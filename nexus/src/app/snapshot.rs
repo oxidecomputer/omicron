@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
-use crate::authn;
-use crate::authz;
-use crate::db;
-use crate::db::lookup;
-use crate::db::lookup::LookupPath;
+use nexus_db_queries::authn;
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
+use nexus_db_queries::db::lookup;
+use nexus_db_queries::db::lookup::LookupPath;
 use nexus_types::external_api::params;
 use nexus_types::external_api::params::DiskSelector;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -57,7 +57,7 @@ impl super::Nexus {
         }
     }
 
-    pub async fn snapshot_create(
+    pub(crate) async fn snapshot_create(
         self: &Arc<Self>,
         opctx: &OpContext,
         // Is passed by value due to `disk_name` taking ownership of `self` below
@@ -154,7 +154,7 @@ impl super::Nexus {
         Ok(snapshot_created)
     }
 
-    pub async fn snapshot_list(
+    pub(crate) async fn snapshot_list(
         &self,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
@@ -166,18 +166,11 @@ impl super::Nexus {
         self.db_datastore.snapshot_list(opctx, &authz_project, pagparams).await
     }
 
-    pub async fn snapshot_delete(
+    pub(crate) async fn snapshot_delete(
         self: &Arc<Self>,
         opctx: &OpContext,
         snapshot_lookup: &lookup::Snapshot<'_>,
     ) -> DeleteResult {
-        // TODO-correctness
-        // This also requires solving how to clean up the associated resources
-        // (on-disk snapshots, running read-only downstairs) because disks
-        // *could* still be using them (if the snapshot has not yet been turned
-        // into a regular crucible volume). It will involve some sort of
-        // reference counting for volumes.
-
         let (.., authz_snapshot, db_snapshot) =
             snapshot_lookup.fetch_for(authz::Action::Delete).await?;
 
@@ -186,10 +179,12 @@ impl super::Nexus {
             authz_snapshot,
             snapshot: db_snapshot,
         };
+
         self.execute_saga::<sagas::snapshot_delete::SagaSnapshotDelete>(
             saga_params,
         )
         .await?;
+
         Ok(())
     }
 }

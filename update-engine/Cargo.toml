@@ -22,6 +22,7 @@ schemars = { workspace = true, features = ["uuid1"] }
 slog.workspace = true
 tokio = { workspace = true, features = ["macros", "sync", "time", "rt-multi-thread"] }
 uuid.workspace = true
+omicron-workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dev-dependencies]
 buf-list.workspace = true
@@ -32,5 +33,6 @@ clap.workspace = true
 indicatif.workspace = true
 omicron-test-utils.workspace = true
 owo-colors.workspace = true
+supports-color.workspace = true
 tokio = { workspace = true, features = ["io-util"] }
 tokio-stream.workspace = true

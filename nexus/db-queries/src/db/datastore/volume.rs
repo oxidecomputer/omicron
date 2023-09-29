@@ -640,15 +640,13 @@ impl DataStore {
                 // Decrease the number of uses for each referenced region snapshot.
                 use db::schema::region_snapshot::dsl;
 
-                for read_only_target in &crucible_targets.read_only_targets {
-                    diesel::update(dsl::region_snapshot)
-                        .filter(dsl::snapshot_addr.eq(read_only_target.clone()))
-                        .set(
-                            dsl::volume_references
-                                .eq(dsl::volume_references - 1),
-                        )
-                        .execute(conn)?;
-                }
+                diesel::update(dsl::region_snapshot)
+                    .filter(
+                        dsl::snapshot_addr
+                            .eq_any(&crucible_targets.read_only_targets),
+                    )
+                    .set(dsl::volume_references.eq(dsl::volume_references - 1))
+                    .execute(conn)?;
 
                 // Return what results can be cleaned up
                 let result = CrucibleResources::V1(CrucibleResourcesV1 {
@@ -688,15 +686,32 @@ impl DataStore {
 
                     // A volume (for a disk or snapshot) may reference another nested
                     // volume as a read-only parent, and this may be arbitrarily deep.
-                    // After decrementing volume_references above, get all region
-                    // snapshot records where the volume_references has gone to 0.
-                    // Consumers of this struct will be responsible for deleting the
-                    // read-only downstairs running for the snapshot and the snapshot
-                    // itself.
+                    // After decrementing volume_references above, get the region
+                    // snapshot records for these read_only_targets where the
+                    // volume_references has gone to 0. Consumers of this struct will
+                    // be responsible for deleting the read-only downstairs running
+                    // for the snapshot and the snapshot itself.
                     datasets_and_snapshots: {
                         use db::schema::dataset::dsl as dataset_dsl;
 
                         dsl::region_snapshot
+                            // Only return region_snapshot records related to
+                            // this volume that have zero references. This will
+                            // only happen one time, on the last decrease of a
+                            // volume containing these read-only targets.
+                            //
+                            // It's important to not return *every* region
+                            // snapshot with zero references: multiple volume
+                            // delete sub-sagas will then be issues duplicate
+                            // DELETE calls to Crucible agents, and a request to
+                            // delete a read-only downstairs running for a
+                            // snapshot that doesn't exist will return a 404,
+                            // causing the saga to error and unwind.
+                            .filter(
+                                dsl::snapshot_addr.eq_any(
+                                    &crucible_targets.read_only_targets,
+                                ),
+                            )
                             .filter(dsl::volume_references.eq(0))
                             .inner_join(
                                 dataset_dsl::dataset

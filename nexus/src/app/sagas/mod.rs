@@ -46,16 +46,16 @@ pub mod common_storage;
 mod test_helpers;
 
 #[derive(Debug)]
-pub struct NexusSagaType;
+pub(crate) struct NexusSagaType;
 impl steno::SagaType for NexusSagaType {
     type ExecContextType = Arc<SagaContext>;
 }
 
-pub type ActionRegistry = steno::ActionRegistry<NexusSagaType>;
-pub type NexusAction = Arc<dyn steno::Action<NexusSagaType>>;
-pub type NexusActionContext = steno::ActionContext<NexusSagaType>;
+pub(crate) type ActionRegistry = steno::ActionRegistry<NexusSagaType>;
+pub(crate) type NexusAction = Arc<dyn steno::Action<NexusSagaType>>;
+pub(crate) type NexusActionContext = steno::ActionContext<NexusSagaType>;
 
-pub trait NexusSaga {
+pub(crate) trait NexusSaga {
     const NAME: &'static str;
 
     type Params: serde::Serialize
@@ -111,7 +111,7 @@ impl From<SagaInitError> for omicron_common::api::external::Error {
 pub(super) static ACTION_GENERATE_ID: Lazy<NexusAction> = Lazy::new(|| {
     new_action_noop_undo("common.uuid_generate", saga_generate_uuid)
 });
-pub static ACTION_REGISTRY: Lazy<Arc<ActionRegistry>> =
+pub(crate) static ACTION_REGISTRY: Lazy<Arc<ActionRegistry>> =
     Lazy::new(|| Arc::new(make_action_registry()));
 
 fn make_action_registry() -> ActionRegistry {

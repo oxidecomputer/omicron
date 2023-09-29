@@ -7,10 +7,6 @@
 use super::*;
 
 use crate::app::sagas::retry_until_known_result;
-use crate::authz;
-use crate::db;
-use crate::db::identity::Asset;
-use crate::db::lookup::LookupPath;
 use crate::Nexus;
 use anyhow::anyhow;
 use crucible_agent_client::{
@@ -19,7 +15,11 @@ use crucible_agent_client::{
 };
 use futures::StreamExt;
 use internal_dns::ServiceName;
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
+use nexus_db_queries::db::identity::Asset;
+use nexus_db_queries::db::lookup::LookupPath;
 use omicron_common::api::external::Error;
 use omicron_common::backoff::{self, BackoffError};
 use slog::Logger;
@@ -30,7 +30,7 @@ use std::net::SocketAddrV6;
 const MAX_CONCURRENT_REGION_REQUESTS: usize = 3;
 
 /// Call out to Crucible agent and perform region creation.
-pub async fn ensure_region_in_dataset(
+pub(crate) async fn ensure_region_in_dataset(
     log: &Logger,
     dataset: &db::model::Dataset,
     region: &db::model::Region,
@@ -88,7 +88,7 @@ pub async fn ensure_region_in_dataset(
     Ok(region.into_inner())
 }
 
-pub async fn ensure_all_datasets_and_regions(
+pub(crate) async fn ensure_all_datasets_and_regions(
     log: &Logger,
     datasets_and_regions: Vec<(db::model::Dataset, db::model::Region)>,
 ) -> Result<
@@ -148,6 +148,44 @@ pub(super) async fn delete_crucible_region(
     client: &CrucibleAgentClient,
     region_id: Uuid,
 ) -> Result<(), Error> {
+    // If the region never existed, then a `GET` will return 404, and so will a
+    // `DELETE`. Catch this case, and return Ok if the region never existed.
+    // This can occur if an `ensure_all_datasets_and_regions` partially fails.
+    let result = retry_until_known_result(log, || async {
+        client.region_get(&RegionId(region_id.to_string())).await
+    })
+    .await;
+
+    if let Err(e) = result {
+        error!(log, "delete_crucible_region: region_get saw {:?}", e);
+        match e {
+            crucible_agent_client::Error::ErrorResponse(rv) => {
+                match rv.status() {
+                    http::StatusCode::NOT_FOUND => {
+                        // Bail out here!
+                        return Ok(());
+                    }
+
+                    status if status.is_client_error() => {
+                        return Err(Error::invalid_request(&rv.message));
+                    }
+
+                    _ => {
+                        return Err(Error::internal_error(&rv.message));
+                    }
+                }
+            }
+
+            _ => {
+                return Err(Error::internal_error(
+                    "unexpected failure during `region_get`",
+                ));
+            }
+        }
+    }
+
+    // Past here, the region exists: ensure it is deleted.
+
     retry_until_known_result(log, || async {
         client.region_delete(&RegionId(region_id.to_string())).await
     })
@@ -170,7 +208,7 @@ pub(super) async fn delete_crucible_region(
     })?;
 
     #[derive(Debug, thiserror::Error)]
-    pub enum WaitError {
+    enum WaitError {
         #[error("Transient error: {0}")]
         Transient(#[from] anyhow::Error),
 
@@ -319,7 +357,7 @@ pub(super) async fn delete_crucible_running_snapshot(
     })?;
 
     #[derive(Debug, thiserror::Error)]
-    pub enum WaitError {
+    enum WaitError {
         #[error("Transient error: {0}")]
         Transient(#[from] anyhow::Error),
 
@@ -570,7 +608,7 @@ pub(super) async fn delete_crucible_running_snapshots(
     Ok(())
 }
 
-pub async fn get_pantry_address(
+pub(crate) async fn get_pantry_address(
     nexus: &Arc<Nexus>,
 ) -> Result<SocketAddrV6, ActionError> {
     nexus
@@ -584,7 +622,7 @@ pub async fn get_pantry_address(
 
 // Common Pantry operations
 
-pub async fn call_pantry_attach_for_disk(
+pub(crate) async fn call_pantry_attach_for_disk(
     log: &slog::Logger,
     opctx: &OpContext,
     nexus: &Arc<Nexus>,
@@ -639,7 +677,7 @@ pub async fn call_pantry_attach_for_disk(
     Ok(())
 }
 
-pub async fn call_pantry_detach_for_disk(
+pub(crate) async fn call_pantry_detach_for_disk(
     log: &slog::Logger,
     disk_id: Uuid,
     pantry_address: SocketAddrV6,

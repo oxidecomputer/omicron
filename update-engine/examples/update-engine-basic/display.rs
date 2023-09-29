@@ -55,8 +55,11 @@ async fn display_line(
     let mut buffer = EventBuffer::new(8);
     let mut display = LineDisplay::new(std::io::stdout());
     // For now, always colorize. TODO: figure out whether colorization should be
-    // done based on supports_color/always/auto/never etc.
-    display.set_styles(LineDisplayStyles::colorized());
+    // done based on always/auto/never etc.
+    if supports_color::on(supports_color::Stream::Stdout).is_some() {
+        display.set_styles(LineDisplayStyles::colorized());
+    }
+    display.set_progress_interval(Duration::from_millis(50));
     while let Some(event) = receiver.recv().await {
         buffer.add_event(event);
         display.display_event_buffer(&buffer)?;

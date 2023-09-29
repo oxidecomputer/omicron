@@ -26,6 +26,7 @@ semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 steno.workspace = true
+strum.workspace = true
 uuid.workspace = true
 
 db-macros.workspace = true
@@ -35,7 +36,7 @@ nexus-defaults.workspace = true
 nexus-types.workspace = true
 omicron-passwords.workspace = true
 sled-agent-client.workspace = true
+omicron-workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 
 [dev-dependencies]
 expectorate.workspace = true
-strum.workspace = true

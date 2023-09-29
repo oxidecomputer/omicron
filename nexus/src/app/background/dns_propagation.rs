@@ -14,6 +14,7 @@ use futures::FutureExt;
 use futures::StreamExt;
 use nexus_db_queries::context::OpContext;
 use serde_json::json;
+use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use tokio::sync::watch;
 
@@ -103,23 +104,28 @@ impl BackgroundTask for DnsPropagator {
             .await;
 
             // Report results.
-            if result.iter().any(|r| r.is_err()) {
+            if result.iter().any(|(_, r)| r.is_err()) {
                 warn!(&log, "DNS propagation: failed");
             } else {
                 info!(&log, "DNS propagation: done");
             }
 
-            serde_json::to_value(
+            let server_results = serde_json::to_value(
                 result
                     .into_iter()
-                    .map(|r| r.map_err(|e| format!("{:#}", e)))
-                    .collect::<Vec<_>>(),
+                    .map(|(e, r)| (e, r.map_err(|e| format!("{:#}", e))))
+                    .collect::<BTreeMap<_, _>>(),
             )
             .unwrap_or_else(|error| {
                 json!({
                     "error":
                         format!("failed to serialize final value: {:#}", error)
                 })
+            });
+
+            json!({
+                "generation": dns_config.generation,
+                "server_results": server_results,
             })
         }
         .boxed()
@@ -131,10 +137,11 @@ async fn dns_propagate(
     dns_config: &DnsConfigParams,
     servers: &DnsServersList,
     max_concurrent_server_updates: usize,
-) -> Vec<anyhow::Result<()>> {
+) -> BTreeMap<String, anyhow::Result<()>> {
     stream::iter(servers.addresses.clone())
         .map(|server_addr| async move {
-            dns_propagate_one(log, dns_config, &server_addr).await
+            let result = dns_propagate_one(log, dns_config, &server_addr).await;
+            (server_addr.to_string(), result)
         })
         .buffered(max_concurrent_server_updates)
         .collect()
@@ -183,7 +190,9 @@ mod test {
     use httptest::Expectation;
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils_macros::nexus_test;
+    use serde::Deserialize;
     use serde_json::json;
+    use std::collections::BTreeMap;
     use tokio::sync::watch;
 
     type ControlPlaneTestContext =
@@ -221,10 +230,19 @@ mod test {
         let value = task.activate(&opctx).await;
         assert_eq!(value, json!({ "error": "no config" }));
 
+        // Define a type we can use to pick stuff out of error objects.
+        #[derive(Deserialize)]
+        struct ServerResult {
+            server_results: BTreeMap<String, Result<(), String>>,
+            generation: u32,
+        }
+
         // With a config and no servers, the operation should be a noop.
         config_tx.send(Some(dns_config)).unwrap();
         let value = task.activate(&opctx).await;
-        assert_eq!(value, json!([]));
+        let result: ServerResult = serde_json::from_value(value).unwrap();
+        assert_eq!(result.generation, 1);
+        assert!(result.server_results.is_empty());
 
         // Now, create some fake servers ready to respond successfully to a
         // propagation attempt.
@@ -244,16 +262,12 @@ mod test {
             );
         }
 
-        // Define a type we can use to pick stuff out of error objects.
-        type ServerResult = Vec<Result<(), String>>;
-
         // Do it!
         let value = task.activate(&opctx).await;
         // Check the results.
         let result: ServerResult = serde_json::from_value(value).unwrap();
-        assert_eq!(result.len(), 2);
-        assert!(result[0].is_ok());
-        assert!(result[1].is_ok());
+        assert_eq!(result.server_results.len(), 2);
+        assert!(result.server_results.values().all(|r| r.is_ok()));
         s1.verify_and_clear();
         s2.verify_and_clear();
 
@@ -268,9 +282,8 @@ mod test {
 
         let value = task.activate(&opctx).await;
         let result: ServerResult = serde_json::from_value(value).unwrap();
-        assert_eq!(result.len(), 2);
-        assert!(result[0].is_ok());
-        assert!(result[1].is_ok());
+        assert_eq!(result.server_results.len(), 2);
+        assert!(result.server_results.values().all(|r| r.is_ok()));
         s1.verify_and_clear();
         s2.verify_and_clear();
 
@@ -288,10 +301,16 @@ mod test {
         let value = task.activate(&opctx).await;
         println!("{:?}", value);
         let result: ServerResult = serde_json::from_value(value).unwrap();
-        assert_eq!(result.len(), 2);
-        assert!(result[0].is_ok());
-        assert!(result[1].is_err());
-        assert!(result[1].as_ref().unwrap_err().starts_with(&format!(
+        assert_eq!(result.server_results.len(), 2);
+        assert!(result.server_results.values().any(|r| r.is_ok()));
+        let message = result
+            .server_results
+            .values()
+            .find(|r| r.is_err())
+            .cloned()
+            .unwrap()
+            .unwrap_err();
+        assert!(message.starts_with(&format!(
             "failed to propagate DNS generation 1 to server {}",
             s2.addr()
         )));
@@ -309,9 +328,8 @@ mod test {
 
         let value = task.activate(&opctx).await;
         let result: ServerResult = serde_json::from_value(value).unwrap();
-        assert_eq!(result.len(), 2);
-        assert!(result[0].is_ok());
-        assert!(result[1].is_ok());
+        assert_eq!(result.server_results.len(), 2);
+        assert!(result.server_results.values().all(|r| r.is_ok()));
         s1.verify_and_clear();
         s2.verify_and_clear();
     }

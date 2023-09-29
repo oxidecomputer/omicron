@@ -60,7 +60,7 @@ function main
     HELIOS_PATH=$1
     GLOBAL_ZONE_TARBALL_PATH=$2
 
-    TOOLS_DIR="$(pwd)/$(dirname $0)"
+    TOOLS_DIR="$(pwd)/$(dirname "$0")"
 
     # Grab the opte version
     OPTE_VER=$(cat "$TOOLS_DIR/opte_version")
@@ -73,7 +73,7 @@ function main
 
     # Extract the global zone tarball into a tmp_gz directory
     echo "Extracting gz packages into $tmp_gz"
-    ptime -m tar xvzf $GLOBAL_ZONE_TARBALL_PATH -C $tmp_gz
+    ptime -m tar xvzf "$GLOBAL_ZONE_TARBALL_PATH" -C "$tmp_gz"
 
     # If the user specified a switch zone (which is probably named
     # `switch-SOME_VARIANT.tar.gz`), stage it in the right place and rename it
@@ -90,7 +90,7 @@ function main
     fi
 
     # Move to the helios checkout
-    cd $HELIOS_PATH
+    cd "$HELIOS_PATH"
 
     # Create the "./helios-build" command, which lets us build images
     gmake setup
@@ -106,7 +106,7 @@ function main
         *) exit $rc ;;
     esac
 
-    pfexec zfs create -p rpool/images/$USER
+    pfexec zfs create -p rpool/images/"$USER"
 
     HELIOS_REPO=https://pkg.oxide.computer/helios/2/dev/
 

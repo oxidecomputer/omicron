@@ -3,12 +3,12 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::app::sagas;
-use crate::authn;
-use crate::authz;
-use crate::db;
 use crate::external_api::params;
 use db::model::{LoopbackAddress, Name};
+use nexus_db_queries::authn;
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
 use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::lookup::LookupPath;
 use omicron_common::api::external::LookupResult;
@@ -34,7 +34,7 @@ impl super::Nexus {
         ))
     }
 
-    pub async fn loopback_address_create(
+    pub(crate) async fn loopback_address_create(
         self: &Arc<Self>,
         opctx: &OpContext,
         params: params::LoopbackAddressCreate,
@@ -62,7 +62,7 @@ impl super::Nexus {
         Ok(value)
     }
 
-    pub async fn loopback_address_delete(
+    pub(crate) async fn loopback_address_delete(
         self: &Arc<Self>,
         opctx: &OpContext,
         rack_id: Uuid,
@@ -83,7 +83,7 @@ impl super::Nexus {
         Ok(())
     }
 
-    pub async fn loopback_address_list(
+    pub(crate) async fn loopback_address_list(
         self: &Arc<Self>,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,

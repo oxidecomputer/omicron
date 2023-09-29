@@ -32,6 +32,12 @@
     -->
     <propval name='id' type='astring' value='unknown' />
     <!--
+      `config/rack_id` is expected to have a single value; sled-agent will replace
+      "unknown" with a UUID when it learns about it. This should happen in the same
+      refresh where the underlay address is provisioned into `config/address`.
+    -->
+    <propval name='rack_id' type='astring' value='unknown' />
+    <!--
       `config/address` is allowed to have multiple values, so we do not seed it
       with an initial `unknown` that sled-agent would need to delete.
     -->

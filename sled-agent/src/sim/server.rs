@@ -97,8 +97,8 @@ impl Server {
                         role: NexusTypes::SledRole::Gimlet,
                         baseboard: NexusTypes::Baseboard {
                             serial_number: format!(
-                                "Simulated sled {}",
-                                config.id
+                                "sim-{}",
+                                &config.id.to_string()[0..8]
                             ),
                             part_number: String::from("Unknown"),
                             revision: 0,

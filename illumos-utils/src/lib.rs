@@ -53,8 +53,8 @@ pub enum ExecutionError {
     #[error("{0}")]
     CommandFailure(Box<CommandFailureInfo>),
 
-    #[error("Failed to enter zone: {err}")]
-    ZoneEnter { err: std::io::Error },
+    #[error("Failed to manipulate process contract: {err}")]
+    ContractFailure { err: std::io::Error },
 
     #[error("Zone is not running")]
     NotRunning,

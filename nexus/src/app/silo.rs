@@ -4,20 +4,20 @@
 
 //! Silos, Users, and SSH Keys.
 
-use crate::authz::ApiResource;
-use crate::db::identity::{Asset, Resource};
-use crate::db::lookup::LookupPath;
-use crate::db::model::Name;
-use crate::db::model::SshKey;
-use crate::db::{self, lookup};
 use crate::external_api::params;
 use crate::external_api::shared;
-use crate::{authn, authz};
 use anyhow::Context;
 use nexus_db_model::{DnsGroup, UserProvisionType};
+use nexus_db_queries::authz::ApiResource;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::Discoverability;
 use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
+use nexus_db_queries::db::identity::{Asset, Resource};
+use nexus_db_queries::db::lookup::LookupPath;
+use nexus_db_queries::db::model::Name;
+use nexus_db_queries::db::model::SshKey;
+use nexus_db_queries::db::{self, lookup};
+use nexus_db_queries::{authn, authz};
 use nexus_types::internal_api::params::DnsRecord;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::ListResultVec;
@@ -65,7 +65,26 @@ impl super::Nexus {
         }
     }
 
-    pub async fn silo_create(
+    pub(crate) async fn silo_fq_dns_names(
+        &self,
+        opctx: &OpContext,
+        silo_id: Uuid,
+    ) -> ListResultVec<String> {
+        let (_, silo) =
+            self.silo_lookup(opctx, silo_id.into())?.fetch().await?;
+        let silo_dns_name = silo_dns_name(&silo.name());
+        let external_dns_zones = self
+            .db_datastore
+            .dns_zones_list_all(opctx, nexus_db_model::DnsGroup::External)
+            .await?;
+
+        Ok(external_dns_zones
+            .into_iter()
+            .map(|zone| format!("{silo_dns_name}.{}", zone.zone_name))
+            .collect())
+    }
+
+    pub(crate) async fn silo_create(
         &self,
         opctx: &OpContext,
         new_silo_params: params::SiloCreate,
@@ -79,9 +98,9 @@ impl super::Nexus {
 
         // Set up an external DNS name for this Silo's API and console
         // endpoints (which are the same endpoint).
-        let dns_records: Vec<DnsRecord> = datastore
-            .nexus_external_addresses(nexus_opctx)
-            .await?
+        let (nexus_external_ips, nexus_external_dns_zones) =
+            datastore.nexus_external_addresses(nexus_opctx).await?;
+        let dns_records: Vec<DnsRecord> = nexus_external_ips
             .into_iter()
             .map(|addr| match addr {
                 IpAddr::V4(addr) => DnsRecord::A(addr),
@@ -92,13 +111,25 @@ impl super::Nexus {
         let silo_name = &new_silo_params.identity.name;
         let mut dns_update = DnsVersionUpdateBuilder::new(
             DnsGroup::External,
-            format!("create silo: {:?}", silo_name),
+            format!("create silo: {:?}", silo_name.as_str()),
             self.id.to_string(),
         );
-        dns_update.add_name(silo_dns_name(silo_name), dns_records)?;
+        let silo_dns_name = silo_dns_name(silo_name);
+        let new_silo_dns_names = nexus_external_dns_zones
+            .into_iter()
+            .map(|zone| format!("{silo_dns_name}.{}", zone.zone_name))
+            .collect::<Vec<_>>();
+
+        dns_update.add_name(silo_dns_name, dns_records)?;
 
         let silo = datastore
-            .silo_create(&opctx, &nexus_opctx, new_silo_params, dns_update)
+            .silo_create(
+                &opctx,
+                &nexus_opctx,
+                new_silo_params,
+                &new_silo_dns_names,
+                dns_update,
+            )
             .await?;
         self.background_tasks
             .activate(&self.background_tasks.task_external_dns_config);
@@ -107,7 +138,7 @@ impl super::Nexus {
         Ok(silo)
     }
 
-    pub async fn silos_list(
+    pub(crate) async fn silos_list(
         &self,
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
@@ -117,7 +148,7 @@ impl super::Nexus {
             .await
     }
 
-    pub async fn silo_delete(
+    pub(crate) async fn silo_delete(
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
@@ -144,7 +175,7 @@ impl super::Nexus {
 
     // Role assignments
 
-    pub async fn silo_fetch_policy(
+    pub(crate) async fn silo_fetch_policy(
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
@@ -162,7 +193,7 @@ impl super::Nexus {
         Ok(shared::Policy { role_assignments })
     }
 
-    pub async fn silo_update_policy(
+    pub(crate) async fn silo_update_policy(
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
@@ -212,7 +243,7 @@ impl super::Nexus {
     }
 
     /// List the users in a Silo
-    pub async fn silo_list_users(
+    pub(crate) async fn silo_list_users(
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
@@ -226,7 +257,7 @@ impl super::Nexus {
     }
 
     /// Fetch a user in a Silo
-    pub async fn silo_user_fetch(
+    pub(crate) async fn silo_user_fetch(
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
@@ -267,7 +298,7 @@ impl super::Nexus {
     }
 
     /// Create a user in a Silo's local identity provider
-    pub async fn local_idp_create_user(
+    pub(crate) async fn local_idp_create_user(
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
@@ -305,7 +336,7 @@ impl super::Nexus {
     }
 
     /// Delete a user in a Silo's local identity provider
-    pub async fn local_idp_delete_user(
+    pub(crate) async fn local_idp_delete_user(
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
@@ -432,7 +463,7 @@ impl super::Nexus {
     /// If `password` is `UserPassword::Password`, the password is set to the
     /// requested value.  Otherwise, any existing password is invalidated so
     /// that it cannot be used for authentication any more.
-    pub async fn local_idp_user_set_password(
+    pub(crate) async fn local_idp_user_set_password(
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
@@ -506,7 +537,7 @@ impl super::Nexus {
     /// callers are expected to invoke this function during authentication even
     /// if they've found no user to match the requested credentials.  That's why
     /// this function accepts `Option<SiloUser>` rather than just a `SiloUser`.
-    pub async fn silo_user_password_verify(
+    pub(crate) async fn silo_user_password_verify(
         &self,
         opctx: &OpContext,
         maybe_authz_silo_user: Option<&authz::SiloUser>,
@@ -544,7 +575,7 @@ impl super::Nexus {
 
     /// Given a silo name and username/password credentials, verify the
     /// credentials and return the corresponding SiloUser.
-    pub async fn login_local(
+    pub(crate) async fn login_local(
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
@@ -643,7 +674,7 @@ impl super::Nexus {
         }
     }
 
-    pub async fn ssh_key_create(
+    pub(crate) async fn ssh_key_create(
         &self,
         opctx: &OpContext,
         silo_user_id: Uuid,
@@ -658,7 +689,7 @@ impl super::Nexus {
         self.db_datastore.ssh_key_create(opctx, &authz_user, ssh_key).await
     }
 
-    pub async fn ssh_keys_list(
+    pub(crate) async fn ssh_keys_list(
         &self,
         opctx: &OpContext,
         silo_user_id: Uuid,
@@ -672,7 +703,7 @@ impl super::Nexus {
         self.db_datastore.ssh_keys_list(opctx, &authz_user, page_params).await
     }
 
-    pub async fn ssh_key_delete(
+    pub(crate) async fn ssh_key_delete(
         &self,
         opctx: &OpContext,
         silo_user_id: Uuid,
@@ -718,7 +749,7 @@ impl super::Nexus {
         }
     }
 
-    pub async fn identity_provider_list(
+    pub(crate) async fn identity_provider_list(
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
@@ -734,7 +765,7 @@ impl super::Nexus {
 
     // Silo authn identity providers
 
-    pub async fn saml_identity_provider_create(
+    pub(crate) async fn saml_identity_provider_create(
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,

@@ -7,15 +7,22 @@
 //! This is used for various authz-related tests.
 //! THERE ARE NO TESTS IN THIS FILE.
 
-use crate::integration_tests::certificates::CertificateChain;
 use crate::integration_tests::unauthorized::HTTP_SERVER;
 use chrono::Utc;
 use http::method::Method;
+use internal_dns::names::DNS_ZONE_EXTERNAL_TESTING;
 use lazy_static::lazy_static;
+use nexus_db_queries::authn;
+use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
+use nexus_db_queries::db::identity::Resource;
 use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils::RACK_UUID;
 use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils::SWITCH_UUID;
+use nexus_types::external_api::params;
+use nexus_types::external_api::shared;
+use nexus_types::external_api::shared::IpRange;
+use nexus_types::external_api::shared::Ipv4Range;
 use omicron_common::api::external::AddressLotKind;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -28,13 +35,7 @@ use omicron_common::api::external::RouteDestination;
 use omicron_common::api::external::RouteTarget;
 use omicron_common::api::external::SemverVersion;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
-use omicron_nexus::authn;
-use omicron_nexus::db::fixed_data::silo::DEFAULT_SILO;
-use omicron_nexus::db::identity::Resource;
-use omicron_nexus::external_api::params;
-use omicron_nexus::external_api::shared;
-use omicron_nexus::external_api::shared::IpRange;
-use omicron_nexus::external_api::shared::Ipv4Range;
+use omicron_test_utils::certificates::CertificateChain;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::str::FromStr;
@@ -334,7 +335,8 @@ lazy_static! {
     pub static ref DEMO_CERTIFICATES_URL: String = format!("/v1/certificates");
     pub static ref DEMO_CERTIFICATE_URL: String =
         format!("/v1/certificates/demo-certificate");
-    pub static ref DEMO_CERTIFICATE: CertificateChain = CertificateChain::new();
+    pub static ref DEMO_CERTIFICATE: CertificateChain =
+        CertificateChain::new(format!("*.sys.{DNS_ZONE_EXTERNAL_TESTING}"));
     pub static ref DEMO_CERTIFICATE_CREATE: params::CertificateCreate =
         params::CertificateCreate {
             identity: IdentityMetadataCreateParams {

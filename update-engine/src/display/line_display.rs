@@ -7,14 +7,16 @@
 use debug_ignore::DebugIgnore;
 use owo_colors::{OwoColorize, Style};
 use std::{
-    collections::HashMap,
+    collections::{hash_map::Entry, HashMap},
     fmt::{self, Write as _},
+    time::Duration,
 };
 
 use crate::{
     events::{StepInfo, StepOutcome},
     AbortInfo, AbortReason, CompletionInfo, EventBuffer, EventBufferStepData,
-    FailureInfo, FailureReason, NestedSpec, StepKey, StepSpec, StepStatus,
+    FailureInfo, FailureReason, NestedSpec, RootEventIndex, StepKey, StepSpec,
+    StepStatus,
 };
 
 /// A line-oriented display.
@@ -23,12 +25,9 @@ use crate::{
 #[derive(Debug)]
 pub struct LineDisplay<W> {
     writer: DebugIgnore<W>,
-    prefix: String,
-    styles: LineDisplayStyles,
-    // A map from the step key to the index of the last event we reported for
-    // that step. This is used to determine which events are new and should be
-    // displayed.
-    last_event_index: HashMap<StepKey, usize>,
+    step_data: HashMap<StepKey, LineDisplayStepData>,
+    // Inner state that's immutable during `display_event_buffer` calls.
+    inner: LineDisplayInner,
 }
 
 impl<W: std::io::Write> LineDisplay<W> {
@@ -36,20 +35,28 @@ impl<W: std::io::Write> LineDisplay<W> {
     pub fn new(writer: W) -> Self {
         Self {
             writer: DebugIgnore(writer),
-            prefix: String::new(),
-            styles: Default::default(),
-            last_event_index: HashMap::new(),
+            step_data: HashMap::new(),
+            inner: LineDisplayInner {
+                prefix: String::new(),
+                styles: Default::default(),
+                progress_interval: Duration::from_secs(1),
+            },
         }
     }
 
     /// Sets the prefix for all future lines.
     pub fn set_prefix(&mut self, prefix: impl Into<String>) {
-        self.prefix = prefix.into();
+        self.inner.prefix = prefix.into();
     }
 
     /// Sets the styles for all future lines.
     pub fn set_styles(&mut self, styles: LineDisplayStyles) {
-        self.styles = styles;
+        self.inner.styles = styles;
+    }
+
+    /// Sets the amount of time before the next progress event is shown.
+    pub fn set_progress_interval(&mut self, interval: Duration) {
+        self.inner.progress_interval = interval;
     }
 
     /// Writes an event buffer to the display.
@@ -62,27 +69,20 @@ impl<W: std::io::Write> LineDisplay<W> {
     ) -> std::io::Result<()> {
         let steps = buffer.steps();
         for (step_key, data) in steps.as_slice() {
-            if let Some(event_index) = self.last_event_index.get(step_key) {
-                if *event_index >= data.last_root_event_index() {
-                    // We've already displayed these events.
-                    continue;
-                }
-            }
-            // There are new events to display.
-            self.display_step_event(buffer, data)?;
-            self.last_event_index
-                .insert(*step_key, data.last_root_event_index());
+            self.display_step(buffer, *step_key, data)?;
         }
 
         Ok(())
     }
 
     /// Writes step data to the display.
-    fn display_step_event<S: StepSpec>(
+    fn display_step<S: StepSpec>(
         &mut self,
         buffer: &EventBuffer<S>,
+        step_key: StepKey,
         data: &EventBufferStepData<S>,
     ) -> std::io::Result<()> {
+        let parent_key_and_child_index = data.parent_key_and_child_index();
         let nest_level = data.nest_level();
         let total_steps = data.total_steps();
         let step_info = data.step_info();
@@ -90,86 +90,233 @@ impl<W: std::io::Write> LineDisplay<W> {
 
         match step_status {
             StepStatus::NotStarted => {}
-            StepStatus::Running { low_priority, progress_event } => {
-                // TODO: report low-priority and progress events here.
+            StepStatus::Running { progress_event, .. } => {
+                let Some(leaf_step_elapsed) =
+                    progress_event.kind.leaf_step_elapsed()
+                else {
+                    // Can't show anything for unknown events.
+                    return Ok(());
+                };
+
+                let ld = self.step_data.entry(step_key).or_insert_with(|| {
+                    LineDisplayStepData::new(data.last_root_event_index())
+                });
+
+                let (is_first_event, should_display) =
+                    match ld.last_progress_event_at {
+                        Some(last_progress_event_at) => {
+                            let should_display = leaf_step_elapsed
+                                > last_progress_event_at
+                                    + self.inner.progress_interval;
+                            (false, should_display)
+                        }
+                        None => (true, true),
+                    };
+
+                if should_display {
+                    let mut line = self.inner.start_line(
+                        // Add extra half-indent for non-first progress events.
+                        !is_first_event,
+                        parent_key_and_child_index,
+                        nest_level,
+                        step_info,
+                        total_steps,
+                    );
+                    match progress_event.kind.progress_counter() {
+                        Some(counter) => {
+                            let progress_str = match counter.total {
+                                Some(total) => {
+                                    format!("{}/{}", counter.current, total)
+                                }
+                                None => format!("{}", counter.current),
+                            };
+                            write!(
+                                line,
+                                "{}: {progress_str} {} after {:.2?}",
+                                "Progress"
+                                    .style(self.inner.styles.progress_style),
+                                counter.units,
+                                leaf_step_elapsed
+                                    .style(self.inner.styles.meta_style),
+                            )
+                            .expect("String::write_fmt is infallible");
+                        }
+                        None => {
+                            write!(
+                                line,
+                                "{} after {:.2?}",
+                                "Running"
+                                    .style(self.inner.styles.progress_style),
+                                leaf_step_elapsed
+                                    .style(self.inner.styles.meta_style),
+                            )
+                            .expect("String::write_fmt is infallible");
+                        }
+                    }
+
+                    writeln!(self.writer, "{line}")?;
+
+                    ld.update_progress_event(leaf_step_elapsed);
+                }
+
+                // TODO: show low-priority events (retries and resets).
             }
-            StepStatus::Completed { info } => match info {
-                Some(info) => {
-                    let mut line =
-                        self.start_line(nest_level, step_info, total_steps);
-                    self.add_completion_info(&mut line, info)
+            StepStatus::Completed { info } => {
+                if let Some(ld) = self.step_data.get(&step_key) {
+                    if ld.last_root_event_index >= data.last_root_event_index()
+                    {
+                        // We've already displayed this event.
+                        return Ok(());
+                    }
+                }
+
+                match info {
+                    Some(info) => {
+                        let mut line = self.inner.start_line(
+                            false,
+                            parent_key_and_child_index,
+                            nest_level,
+                            step_info,
+                            total_steps,
+                        );
+                        self.inner
+                            .add_completion_info(&mut line, info)
+                            .expect("String::write_fmt is infallible");
+                        writeln!(self.writer, "{line}")?;
+                    }
+                    None => {
+                        // This means that we don't know what happened to the step
+                        // but it did complete.
+                        let mut line = self.inner.start_line(
+                            false,
+                            parent_key_and_child_index,
+                            nest_level,
+                            step_info,
+                            total_steps,
+                        );
+                        write!(
+                            line,
+                            "{} with {}",
+                            "Completed".style(self.inner.styles.progress_style),
+                            "unknown outcome"
+                                .style(self.inner.styles.meta_style),
+                        )
                         .expect("String::write_fmt is infallible");
-                    writeln!(self.writer, "{line}")?;
+                        writeln!(self.writer, "{line}")?;
+                    }
                 }
-                None => {
-                    // This means that we don't know what happened to the step
-                    // but it did complete.
-                    let mut line =
-                        self.start_line(nest_level, step_info, total_steps);
-                    write!(
-                        line,
-                        "{} with {}",
-                        "Completed".style(self.styles.progress_style),
-                        "unknown outcome".style(self.styles.meta_style),
-                    )
-                    .expect("String::write_fmt is infallible");
-                    writeln!(self.writer, "{line}")?;
+
+                self.insert_or_update_index(
+                    step_key,
+                    data.last_root_event_index(),
+                );
+            }
+            StepStatus::Failed { reason } => {
+                if let Some(ld) = self.step_data.get(&step_key) {
+                    if ld.last_root_event_index >= data.last_root_event_index()
+                    {
+                        // We've already displayed this event.
+                        return Ok(());
+                    }
                 }
-            },
-            StepStatus::Failed { reason } => match reason {
-                FailureReason::StepFailed(info) => {
-                    let mut line =
-                        self.start_line(nest_level, step_info, total_steps);
-                    self.add_failure_info(&mut line, info)
+
+                match reason {
+                    FailureReason::StepFailed(info) => {
+                        let mut line = self.inner.start_line(
+                            false,
+                            parent_key_and_child_index,
+                            nest_level,
+                            step_info,
+                            total_steps,
+                        );
+                        self.inner
+                            .add_failure_info(&mut line, info)
+                            .expect("String::write_fmt is infallible");
+                        writeln!(self.writer, "{line}")?;
+                    }
+                    FailureReason::ParentFailed { parent_step } => {
+                        let parent_step_info = buffer
+                            .get(&parent_step)
+                            .expect("parent step must exist");
+                        let mut line = self.inner.start_line(
+                            false,
+                            parent_key_and_child_index,
+                            nest_level,
+                            step_info,
+                            total_steps,
+                        );
+                        write!(
+                            line,
+                            "{} because parent step {} failed",
+                            "Failed".style(self.inner.styles.error_style),
+                            parent_step_info
+                                .step_info()
+                                .description
+                                .style(self.inner.styles.step_name_style)
+                        )
                         .expect("String::write_fmt is infallible");
-                    writeln!(self.writer, "{line}")?;
+                        writeln!(self.writer, "{line}")?;
+                    }
                 }
-                FailureReason::ParentFailed { parent_step } => {
-                    let parent_step_info = buffer
-                        .get(&parent_step)
-                        .expect("parent step must exist");
-                    let mut line =
-                        self.start_line(nest_level, step_info, total_steps);
-                    write!(
-                        line,
-                        "{} because parent step {} failed",
-                        "Failed".style(self.styles.error_style),
-                        parent_step_info
-                            .step_info()
-                            .description
-                            .style(self.styles.step_name_style)
-                    )
-                    .expect("String::write_fmt is infallible");
-                    writeln!(self.writer, "{line}")?;
+
+                self.insert_or_update_index(
+                    step_key,
+                    data.last_root_event_index(),
+                );
+            }
+            StepStatus::Aborted { reason, .. } => {
+                if let Some(ld) = self.step_data.get(&step_key) {
+                    if ld.last_root_event_index >= data.last_root_event_index()
+                    {
+                        // We've already displayed this event.
+                        return Ok(());
+                    }
                 }
-            },
-            StepStatus::Aborted { reason, .. } => match reason {
-                AbortReason::StepAborted(info) => {
-                    let mut line =
-                        self.start_line(nest_level, step_info, total_steps);
-                    self.add_abort_info(&mut line, info)
+
+                match reason {
+                    AbortReason::StepAborted(info) => {
+                        let mut line = self.inner.start_line(
+                            false,
+                            parent_key_and_child_index,
+                            nest_level,
+                            step_info,
+                            total_steps,
+                        );
+                        self.inner
+                            .add_abort_info(&mut line, info)
+                            .expect("String::write_fmt is infallible");
+                        writeln!(self.writer, "{line}")?;
+                    }
+                    AbortReason::ParentAborted { parent_step } => {
+                        let parent_step_info = buffer
+                            .get(&parent_step)
+                            .expect("parent step must exist");
+                        let mut line = self.inner.start_line(
+                            false,
+                            parent_key_and_child_index,
+                            nest_level,
+                            step_info,
+                            total_steps,
+                        );
+                        write!(
+                            line,
+                            "{} because parent step {} aborted",
+                            "Aborted".style(self.inner.styles.error_style),
+                            parent_step_info
+                                .step_info()
+                                .description
+                                .style(self.inner.styles.step_name_style)
+                        )
                         .expect("String::write_fmt is infallible");
-                    writeln!(self.writer, "{line}")?;
+                        writeln!(self.writer, "{line}")?;
+                    }
                 }
-                AbortReason::ParentAborted { parent_step } => {
-                    let parent_step_info = buffer
-                        .get(&parent_step)
-                        .expect("parent step must exist");
-                    let mut line =
-                        self.start_line(nest_level, step_info, total_steps);
-                    write!(
-                        line,
-                        "{} because parent step {} aborted",
-                        "Aborted".style(self.styles.error_style),
-                        parent_step_info
-                            .step_info()
-                            .description
-                            .style(self.styles.step_name_style)
-                    )
-                    .expect("String::write_fmt is infallible");
-                    writeln!(self.writer, "{line}")?;
-                }
-            },
+
+                self.insert_or_update_index(
+                    step_key,
+                    data.last_root_event_index(),
+                );
+            }
             StepStatus::WillNotBeRun { .. } => {
                 // We don't print "will not be run". (TODO: maybe add an
                 // extended mode which does do so?)
@@ -179,8 +326,34 @@ impl<W: std::io::Write> LineDisplay<W> {
         Ok(())
     }
 
+    fn insert_or_update_index(
+        &mut self,
+        step_key: StepKey,
+        last_root_index: RootEventIndex,
+    ) {
+        match self.step_data.entry(step_key) {
+            Entry::Occupied(mut entry) => {
+                entry.get_mut().update_last_root_event_index(last_root_index);
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(LineDisplayStepData::new(last_root_index));
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+struct LineDisplayInner {
+    prefix: String,
+    styles: LineDisplayStyles,
+    progress_interval: Duration,
+}
+
+impl LineDisplayInner {
     fn start_line(
         &self,
+        extra_half_indent: bool,
+        parent_key_and_child_index: Option<(StepKey, usize)>,
         nest_level: usize,
         step_info: &StepInfo<NestedSpec>,
         total_steps: usize,
@@ -191,15 +364,34 @@ impl<W: std::io::Write> LineDisplay<W> {
         if !self.prefix.is_empty() {
             line.push(' ');
         }
-        line.push_str(&" ".repeat(nest_level * 2));
+        line.push_str(&"    ".repeat(nest_level));
+        if extra_half_indent {
+            line.push_str("  ");
+        }
 
-        // Print out "(<step index>/<total steps>)". Leave space such that we
-        // print out e.g. "(1/8)" and "( 3/14)".
+        match parent_key_and_child_index {
+            Some((parent_key, child_index)) => {
+                // Print e.g. (6a .
+                write!(
+                    &mut line,
+                    "({}{} ",
+                    parent_key.index,
+                    AsLetters(child_index)
+                )
+            }
+            None => {
+                write!(&mut line, "(")
+            }
+        }
+        .expect("String::write_fmt is infallible");
+
+        // Print out "<step index>/<total steps>)". Leave space such that we
+        // print out e.g. "1/8)" and " 3/14)".
         let step_index = step_info.index + 1;
         let step_index_width = total_steps.to_string().len();
         write!(
             &mut line,
-            "({:width$}/{:width$}) ",
+            "{:width$}/{:width$}) ",
             step_index,
             total_steps,
             width = step_index_width
@@ -337,6 +529,47 @@ impl<W: std::io::Write> LineDisplay<W> {
     }
 }
 
+#[derive(Debug)]
+struct LineDisplayStepData {
+    last_root_event_index: RootEventIndex,
+    last_progress_event_at: Option<Duration>,
+}
+
+impl LineDisplayStepData {
+    fn new(last_root_event_index: RootEventIndex) -> Self {
+        Self { last_root_event_index, last_progress_event_at: None }
+    }
+
+    fn update_progress_event(&mut self, event: Duration) {
+        self.last_progress_event_at = Some(event);
+    }
+
+    fn update_last_root_event_index(&mut self, event: RootEventIndex) {
+        self.last_root_event_index = event;
+    }
+}
+
+/// A display impl that converts a 0-based index into a letter or a series of
+/// letters.
+///
+/// This is effectively a conversion to base 26.
+struct AsLetters(usize);
+
+impl fmt::Display for AsLetters {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut index = self.0;
+        loop {
+            let letter = (b'a' + (index % 26) as u8) as char;
+            f.write_char(letter)?;
+            index /= 26;
+            if index == 0 {
+                break;
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Styles for [`LineDisplay`].
 ///
 /// By default this isn't colorized, but it can be if so chosen.
@@ -359,7 +592,7 @@ impl LineDisplayStyles {
         let mut ret = Self::default();
         ret.prefix_style = Style::new().bold();
         ret.meta_style = Style::new().bold();
-        ret.step_name_style = Style::new().underline();
+        ret.step_name_style = Style::new();
         ret.progress_style = Style::new().bold().green();
         ret.warning_style = Style::new().bold().yellow();
         ret.error_style = Style::new().bold().red();

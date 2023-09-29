@@ -14,14 +14,14 @@ use nexus_test_utils::resource_helpers::{
     project_get, projects_list, DiskTest,
 };
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::params;
+use nexus_types::external_api::views;
+use nexus_types::external_api::views::Project;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::Name;
-use omicron_nexus::external_api::params;
-use omicron_nexus::external_api::views;
-use omicron_nexus::external_api::views::Project;
 use std::str::FromStr;
 
 type ControlPlaneTestContext =

@@ -8,7 +8,7 @@ use super::NexusSaga;
 use crate::app::sagas;
 use crate::app::sagas::declare_saga_actions;
 use crate::external_api::params;
-use crate::{authn, authz, db};
+use nexus_db_queries::{authn, authz, db};
 use nexus_defaults as defaults;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -19,7 +19,7 @@ use steno::ActionError;
 // project create saga: input parameters
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Params {
+pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub project_create: params::ProjectCreate,
     pub authz_silo: authz::Silo,
@@ -41,7 +41,7 @@ declare_saga_actions! {
 // project create saga: definition
 
 #[derive(Debug)]
-pub struct SagaProjectCreate;
+pub(crate) struct SagaProjectCreate;
 impl NexusSaga for SagaProjectCreate {
     const NAME: &'static str = "project-create";
     type Params = Params;
@@ -155,15 +155,17 @@ async fn spc_create_vpc_params(
 mod test {
     use crate::{
         app::saga::create_saga_dag, app::sagas::project_create::Params,
-        app::sagas::project_create::SagaProjectCreate, authn::saga::Serialized,
-        authz, db::datastore::DataStore, external_api::params,
+        app::sagas::project_create::SagaProjectCreate, external_api::params,
     };
     use async_bb8_diesel::{
         AsyncConnection, AsyncRunQueryDsl, AsyncSimpleConnection,
         OptionalExtension,
     };
     use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
-    use nexus_db_queries::context::OpContext;
+    use nexus_db_queries::{
+        authn::saga::Serialized, authz, context::OpContext,
+        db::datastore::DataStore,
+    };
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::api::external::IdentityMetadataCreateParams;
 
@@ -202,9 +204,9 @@ mod test {
     }
 
     async fn no_projects_exist(datastore: &DataStore) -> bool {
-        use crate::db::fixed_data::project::SERVICES_PROJECT_ID;
-        use crate::db::model::Project;
-        use crate::db::schema::project::dsl;
+        use nexus_db_queries::db::fixed_data::project::SERVICES_PROJECT_ID;
+        use nexus_db_queries::db::model::Project;
+        use nexus_db_queries::db::schema::project::dsl;
 
         dsl::project
             .filter(dsl::time_deleted.is_null())
@@ -224,9 +226,9 @@ mod test {
     async fn no_virtual_provisioning_collection_records_for_projects(
         datastore: &DataStore,
     ) -> bool {
-        use crate::db::fixed_data::project::SERVICES_PROJECT_ID;
-        use crate::db::model::VirtualProvisioningCollection;
-        use crate::db::schema::virtual_provisioning_collection::dsl;
+        use nexus_db_queries::db::fixed_data::project::SERVICES_PROJECT_ID;
+        use nexus_db_queries::db::model::VirtualProvisioningCollection;
+        use nexus_db_queries::db::schema::virtual_provisioning_collection::dsl;
 
         datastore.pool_for_tests()
             .await
@@ -236,9 +238,9 @@ mod test {
                     .batch_execute_async(nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL)
                     .await
                     .unwrap();
-                Ok::<_, crate::db::TransactionError<()>>(
+                Ok::<_, nexus_db_queries::db::TransactionError<()>>(
                     dsl::virtual_provisioning_collection
-                        .filter(dsl::collection_type.eq(crate::db::model::CollectionTypeProvisioned::Project.to_string()))
+                        .filter(dsl::collection_type.eq(nexus_db_queries::db::model::CollectionTypeProvisioned::Project.to_string()))
                         // ignore built-in services project
                         .filter(dsl::id.ne(*SERVICES_PROJECT_ID))
 

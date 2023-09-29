@@ -4,14 +4,14 @@
 
 //! Information about all top-level Oxide components (sleds, switches, PSCs)
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{bail, Result};
 use omicron_common::api::internal::nexus::KnownArtifactKind;
 use once_cell::sync::Lazy;
+use ratatui::text::Text;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::Display;
 use std::iter::Iterator;
-use tui::text::Text;
 use wicketd_client::types::{
     RackV1Inventory, RotInventory, RotSlot, SpComponentCaboose,
     SpComponentInfo, SpIgnition, SpState, SpType,
@@ -19,8 +19,8 @@ use wicketd_client::types::{
 
 pub static ALL_COMPONENT_IDS: Lazy<Vec<ComponentId>> = Lazy::new(|| {
     (0..=31u8)
-        .map(|i| ComponentId::Sled(i))
-        .chain((0..=1u8).map(|i| ComponentId::Switch(i)))
+        .map(ComponentId::Sled)
+        .chain((0..=1u8).map(ComponentId::Switch))
         // Currently shipping racks don't have PSC 1.
         .chain(std::iter::once(ComponentId::Psc(0)))
         .collect()
