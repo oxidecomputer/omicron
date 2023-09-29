@@ -176,12 +176,6 @@ impl DataStore {
         }
         .filter(dsl::project_id.eq(authz_project.id()))
         .filter(dsl::time_deleted.is_null())
-<<<<<<< HEAD
-        .select(Instance::as_select())
-        .load_async::<Instance>(&*self.pool_connection_authorized(opctx).await?)
-        .await
-        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-=======
         .left_join(
             vmm_dsl::vmm.on(vmm_dsl::id
                 .nullable()
@@ -197,7 +191,6 @@ impl DataStore {
         .into_iter()
         .map(|(instance, vmm)| InstanceAndActiveVmm { instance, vmm })
         .collect())
->>>>>>> f0fe4e890 (nexus: adapt some db queries to instance/vmm split)
     }
 
     /// Fetches information about an Instance that the caller has previously
@@ -258,36 +251,6 @@ impl DataStore {
             })?;
 
         Ok(InstanceAndActiveVmm { instance, vmm })
-    }
-
-    /// Fetches information about a deleted instance. This can be used to
-    /// query the properties an instance had at the time it was deleted, which
-    /// can be useful when cleaning up a deleted instance.
-    pub async fn instance_fetch_deleted(
-        &self,
-        opctx: &OpContext,
-        authz_instance: &authz::Instance,
-    ) -> LookupResult<Instance> {
-        opctx.authorize(authz::Action::Read, authz_instance).await?;
-
-        use db::schema::instance::dsl;
-        let instance = dsl::instance
-            .filter(dsl::id.eq(authz_instance.id()))
-            .filter(dsl::time_deleted.is_not_null())
-            .select(Instance::as_select())
-            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Instance,
-                        LookupType::ById(authz_instance.id()),
-                    ),
-                )
-            })?;
-
-        Ok(instance)
     }
 
     // TODO-design It's tempting to return the updated state of the Instance
