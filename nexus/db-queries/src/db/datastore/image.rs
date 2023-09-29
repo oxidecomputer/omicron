@@ -4,7 +4,7 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
-use crate::db::error::public_error_from_diesel_pool;
+use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::model::Image;
 use crate::db::model::Project;
@@ -52,9 +52,11 @@ impl DataStore {
         .filter(project_dsl::time_deleted.is_null())
         .filter(project_dsl::project_id.eq(authz_project.id()))
         .select(ProjectImage::as_select())
-        .load_async::<ProjectImage>(self.pool_authorized(opctx).await?)
+        .load_async::<ProjectImage>(
+            &*self.pool_connection_authorized(opctx).await?,
+        )
         .await
-        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
         .map(|v| v.into_iter().map(|v| v.into()).collect())
     }
 
@@ -80,9 +82,11 @@ impl DataStore {
         .filter(dsl::time_deleted.is_null())
         .filter(dsl::silo_id.eq(authz_silo.id()))
         .select(SiloImage::as_select())
-        .load_async::<SiloImage>(self.pool_authorized(opctx).await?)
+        .load_async::<SiloImage>(
+            &*self.pool_connection_authorized(opctx).await?,
+        )
         .await
-        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
         .map(|v| v.into_iter().map(|v| v.into()).collect())
     }
 
@@ -107,19 +111,19 @@ impl DataStore {
                 .do_update()
                 .set(dsl::time_modified.eq(dsl::time_modified)),
         )
-        .insert_and_get_result_async(self.pool_authorized(opctx).await?)
+        .insert_and_get_result_async(
+            &*self.pool_connection_authorized(opctx).await?,
+        )
         .await
         .map_err(|e| match e {
             AsyncInsertError::CollectionNotFound => authz_silo.not_found(),
-            AsyncInsertError::DatabaseError(e) => {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::Conflict(
-                        ResourceType::ProjectImage,
-                        name.as_str(),
-                    ),
-                )
-            }
+            AsyncInsertError::DatabaseError(e) => public_error_from_diesel(
+                e,
+                ErrorHandler::Conflict(
+                    ResourceType::ProjectImage,
+                    name.as_str(),
+                ),
+            ),
         })?;
         Ok(image)
     }
@@ -145,19 +149,19 @@ impl DataStore {
                 .do_update()
                 .set(dsl::time_modified.eq(dsl::time_modified)),
         )
-        .insert_and_get_result_async(self.pool_authorized(opctx).await?)
+        .insert_and_get_result_async(
+            &*self.pool_connection_authorized(opctx).await?,
+        )
         .await
         .map_err(|e| match e {
             AsyncInsertError::CollectionNotFound => authz_project.not_found(),
-            AsyncInsertError::DatabaseError(e) => {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::Conflict(
-                        ResourceType::ProjectImage,
-                        name.as_str(),
-                    ),
-                )
-            }
+            AsyncInsertError::DatabaseError(e) => public_error_from_diesel(
+                e,
+                ErrorHandler::Conflict(
+                    ResourceType::ProjectImage,
+                    name.as_str(),
+                ),
+            ),
         })?;
         Ok(image)
     }
@@ -181,10 +185,10 @@ impl DataStore {
                 dsl::time_modified.eq(Utc::now()),
             ))
             .returning(Image::as_returning())
-            .get_result_async(self.pool_authorized(opctx).await?)
+            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::Conflict(
                         ResourceType::SiloImage,
@@ -215,10 +219,10 @@ impl DataStore {
                 dsl::time_modified.eq(Utc::now()),
             ))
             .returning(Image::as_returning())
-            .get_result_async(self.pool_authorized(opctx).await?)
+            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::Conflict(
                         ResourceType::ProjectImage,
