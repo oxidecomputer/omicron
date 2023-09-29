@@ -39,6 +39,7 @@ max_vpc_ipv4_subnet_prefix = 29
 # NOTE: The test suite always overrides this.
 id = "e6bff1ff-24fb-49dc-a54e-c6a350cd4d6c"
 rack_id = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc"
+techport_external_server_port = 0
 
 # Nexus may need to resolve external hosts (e.g. to grab IdP metadata).
 # These are the DNS servers it should use.

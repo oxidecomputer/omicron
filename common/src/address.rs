@@ -47,6 +47,9 @@ pub const CRUCIBLE_PANTRY_PORT: u16 = 17000;
 
 pub const NEXUS_INTERNAL_PORT: u16 = 12221;
 
+/// TODO docs
+pub const NEXUS_TECHPORT_EXTERNAL_PORT: u16 = 12228;
+
 pub const NTP_PORT: u16 = 123;
 
 // The number of ports available to an SNAT IP.

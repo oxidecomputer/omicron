@@ -62,7 +62,6 @@ use illumos_utils::zone::Zones;
 use illumos_utils::{execute, PFEXEC};
 use internal_dns::resolver::Resolver;
 use itertools::Itertools;
-use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::AZ_PREFIX;
 use omicron_common::address::BOOTSTRAP_ARTIFACT_PORT;
 use omicron_common::address::CLICKHOUSE_KEEPER_PORT;
@@ -75,6 +74,7 @@ use omicron_common::address::MGS_PORT;
 use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::address::WICKETD_PORT;
+use omicron_common::address::{Ipv6Subnet, NEXUS_TECHPORT_EXTERNAL_PORT};
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::RackNetworkConfig;
 use omicron_common::backoff::{
@@ -1448,6 +1448,8 @@ impl ServiceManager {
                     let deployment_config = NexusDeploymentConfig {
                         id: request.zone.id,
                         rack_id: sled_info.rack_id,
+                        techport_external_server_port:
+                            NEXUS_TECHPORT_EXTERNAL_PORT,
 
                         dropshot_external: ConfigDropshotWithTls {
                             tls: *external_tls,
