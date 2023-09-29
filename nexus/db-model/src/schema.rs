@@ -1146,9 +1146,9 @@ table! {
 }
 
 table! {
-    inv_collection_errors (inv_collection_id, i) {
+    inv_collection_error (inv_collection_id, index) {
         inv_collection_id -> Uuid,
-        i -> Int4,
+        index -> Int4,
         message -> Text,
     }
 }

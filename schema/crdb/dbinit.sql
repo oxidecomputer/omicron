@@ -2595,13 +2595,13 @@ CREATE INDEX IF NOT EXISTS inv_collection_by_time
     ON omicron.public.inv_collection (time_done) WHERE time_done IS NOT NULL;
 
 -- list of errors generated during a collection
-CREATE TABLE IF NOT EXISTS omicron.public.inv_collection_errors (
+CREATE TABLE IF NOT EXISTS omicron.public.inv_collection_error (
     inv_collection_id UUID NOT NULL,
-    i INT4 NOT NULL,
+    index INT4 NOT NULL,
     message TEXT
 );
 CREATE INDEX IF NOT EXISTS errors_by_collection
-    ON omicron.public.inv_collection_errors (inv_collection_id, i);
+    ON omicron.public.inv_collection_error (inv_collection_id, index);
 
 -- observations from and about service processors
 -- also see inv_root_of_trust

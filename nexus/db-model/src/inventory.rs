@@ -4,15 +4,12 @@
 
 use crate::impl_enum_type;
 use crate::schema::{
-    hw_baseboard_id, inv_caboose, inv_collection, inv_root_of_trust,
-    inv_service_processor, sw_caboose,
+    hw_baseboard_id, inv_collection, inv_collection_error, sw_caboose,
 };
 use chrono::DateTime;
 use chrono::Utc;
-use db_macros::Asset;
 use diesel::expression::AsExpression;
-use nexus_types::identity::Asset;
-use nexus_types::inventory::{BaseboardId, Collection, PowerState};
+use nexus_types::inventory::{BaseboardId, Caboose, Collection, PowerState};
 use uuid::Uuid;
 
 impl_enum_type!(
@@ -107,5 +104,41 @@ impl<'a> From<&'a BaseboardId> for HwBaseboardId {
             part_number: c.part_number.clone(),
             serial_number: c.serial_number.clone(),
         }
+    }
+}
+
+#[derive(Queryable, Insertable, Clone, Debug, Selectable)]
+#[diesel(table_name = sw_caboose)]
+pub struct SwCaboose {
+    pub id: Uuid,
+    pub board: String,
+    pub git_commit: String,
+    pub name: String,
+    pub version: String,
+}
+
+impl<'a> From<&'a Caboose> for SwCaboose {
+    fn from(c: &'a Caboose) -> Self {
+        SwCaboose {
+            id: Uuid::new_v4(),
+            board: c.board.clone(),
+            git_commit: c.git_commit.clone(),
+            name: c.name.clone(),
+            version: c.version.clone(),
+        }
+    }
+}
+
+#[derive(Queryable, Insertable, Clone, Debug, Selectable)]
+#[diesel(table_name = inv_collection_error)]
+pub struct InvCollectionError {
+    pub inv_collection_id: Uuid,
+    pub index: i32,
+    pub message: String,
+}
+
+impl InvCollectionError {
+    pub fn new(inv_collection_id: Uuid, index: i32, message: String) -> Self {
+        InvCollectionError { inv_collection_id, index, message }
     }
 }

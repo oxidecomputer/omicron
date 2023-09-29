@@ -11,15 +11,14 @@ use crate::db::error::ErrorHandler;
 use crate::db::TransactionError;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
-use async_bb8_diesel::PoolError;
-use diesel::expression::AsExpression;
 use diesel::query_dsl::methods::SelectDsl;
 use diesel::IntoSql;
 use nexus_db_model::HwBaseboardId;
 use nexus_db_model::HwPowerState;
 use nexus_db_model::HwPowerStateEnum;
 use nexus_db_model::InvCollection;
-use nexus_types::inventory::BaseboardId;
+use nexus_db_model::InvCollectionError;
+use nexus_db_model::SwCaboose;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::Error;
 
@@ -35,6 +34,10 @@ impl DataStore {
         // It's not critical that this be done in one transaction.  But it keeps
         // the database a little tidier because we won't have half-inserted
         // collections in there.
+        //
+        // Even better would be a large hunk of SQL sent over at once.  None of
+        // this needs to be interactive.  But we don't yet have support for
+        // this.  See oxidecomputer/omicron#973.
         let pool = self.pool_authorized(opctx).await?;
         pool.transaction_async(|conn| async move {
             let row_collection = InvCollection::from(collection);
@@ -60,50 +63,72 @@ impl DataStore {
                     })?;
             }
 
-            // Insert records for any baseboards that do not already exist in
-            // the database.
+            // Insert records (and generate ids) for any baseboards that do not
+            // already exist in the database.
             {
                 use db::schema::hw_baseboard_id::dsl;
-                for baseboard_id in &collection.baseboards {
-                    let _ = diesel::insert_into(dsl::hw_baseboard_id)
-                        .values(HwBaseboardId::from(baseboard_id.as_ref()))
-                        .on_conflict_do_nothing()
-                        .execute_async(&conn)
-                        .await
-                        .map_err(|e| {
-                            TransactionError::CustomError(
-                                public_error_from_diesel_pool(
-                                    e.into(),
-                                    ErrorHandler::Server,
-                                )
-                                .internal_context("inserting baseboard"),
+                let baseboards = collection
+                    .baseboards
+                    .iter()
+                    .map(|b| HwBaseboardId::from(b.as_ref()))
+                    .collect::<Vec<_>>();
+                let _ = diesel::insert_into(dsl::hw_baseboard_id)
+                    .values(baseboards)
+                    .on_conflict_do_nothing()
+                    .execute_async(&conn)
+                    .await
+                    .map_err(|e| {
+                        TransactionError::CustomError(
+                            public_error_from_diesel_pool(
+                                e.into(),
+                                ErrorHandler::Server,
                             )
-                        });
-                }
+                            .internal_context("inserting baseboards"),
+                        )
+                    });
             }
 
-            // XXX-dap insert the errors
+            // Insert records (and generate ids) for each distinct caboose that
+            // we've found.  Like baseboards, these might already be present.
+            {
+                use db::schema::sw_caboose::dsl;
+                let cabooses = collection
+                    .cabooses
+                    .iter()
+                    .map(|s| SwCaboose::from(s.as_ref()))
+                    .collect::<Vec<_>>();
+                let _ = diesel::insert_into(dsl::sw_caboose)
+                    .values(cabooses)
+                    .on_conflict_do_nothing()
+                    .execute_async(&conn)
+                    .await
+                    .map_err(|e| {
+                        TransactionError::CustomError(
+                            public_error_from_diesel_pool(
+                                e.into(),
+                                ErrorHandler::Server,
+                            )
+                            .internal_context("inserting cabooses"),
+                        )
+                    });
+            }
 
-            // XXX-dap remove this
-            // We now need to fetch the ids for those baseboards.  We need these
-            // ids in order to insert, for example, inv_service_processor
-            // records, which have a foreign key into the hw_baseboard_id table.
+            // Now insert rows for the service processors we found.  These have
+            // a foreign key into the hw_baseboard_id table.  We don't have
+            // those values.  We may have just inserted them, or maybe not (if
+            // they previously existed).  To avoid dozens of unnecessary
+            // round-trips, we use INSERT INTO ... SELECT, which looks like
+            // this:
             //
-            // This approach sucks.  With raw SQL, we could do something like
+            //   INSERT INTO inv_service_processor
+            //       SELECT
+            //           id
+            //           [other service_processor column values as literals]
+            //         FROM hw_baseboard_id
+            //         WHERE part_number = ... AND serial_number = ...;
             //
-            // INSERT INTO inv_service_processor
-            //     SELECT
-            //         id
-            //         [other service_processor column values]
-            //       FROM hw_baseboard_id
-            //       WHERE part_number = ... AND serial_number = ...;
-            //
-            // This way, we don't need to know the id directly.
-
-            // XXX-dap
-            //self.inventory_insert_cabooses(opctx, &collection.cabooses, &conn)
-            //    .await?;
-
+            // This way, we don't need to know the id.  The database looks it up
+            // for us as it does the INSERT.
             {
                 use db::schema::hw_baseboard_id::dsl as baseboard_dsl;
                 use db::schema::inv_service_processor::dsl as sp_dsl;
@@ -154,14 +179,39 @@ impl DataStore {
                 }
             }
 
-            //self.inventory_insert_sps(opctx, &collection.sps, &conn).await?;
-            //self.inventory_insert_cabooses_found(
-            //    opctx,
-            //    &collection.cabooses,
-            //    &collection.sps,
-            //    &conn,
-            //)
-            //.await?;
+            // XXX-dap Insert the root-of-trust information.
+            // XXX-dap Insert the "found cabooses" information.
+            // XXX-dap the various loops here could probably be INSERTs of Vecs
+
+            // Finally, insert the list of errors.
+            {
+                use db::schema::inv_collection_error::dsl as errors_dsl;
+                let error_values = collection
+                    .errors
+                    .iter()
+                    .enumerate()
+                    .map(|(i, error)| {
+                        // XXX-dap unwrap
+                        let index = i32::try_from(i).unwrap();
+                        let message = format!("{:#}", error);
+                        InvCollectionError::new(collection_id, index, message)
+                    })
+                    .collect::<Vec<_>>();
+                let _ = diesel::insert_into(errors_dsl::inv_collection_error)
+                    .values(error_values)
+                    .execute_async(&conn)
+                    .await
+                    .map_err(|e| {
+                        TransactionError::CustomError(
+                            public_error_from_diesel_pool(
+                                e.into(),
+                                ErrorHandler::Server,
+                            )
+                            .internal_context("inserting errors"),
+                        )
+                    });
+            }
+
             Ok(())
         })
         .await
@@ -172,38 +222,4 @@ impl DataStore {
             }
         })
     }
-
-    //async fn inventory_insert_baseboards<ConnErr>(
-    //    &self,
-    //    baseboards: impl Iterator<Item = &'_ BaseboardId>,
-    //    conn: &(impl async_bb8_diesel::AsyncConnection<
-    //        crate::db::pool::DbConnection,
-    //        ConnErr,
-    //    > + Sync),
-    //) -> Result<(), TransactionError<Error>>
-    //where
-    //    ConnErr: From<diesel::result::Error> + Send + 'static,
-    //    ConnErr: Into<PoolError>,
-    //{
-    //    use db::schema::hw_baseboard_id::dsl;
-
-    //    for baseboard_id in baseboards {
-    //        let _ = diesel::insert_into(dsl::hw_baseboard_id)
-    //            .values(HwBaseboardId::from(baseboard_id))
-    //            .on_conflict_do_nothing()
-    //            .execute_async(conn)
-    //            .await
-    //            .map_err(|e| {
-    //                TransactionError::CustomError(
-    //                    public_error_from_diesel_pool(
-    //                        e.into(),
-    //                        ErrorHandler::Server,
-    //                    )
-    //                    .internal_context("inserting baseboard"),
-    //                )
-    //            });
-    //    }
-
-    //    Ok(())
-    //}
 }
