@@ -739,6 +739,7 @@ pub enum ResourceType {
     UpdateableComponent,
     UserBuiltin,
     Zpool,
+    Vmm,
 }
 
 // IDENTITY METADATA

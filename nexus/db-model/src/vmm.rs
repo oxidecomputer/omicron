@@ -111,3 +111,17 @@ pub struct VmmRuntimeState {
     #[diesel(column_name = state_generation)]
     pub gen: Generation,
 }
+
+impl From<omicron_common::api::internal::nexus::VmmRuntimeState>
+    for VmmRuntimeState
+{
+    fn from(
+        value: omicron_common::api::internal::nexus::VmmRuntimeState,
+    ) -> Self {
+        Self {
+            state: InstanceState::new(value.state),
+            time_state_updated: value.time_updated,
+            gen: value.gen.into(),
+        }
+    }
+}

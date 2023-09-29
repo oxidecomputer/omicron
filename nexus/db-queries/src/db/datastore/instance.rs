@@ -28,6 +28,7 @@ use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use nexus_db_model::VmmRuntimeState;
 use omicron_common::api;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
@@ -330,6 +331,62 @@ impl DataStore {
             })?;
 
         Ok(updated)
+    }
+
+    /// Updates an instance record and a VMM record with a single database
+    /// command.
+    ///
+    /// # Arguments
+    ///
+    /// - instance_id: The ID of the instance to update.
+    /// - new_instance: The new instance runtime state to try to write.
+    /// - vmm_id: The ID of the VMM to update.
+    /// - new_vmm: The new VMM runtime state to try to write.
+    ///
+    /// # Return value
+    ///
+    /// - `Ok((instance_updated, vmm_updated))` if the query was issued
+    ///   successfully. `instance_updated` and `vmm_updated` are each true if
+    ///   the relevant item was updated and false otherwise. Note that an update
+    ///   can fail because it was inapplicable (i.e. the database has state with
+    ///   a newer generation already) or because the relevant record was not
+    ///   found.
+    /// - `Err` if another error occurred while accessing the database.
+    pub async fn instance_and_vmm_update_runtime(
+        &self,
+        instance_id: &Uuid,
+        new_instance: &InstanceRuntimeState,
+        vmm_id: &Uuid,
+        new_vmm: &VmmRuntimeState,
+    ) -> Result<(bool, bool), Error> {
+        let query = crate::db::queries::instance::InstanceAndVmmUpdate::new(
+            *instance_id,
+            new_instance.clone(),
+            *vmm_id,
+            new_vmm.clone(),
+        );
+
+        // The InstanceAndVmmUpdate query handles and indicates failure to find
+        // either the instance or the VMM, so a query failure here indicates
+        // some kind of internal error and not a failed lookup.
+        let result =
+            query.execute_and_check(self.pool()).await.map_err(|e| {
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            })?;
+
+        let instance_updated = match result.instance_status {
+            Some(UpdateStatus::Updated) => true,
+            Some(UpdateStatus::NotUpdatedButExists) => false,
+            None => false,
+        };
+
+        let vmm_updated = match result.vmm_status {
+            Some(UpdateStatus::Updated) => true,
+            Some(UpdateStatus::NotUpdatedButExists) => false,
+            None => false,
+        };
+
+        Ok((instance_updated, vmm_updated))
     }
 
     pub async fn project_delete_instance(

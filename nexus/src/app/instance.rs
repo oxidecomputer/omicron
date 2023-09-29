@@ -1079,91 +1079,107 @@ impl super::Nexus {
     pub(crate) async fn notify_instance_updated(
         &self,
         opctx: &OpContext,
-        id: &Uuid,
-        new_runtime_state: &nexus::InstanceRuntimeState,
+        instance_id: &Uuid,
+        new_runtime_state: &nexus::SledInstanceState,
     ) -> Result<(), Error> {
         let log = &self.log;
+        let vmm_id = new_runtime_state.vmm_id;
 
-        slog::debug!(log, "received new runtime state from sled agent";
-                     "instance_id" => %id,
-                     "runtime_state" => ?new_runtime_state);
+        info!(log, "received new runtime state from sled agent";
+              "instance_id" => %instance_id,
+              "instance_state" => ?new_runtime_state.instance_state,
+              "propolis_id" => %vmm_id,
+              "vmm_state" => ?new_runtime_state.vmm_state);
 
-        // If the new state has a newer Propolis ID generation than the current
-        // instance state in CRDB, notify interested parties of this change.
+        // Update OPTE and Dendrite if the instance's active sled assignment
+        // changed or a migration was retired. If these actions fail, sled agent
+        // is expected to retry this update.
         //
-        // The synchronization rules here are as follows:
+        // This configuration must be updated before updating any state in CRDB
+        // so that, if the instance was migrating or has shut down, it will not
+        // appear to be able to migrate or start again until the appropriate
+        // networking state has been written. Without this interlock, another
+        // thread or another Nexus can race with this routine to write
+        // conflicting configuration.
         //
-        // - Sled agents own an instance's runtime state while an instance is
-        //   running on a sled. Each sled agent prevents concurrent conflicting
-        //   Propolis identifier updates from being sent until previous updates
-        //   are processed.
-        // - Operations that can dispatch an instance to a brand-new sled (e.g.
-        //   live migration) can only start if the appropriate instance runtime
-        //   state fields are cleared in CRDB. For example, while a live
-        //   migration is in progress, the instance's `migration_id` field will
-        //   be non-NULL, and a new migration cannot start until it is cleared.
-        //   This routine must notify recipients before writing new records
-        //   back to CRDB so that these "locks" remain held until all
-        //   notifications have been sent. Otherwise, Nexus might allow new
-        //   operations to proceed that will produce system updates that might
-        //   race with this one.
-        // - This work is not done in a saga. The presumption is instead that
-        //   if any of these operations fail, the entire update will fail, and
-        //   sled agent will retry the update. Unwinding on failure isn't needed
-        //   because (a) any partially-applied configuration is correct
-        //   configuration, (b) if the instance is migrating, it can't migrate
-        //   again until this routine successfully updates configuration and
-        //   writes an update back to CRDB, and (c) sled agent won't process any
-        //   new instance state changes (e.g. a change that stops an instance)
-        //   until this state change is successfully committed.
-        let (.., db_instance) = LookupPath::new(&opctx, &self.db_datastore)
-            .instance_id(*id)
-            .fetch_for(authz::Action::Read)
-            .await?;
+        // In the future, this should be replaced by a call to trigger a
+        // networking state update RPW.
+        let (.., authz_instance, db_instance) =
+            LookupPath::new(&opctx, &self.db_datastore)
+                .instance_id(*instance_id)
+                .fetch()
+                .await?;
 
-        if new_runtime_state.propolis_gen > *db_instance.runtime().propolis_gen
-        {
-            self.handle_instance_propolis_gen_change(
-                opctx,
-                new_runtime_state,
-                &db_instance,
-            )
-            .await?;
-        }
+        self.ensure_updated_instance_network_config(
+            opctx,
+            &authz_instance,
+            db_instance.runtime(),
+            &new_runtime_state.instance_state,
+        )
+        .await?;
 
+        // Write the new instance and VMM states back to CRDB. This needs to be
+        // done before trying to clean up the VMM, since the datastore will only
+        // allow a VMM to be marked as deleted if it is already in a terminal
+        // state.
         let result = self
             .db_datastore
-            .instance_update_runtime(id, &(new_runtime_state.clone().into()))
+            .instance_and_vmm_update_runtime(
+                instance_id,
+                &db::model::InstanceRuntimeState::from(
+                    new_runtime_state.instance_state.clone(),
+                ),
+                &vmm_id,
+                &db::model::VmmRuntimeState::from(
+                    new_runtime_state.vmm_state.clone(),
+                ),
+            )
             .await;
 
+        // If the VMM is now in a terminal state, make sure its resources get
+        // cleaned up.
+        if let Ok((_, true)) = result {
+            let vmm_terminated = matches!(
+                new_runtime_state.vmm_state.state,
+                InstanceState::Destroyed | InstanceState::Failed
+            );
+
+            if vmm_terminated {
+                info!(log, "vmm is terminated, cleaning up resources";
+                      "instance_id" => %instance_id,
+                      "propolis_id" => %vmm_id);
+
+                self.db_datastore
+                    .sled_reservation_delete(opctx, vmm_id)
+                    .await?;
+
+                if !self.db_datastore.vmm_mark_deleted(opctx, &vmm_id).await? {
+                    warn!(log, "failed to mark vmm record as deleted";
+                      "instance_id" => %instance_id,
+                      "propolis_id" => %vmm_id,
+                      "vmm_state" => ?new_runtime_state.vmm_state);
+                }
+            }
+        }
+
         match result {
-            Ok(true) => {
-                info!(log, "instance updated by sled agent";
-                    "instance_id" => %id,
-                    "propolis_id" => %new_runtime_state.propolis_id,
-                    "new_state" => %new_runtime_state.run_state);
+            Ok((instance_updated, vmm_updated)) => {
+                info!(log, "instance and vmm updated by sled agent";
+                      "instance_id" => %instance_id,
+                      "propolis_id" => %vmm_id,
+                      "instance_updated" => instance_updated,
+                      "vmm_updated" => vmm_updated);
                 Ok(())
             }
 
-            Ok(false) => {
-                info!(log, "instance update from sled agent ignored (old)";
-                    "instance_id" => %id,
-                    "propolis_id" => %new_runtime_state.propolis_id,
-                    "requested_state" => %new_runtime_state.run_state);
-                Ok(())
-            }
-
-            // If the instance doesn't exist, swallow the error -- there's
-            // nothing to do here.
-            // TODO-robustness This could only be possible if we've removed an
-            // Instance from the datastore altogether.  When would we do that?
-            // We don't want to do it as soon as something's destroyed, I think,
-            // and in that case, we'd need some async task for cleaning these
-            // up.
+            // The update command should swallow object-not-found errors and
+            // return them back as failures to update, so this error case is
+            // unexpected. There's no work to do if this occurs, however.
             Err(Error::ObjectNotFound { .. }) => {
-                warn!(log, "non-existent instance updated by sled agent";
-                    "instance_id" => %id,
-                    "new_state" => %new_runtime_state.run_state);
+                error!(log, "instance/vmm update unexpectedly returned \
+                       an object not found error";
+                       "instance_id" => %instance_id,
+                       "vmm_id" => %vmm_id);
                 Ok(())
             }
 
@@ -1173,72 +1189,12 @@ impl super::Nexus {
             // different from Error with an Into<Error>.
             Err(error) => {
                 warn!(log, "failed to update instance from sled agent";
-                    "instance_id" => %id,
-                    "new_state" => %new_runtime_state.run_state,
-                    "error" => ?error);
+                      "instance_id" => %instance_id,
+                      "vmm_id" => %vmm_id,
+                      "error" => ?error);
                 Err(error)
             }
         }
-    }
-
-    async fn handle_instance_propolis_gen_change(
-        &self,
-        opctx: &OpContext,
-        new_runtime: &nexus::InstanceRuntimeState,
-        db_instance: &nexus_db_model::Instance,
-    ) -> Result<(), Error> {
-        let log = &self.log;
-        let instance_id = db_instance.id();
-
-        info!(log,
-              "updating configuration after Propolis generation change";
-              "instance_id" => %instance_id,
-              "new_sled_id" => %new_runtime.sled_id,
-              "old_sled_id" => %db_instance.runtime().sled_id);
-
-        // Push updated V2P mappings to all interested sleds. This needs to be
-        // done irrespective of whether the sled ID actually changed, because
-        // merely creating the target Propolis on the target sled will create
-        // XDE devices for its NICs, and creating an XDE device for a virtual IP
-        // creates a V2P mapping that maps that IP to that sled. This is fine if
-        // migration succeeded, but if it failed, the instance is running on the
-        // source sled, and the incorrect mapping needs to be replaced.
-        //
-        // TODO(#3107): When XDE no longer creates mappings implicitly, this
-        // can be restricted to cases where an instance's sled has actually
-        // changed.
-        self.create_instance_v2p_mappings(
-            opctx,
-            instance_id,
-            new_runtime.sled_id,
-        )
-        .await?;
-
-        let (.., sled) = LookupPath::new(opctx, &self.db_datastore)
-            .sled_id(new_runtime.sled_id)
-            .fetch()
-            .await?;
-
-        let boundary_switches =
-            self.boundary_switches(&self.opctx_alloc).await?;
-
-        for switch in &boundary_switches {
-            let dpd_client = self.dpd_clients.get(switch).ok_or_else(|| {
-                Error::internal_error(&format!(
-                    "could not find dpd client for {switch}"
-                ))
-            })?;
-            self.instance_ensure_dpd_config(
-                opctx,
-                db_instance.id(),
-                &sled.address(),
-                None,
-                dpd_client,
-            )
-            .await?;
-        }
-
-        Ok(())
     }
 
     /// Returns the requested range of serial console output bytes,
@@ -1270,11 +1226,11 @@ impl super::Nexus {
             .send()
             .await
             .map_err(|e| {
-                Error::internal_error(
+                Error::internal_error(&format!(
                     "websocket connection to instance's serial port failed: \
                         {:?}",
                     e,
-                )
+                ))
             })?
             .into_inner();
         Ok(params::InstanceSerialConsoleData {

@@ -82,6 +82,7 @@ mod switch_interface;
 mod switch_port;
 mod update;
 mod virtual_provisioning_collection;
+mod vmm;
 mod volume;
 mod vpc;
 mod zpool;

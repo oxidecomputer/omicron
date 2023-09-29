@@ -2099,7 +2099,7 @@ async fn instance_serial_console(
         let instance_lookup =
             nexus.instance_lookup(&opctx, instance_selector)?;
         let data = nexus
-            .instance_serial_console_data(&instance_lookup, &query)
+            .instance_serial_console_data(&opctx, &instance_lookup, &query)
             .await?;
         Ok(HttpResponseOk(data))
     };
@@ -2137,6 +2137,7 @@ async fn instance_serial_console_stream(
         Ok(instance_lookup) => {
             nexus
                 .instance_serial_console_stream(
+                    &opctx,
                     client_stream,
                     &instance_lookup,
                     &query,
