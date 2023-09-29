@@ -8,7 +8,6 @@ use super::ActionRegistry;
 use super::NexusActionContext;
 use super::NexusSaga;
 use crate::app::sagas::declare_saga_actions;
-use crate::app::sagas::retry_until_known_result;
 use nexus_db_queries::db;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::{authn, authz};
@@ -151,70 +150,14 @@ async fn sid_delete_network_config(
         &sagactx,
         &params.serialized_authn,
     );
+    let authz_instance = &params.authz_instance;
     let osagactx = sagactx.user_data();
 
-    let datastore = &osagactx.datastore();
-    let log = sagactx.user_data().log();
-
-    debug!(log, "fetching external ip addresses");
-
-    let external_ips = &datastore
-        .instance_lookup_external_ips(&opctx, params.authz_instance.id())
+    osagactx
+        .nexus()
+        .instance_delete_dpd_config(&opctx, authz_instance)
         .await
-        .map_err(ActionError::action_failed)?;
-
-    let mut errors: Vec<ActionError> = vec![];
-
-    // Here we are attempting to delete every existing NAT entry while deferring
-    // any error handling. If we don't defer error handling, we might end up
-    // bailing out before we've attempted deletion of all entries.
-    for entry in external_ips {
-        for switch in &params.boundary_switches {
-            debug!(log, "deleting nat mapping"; "switch" => switch.to_string(), "entry" => #?entry);
-
-            let client_result =
-                osagactx.nexus().dpd_clients.get(switch).ok_or_else(|| {
-                    ActionError::action_failed(Error::internal_error(&format!(
-                        "unable to find dendrite client for {switch}"
-                    )))
-                });
-
-            let dpd_client = match client_result {
-                Ok(client) => client,
-                Err(new_error) => {
-                    errors.push(new_error);
-                    continue;
-                }
-            };
-
-            let result = retry_until_known_result(log, || async {
-                dpd_client
-                    .ensure_nat_entry_deleted(log, entry.ip, *entry.first_port)
-                    .await
-            })
-            .await;
-
-            match result {
-                Ok(_) => {
-                    debug!(log, "deleting nat mapping successful"; "switch" => switch.to_string(), "entry" => format!("{entry:#?}"));
-                }
-                Err(e) => {
-                    let new_error =
-                        ActionError::action_failed(Error::internal_error(
-                            &format!("failed to delete nat entry via dpd: {e}"),
-                        ));
-                    error!(log, "{new_error:#?}");
-                    errors.push(new_error);
-                }
-            }
-        }
-    }
-
-    if let Some(error) = errors.first() {
-        return Err(error.clone());
-    }
-
-    Ok(())
+        .map_err(ActionError::action_failed)
 }
 
 async fn sid_delete_instance_record(

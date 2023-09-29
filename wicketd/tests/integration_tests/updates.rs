@@ -17,13 +17,13 @@ use omicron_common::{
     api::internal::nexus::KnownArtifactKind,
     update::{ArtifactHashId, ArtifactKind},
 };
-use tokio::sync::oneshot;
+use tokio::sync::watch;
 use uuid::Uuid;
 use wicket_common::update_events::{StepEventKind, UpdateComponent};
 use wicketd::{RunningUpdateState, StartUpdateError};
 use wicketd_client::types::{
     GetInventoryParams, GetInventoryResponse, SpIdentifier, SpType,
-    StartUpdateOptions,
+    StartUpdateOptions, StartUpdateParams,
 };
 
 #[tokio::test]
@@ -139,13 +139,11 @@ async fn test_updates() {
     }
 
     // Now, try starting the update on SP 0.
+    let options = StartUpdateOptions::default();
+    let params = StartUpdateParams { targets: vec![target_sp], options };
     wicketd_testctx
         .wicketd_client
-        .post_start_update(
-            target_sp.type_,
-            target_sp.slot,
-            &StartUpdateOptions::default(),
-        )
+        .post_start_update(&params)
         .await
         .expect("update started successfully");
 
@@ -354,12 +352,13 @@ async fn test_update_races() {
         slot: 0,
         type_: gateway_client::types::SpType::Sled,
     };
+    let sps: BTreeSet<_> = vec![sp].into_iter().collect();
 
-    let (sender, receiver) = oneshot::channel();
+    let (sender, receiver) = watch::channel(());
     wicketd_testctx
         .server
         .update_tracker
-        .start_fake_update(sp, receiver)
+        .start_fake_update(sps.clone(), receiver)
         .await
         .expect("start_fake_update successful");
 
@@ -374,14 +373,18 @@ async fn test_update_races() {
     // Also try starting another fake update, which should fail -- we don't let
     // updates be started in the middle of other updates.
     {
-        let (_, receiver) = oneshot::channel();
+        let (_, receiver) = watch::channel(());
         let err = wicketd_testctx
             .server
             .update_tracker
-            .start_fake_update(sp, receiver)
+            .start_fake_update(sps, receiver)
             .await
             .expect_err("start_fake_update failed while update is running");
-        assert_eq!(err, StartUpdateError::UpdateInProgress(sp));
+        assert_eq!(err.len(), 1, "one error returned: {err:?}");
+        assert_eq!(
+            err.first().unwrap(),
+            &StartUpdateError::UpdateInProgress(vec![sp])
+        );
     }
 
     // Unblock the update, letting it run to completion.

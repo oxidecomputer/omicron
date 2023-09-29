@@ -142,13 +142,12 @@ pub async fn test_setup_with_config(
     }
 
     // Start gateway server
-    let rack_id = Uuid::parse_str(RACK_UUID).unwrap();
+    let rack_id = Some(Uuid::parse_str(RACK_UUID).unwrap());
 
-    let args = MgsArguments { id: Uuid::new_v4(), addresses };
+    let args = MgsArguments { id: Uuid::new_v4(), addresses, rack_id };
     let server = omicron_gateway::Server::start(
         server_config.clone(),
         args,
-        rack_id,
         log.clone(),
     )
     .await

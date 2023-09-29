@@ -31,6 +31,8 @@ tokio.workspace = true
 uuid.workspace = true
 zone.workspace = true
 
+omicron-workspace-hack = { version = "0.1", path = "../workspace-hack" }
+
 [target.'cfg(target_os = "illumos")'.dependencies]
 opte-ioctl.workspace = true
 

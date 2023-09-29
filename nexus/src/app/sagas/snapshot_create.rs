@@ -1885,7 +1885,9 @@ mod test {
         dsl::snapshot
             .filter(dsl::time_deleted.is_null())
             .select(Snapshot::as_select())
-            .first_async::<Snapshot>(datastore.pool_for_tests().await.unwrap())
+            .first_async::<Snapshot>(
+                &*datastore.pool_connection_for_tests().await.unwrap(),
+            )
             .await
             .optional()
             .unwrap()
@@ -1899,7 +1901,7 @@ mod test {
         dsl::region_snapshot
             .select(RegionSnapshot::as_select())
             .first_async::<RegionSnapshot>(
-                datastore.pool_for_tests().await.unwrap(),
+                &*datastore.pool_connection_for_tests().await.unwrap(),
             )
             .await
             .optional()

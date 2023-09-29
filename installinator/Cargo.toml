@@ -44,6 +44,7 @@ toml.workspace = true
 tufaceous-lib.workspace = true
 update-engine.workspace = true
 uuid.workspace = true
+omicron-workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dev-dependencies]
 omicron-test-utils.workspace = true

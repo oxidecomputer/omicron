@@ -27,7 +27,9 @@ use camino::Utf8PathBuf;
 use dropshot::HttpError;
 use helios_fusion::BoxedExecutor;
 use illumos_utils::dladm::Dladm;
-use illumos_utils::opte::params::SetVirtualNetworkInterfaceHost;
+use illumos_utils::opte::params::{
+    DeleteVirtualNetworkInterfaceHost, SetVirtualNetworkInterfaceHost,
+};
 use illumos_utils::opte::PortManager;
 use illumos_utils::zone::Zones;
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
@@ -887,7 +889,7 @@ impl SledAgent {
 
     pub async fn unset_virtual_nic_host(
         &self,
-        mapping: &SetVirtualNetworkInterfaceHost,
+        mapping: &DeleteVirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
         self.inner
             .port_manager
