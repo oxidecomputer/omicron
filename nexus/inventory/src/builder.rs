@@ -84,6 +84,7 @@ impl CollectionBuilder {
                 baseboard: baseboard.clone(),
                 time_collected: Utc::now(),
                 source: source.to_owned(),
+                baseboard_revision: sp_state.revision,
                 hubris_archive: sp_state.hubris_archive_id,
                 power_state: sp_state.power_state,
                 rot,

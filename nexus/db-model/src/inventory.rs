@@ -21,7 +21,7 @@ impl_enum_type!(
     pub struct HwPowerStateEnum;
 
     #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
-    #[diesel(sql_type = HwRotSlotEnum)]
+    #[diesel(sql_type = HwPowerStateEnum)]
     pub enum HwPowerState;
 
     // Enum values

@@ -115,15 +115,19 @@ impl DataStore {
                             baseboard_dsl::id,
                             sp.time_collected
                                 .into_sql::<diesel::sql_types::Timestamptz>(),
-                            sp.source.into_sql::<diesel::sql_types::Text>(),
+                            sp.source
+                                .clone()
+                                .into_sql::<diesel::sql_types::Text>(),
                             i64::from(sp.baseboard_revision)
                                 .into_sql::<diesel::sql_types::Int8>(),
                             sp.hubris_archive
+                                .clone()
                                 .into_sql::<diesel::sql_types::Text>(),
-                            HwPowerState::from(sp.power_state).into_sql(),
+                            HwPowerState::from(sp.power_state)
+                                .into_sql::<HwPowerStateEnum>(),
                         ));
 
-                    diesel::insert_into(
+                    let _ = diesel::insert_into(
                         db::schema::inv_service_processor::table,
                     )
                     .values(selection)
