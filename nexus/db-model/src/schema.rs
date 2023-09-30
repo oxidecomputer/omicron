@@ -344,16 +344,16 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         project_id -> Uuid,
         user_data -> Binary,
+        ncpus -> Int8,
+        memory -> Int8,
+        hostname -> Text,
+        boot_on_fault -> Bool,
         state -> crate::InstanceStateEnum,
         time_state_updated -> Timestamptz,
         state_generation -> Int8,
         active_propolis_id -> Nullable<Uuid>,
         target_propolis_id -> Nullable<Uuid>,
         migration_id -> Nullable<Uuid>,
-        ncpus -> Int8,
-        memory -> Int8,
-        hostname -> Text,
-        boot_on_fault -> Bool,
     }
 }
 
