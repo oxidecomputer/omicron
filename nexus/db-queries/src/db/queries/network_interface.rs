@@ -59,6 +59,11 @@ lazy_static::lazy_static! {
     static ref INSTANCE_DESTROYED: db::model::InstanceState =
         db::model::InstanceState(external::InstanceState::Destroyed);
 
+    // A sentinel value for the instance state when the instance has an active
+    // VMM, irrespective of that VMM's actual state.
+    static ref INSTANCE_RUNNING: db::model::InstanceState =
+        db::model::InstanceState(external::InstanceState::Running);
+
     static ref NO_INSTANCE_SENTINEL_STRING: String =
         String::from(NO_INSTANCE_SENTINEL);
 
@@ -1283,7 +1288,7 @@ const INSTANCE_FROM_CLAUSE: InstanceFromClause = InstanceFromClause::new();
 //              SELECT
 //                  CASE
 //                      WHEN active_propolis_id IS NULL THEN state
-//                      ELSE 'bad-state'
+//                      ELSE 'running'
 //                  END
 //              FROM
 //                  instance
@@ -1307,8 +1312,8 @@ const INSTANCE_FROM_CLAUSE: InstanceFromClause = InstanceFromClause::new();
 // yield the following state string:
 //
 // - 'destroyed' if the instance is not found at all
-// - 'bad-state' if the instance is found and has an active VMM (this forbids
-//   network interface changes irrespective of that VMM's state)
+// - 'running' if the instance is found and has an active VMM (this forbids
+//   network interface changes irrespective of that VMM's actual state)
 // - the instance's `state` otherwise
 //
 // If this produces 'stopped', 'creating', or (if applicable) 'failed', the
@@ -1339,9 +1344,7 @@ fn push_instance_state_verification_subquery<'a>(
     out.push_sql(" IS NULL THEN ");
     out.push_identifier(db::schema::instance::dsl::state::NAME)?;
     out.push_sql(" ELSE ");
-    out.push_bind_param::<sql_types::Text, String>(
-        &INSTANCE_BAD_STATE_SENTINEL_STRING,
-    )?;
+    out.push_bind_param::<db::model::InstanceStateEnum, db::model::InstanceState>(&INSTANCE_RUNNING)?;
     out.push_sql(" END ");
     out.push_sql(" FROM ");
     INSTANCE_FROM_CLAUSE.walk_ast(out.reborrow())?;
