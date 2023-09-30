@@ -135,8 +135,15 @@ impl InstanceAndVmmUpdate {
         vmm_id: Uuid,
         new_vmm_runtime_state: VmmRuntimeState,
     ) -> Self {
-        let instance_find = Box::new(instance_dsl::instance.find(instance_id));
-        let vmm_find = Box::new(vmm_dsl::vmm.find(vmm_id));
+        let instance_find = Box::new(
+            instance_dsl::instance
+                .filter(instance_dsl::id.eq(instance_id))
+                .select(instance_dsl::id),
+        );
+
+        let vmm_find = Box::new(
+            vmm_dsl::vmm.filter(vmm_dsl::id.eq(vmm_id)).select(vmm_dsl::id),
+        );
 
         let instance_update = Box::new(
             diesel::update(instance_dsl::instance)
