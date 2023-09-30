@@ -35,7 +35,7 @@ declare_saga_actions! {
 
     ALLOC_SERVER -> "sled_id" {
         + sis_alloc_server
-            - sis_alloc_server_undo
+        - sis_alloc_server_undo
     }
 
     ALLOC_PROPOLIS_IP -> "propolis_ip" {
@@ -44,29 +44,29 @@ declare_saga_actions! {
 
     CREATE_VMM_RECORD -> "vmm_record" {
         + sis_create_vmm_record
-            - sis_destroy_vmm_record
+        - sis_destroy_vmm_record
     }
 
     MARK_AS_STARTING -> "started_record" {
         + sis_move_to_starting
-            - sis_move_to_starting_undo
+        - sis_move_to_starting_undo
     }
 
     // TODO(#3879) This can be replaced with an action that triggers the NAT RPW
     // once such an RPW is available.
     DPD_ENSURE -> "dpd_ensure" {
         + sis_dpd_ensure
-            - sis_dpd_ensure_undo
+        - sis_dpd_ensure_undo
     }
 
     V2P_ENSURE -> "v2p_ensure" {
         + sis_v2p_ensure
-            - sis_v2p_ensure_undo
+        - sis_v2p_ensure_undo
     }
 
     ENSURE_REGISTERED -> "ensure_registered" {
         + sis_ensure_registered
-            - sis_ensure_registered_undo
+        - sis_ensure_registered_undo
     }
 
     ENSURE_RUNNING -> "ensure_running" {
@@ -362,47 +362,24 @@ async fn sis_dpd_ensure_undo(
     let instance_id = params.db_instance.id();
     let osagactx = sagactx.user_data();
     let log = osagactx.log();
-
-    info!(log, "start saga: undoing dpd configuration";
-          "instance_id" => %instance_id);
-
-    let datastore = &osagactx.datastore();
     let opctx = crate::context::op_context_for_saga_action(
         &sagactx,
         &params.serialized_authn,
     );
 
-    let target_ips =
-        &datastore.instance_lookup_external_ips(&opctx, instance_id).await?;
+    info!(log, "start saga: undoing dpd configuration";
+          "instance_id" => %instance_id);
 
-    let boundary_switches = osagactx.nexus().boundary_switches(&opctx).await?;
-    for switch in boundary_switches {
-        let dpd_client =
-            osagactx.nexus().dpd_clients.get(&switch).ok_or_else(|| {
-                ActionError::action_failed(Error::internal_error(&format!(
-                    "unable to find client for switch {switch}"
-                )))
-            })?;
+    let (.., authz_instance) = LookupPath::new(&opctx, &osagactx.datastore())
+        .instance_id(instance_id)
+        .lookup_for(authz::Action::Modify)
+        .await
+        .map_err(ActionError::action_failed)?;
 
-        for ip in target_ips {
-            let result = retry_until_known_result(log, || async {
-                dpd_client
-                    .ensure_nat_entry_deleted(log, ip.ip, *ip.first_port)
-                    .await
-            })
-            .await;
-
-            match result {
-                Ok(_) => {
-                    debug!(log, "successfully deleted nat entry for {ip:#?}");
-                    Ok(())
-                }
-                Err(e) => Err(Error::internal_error(&format!(
-                    "failed to delete nat entry for {ip:#?} via dpd: {e}"
-                ))),
-            }?;
-        }
-    }
+    osagactx
+        .nexus()
+        .instance_delete_dpd_config(&opctx, &authz_instance)
+        .await?;
 
     Ok(())
 }
