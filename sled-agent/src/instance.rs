@@ -280,9 +280,6 @@ impl InstanceInner {
                     "state" => ?state,
                 );
 
-                Ok(())
-
-                /* TODO(gjc) regenerate openapi
                 self.nexus_client
                     .client()
                     .cpapi_instances_put(self.id(), &state.into())
@@ -326,7 +323,7 @@ impl InstanceInner {
                                 }
                             }
                         }
-                    }) */
+                    })
             },
             |err: Error, delay| {
                 warn!(self.log,

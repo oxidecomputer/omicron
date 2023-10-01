@@ -340,9 +340,20 @@ impl SledAgent {
             };
 
         self.detach_disks_from_instance(instance_id).await?;
-        Ok(InstanceUnregisterResponse {
+        let response = InstanceUnregisterResponse {
             updated_runtime: Some(instance.terminate()),
-        })
+        };
+
+        // Poke the now-destroyed instance to force it to be removed from the
+        // collection.
+        //
+        // TODO: In the real sled agent, this happens inline without publishing
+        // any other state changes, whereas this call causes any pending state
+        // changes to be published. This can be fixed by adding a simulated
+        // object collection function to forcibly remove an object from a
+        // collection.
+        self.instances.sim_poke(instance_id, PokeMode::Drain).await;
+        Ok(response)
     }
 
     /// Asks the supplied instance to transition to the requested state.

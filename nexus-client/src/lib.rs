@@ -87,7 +87,42 @@ impl From<omicron_common::api::internal::nexus::InstanceRuntimeState>
     fn from(
         s: omicron_common::api::internal::nexus::InstanceRuntimeState,
     ) -> Self {
-        todo!("regenerate openapi");
+        Self {
+            dst_propolis_id: s.dst_propolis_id,
+            fallback_state: s.fallback_state.into(),
+            gen: s.gen.into(),
+            migration_id: s.migration_id,
+            propolis_id: s.propolis_id,
+            time_updated: s.time_updated,
+        }
+    }
+}
+
+impl From<omicron_common::api::internal::nexus::VmmRuntimeState>
+    for types::VmmRuntimeState
+{
+    fn from(s: omicron_common::api::internal::nexus::VmmRuntimeState) -> Self {
+        Self {
+            gen: s.gen.into(),
+            propolis_addr: s.propolis_addr.to_string(),
+            sled_id: s.sled_id,
+            state: s.state.into(),
+            time_updated: s.time_updated,
+        }
+    }
+}
+
+impl From<omicron_common::api::internal::nexus::SledInstanceState>
+    for types::SledInstanceState
+{
+    fn from(
+        s: omicron_common::api::internal::nexus::SledInstanceState,
+    ) -> Self {
+        Self {
+            instance_state: s.instance_state.into(),
+            vmm_id: s.vmm_id,
+            vmm_state: s.vmm_state.into(),
+        }
     }
 }
 
@@ -108,14 +143,6 @@ impl From<omicron_common::api::external::InstanceState>
             InstanceState::Failed => Self::Failed,
             InstanceState::Destroyed => Self::Destroyed,
         }
-    }
-}
-
-impl From<omicron_common::api::external::InstanceCpuCount>
-    for types::InstanceCpuCount
-{
-    fn from(s: omicron_common::api::external::InstanceCpuCount) -> Self {
-        Self(s.0)
     }
 }
 

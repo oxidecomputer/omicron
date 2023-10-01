@@ -106,23 +106,27 @@ impl SimInstanceInner {
                 if !self.queue.is_empty() {
                     return Err(Error::invalid_request(&format!(
                         "can't request migration in with a non-empty state
-                        transition queue"
+                        transition queue (current state: {:?})",
+                        self
                     )));
                 }
                 if self.state.vmm().state != ApiInstanceState::Migrating {
                     return Err(Error::invalid_request(&format!(
                         "can't request migration in for a vmm that wasn't \
-                        created in the migrating state"
+                        created in the migrating state (current state: {:?})",
+                        self
                     )));
                 }
 
                 // Propolis transitions to the Migrating state once before
                 // actually starting migration.
                 self.queue_propolis_state(PropolisInstanceState::Migrating);
-                let migration_id = self.state.instance().migration_id.expect(
-                    "should have migration ID set before getting \
-                            request to migrate in",
-                );
+                let migration_id =
+                    self.state.instance().migration_id.expect(&format!(
+                        "should have migration ID set before getting request to
+                        migrate in (current state: {:?})",
+                        self
+                    ));
                 self.queue_migration_status(PropolisMigrateStatus {
                     migration_id,
                     state: propolis_client::api::MigrationState::Sync,
@@ -160,8 +164,9 @@ impl SimInstanceInner {
                     | ApiInstanceState::Destroyed => {
                         return Err(Error::invalid_request(&format!(
                             "can't request state Running with pending resting \
-                        state {}",
-                            self.next_resting_state()
+                            state {} (current state: {:?})",
+                            self.next_resting_state(),
+                            self
                         )))
                     }
                 }
@@ -197,8 +202,9 @@ impl SimInstanceInner {
                     _ => {
                         return Err(Error::invalid_request(&format!(
                             "can't request state Stopped with pending resting \
-                        state {}",
-                            self.next_resting_state()
+                            state {} (current state: {:?})",
+                            self.next_resting_state(),
+                            self
                         )))
                     }
                 }
@@ -224,8 +230,10 @@ impl SimInstanceInner {
                 }
                 _ => {
                     return Err(Error::invalid_request(&format!(
-                        "can't request Reboot with pending resting state {}",
-                        self.next_resting_state()
+                        "can't request Reboot with pending resting state {} \
+                        (current state: {:?})",
+                        self.next_resting_state(),
+                        self
                     )))
                 }
             },
@@ -474,16 +482,14 @@ impl Simulatable for SimInstance {
         id: &Uuid,
         current: Self::CurrentState,
     ) -> Result<(), Error> {
-        todo!("gjc: regenerate openapi")
-        /*
         nexus_client
             .cpapi_instances_put(
                 id,
-                &nexus_client::types::InstanceRuntimeState::from(current),
+                &nexus_client::types::SledInstanceState::from(current),
             )
             .await
             .map(|_| ())
-            .map_err(Error::from) */
+            .map_err(Error::from)
     }
 
     fn resource_type() -> ResourceType {

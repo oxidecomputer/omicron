@@ -87,6 +87,10 @@ fn get_instance_url(instance_name: &str) -> String {
     format!("/v1/instances/{}?{}", instance_name, get_project_selector())
 }
 
+fn get_instance_start_url(instance_name: &str) -> String {
+    format!("/v1/instances/{}/start?{}", instance_name, get_project_selector())
+}
+
 fn get_disks_url() -> String {
     format!("/v1/disks?{}", get_project_selector())
 }
@@ -1081,7 +1085,7 @@ async fn test_instances_delete_fails_when_running_succeeds_when_stopped(
     .unwrap();
     assert_eq!(
         error.message,
-        "instance cannot be deleted in state \"running\""
+        "cannot delete instance: instance is running or has not yet fully stopped"
     );
 
     // Stop the instance
@@ -3079,20 +3083,40 @@ async fn test_instances_memory_greater_than_max_size(
     assert!(error.message.contains("memory must be less than"));
 }
 
-async fn expect_instance_creation_fail_unavailable(
+async fn expect_instance_start_fail_unavailable(
     client: &ClientTestContext,
-    url_instances: &str,
-    instance_params: &params::InstanceCreate,
+    instance_name: &str,
 ) {
-    let builder =
-        RequestBuilder::new(client, http::Method::POST, &url_instances)
-            .body(Some(&instance_params))
-            .expect_status(Some(http::StatusCode::SERVICE_UNAVAILABLE));
+    let builder = RequestBuilder::new(
+        client,
+        http::Method::POST,
+        &get_instance_start_url(instance_name),
+    )
+    .expect_status(Some(http::StatusCode::SERVICE_UNAVAILABLE));
+
     NexusRequest::new(builder)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
-        .expect("Expected instance creation to fail with SERVICE_UNAVAILABLE!");
+        .expect("Expected instance start to fail with SERVICE_UNAVAILABLE");
+}
+
+async fn expect_instance_start_ok(
+    client: &ClientTestContext,
+    instance_name: &str,
+) {
+    let builder = RequestBuilder::new(
+        client,
+        http::Method::POST,
+        &get_instance_start_url(instance_name),
+    )
+    .expect_status(Some(http::StatusCode::ACCEPTED));
+
+    NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Expected instance start to succeed with 202 Accepted");
 }
 
 async fn expect_instance_creation_ok(
@@ -3130,59 +3154,65 @@ async fn test_cannot_provision_instance_beyond_cpu_capacity(
     create_project(client, PROJECT_NAME).await;
     populate_ip_pool(&client, "default", None).await;
 
-    let too_many_cpus = InstanceCpuCount::try_from(i64::from(
-        nexus_test_utils::TEST_HARDWARE_THREADS + 1,
-    ))
-    .unwrap();
-    let enough_cpus = InstanceCpuCount::try_from(i64::from(
-        nexus_test_utils::TEST_HARDWARE_THREADS,
-    ))
-    .unwrap();
+    // The third item in each tuple specifies whether instance start should
+    // succeed or fail if all these configs are visited in order and started in
+    // sequence. Note that for this reason the order of these elements matters.
+    let configs = vec![
+        ("too-many-cpus", nexus_test_utils::TEST_HARDWARE_THREADS + 1, Err(())),
+        ("just-right-cpus", nexus_test_utils::TEST_HARDWARE_THREADS, Ok(())),
+        (
+            "insufficient-space",
+            nexus_test_utils::TEST_HARDWARE_THREADS,
+            Err(()),
+        ),
+    ];
 
-    // Try to boot an instance that uses more CPUs than we have
-    // on our test sled setup.
-    let name1 = Name::try_from(String::from("test")).unwrap();
-    let mut instance_params = params::InstanceCreate {
-        identity: IdentityMetadataCreateParams {
-            name: name1.clone(),
-            description: String::from("probably serving data"),
-        },
-        ncpus: too_many_cpus,
-        memory: ByteCount::from_gibibytes_u32(4),
-        hostname: String::from("test"),
-        user_data: vec![],
-        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
-        external_ips: vec![],
-        disks: vec![],
-        start: false,
-    };
-    let url_instances = get_instances_url();
+    // Creating all the instances should succeed, even though there will never
+    // be enough space to run the too-large instance.
+    let mut instances = Vec::new();
+    for config in &configs {
+        let name = Name::try_from(config.0.to_string()).unwrap();
+        let ncpus = InstanceCpuCount::try_from(i64::from(config.1)).unwrap();
+        let params = params::InstanceCreate {
+            identity: IdentityMetadataCreateParams {
+                name,
+                description: String::from("probably serving data"),
+            },
+            ncpus,
+            memory: ByteCount::from_gibibytes_u32(1),
+            hostname: config.0.to_string(),
+            user_data: vec![],
+            network_interfaces:
+                params::InstanceNetworkInterfaceAttachment::Default,
+            external_ips: vec![],
+            disks: vec![],
+            start: false,
+        };
 
-    expect_instance_creation_fail_unavailable(
-        client,
-        &url_instances,
-        &instance_params,
-    )
-    .await;
+        let url_instances = get_instances_url();
+        expect_instance_creation_ok(client, &url_instances, &params).await;
 
-    // If we ask for fewer CPUs, the request should work
-    instance_params.ncpus = enough_cpus;
-    expect_instance_creation_ok(client, &url_instances, &instance_params).await;
+        let instance = instance_get(&client, &get_instance_url(config.0)).await;
+        instances.push(instance);
+    }
 
-    // Requesting another instance won't have enough space
-    let name2 = Name::try_from(String::from("test2")).unwrap();
-    instance_params.identity.name = name2;
-    expect_instance_creation_fail_unavailable(
-        client,
-        &url_instances,
-        &instance_params,
-    )
-    .await;
+    // Only the first properly-sized instance should be able to start.
+    for config in &configs {
+        match config.2 {
+            Ok(_) => expect_instance_start_ok(client, config.0).await,
+            Err(_) => {
+                expect_instance_start_fail_unavailable(client, config.0).await
+            }
+        }
+    }
 
-    // But if we delete the first instace, we'll have space
-    let url_instance = get_instance_url(&name1.to_string());
-    expect_instance_deletion_ok(client, &url_instance).await;
-    expect_instance_creation_ok(client, &url_instances, &instance_params).await;
+    // Make the started instance transition to Running, shut it down, and verify
+    // that the other reasonably-sized instance can now start.
+    let nexus = &cptestctx.server.apictx().nexus;
+    instance_simulate(nexus, &instances[1].identity.id).await;
+    instances[1] = instance_post(client, configs[1].0, InstanceOp::Stop).await;
+    instance_simulate(nexus, &instances[1].identity.id).await;
+    expect_instance_start_ok(client, configs[2].0).await;
 }
 
 #[nexus_test]
@@ -3235,57 +3265,62 @@ async fn test_cannot_provision_instance_beyond_ram_capacity(
     create_project(client, PROJECT_NAME).await;
     populate_ip_pool(&client, "default", None).await;
 
-    let too_much_ram = ByteCount::try_from(
-        nexus_test_utils::TEST_PHYSICAL_RAM
-            + u64::from(MIN_MEMORY_BYTES_PER_INSTANCE),
-    )
-    .unwrap();
-    let enough_ram =
-        ByteCount::try_from(nexus_test_utils::TEST_PHYSICAL_RAM).unwrap();
+    let configs = vec![
+        (
+            "too-much-memory",
+            nexus_test_utils::TEST_RESERVOIR_RAM
+                + u64::from(MIN_MEMORY_BYTES_PER_INSTANCE),
+            Err(()),
+        ),
+        ("just-right-memory", nexus_test_utils::TEST_RESERVOIR_RAM, Ok(())),
+        ("insufficient-space", nexus_test_utils::TEST_RESERVOIR_RAM, Err(())),
+    ];
 
-    // Try to boot an instance that uses more RAM than we have
-    // on our test sled setup.
-    let name1 = Name::try_from(String::from("test")).unwrap();
-    let mut instance_params = params::InstanceCreate {
-        identity: IdentityMetadataCreateParams {
-            name: name1.clone(),
-            description: String::from("probably serving data"),
-        },
-        ncpus: InstanceCpuCount::try_from(2).unwrap(),
-        memory: too_much_ram,
-        hostname: String::from("test"),
-        user_data: vec![],
-        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
-        external_ips: vec![],
-        disks: vec![],
-        start: false,
-    };
-    let url_instances = get_instances_url();
-    expect_instance_creation_fail_unavailable(
-        client,
-        &url_instances,
-        &instance_params,
-    )
-    .await;
+    // Creating all the instances should succeed, even though there will never
+    // be enough space to run the too-large instance.
+    let mut instances = Vec::new();
+    for config in &configs {
+        let name = Name::try_from(config.0.to_string()).unwrap();
+        let params = params::InstanceCreate {
+            identity: IdentityMetadataCreateParams {
+                name,
+                description: String::from("probably serving data"),
+            },
+            ncpus: InstanceCpuCount::try_from(i64::from(1)).unwrap(),
+            memory: ByteCount::try_from(config.1).unwrap(),
+            hostname: config.0.to_string(),
+            user_data: vec![],
+            network_interfaces:
+                params::InstanceNetworkInterfaceAttachment::Default,
+            external_ips: vec![],
+            disks: vec![],
+            start: false,
+        };
 
-    // If we ask for less RAM, the request should work
-    instance_params.memory = enough_ram;
-    expect_instance_creation_ok(client, &url_instances, &instance_params).await;
+        let url_instances = get_instances_url();
+        expect_instance_creation_ok(client, &url_instances, &params).await;
 
-    // Requesting another instance won't have enough space
-    let name2 = Name::try_from(String::from("test2")).unwrap();
-    instance_params.identity.name = name2;
-    expect_instance_creation_fail_unavailable(
-        client,
-        &url_instances,
-        &instance_params,
-    )
-    .await;
+        let instance = instance_get(&client, &get_instance_url(config.0)).await;
+        instances.push(instance);
+    }
 
-    // But if we delete the first instace, we'll have space
-    let url_instance = get_instance_url(&name1.to_string());
-    expect_instance_deletion_ok(client, &url_instance).await;
-    expect_instance_creation_ok(client, &url_instances, &instance_params).await;
+    // Only the first properly-sized instance should be able to start.
+    for config in &configs {
+        match config.2 {
+            Ok(_) => expect_instance_start_ok(client, config.0).await,
+            Err(_) => {
+                expect_instance_start_fail_unavailable(client, config.0).await
+            }
+        }
+    }
+
+    // Make the started instance transition to Running, shut it down, and verify
+    // that the other reasonably-sized instance can now start.
+    let nexus = &cptestctx.server.apictx().nexus;
+    instance_simulate(nexus, &instances[1].identity.id).await;
+    instances[1] = instance_post(client, configs[1].0, InstanceOp::Stop).await;
+    instance_simulate(nexus, &instances[1].identity.id).await;
+    expect_instance_start_ok(client, configs[2].0).await;
 }
 
 #[nexus_test]
@@ -3325,17 +3360,8 @@ async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
         format!("not found: instance with name \"{}\"", instance_name).as_str()
     );
 
-    // Create an instance.
+    // Create an instance and poke it to ensure it's running.
     let instance = create_instance(client, PROJECT_NAME, instance_name).await;
-
-    // Now, simulate completion of instance boot and check the state reported.
-    // NOTE: prior to this instance_simulate call, nexus's stored propolis addr
-    // is one it allocated in a 'real' sled-agent IP range as part of its usual
-    // instance-creation saga. after we poke the new run state for the instance
-    // here, sled-agent-sim will send an entire updated InstanceRuntimeState
-    // back to nexus, including the localhost address on which the mock
-    // propolis-server is running, which overwrites this -- after which nexus's
-    // serial-console related API calls will start working.
     instance_simulate(nexus, &instance.identity.id).await;
     let instance_next = instance_get(&client, &instance_url).await;
     identity_eq(&instance.identity, &instance_next.identity);
@@ -3344,6 +3370,29 @@ async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
         instance_next.runtime.time_run_state_updated
             > instance.runtime.time_run_state_updated
     );
+
+    // Starting a simulated instance with a mock Propolis server starts the
+    // mock, but it serves on localhost instead of the address that was chosen
+    // by the instance start process. Forcibly update the VMM record to point to
+    // the correct IP.
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+    let (.., db_instance) = LookupPath::new(&opctx, &datastore)
+        .instance_id(instance.identity.id)
+        .fetch()
+        .await
+        .unwrap();
+    let vmm_id = db_instance
+        .runtime()
+        .propolis_id
+        .expect("running instance should have vmm");
+    let localhost = std::net::IpAddr::V6(std::net::Ipv6Addr::LOCALHOST);
+    let updated_vmm = datastore
+        .vmm_overwrite_ip_for_test(&opctx, &vmm_id, localhost.into())
+        .await
+        .unwrap();
+    assert_eq!(updated_vmm.propolis_ip.ip(), localhost);
 
     // Query serial output history endpoint
     // This is the first line of output generated by the mock propolis-server.
