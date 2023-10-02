@@ -484,6 +484,21 @@ const STATISTICS: [&'static str; 11] = [
     "implicit",
 ];
 
+const SEQUENCES: [&'static str; 12] = [
+    "sequence_catalog",
+    "sequence_schema",
+    "sequence_name",
+    "data_type",
+    "numeric_precision",
+    "numeric_precision_radix",
+    "numeric_scale",
+    "start_value",
+    "minimum_value",
+    "maximum_value",
+    "increment",
+    "cycle_option",
+];
+
 const PG_INDEXES: [&'static str; 5] =
     ["schemaname", "tablename", "indexname", "tablespace", "indexdef"];
 
@@ -511,6 +526,7 @@ struct InformationSchema {
     referential_constraints: Vec<Row>,
     views: Vec<Row>,
     statistics: Vec<Row>,
+    sequences: Vec<Row>,
     pg_indexes: Vec<Row>,
     tables: Vec<Row>,
     table_constraints: Vec<Row>,
@@ -539,6 +555,7 @@ impl InformationSchema {
         );
         similar_asserts::assert_eq!(self.views, other.views);
         similar_asserts::assert_eq!(self.statistics, other.statistics);
+        similar_asserts::assert_eq!(self.sequences, other.sequences);
         similar_asserts::assert_eq!(self.pg_indexes, other.pg_indexes);
         similar_asserts::assert_eq!(self.tables, other.tables);
         similar_asserts::assert_eq!(
@@ -608,6 +625,14 @@ impl InformationSchema {
         )
         .await;
 
+        let sequences = query_crdb_for_rows_of_strings(
+            crdb,
+            SEQUENCES.as_slice().into(),
+            "information_schema.sequences",
+            None,
+        )
+        .await;
+
         let pg_indexes = query_crdb_for_rows_of_strings(
             crdb,
             PG_INDEXES.as_slice().into(),
@@ -640,6 +665,7 @@ impl InformationSchema {
             referential_constraints,
             views,
             statistics,
+            sequences,
             pg_indexes,
             tables,
             table_constraints,
@@ -827,5 +853,132 @@ async fn compare_index_creation_differing_columns() {
     // These tables should differ in the "implicit" column.
     assert_ne!(schema1.statistics, schema2.statistics);
 
+    logctx.cleanup_successful();
+}
+
+#[tokio::test]
+async fn compare_view_differing_where_clause() {
+    let config = load_test_config();
+    let logctx =
+        LogContext::new("compare_view_differing_where_clause", &config.pkg.log);
+    let log = &logctx.log;
+
+    let schema1 = get_information_schema(
+        log,
+        "
+        CREATE DATABASE omicron;
+        CREATE TABLE omicron.public.animal (
+            id UUID PRIMARY KEY,
+            name TEXT,
+            time_deleted TIMESTAMPTZ
+        );
+
+        CREATE VIEW live_view AS
+            SELECT animal.id, animal.name
+            FROM omicron.public.animal
+            WHERE animal.time_deleted IS NOT NULL;
+    ",
+    )
+    .await;
+
+    let schema2 = get_information_schema(
+        log,
+        "
+        CREATE DATABASE omicron;
+        CREATE TABLE omicron.public.animal (
+            id UUID PRIMARY KEY,
+            name TEXT,
+            time_deleted TIMESTAMPTZ
+        );
+
+        CREATE VIEW live_view AS
+            SELECT animal.id, animal.name
+            FROM omicron.public.animal
+            WHERE animal.time_deleted IS NOT NULL AND animal.name = 'Thomas';
+    ",
+    )
+    .await;
+
+    assert_ne!(schema1.views, schema2.views);
+
+    logctx.cleanup_successful();
+}
+
+#[tokio::test]
+async fn compare_sequence_differing_increment() {
+    let config = load_test_config();
+    let logctx = LogContext::new(
+        "compare_sequence_differing_increment",
+        &config.pkg.log,
+    );
+    let log = &logctx.log;
+
+    let schema1 = get_information_schema(
+        log,
+        "
+        CREATE DATABASE omicron;
+        CREATE SEQUENCE omicron.public.myseq START 1 INCREMENT 1;
+    ",
+    )
+    .await;
+
+    let schema2 = get_information_schema(
+        log,
+        "
+        CREATE DATABASE omicron;
+        CREATE SEQUENCE omicron.public.myseq START 1 INCREMENT 2;
+    ",
+    )
+    .await;
+
+    assert_ne!(schema1.sequences, schema2.sequences);
+
+    logctx.cleanup_successful();
+}
+
+#[tokio::test]
+async fn compare_table_differing_constraint() {
+    let config = load_test_config();
+    let logctx =
+        LogContext::new("compare_table_differing_constraint", &config.pkg.log);
+    let log = &logctx.log;
+
+    let schema1 = get_information_schema(
+        log,
+        "
+        CREATE DATABASE omicron;
+        CREATE TABLE omicron.public.animal (
+            id UUID PRIMARY KEY,
+            name TEXT,
+            time_deleted TIMESTAMPTZ,
+
+            CONSTRAINT dead_animals_have_names CHECK (
+                (time_deleted IS NULL) OR
+                (name IS NOT NULL)
+            )
+        );
+    ",
+    )
+    .await;
+
+    let schema2 = get_information_schema(
+        log,
+        "
+        CREATE DATABASE omicron;
+        CREATE TABLE omicron.public.animal (
+            id UUID PRIMARY KEY,
+            name TEXT,
+            time_deleted TIMESTAMPTZ,
+
+            CONSTRAINT dead_animals_have_names CHECK (
+                (time_deleted IS NULL) OR
+                (name IS NULL)
+            )
+        );
+    ",
+    )
+    .await;
+
+    assert_ne!(schema1.check_constraints, schema2.check_constraints);
     logctx.cleanup_successful();
 }
