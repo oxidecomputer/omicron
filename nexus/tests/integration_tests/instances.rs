@@ -3135,17 +3135,6 @@ async fn expect_instance_creation_ok(
         .expect("Expected instance creation to work!");
 }
 
-async fn expect_instance_deletion_ok(
-    client: &ClientTestContext,
-    url_instances: &str,
-) {
-    NexusRequest::object_delete(client, &url_instances)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .unwrap();
-}
-
 #[nexus_test]
 async fn test_cannot_provision_instance_beyond_cpu_capacity(
     cptestctx: &ControlPlaneTestContext,

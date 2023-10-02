@@ -11,7 +11,6 @@ use crate::app::{
 };
 use crate::external_api::params;
 use nexus_db_model::NetworkInterfaceKind;
-use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::model::ByteCount as DbByteCount;
@@ -30,7 +29,6 @@ use slog::warn;
 use std::collections::HashSet;
 use std::convert::TryFrom;
 use std::fmt::Debug;
-use std::net::Ipv6Addr;
 use steno::ActionError;
 use steno::Node;
 use steno::{DagBuilder, SagaName};

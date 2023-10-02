@@ -10,7 +10,7 @@ use super::{
     instance_common::allocate_sled_ipv6, NexusActionContext, NexusSaga,
     SagaInitError, ACTION_GENERATE_ID,
 };
-use crate::app::sagas::{declare_saga_actions, retry_until_known_result};
+use crate::app::sagas::declare_saga_actions;
 use chrono::Utc;
 use nexus_db_queries::db::{identity::Resource, lookup::LookupPath};
 use nexus_db_queries::{authn, authz, db};
