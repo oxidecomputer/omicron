@@ -5299,6 +5299,7 @@ dependencies = [
  "static_assertions",
  "subprocess",
  "tar",
+ "tempfile",
  "thiserror",
  "tofino",
  "tokio",
