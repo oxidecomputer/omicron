@@ -12,6 +12,7 @@ bhyve_api.workspace = true
 byteorder.workspace = true
 camino.workspace = true
 cfg-if.workspace = true
+crucible-smf.workspace = true
 futures.workspace = true
 ipnetwork.workspace = true
 libc.workspace = true
