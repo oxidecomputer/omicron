@@ -7,6 +7,7 @@
 use crate::updates::ConfigUpdates;
 use camino::{Utf8Path, Utf8PathBuf};
 use dropshot::ConfigLogging;
+use helios_fusion::BoxedExecutor;
 use illumos_utils::dladm::Dladm;
 use illumos_utils::dladm::FindPhysicalLinkError;
 use illumos_utils::dladm::PhysicalLink;
@@ -121,12 +122,15 @@ impl Config {
         Ok(config)
     }
 
-    pub fn get_link(&self) -> Result<PhysicalLink, ConfigError> {
+    pub fn get_link(
+        &self,
+        executor: &BoxedExecutor,
+    ) -> Result<PhysicalLink, ConfigError> {
         if let Some(link) = self.data_link.as_ref() {
             Ok(link.clone())
         } else {
             if is_gimlet().map_err(ConfigError::SystemDetection)? {
-                Dladm::list_physical()
+                Dladm::list_physical(executor)
                     .map_err(ConfigError::FindLinks)?
                     .into_iter()
                     .find(|link| link.0.starts_with(CHELSIO_LINK_PREFIX))
@@ -136,7 +140,7 @@ impl Config {
                         )
                     })
             } else {
-                Dladm::find_physical().map_err(ConfigError::FindLinks)
+                Dladm::find_physical(executor).map_err(ConfigError::FindLinks)
             }
         }
     }

@@ -23,6 +23,7 @@ use crate::zone_bundle::ZoneBundler;
 use anyhow::anyhow;
 use backoff::BackoffError;
 use futures::lock::{Mutex, MutexGuard};
+use helios_fusion::BoxedExecutor;
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::PortManager;
@@ -207,6 +208,8 @@ struct PropolisSetup {
 
 struct InstanceInner {
     log: Logger,
+
+    executor: BoxedExecutor,
 
     // Properties visible to Propolis
     properties: propolis_client::api::InstanceProperties,
@@ -573,7 +576,9 @@ impl InstanceInner {
         // `RunningZone::stop` in case we're called between creating the
         // zone and assigning `running_state`.
         warn!(self.log, "Halting and removing zone: {}", zname);
-        Zones::halt_and_remove_logged(&self.log, &zname).await.unwrap();
+        Zones::halt_and_remove_logged(&self.log, &self.executor, &zname)
+            .await
+            .unwrap();
 
         // Remove ourselves from the instance manager's map of instances.
         self.instance_ticket.terminate();
@@ -616,6 +621,7 @@ impl Instance {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         log: Logger,
+        executor: &BoxedExecutor,
         id: Uuid,
         ticket: InstanceTicket,
         initial: InstanceHardware,
@@ -628,6 +634,7 @@ impl Instance {
         info!(log, "Instance::new w/initial HW: {:?}", initial);
         let instance = InstanceInner {
             log: log.new(o!("instance_id" => id.to_string())),
+            executor: executor.clone(),
             // NOTE: Mostly lies.
             properties: propolis_client::api::InstanceProperties {
                 id,
@@ -896,6 +903,7 @@ impl Instance {
             .clone();
         let installed_zone = InstalledZone::install(
             &inner.log,
+            &inner.executor,
             &inner.vnic_allocator,
             &root,
             &["/opt/oxide".into()],
@@ -973,7 +981,7 @@ impl Instance {
         // but it helps distinguish "online in SMF" from "responding to HTTP
         // requests".
         let fmri = fmri_name();
-        wait_for_service(Some(&zname), &fmri)
+        wait_for_service(&inner.executor, Some(&zname), &fmri)
             .await
             .map_err(|_| Error::Timeout(fmri.to_string()))?;
         info!(inner.log, "Propolis SMF service is online");

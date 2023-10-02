@@ -35,6 +35,7 @@ use ddm_admin_client::DdmError;
 use dropshot::HttpServer;
 use futures::Future;
 use futures::StreamExt;
+use helios_fusion::BoxedExecutor;
 use illumos_utils::dladm;
 use illumos_utils::zfs;
 use illumos_utils::zone;
@@ -100,7 +101,7 @@ pub enum StartError {
     EnsureEtherstubError {
         name: &'static str,
         #[source]
-        err: illumos_utils::ExecutionError,
+        err: helios_fusion::ExecutionError,
     },
 
     #[error(transparent)]
@@ -131,7 +132,7 @@ pub enum StartError {
     DeleteXdeDevices(#[source] illumos_utils::opte::Error),
 
     #[error("Failed to enable ipv6-forwarding")]
-    EnableIpv6Forwarding(#[from] illumos_utils::ExecutionError),
+    EnableIpv6Forwarding(#[from] helios_fusion::ExecutionError),
 
     #[error("Incorrect binary packaging: {0}")]
     IncorrectBuildPackaging(&'static str),
@@ -173,6 +174,7 @@ impl Server {
         // fail to start.
         let BootstrapAgentStartup {
             config,
+            executor,
             global_zone_bootstrap_ip,
             ddm_admin_localhost_client,
             base_log,
@@ -292,6 +294,7 @@ impl Server {
             let sled_agent_server = wait_while_handling_hardware_updates(
                 start_sled_agent(
                     &config,
+                    &executor,
                     &sled_request.request,
                     &bootstore_handles.node_handle,
                     &managers,
@@ -345,6 +348,7 @@ impl Server {
         // agent state.
         let inner = Inner {
             config,
+            executor,
             hardware_monitor,
             state,
             sled_init_rx,
@@ -424,8 +428,10 @@ impl From<SledAgentServerStartError> for StartError {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn start_sled_agent(
     config: &SledConfig,
+    executor: &BoxedExecutor,
     request: &StartSledAgentRequest,
     bootstore: &bootstore::NodeHandle,
     managers: &BootstrapManagers,
@@ -469,6 +475,7 @@ async fn start_sled_agent(
     let server = SledAgentServer::start(
         config,
         base_log.clone(),
+        &executor,
         request.clone(),
         managers.service.clone(),
         managers.storage.clone(),
@@ -636,6 +643,7 @@ pub fn run_openapi() -> Result<(), String> {
 
 struct Inner {
     config: SledConfig,
+    executor: BoxedExecutor,
     hardware_monitor: broadcast::Receiver<HardwareUpdate>,
     state: SledAgentState,
     sled_init_rx: mpsc::Receiver<(
@@ -721,6 +729,7 @@ impl Inner {
             SledAgentState::Bootstrapping => {
                 let response = match start_sled_agent(
                     &self.config,
+                    &self.executor,
                     &request,
                     &self.bootstore_handles.node_handle,
                     &self.managers,
@@ -778,14 +787,14 @@ impl Inner {
     // Uninstall all oxide zones (except the switch zone)
     async fn uninstall_zones(&self) -> Result<(), BootstrapError> {
         const CONCURRENCY_CAP: usize = 32;
-        futures::stream::iter(Zones::get().await?)
+        futures::stream::iter(Zones::get(&self.executor).await?)
             .map(Ok::<_, anyhow::Error>)
             // Use for_each_concurrent_then_try to delete as much as possible.
             // We only return one error though -- hopefully that's enough to
             // signal to the caller that this failed.
             .for_each_concurrent_then_try(CONCURRENCY_CAP, |zone| async move {
                 if zone.name() != "oxz_switch" {
-                    Zones::halt_and_remove(zone.name()).await?;
+                    Zones::halt_and_remove(&self.executor, zone.name()).await?;
                 }
                 Ok(())
             })
@@ -847,9 +856,9 @@ impl Inner {
         // these addresses would delete "cxgbe0/ll", and could render
         // the sled inaccessible via a local interface.
 
-        sled_hardware::cleanup::delete_underlay_addresses(&log)
+        sled_hardware::cleanup::delete_underlay_addresses(&log, &self.executor)
             .map_err(BootstrapError::Cleanup)?;
-        sled_hardware::cleanup::delete_omicron_vnics(&log)
+        sled_hardware::cleanup::delete_omicron_vnics(&log, &self.executor)
             .await
             .map_err(BootstrapError::Cleanup)?;
         illumos_utils::opte::delete_all_xde_devices(&log)?;
@@ -860,11 +869,11 @@ impl Inner {
         &self,
         log: &Logger,
     ) -> Result<(), BootstrapError> {
-        let datasets = zfs::get_all_omicron_datasets_for_delete()
+        let datasets = zfs::get_all_omicron_datasets_for_delete(&self.executor)
             .map_err(BootstrapError::ZfsDatasetsList)?;
         for dataset in &datasets {
             info!(log, "Removing dataset: {dataset}");
-            zfs::Zfs::destroy_dataset(dataset)?;
+            zfs::Zfs::destroy_dataset(&self.executor, dataset)?;
         }
 
         Ok(())

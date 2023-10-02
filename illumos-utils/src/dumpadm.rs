@@ -1,3 +1,9 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use helios_fusion::{BoxedExecutor, ExecutionError};
+
 use byteorder::{LittleEndian, ReadBytesExt};
 use camino::Utf8PathBuf;
 use std::ffi::OsString;
@@ -101,10 +107,10 @@ pub enum DumpAdmError {
     SavecoreFailure(OsString),
 
     #[error("Failed to execute dumpadm process: {0}")]
-    ExecDumpadm(std::io::Error),
+    ExecDumpadm(ExecutionError),
 
     #[error("Failed to execute savecore process: {0}")]
-    ExecSavecore(std::io::Error),
+    ExecSavecore(ExecutionError),
 }
 
 /// Invokes `dumpadm(8)` to configure the kernel to dump core into the given
@@ -114,6 +120,7 @@ pub enum DumpAdmError {
 /// On success, returns Ok(Some(stdout)) if `savecore(8)` was invoked, or
 /// Ok(None) if it wasn't.
 pub fn dumpadm(
+    executor: &BoxedExecutor,
     dump_slice: &Utf8PathBuf,
     savecore_dir: Option<&Utf8PathBuf>,
 ) -> Result<Option<OsString>, DumpAdmError> {
@@ -150,7 +157,7 @@ pub fn dumpadm(
         cmd.arg("-s").arg(tmp_crash);
     }
 
-    let out = cmd.output().map_err(DumpAdmError::ExecDumpadm)?;
+    let out = executor.execute(&mut cmd).map_err(DumpAdmError::ExecDumpadm)?;
 
     match out.status.code() {
         Some(0) => {
@@ -158,7 +165,7 @@ pub fn dumpadm(
             if savecore_dir.is_some() {
                 // and does the dump slice have one to save off
                 if let Ok(true) = dump_flag_is_valid(dump_slice) {
-                    return savecore();
+                    return savecore(executor);
                 }
             }
             Ok(None)
@@ -191,11 +198,13 @@ pub fn dumpadm(
 // in the event that savecore(8) terminates before it finishes copying the
 // dump, the incomplete dump will remain in the target directory, but the next
 // invocation will overwrite it, because `bounds` wasn't created/incremented.
-fn savecore() -> Result<Option<OsString>, DumpAdmError> {
+fn savecore(
+    executor: &BoxedExecutor,
+) -> Result<Option<OsString>, DumpAdmError> {
     let mut cmd = Command::new(SAVECORE);
     cmd.env_clear();
     cmd.arg("-v");
-    let out = cmd.output().map_err(DumpAdmError::ExecSavecore)?;
+    let out = executor.execute(&mut cmd).map_err(DumpAdmError::ExecSavecore)?;
     if out.status.success() {
         if out.stdout.is_empty() || out.stdout == vec![b'\n'] {
             Ok(None)

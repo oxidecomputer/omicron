@@ -7,6 +7,8 @@
 use anyhow::{anyhow, bail, Context, Result};
 use clap::{Parser, Subcommand};
 use futures::stream::{self, StreamExt, TryStreamExt};
+use helios_fusion::BoxedExecutor;
+use helios_protostar::HostExecutor;
 use illumos_utils::{zfs, zone};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use omicron_package::target::KnownTarget;
@@ -598,20 +600,23 @@ async fn do_install(
     do_activate(config, install_dir)
 }
 
-async fn uninstall_all_omicron_zones() -> Result<()> {
+async fn uninstall_all_omicron_zones(executor: &BoxedExecutor) -> Result<()> {
     const CONCURRENCY_CAP: usize = 32;
-    futures::stream::iter(zone::Zones::get().await?)
+    futures::stream::iter(zone::Zones::get(executor).await?)
         .map(Ok::<_, anyhow::Error>)
         .try_for_each_concurrent(CONCURRENCY_CAP, |zone| async move {
-            zone::Zones::halt_and_remove(zone.name()).await?;
+            zone::Zones::halt_and_remove(executor, zone.name()).await?;
             Ok(())
         })
         .await?;
     Ok(())
 }
 
-fn uninstall_all_omicron_datasets(config: &Config) -> Result<()> {
-    let datasets = match zfs::get_all_omicron_datasets_for_delete() {
+fn uninstall_all_omicron_datasets(
+    executor: &BoxedExecutor,
+    config: &Config,
+) -> Result<()> {
+    let datasets = match zfs::get_all_omicron_datasets_for_delete(executor) {
         Err(e) => {
             warn!(config.log, "Failed to get omicron datasets: {}", e);
             return Err(e);
@@ -629,7 +634,7 @@ fn uninstall_all_omicron_datasets(config: &Config) -> Result<()> {
     ))?;
     for dataset in &datasets {
         info!(config.log, "Deleting dataset: {dataset}");
-        zfs::Zfs::destroy_dataset(dataset)?;
+        zfs::Zfs::destroy_dataset(executor, dataset)?;
     }
 
     Ok(())
@@ -698,19 +703,21 @@ fn remove_all_except<P: AsRef<Path>>(
 }
 
 async fn do_deactivate(config: &Config) -> Result<()> {
+    let executor = HostExecutor::new(config.log.clone()).as_executor();
     info!(&config.log, "Removing all Omicron zones");
-    uninstall_all_omicron_zones().await?;
+    uninstall_all_omicron_zones(&executor).await?;
     info!(config.log, "Uninstalling all packages");
     uninstall_all_packages(config);
     info!(config.log, "Removing networking resources");
-    cleanup_networking_resources(&config.log).await?;
+    cleanup_networking_resources(&config.log, &executor).await?;
     Ok(())
 }
 
 async fn do_uninstall(config: &Config) -> Result<()> {
+    let executor = HostExecutor::new(config.log.clone()).as_executor();
     do_deactivate(config).await?;
     info!(config.log, "Removing datasets");
-    uninstall_all_omicron_datasets(config)?;
+    uninstall_all_omicron_datasets(&executor, config)?;
     Ok(())
 }
 

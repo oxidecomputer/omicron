@@ -4,6 +4,7 @@
 
 //! Operations for creating a system swap device.
 
+use helios_fusion::{BoxedExecutor, ExecutionError};
 use std::io::Read;
 use zeroize::Zeroize;
 
@@ -13,7 +14,7 @@ pub enum SwapDeviceError {
     BootDiskNotFound,
 
     #[error("Error running ZFS command: {0}")]
-    Zfs(illumos_utils::ExecutionError),
+    Zfs(ExecutionError),
 
     #[error("Error listing swap devices: {0}")]
     ListDevices(String),
@@ -59,6 +60,7 @@ pub enum SwapDeviceError {
 /// configuration.
 pub(crate) fn ensure_swap_device(
     log: &slog::Logger,
+    executor: &BoxedExecutor,
     boot_zpool_name: &illumos_utils::zpool::ZpoolName,
     size_gb: u32,
 ) -> Result<(), SwapDeviceError> {
@@ -85,13 +87,13 @@ pub(crate) fn ensure_swap_device(
     }
 
     let swap_zvol = format!("{}/{}", boot_zpool_name, "swap");
-    if zvol_exists(&swap_zvol)? {
+    if zvol_exists(executor, &swap_zvol)? {
         info!(log, "swap zvol \"{}\" aleady exists; destroying", swap_zvol);
-        zvol_destroy(&swap_zvol)?;
+        zvol_destroy(executor, &swap_zvol)?;
         info!(log, "swap zvol \"{}\" destroyed", swap_zvol);
     }
 
-    create_encrypted_swap_zvol(log, &swap_zvol, size_gb)?;
+    create_encrypted_swap_zvol(log, executor, &swap_zvol, size_gb)?;
 
     // The process of paging out uses block I/O, so use the "dsk" version of
     // the zvol path (as opposed to "rdsk", which is for character/raw access.)
@@ -105,12 +107,14 @@ pub(crate) fn ensure_swap_device(
 }
 
 /// Check whether the given zvol exists.
-fn zvol_exists(name: &str) -> Result<bool, SwapDeviceError> {
+fn zvol_exists(
+    executor: &BoxedExecutor,
+    name: &str,
+) -> Result<bool, SwapDeviceError> {
     let mut command = std::process::Command::new(illumos_utils::zfs::ZFS);
     let cmd = command.args(&["list", "-Hpo", "name,type"]);
 
-    let output =
-        illumos_utils::execute(cmd).map_err(|e| SwapDeviceError::Zfs(e))?;
+    let output = executor.execute(cmd).map_err(|e| SwapDeviceError::Zfs(e))?;
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     for line in stdout.lines() {
@@ -136,10 +140,13 @@ fn zvol_exists(name: &str) -> Result<bool, SwapDeviceError> {
 }
 
 /// Destroys a zvol at the given path.
-fn zvol_destroy(name: &str) -> Result<(), SwapDeviceError> {
+fn zvol_destroy(
+    executor: &BoxedExecutor,
+    name: &str,
+) -> Result<(), SwapDeviceError> {
     let mut command = std::process::Command::new(illumos_utils::zfs::ZFS);
     let cmd = command.args(&["destroy", name]);
-    illumos_utils::execute(cmd).map_err(|e| SwapDeviceError::Zfs(e))?;
+    executor.execute(cmd).map_err(|e| SwapDeviceError::Zfs(e))?;
 
     Ok(())
 }
@@ -150,6 +157,7 @@ fn zvol_destroy(name: &str) -> Result<(), SwapDeviceError> {
 /// and zeroize the buffer after the zvol is created.
 fn create_encrypted_swap_zvol(
     log: &slog::Logger,
+    executor: &BoxedExecutor,
     name: &str,
     size_gb: u32,
 ) -> Result<(), SwapDeviceError> {
@@ -171,7 +179,7 @@ fn create_encrypted_swap_zvol(
         })?;
     let mut command = std::process::Command::new(illumos_utils::zfs::ZFS);
     #[rustfmt::skip]
-    let cmd = command
+    let mut cmd = command
         // create sparse volume of a given size with no reservation, exported as
         // a block device at: /dev/zvol/{dsk,rdsk}/<name>
         .arg("create")
@@ -218,11 +226,13 @@ fn create_encrypted_swap_zvol(
     })?;
 
     // Spawn the process, writing the key in through stdin.
-    let mut child = cmd.spawn().map_err(|e| SwapDeviceError::Misc {
-        msg: format!("failed to spawn `zfs create` for zvol \"{}\"", name),
-        error: e.to_string(),
-    })?;
-    let mut stdin = child.stdin.take().unwrap();
+    let mut spawn =
+        executor.spawn(&mut cmd).map_err(|e| SwapDeviceError::Misc {
+            msg: format!("failed to spawn `zfs create` for zvol \"{}\"", name),
+            error: e.to_string(),
+        })?;
+
+    let mut stdin = spawn.take_stdin().take().unwrap();
     let child_log = log.clone();
     let hdl = std::thread::spawn(move || {
         use std::io::Write;
@@ -236,15 +246,14 @@ fn create_encrypted_swap_zvol(
     });
 
     // Wait for the process, and the thread writing the bytes to it, to complete.
-    let output =
-        child.wait_with_output().map_err(|e| SwapDeviceError::Misc {
-            msg: "failed to read stdout".to_string(),
-            error: e.to_string(),
-        })?;
+    let output = spawn.wait().map_err(|e| SwapDeviceError::Misc {
+        msg: "failed to read stdout".to_string(),
+        error: e.to_string(),
+    })?;
     hdl.join().unwrap();
 
     if !output.status.success() {
-        return Err(SwapDeviceError::Zfs(illumos_utils::output_to_exec_error(
+        return Err(SwapDeviceError::Zfs(ExecutionError::from_output(
             &command, &output,
         )));
     }

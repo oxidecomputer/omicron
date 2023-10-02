@@ -15,6 +15,7 @@ use async_trait::async_trait;
 use buf_list::BufList;
 use bytes::Buf;
 use camino::{Utf8Path, Utf8PathBuf};
+use helios_fusion::BoxedExecutor;
 use illumos_utils::{
     dkio::{self, MediaInfoExtended},
     zpool::{Zpool, ZpoolName},
@@ -92,8 +93,11 @@ impl WriteDestination {
         Ok(Self { drives, is_host_phase_2_block_device: false })
     }
 
-    pub(crate) async fn from_hardware(log: &Logger) -> Result<Self> {
-        let hardware = Hardware::scan(log).await?;
+    pub(crate) async fn from_hardware(
+        log: &Logger,
+        executor: &BoxedExecutor,
+    ) -> Result<Self> {
+        let hardware = Hardware::scan(log, executor).await?;
 
         // We want the `,raw`-suffixed path to the boot image partition, as that
         // allows us file-like access via the character device.
@@ -221,6 +225,7 @@ impl<'a> ArtifactWriter<'a> {
         &mut self,
         cx: &StepContext,
         log: &Logger,
+        executor: &BoxedExecutor,
     ) -> WriteOutput {
         let mut control_plane_transport = FileTransport;
         if self.is_host_phase_2_block_device {
@@ -228,6 +233,7 @@ impl<'a> ArtifactWriter<'a> {
             self.write_with_transport(
                 cx,
                 log,
+                executor,
                 &mut host_transport,
                 &mut control_plane_transport,
             )
@@ -237,6 +243,7 @@ impl<'a> ArtifactWriter<'a> {
             self.write_with_transport(
                 cx,
                 log,
+                executor,
                 &mut host_transport,
                 &mut control_plane_transport,
             )
@@ -248,6 +255,7 @@ impl<'a> ArtifactWriter<'a> {
         &mut self,
         cx: &StepContext,
         log: &Logger,
+        executor: &BoxedExecutor,
         host_phase_2_transport: &mut impl WriteTransport,
         control_plane_transport: &mut impl WriteTransport,
     ) -> WriteOutput {
@@ -266,6 +274,7 @@ impl<'a> ArtifactWriter<'a> {
                 // want each drive to track success and failure independently.
                 let write_cx = SlotWriteContext {
                     log: log.clone(),
+                    executor,
                     artifacts: self.artifacts,
                     slot: *drive,
                     destinations,
@@ -348,6 +357,7 @@ impl<'a> ArtifactWriter<'a> {
 
 struct SlotWriteContext<'a> {
     log: Logger,
+    executor: &'a BoxedExecutor,
     artifacts: ArtifactsToWrite<'a>,
     slot: M2Slot,
     destinations: &'a ArtifactDestination,
@@ -498,6 +508,7 @@ impl<'a> SlotWriteContext<'a> {
                     self.artifacts
                         .write_control_plane(
                             &self.log,
+                            &self.executor,
                             self.slot,
                             self.destinations,
                             transport,
@@ -549,6 +560,7 @@ impl ArtifactsToWrite<'_> {
     async fn write_control_plane(
         &self,
         log: &Logger,
+        executor: &BoxedExecutor,
         slot: M2Slot,
         destinations: &ArtifactDestination,
         transport: &mut impl WriteTransport,
@@ -558,6 +570,7 @@ impl ArtifactsToWrite<'_> {
         // own step.
         let inner_cx = &ControlPlaneZoneWriteContext {
             slot,
+            executor,
             clean_output_directory: destinations.clean_control_plane_dir,
             output_directory: &destinations.control_plane_dir,
             zones: self.control_plane_zones,
@@ -591,6 +604,7 @@ impl ArtifactsToWrite<'_> {
 
 struct ControlPlaneZoneWriteContext<'a> {
     slot: M2Slot,
+    executor: &'a BoxedExecutor,
     clean_output_directory: bool,
     output_directory: &'a Utf8Path,
     zones: &'a ControlPlaneZoneImages,
@@ -689,7 +703,7 @@ impl ControlPlaneZoneWriteContext<'_> {
                     std::mem::drop(output_directory);
 
                     if let Some(zpool) = zpool {
-                        Zpool::export(zpool)?;
+                        Zpool::export(&self.executor, zpool)?;
                     }
 
                     StepSuccess::new(()).into()
@@ -1148,6 +1162,9 @@ mod tests {
 
         let engine = UpdateEngine::new(&logctx.log, event_sender);
         let log = logctx.log.clone();
+        let executor = helios_tokamak::FakeExecutorBuilder::new(log.clone())
+            .build()
+            .as_executor();
         engine
             .new_step(
                 InstallinatorComponent::Both,
@@ -1158,6 +1175,7 @@ mod tests {
                         .write_with_transport(
                             &cx,
                             &log,
+                            &executor,
                             &mut host_transport,
                             &mut control_plane_transport,
                         )

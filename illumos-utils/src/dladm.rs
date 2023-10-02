@@ -6,7 +6,7 @@
 
 use crate::link::{Link, LinkKind};
 use crate::zone::IPADM;
-use crate::{execute, ExecutionError, PFEXEC};
+use helios_fusion::{BoxedExecutor, ExecutionError, PFEXEC};
 use omicron_common::api::external::MacAddr;
 use omicron_common::vlan::VlanID;
 use serde::{Deserialize, Serialize};
@@ -176,24 +176,29 @@ impl VnicSource for PhysicalLink {
 /// Wraps commands for interacting with data links.
 pub struct Dladm {}
 
-#[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
 impl Dladm {
     /// Creates an etherstub, or returns one which already exists.
-    pub fn ensure_etherstub(name: &str) -> Result<Etherstub, ExecutionError> {
-        if let Ok(stub) = Self::get_etherstub(name) {
+    pub fn ensure_etherstub(
+        executor: &BoxedExecutor,
+        name: &str,
+    ) -> Result<Etherstub, ExecutionError> {
+        if let Ok(stub) = Self::get_etherstub(executor, name) {
             return Ok(stub);
         }
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[DLADM, "create-etherstub", "-t", name]);
-        execute(cmd)?;
+        executor.execute(cmd)?;
         Ok(Etherstub(name.to_string()))
     }
 
     /// Finds an etherstub.
-    fn get_etherstub(name: &str) -> Result<Etherstub, ExecutionError> {
+    fn get_etherstub(
+        executor: &BoxedExecutor,
+        name: &str,
+    ) -> Result<Etherstub, ExecutionError> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[DLADM, "show-etherstub", name]);
-        execute(cmd)?;
+        executor.execute(cmd)?;
         Ok(Etherstub(name.to_string()))
     }
 
@@ -202,6 +207,7 @@ impl Dladm {
     /// This VNIC is not tracked like [`crate::link::Link`], because
     /// it is expected to exist for the lifetime of the sled.
     pub fn ensure_etherstub_vnic(
+        executor: &BoxedExecutor,
         source: &Etherstub,
     ) -> Result<EtherstubVnic, CreateVnicError> {
         let (vnic_name, mtu) = match source.0.as_str() {
@@ -209,80 +215,95 @@ impl Dladm {
             BOOTSTRAP_ETHERSTUB_NAME => (BOOTSTRAP_ETHERSTUB_VNIC_NAME, 1500),
             _ => unreachable!(),
         };
-        if let Ok(vnic) = Self::get_etherstub_vnic(vnic_name) {
+        if let Ok(vnic) = Self::get_etherstub_vnic(executor, vnic_name) {
             return Ok(vnic);
         }
-        Self::create_vnic(source, vnic_name, None, None, mtu)?;
+        Self::create_vnic(executor, source, vnic_name, None, None, mtu)?;
         Ok(EtherstubVnic(vnic_name.to_string()))
     }
 
-    fn get_etherstub_vnic(name: &str) -> Result<EtherstubVnic, ExecutionError> {
+    fn get_etherstub_vnic(
+        executor: &BoxedExecutor,
+        name: &str,
+    ) -> Result<EtherstubVnic, ExecutionError> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[DLADM, "show-vnic", name]);
-        execute(cmd)?;
+        executor.execute(cmd)?;
         Ok(EtherstubVnic(name.to_string()))
     }
 
     // Return the name of the IP interface over the etherstub VNIC, if it
     // exists.
     fn get_etherstub_vnic_interface(
+        executor: &BoxedExecutor,
         name: &str,
     ) -> Result<String, ExecutionError> {
         let mut cmd = std::process::Command::new(PFEXEC);
         let cmd = cmd.args(&[IPADM, "show-if", "-p", "-o", "IFNAME", name]);
-        execute(cmd)?;
+        executor.execute(cmd)?;
         Ok(name.to_string())
     }
 
     /// Delete the VNIC over the inter-zone comms etherstub.
-    pub fn delete_etherstub_vnic(name: &str) -> Result<(), ExecutionError> {
+    pub fn delete_etherstub_vnic(
+        executor: &BoxedExecutor,
+        name: &str,
+    ) -> Result<(), ExecutionError> {
         // It's not clear why, but this requires deleting the _interface_ that's
         // over the VNIC first. Other VNICs don't require this for some reason.
-        if Self::get_etherstub_vnic_interface(name).is_ok() {
+        if Self::get_etherstub_vnic_interface(executor, name).is_ok() {
             let mut cmd = std::process::Command::new(PFEXEC);
             let cmd = cmd.args(&[IPADM, "delete-if", name]);
-            execute(cmd)?;
+            executor.execute(cmd)?;
         }
 
-        if Self::get_etherstub_vnic(name).is_ok() {
+        if Self::get_etherstub_vnic(executor, name).is_ok() {
             let mut cmd = std::process::Command::new(PFEXEC);
             let cmd = cmd.args(&[DLADM, "delete-vnic", name]);
-            execute(cmd)?;
+            executor.execute(cmd)?;
         }
         Ok(())
     }
 
     /// Delete the inter-zone comms etherstub.
-    pub fn delete_etherstub(name: &str) -> Result<(), ExecutionError> {
-        if Self::get_etherstub(name).is_ok() {
+    pub fn delete_etherstub(
+        executor: &BoxedExecutor,
+        name: &str,
+    ) -> Result<(), ExecutionError> {
+        if Self::get_etherstub(executor, name).is_ok() {
             let mut cmd = std::process::Command::new(PFEXEC);
             let cmd = cmd.args(&[DLADM, "delete-etherstub", name]);
-            execute(cmd)?;
+            executor.execute(cmd)?;
         }
         Ok(())
     }
 
     /// Verify that the given link exists
-    pub fn verify_link(link: &str) -> Result<Link, FindPhysicalLinkError> {
+    pub fn verify_link(
+        executor: &BoxedExecutor,
+        link: &str,
+    ) -> Result<Link, FindPhysicalLinkError> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[DLADM, "show-link", "-p", "-o", "LINK", link]);
-        let output = execute(cmd)?;
+        let output = executor.execute(cmd)?;
         match String::from_utf8_lossy(&output.stdout)
             .lines()
             .next()
             .map(|s| s.trim())
         {
-            Some(x) if x == link => Ok(Link::wrap_physical(link)),
+            Some(x) if x == link => Ok(Link::wrap_physical(executor, link)),
             _ => Err(FindPhysicalLinkError::NoPhysicalLinkFound),
         }
     }
 
     /// Returns the name of the first observed physical data link.
-    pub fn find_physical() -> Result<PhysicalLink, FindPhysicalLinkError> {
+    pub fn find_physical(
+        executor: &BoxedExecutor,
+    ) -> Result<PhysicalLink, FindPhysicalLinkError> {
         // TODO: This is arbitrary, but we're currently grabbing the first
         // physical device. Should we have a more sophisticated method for
         // selection?
-        Self::list_physical()?
+        Self::list_physical(executor)?
             .into_iter()
             .next()
             .ok_or_else(|| FindPhysicalLinkError::NoPhysicalLinkFound)
@@ -291,10 +312,12 @@ impl Dladm {
     /// List the extant physical data links on the system.
     ///
     /// Note that this returns _all_ links.
-    pub fn list_physical() -> Result<Vec<PhysicalLink>, FindPhysicalLinkError> {
+    pub fn list_physical(
+        executor: &BoxedExecutor,
+    ) -> Result<Vec<PhysicalLink>, FindPhysicalLinkError> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[DLADM, "show-phys", "-p", "-o", "LINK"]);
-        let output = execute(cmd)?;
+        let output = executor.execute(cmd)?;
         std::str::from_utf8(&output.stdout)
             .map_err(FindPhysicalLinkError::NonUtf8Output)
             .map(|stdout| {
@@ -306,7 +329,10 @@ impl Dladm {
     }
 
     /// Returns the MAC address of a physical link.
-    pub fn get_mac(link: &PhysicalLink) -> Result<MacAddr, GetMacError> {
+    pub fn get_mac(
+        executor: &BoxedExecutor,
+        link: &PhysicalLink,
+    ) -> Result<MacAddr, GetMacError> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[
             DLADM,
@@ -317,7 +343,7 @@ impl Dladm {
             "ADDRESS",
             &link.0,
         ]);
-        let output = execute(cmd)?;
+        let output = executor.execute(cmd)?;
         let name = String::from_utf8_lossy(&output.stdout)
             .lines()
             .next()
@@ -344,6 +370,7 @@ impl Dladm {
     /// * `mac`: An optional unicast MAC address for the newly created NIC.
     /// * `vlan`: An optional VLAN ID for VLAN tagging.
     pub fn create_vnic<T: VnicSource + 'static>(
+        executor: &BoxedExecutor,
         source: &T,
         vnic_name: &str,
         mac: Option<MacAddr>,
@@ -375,7 +402,7 @@ impl Dladm {
         args.push(vnic_name.to_string());
 
         let cmd = command.args(&args);
-        execute(cmd).map_err(|err| CreateVnicError {
+        executor.execute(cmd).map_err(|err| CreateVnicError {
             name: vnic_name.to_string(),
             link: source.name().to_string(),
             err,
@@ -395,7 +422,7 @@ impl Dladm {
             &prop,
             vnic_name,
         ]);
-        execute(cmd).map_err(|err| CreateVnicError {
+        executor.execute(cmd).map_err(|err| CreateVnicError {
             name: vnic_name.to_string(),
             link: source.name().to_string(),
             err,
@@ -405,10 +432,13 @@ impl Dladm {
     }
 
     /// Returns VNICs that may be managed by the Sled Agent.
-    pub fn get_vnics() -> Result<Vec<String>, GetVnicError> {
+    pub fn get_vnics(
+        executor: &BoxedExecutor,
+    ) -> Result<Vec<String>, GetVnicError> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[DLADM, "show-vnic", "-p", "-o", "LINK"]);
-        let output = execute(cmd).map_err(|err| GetVnicError { err })?;
+        let output =
+            executor.execute(cmd).map_err(|err| GetVnicError { err })?;
 
         let vnics = String::from_utf8_lossy(&output.stdout)
             .lines()
@@ -425,10 +455,13 @@ impl Dladm {
     }
 
     /// Returns simnet links masquerading as tfport devices
-    pub fn get_simulated_tfports() -> Result<Vec<String>, GetSimnetError> {
+    pub fn get_simulated_tfports(
+        executor: &BoxedExecutor,
+    ) -> Result<Vec<String>, GetSimnetError> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[DLADM, "show-simnet", "-p", "-o", "LINK"]);
-        let output = execute(cmd).map_err(|err| GetSimnetError { err })?;
+        let output =
+            executor.execute(cmd).map_err(|err| GetSimnetError { err })?;
 
         let tfports = String::from_utf8_lossy(&output.stdout)
             .lines()
@@ -444,16 +477,21 @@ impl Dladm {
     }
 
     /// Remove a vnic from the sled.
-    pub fn delete_vnic(name: &str) -> Result<(), DeleteVnicError> {
+    pub fn delete_vnic(
+        executor: &BoxedExecutor,
+        name: &str,
+    ) -> Result<(), DeleteVnicError> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[DLADM, "delete-vnic", name]);
-        execute(cmd)
+        executor
+            .execute(cmd)
             .map_err(|err| DeleteVnicError { name: name.to_string(), err })?;
         Ok(())
     }
 
     /// Get a link property value on a VNIC
     pub fn get_linkprop(
+        executor: &BoxedExecutor,
         vnic: &str,
         prop_name: &str,
     ) -> Result<String, GetLinkpropError> {
@@ -468,7 +506,7 @@ impl Dladm {
             prop_name,
             vnic,
         ]);
-        let result = execute(cmd).map_err(|err| GetLinkpropError {
+        let result = executor.execute(cmd).map_err(|err| GetLinkpropError {
             link_name: vnic.to_string(),
             prop_name: prop_name.to_string(),
             err,
@@ -477,6 +515,7 @@ impl Dladm {
     }
     /// Set a link property on a VNIC
     pub fn set_linkprop(
+        executor: &BoxedExecutor,
         vnic: &str,
         prop_name: &str,
         prop_value: &str,
@@ -485,7 +524,7 @@ impl Dladm {
         let prop = format!("{}={}", prop_name, prop_value);
         let cmd =
             command.args(&[DLADM, "set-linkprop", "-t", "-p", &prop, vnic]);
-        execute(cmd).map_err(|err| SetLinkpropError {
+        executor.execute(cmd).map_err(|err| SetLinkpropError {
             link_name: vnic.to_string(),
             prop_name: prop_name.to_string(),
             prop_value: prop_value.to_string(),
@@ -496,6 +535,7 @@ impl Dladm {
 
     /// Reset a link property on a VNIC
     pub fn reset_linkprop(
+        executor: &BoxedExecutor,
         vnic: &str,
         prop_name: &str,
     ) -> Result<(), ResetLinkpropError> {
@@ -508,11 +548,143 @@ impl Dladm {
             prop_name,
             vnic,
         ]);
-        execute(cmd).map_err(|err| ResetLinkpropError {
+        executor.execute(cmd).map_err(|err| ResetLinkpropError {
             link_name: vnic.to_string(),
             prop_name: prop_name.to_string(),
             err,
         })?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use helios_fusion::{Input, OutputExt};
+    use helios_tokamak::{CommandSequence, FakeExecutorBuilder};
+    use omicron_test_utils::dev;
+    use std::process::Output;
+
+    #[test]
+    fn ensure_new_etherstub() {
+        let logctx = dev::test_setup_log("ensure_new_etherstub");
+
+        let mut handler = CommandSequence::new();
+        handler.expect_fail(format!("{PFEXEC} {DLADM} show-etherstub mystub1"));
+        handler
+            .expect_ok(format!("{PFEXEC} {DLADM} create-etherstub -t mystub1"));
+
+        let executor = FakeExecutorBuilder::new(logctx.log.clone())
+            .with_sequence(handler)
+            .build();
+
+        let etherstub =
+            Dladm::ensure_etherstub(&executor.as_executor(), "mystub1")
+                .expect("Failed to ensure etherstub");
+        assert_eq!(etherstub.0, "mystub1");
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn ensure_existing_etherstub() {
+        let logctx = dev::test_setup_log("ensure_existing_etherstub");
+
+        let mut handler = CommandSequence::new();
+        handler.expect_ok(format!("{PFEXEC} {DLADM} show-etherstub mystub1"));
+        let executor = FakeExecutorBuilder::new(logctx.log.clone())
+            .with_sequence(handler)
+            .build();
+
+        let etherstub =
+            Dladm::ensure_etherstub(&executor.as_executor(), "mystub1")
+                .expect("Failed to ensure etherstub");
+        assert_eq!(etherstub.0, "mystub1");
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn ensure_existing_etherstub_vnic() {
+        let logctx = dev::test_setup_log("ensure_existing_etherstub_vnic");
+
+        let mut handler = CommandSequence::new();
+        handler.expect_ok(format!(
+            "{PFEXEC} {DLADM} show-etherstub {UNDERLAY_ETHERSTUB_NAME}"
+        ));
+        handler.expect_ok(format!(
+            "{PFEXEC} {DLADM} show-vnic {UNDERLAY_ETHERSTUB_VNIC_NAME}"
+        ));
+        let executor = FakeExecutorBuilder::new(logctx.log.clone())
+            .with_sequence(handler)
+            .build();
+
+        let executor = &executor.as_executor();
+        let etherstub =
+            Dladm::ensure_etherstub(executor, UNDERLAY_ETHERSTUB_NAME)
+                .expect("Failed to ensure etherstub");
+        let _vnic = Dladm::ensure_etherstub_vnic(executor, &etherstub)
+            .expect("Failed to ensure etherstub VNIC");
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn ensure_new_etherstub_vnic() {
+        let logctx = dev::test_setup_log("ensure_new_etherstub_vnic");
+
+        let mut handler = CommandSequence::new();
+        handler.expect_ok(format!(
+            "{PFEXEC} {DLADM} show-etherstub {UNDERLAY_ETHERSTUB_NAME}"
+        ));
+        handler.expect_fail(format!(
+            "{PFEXEC} {DLADM} show-vnic {UNDERLAY_ETHERSTUB_VNIC_NAME}"
+        ));
+        handler.expect_ok(format!(
+            "{PFEXEC} {DLADM} create-vnic -t -l {UNDERLAY_ETHERSTUB_NAME} \
+            -p mtu=9000 {UNDERLAY_ETHERSTUB_VNIC_NAME}"
+        ));
+        handler.expect_ok(format!(
+            "{PFEXEC} {DLADM} set-linkprop -t -p mtu=9000 \
+            {UNDERLAY_ETHERSTUB_VNIC_NAME}"
+        ));
+        let executor = FakeExecutorBuilder::new(logctx.log.clone())
+            .with_sequence(handler)
+            .build();
+
+        let executor = &executor.as_executor();
+        let etherstub =
+            Dladm::ensure_etherstub(executor, UNDERLAY_ETHERSTUB_NAME)
+                .expect("Failed to ensure etherstub");
+        let _vnic = Dladm::ensure_etherstub_vnic(executor, &etherstub)
+            .expect("Failed to ensure etherstub VNIC");
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn only_parse_oxide_vnics() {
+        let logctx = dev::test_setup_log("only_parse_oxide_vnics");
+
+        let mut handler = CommandSequence::new();
+        handler.expect(
+            Input::shell(format!("{PFEXEC} {DLADM} show-vnic -p -o LINK")),
+            Output::success().set_stdout(
+                "oxVnic\nvopteVnic\nInvalid\noxBootstrapVnic\nInvalid",
+            ),
+        );
+        let executor = FakeExecutorBuilder::new(logctx.log.clone())
+            .with_sequence(handler)
+            .build();
+
+        let executor = &executor.as_executor();
+        let vnics = Dladm::get_vnics(executor).expect("Failed to get VNICs");
+
+        assert_eq!(vnics[0], "oxVnic");
+        assert_eq!(vnics[1], "vopteVnic");
+        assert_eq!(vnics[2], "oxBootstrapVnic");
+        assert_eq!(vnics.len(), 3);
+
+        logctx.cleanup_successful();
     }
 }

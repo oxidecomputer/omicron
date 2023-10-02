@@ -6,12 +6,16 @@
 
 use crate::opte::Gateway;
 use crate::opte::Vni;
+use debug_ignore::DebugIgnore;
+use helios_fusion::BoxedExecutor;
 use macaddr::MacAddr6;
 use std::net::IpAddr;
 use std::sync::Arc;
 
 #[derive(Debug)]
 struct PortInner {
+    #[allow(dead_code)]
+    executor: DebugIgnore<BoxedExecutor>,
     // Name of the port as identified by OPTE
     name: String,
     // IP address within the VPC Subnet
@@ -39,7 +43,9 @@ struct PortInner {
 #[cfg(target_os = "illumos")]
 impl Drop for PortInner {
     fn drop(&mut self) {
-        if let Err(e) = crate::dladm::Dladm::delete_vnic(&self.vnic) {
+        if let Err(e) =
+            crate::dladm::Dladm::delete_vnic(&self.executor, &self.vnic)
+        {
             eprintln!(
                 "WARNING: Failed to delete OPTE port overlay VNIC \
                 while dropping port. The VNIC will not be cleaned up \
@@ -83,7 +89,9 @@ pub struct Port {
 }
 
 impl Port {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
+        executor: &BoxedExecutor,
         name: String,
         ip: IpAddr,
         mac: MacAddr6,
@@ -94,6 +102,7 @@ impl Port {
     ) -> Self {
         Self {
             inner: Arc::new(PortInner {
+                executor: DebugIgnore(executor.clone()),
                 name,
                 _ip: ip,
                 mac,

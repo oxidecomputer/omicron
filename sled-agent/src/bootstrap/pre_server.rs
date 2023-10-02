@@ -22,6 +22,8 @@ use cancel_safe_futures::TryStreamExt;
 use ddm_admin_client::Client as DdmAdminClient;
 use futures::stream;
 use futures::StreamExt;
+use helios_fusion::BoxedExecutor;
+use helios_protostar::HostExecutor;
 use illumos_utils::addrobj::AddrObject;
 use illumos_utils::dladm;
 use illumos_utils::dladm::Dladm;
@@ -141,6 +143,7 @@ impl BootstrapManagers {
 
 pub(super) struct BootstrapAgentStartup {
     pub(super) config: Config,
+    pub(super) executor: BoxedExecutor,
     pub(super) global_zone_bootstrap_ip: Ipv6Addr,
     pub(super) ddm_admin_localhost_client: DdmAdminClient,
     pub(super) base_log: Logger,
@@ -154,15 +157,18 @@ impl BootstrapAgentStartup {
         let base_log = build_logger(&config)?;
 
         let log = base_log.new(o!("component" => "BootstrapAgentStartup"));
+        let executor = HostExecutor::new(log.clone()).as_executor();
 
         // Perform several blocking startup tasks first; we move `config` and
         // `log` into this task, and on success, it gives them back to us.
+        let executor_clone = executor.clone();
         let (config, log, ddm_admin_localhost_client, startup_networking) =
             tokio::task::spawn_blocking(move || {
-                enable_mg_ddm(&config, &log)?;
+                enable_mg_ddm(&config, &log, &executor_clone)?;
                 ensure_zfs_key_directory_exists(&log)?;
 
-                let startup_networking = BootstrapNetworking::setup(&config)?;
+                let startup_networking =
+                    BootstrapNetworking::setup(&config, &executor_clone)?;
 
                 // Start trying to notify ddmd of our bootstrap address so it can
                 // advertise it to other sleds.
@@ -175,7 +181,7 @@ impl BootstrapAgentStartup {
                 // Before we create the switch zone, we need to ensure that the
                 // necessary ZFS and Zone resources are ready. All other zones
                 // are created on U.2 drives.
-                ensure_zfs_ramdisk_dataset()?;
+                ensure_zfs_ramdisk_dataset(&executor_clone)?;
 
                 Ok::<_, StartError>((
                     config,
@@ -191,14 +197,14 @@ impl BootstrapAgentStartup {
         // predictable state.
         //
         // This means all VNICs, zones, etc.
-        cleanup_all_old_global_state(&log).await?;
+        cleanup_all_old_global_state(&log, &executor).await?;
 
         // Ipv6 forwarding must be enabled to route traffic between zones,
         // including the switch zone which we may launch below if we find we're
         // actually running on a scrimlet.
         //
         // This should be a no-op if already enabled.
-        BootstrapNetworking::enable_ipv6_forwarding().await?;
+        BootstrapNetworking::enable_ipv6_forwarding(&executor).await?;
 
         // Spawn the `KeyManager` which is needed by the the StorageManager to
         // retrieve encryption keys.
@@ -227,7 +233,8 @@ impl BootstrapAgentStartup {
 
         // Create a `StorageManager` and (possibly) synthetic disks.
         let storage_manager =
-            StorageManager::new(&base_log, storage_key_requester).await;
+            StorageManager::new(&base_log, &executor, storage_key_requester)
+                .await;
         upsert_synthetic_zpools_if_needed(&log, &storage_manager, &config)
             .await;
 
@@ -236,6 +243,7 @@ impl BootstrapAgentStartup {
 
         let service_manager = ServiceManager::new(
             &base_log,
+            &executor,
             ddm_admin_localhost_client.clone(),
             startup_networking,
             sled_mode,
@@ -248,6 +256,7 @@ impl BootstrapAgentStartup {
 
         Ok(Self {
             config,
+            executor,
             global_zone_bootstrap_ip,
             ddm_admin_localhost_client,
             base_log,
@@ -285,7 +294,10 @@ fn build_logger(config: &Config) -> Result<Logger, StartError> {
 // This may re-establish contact in the future, and re-construct a picture of
 // the expected state of each service. However, at the moment, "starting from a
 // known clean slate" is easier to work with.
-async fn cleanup_all_old_global_state(log: &Logger) -> Result<(), StartError> {
+async fn cleanup_all_old_global_state(
+    log: &Logger,
+    executor: &BoxedExecutor,
+) -> Result<(), StartError> {
     // Identify all existing zones which should be managed by the Sled
     // Agent.
     //
@@ -293,7 +305,7 @@ async fn cleanup_all_old_global_state(log: &Logger) -> Result<(), StartError> {
     // Currently, we're removing these zones. In the future, we should
     // re-establish contact (i.e., if the Sled Agent crashed, but we wanted
     // to leave the running Zones intact).
-    let zones = Zones::get().await.map_err(StartError::ListZones)?;
+    let zones = Zones::get(&executor).await.map_err(StartError::ListZones)?;
 
     stream::iter(zones)
         .zip(stream::iter(std::iter::repeat(log.clone())))
@@ -303,7 +315,7 @@ async fn cleanup_all_old_global_state(log: &Logger) -> Result<(), StartError> {
         // the caller that this failed.
         .for_each_concurrent_then_try(None, |(zone, log)| async move {
             warn!(log, "Deleting existing zone"; "zone_name" => zone.name());
-            Zones::halt_and_remove_logged(&log, zone.name()).await
+            Zones::halt_and_remove_logged(&log, &executor, zone.name()).await
         })
         .await
         .map_err(StartError::DeleteZone)?;
@@ -321,7 +333,7 @@ async fn cleanup_all_old_global_state(log: &Logger) -> Result<(), StartError> {
     // Note that we don't currently delete the VNICs in any particular
     // order. That should be OK, since we're definitely deleting the guest
     // VNICs before the xde devices, which is the main constraint.
-    sled_hardware::cleanup::delete_omicron_vnics(&log)
+    sled_hardware::cleanup::delete_omicron_vnics(&log, &executor)
         .await
         .map_err(StartError::DeleteOmicronVnics)?;
 
@@ -338,8 +350,12 @@ async fn cleanup_all_old_global_state(log: &Logger) -> Result<(), StartError> {
     Ok(())
 }
 
-fn enable_mg_ddm(config: &Config, log: &Logger) -> Result<(), StartError> {
-    let mg_addr_objs = underlay::find_nics(&config.data_links)
+fn enable_mg_ddm(
+    config: &Config,
+    log: &Logger,
+    executor: &BoxedExecutor,
+) -> Result<(), StartError> {
+    let mg_addr_objs = underlay::find_nics(executor, &config.data_links)
         .map_err(StartError::FindMaghemiteAddrObjs)?;
     if mg_addr_objs.is_empty() {
         return Err(StartError::NoUnderlayAddrObjs);
@@ -367,12 +383,15 @@ fn ensure_zfs_key_directory_exists(log: &Logger) -> Result<(), StartError> {
     })
 }
 
-fn ensure_zfs_ramdisk_dataset() -> Result<(), StartError> {
+fn ensure_zfs_ramdisk_dataset(
+    executor: &BoxedExecutor,
+) -> Result<(), StartError> {
     let zoned = true;
     let do_format = true;
     let encryption_details = None;
     let quota = None;
     Zfs::ensure_filesystem(
+        executor,
         zfs::ZONE_ZFS_RAMDISK_DATASET,
         zfs::Mountpoint::Path(Utf8PathBuf::from(
             zfs::ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT,
@@ -459,29 +478,34 @@ pub(crate) struct BootstrapNetworking {
 }
 
 impl BootstrapNetworking {
-    fn setup(config: &Config) -> Result<Self, StartError> {
-        let link_for_mac = config.get_link().map_err(StartError::ConfigLink)?;
+    fn setup(
+        config: &Config,
+        executor: &BoxedExecutor,
+    ) -> Result<Self, StartError> {
+        let link_for_mac =
+            config.get_link(executor).map_err(StartError::ConfigLink)?;
         let global_zone_bootstrap_ip = underlay::BootstrapInterface::GlobalZone
-            .ip(&link_for_mac)
+            .ip(executor, &link_for_mac)
             .map_err(StartError::BootstrapLinkMac)?;
 
-        let bootstrap_etherstub = Dladm::ensure_etherstub(
-            dladm::BOOTSTRAP_ETHERSTUB_NAME,
-        )
-        .map_err(|err| StartError::EnsureEtherstubError {
-            name: dladm::BOOTSTRAP_ETHERSTUB_NAME,
-            err,
-        })?;
+        let bootstrap_etherstub =
+            Dladm::ensure_etherstub(executor, dladm::BOOTSTRAP_ETHERSTUB_NAME)
+                .map_err(|err| StartError::EnsureEtherstubError {
+                    name: dladm::BOOTSTRAP_ETHERSTUB_NAME,
+                    err,
+                })?;
         let bootstrap_etherstub_vnic =
-            Dladm::ensure_etherstub_vnic(&bootstrap_etherstub)?;
+            Dladm::ensure_etherstub_vnic(executor, &bootstrap_etherstub)?;
 
         Zones::ensure_has_global_zone_v6_address(
+            executor,
             bootstrap_etherstub_vnic.clone(),
             global_zone_bootstrap_ip,
             "bootstrap6",
         )?;
 
         let global_zone_bootstrap_link_local_address = Zones::get_address(
+            executor,
             None,
             // AddrObject::link_local() can only fail if the interface name is
             // malformed, but we just got it from `Dladm`, so we know it's
@@ -499,18 +523,17 @@ impl BootstrapNetworking {
             };
 
         let switch_zone_bootstrap_ip = underlay::BootstrapInterface::SwitchZone
-            .ip(&link_for_mac)
+            .ip(executor, &link_for_mac)
             .map_err(StartError::BootstrapLinkMac)?;
 
-        let underlay_etherstub = Dladm::ensure_etherstub(
-            dladm::UNDERLAY_ETHERSTUB_NAME,
-        )
-        .map_err(|err| StartError::EnsureEtherstubError {
-            name: dladm::UNDERLAY_ETHERSTUB_NAME,
-            err,
-        })?;
+        let underlay_etherstub =
+            Dladm::ensure_etherstub(executor, dladm::UNDERLAY_ETHERSTUB_NAME)
+                .map_err(|err| StartError::EnsureEtherstubError {
+                name: dladm::UNDERLAY_ETHERSTUB_NAME,
+                err,
+            })?;
         let underlay_etherstub_vnic =
-            Dladm::ensure_etherstub_vnic(&underlay_etherstub)?;
+            Dladm::ensure_etherstub_vnic(executor, &underlay_etherstub)?;
 
         Ok(Self {
             bootstrap_etherstub,
@@ -522,21 +545,21 @@ impl BootstrapNetworking {
         })
     }
 
-    async fn enable_ipv6_forwarding() -> Result<(), StartError> {
-        tokio::task::spawn_blocking(|| {
-            let mut command = std::process::Command::new(illumos_utils::PFEXEC);
-            let cmd = command.args(&[
-                "/usr/sbin/routeadm",
-                // Needed to access all zones, which are on the underlay.
-                "-e",
-                "ipv6-forwarding",
-                "-u",
-            ]);
-            illumos_utils::execute(cmd)
-                .map(|_output| ())
-                .map_err(StartError::EnableIpv6Forwarding)
-        })
-        .await
-        .unwrap()
+    async fn enable_ipv6_forwarding(
+        executor: &BoxedExecutor,
+    ) -> Result<(), StartError> {
+        let mut command = std::process::Command::new(helios_fusion::PFEXEC);
+        command.args(&[
+            "/usr/sbin/routeadm",
+            // Needed to access all zones, which are on the underlay.
+            "-e",
+            "ipv6-forwarding",
+            "-u",
+        ]);
+        executor
+            .execute_async(&mut tokio::process::Command::from(command))
+            .await
+            .map(|_output| ())
+            .map_err(StartError::EnableIpv6Forwarding)
     }
 }

@@ -46,6 +46,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use dpd_client::{types as DpdTypes, Client as DpdClient, Error as DpdError};
 use dropshot::HandlerTaskMode;
+use helios_fusion::{BoxedExecutor, PFEXEC};
 use illumos_utils::addrobj::AddrObject;
 use illumos_utils::addrobj::IPV6_LINK_LOCAL_NAME;
 use illumos_utils::dladm::{
@@ -59,7 +60,6 @@ use illumos_utils::running_zone::{
 use illumos_utils::zfs::ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT;
 use illumos_utils::zone::AddressRequest;
 use illumos_utils::zone::Zones;
-use illumos_utils::{execute, PFEXEC};
 use internal_dns::resolver::Resolver;
 use itertools::Itertools;
 use omicron_common::address::Ipv6Subnet;
@@ -205,7 +205,7 @@ pub enum Error {
     NtpZoneNotReady,
 
     #[error("Execution error: {0}")]
-    ExecutionError(#[from] illumos_utils::ExecutionError),
+    ExecutionError(#[from] helios_fusion::ExecutionError),
 
     #[error("Error resolving DNS name: {0}")]
     ResolveError(#[from] internal_dns::resolver::ResolveError),
@@ -354,6 +354,7 @@ enum SledLocalZone {
 /// Manages miscellaneous Sled-local services.
 pub struct ServiceManagerInner {
     log: Logger,
+    executor: BoxedExecutor,
     global_zone_bootstrap_link_local_address: Ipv6Addr,
     switch_zone: Mutex<SledLocalZone>,
     sled_mode: SledMode,
@@ -409,6 +410,7 @@ impl ServiceManager {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         log: &Logger,
+        executor: &BoxedExecutor,
         ddmd_client: DdmAdminClient,
         bootstrap_networking: BootstrapNetworking,
         sled_mode: SledMode,
@@ -422,6 +424,7 @@ impl ServiceManager {
         Self {
             inner: Arc::new(ServiceManagerInner {
                 log: log.clone(),
+                executor: executor.clone(),
                 global_zone_bootstrap_link_local_address: bootstrap_networking
                     .global_zone_bootstrap_link_local_ip,
                 // TODO(https://github.com/oxidecomputer/omicron/issues/725):
@@ -434,11 +437,13 @@ impl ServiceManager {
                 switch_zone_maghemite_links,
                 zones: Mutex::new(BTreeMap::new()),
                 underlay_vnic_allocator: VnicAllocator::new(
+                    executor,
                     "Service",
                     bootstrap_networking.underlay_etherstub,
                 ),
                 underlay_vnic: bootstrap_networking.underlay_etherstub_vnic,
                 bootstrap_vnic_allocator: VnicAllocator::new(
+                    executor,
                     "Bootstrap",
                     bootstrap_networking.bootstrap_etherstub,
                 ),
@@ -742,7 +747,7 @@ impl ServiceManager {
                     // The tfport service requires a MAC device to/from which sidecar
                     // packets may be multiplexed.  If the link isn't present, don't
                     // bother trying to start the zone.
-                    match Dladm::verify_link(pkt_source) {
+                    match Dladm::verify_link(&self.inner.executor, pkt_source) {
                         Ok(link) => {
                             // It's important that tfpkt does **not** receive a
                             // link local address! See: https://github.com/oxidecomputer/stlouis/issues/391
@@ -761,7 +766,10 @@ impl ServiceManager {
                     // If on a non-gimlet, sled-agent can be configured to map
                     // links into the switch zone. Validate those links here.
                     for link in &self.inner.switch_zone_maghemite_links {
-                        match Dladm::verify_link(&link.to_string()) {
+                        match Dladm::verify_link(
+                            &self.inner.executor,
+                            &link.to_string(),
+                        ) {
                             Ok(link) => {
                                 // Link local addresses should be created in the
                                 // zone so that maghemite can listen on them.
@@ -1075,12 +1083,14 @@ impl ServiceManager {
             .map(|d| zone::Device { name: d.to_string() })
             .collect();
 
-        // Look for the image in the ramdisk first
-        let mut zone_image_paths = vec![Utf8PathBuf::from("/opt/oxide")];
+        let mut zone_image_paths = vec![];
         // Inject an image path if requested by a test.
         if let Some(path) = self.inner.image_directory_override.get() {
             zone_image_paths.push(path.clone());
         };
+
+        // Look for the image in the ramdisk next.
+        zone_image_paths.push(Utf8PathBuf::from("/opt/oxide"));
 
         // If the boot disk exists, look for the image in the "install" dataset
         // there too.
@@ -1093,6 +1103,7 @@ impl ServiceManager {
 
         let installed_zone = InstalledZone::install(
             &self.inner.log,
+            &self.inner.executor,
             &self.inner.underlay_vnic_allocator,
             &request.root,
             zone_image_paths.as_slice(),
@@ -1316,6 +1327,7 @@ impl ServiceManager {
                     IPV6_LINK_LOCAL_NAME
                 );
                 Zones::ensure_has_link_local_v6_address(
+                    &self.inner.executor,
                     Some(running_zone.name()),
                     &AddrObject::new(link.name(), IPV6_LINK_LOCAL_NAME)
                         .unwrap(),
@@ -1574,6 +1586,7 @@ impl ServiceManager {
                     // to be given distinct names.
                     let addr_name = format!("internaldns{gz_address_index}");
                     Zones::ensure_has_global_zone_v6_address(
+                        &self.inner.executor,
                         self.inner.underlay_vnic.clone(),
                         *gz_address,
                         &addr_name,
@@ -2202,7 +2215,7 @@ impl ServiceManager {
             let name = zone.zone_name();
             if existing_zones.contains_key(&name) {
                 // Make sure the zone actually exists in the right state too
-                match Zones::find(&name).await {
+                match Zones::find(&self.inner.executor, &name).await {
                     Ok(Some(zone)) if zone.state() == zone::State::Running => {
                         info!(log, "skipping running zone"; "zone" => &name);
                         continue;
@@ -2267,6 +2280,7 @@ impl ServiceManager {
             // safer.
             if zone.name().contains(&ZoneType::CockroachDb.to_string()) {
                 let address = Zones::get_address(
+                    &self.inner.executor,
                     Some(zone.name()),
                     &zone.control_interface(),
                 )?
@@ -2356,7 +2370,7 @@ impl ServiceManager {
                 &format!("{}", now.as_secs()),
                 &file.as_str(),
             ]);
-            match execute(cmd) {
+            match self.inner.executor.execute(cmd) {
                 Err(e) => {
                     warn!(self.inner.log, "Updating {} failed: {}", &file, e);
                 }
@@ -2493,7 +2507,8 @@ impl ServiceManager {
                         ..Default::default()
                     };
                     filesystems.push(softnpu_filesystem);
-                    data_links = Dladm::get_simulated_tfports()?;
+                    data_links =
+                        Dladm::get_simulated_tfports(&self.inner.executor)?;
                 }
                 vec![
                     ServiceType::Dendrite { asic },
@@ -2930,20 +2945,20 @@ mod test {
     use super::*;
     use crate::params::{ServiceZoneService, ZoneType};
     use async_trait::async_trait;
+    use helios_fusion::{Input, Output, OutputExt};
+    use helios_tokamak::{CommandSequence, FakeExecutorBuilder};
     use illumos_utils::{
         dladm::{
-            Etherstub, MockDladm, BOOTSTRAP_ETHERSTUB_NAME,
-            UNDERLAY_ETHERSTUB_NAME, UNDERLAY_ETHERSTUB_VNIC_NAME,
+            Etherstub, BOOTSTRAP_ETHERSTUB_NAME, UNDERLAY_ETHERSTUB_NAME,
+            UNDERLAY_ETHERSTUB_VNIC_NAME,
         },
-        svc,
-        zone::MockZones,
+        zone::{ZLOGIN, ZONEADM, ZONECFG},
     };
     use key_manager::{
         SecretRetriever, SecretRetrieverError, SecretState, VersionedIkm,
     };
     use omicron_common::address::OXIMETER_PORT;
     use std::net::{Ipv6Addr, SocketAddrV6};
-    use std::os::unix::process::ExitStatusExt;
     use uuid::Uuid;
 
     // Just placeholders. Not used.
@@ -2967,75 +2982,137 @@ mod test {
         }
     }
 
-    // Returns the expectations for a new service to be created.
-    fn expect_new_service() -> Vec<Box<dyn std::any::Any>> {
-        // Create a VNIC
-        let create_vnic_ctx = MockDladm::create_vnic_context();
-        create_vnic_ctx.expect().return_once(
-            |physical_link: &Etherstub, _, _, _, _| {
-                assert_eq!(&physical_link.0, &UNDERLAY_ETHERSTUB_NAME);
-                Ok(())
-            },
+    // Generate a static executor handler with the expected invocations (and
+    // responses) when generating a new service.
+    fn expect_new_service(
+        handler: &mut CommandSequence,
+        config: &TestConfig,
+        zone_id: Uuid,
+        u2_mountpoint: &Utf8Path,
+    ) {
+        handler.expect(
+            Input::shell(format!("{PFEXEC} /usr/sbin/dladm create-vnic -t -l underlay_stub0 -p mtu=9000 oxControlService0")),
+            Output::success()
         );
-        // Install the Omicron Zone
-        let install_ctx = MockZones::install_omicron_zone_context();
-        install_ctx.expect().return_once(|_, _, name, _, _, _, _, _, _| {
-            assert!(name.starts_with(EXPECTED_ZONE_NAME_PREFIX));
-            Ok(())
-        });
+        handler.expect(
+            Input::shell(format!("{PFEXEC} /usr/sbin/dladm set-linkprop -t -p mtu=9000 oxControlService0")),
+            Output::success()
+        );
 
-        // Boot the zone.
-        let boot_ctx = MockZones::boot_context();
-        boot_ctx.expect().return_once(|name| {
-            assert!(name.starts_with(EXPECTED_ZONE_NAME_PREFIX));
-            Ok(())
-        });
+        handler.expect(
+            Input::shell(format!("{PFEXEC} {ZONEADM} list -cip")),
+            Output::success().set_stdout("0:global:running:/::ipkg:shared"),
+        );
 
-        // After calling `MockZones::boot`, `RunningZone::boot` will then look
-        // up the zone ID for the booted zone. This goes through
-        // `MockZone::id` to find the zone and get its ID.
-        let id_ctx = MockZones::id_context();
-        id_ctx.expect().return_once(|name| {
-            assert!(name.starts_with(EXPECTED_ZONE_NAME_PREFIX));
-            Ok(Some(1))
-        });
+        let zone_name = format!("{EXPECTED_ZONE_NAME_PREFIX}_{zone_id}");
 
-        // Ensure the address exists
-        let ensure_address_ctx = MockZones::ensure_address_context();
-        ensure_address_ctx.expect().return_once(|_, _, _| {
-            Ok(ipnetwork::IpNetwork::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 64)
-                .unwrap())
-        });
+        let zonepath = format!("{u2_mountpoint}/{zone_name}");
+        handler.expect(
+            Input::shell(format!(
+                "{PFEXEC} {ZONECFG} -z {zone_name} \
+                    create -F -b ; \
+                    set brand=omicron1 ; \
+                    set zonepath={zonepath} ; \
+                    set autoboot=false ; \
+                    set ip-type=exclusive ; \
+                    add net ; \
+                    set physical=oxControlService0 ; \
+                    end"
+            )),
+            Output::success(),
+        );
 
-        // Wait for the networking service.
-        let wait_ctx = svc::wait_for_service_context();
-        wait_ctx.expect().return_once(|_, _| Ok(()));
+        let zone_image =
+            format!("{}/oximeter.tar.gz", config.config_dir.path());
+        handler.expect(
+            Input::shell(format!(
+                "{PFEXEC} {ZONEADM} -z {zone_name} \
+                    install {zone_image} /opt/oxide/overlay.tar.gz"
+            )),
+            Output::success(),
+        );
 
-        // Import the manifest, enable the service
-        let execute_ctx = illumos_utils::execute_context();
-        execute_ctx.expect().times(..).returning(|_| {
-            Ok(std::process::Output {
-                status: std::process::ExitStatus::from_raw(0),
-                stdout: vec![],
-                stderr: vec![],
-            })
-        });
+        handler.expect(
+            Input::shell(format!("{PFEXEC} {ZONEADM} -z {zone_name} boot")),
+            Output::success(),
+        );
 
-        vec![
-            Box::new(create_vnic_ctx),
-            Box::new(install_ctx),
-            Box::new(boot_ctx),
-            Box::new(id_ctx),
-            Box::new(ensure_address_ctx),
-            Box::new(wait_ctx),
-            Box::new(execute_ctx),
-        ]
+        handler.expect(
+            Input::shell(
+                format!("{PFEXEC} /usr/bin/svcprop -t -z {zone_name} -p restarter/state svc:/milestone/single-user:default")
+            ),
+            Output::success().set_stdout("restarter/state astring online"),
+        );
+
+        handler.expect(
+            Input::shell(format!("{PFEXEC} {ZONEADM} list -cip")),
+            Output::success().set_stdout(
+                format!("0:global:running:/::ipkg:shared\n1:{zone_name}:running:{zonepath}::omicron1:excl")
+            )
+        );
+
+        // Refer to illumos-utils/src/running_zone.rs for the difference here.
+        //
+        // On illumos, we tend to avoid using zlogin, and instead use
+        // thread-level contracts with zenter::zone_enter to run commands within
+        // the context of zones.
+        //
+        // On non-illumos systems, we just pretend to zlogin, since the
+        // interface for doing so is simpler than the host API to access
+        // zenter.
+        let login = if cfg!(target_os = "illumos") {
+            format!("{PFEXEC} ")
+        } else {
+            format!("{PFEXEC} {ZLOGIN} {zone_name} ")
+        };
+
+        handler.expect(
+            Input::shell(format!(
+                "{login} /usr/sbin/ipadm create-if -t oxControlService0"
+            )),
+            Output::success(),
+        );
+        handler.expect(
+            Input::shell(format!("{login} /usr/sbin/ipadm set-ifprop -t -p mtu=9000 -m ipv4 oxControlService0")),
+            Output::success(),
+        );
+        handler.expect(
+            Input::shell(format!("{login} /usr/sbin/ipadm set-ifprop -t -p mtu=9000 -m ipv6 oxControlService0")),
+            Output::success(),
+        );
+        handler.expect(
+            Input::shell(format!(
+                "{login} /usr/sbin/route add -inet6 default -inet6 ::1"
+            )),
+            Output::success(),
+        );
+        handler.expect(
+            Input::shell(format!("{login} /usr/sbin/svccfg import /var/svc/manifest/site/oximeter/manifest.xml")),
+            Output::success(),
+        );
+        handler.expect(
+            Input::shell(format!("{login} /usr/sbin/svccfg -s svc:/oxide/oximeter setprop config/id={zone_id}")),
+            Output::success(),
+        );
+        handler.expect(
+            Input::shell(format!("{login} /usr/sbin/svccfg -s svc:/oxide/oximeter setprop config/address=[::1]:12223")),
+            Output::success(),
+        );
+        handler.expect(
+            Input::shell(
+                format!("{login} /usr/sbin/svccfg -s svc:/oxide/oximeter:default refresh"),
+            ),
+            Output::success(),
+        );
+        handler.expect(
+            Input::shell(
+                format!("{login} /usr/sbin/svcadm enable -t svc:/oxide/oximeter:default"),
+            ),
+            Output::success(),
+        );
     }
 
-    // Prepare to call "ensure" for a new service, then actually call "ensure".
     async fn ensure_new_service(mgr: &ServiceManager, id: Uuid) {
-        let _expectations = expect_new_service();
-
         mgr.ensure_all_services_persistent(ServiceEnsureBody {
             services: vec![ServiceZoneRequest {
                 id,
@@ -3059,8 +3136,6 @@ mod test {
         .unwrap();
     }
 
-    // Prepare to call "ensure" for a service which already exists. We should
-    // return the service without actually installing a new zone.
     async fn ensure_existing_service(mgr: &ServiceManager, id: Uuid) {
         mgr.ensure_all_services_persistent(ServiceEnsureBody {
             services: vec![ServiceZoneRequest {
@@ -3083,23 +3158,6 @@ mod test {
         })
         .await
         .unwrap();
-    }
-
-    // Prepare to drop the service manager.
-    //
-    // This will shut down all allocated zones, and delete their
-    // associated VNICs.
-    fn drop_service_manager(mgr: ServiceManager) {
-        let halt_ctx = MockZones::halt_and_remove_logged_context();
-        halt_ctx.expect().returning(|_, name| {
-            assert!(name.starts_with(EXPECTED_ZONE_NAME_PREFIX));
-            Ok(())
-        });
-        let delete_vnic_ctx = MockDladm::delete_vnic_context();
-        delete_vnic_ctx.expect().returning(|_| Ok(()));
-
-        // Explicitly drop the service manager
-        drop(mgr);
     }
 
     struct TestConfig {
@@ -3160,34 +3218,44 @@ mod test {
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_ensure_service() {
         let logctx =
             omicron_test_utils::dev::test_setup_log("test_ensure_service");
         let log = logctx.log.clone();
         let test_config = TestConfig::new().await;
 
-        let resources = StorageResources::new_for_test();
-        let zone_bundler = ZoneBundler::new(
-            log.clone(),
-            resources.clone(),
-            Default::default(),
-        );
+        let storage = StorageResources::new_for_test();
+        let u2_mountpoints = storage.all_u2_mountpoints(ZONE_DATASET).await;
+        assert_eq!(u2_mountpoints.len(), 1);
+        let u2_mountpoint = &u2_mountpoints[0];
+
+        let id = Uuid::new_v4();
+        let mut handler = CommandSequence::new();
+        expect_new_service(&mut handler, &test_config, id, &u2_mountpoint);
+        let executor = FakeExecutorBuilder::new(log.clone())
+            .with_sequence(handler)
+            .build()
+            .as_executor();
+
+        let zone_bundler =
+            ZoneBundler::new(log.clone(), storage.clone(), Default::default());
         let mgr = ServiceManager::new(
             &log,
+            &executor,
             DdmAdminClient::localhost(&log).unwrap(),
             make_bootstrap_networking_config(),
             SledMode::Auto,
             Some(true),
             SidecarRevision::Physical("rev-test".to_string()),
             vec![],
-            resources,
+            storage,
             zone_bundler,
         );
         test_config.override_paths(&mgr);
 
         let port_manager = PortManager::new(
             logctx.log.new(o!("component" => "PortManager")),
+            &executor,
             Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
         );
         mgr.sled_agent_started(
@@ -3199,15 +3267,13 @@ mod test {
         )
         .unwrap();
 
-        let id = Uuid::new_v4();
         ensure_new_service(&mgr, id).await;
-        drop_service_manager(mgr);
+        drop(mgr);
 
         logctx.cleanup_successful();
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_ensure_service_which_already_exists() {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_ensure_service_which_already_exists",
@@ -3215,27 +3281,38 @@ mod test {
         let log = logctx.log.clone();
         let test_config = TestConfig::new().await;
 
-        let resources = StorageResources::new_for_test();
-        let zone_bundler = ZoneBundler::new(
-            log.clone(),
-            resources.clone(),
-            Default::default(),
-        );
+        let storage = StorageResources::new_for_test();
+        let u2_mountpoints = storage.all_u2_mountpoints(ZONE_DATASET).await;
+        assert_eq!(u2_mountpoints.len(), 1);
+        let u2_mountpoint = &u2_mountpoints[0];
+
+        let id = Uuid::new_v4();
+        let mut handler = CommandSequence::new();
+        expect_new_service(&mut handler, &test_config, id, &u2_mountpoint);
+        let executor = FakeExecutorBuilder::new(log.clone())
+            .with_sequence(handler)
+            .build()
+            .as_executor();
+
+        let zone_bundler =
+            ZoneBundler::new(log.clone(), storage.clone(), Default::default());
         let mgr = ServiceManager::new(
             &log,
+            &executor,
             DdmAdminClient::localhost(&log).unwrap(),
             make_bootstrap_networking_config(),
             SledMode::Auto,
             Some(true),
             SidecarRevision::Physical("rev-test".to_string()),
             vec![],
-            resources,
+            storage,
             zone_bundler,
         );
         test_config.override_paths(&mgr);
 
         let port_manager = PortManager::new(
             logctx.log.new(o!("component" => "PortManager")),
+            &executor,
             Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
         );
         mgr.sled_agent_started(
@@ -3247,16 +3324,14 @@ mod test {
         )
         .unwrap();
 
-        let id = Uuid::new_v4();
         ensure_new_service(&mgr, id).await;
         ensure_existing_service(&mgr, id).await;
-        drop_service_manager(mgr);
+        drop(mgr);
 
         logctx.cleanup_successful();
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_services_are_recreated_on_reboot() {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_services_are_recreated_on_reboot",
@@ -3266,29 +3341,40 @@ mod test {
         let ddmd_client = DdmAdminClient::localhost(&log).unwrap();
         let bootstrap_networking = make_bootstrap_networking_config();
 
+        let storage = StorageResources::new_for_test();
+        let u2_mountpoints = storage.all_u2_mountpoints(ZONE_DATASET).await;
+        assert_eq!(u2_mountpoints.len(), 1);
+        let u2_mountpoint = &u2_mountpoints[0];
+
+        let id = Uuid::new_v4();
+        let mut handler = CommandSequence::new();
+        expect_new_service(&mut handler, &test_config, id, &u2_mountpoint);
+        let executor = FakeExecutorBuilder::new(log.clone())
+            .with_sequence(handler)
+            .build()
+            .as_executor();
+
         // First, spin up a ServiceManager, create a new service, and tear it
         // down.
-        let resources = StorageResources::new_for_test();
-        let zone_bundler = ZoneBundler::new(
-            log.clone(),
-            resources.clone(),
-            Default::default(),
-        );
+        let zone_bundler =
+            ZoneBundler::new(log.clone(), storage.clone(), Default::default());
         let mgr = ServiceManager::new(
             &log,
+            &executor,
             ddmd_client.clone(),
             bootstrap_networking.clone(),
             SledMode::Auto,
             Some(true),
             SidecarRevision::Physical("rev-test".to_string()),
             vec![],
-            resources.clone(),
+            storage.clone(),
             zone_bundler.clone(),
         );
         test_config.override_paths(&mgr);
 
         let port_manager = PortManager::new(
             log.new(o!("component" => "PortManager")),
+            &executor,
             Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
         );
         mgr.sled_agent_started(
@@ -3300,28 +3386,50 @@ mod test {
         )
         .unwrap();
 
-        let id = Uuid::new_v4();
         ensure_new_service(&mgr, id).await;
-        drop_service_manager(mgr);
+        drop(mgr);
 
         // Before we re-create the service manager - notably, using the same
         // config file! - expect that a service gets initialized.
-        let _expectations = expect_new_service();
+        let mut handler = CommandSequence::new();
+
+        handler.expect_dynamic(Box::new(|input| -> Output {
+            assert_eq!(input.program, PFEXEC);
+            assert_eq!(input.args[0], "/usr/platform/oxide/bin/tmpx");
+            // input.args[1] is the current time.
+            assert_eq!(input.args[2], "/var/adm/utmpx");
+            Output::success()
+        }));
+        handler.expect_dynamic(Box::new(|input| -> Output {
+            assert_eq!(input.program, PFEXEC);
+            assert_eq!(input.args[0], "/usr/platform/oxide/bin/tmpx");
+            // input.args[1] is the current time.
+            assert_eq!(input.args[2], "/var/adm/wtmpx");
+            Output::success()
+        }));
+        expect_new_service(&mut handler, &test_config, id, &u2_mountpoint);
+        let executor = FakeExecutorBuilder::new(log.clone())
+            .with_sequence(handler)
+            .build()
+            .as_executor();
+
         let mgr = ServiceManager::new(
             &log,
+            &executor,
             ddmd_client,
             bootstrap_networking,
             SledMode::Auto,
             Some(true),
             SidecarRevision::Physical("rev-test".to_string()),
             vec![],
-            resources.clone(),
+            storage.clone(),
             zone_bundler.clone(),
         );
         test_config.override_paths(&mgr);
 
         let port_manager = PortManager::new(
             log.new(o!("component" => "PortManager")),
+            &executor,
             Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
         );
         mgr.sled_agent_started(
@@ -3333,13 +3441,13 @@ mod test {
         )
         .unwrap();
 
-        drop_service_manager(mgr);
+        mgr.load_services().await.expect("Failed to load services");
 
+        drop(mgr);
         logctx.cleanup_successful();
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_services_do_not_persist_without_config() {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_services_do_not_persist_without_config",
@@ -3349,29 +3457,40 @@ mod test {
         let ddmd_client = DdmAdminClient::localhost(&log).unwrap();
         let bootstrap_networking = make_bootstrap_networking_config();
 
+        let storage = StorageResources::new_for_test();
+        let u2_mountpoints = storage.all_u2_mountpoints(ZONE_DATASET).await;
+        assert_eq!(u2_mountpoints.len(), 1);
+        let u2_mountpoint = &u2_mountpoints[0];
+
+        let id = Uuid::new_v4();
+        let mut handler = CommandSequence::new();
+        expect_new_service(&mut handler, &test_config, id, &u2_mountpoint);
+        let executor = FakeExecutorBuilder::new(log.clone())
+            .with_sequence(handler)
+            .build()
+            .as_executor();
+
         // First, spin up a ServiceManager, create a new service, and tear it
         // down.
-        let resources = StorageResources::new_for_test();
-        let zone_bundler = ZoneBundler::new(
-            log.clone(),
-            resources.clone(),
-            Default::default(),
-        );
+        let zone_bundler =
+            ZoneBundler::new(log.clone(), storage.clone(), Default::default());
         let mgr = ServiceManager::new(
             &log,
+            &executor,
             ddmd_client.clone(),
             bootstrap_networking.clone(),
             SledMode::Auto,
             Some(true),
             SidecarRevision::Physical("rev-test".to_string()),
             vec![],
-            resources.clone(),
+            storage.clone(),
             zone_bundler.clone(),
         );
         test_config.override_paths(&mgr);
 
         let port_manager = PortManager::new(
             log.new(o!("component" => "PortManager")),
+            &executor,
             Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
         );
         mgr.sled_agent_started(
@@ -3383,9 +3502,8 @@ mod test {
         )
         .unwrap();
 
-        let id = Uuid::new_v4();
         ensure_new_service(&mgr, id).await;
-        drop_service_manager(mgr);
+        drop(mgr);
 
         // Next, delete the ledger. This means the service we just created will
         // not be remembered on the next initialization.
@@ -3397,19 +3515,21 @@ mod test {
         // Observe that the old service is not re-initialized.
         let mgr = ServiceManager::new(
             &log,
+            &executor,
             ddmd_client,
             bootstrap_networking,
             SledMode::Auto,
             Some(true),
             SidecarRevision::Physical("rev-test".to_string()),
             vec![],
-            resources.clone(),
+            storage,
             zone_bundler.clone(),
         );
         test_config.override_paths(&mgr);
 
         let port_manager = PortManager::new(
             log.new(o!("component" => "PortManager")),
+            &executor,
             Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
         );
         mgr.sled_agent_started(
@@ -3421,7 +3541,7 @@ mod test {
         )
         .unwrap();
 
-        drop_service_manager(mgr);
+        drop(mgr);
 
         logctx.cleanup_successful();
     }

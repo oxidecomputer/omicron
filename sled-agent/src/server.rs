@@ -12,6 +12,7 @@ use crate::nexus::NexusClientWithResolver;
 use crate::services::ServiceManager;
 use crate::storage_manager::StorageManager;
 use bootstore::schemes::v0 as bootstore;
+use helios_fusion::BoxedExecutor;
 use internal_dns::resolver::Resolver;
 use slog::Logger;
 use std::net::SocketAddr;
@@ -38,6 +39,7 @@ impl Server {
     pub async fn start(
         config: &Config,
         log: Logger,
+        executor: &BoxedExecutor,
         request: StartSledAgentRequest,
         services: ServiceManager,
         storage: StorageManager,
@@ -60,6 +62,7 @@ impl Server {
         let sled_agent = SledAgent::new(
             &config,
             log.clone(),
+            executor,
             nexus_client,
             request,
             services,

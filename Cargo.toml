@@ -56,6 +56,9 @@ members = [
     "sled-hardware",
     "sp-sim",
     "test-utils",
+    "helios/fusion",
+    "helios/protostar",
+    "helios/tokamak",
     "tufaceous-lib",
     "tufaceous",
     "update-engine",
@@ -118,6 +121,9 @@ default-members = [
     "sled-hardware",
     "sp-sim",
     "test-utils",
+    "helios/fusion",
+    "helios/protostar",
+    "helios/tokamak",
     "tufaceous",
     "tufaceous-lib",
     "update-engine",
@@ -194,6 +200,9 @@ gateway-test-utils = { path = "gateway-test-utils" }
 glob = "0.3.1"
 headers = "0.3.9"
 heck = "0.4"
+helios-fusion = { path = "helios/fusion" }
+helios-protostar = { path = "helios/protostar" }
+helios-tokamak = { path = "helios/tokamak" }
 hex = "0.4.3"
 hex-literal = "0.4.1"
 hkdf = "0.12.3"
@@ -221,7 +230,6 @@ libc = "0.2.148"
 linear-map = "1.2.0"
 macaddr = { version = "1.0.1", features = ["serde_std"] }
 mime_guess = "2.0.4"
-mockall = "0.11"
 newtype_derive = "0.1.6"
 nexus-client = { path = "nexus-client" }
 nexus-db-model = { path = "nexus/db-model" }
@@ -306,10 +314,10 @@ serde_path_to_error = "0.1.14"
 serde_tokenstream = "0.2"
 serde_urlencoded = "0.7.1"
 serde_with = "2.3.3"
-serial_test = "0.10"
 sha2 = "0.10.7"
 sha3 = "0.10.8"
 shell-words = "1.1.0"
+shlex = "1.1.0"
 signal-hook = "0.3"
 signal-hook-tokio = { version = "0.3", features = [ "futures-v0_3" ] }
 similar-asserts = "1.5.0"
@@ -321,7 +329,7 @@ slog-async = "2.8"
 slog-dtrace = "0.2"
 slog-envlogger = "2.2"
 slog-term = "2.9"
-smf = "0.2"
+smf = "0.2.2"
 snafu = "0.7"
 sp-sim = { path = "sp-sim" }
 sprockets-common = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
@@ -372,7 +380,7 @@ wicket-common = { path = "wicket-common" }
 wicketd-client = { path = "wicketd-client" }
 zeroize = { version = "1.6.0", features = ["zeroize_derive", "std"] }
 zip = { version = "0.6.6", default-features = false, features = ["deflate","bzip2"] }
-zone = { version = "0.2", default-features = false, features = ["async"] }
+zone = { version = "0.3", default-features = false, features = ["async"] }
 
 [profile.dev]
 panic = "abort"

@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use camino::{Utf8Path, Utf8PathBuf};
+use helios_fusion::BoxedExecutor;
 use illumos_utils::fstyp::Fstyp;
 use illumos_utils::zfs;
 use illumos_utils::zfs::DestroyDatasetErrorVariant;
@@ -315,6 +316,7 @@ impl Disk {
     /// `None` is for the M.2s touched by the Installinator.
     pub async fn new(
         log: &Logger,
+        executor: &BoxedExecutor,
         unparsed_disk: UnparsedDisk,
         key_requester: Option<&StorageKeyRequester>,
     ) -> Result<Self, DiskError> {
@@ -322,7 +324,8 @@ impl Disk {
         let variant = unparsed_disk.variant;
         // Ensure the GPT has the right format. This does not necessarily
         // mean that the partitions are populated with the data we need.
-        let partitions = ensure_partition_layout(&log, &paths, variant)?;
+        let partitions =
+            ensure_partition_layout(&log, &executor, &paths, variant)?;
 
         // Find the path to the zpool which exists on this disk.
         //
@@ -334,9 +337,11 @@ impl Disk {
             false,
         )?;
 
-        let zpool_name = Self::ensure_zpool_exists(log, variant, &zpool_path)?;
+        let zpool_name =
+            Self::ensure_zpool_exists(log, executor, variant, &zpool_path)?;
         Self::ensure_zpool_ready(
             log,
+            executor,
             &zpool_name,
             &unparsed_disk.identity,
             key_requester,
@@ -356,14 +361,16 @@ impl Disk {
 
     pub async fn ensure_zpool_ready(
         log: &Logger,
+        executor: &BoxedExecutor,
         zpool_name: &ZpoolName,
         disk_identity: &DiskIdentity,
         key_requester: Option<&StorageKeyRequester>,
     ) -> Result<(), DiskError> {
-        Self::ensure_zpool_imported(log, &zpool_name)?;
-        Self::ensure_zpool_failmode_is_continue(log, &zpool_name)?;
+        Self::ensure_zpool_imported(log, executor, &zpool_name)?;
+        Self::ensure_zpool_failmode_is_continue(log, executor, &zpool_name)?;
         Self::ensure_zpool_has_datasets(
             log,
+            executor,
             &zpool_name,
             disk_identity,
             key_requester,
@@ -374,10 +381,11 @@ impl Disk {
 
     fn ensure_zpool_exists(
         log: &Logger,
+        executor: &BoxedExecutor,
         variant: DiskVariant,
         zpool_path: &Utf8Path,
     ) -> Result<ZpoolName, DiskError> {
-        let zpool_name = match Fstyp::get_zpool(&zpool_path) {
+        let zpool_name = match Fstyp::get_zpool(executor, &zpool_path) {
             Ok(zpool_name) => zpool_name,
             Err(_) => {
                 // What happened here?
@@ -401,11 +409,11 @@ impl Disk {
                     DiskVariant::M2 => ZpoolName::new_internal(Uuid::new_v4()),
                     DiskVariant::U2 => ZpoolName::new_external(Uuid::new_v4()),
                 };
-                Zpool::create(zpool_name.clone(), &zpool_path)?;
+                Zpool::create(executor, zpool_name.clone(), &zpool_path)?;
                 zpool_name
             }
         };
-        Zpool::import(zpool_name.clone()).map_err(|e| {
+        Zpool::import(executor, zpool_name.clone()).map_err(|e| {
             warn!(log, "Failed to import zpool {zpool_name}: {e}");
             DiskError::ZpoolImport(e)
         })?;
@@ -415,9 +423,10 @@ impl Disk {
 
     fn ensure_zpool_imported(
         log: &Logger,
+        executor: &BoxedExecutor,
         zpool_name: &ZpoolName,
     ) -> Result<(), DiskError> {
-        Zpool::import(zpool_name.clone()).map_err(|e| {
+        Zpool::import(executor, zpool_name.clone()).map_err(|e| {
             warn!(log, "Failed to import zpool {zpool_name}: {e}");
             DiskError::ZpoolImport(e)
         })?;
@@ -426,6 +435,7 @@ impl Disk {
 
     fn ensure_zpool_failmode_is_continue(
         log: &Logger,
+        executor: &BoxedExecutor,
         zpool_name: &ZpoolName,
     ) -> Result<(), DiskError> {
         // Ensure failmode is set to `continue`. See
@@ -435,7 +445,7 @@ impl Disk {
         // actively harmful to try to wait for it to come back; we'll be waiting
         // forever and get stuck. We'd rather get the errors so we can deal with
         // them ourselves.
-        Zpool::set_failmode_continue(&zpool_name).map_err(|e| {
+        Zpool::set_failmode_continue(executor, &zpool_name).map_err(|e| {
             warn!(
                 log,
                 "Failed to set failmode=continue on zpool {zpool_name}: {e}"
@@ -449,6 +459,7 @@ impl Disk {
     // contain.
     async fn ensure_zpool_has_datasets(
         log: &Logger,
+        executor: &BoxedExecutor,
         zpool_name: &ZpoolName,
         disk_identity: &DiskIdentity,
         key_requester: Option<&StorageKeyRequester>,
@@ -472,31 +483,32 @@ impl Disk {
             let mountpoint = zpool_name.dataset_mountpoint(dataset);
             let keypath: Keypath = disk_identity.into();
 
-            let epoch =
-                if let Ok(epoch_str) = Zfs::get_oxide_value(dataset, "epoch") {
-                    if let Ok(epoch) = epoch_str.parse::<u64>() {
-                        epoch
-                    } else {
-                        return Err(DiskError::CannotParseEpochProperty(
-                            dataset.to_string(),
-                        ));
-                    }
+            let epoch = if let Ok(epoch_str) =
+                Zfs::get_oxide_value(executor, dataset, "epoch")
+            {
+                if let Ok(epoch) = epoch_str.parse::<u64>() {
+                    epoch
                 } else {
-                    // We got an error trying to call `Zfs::get_oxide_value`
-                    // which indicates that the dataset doesn't exist or there
-                    // was a problem  running the command.
-                    //
-                    // Note that `Zfs::get_oxide_value` will succeed even if
-                    // the epoch is missing. `epoch_str` will show up as a dash
-                    // (`-`) and will not parse into a `u64`. So we don't have
-                    // to worry about that case here as it is handled above.
-                    //
-                    // If the error indicated that the command failed for some
-                    // other reason, but the dataset actually existed, we will
-                    // try to create the dataset below and that will fail. So
-                    // there is no harm in just loading the latest secret here.
-                    key_requester.load_latest_secret().await?
-                };
+                    return Err(DiskError::CannotParseEpochProperty(
+                        dataset.to_string(),
+                    ));
+                }
+            } else {
+                // We got an error trying to call `Zfs::get_oxide_value`
+                // which indicates that the dataset doesn't exist or there
+                // was a problem  running the command.
+                //
+                // Note that `Zfs::get_oxide_value` will succeed even if
+                // the epoch is missing. `epoch_str` will show up as a dash
+                // (`-`) and will not parse into a `u64`. So we don't have
+                // to worry about that case here as it is handled above.
+                //
+                // If the error indicated that the command failed for some
+                // other reason, but the dataset actually existed, we will
+                // try to create the dataset below and that will fail. So
+                // there is no harm in just loading the latest secret here.
+                key_requester.load_latest_secret().await?
+            };
 
             let key =
                 key_requester.get_key(epoch, disk_identity.clone()).await?;
@@ -518,6 +530,7 @@ impl Disk {
                 epoch
             );
             let result = Zfs::ensure_filesystem(
+                executor,
                 &format!("{}/{}", zpool_name, dataset),
                 Mountpoint::Path(mountpoint),
                 zoned,
@@ -549,7 +562,7 @@ impl Disk {
             });
 
             if dataset.wipe {
-                match Zfs::get_oxide_value(name, "agent") {
+                match Zfs::get_oxide_value(executor, name, "agent") {
                     Ok(v) if &v == agent_local_value => {
                         info!(
                             log,
@@ -561,17 +574,19 @@ impl Disk {
                             log,
                             "Automatically destroying dataset: {}", name
                         );
-                        Zfs::destroy_dataset(name).or_else(|err| {
-                            // If we can't find the dataset, that's fine -- it might
-                            // not have been formatted yet.
-                            if let DestroyDatasetErrorVariant::NotFound =
-                                err.err
-                            {
-                                Ok(())
-                            } else {
-                                Err(err)
-                            }
-                        })?;
+                        Zfs::destroy_dataset(executor, name).or_else(
+                            |err| {
+                                // If we can't find the dataset, that's fine -- it might
+                                // not have been formatted yet.
+                                if let DestroyDatasetErrorVariant::NotFound =
+                                    err.err
+                                {
+                                    Ok(())
+                                } else {
+                                    Err(err)
+                                }
+                            },
+                        )?;
                     }
                 }
             }
@@ -582,6 +597,7 @@ impl Disk {
                 compression: dataset.compression,
             });
             Zfs::ensure_filesystem(
+                executor,
                 name,
                 Mountpoint::Path(mountpoint),
                 zoned,
@@ -591,11 +607,18 @@ impl Disk {
             )?;
 
             if dataset.wipe {
-                Zfs::set_oxide_value(name, "agent", agent_local_value)
-                    .map_err(|err| DiskError::CannotSetAgentProperty {
+                Zfs::set_oxide_value(
+                    executor,
+                    name,
+                    "agent",
+                    agent_local_value,
+                )
+                .map_err(|err| {
+                    DiskError::CannotSetAgentProperty {
                         dataset: name.clone(),
                         err: Box::new(err),
-                    })?;
+                    }
+                })?;
             }
         }
         Ok(())

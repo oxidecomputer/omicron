@@ -1,0 +1,30 @@
+[package]
+name = "helios-tokamak"
+description = "Utilities to create a fake Helios system"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+camino.workspace = true
+cfg-if.workspace = true
+futures.workspace = true
+helios-fusion.workspace = true
+itertools.workspace = true
+libc.workspace = true
+omicron-common.workspace = true
+schemars.workspace = true
+serde.workspace = true
+shlex.workspace = true
+slog.workspace = true
+smf.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+uuid.workspace = true
+zone.workspace = true
+omicron-workspace-hack = { version = "0.1", path = "../../workspace-hack" }
+
+[dev-dependencies]
+omicron-test-utils.workspace = true

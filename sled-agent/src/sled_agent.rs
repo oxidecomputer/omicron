@@ -25,10 +25,13 @@ use crate::zone_bundle::BundleError;
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
 use dropshot::HttpError;
+use helios_fusion::BoxedExecutor;
+use illumos_utils::dladm::Dladm;
 use illumos_utils::opte::params::{
     DeleteVirtualNetworkInterfaceHost, SetVirtualNetworkInterfaceHost,
 };
 use illumos_utils::opte::PortManager;
+use illumos_utils::zone::Zones;
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use illumos_utils::zone::ZONE_PREFIX;
 use omicron_common::address::{
@@ -52,11 +55,6 @@ use std::net::{Ipv6Addr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;
 
-#[cfg(not(test))]
-use illumos_utils::{dladm::Dladm, zone::Zones};
-#[cfg(test)]
-use illumos_utils::{dladm::MockDladm as Dladm, zone::MockZones as Zones};
-
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("Configuration error: {0}")]
@@ -66,7 +64,7 @@ pub enum Error {
     SwapDevice(#[from] crate::swap_device::SwapDeviceError),
 
     #[error("Failed to acquire etherstub: {0}")]
-    Etherstub(illumos_utils::ExecutionError),
+    Etherstub(helios_fusion::ExecutionError),
 
     #[error("Failed to acquire etherstub VNIC: {0}")]
     EtherstubVnic(illumos_utils::dladm::CreateVnicError),
@@ -75,7 +73,7 @@ pub enum Error {
     Bootstrap(#[from] crate::bootstrap::BootstrapError),
 
     #[error("Failed to remove Omicron address: {0}")]
-    DeleteAddress(#[from] illumos_utils::ExecutionError),
+    DeleteAddress(#[from] helios_fusion::ExecutionError),
 
     #[error("Failed to operate on underlay device: {0}")]
     Underlay(#[from] underlay::Error),
@@ -194,6 +192,9 @@ struct SledAgentInner {
     // ID of the Sled
     id: Uuid,
 
+    // Sled Agent's interaction with the host system
+    executor: BoxedExecutor,
+
     // Subnet of the Sled's underlay.
     //
     // The Sled Agent's address can be derived from this value.
@@ -248,9 +249,11 @@ pub struct SledAgent {
 
 impl SledAgent {
     /// Initializes a new [`SledAgent`] object.
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         config: &Config,
         log: Logger,
+        executor: &BoxedExecutor,
         nexus_client: NexusClientWithResolver,
         request: StartSledAgentRequest,
         services: ServiceManager,
@@ -278,6 +281,7 @@ impl SledAgent {
                     })?;
                 crate::swap_device::ensure_swap_device(
                     &parent_log,
+                    executor,
                     &boot_disk.1,
                     sz,
                 )?;
@@ -299,15 +303,17 @@ impl SledAgent {
         // etherstub and etherstub VNIC exist on startup - could it pass them
         // through to us?
         let etherstub = Dladm::ensure_etherstub(
+            executor,
             illumos_utils::dladm::UNDERLAY_ETHERSTUB_NAME,
         )
         .map_err(|e| Error::Etherstub(e))?;
-        let etherstub_vnic = Dladm::ensure_etherstub_vnic(&etherstub)
+        let etherstub_vnic = Dladm::ensure_etherstub_vnic(executor, &etherstub)
             .map_err(|e| Error::EtherstubVnic(e))?;
 
         // Ensure the global zone has a functioning IPv6 address.
         let sled_address = request.sled_address();
         Zones::ensure_has_global_zone_v6_address(
+            executor,
             etherstub_vnic.clone(),
             *sled_address.ip(),
             "sled6",
@@ -315,12 +321,13 @@ impl SledAgent {
         .map_err(|err| Error::SledSubnet { err })?;
 
         // Initialize the xde kernel driver with the underlay devices.
-        let underlay_nics = underlay::find_nics(&config.data_links)?;
+        let underlay_nics = underlay::find_nics(executor, &config.data_links)?;
         illumos_utils::opte::initialize_xde_driver(&log, &underlay_nics)?;
 
         // Create the PortManager to manage all the OPTE ports on the sled.
         let port_manager = PortManager::new(
             parent_log.new(o!("component" => "PortManager")),
+            executor,
             *sled_address.ip(),
         );
 
@@ -341,6 +348,7 @@ impl SledAgent {
 
         let instances = InstanceManager::new(
             parent_log.clone(),
+            executor,
             nexus_client.clone(),
             etherstub.clone(),
             port_manager.clone(),
@@ -425,6 +433,7 @@ impl SledAgent {
         let sled_agent = SledAgent {
             inner: Arc::new(SledAgentInner {
                 id: request.id,
+                executor: executor.clone(),
                 subnet: request.subnet,
                 storage,
                 instances,
@@ -643,7 +652,7 @@ impl SledAgent {
 
     /// List the zones that the sled agent is currently managing.
     pub async fn zones_list(&self) -> Result<Vec<String>, Error> {
-        Zones::get()
+        Zones::get(&self.inner.executor)
             .await
             .map(|zones| {
                 let mut zn: Vec<_> = zones

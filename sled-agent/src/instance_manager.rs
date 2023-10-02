@@ -15,6 +15,7 @@ use crate::params::{
 use crate::storage_manager::StorageResources;
 use crate::zone_bundle::BundleError;
 use crate::zone_bundle::ZoneBundler;
+use helios_fusion::BoxedExecutor;
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::PortManager;
@@ -49,6 +50,7 @@ pub enum Error {
 
 struct InstanceManagerInternal {
     log: Logger,
+    executor: BoxedExecutor,
     nexus_client: NexusClientWithResolver,
 
     /// Last set size of the VMM reservoir (in bytes)
@@ -75,6 +77,7 @@ impl InstanceManager {
     /// Initializes a new [`InstanceManager`] object.
     pub fn new(
         log: Logger,
+        executor: &BoxedExecutor,
         nexus_client: NexusClientWithResolver,
         etherstub: Etherstub,
         port_manager: PortManager,
@@ -84,12 +87,15 @@ impl InstanceManager {
         Ok(InstanceManager {
             inner: Arc::new(InstanceManagerInternal {
                 log: log.new(o!("component" => "InstanceManager")),
+                executor: executor.clone(),
                 nexus_client,
 
                 // no reservoir size set on startup
                 reservoir_size: Mutex::new(ByteCount::from_kibibytes_u32(0)),
                 instances: Mutex::new(BTreeMap::new()),
-                vnic_allocator: VnicAllocator::new("Instance", etherstub),
+                vnic_allocator: VnicAllocator::new(
+                    executor, "Instance", etherstub,
+                ),
                 port_manager,
                 storage,
                 zone_bundler,
@@ -209,6 +215,7 @@ impl InstanceManager {
                     InstanceTicket::new(instance_id, self.inner.clone());
                 let instance = Instance::new(
                     instance_log,
+                    &self.inner.executor,
                     instance_id,
                     ticket,
                     initial_hardware,

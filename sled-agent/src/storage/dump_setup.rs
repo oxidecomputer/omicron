@@ -1,6 +1,7 @@
 use crate::storage_manager::DiskWrapper;
 use camino::Utf8PathBuf;
 use derive_more::{AsRef, Deref, From};
+use helios_fusion::{BoxedExecutor, ExecutionError};
 use illumos_utils::dumpadm::DumpAdmError;
 use illumos_utils::zone::{AdmError, Zones};
 use illumos_utils::zpool::{ZpoolHealth, ZpoolName};
@@ -15,15 +16,18 @@ use std::time::{Duration, SystemTime, SystemTimeError, UNIX_EPOCH};
 use tokio::sync::MutexGuard;
 
 pub struct DumpSetup {
+    executor: BoxedExecutor,
     worker: Arc<std::sync::Mutex<DumpSetupWorker>>,
     _poller: std::thread::JoinHandle<()>,
     log: Logger,
 }
 
 impl DumpSetup {
-    pub fn new(log: &Logger) -> Self {
+    pub fn new(log: &Logger, executor: BoxedExecutor) -> Self {
+        let exec = executor.clone();
         let worker = Arc::new(std::sync::Mutex::new(DumpSetupWorker::new(
             log.new(o!("component" => "DumpSetup-worker")),
+            exec,
         )));
         let worker_weak = Arc::downgrade(&worker);
         let log_poll = log.new(o!("component" => "DumpSetup-archival"));
@@ -31,7 +35,7 @@ impl DumpSetup {
             Self::poll_file_archival(worker_weak, log_poll)
         });
         let log = log.new(o!("component" => "DumpSetup"));
-        Self { worker, _poller, log }
+        Self { executor, worker, _poller, log }
     }
 }
 
@@ -58,8 +62,11 @@ struct DebugZpool(ZpoolName);
 trait GetMountpoint: std::ops::Deref<Target = ZpoolName> {
     type NewType: From<Utf8PathBuf>;
     const MOUNTPOINT: &'static str;
-    fn mountpoint(&self) -> Result<Option<Self::NewType>, ZfsGetError> {
-        if zfs_get_prop(self.to_string(), "mounted")? == "yes" {
+    fn mountpoint(
+        &self,
+        executor: &BoxedExecutor,
+    ) -> Result<Option<Self::NewType>, ZfsGetError> {
+        if zfs_get_prop(executor, self.to_string(), "mounted")? == "yes" {
             Ok(Some(Self::NewType::from(
                 self.dataset_mountpoint(Self::MOUNTPOINT),
             )))
@@ -92,6 +99,7 @@ struct DumpSetupWorker {
     savecored_slices: HashSet<DumpSlicePath>,
 
     log: Logger,
+    executor: BoxedExecutor,
 }
 
 const ARCHIVAL_INTERVAL: Duration = Duration::from_secs(300);
@@ -119,6 +127,7 @@ impl DumpSetup {
                         }
                         let name = disk.zpool_name();
                         if let Ok(info) = illumos_utils::zpool::Zpool::get_info(
+                            &self.executor,
                             &name.to_string(),
                         ) {
                             if info.health() == ZpoolHealth::Online {
@@ -131,6 +140,7 @@ impl DumpSetup {
                     DiskVariant::U2 => {
                         let name = disk.zpool_name();
                         if let Ok(info) = illumos_utils::zpool::Zpool::get_info(
+                            &self.executor,
                             &name.to_string(),
                         ) {
                             if info.health() == ZpoolHealth::Online {
@@ -201,6 +211,8 @@ impl DumpSetup {
 
 #[derive(Debug, thiserror::Error)]
 enum ZfsGetError {
+    #[error("Failed to execute command: {0}")]
+    Execution(#[from] ExecutionError),
     #[error("Error executing 'zfs get' command: {0}")]
     IoError(#[from] std::io::Error),
     #[error("Output of 'zfs get' was not only not an integer string, it wasn't even UTF-8: {0}")]
@@ -213,13 +225,17 @@ const ZFS_PROP_USED: &str = "used";
 const ZFS_PROP_AVAILABLE: &str = "available";
 
 fn zfs_get_integer(
+    executor: &BoxedExecutor,
     mountpoint_or_name: impl AsRef<str>,
     property: &str,
 ) -> Result<u64, ZfsGetError> {
-    zfs_get_prop(mountpoint_or_name, property)?.parse().map_err(Into::into)
+    zfs_get_prop(executor, mountpoint_or_name, property)?
+        .parse()
+        .map_err(Into::into)
 }
 
 fn zfs_get_prop(
+    executor: &BoxedExecutor,
     mountpoint_or_name: impl AsRef<str> + Sized,
     property: &str,
 ) -> Result<String, ZfsGetError> {
@@ -228,7 +244,7 @@ fn zfs_get_prop(
     cmd.arg("get").arg("-Hpo").arg("value");
     cmd.arg(property);
     cmd.arg(mountpoint);
-    let output = cmd.output()?;
+    let output = executor.execute(&mut cmd)?;
     Ok(String::from_utf8(output.stdout)?.trim().to_string())
 }
 
@@ -236,18 +252,19 @@ const DATASET_USAGE_PERCENT_CHOICE: u64 = 70;
 const DATASET_USAGE_PERCENT_CLEANUP: u64 = 80;
 
 fn below_thresh(
+    executor: &BoxedExecutor,
     mountpoint: &Utf8PathBuf,
     percent: u64,
 ) -> Result<(bool, u64), ZfsGetError> {
-    let used = zfs_get_integer(mountpoint, ZFS_PROP_USED)?;
-    let available = zfs_get_integer(mountpoint, ZFS_PROP_AVAILABLE)?;
+    let used = zfs_get_integer(executor, mountpoint, ZFS_PROP_USED)?;
+    let available = zfs_get_integer(executor, mountpoint, ZFS_PROP_AVAILABLE)?;
     let capacity = used + available;
     let below = (used * 100) / capacity < percent;
     Ok((below, used))
 }
 
 impl DumpSetupWorker {
-    fn new(log: Logger) -> Self {
+    fn new(log: Logger, executor: BoxedExecutor) -> Self {
         Self {
             core_dataset_names: vec![],
             debug_dataset_names: vec![],
@@ -259,6 +276,7 @@ impl DumpSetupWorker {
             known_core_dirs: vec![],
             savecored_slices: Default::default(),
             log,
+            executor,
         }
     }
 
@@ -282,13 +300,13 @@ impl DumpSetupWorker {
         self.known_debug_dirs = self
             .debug_dataset_names
             .iter()
-            .flat_map(|ds| ds.mountpoint())
+            .flat_map(|ds| ds.mountpoint(&self.executor))
             .flatten()
             .collect();
         self.known_core_dirs = self
             .core_dataset_names
             .iter()
-            .flat_map(|ds| ds.mountpoint())
+            .flat_map(|ds| ds.mountpoint(&self.executor))
             .flatten()
             .collect();
     }
@@ -302,7 +320,7 @@ impl DumpSetupWorker {
         // below a certain usage threshold.
         self.known_debug_dirs.sort_by_cached_key(
             |mountpoint: &DebugDataset| {
-                match below_thresh(mountpoint.as_ref(), DATASET_USAGE_PERCENT_CHOICE) {
+                match below_thresh(&self.executor, mountpoint.as_ref(), DATASET_USAGE_PERCENT_CHOICE) {
                     Ok((below, used)) => {
                         let priority = if below { 0 } else { 1 };
                         (priority, used, mountpoint.clone())
@@ -317,7 +335,9 @@ impl DumpSetupWorker {
         );
         self.known_core_dirs.sort_by_cached_key(|mnt| {
             // these get archived periodically anyway, pick one with room
-            let available = zfs_get_integer(&**mnt, "available").unwrap_or(0);
+            let available =
+                zfs_get_integer(&self.executor, &**mnt, "available")
+                    .unwrap_or(0);
             (u64::MAX - available, mnt.clone())
         });
 
@@ -326,11 +346,16 @@ impl DumpSetupWorker {
                 warn!(self.log, "Previously-chosen debug/dump dir {x:?} no longer exists in our view of reality");
                 self.chosen_debug_dir = None;
             } else {
-                match below_thresh(x.as_ref(), DATASET_USAGE_PERCENT_CLEANUP) {
+                match below_thresh(
+                    &self.executor,
+                    x.as_ref(),
+                    DATASET_USAGE_PERCENT_CLEANUP,
+                ) {
                     Ok((true, _)) => {}
                     Ok((false, _)) => {
                         if self.known_debug_dirs.iter().any(|x| {
                             below_thresh(
+                                &self.executor,
                                 x.as_ref(),
                                 DATASET_USAGE_PERCENT_CHOICE,
                             )
@@ -427,7 +452,9 @@ impl DumpSetupWorker {
                             // Have dumpadm write the config for crash dumps to be
                             // on this slice, at least, until a U.2 comes along.
                             match illumos_utils::dumpadm::dumpadm(
-                                dump_slice, None,
+                                &self.executor,
+                                dump_slice,
+                                None,
                             ) {
                                 Ok(_) => {
                                     info!(self.log, "Using dump device {dump_slice:?} with no savecore destination (no U.2 debug zvol yet)");
@@ -486,9 +513,11 @@ impl DumpSetupWorker {
             // in the event of a kernel crash
             if changed_slice {
                 if let Some(dump_slice) = &self.chosen_dump_slice {
-                    if let Err(err) =
-                        illumos_utils::dumpadm::dumpadm(dump_slice, None)
-                    {
+                    if let Err(err) = illumos_utils::dumpadm::dumpadm(
+                        &self.executor,
+                        dump_slice,
+                        None,
+                    ) {
                         error!(self.log, "Could not restore dump slice to {dump_slice:?}: {err:?}");
                     }
                 }
@@ -574,7 +603,7 @@ impl DumpSetupWorker {
         // its 'sync' and 'async' features simultaneously :(
         let rt =
             tokio::runtime::Runtime::new().map_err(ArchiveLogsError::Tokio)?;
-        let oxz_zones = rt.block_on(Zones::get())?;
+        let oxz_zones = rt.block_on(Zones::get(&self.executor))?;
         self.archive_logs_inner(
             debug_dir,
             PathBuf::from("/var/svc/log"),
@@ -662,8 +691,11 @@ impl DumpSetupWorker {
 
         let savecore_dir = self.chosen_debug_dir.clone().unwrap().0;
 
-        match illumos_utils::dumpadm::dumpadm(&dump_slice, Some(&savecore_dir))
-        {
+        match illumos_utils::dumpadm::dumpadm(
+            &self.executor,
+            &dump_slice,
+            Some(&savecore_dir),
+        ) {
             Ok(saved) => {
                 self.savecored_slices.insert(dump_slice.clone());
                 Ok(saved)
@@ -675,7 +707,7 @@ impl DumpSetupWorker {
     fn cleanup(&self) -> Result<(), CleanupError> {
         let mut dir_info = Vec::new();
         for dir in &self.known_debug_dirs {
-            match Self::scope_dir_for_cleanup(dir) {
+            match Self::scope_dir_for_cleanup(&self.executor, dir) {
                 Ok(info) => {
                     dir_info.push((info, dir));
                 }
@@ -713,10 +745,12 @@ impl DumpSetupWorker {
     }
 
     fn scope_dir_for_cleanup(
+        executor: &BoxedExecutor,
         debug_dir: &DebugDataset,
     ) -> Result<CleanupDirInfo, CleanupError> {
-        let used = zfs_get_integer(&**debug_dir, ZFS_PROP_USED)?;
-        let available = zfs_get_integer(&**debug_dir, ZFS_PROP_AVAILABLE)?;
+        let used = zfs_get_integer(executor, &**debug_dir, ZFS_PROP_USED)?;
+        let available =
+            zfs_get_integer(executor, &**debug_dir, ZFS_PROP_AVAILABLE)?;
         let capacity = used + available;
 
         let target_used = capacity * DATASET_USAGE_PERCENT_CHOICE / 100;

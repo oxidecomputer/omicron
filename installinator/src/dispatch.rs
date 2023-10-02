@@ -8,6 +8,7 @@ use anyhow::{bail, Context, Result};
 use buf_list::{BufList, Cursor};
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::{Args, Parser, Subcommand};
+use helios_fusion::BoxedExecutor;
 use installinator_common::{
     InstallinatorCompletionMetadata, InstallinatorComponent, InstallinatorSpec,
     InstallinatorStepId, StepContext, StepHandle, StepProgress, StepSuccess,
@@ -40,13 +41,19 @@ pub struct InstallinatorApp {
 
 impl InstallinatorApp {
     /// Executes the app.
-    pub async fn exec(self, log: &slog::Logger) -> Result<()> {
+    pub async fn exec(
+        self,
+        log: &slog::Logger,
+        executor: &BoxedExecutor,
+    ) -> Result<()> {
         match self.subcommand {
             InstallinatorCommand::DebugDiscover(opts) => opts.exec(log).await,
             InstallinatorCommand::DebugHardwareScan(opts) => {
-                opts.exec(log).await
+                opts.exec(log, executor).await
             }
-            InstallinatorCommand::Install(opts) => opts.exec(log).await,
+            InstallinatorCommand::Install(opts) => {
+                opts.exec(log, executor).await
+            }
         }
     }
 
@@ -115,11 +122,15 @@ struct DiscoverOpts {
 struct DebugHardwareScan {}
 
 impl DebugHardwareScan {
-    async fn exec(self, log: &slog::Logger) -> Result<()> {
+    async fn exec(
+        self,
+        log: &slog::Logger,
+        executor: &BoxedExecutor,
+    ) -> Result<()> {
         // Finding the write destination from the gimlet hardware logs details
         // about what it's doing sufficiently for this subcommand; just create a
         // write destination and then discard it.
-        _ = WriteDestination::from_hardware(log).await?;
+        _ = WriteDestination::from_hardware(log, executor).await?;
         Ok(())
     }
 }
@@ -174,10 +185,19 @@ struct InstallOpts {
 }
 
 impl InstallOpts {
-    async fn exec(self, log: &slog::Logger) -> Result<()> {
+    async fn exec(
+        self,
+        log: &slog::Logger,
+        executor: &BoxedExecutor,
+    ) -> Result<()> {
         if self.bootstrap_sled {
             let data_links = [self.data_link0.clone(), self.data_link1.clone()];
-            crate::bootstrap::bootstrap_sled(&data_links, log.clone()).await?;
+            crate::bootstrap::bootstrap_sled(
+                &data_links,
+                log.clone(),
+                executor,
+            )
+            .await?;
         }
 
         let image_id = self.artifact_ids.resolve()?;
@@ -295,7 +315,7 @@ impl InstallOpts {
                     InstallinatorStepId::Scan,
                     "Scanning hardware to find M.2 disks",
                     move |cx| async move {
-                        scan_hardware_with_retries(&cx, &log).await
+                        scan_hardware_with_retries(&cx, &log, executor).await
                     },
                 )
                 .register()
@@ -352,7 +372,7 @@ impl InstallOpts {
 
                     // TODO: verify artifact was correctly written out to disk.
 
-                    let write_output = writer.write(&cx, log).await;
+                    let write_output = writer.write(&cx, log, executor).await;
                     let slots_not_written = write_output.slots_not_written();
 
                     let metadata = InstallinatorCompletionMetadata::Write {
@@ -431,6 +451,7 @@ async fn check_downloaded_artifact_hash(
 async fn scan_hardware_with_retries(
     cx: &StepContext,
     log: &slog::Logger,
+    executor: &BoxedExecutor,
 ) -> Result<StepResult<WriteDestination, InstallinatorSpec>> {
     // Scanning for our disks is inherently racy: we have to wait for the disks
     // to attach. This should take milliseconds in general; we'll set a hard cap
@@ -443,7 +464,7 @@ async fn scan_hardware_with_retries(
     let mut retry = 0;
     let result = loop {
         let log = log.clone();
-        let result = WriteDestination::from_hardware(&log).await;
+        let result = WriteDestination::from_hardware(&log, executor).await;
 
         match result {
             Ok(destination) => break Ok(destination),

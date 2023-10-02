@@ -6,25 +6,22 @@
 
 use crate::destructor::{Deletable, Destructor};
 use crate::dladm::{
-    CreateVnicError, DeleteVnicError, VnicSource, VNIC_PREFIX,
+    CreateVnicError, DeleteVnicError, Dladm, VnicSource, VNIC_PREFIX,
     VNIC_PREFIX_BOOTSTRAP, VNIC_PREFIX_CONTROL, VNIC_PREFIX_GUEST,
 };
+use helios_fusion::BoxedExecutor;
 use omicron_common::api::external::MacAddr;
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc,
 };
 
-#[cfg(not(any(test, feature = "testing")))]
-use crate::dladm::Dladm;
-#[cfg(any(test, feature = "testing"))]
-use crate::dladm::MockDladm as Dladm;
-
 /// A shareable wrapper around an atomic counter.
 /// May be used to allocate runtime-unique IDs for objects
 /// which have naming constraints - such as VNICs.
 #[derive(Clone)]
 pub struct VnicAllocator<DL: VnicSource + 'static> {
+    executor: BoxedExecutor,
     value: Arc<AtomicU64>,
     scope: String,
     data_link: DL,
@@ -44,8 +41,13 @@ impl<DL: VnicSource + Clone> VnicAllocator<DL> {
     ///
     /// VnicAllocator::new("Storage") produces
     /// - oxControlStorage0
-    pub fn new<S: AsRef<str>>(scope: S, data_link: DL) -> Self {
+    pub fn new<S: AsRef<str>>(
+        executor: &BoxedExecutor,
+        scope: S,
+        data_link: DL,
+    ) -> Self {
         Self {
+            executor: executor.clone(),
             value: Arc::new(AtomicU64::new(0)),
             scope: scope.as_ref().to_string(),
             data_link,
@@ -63,8 +65,16 @@ impl<DL: VnicSource + Clone> VnicAllocator<DL> {
         let name = allocator.next();
         debug_assert!(name.starts_with(VNIC_PREFIX));
         debug_assert!(name.starts_with(VNIC_PREFIX_CONTROL));
-        Dladm::create_vnic(&self.data_link, &name, mac, None, 9000)?;
+        Dladm::create_vnic(
+            &self.executor,
+            &self.data_link,
+            &name,
+            mac,
+            None,
+            9000,
+        )?;
         Ok(Link {
+            executor: self.executor.clone(),
             name,
             deleted: false,
             kind: LinkKind::OxideControlVnic,
@@ -79,6 +89,7 @@ impl<DL: VnicSource + Clone> VnicAllocator<DL> {
     ) -> Result<Link, InvalidLinkKind> {
         match LinkKind::from_name(name.as_ref()) {
             Some(kind) => Ok(Link {
+                executor: self.executor.clone(),
                 name: name.as_ref().to_owned(),
                 deleted: false,
                 kind,
@@ -90,6 +101,7 @@ impl<DL: VnicSource + Clone> VnicAllocator<DL> {
 
     fn new_superscope<S: AsRef<str>>(&self, scope: S) -> Self {
         Self {
+            executor: self.executor.clone(),
             value: self.value.clone(),
             scope: format!("{}{}", scope.as_ref(), self.scope),
             data_link: self.data_link.clone(),
@@ -99,8 +111,16 @@ impl<DL: VnicSource + Clone> VnicAllocator<DL> {
 
     pub fn new_bootstrap(&self) -> Result<Link, CreateVnicError> {
         let name = self.next();
-        Dladm::create_vnic(&self.data_link, &name, None, None, 1500)?;
+        Dladm::create_vnic(
+            &self.executor,
+            &self.data_link,
+            &name,
+            None,
+            None,
+            1500,
+        )?;
         Ok(Link {
+            executor: self.executor.clone(),
             name,
             deleted: false,
             kind: LinkKind::OxideBootstrapVnic,
@@ -156,6 +176,7 @@ pub struct InvalidLinkKind(String);
 /// another process in the global zone could also modify / destroy
 /// the VNIC while this object is alive.
 pub struct Link {
+    executor: BoxedExecutor,
     name: String,
     deleted: bool,
     kind: LinkKind,
@@ -176,8 +197,12 @@ impl Link {
     /// Wraps a physical nic in a Link structure.
     ///
     /// It is the caller's responsibility to ensure this is a physical link.
-    pub fn wrap_physical<S: AsRef<str>>(name: S) -> Self {
+    pub fn wrap_physical<S: AsRef<str>>(
+        executor: &BoxedExecutor,
+        name: S,
+    ) -> Self {
         Link {
+            executor: executor.clone(),
             name: name.as_ref().to_owned(),
             deleted: false,
             kind: LinkKind::Physical,
@@ -190,7 +215,7 @@ impl Link {
         if self.deleted || self.kind == LinkKind::Physical {
             Ok(())
         } else {
-            Dladm::delete_vnic(&self.name)?;
+            Dladm::delete_vnic(&self.executor, &self.name)?;
             self.deleted = true;
             Ok(())
         }
@@ -208,8 +233,10 @@ impl Link {
 impl Drop for Link {
     fn drop(&mut self) {
         if let Some(destructor) = self.destructor.take() {
-            destructor
-                .enqueue_destroy(VnicDestruction { name: self.name.clone() });
+            destructor.enqueue_destroy(VnicDestruction {
+                executor: self.executor.clone(),
+                name: self.name.clone(),
+            });
         }
     }
 }
@@ -217,12 +244,13 @@ impl Drop for Link {
 // Represents the request to destroy a VNIC
 struct VnicDestruction {
     name: String,
+    executor: BoxedExecutor,
 }
 
 #[async_trait::async_trait]
 impl Deletable for VnicDestruction {
     async fn delete(&self) -> Result<(), anyhow::Error> {
-        Dladm::delete_vnic(&self.name)?;
+        Dladm::delete_vnic(&self.executor, &self.name)?;
         Ok(())
     }
 }
@@ -231,22 +259,37 @@ impl Deletable for VnicDestruction {
 mod test {
     use super::*;
     use crate::dladm::Etherstub;
+    use helios_tokamak::FakeExecutorBuilder;
+
+    use omicron_test_utils::dev;
 
     #[tokio::test]
     async fn test_allocate() {
-        let allocator =
-            VnicAllocator::new("Foo", Etherstub("mystub".to_string()));
+        let logctx = dev::test_setup_log("test_allocate");
+        let executor = FakeExecutorBuilder::new(logctx.log.clone()).build();
+        let allocator = VnicAllocator::new(
+            &executor.as_executor(),
+            "Foo",
+            Etherstub("mystub".to_string()),
+        );
         assert_eq!("oxFoo0", allocator.next());
         assert_eq!("oxFoo1", allocator.next());
         assert_eq!("oxFoo2", allocator.next());
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
     async fn test_allocate_within_scopes() {
-        let allocator =
-            VnicAllocator::new("Foo", Etherstub("mystub".to_string()));
+        let logctx = dev::test_setup_log("test_allocate_within_scopes");
+        let executor = FakeExecutorBuilder::new(logctx.log.clone()).build();
+        let allocator = VnicAllocator::new(
+            &executor.as_executor(),
+            "Foo",
+            Etherstub("mystub".to_string()),
+        );
         assert_eq!("oxFoo0", allocator.next());
         let allocator = allocator.new_superscope("Baz");
         assert_eq!("oxBazFoo1", allocator.next());
+        logctx.cleanup_successful();
     }
 }

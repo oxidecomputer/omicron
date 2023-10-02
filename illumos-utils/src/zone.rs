@@ -14,7 +14,7 @@ use std::net::{IpAddr, Ipv6Addr};
 
 use crate::addrobj::AddrObject;
 use crate::dladm::{EtherstubVnic, VNIC_PREFIX_BOOTSTRAP, VNIC_PREFIX_CONTROL};
-use crate::{execute, PFEXEC};
+use helios_fusion::{BoxedExecutor, ExecutionError, PFEXEC};
 use omicron_common::address::SLED_PREFIX;
 
 const DLADM: &str = "/usr/sbin/dladm";
@@ -22,6 +22,8 @@ pub const IPADM: &str = "/usr/sbin/ipadm";
 pub const SVCADM: &str = "/usr/sbin/svcadm";
 pub const SVCCFG: &str = "/usr/sbin/svccfg";
 pub const ZLOGIN: &str = "/usr/sbin/zlogin";
+pub const ZONEADM: &str = "/usr/sbin/zoneadm";
+pub const ZONECFG: &str = "/usr/sbin/zonecfg";
 
 // TODO: These could become enums
 pub const ZONE_PREFIX: &str = "oxz_";
@@ -30,7 +32,7 @@ pub const PROPOLIS_ZONE_PREFIX: &str = "oxz_propolis-server_";
 #[derive(thiserror::Error, Debug)]
 enum Error {
     #[error("Zone execution error: {0}")]
-    Execution(#[from] crate::ExecutionError),
+    Execution(#[from] ExecutionError),
 
     #[error(transparent)]
     AddrObject(#[from] crate::addrobj::ParseError),
@@ -51,6 +53,13 @@ pub enum Operation {
     Uninstall,
 }
 
+#[derive(thiserror::Error, Debug)]
+#[error(transparent)]
+enum AdmErrorVariant {
+    Execution(#[from] ExecutionError),
+    Adm(#[from] zone::ZoneError),
+}
+
 /// Errors from issuing [`zone::Adm`] commands.
 #[derive(thiserror::Error, Debug)]
 #[error("Failed to execute zoneadm command '{op:?}' for zone '{zone}': {err}")]
@@ -58,7 +67,7 @@ pub struct AdmError {
     op: Operation,
     zone: String,
     #[source]
-    err: zone::ZoneError,
+    err: AdmErrorVariant,
 }
 
 /// Errors which may be encountered when deleting addresses.
@@ -68,7 +77,7 @@ pub struct DeleteAddressError {
     zone: String,
     addrobj: AddrObject,
     #[source]
-    err: crate::ExecutionError,
+    err: ExecutionError,
 }
 
 /// Errors from [`Zones::get_control_interface`].
@@ -79,7 +88,7 @@ pub enum GetControlInterfaceError {
     Execution {
         zone: String,
         #[source]
-        err: crate::ExecutionError,
+        err: ExecutionError,
     },
 
     #[error("VNIC starting with 'oxControl' not found in {zone}")]
@@ -94,7 +103,7 @@ pub enum GetBootstrapInterfaceError {
     Execution {
         zone: String,
         #[source]
-        err: crate::ExecutionError,
+        err: ExecutionError,
     },
 
     #[error("VNIC starting with 'oxBootstrap' not found in {zone}")]
@@ -203,16 +212,16 @@ fn parse_ip_network(s: &str) -> Result<IpNetwork, IpNetworkError> {
     }
 }
 
-#[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
 impl Zones {
     /// Ensures a zone is halted before both uninstalling and deleting it.
     ///
     /// Returns the state the zone was in before it was removed, or None if the
     /// zone did not exist.
     pub async fn halt_and_remove(
+        executor: &BoxedExecutor,
         name: &str,
     ) -> Result<Option<zone::State>, AdmError> {
-        match Self::find(name).await? {
+        match Self::find(executor, name).await? {
             None => Ok(None),
             Some(zone) => {
                 let state = zone.state();
@@ -231,7 +240,7 @@ impl Zones {
                         AdmError {
                             op: Operation::Halt,
                             zone: name.to_string(),
-                            err,
+                            err: err.into(),
                         }
                     })?;
                 }
@@ -242,7 +251,7 @@ impl Zones {
                         .map_err(|err| AdmError {
                             op: Operation::Uninstall,
                             zone: name.to_string(),
-                            err,
+                            err: err.into(),
                         })?;
                 }
                 zone::Config::new(name)
@@ -252,7 +261,7 @@ impl Zones {
                     .map_err(|err| AdmError {
                     op: Operation::Delete,
                     zone: name.to_string(),
-                    err,
+                    err: err.into(),
                 })?;
                 Ok(Some(state))
             }
@@ -262,9 +271,10 @@ impl Zones {
     /// Halt and remove the zone, logging the state in which the zone was found.
     pub async fn halt_and_remove_logged(
         log: &Logger,
+        executor: &BoxedExecutor,
         name: &str,
     ) -> Result<(), AdmError> {
-        if let Some(state) = Self::halt_and_remove(name).await? {
+        if let Some(state) = Self::halt_and_remove(executor, name).await? {
             info!(
                 log,
                 "halt_and_remove_logged: Previous zone state: {:?}", state
@@ -280,6 +290,7 @@ impl Zones {
     /// - Otherwise, the zone is deleted.
     #[allow(clippy::too_many_arguments)]
     pub async fn install_omicron_zone(
+        executor: &BoxedExecutor,
         log: &Logger,
         zone_root_path: &Utf8Path,
         zone_name: &str,
@@ -290,7 +301,7 @@ impl Zones {
         links: Vec<String>,
         limit_priv: Vec<String>,
     ) -> Result<(), AdmError> {
-        if let Some(zone) = Self::find(zone_name).await? {
+        if let Some(zone) = Self::find(executor, zone_name).await? {
             info!(
                 log,
                 "install_omicron_zone: Found zone: {} in state {:?}",
@@ -307,7 +318,8 @@ impl Zones {
                     "Invalid state; uninstalling and deleting zone {}",
                     zone_name
                 );
-                Zones::halt_and_remove_logged(log, zone.name()).await?;
+                Zones::halt_and_remove_logged(log, executor, zone.name())
+                    .await?;
             }
         }
 
@@ -344,34 +356,41 @@ impl Zones {
                 ..Default::default()
             });
         }
-        cfg.run().await.map_err(|err| AdmError {
+        let mut cmd = tokio::process::Command::from(cfg.as_command());
+        executor.execute_async(&mut cmd).await.map_err(|err| AdmError {
             op: Operation::Configure,
             zone: zone_name.to_string(),
-            err,
+            err: err.into(),
         })?;
 
         info!(log, "Installing Omicron zone: {}", zone_name);
 
-        zone::Adm::new(zone_name)
-            .install(&[
+        let mut cmd = tokio::process::Command::from(
+            zone::Adm::new(zone_name).install_command(&[
                 zone_image.as_ref(),
                 "/opt/oxide/overlay.tar.gz".as_ref(),
-            ])
-            .await
-            .map_err(|err| AdmError {
-                op: Operation::Install,
-                zone: zone_name.to_string(),
-                err,
-            })?;
+            ]),
+        );
+        executor.execute_async(&mut cmd).await.map_err(|err| AdmError {
+            op: Operation::Install,
+            zone: zone_name.to_string(),
+            err: err.into(),
+        })?;
         Ok(())
     }
 
     /// Boots a zone (named `name`).
-    pub async fn boot(name: &str) -> Result<(), AdmError> {
-        zone::Adm::new(name).boot().await.map_err(|err| AdmError {
+    pub async fn boot(
+        executor: &BoxedExecutor,
+        name: &str,
+    ) -> Result<(), AdmError> {
+        let mut cmd =
+            tokio::process::Command::from(zone::Adm::new(name).boot_command());
+
+        executor.execute_async(&mut cmd).await.map_err(|err| AdmError {
             op: Operation::Boot,
             zone: name.to_string(),
-            err,
+            err: err.into(),
         })?;
         Ok(())
     }
@@ -379,14 +398,25 @@ impl Zones {
     /// Returns all zones that may be managed by the Sled Agent.
     ///
     /// These zones must have names starting with [`ZONE_PREFIX`].
-    pub async fn get() -> Result<Vec<zone::Zone>, AdmError> {
-        Ok(zone::Adm::list()
+    pub async fn get(
+        executor: &BoxedExecutor,
+    ) -> Result<Vec<zone::Zone>, AdmError> {
+        let handle_err = |err| AdmError {
+            op: Operation::List,
+            zone: "<all>".to_string(),
+            err,
+        };
+
+        let mut cmd = tokio::process::Command::from(zone::Adm::list_command());
+        let output = executor
+            .execute_async(&mut cmd)
             .await
-            .map_err(|err| AdmError {
-                op: Operation::List,
-                zone: "<all>".to_string(),
-                err,
-            })?
+            .map_err(|err| handle_err(err.into()))?;
+
+        let zones = zone::Adm::parse_list_output(&output)
+            .map_err(|err| handle_err(err.into()))?;
+
+        Ok(zones
             .into_iter()
             .filter(|z| z.name().starts_with(ZONE_PREFIX))
             .collect())
@@ -396,8 +426,14 @@ impl Zones {
     ///
     /// Can only return zones that start with [`ZONE_PREFIX`], as they
     /// are managed by the Sled Agent.
-    pub async fn find(name: &str) -> Result<Option<zone::Zone>, AdmError> {
-        Ok(Self::get().await?.into_iter().find(|zone| zone.name() == name))
+    pub async fn find(
+        executor: &BoxedExecutor,
+        name: &str,
+    ) -> Result<Option<zone::Zone>, AdmError> {
+        Ok(Self::get(executor)
+            .await?
+            .into_iter()
+            .find(|zone| zone.name() == name))
     }
 
     /// Return the ID for a _running_ zone with the specified name.
@@ -407,10 +443,13 @@ impl Zones {
     // object. But that can't easily be done, because we need to supply
     // `mockall` with a value to return, and `zone::Zone` objects can't be
     // constructed since they have private fields.
-    pub async fn id(name: &str) -> Result<Option<i32>, AdmError> {
+    pub async fn id(
+        executor: &BoxedExecutor,
+        name: &str,
+    ) -> Result<Option<i32>, AdmError> {
         // Safety: illumos defines `zoneid_t` as a typedef for an integer, i.e.,
         // an `i32`, so this unwrap should always be safe.
-        match Self::find(name).await?.map(|zn| zn.id()) {
+        match Self::find(executor, name).await?.map(|zn| zn.id()) {
             Some(Some(id)) => Ok(Some(id.try_into().unwrap())),
             Some(None) | None => Ok(None),
         }
@@ -418,6 +457,7 @@ impl Zones {
 
     /// Returns the name of the VNIC used to communicate with the control plane.
     pub fn get_control_interface(
+        executor: &BoxedExecutor,
         zone: &str,
     ) -> Result<String, GetControlInterfaceError> {
         let mut command = std::process::Command::new(PFEXEC);
@@ -430,7 +470,7 @@ impl Zones {
             "-o",
             "LINK",
         ]);
-        let output = execute(cmd).map_err(|err| {
+        let output = executor.execute(cmd).map_err(|err| {
             GetControlInterfaceError::Execution { zone: zone.to_string(), err }
         })?;
         String::from_utf8_lossy(&output.stdout)
@@ -449,6 +489,7 @@ impl Zones {
 
     /// Returns the name of the VNIC used to communicate with the bootstrap network.
     pub fn get_bootstrap_interface(
+        executor: &BoxedExecutor,
         zone: &str,
     ) -> Result<Option<String>, GetBootstrapInterfaceError> {
         let mut command = std::process::Command::new(PFEXEC);
@@ -461,7 +502,7 @@ impl Zones {
             "-o",
             "LINK",
         ]);
-        let output = execute(cmd).map_err(|err| {
+        let output = executor.execute(cmd).map_err(|err| {
             GetBootstrapInterfaceError::Execution {
                 zone: zone.to_string(),
                 err,
@@ -496,12 +537,13 @@ impl Zones {
     /// If `None` is supplied, the address is queried from the Global Zone.
     #[allow(clippy::needless_lifetimes)]
     pub fn ensure_address<'a>(
+        executor: &BoxedExecutor,
         zone: Option<&'a str>,
         addrobj: &AddrObject,
         addrtype: AddressRequest,
     ) -> Result<IpNetwork, EnsureAddressError> {
         |zone, addrobj, addrtype| -> Result<IpNetwork, anyhow::Error> {
-            match Self::get_address_impl(zone, addrobj) {
+            match Self::get_address_impl(executor, zone, addrobj) {
                 Ok(addr) => {
                     if let AddressRequest::Static(expected_addr) = addrtype {
                         // If the address is static, we need to validate that it
@@ -509,18 +551,20 @@ impl Zones {
                         if addr != expected_addr {
                             // If the address doesn't match, try removing the old
                             // value before using the new one.
-                            Self::delete_address(zone, addrobj)
+                            Self::delete_address(executor, zone, addrobj)
                                 .map_err(|e| anyhow!(e))?;
                             return Self::create_address(
-                                zone, addrobj, addrtype,
+                                executor, zone, addrobj, addrtype,
                             )
                             .map_err(|e| anyhow!(e));
                         }
                     }
                     Ok(addr)
                 }
-                Err(_) => Self::create_address(zone, addrobj, addrtype)
-                    .map_err(|e| anyhow!(e)),
+                Err(_) => {
+                    Self::create_address(executor, zone, addrobj, addrtype)
+                        .map_err(|e| anyhow!(e))
+                }
             }
         }(zone, addrobj, addrtype)
         .map_err(|err| EnsureAddressError {
@@ -537,13 +581,16 @@ impl Zones {
     /// If `None` is supplied, the address is queried from the Global Zone.
     #[allow(clippy::needless_lifetimes)]
     pub fn get_address<'a>(
+        executor: &BoxedExecutor,
         zone: Option<&'a str>,
         addrobj: &AddrObject,
     ) -> Result<IpNetwork, GetAddressError> {
-        Self::get_address_impl(zone, addrobj).map_err(|err| GetAddressError {
-            zone: zone.unwrap_or("global").to_string(),
-            name: addrobj.clone(),
-            err: anyhow!(err),
+        Self::get_address_impl(executor, zone, addrobj).map_err(|err| {
+            GetAddressError {
+                zone: zone.unwrap_or("global").to_string(),
+                name: addrobj.clone(),
+                err: anyhow!(err),
+            }
         })
     }
 
@@ -553,6 +600,7 @@ impl Zones {
     /// If `None` is supplied, the address is queried from the Global Zone.
     #[allow(clippy::needless_lifetimes)]
     fn get_address_impl<'a>(
+        executor: &BoxedExecutor,
         zone: Option<&'a str>,
         addrobj: &AddrObject,
     ) -> Result<IpNetwork, Error> {
@@ -567,7 +615,7 @@ impl Zones {
         args.extend(&[IPADM, "show-addr", "-p", "-o", "ADDR", &addrobj_str]);
 
         let cmd = command.args(args);
-        let output = execute(cmd)?;
+        let output = executor.execute(cmd)?;
         String::from_utf8_lossy(&output.stdout)
             .lines()
             .find_map(|s| parse_ip_network(s).ok())
@@ -580,6 +628,7 @@ impl Zones {
     /// If `None` is supplied, the address is queried from the Global Zone.
     #[allow(clippy::needless_lifetimes)]
     pub fn get_all_addresses<'a>(
+        executor: &BoxedExecutor,
         zone: Option<&'a str>,
         addrobj: &AddrObject,
     ) -> Result<Vec<IpNetwork>, GetAddressesError> {
@@ -594,11 +643,12 @@ impl Zones {
         args.extend(&[IPADM, "show-addr", "-p", "-o", "ADDR", &addrobj_str]);
 
         let cmd = command.args(args);
-        let output = execute(cmd).map_err(|err| GetAddressesError {
-            zone: zone.unwrap_or("global").to_string(),
-            name: addrobj.clone(),
-            err: err.into(),
-        })?;
+        let output =
+            executor.execute(cmd).map_err(|err| GetAddressesError {
+                zone: zone.unwrap_or("global").to_string(),
+                name: addrobj.clone(),
+                err: err.into(),
+            })?;
         Ok(String::from_utf8_lossy(&output.stdout)
             .lines()
             .filter_map(|s| s.parse().ok())
@@ -611,6 +661,7 @@ impl Zones {
     /// run the command in the Global zone.
     #[allow(clippy::needless_lifetimes)]
     fn has_link_local_v6_address<'a>(
+        executor: &BoxedExecutor,
         zone: Option<&'a str>,
         addrobj: &AddrObject,
     ) -> Result<(), Error> {
@@ -625,7 +676,7 @@ impl Zones {
 
         let args = prefix.iter().chain(show_addr_args);
         let cmd = command.args(args);
-        let output = execute(cmd)?;
+        let output = executor.execute(cmd)?;
         if let Some(_) = String::from_utf8_lossy(&output.stdout)
             .lines()
             .find(|s| s.trim() == "addrconf")
@@ -640,10 +691,11 @@ impl Zones {
     // Does NOT check if the address already exists.
     #[allow(clippy::needless_lifetimes)]
     fn create_address_internal<'a>(
+        executor: &BoxedExecutor,
         zone: Option<&'a str>,
         addrobj: &AddrObject,
         addrtype: AddressRequest,
-    ) -> Result<(), crate::ExecutionError> {
+    ) -> Result<(), ExecutionError> {
         let mut command = std::process::Command::new(PFEXEC);
         let mut args = vec![];
         if let Some(zone) = zone {
@@ -670,13 +722,14 @@ impl Zones {
         args.push(addrobj.to_string());
 
         let cmd = command.args(args);
-        execute(cmd)?;
+        executor.execute(cmd)?;
 
         Ok(())
     }
 
     #[allow(clippy::needless_lifetimes)]
     pub fn delete_address<'a>(
+        executor: &BoxedExecutor,
         zone: Option<&'a str>,
         addrobj: &AddrObject,
     ) -> Result<(), DeleteAddressError> {
@@ -692,7 +745,7 @@ impl Zones {
         args.push(addrobj.to_string());
 
         let cmd = command.args(args);
-        execute(cmd).map_err(|err| DeleteAddressError {
+        executor.execute(cmd).map_err(|err| DeleteAddressError {
             zone: zone.unwrap_or("global").to_string(),
             addrobj: addrobj.clone(),
             err,
@@ -709,10 +762,13 @@ impl Zones {
     /// <https://ry.goodwu.net/tinkering/a-day-in-the-life-of-an-ipv6-address-on-illumos/>
     #[allow(clippy::needless_lifetimes)]
     pub fn ensure_has_link_local_v6_address<'a>(
+        executor: &BoxedExecutor,
         zone: Option<&'a str>,
         addrobj: &AddrObject,
-    ) -> Result<(), crate::ExecutionError> {
-        if let Ok(()) = Self::has_link_local_v6_address(zone, &addrobj) {
+    ) -> Result<(), ExecutionError> {
+        if let Ok(()) =
+            Self::has_link_local_v6_address(executor, zone, &addrobj)
+        {
             return Ok(());
         }
 
@@ -733,7 +789,7 @@ impl Zones {
         let args = prefix.iter().chain(create_addr_args);
 
         let cmd = command.args(args);
-        execute(cmd)?;
+        executor.execute(cmd)?;
         Ok(())
     }
 
@@ -743,6 +799,7 @@ impl Zones {
     // (which exists pre-RSS), but we should remove all uses of it other than
     // the bootstrap agent.
     pub fn ensure_has_global_zone_v6_address(
+        executor: &BoxedExecutor,
         link: EtherstubVnic,
         address: Ipv6Addr,
         name: &str,
@@ -753,6 +810,7 @@ impl Zones {
             let gz_link_local_addrobj = AddrObject::link_local(&link.0)
                 .map_err(|err| anyhow!(err))?;
             Self::ensure_has_link_local_v6_address(
+                executor,
                 None,
                 &gz_link_local_addrobj,
             )
@@ -765,6 +823,7 @@ impl Zones {
             // this sled itself are within the underlay or bootstrap prefix.
             // Anything else must be routed through Sidecar.
             Self::ensure_address(
+                executor,
                 None,
                 &gz_link_local_addrobj
                     .on_same_interface(name)
@@ -805,6 +864,7 @@ impl Zones {
     // Creates an IP address within a Zone.
     #[allow(clippy::needless_lifetimes)]
     fn create_address<'a>(
+        executor: &BoxedExecutor,
         zone: Option<&'a str>,
         addrobj: &AddrObject,
         addrtype: AddressRequest,
@@ -824,6 +884,7 @@ impl Zones {
                         let link_local_addrobj =
                             addrobj.link_local_on_same_interface()?;
                         Self::ensure_has_link_local_v6_address(
+                            executor,
                             Some(zone),
                             &link_local_addrobj,
                         )?;
@@ -833,15 +894,130 @@ impl Zones {
         };
 
         // Actually perform address allocation.
-        Self::create_address_internal(zone, addrobj, addrtype)?;
-
-        Self::get_address_impl(zone, addrobj)
+        Self::create_address_internal(executor, zone, addrobj, addrtype)?;
+        Self::get_address_impl(executor, zone, addrobj)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use helios_fusion::{Input, OutputExt};
+    use helios_tokamak::{CommandSequence, FakeExecutorBuilder};
+    use omicron_test_utils::dev;
+    use std::process::Output;
+
+    #[tokio::test]
+    async fn install_new_zone_calls_config_then_install() {
+        let logctx =
+            dev::test_setup_log("install_new_zone_calls_config_then_install");
+
+        let zone_root_path = Utf8Path::new("/root");
+        let zone_name = "oxz_myzone";
+        let zone_image = Utf8Path::new("/image.tar.gz");
+
+        // When installing a new zone, we expect to see:
+        // - A request for the list of existing zones
+        // - A command to configure the zone
+        // - A command to install the zone
+        let mut handler = CommandSequence::new();
+        handler.expect(
+            Input::shell(format!("{PFEXEC} {ZONEADM} list -cip")),
+            Output::success().set_stdout("0:global:running:/::ipkg:shared"),
+        );
+
+        handler.expect(
+            Input::shell(format!(
+                "{PFEXEC} {ZONECFG} -z {zone_name} \
+                    create -F -b ; \
+                    set brand=omicron1 ; \
+                    set zonepath={zone_root_path}/{zone_name} ; \
+                    set autoboot=false ; \
+                    set ip-type=exclusive"
+            )),
+            Output::success(),
+        );
+
+        handler.expect(
+            Input::shell(format!(
+                "{PFEXEC} {ZONEADM} -z {zone_name} \
+                    install {zone_image} /opt/oxide/overlay.tar.gz"
+            )),
+            Output::success(),
+        );
+
+        let executor = FakeExecutorBuilder::new(logctx.log.clone())
+            .with_sequence(handler)
+            .build();
+
+        let datasets = [];
+        let filesystems = [];
+        let devices = [];
+        let links = vec![];
+        let limit_priv = vec![];
+
+        Zones::install_omicron_zone(
+            &executor.as_executor(),
+            &logctx.log,
+            &zone_root_path,
+            zone_name,
+            &zone_image,
+            &datasets,
+            &filesystems,
+            &devices,
+            links,
+            limit_priv,
+        )
+        .await
+        .expect("Failed to install zone");
+
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn install_existing_zone_queries_for_it() {
+        let logctx =
+            dev::test_setup_log("install_existing_zone_queries_for_it");
+
+        let zone_root_path = Utf8Path::new("/root");
+        let zone_name = "oxz_myzone";
+        let zone_image = Utf8Path::new("/image.tar.gz");
+
+        let mut handler = CommandSequence::new();
+        handler.expect(
+            Input::shell(format!("{PFEXEC} {ZONEADM} list -cip")),
+            Output::success().set_stdout(
+                "0:global:running:/::ipkg:shared\n1:oxz_myzone:running:/root/oxz_myzone::omicron1:excl"
+            )
+        );
+
+        let executor = FakeExecutorBuilder::new(logctx.log.clone())
+            .with_sequence(handler)
+            .build();
+
+        let datasets = [];
+        let filesystems = [];
+        let devices = [];
+        let links = vec![];
+        let limit_priv = vec![];
+
+        Zones::install_omicron_zone(
+            &executor.as_executor(),
+            &logctx.log,
+            &zone_root_path,
+            zone_name,
+            &zone_image,
+            &datasets,
+            &filesystems,
+            &devices,
+            links,
+            limit_priv,
+        )
+        .await
+        .expect("Failed to install zone");
+
+        logctx.cleanup_successful();
+    }
 
     #[test]
     fn test_parse_ip_network() {

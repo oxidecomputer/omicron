@@ -12,14 +12,18 @@ bhyve_api.workspace = true
 byteorder.workspace = true
 camino.workspace = true
 cfg-if.workspace = true
+debug-ignore.workspace = true
 futures.workspace = true
+helios-fusion.workspace = true
 ipnetwork.workspace = true
+itertools.workspace = true
 libc.workspace = true
 macaddr.workspace = true
 omicron-common.workspace = true
 oxide-vpc.workspace = true
 schemars.workspace = true
 serde.workspace = true
+shlex.workspace = true
 slog.workspace = true
 smf.workspace = true
 thiserror.workspace = true
@@ -27,19 +31,14 @@ tokio.workspace = true
 uuid.workspace = true
 zone.workspace = true
 
-# only enabled via the `testing` feature
-mockall = { workspace = true, optional = true }
 omicron-workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [target.'cfg(target_os = "illumos")'.dependencies]
 opte-ioctl.workspace = true
 
 [dev-dependencies]
-mockall.workspace = true
+helios-tokamak.workspace = true
+omicron-test-utils.workspace = true
 regress.workspace = true
 serde_json.workspace = true
 toml.workspace = true
-
-[features]
-# Enable to generate MockZones
-testing = ["mockall"]
