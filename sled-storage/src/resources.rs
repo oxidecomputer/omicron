@@ -49,30 +49,47 @@ pub struct StorageResources {
 
 impl StorageResources {
     /// Insert a disk and its zpool
-    pub(crate) fn insert_real_disk(&mut self, disk: Disk) -> Result<(), Error> {
+    ///
+    /// Return true, if data was changed, false otherwise
+    pub(crate) fn insert_real_disk(
+        &mut self,
+        disk: Disk,
+    ) -> Result<bool, Error> {
         let parent = disk.identity().clone();
         let zpool_name = disk.zpool_name().clone();
         let disk = DiskWrapper::Real {
             disk: disk.clone(),
             devfs_path: disk.devfs_path().clone(),
         };
+        if let Some(stored) = self.disks.get(&parent) {
+            if stored == &disk {
+                return Ok(false);
+            }
+        }
         Arc::make_mut(&mut self.disks).insert(disk.identity(), disk);
         let zpool = Pool::new(zpool_name, parent)?;
         Arc::make_mut(&mut self.pools).insert(zpool.name.id(), zpool);
-        Ok(())
+        Ok(true)
     }
 
     /// Insert a synthetic disk and its zpool
+    ///
+    /// Return true, if data was changed, false otherwise
     pub(crate) fn insert_synthetic_disk(
         &mut self,
         zpool_name: ZpoolName,
-    ) -> Result<(), Error> {
+    ) -> Result<bool, Error> {
         let disk = DiskWrapper::Synthetic { zpool_name: zpool_name.clone() };
         let parent = disk.identity().clone();
+        if let Some(stored) = self.disks.get(&parent) {
+            if stored == &disk {
+                return Ok(false);
+            }
+        }
         Arc::make_mut(&mut self.disks).insert(disk.identity(), disk);
         let zpool = Pool::new(zpool_name, parent)?;
         Arc::make_mut(&mut self.pools).insert(zpool.name.id(), zpool);
-        Ok(())
+        Ok(true)
     }
 
     /// Returns the identity of the boot disk.
