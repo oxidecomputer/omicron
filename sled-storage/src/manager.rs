@@ -16,7 +16,7 @@ use key_manager::StorageKeyRequester;
 use omicron_common::disk::DiskIdentity;
 use sled_hardware::{DiskVariant, UnparsedDisk};
 use slog::{debug, error, info, o, warn, Logger};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, watch};
 
 // The size of the mpsc bounded channel used to communicate
 // between the `StorageHandle` and `StorageManager`.
@@ -30,11 +30,19 @@ pub enum StorageManagerStage {
     Normal,
 }
 
-enum StorageRequest {}
+enum StorageRequest {
+    AddDisk(UnparsedDisk),
+    AddSyntheticDisk(ZpoolName),
+    RemoveDisk(UnparsedDisk),
+    DisksChanged(Vec<UnparsedDisk>),
+    //    NewFilesystem(NewFilesystemRequest),
+    KeyManagerReady,
+}
 
 /// A mechanism for interacting with the [`StorageManager`]
 pub struct StorageHandle {
     tx: mpsc::Sender<StorageRequest>,
+    resource_updates: watch::Receiver<StorageResources>,
 }
 
 /// The storage manager responsible for the state of the storage
@@ -48,6 +56,7 @@ pub struct StorageManager {
     queued_u2_drives: HashSet<UnparsedDisk>,
     queued_synthetic_u2_drives: HashSet<ZpoolName>,
     key_requester: StorageKeyRequester,
+    resource_updates: watch::Sender<StorageResources>,
 }
 
 impl StorageManager {
@@ -56,18 +65,60 @@ impl StorageManager {
         key_requester: StorageKeyRequester,
     ) -> (StorageManager, StorageHandle) {
         let (tx, rx) = mpsc::channel(QUEUE_SIZE);
+        let resources = StorageResources::default();
+        let (update_tx, update_rx) = watch::channel(resources.clone());
         (
             StorageManager {
                 log: log.new(o!("component" => "StorageManager")),
                 stage: StorageManagerStage::WaitingForBootDisk,
                 rx,
-                resources: StorageResources::default(),
+                resources,
                 queued_u2_drives: HashSet::new(),
                 queued_synthetic_u2_drives: HashSet::new(),
                 key_requester,
+                resource_updates: update_tx,
             },
-            StorageHandle { tx },
+            StorageHandle { tx, resource_updates: update_rx },
         )
+    }
+
+    /// Run the main receive loop of the `StorageManager`
+    ///
+    /// This should be spawned into a tokio task
+    pub async fn run(&mut self) {
+        loop {
+            if let Err(e) = self.step().await {
+                warn!(self.log, "{e}");
+                return;
+            }
+        }
+    }
+
+    /// Process the next event
+    ///
+    /// This is useful for testing/debugging
+    pub async fn step(&mut self) -> Result<(), Error> {
+        // The sending side should never disappear
+        match self.rx.recv().await.unwrap() {
+            StorageRequest::AddDisk(unparsed_disk) => {
+                match unparsed_disk.variant() {
+                    DiskVariant::U2 => self.add_u2_disk(unparsed_disk).await?,
+                    DiskVariant::M2 => todo!(),
+                }
+            }
+            StorageRequest::AddSyntheticDisk(zpool_name) => {
+                match zpool_name.kind() {
+                    ZpoolKind::External => {
+                        self.add_synthetic_u2_disk(zpool_name).await?
+                    }
+                    ZpoolKind::Internal => todo!(),
+                }
+            }
+            StorageRequest::RemoveDisk(_unparsed_disk) => todo!(),
+            StorageRequest::DisksChanged(_unparsed_disks) => todo!(),
+            StorageRequest::KeyManagerReady => todo!(),
+        }
+        Ok(())
     }
 
     /// Add a real U.2 disk to storage resources or queue it to be added later
@@ -142,7 +193,7 @@ impl StorageManager {
                 );
                 self.queued_synthetic_u2_drives.insert(zpool_name);
                 self.stage = StorageManagerStage::QueuingDisks;
-                Err(DiskError::Dataset(err).into())
+                Ok(())
             }
             Err(err) => {
                 error!(
@@ -150,7 +201,7 @@ impl StorageManager {
                     "Persistent error: {err} - not queueing disk {:?}",
                     synthetic_id
                 );
-                Err(DiskError::Dataset(err).into())
+                Ok(())
             }
         }
     }
@@ -260,8 +311,11 @@ mod tests {
         let zpool_name = ZpoolName::new_external(Uuid::new_v4());
         let dir = tempdir().unwrap();
         let _ = new_disk(dir.path(), &zpool_name);
+
         // Spawn the key_manager so that it will respond to requests for encryption keys
         tokio::spawn(async move { key_manager.run().await });
+
+        // Set the stage to pretend we've progressed enough to have a key_manager available.
         manager.stage = StorageManagerStage::Normal;
         manager.add_synthetic_u2_disk(zpool_name.clone()).await.unwrap();
         assert_eq!(manager.resources.all_u2_zpools().len(), 1);
