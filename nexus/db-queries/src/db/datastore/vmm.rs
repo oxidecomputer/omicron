@@ -7,7 +7,7 @@
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
-use crate::db::error::public_error_from_diesel_pool;
+use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::model::Vmm;
 use crate::db::model::VmmRuntimeState;
@@ -37,10 +37,10 @@ impl DataStore {
             .do_update()
             .set(dsl::time_state_updated.eq(dsl::time_state_updated))
             .returning(Vmm::as_returning())
-            .get_result_async(self.pool_authorized(opctx).await?)
+            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(e.into(), ErrorHandler::Server)
+                public_error_from_diesel(e.into(), ErrorHandler::Server)
             })?;
 
         Ok(vmm)
@@ -63,10 +63,10 @@ impl DataStore {
             .filter(dsl::id.eq(vmm_id.clone()))
             .filter(dsl::state.eq_any(valid_states))
             .set(dsl::time_deleted.eq(Utc::now()))
-            .execute_async(self.pool_authorized(opctx).await?)
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::NotFoundByLookup(
                         ResourceType::Vmm,
@@ -91,10 +91,10 @@ impl DataStore {
             .filter(dsl::instance_id.eq(authz_instance.id()))
             .filter(dsl::time_deleted.is_null())
             .select(Vmm::as_select())
-            .get_result_async(self.pool_authorized(opctx).await?)
+            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::NotFoundByLookup(
                         ResourceType::Vmm,
@@ -117,14 +117,14 @@ impl DataStore {
             .filter(dsl::state_generation.lt(new_runtime.gen))
             .set(new_runtime.clone())
             .check_if_exists::<Vmm>(*vmm_id)
-            .execute_and_check(self.pool())
+            .execute_and_check(&*self.pool_connection_unauthorized().await?)
             .await
             .map(|r| match r.status {
                 UpdateStatus::Updated => true,
                 UpdateStatus::NotUpdatedButExists => false,
             })
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::NotFoundByLookup(
                         ResourceType::Vmm,
@@ -154,10 +154,10 @@ impl DataStore {
             .filter(dsl::id.eq(vmm_id.clone()))
             .set(dsl::propolis_ip.eq(new_ip))
             .returning(Vmm::as_returning())
-            .get_result_async(self.pool_authorized(opctx).await?)
+            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(e.into(), ErrorHandler::Server)
+                public_error_from_diesel(e.into(), ErrorHandler::Server)
             })?;
 
         Ok(vmm)

@@ -188,10 +188,10 @@ impl DataStore {
         )
         .select((Instance::as_select(), Option::<Vmm>::as_select()))
         .load_async::<(Instance, Option<Vmm>)>(
-            self.pool_authorized(opctx).await?,
+            &*self.pool_connection_authorized(opctx).await?,
         )
         .await
-        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
         .into_iter()
         .map(|(instance, vmm)| InstanceAndActiveVmm { instance, vmm })
         .collect())
@@ -241,11 +241,11 @@ impl DataStore {
             )
             .select((Instance::as_select(), Option::<Vmm>::as_select()))
             .get_result_async::<(Instance, Option<Vmm>)>(
-                self.pool_authorized(opctx).await?,
+                &*self.pool_connection_authorized(opctx).await?,
             )
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::NotFoundByLookup(
                         ResourceType::Instance,
@@ -336,10 +336,10 @@ impl DataStore {
         // The InstanceAndVmmUpdate query handles and indicates failure to find
         // either the instance or the VMM, so a query failure here indicates
         // some kind of internal error and not a failed lookup.
-        let result =
-            query.execute_and_check(self.pool()).await.map_err(|e| {
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
-            })?;
+        let result = query
+            .execute_and_check(&*self.pool_connection_unauthorized().await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         let instance_updated = match result.instance_status {
             Some(UpdateStatus::Updated) => true,

@@ -4,7 +4,7 @@
 
 //! Implement a query for updating an instance and VMM in a single CTE.
 
-use async_bb8_diesel::{AsyncRunQueryDsl, PoolError};
+use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::QueryResult;
 use diesel::query_builder::{Query, QueryFragment, QueryId};
 use diesel::sql_types::{Nullable, Uuid as SqlUuid};
@@ -171,10 +171,9 @@ impl InstanceAndVmmUpdate {
         self,
         conn: &(impl async_bb8_diesel::AsyncConnection<DbConnection, ConnErr>
               + Sync),
-    ) -> Result<InstanceAndVmmUpdateResult, PoolError>
+    ) -> Result<InstanceAndVmmUpdateResult, ConnErr>
     where
         ConnErr: From<diesel::result::Error> + Send + 'static,
-        PoolError: From<ConnErr>,
     {
         let (vmm_found, vmm_updated, instance_found, instance_updated) =
             self.get_result_async::<(Option<Uuid>,
