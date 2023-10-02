@@ -54,7 +54,7 @@ indexmap = { version = "2.0.0", features = ["serde"] }
 inout = { version = "0.1.3", default-features = false, features = ["std"] }
 ipnetwork = { version = "0.20.0", features = ["schemars"] }
 itertools = { version = "0.10.5" }
-lalrpop-util = { version = "0.19.12" }
+lalrpop-util = { version = "0.20.0" }
 lazy_static = { version = "1.4.0", default-features = false, features = ["spin_no_std"] }
 libc = { version = "0.2.148", features = ["extra_traits"] }
 log = { version = "0.4.20", default-features = false, features = ["std"] }
@@ -148,7 +148,7 @@ indexmap = { version = "2.0.0", features = ["serde"] }
 inout = { version = "0.1.3", default-features = false, features = ["std"] }
 ipnetwork = { version = "0.20.0", features = ["schemars"] }
 itertools = { version = "0.10.5" }
-lalrpop-util = { version = "0.19.12" }
+lalrpop-util = { version = "0.20.0" }
 lazy_static = { version = "1.4.0", default-features = false, features = ["spin_no_std"] }
 libc = { version = "0.2.148", features = ["extra_traits"] }
 log = { version = "0.4.20", default-features = false, features = ["std"] }

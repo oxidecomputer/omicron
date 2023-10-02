@@ -3815,7 +3815,7 @@ dependencies = [
  "ena",
  "is-terminal",
  "itertools 0.10.5",
- "lalrpop-util",
+ "lalrpop-util 0.19.12",
  "petgraph",
  "regex",
  "regex-syntax 0.6.29",
@@ -3830,6 +3830,12 @@ name = "lalrpop-util"
 version = "0.19.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d3c48237b9604c5a4702de6b824e02006c3214327564636aef27c1028a8fa0ed"
+
+[[package]]
+name = "lalrpop-util"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f35c735096c0293d313e8f2a641627472b83d01b937177fe76e5e2708d31e0d"
 
 [[package]]
 name = "lazy_static"
@@ -5385,7 +5391,7 @@ dependencies = [
  "inout",
  "ipnetwork",
  "itertools 0.10.5",
- "lalrpop-util",
+ "lalrpop-util 0.20.0",
  "lazy_static",
  "libc",
  "log",
@@ -6263,7 +6269,7 @@ dependencies = [
  "indoc 1.0.9",
  "js-sys",
  "lalrpop",
- "lalrpop-util",
+ "lalrpop-util 0.19.12",
  "serde",
  "serde_derive",
  "strum_macros 0.24.3",
