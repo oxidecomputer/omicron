@@ -4,7 +4,7 @@
 
 //! Storage related errors
 
-use crate::dataset::DatasetName;
+use crate::dataset::{DatasetError, DatasetName};
 use crate::disk::DiskError;
 use camino::Utf8PathBuf;
 use omicron_common::api::external::ByteCountRangeError;
@@ -14,6 +14,9 @@ use uuid::Uuid;
 pub enum Error {
     #[error(transparent)]
     DiskError(#[from] DiskError),
+
+    #[error(transparent)]
+    DatasetError(#[from] DatasetError),
 
     // TODO: We could add the context of "why are we doint this op", maybe?
     #[error(transparent)]

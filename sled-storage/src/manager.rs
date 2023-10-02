@@ -89,7 +89,6 @@ impl StorageManager {
         loop {
             if let Err(e) = self.step().await {
                 warn!(self.log, "{e}");
-                return;
             }
         }
     }
@@ -103,7 +102,7 @@ impl StorageManager {
             StorageRequest::AddDisk(unparsed_disk) => {
                 match unparsed_disk.variant() {
                     DiskVariant::U2 => self.add_u2_disk(unparsed_disk).await?,
-                    DiskVariant::M2 => todo!(),
+                    DiskVariant::M2 => self.add_m2_disk(unparsed_disk).await?,
                 }
             }
             StorageRequest::AddSyntheticDisk(zpool_name) => {
@@ -111,7 +110,9 @@ impl StorageManager {
                     ZpoolKind::External => {
                         self.add_synthetic_u2_disk(zpool_name).await?
                     }
-                    ZpoolKind::Internal => todo!(),
+                    ZpoolKind::Internal => {
+                        self.add_synthetic_m2_disk(zpool_name).await?
+                    }
                 }
             }
             StorageRequest::RemoveDisk(_unparsed_disk) => todo!(),
@@ -121,7 +122,7 @@ impl StorageManager {
         Ok(())
     }
 
-    /// Add a real U.2 disk to storage resources or queue it to be added later
+    // Add a real U.2 disk to [`StorageResources`] or queue it to be added later
     async fn add_u2_disk(
         &mut self,
         unparsed_disk: UnparsedDisk,
@@ -159,7 +160,53 @@ impl StorageManager {
         }
     }
 
-    /// Add a synthetic U.2 disk to storage resources or queue it to be added later
+    // Add a real U.2 disk to [`StorageResources`]
+    //
+    //
+    // We never queue M.2 drives, as they don't rely on [`KeyManager`] based
+    // encryption
+    async fn add_m2_disk(
+        &mut self,
+        unparsed_disk: UnparsedDisk,
+    ) -> Result<(), Error> {
+        let disk = Disk::new(
+            &self.log,
+            unparsed_disk.clone(),
+            Some(&self.key_requester),
+        )
+        .await?;
+        self.resources.insert_real_disk(disk)?;
+        Ok(())
+    }
+
+    // Add a synthetic U.2 disk to [`StorageResources`]
+    //
+    // We never queue M.2 drives, as they don't rely on [`KeyManager`] based
+    // encryption
+    async fn add_synthetic_m2_disk(
+        &mut self,
+        zpool_name: ZpoolName,
+    ) -> Result<(), Error> {
+        let synthetic_id = DiskIdentity {
+            vendor: "fake_vendor".to_string(),
+            serial: "fake_serial".to_string(),
+            model: zpool_name.id().to_string(),
+        };
+
+        debug!(self.log, "Ensure zpool has datasets: {zpool_name}");
+        dataset::ensure_zpool_has_datasets(
+            &self.log,
+            &zpool_name,
+            &synthetic_id,
+            Some(&self.key_requester),
+        )
+        .await?;
+        self.resources.insert_synthetic_disk(zpool_name)?;
+        Ok(())
+    }
+
+    // Add a synthetic U.2 disk to [`StorageResources`] or queue it to be added
+    // later
     async fn add_synthetic_u2_disk(
         &mut self,
         zpool_name: ZpoolName,
