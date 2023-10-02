@@ -234,10 +234,10 @@ impl DataStore {
                         api::external::DiskState::Detached => {
                             if collection.runtime_state.propolis_id.is_some() {
                                 return Err(
-                                    Error::invalid_request(&format!(
+                                    Error::invalid_request(
                                         "cannot attach disk: instance is not \
                                         fully stopped"
-                                    ))
+                                    )
                                 );
                             }
                             match collection.runtime_state.fallback_state.state() {
@@ -375,10 +375,10 @@ impl DataStore {
                         api::external::DiskState::Attached(id) if id == authz_instance.id() => {
                             if collection.runtime_state.propolis_id.is_some() {
                                 return Err(
-                                    Error::invalid_request(&format!(
+                                    Error::invalid_request(
                                         "cannot attach disk: instance is not \
                                         fully stopped"
-                                    ))
+                                    )
                                 );
                             }
                             match collection.runtime_state.fallback_state.state() {

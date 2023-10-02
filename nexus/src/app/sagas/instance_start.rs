@@ -119,7 +119,7 @@ async fn sis_alloc_server(
         osagactx.nexus(),
         propolis_id,
         hardware_threads.0 as u32,
-        reservoir_ram.into(),
+        reservoir_ram,
         db::model::SledReservationConstraints::none(),
     )
     .await?;

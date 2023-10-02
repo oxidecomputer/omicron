@@ -122,11 +122,13 @@ impl SimInstanceInner {
                 // actually starting migration.
                 self.queue_propolis_state(PropolisInstanceState::Migrating);
                 let migration_id =
-                    self.state.instance().migration_id.expect(&format!(
+                    self.state.instance().migration_id.unwrap_or_else(|| {
+                        panic!(
                         "should have migration ID set before getting request to
                         migrate in (current state: {:?})",
                         self
-                    ));
+                    )
+                    });
                 self.queue_migration_status(PropolisMigrateStatus {
                     migration_id,
                     state: propolis_client::api::MigrationState::Sync,

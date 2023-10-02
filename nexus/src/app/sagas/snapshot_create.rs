@@ -679,10 +679,10 @@ async fn ssc_send_snapshot_request_to_sled_agent(
     // executing.
     let (instance_id, sled_id) =
         params.attached_instance_and_sled.ok_or_else(|| {
-            ActionError::action_failed(Error::internal_error(&format!(
+            ActionError::action_failed(Error::internal_error(
                 "snapshot saga in send_snapshot_request_to_sled_agent but no \
-                instance/sled pair was provided"
-            )))
+                instance/sled pair was provided",
+            ))
         })?;
 
     info!(log, "asking for disk snapshot from Propolis via sled agent";

@@ -429,10 +429,10 @@ impl DataStore {
             ),
             DetachManyError::NoUpdate { collection } => {
                 if collection.runtime_state.propolis_id.is_some() {
-                    return Error::invalid_request(&format!(
+                    return Error::invalid_request(
                         "cannot delete instance: instance is running or has \
-                                not yet fully stopped"
-                    ));
+                                not yet fully stopped",
+                    );
                 }
                 let instance_state =
                     collection.runtime_state.fallback_state.state();

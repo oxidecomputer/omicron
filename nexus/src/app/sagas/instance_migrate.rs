@@ -152,7 +152,7 @@ async fn sim_reserve_sled_resources(
         osagactx.nexus(),
         propolis_id,
         params.instance.ncpus.0 .0 as u32,
-        params.instance.memory.into(),
+        params.instance.memory,
         constraints,
     )
     .await?;
@@ -761,4 +761,3 @@ mod tests {
         .await;
     }
 }
-

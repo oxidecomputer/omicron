@@ -282,10 +282,7 @@ impl super::Nexus {
             .lookup_for(authz::Action::Read)
             .await?;
 
-        Ok(self
-            .db_datastore
-            .instance_fetch_with_vmm(opctx, &authz_instance)
-            .await?)
+        self.db_datastore.instance_fetch_with_vmm(opctx, &authz_instance).await
     }
 
     pub(crate) async fn instance_list(
@@ -705,10 +702,10 @@ impl super::Nexus {
                 // even begun to start yet), no runtime state change is valid.
                 // Return a specific error message explaining the problem.
                 InstanceState::Creating => {
-                    return Err(Error::invalid_request(&format!(
+                    return Err(Error::invalid_request(
                                 "cannot change instance state while it is \
                                 still being created"
-                                )))
+                                ))
                 }
 
                 // If the instance has no sled beacuse it's been destroyed or

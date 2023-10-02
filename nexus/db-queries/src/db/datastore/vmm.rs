@@ -39,9 +39,7 @@ impl DataStore {
             .returning(Vmm::as_returning())
             .get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| {
-                public_error_from_diesel(e.into(), ErrorHandler::Server)
-            })?;
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         Ok(vmm)
     }
@@ -60,7 +58,7 @@ impl DataStore {
         ];
 
         let updated = diesel::update(dsl::vmm)
-            .filter(dsl::id.eq(vmm_id.clone()))
+            .filter(dsl::id.eq(*vmm_id))
             .filter(dsl::state.eq_any(valid_states))
             .set(dsl::time_deleted.eq(Utc::now()))
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
@@ -87,7 +85,7 @@ impl DataStore {
         opctx.authorize(authz::Action::Read, authz_instance).await?;
 
         let vmm = dsl::vmm
-            .filter(dsl::id.eq(vmm_id.clone()))
+            .filter(dsl::id.eq(*vmm_id))
             .filter(dsl::instance_id.eq(authz_instance.id()))
             .filter(dsl::time_deleted.is_null())
             .select(Vmm::as_select())
@@ -113,7 +111,7 @@ impl DataStore {
     ) -> Result<bool, Error> {
         let updated = diesel::update(dsl::vmm)
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::id.eq(vmm_id.clone()))
+            .filter(dsl::id.eq(*vmm_id))
             .filter(dsl::state_generation.lt(new_runtime.gen))
             .set(new_runtime.clone())
             .check_if_exists::<Vmm>(*vmm_id)
@@ -151,14 +149,12 @@ impl DataStore {
         new_ip: ipnetwork::IpNetwork,
     ) -> UpdateResult<Vmm> {
         let vmm = diesel::update(dsl::vmm)
-            .filter(dsl::id.eq(vmm_id.clone()))
+            .filter(dsl::id.eq(*vmm_id))
             .set(dsl::propolis_ip.eq(new_ip))
             .returning(Vmm::as_returning())
             .get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| {
-                public_error_from_diesel(e.into(), ErrorHandler::Server)
-            })?;
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         Ok(vmm)
     }

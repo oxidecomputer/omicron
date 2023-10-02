@@ -652,7 +652,7 @@ impl super::Nexus {
                 return Ok(());
             }
 
-            Err(e) => return Err(e.into()),
+            Err(e) => return Err(e),
         };
 
         self.create_instance_v2p_mappings(opctx, instance_id, new_sled_id)
