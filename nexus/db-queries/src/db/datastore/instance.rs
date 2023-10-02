@@ -61,6 +61,22 @@ impl InstanceAndActiveVmm {
     pub fn sled_id(&self) -> Option<Uuid> {
         self.vmm.as_ref().map(|v| v.sled_id)
     }
+
+    pub fn effective_state(
+        &self,
+    ) -> omicron_common::api::external::InstanceState {
+        if let Some(vmm) = &self.vmm {
+            vmm.runtime.state.0
+        } else {
+            self.instance.runtime().fallback_state.0
+        }
+    }
+}
+
+impl From<(Instance, Option<Vmm>)> for InstanceAndActiveVmm {
+    fn from(value: (Instance, Option<Vmm>)) -> Self {
+        Self { instance: value.0, vmm: value.1 }
+    }
 }
 
 impl From<InstanceAndActiveVmm> for omicron_common::api::external::Instance {
