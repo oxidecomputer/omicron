@@ -33,6 +33,7 @@ use nexus_db_model::DnsGroup;
 use nexus_db_model::DnsName;
 use nexus_db_model::DnsVersion;
 use nexus_db_model::DnsZone;
+use nexus_db_model::ExternalIp;
 use nexus_db_model::Instance;
 use nexus_db_model::Project;
 use nexus_db_model::Region;
@@ -1133,10 +1134,18 @@ async fn cmd_db_eips(
     limit: NonZeroU32,
     verbose: bool,
 ) -> Result<(), anyhow::Error> {
+    /*
     let ips = datastore
         .lookup_external_ips(&opctx)
         .await
         .context("listing external ips")?;
+    */
+    use db::schema::external_ip::dsl;
+    let ips: Vec<ExternalIp> = dsl::external_ip
+        .filter(dsl::time_deleted.is_null())
+        .select(ExternalIp::as_select())
+        .get_results_async(datastore.pool_for_tests().await?)
+        .await?;
 
     check_limit(&ips, limit, || String::from("listing external ips"));
 
@@ -1199,7 +1208,7 @@ async fn cmd_db_eips(
                 Owner::Service { kind: format!("{:?}", service.1.kind) }
             } else {
                 use db::schema::instance::dsl as instance_dsl;
-                let instance = instance_dsl::instance
+                let instance = match instance_dsl::instance
                     .filter(instance_dsl::id.eq(owner_id))
                     .limit(1)
                     .select(Instance::as_select())
@@ -1207,10 +1216,16 @@ async fn cmd_db_eips(
                     .await
                     .context("loading requested instance")?
                     .pop()
-                    .context("requested instance not found")?;
+                {
+                    Some(instance) => instance,
+                    None => {
+                        eprintln!("instance with id {owner_id} not found");
+                        continue;
+                    }
+                };
 
                 use db::schema::project::dsl as project_dsl;
-                let project = project_dsl::project
+                let project = match project_dsl::project
                     .filter(project_dsl::id.eq(instance.project_id))
                     .limit(1)
                     .select(Project::as_select())
@@ -1218,7 +1233,16 @@ async fn cmd_db_eips(
                     .await
                     .context("loading requested project")?
                     .pop()
-                    .context("requested project not found")?;
+                {
+                    Some(instance) => instance,
+                    None => {
+                        eprintln!(
+                            "project with id {} not found",
+                            instance.project_id
+                        );
+                        continue;
+                    }
+                };
 
                 Owner::Instance {
                     project: project.name().to_string(),
