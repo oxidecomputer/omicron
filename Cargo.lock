@@ -4304,7 +4304,6 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "futures",
- "internal-dns 0.1.0",
  "ipnetwork",
  "omicron-common 0.1.0",
  "omicron-passwords 0.1.0",
