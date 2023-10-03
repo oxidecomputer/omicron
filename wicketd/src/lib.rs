@@ -22,14 +22,16 @@ pub use config::Config;
 pub(crate) use context::ServerContext;
 use dropshot::{ConfigDropshot, HandlerTaskMode, HttpServer};
 pub use installinator_progress::{IprUpdateTracker, RunningUpdateState};
+use internal_dns::resolver::Resolver;
 pub use inventory::{RackV1Inventory, SpInventory};
 use mgs::make_mgs_client;
 pub(crate) use mgs::{MgsHandle, MgsManager};
+use omicron_common::address::{Ipv6Subnet, AZ_PREFIX};
 use omicron_common::FileKv;
 use preflight_check::PreflightCheckerHandler;
 use sled_hardware::Baseboard;
 use slog::{debug, error, o, Drain};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 use std::{
     net::{SocketAddr, SocketAddrV6},
     sync::Arc,
@@ -53,7 +55,50 @@ pub struct Args {
     pub address: SocketAddrV6,
     pub artifact_address: SocketAddrV6,
     pub mgs_address: SocketAddrV6,
+    pub nexus_proxy_address: SocketAddrV6,
     pub baseboard: Option<Baseboard>,
+    pub rack_subnet: Option<Ipv6Subnet<AZ_PREFIX>>,
+}
+
+pub struct SmfConfigValues {
+    pub rack_subnet: Option<Ipv6Subnet<AZ_PREFIX>>,
+}
+
+impl SmfConfigValues {
+    #[cfg(target_os = "illumos")]
+    pub fn read_current() -> Result<Option<Self>> {
+        use anyhow::Context;
+        use illumos_utils::scf::ScfHandle;
+
+        const CONFIG_PG: &str = "config";
+        const PROP_RACK_SUBNET: &str = "rack-subnet";
+
+        let scf = ScfHandle::new()?;
+        let instance = scf.self_instance()?;
+        let snapshot = instance.running_snapshot()?;
+        let config = snapshot.property_group(CONFIG_PG)?;
+
+        let rack_subnet = config.value_as_string(PROP_RACK_SUBNET)?;
+
+        let rack_subnet = if rack_subnet == "unknown" {
+            None
+        } else {
+            let addr = rack_subnet.parse().with_context(|| {
+                format!(
+                    "failed to parse {CONFIG_PG}/{PROP_RACK_SUBNET} \
+                     value {rack_subnet:?} as a rack subnet"
+                )
+            })?;
+            Some(addr)
+        };
+
+        Ok(Some(Self { rack_subnet }))
+    }
+
+    #[cfg(not(target_os = "illumos"))]
+    pub fn read_current() -> Result<Option<Self>> {
+        Ok(None)
+    }
 }
 
 pub struct Server {
@@ -80,8 +125,9 @@ impl Server {
 
         let dropshot_config = ConfigDropshot {
             bind_address: SocketAddr::V6(args.address),
-            // The maximum request size is set to 4 GB -- artifacts can be large and there's currently
-            // no way to set a larger request size for some endpoints.
+            // The maximum request size is set to 4 GB -- artifacts can be large
+            // and there's currently no way to set a larger request size for
+            // some endpoints.
             request_body_max_bytes: 4 << 30,
             default_handler_task_mode: HandlerTaskMode::Detached,
         };
@@ -104,6 +150,19 @@ impl Server {
         ));
 
         let bootstrap_peers = BootstrapPeers::new(&log);
+        let internal_dns_resolver = args
+            .rack_subnet
+            .map(|addr| {
+                Resolver::new_from_subnet(
+                    log.new(o!("component" => "InternalDnsResolver")),
+                    addr,
+                )
+                .map_err(|err| {
+                    format!("Could not create internal DNS resolver: {err}")
+                })
+            })
+            .transpose()?;
+        let internal_dns_resolver = Arc::new(Mutex::new(internal_dns_resolver));
 
         let wicketd_server = {
             let ds_log = log.new(o!("component" => "dropshot (wicketd)"));
@@ -121,6 +180,7 @@ impl Server {
                     baseboard: args.baseboard,
                     rss_config: Default::default(),
                     preflight_checker: PreflightCheckerHandler::new(&log),
+                    internal_dns_resolver,
                 },
                 &ds_log,
             )

@@ -8,10 +8,13 @@
 //! and Nexus, who need to agree upon addressing schemes.
 
 use crate::api::external::{self, Error, Ipv4Net, Ipv6Net};
-use ipnetwork::{Ipv4Network, Ipv6Network};
+use ipnetwork::{IpNetworkError, Ipv4Network, Ipv6Network};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
+use std::{
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6},
+    str::FromStr,
+};
 
 pub const AZ_PREFIX: u8 = 48;
 pub const RACK_PREFIX: u8 = 56;
@@ -163,6 +166,27 @@ impl<const N: u8> Ipv6Subnet<N> {
     pub fn net(&self) -> Ipv6Network {
         self.net.0
     }
+}
+
+impl<const N: u8> FromStr for Ipv6Subnet<N> {
+    type Err = Ipv6SubnetParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let net = Ipv6Net(s.parse()?);
+        if net.prefix() == N {
+            Ok(Self { net })
+        } else {
+            Err(Ipv6SubnetParseError::InvalidPrefix { expected: N, net })
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum Ipv6SubnetParseError {
+    #[error(transparent)]
+    IpNetworkError(#[from] IpNetworkError),
+    #[error("expected prefix {expected} but found {}: {net}", net.prefix())]
+    InvalidPrefix { expected: u8, net: Ipv6Net },
 }
 
 // We need a custom Deserialize to ensure that the subnet is what we expect.

@@ -10113,6 +10113,7 @@ dependencies = [
  "installinator-artifact-client",
  "installinator-artifactd",
  "installinator-common",
+ "internal-dns 0.1.0",
  "itertools 0.11.0",
  "omicron-certificates",
  "omicron-common 0.1.0",

@@ -569,6 +569,24 @@
         }
       }
     },
+    "/reload-config": {
+      "post": {
+        "summary": "An endpoint instructing wicketd to reload its SMF config properties.",
+        "description": "The only expected client of this endpoint is `curl` from wicketd's SMF `refresh` method, but other clients hitting it is harmless.",
+        "operationId": "post_reload_config",
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/repository": {
       "put": {
         "summary": "Upload a TUF repository to the server.",
