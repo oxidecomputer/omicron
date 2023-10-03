@@ -1201,10 +1201,19 @@ async fn cmd_db_eips(
     for ip in &ips {
         let owner = if let Some(owner_id) = ip.parent_id {
             if ip.is_service {
-                let service = LookupPath::new(opctx, datastore)
+                let service = match LookupPath::new(opctx, datastore)
                     .service_id(owner_id)
                     .fetch()
-                    .await?;
+                    .await
+                {
+                    Ok(instance) => instance,
+                    Err(e) => {
+                        eprintln!(
+                            "error looking up service with id {owner_id}: {e}"
+                        );
+                        continue;
+                    }
+                };
                 Owner::Service { kind: format!("{:?}", service.1.kind) }
             } else {
                 use db::schema::instance::dsl as instance_dsl;
