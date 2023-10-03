@@ -11,6 +11,7 @@ mod http_entrypoints;
 mod installinator_progress;
 mod inventory;
 pub mod mgs;
+mod nexus_proxy;
 mod preflight_check;
 mod rss_config;
 mod update_tracker;
@@ -26,6 +27,7 @@ use internal_dns::resolver::Resolver;
 pub use inventory::{RackV1Inventory, SpInventory};
 use mgs::make_mgs_client;
 pub(crate) use mgs::{MgsHandle, MgsManager};
+use nexus_proxy::NexusTcpProxy;
 use omicron_common::address::{Ipv6Subnet, AZ_PREFIX};
 use omicron_common::FileKv;
 use preflight_check::PreflightCheckerHandler;
@@ -107,6 +109,7 @@ pub struct Server {
     pub artifact_store: WicketdArtifactStore,
     pub update_tracker: Arc<UpdateTracker>,
     pub ipr_update_tracker: IprUpdateTracker,
+    nexus_tcp_proxy: NexusTcpProxy,
 }
 
 impl Server {
@@ -162,7 +165,15 @@ impl Server {
                 })
             })
             .transpose()?;
+
         let internal_dns_resolver = Arc::new(Mutex::new(internal_dns_resolver));
+        let nexus_tcp_proxy = NexusTcpProxy::start(
+            args.nexus_proxy_address,
+            Arc::clone(&internal_dns_resolver),
+            &log,
+        )
+        .await
+        .map_err(|err| format!("failed to start Nexus TCP proxy: {err}"))?;
 
         let wicketd_server = {
             let ds_log = log.new(o!("component" => "dropshot (wicketd)"));
@@ -206,17 +217,19 @@ impl Server {
             artifact_store: store,
             update_tracker,
             ipr_update_tracker,
+            nexus_tcp_proxy,
         })
     }
 
     /// Close all running dropshot servers.
-    pub async fn close(self) -> Result<()> {
+    pub async fn close(mut self) -> Result<()> {
         self.wicketd_server.close().await.map_err(|error| {
             anyhow!("error closing wicketd server: {error}")
         })?;
         self.artifact_server.close().await.map_err(|error| {
             anyhow!("error closing artifact server: {error}")
         })?;
+        self.nexus_tcp_proxy.shutdown();
         Ok(())
     }
 
