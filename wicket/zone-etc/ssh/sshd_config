@@ -37,6 +37,10 @@ Match User wicket
         AuthenticationMethods none
         ForceCommand /opt/oxide/wicket/bin/wicket
 
+        # Allow TCP port forwarding to wicketd's nexus proxy; port number
+        # matches `WICKETD_NEXUS_PROXY_PORT`
+        PermitOpen [::1]:12229
+
 Match User support
         PubkeyAuthentication yes
         AuthenticationMethods publickey

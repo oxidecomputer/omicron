@@ -52,6 +52,7 @@ pub const NEXUS_INTERNAL_PORT: u16 = 12221;
 
 /// TODO docs
 pub const NEXUS_TECHPORT_EXTERNAL_PORT: u16 = 12228;
+pub const WICKETD_NEXUS_PROXY_PORT: u16 = 12229;
 
 pub const NTP_PORT: u16 = 123;
 

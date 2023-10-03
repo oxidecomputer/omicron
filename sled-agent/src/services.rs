@@ -73,6 +73,7 @@ use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
+use omicron_common::address::WICKETD_NEXUS_PROXY_PORT;
 use omicron_common::address::WICKETD_PORT;
 use omicron_common::address::{Ipv6Subnet, NEXUS_TECHPORT_EXTERNAL_PORT};
 use omicron_common::api::external::Generation;
@@ -1697,6 +1698,23 @@ impl ServiceManager {
                         "config/mgs-address",
                         &format!("[::1]:{MGS_PORT}"),
                     )?;
+                    smfh.setprop(
+                        "config/nexus-proxy-address",
+                        &format!("[::1]:{WICKETD_NEXUS_PROXY_PORT}"),
+                    )?;
+                    if let Some(underlay_address) = self
+                        .inner
+                        .sled_info
+                        .get()
+                        .map(|info| info.underlay_address)
+                    {
+                        let rack_subnet =
+                            Ipv6Subnet::<AZ_PREFIX>::new(underlay_address);
+                        smfh.setprop(
+                            "config/rack-subnet",
+                            &rack_subnet.net().ip().to_string(),
+                        )?;
+                    }
 
                     let serialized_baseboard =
                         serde_json::to_string_pretty(&baseboard)?;
