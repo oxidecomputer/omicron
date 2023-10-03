@@ -48,7 +48,6 @@ use slog::Logger;
 use std::net::IpAddr;
 use std::net::{SocketAddr, SocketAddrV6};
 use std::sync::Arc;
-use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 #[derive(thiserror::Error, Debug)]
@@ -174,32 +173,8 @@ enum Reaction {
 struct RunningState {
     // Connection to Propolis.
     client: Arc<PropolisClient>,
-    // Handle to task monitoring for Propolis state changes.
-    monitor_task: Option<JoinHandle<()>>,
     // Handle to the zone.
     running_zone: RunningZone,
-}
-
-impl Drop for RunningState {
-    fn drop(&mut self) {
-        if let Some(task) = self.monitor_task.take() {
-            // NOTE: We'd prefer to actually await the task, since it
-            // will be completed at this point, but async drop doesn't exist.
-            //
-            // At a minimum, this implementation ensures the background task
-            // is not executing after RunningState terminates.
-            //
-            // "InstanceManager" contains...
-            //      ... "Instance", which contains...
-            //      ... "InstanceInner", which contains...
-            //      ... "RunningState", which owns the "monitor_task".
-            //
-            // The "monitor_task" removes the instance from the
-            // "InstanceManager", triggering it's eventual drop.
-            // When this happens, the "monitor_task" exits anyway.
-            task.abort()
-        }
-    }
 }
 
 // Named type for values returned during propolis zone creation
@@ -492,18 +467,22 @@ impl InstanceInner {
         self.propolis_ensure(&client, &running_zone, migrate).await?;
 
         // Monitor propolis for state changes in the background.
+        //
+        // This task exits after its associated Propolis has been terminated
+        // (either because the task observed a message from Propolis saying that
+        // it exited or because the Propolis server was terminated by other
+        // means).
         let monitor_client = client.clone();
-        let monitor_task = Some(tokio::task::spawn(async move {
+        let _monitor_task = tokio::task::spawn(async move {
             let r = instance.monitor_state_task(monitor_client).await;
             let log = &instance.inner.lock().await.log;
             match r {
                 Err(e) => warn!(log, "State monitoring task failed: {}", e),
                 Ok(()) => info!(log, "State monitoring task complete"),
             }
-        }));
+        });
 
-        self.running_state =
-            Some(RunningState { client, monitor_task, running_zone });
+        self.running_state = Some(RunningState { client, running_zone });
 
         Ok(())
     }
