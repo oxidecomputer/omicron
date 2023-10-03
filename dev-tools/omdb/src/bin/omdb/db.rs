@@ -1144,7 +1144,7 @@ async fn cmd_db_eips(
     let ips: Vec<ExternalIp> = dsl::external_ip
         .filter(dsl::time_deleted.is_null())
         .select(ExternalIp::as_select())
-        .get_results_async(datastore.pool_for_tests().await?)
+        .get_results_async(&*datastore.pool_connection_for_tests().await?)
         .await?;
 
     check_limit(&ips, limit, || String::from("listing external ips"));
@@ -1212,7 +1212,7 @@ async fn cmd_db_eips(
                     .filter(instance_dsl::id.eq(owner_id))
                     .limit(1)
                     .select(Instance::as_select())
-                    .load_async(datastore.pool_for_tests().await?)
+                    .load_async(&*datastore.pool_connection_for_tests().await?)
                     .await
                     .context("loading requested instance")?
                     .pop()
@@ -1229,7 +1229,7 @@ async fn cmd_db_eips(
                     .filter(project_dsl::id.eq(instance.project_id))
                     .limit(1)
                     .select(Project::as_select())
-                    .load_async(datastore.pool_for_tests().await?)
+                    .load_async(&*datastore.pool_connection_for_tests().await?)
                     .await
                     .context("loading requested project")?
                     .pop()
