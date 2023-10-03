@@ -5,7 +5,7 @@
 //! Dump dataset setup
 
 use crate::dataset::{CRASH_DATASET, DUMP_DATASET};
-use crate::disk::DiskWrapper;
+use crate::disk::Disk;
 use camino::Utf8PathBuf;
 use derive_more::{AsRef, Deref, From};
 use illumos_utils::dumpadm::DumpAdmError;
@@ -106,50 +106,51 @@ const ARCHIVAL_INTERVAL: Duration = Duration::from_secs(300);
 impl DumpSetup {
     pub(crate) async fn update_dumpdev_setup(
         &self,
-        disks: &mut MutexGuard<'_, HashMap<DiskIdentity, DiskWrapper>>,
+        disks: &mut MutexGuard<'_, HashMap<DiskIdentity, Disk>>,
     ) {
         let log = &self.log;
         let mut m2_dump_slices = Vec::new();
         let mut u2_debug_datasets = Vec::new();
         let mut m2_core_datasets = Vec::new();
-        for (_id, disk_wrapper) in disks.iter() {
-            match disk_wrapper {
-                DiskWrapper::Real { disk, .. } => match disk.variant() {
-                    DiskVariant::M2 => {
-                        match disk.dump_device_devfs_path(false) {
-                            Ok(path) => {
-                                m2_dump_slices.push(DumpSlicePath(path))
-                            }
-                            Err(err) => {
-                                warn!(log, "Error getting dump device devfs path: {err:?}");
-                            }
-                        }
-                        let name = disk.zpool_name();
-                        if let Ok(info) = illumos_utils::zpool::Zpool::get_info(
-                            &name.to_string(),
-                        ) {
-                            if info.health() == ZpoolHealth::Online {
-                                m2_core_datasets.push(CoreZpool(name.clone()));
-                            } else {
-                                warn!(log, "Zpool {name:?} not online, won't attempt to save process core dumps there");
-                            }
+        for (_id, disk) in disks.iter() {
+            if disk.is_synthetic() {
+                // We only setup dump devices on real disks
+                continue;
+            }
+            match disk.variant() {
+                DiskVariant::M2 => {
+                    match disk.dump_device_devfs_path(false) {
+                        Ok(path) => m2_dump_slices.push(DumpSlicePath(path)),
+                        Err(err) => {
+                            warn!(
+                                log,
+                                "Error getting dump device devfs path: {err:?}"
+                            );
                         }
                     }
-                    DiskVariant::U2 => {
-                        let name = disk.zpool_name();
-                        if let Ok(info) = illumos_utils::zpool::Zpool::get_info(
-                            &name.to_string(),
-                        ) {
-                            if info.health() == ZpoolHealth::Online {
-                                u2_debug_datasets
-                                    .push(DebugZpool(name.clone()));
-                            } else {
-                                warn!(log, "Zpool {name:?} not online, won't attempt to save kernel core dumps there");
-                            }
+                    let name = disk.zpool_name();
+                    if let Ok(info) =
+                        illumos_utils::zpool::Zpool::get_info(&name.to_string())
+                    {
+                        if info.health() == ZpoolHealth::Online {
+                            m2_core_datasets.push(CoreZpool(name.clone()));
+                        } else {
+                            warn!(log, "Zpool {name:?} not online, won't attempt to save process core dumps there");
                         }
                     }
-                },
-                DiskWrapper::Synthetic { .. } => {}
+                }
+                DiskVariant::U2 => {
+                    let name = disk.zpool_name();
+                    if let Ok(info) =
+                        illumos_utils::zpool::Zpool::get_info(&name.to_string())
+                    {
+                        if info.health() == ZpoolHealth::Online {
+                            u2_debug_datasets.push(DebugZpool(name.clone()));
+                        } else {
+                            warn!(log, "Zpool {name:?} not online, won't attempt to save kernel core dumps there");
+                        }
+                    }
+                }
             }
         }
 

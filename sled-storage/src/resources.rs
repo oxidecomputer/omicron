@@ -5,12 +5,11 @@
 //! Discovered and usable disks and zpools
 
 use crate::dataset::M2_DEBUG_DATASET;
-use crate::disk::{Disk, DiskWrapper};
+use crate::disk::{Disk, RawDisk};
 use crate::error::Error;
 use crate::pool::Pool;
 use camino::Utf8PathBuf;
 use illumos_utils::zpool::ZpoolName;
-use omicron_common::api::external::{ByteCount, ByteCountRangeError};
 use omicron_common::disk::DiskIdentity;
 use sled_hardware::{DiskVariant, UnparsedDisk};
 use std::collections::BTreeMap;
@@ -41,7 +40,7 @@ const ZONE_BUNDLE_DIRECTORY: &str = "zone";
 #[derive(Debug, Clone, Default)]
 pub struct StorageResources {
     // All disks, real and synthetic, being managed by this sled
-    disks: Arc<BTreeMap<DiskIdentity, DiskWrapper>>,
+    disks: Arc<BTreeMap<DiskIdentity, Disk>>,
 
     // A map of "Uuid" to "pool".
     pools: Arc<BTreeMap<Uuid, Pool>>,
@@ -51,42 +50,15 @@ impl StorageResources {
     /// Insert a disk and its zpool
     ///
     /// Return true, if data was changed, false otherwise
-    pub(crate) fn insert_real_disk(
-        &mut self,
-        disk: Disk,
-    ) -> Result<bool, Error> {
+    pub(crate) fn insert_disk(&mut self, disk: Disk) -> Result<bool, Error> {
         let parent = disk.identity().clone();
         let zpool_name = disk.zpool_name().clone();
-        let disk = DiskWrapper::Real {
-            disk: disk.clone(),
-            devfs_path: disk.devfs_path().clone(),
-        };
         if let Some(stored) = self.disks.get(&parent) {
             if stored == &disk {
                 return Ok(false);
             }
         }
-        Arc::make_mut(&mut self.disks).insert(disk.identity(), disk);
-        let zpool = Pool::new(zpool_name, parent)?;
-        Arc::make_mut(&mut self.pools).insert(zpool.name.id(), zpool);
-        Ok(true)
-    }
-
-    /// Insert a synthetic disk and its zpool
-    ///
-    /// Return true, if data was changed, false otherwise
-    pub(crate) fn insert_synthetic_disk(
-        &mut self,
-        zpool_name: ZpoolName,
-    ) -> Result<bool, Error> {
-        let disk = DiskWrapper::Synthetic { zpool_name: zpool_name.clone() };
-        let parent = disk.identity().clone();
-        if let Some(stored) = self.disks.get(&parent) {
-            if stored == &disk {
-                return Ok(false);
-            }
-        }
-        Arc::make_mut(&mut self.disks).insert(disk.identity(), disk);
+        Arc::make_mut(&mut self.disks).insert(disk.identity().clone(), disk);
         let zpool = Pool::new(zpool_name, parent)?;
         Arc::make_mut(&mut self.pools).insert(zpool.name.id(), zpool);
         Ok(true)
@@ -95,7 +67,7 @@ impl StorageResources {
     /// Delete a real disk and its zpool
     ///
     /// Return true, if data was changed, false otherwise
-    pub(crate) fn remove_real_disk(&mut self, disk: UnparsedDisk) -> bool {
+    pub(crate) fn remove_disk(&mut self, disk: RawDisk) -> bool {
         if !self.disks.contains_key(disk.identity()) {
             return false;
         }
@@ -106,47 +78,16 @@ impl StorageResources {
         true
     }
 
-    /// Delete a synthetic disk and its zpool
-    ///
-    /// Return true, if data was changed, false otherwise
-    pub(crate) fn remove_synthetic_disk(
-        &mut self,
-        zpool_name: ZpoolName,
-    ) -> bool {
-        let disk = DiskWrapper::Synthetic { zpool_name: zpool_name.clone() };
-        if !self.disks.contains_key(&disk.identity()) {
-            return false;
-        }
-        // Safe to unwrap as we just checked the key existed above
-        let parsed_disk =
-            Arc::make_mut(&mut self.disks).remove(&disk.identity()).unwrap();
-        Arc::make_mut(&mut self.pools).remove(&parsed_disk.zpool_name().id());
-        true
-    }
-
     /// Returns the identity of the boot disk.
     ///
     /// If this returns `None`, we have not processed the boot disk yet.
     pub fn boot_disk(&self) -> Option<(DiskIdentity, ZpoolName)> {
-        self.disks.iter().find_map(|(id, disk)| {
-            match disk {
-                // This is the "real" use-case: if we have real disks, query
-                // their properties to identify if they truly are the boot disk.
-                DiskWrapper::Real { disk, .. } => {
-                    if disk.is_boot_disk() {
-                        return Some((id.clone(), disk.zpool_name().clone()));
-                    }
-                }
-                // This is the "less real" use-case: if we have synthetic disks,
-                // just label the first M.2-looking one as a "boot disk".
-                DiskWrapper::Synthetic { .. } => {
-                    if matches!(disk.variant(), DiskVariant::M2) {
-                        return Some((id.clone(), disk.zpool_name().clone()));
-                    }
-                }
-            };
-            None
-        })
+        for (id, disk) in self.disks.iter() {
+            if disk.is_boot_disk() {
+                return Some((id.clone(), disk.zpool_name().clone()));
+            }
+        }
+        None
     }
     /// Returns all M.2 zpools
     pub fn all_m2_zpools(&self) -> Vec<ZpoolName> {

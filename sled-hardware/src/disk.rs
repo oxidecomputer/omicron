@@ -175,6 +175,7 @@ impl UnparsedDisk {
 /// from the ZFS related logic which can also operate on file backed zpools.
 /// Doing things this way allows us to not put higher level concepts like
 /// storage keys into this hardware related package.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PooledDisk {
     pub paths: DiskPaths,
     pub slot: i64,
