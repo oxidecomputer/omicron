@@ -5127,6 +5127,7 @@ dependencies = [
  "expectorate",
  "humantime",
  "internal-dns 0.1.0",
+ "ipnetwork",
  "nexus-client 0.1.0",
  "nexus-db-model",
  "nexus-db-queries",
