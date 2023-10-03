@@ -34,6 +34,7 @@ enum StorageRequest {
     AddDisk(UnparsedDisk),
     AddSyntheticDisk(ZpoolName),
     RemoveDisk(UnparsedDisk),
+    RemoveSyntheticDisk(ZpoolName),
     DisksChanged(HashSet<UnparsedDisk>),
     //    NewFilesystem(NewFilesystemRequest),
     KeyManagerReady,
@@ -64,6 +65,12 @@ impl StorageHandle {
     /// as any associated zpools.
     pub async fn delete_disk(&self, disk: UnparsedDisk) {
         self.tx.send(StorageRequest::RemoveDisk(disk)).await.unwrap();
+    }
+
+    /// Removes a synthetic disk, if it's tracked by the storage manager, as
+    /// well as any associated zpools.
+    pub async fn delete_synthetic_disk(&self, pool: ZpoolName) {
+        self.tx.send(StorageRequest::RemoveSyntheticDisk(pool)).await.unwrap();
     }
 
     /// Ensures that the storage manager tracks exactly the provided disks.
@@ -209,7 +216,12 @@ impl StorageManager {
                     }
                 }
             }
-            StorageRequest::RemoveDisk(_unparsed_disk) => todo!(),
+            StorageRequest::RemoveDisk(unparsed_disk) => {
+                self.remove_disk(unparsed_disk).await;
+            }
+            StorageRequest::RemoveSyntheticDisk(pool) => {
+                self.remove_synthetic_disk(pool).await;
+            }
             StorageRequest::DisksChanged(_unparsed_disks) => todo!(),
             StorageRequest::KeyManagerReady => {
                 self.state = StorageManagerState::Normal;
@@ -437,6 +449,24 @@ impl StorageManager {
             }
         }
     }
+
+    // Delete a real disk
+    async fn remove_disk(&mut self, unparsed_disk: UnparsedDisk) {
+        // If the disk is a U.2, we want to first delete it from any queued disks
+        let _ = self.queued_u2_drives.remove(&unparsed_disk);
+        if self.resources.remove_real_disk(unparsed_disk) {
+            let _ = self.resource_updates.send_replace(self.resources.clone());
+        }
+    }
+
+    // Delete a synthetic disk
+    async fn remove_synthetic_disk(&mut self, pool: ZpoolName) {
+        // If the disk is a U.2, we want to first delete it from any queued disks
+        let _ = self.queued_synthetic_u2_drives.remove(&pool);
+        if self.resources.remove_synthetic_disk(pool) {
+            let _ = self.resource_updates.send_replace(self.resources.clone());
+        }
+    }
 }
 
 /// All tests only use synthetic disks, but are expected to be run on illumos
@@ -634,7 +664,9 @@ mod tests {
     /// This allows us to control timing precisely.
     #[tokio::test]
     async fn queued_disks_get_requeued_on_secret_retriever_error() {
-        let logctx = test_setup_log("queued_disks_get_added_as_resources");
+        let logctx = test_setup_log(
+            "queued_disks_get_requeued_on_secret_retriever_error",
+        );
         let inject_error = Arc::new(AtomicBool::new(false));
         let (mut key_manager, key_requester) = KeyManager::new(
             &logctx.log,
@@ -677,6 +709,45 @@ mod tests {
         inject_error.store(false, Ordering::SeqCst);
         manager.add_queued_disks().await;
         assert_eq!(1, manager.resources.all_u2_zpools().len());
+
+        Zpool::destroy(&zpool_name).unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn delete_disk_triggers_notification() {
+        let logctx = test_setup_log("delete_disk_triggers_notification");
+        let (mut key_manager, key_requester) =
+            KeyManager::new(&logctx.log, HardcodedSecretRetriever::default());
+        let (mut manager, mut handle) =
+            StorageManager::new(&logctx.log, key_requester);
+
+        // Spawn the key_manager so that it will respond to requests for encryption keys
+        tokio::spawn(async move { key_manager.run().await });
+
+        // Spawn the storage manager as done by sled-agent
+        tokio::spawn(async move {
+            manager.run().await;
+        });
+
+        // Inform the storage manager that the key manager is ready, so disks
+        // don't get queued
+        handle.key_manager_ready().await;
+
+        // Create and add a disk
+        let zpool_name = ZpoolName::new_external(Uuid::new_v4());
+        let dir = tempdir().unwrap();
+        let _ = new_disk(dir.path(), &zpool_name);
+        handle.upsert_synthetic_disk(zpool_name.clone()).await;
+
+        // Wait for the add disk notification
+        let resources = handle.wait_for_changes().await;
+        assert_eq!(resources.all_u2_zpools().len(), 1);
+
+        // Delete the disk and wait for a notification
+        handle.delete_synthetic_disk(zpool_name.clone()).await;
+        let resources = handle.wait_for_changes().await;
+        assert!(resources.all_u2_zpools().is_empty());
 
         Zpool::destroy(&zpool_name).unwrap();
         logctx.cleanup_successful();

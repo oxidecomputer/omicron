@@ -12,7 +12,7 @@ use camino::Utf8PathBuf;
 use illumos_utils::zpool::ZpoolName;
 use omicron_common::api::external::{ByteCount, ByteCountRangeError};
 use omicron_common::disk::DiskIdentity;
-use sled_hardware::DiskVariant;
+use sled_hardware::{DiskVariant, UnparsedDisk};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -90,6 +90,38 @@ impl StorageResources {
         let zpool = Pool::new(zpool_name, parent)?;
         Arc::make_mut(&mut self.pools).insert(zpool.name.id(), zpool);
         Ok(true)
+    }
+
+    /// Delete a real disk and its zpool
+    ///
+    /// Return true, if data was changed, false otherwise
+    pub(crate) fn remove_real_disk(&mut self, disk: UnparsedDisk) -> bool {
+        if !self.disks.contains_key(disk.identity()) {
+            return false;
+        }
+        // Safe to unwrap as we just checked the key existed above
+        let parsed_disk =
+            Arc::make_mut(&mut self.disks).remove(disk.identity()).unwrap();
+        Arc::make_mut(&mut self.pools).remove(&parsed_disk.zpool_name().id());
+        true
+    }
+
+    /// Delete a synthetic disk and its zpool
+    ///
+    /// Return true, if data was changed, false otherwise
+    pub(crate) fn remove_synthetic_disk(
+        &mut self,
+        zpool_name: ZpoolName,
+    ) -> bool {
+        let disk = DiskWrapper::Synthetic { zpool_name: zpool_name.clone() };
+        if !self.disks.contains_key(&disk.identity()) {
+            return false;
+        }
+        // Safe to unwrap as we just checked the key existed above
+        let parsed_disk =
+            Arc::make_mut(&mut self.disks).remove(&disk.identity()).unwrap();
+        Arc::make_mut(&mut self.pools).remove(&parsed_disk.zpool_name().id());
+        true
     }
 
     /// Returns the identity of the boot disk.
