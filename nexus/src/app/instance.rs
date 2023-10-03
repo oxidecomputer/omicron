@@ -1133,7 +1133,7 @@ impl super::Nexus {
 
                         error!(
                             self.log,
-                            "failed to set instance to Failed after bad put";
+                            "attempted to set instance to Failed after bad put";
                             "instance_id" => %instance_id,
                             "result" => ?result,
                         );

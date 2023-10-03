@@ -203,7 +203,8 @@ async fn sis_move_to_starting(
     let instance_id = params.db_instance.id();
     let propolis_id = sagactx.lookup::<Uuid>("propolis_id")?;
     info!(osagactx.log(), "moving instance to Starting state via saga";
-          "instance_id" => %instance_id);
+          "instance_id" => %instance_id,
+          "propolis_id" => %propolis_id);
 
     let opctx = crate::context::op_context_for_saga_action(
         &sagactx,

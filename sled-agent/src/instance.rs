@@ -506,6 +506,10 @@ impl InstanceInner {
                 self.log,
                 "Instance::terminate() called with no running state"
             );
+
+            // Ensure the instance is removed from the instance manager's table
+            // so that a new instance can take its place.
+            self.instance_ticket.terminate();
             return Ok(());
         };
 
