@@ -81,11 +81,11 @@ pub struct InstanceAndVmmUpdate {
 #[derive(Copy, Clone, PartialEq, Debug)]
 pub struct InstanceAndVmmUpdateResult {
     /// `Some(status)` if the target instance was found; the wrapped
-    /// [`UpdateStatus`] indicates whether the row was updated. `None` if the
+    /// `UpdateStatus` indicates whether the row was updated. `None` if the
     /// instance was not found.
     pub instance_status: Option<UpdateStatus>,
 
-    /// `Some(status)` if the target VMM was found; the wrapped [`UpdateStatus`]
+    /// `Some(status)` if the target VMM was found; the wrapped `UpdateStatus`
     /// indicates whether the row was updated. `None` if the VMM was not found.
     pub vmm_status: Option<UpdateStatus>,
 }
