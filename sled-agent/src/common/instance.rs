@@ -45,7 +45,11 @@ impl From<PropolisInstanceState> for ApiInstanceState {
             State::Creating | State::Starting => ApiInstanceState::Starting,
             State::Running => ApiInstanceState::Running,
             State::Stopping => ApiInstanceState::Stopping,
-            State::Stopped => ApiInstanceState::Stopped,
+            // A Propolis that is stopped but not yet destroyed should still
+            // appear to be Stopping from an external API perspective, since
+            // they cannot be restarted yet. Instances become logically Stopped
+            // once Propolis reports that the VM is Destroyed (see below).
+            State::Stopped => ApiInstanceState::Stopping,
             State::Rebooting => ApiInstanceState::Rebooting,
             State::Migrating => ApiInstanceState::Migrating,
             State::Repairing => ApiInstanceState::Repairing,
@@ -689,7 +693,11 @@ mod test {
         assert!(state.apply_propolis_observation(&observed).is_none());
         assert_state_change_has_gen_change(&prev, &state);
         assert_eq!(state.instance.gen, prev.instance.gen);
-        assert_eq!(state.vmm.state, ApiInstanceState::Stopped);
+
+        // The Stopped state is translated internally to Stopping to prevent
+        // external viewers from perceiving that the instance is stopped before
+        // the VMM is fully retired.
+        assert_eq!(state.vmm.state, ApiInstanceState::Stopping);
         assert!(state.vmm.gen > prev.vmm.gen);
 
         let prev = state.clone();

@@ -609,14 +609,16 @@ mod test {
         assert_eq!(rnext.vmm_state.state, InstanceState::Stopping);
         rprev = rnext;
 
-        // Stopping goes to Stopped...
+        // The Stopping-to-Stopped transition is masked from external viewers of
+        // the instance so that the instance doesn't appear to be Stopped before
+        // it is ready to be started again.
         instance.transition_finish();
         let rnext = instance.object.current();
         assert!(rnext.vmm_state.gen > rprev.vmm_state.gen);
         assert!(rnext.vmm_state.time_updated >= rprev.vmm_state.time_updated);
         assert!(instance.object.desired().is_some());
         assert_eq!(rprev.vmm_state.state, InstanceState::Stopping);
-        assert_eq!(rnext.vmm_state.state, InstanceState::Stopped);
+        assert_eq!(rnext.vmm_state.state, InstanceState::Stopping);
         rprev = rnext;
 
         // ...and Stopped (internally) goes to Destroyed. This transition is
@@ -626,7 +628,7 @@ mod test {
         let rnext = instance.object.current();
         assert!(rnext.vmm_state.gen > rprev.vmm_state.gen);
         assert!(rnext.vmm_state.time_updated >= rprev.vmm_state.time_updated);
-        assert_eq!(rprev.vmm_state.state, InstanceState::Stopped);
+        assert_eq!(rprev.vmm_state.state, InstanceState::Stopping);
         assert_eq!(rnext.vmm_state.state, InstanceState::Destroyed);
         assert!(rnext.instance_state.gen > rprev.instance_state.gen);
         assert_eq!(rnext.instance_state.fallback_state, InstanceState::Stopped);
