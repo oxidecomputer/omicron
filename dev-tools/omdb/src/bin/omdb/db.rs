@@ -1134,12 +1134,6 @@ async fn cmd_db_eips(
     limit: NonZeroU32,
     verbose: bool,
 ) -> Result<(), anyhow::Error> {
-    /*
-    let ips = datastore
-        .lookup_external_ips(&opctx)
-        .await
-        .context("listing external ips")?;
-    */
     use db::schema::external_ip::dsl;
     let ips: Vec<ExternalIp> = dsl::external_ip
         .filter(dsl::time_deleted.is_null())
