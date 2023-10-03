@@ -181,8 +181,6 @@ impl StorageManager {
                 _ = interval.tick(),
                     if self.state == StorageManagerState::QueuingDisks =>
                 {
-                    // We are going to try to configure these disks again
-                    self.state = StorageManagerState::Normal;
                     self.add_queued_disks().await;
                 }
             }
@@ -229,6 +227,7 @@ impl StorageManager {
     // and wait for the next retry window to re-call this method. If we hit a
     // permanent error we log it, but we continue inserting queued disks.
     async fn add_queued_disks(&mut self) {
+        self.state = StorageManagerState::Normal;
         // Operate on queued real disks
 
         // Disks that should be requeued.
@@ -455,18 +454,30 @@ mod tests {
     };
     use omicron_test_utils::dev::test_setup_log;
     use std::fs::File;
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    };
     use uuid::Uuid;
 
     /// A [`key-manager::SecretRetriever`] that only returns hardcoded IKM for
     /// epoch 0
-    #[derive(Debug)]
-    struct HardcodedSecretRetriever {}
+    #[derive(Debug, Default)]
+    struct HardcodedSecretRetriever {
+        inject_error: Arc<AtomicBool>,
+    }
 
     #[async_trait]
     impl SecretRetriever for HardcodedSecretRetriever {
         async fn get_latest(
             &self,
         ) -> Result<VersionedIkm, SecretRetrieverError> {
+            if self.inject_error.load(Ordering::SeqCst) {
+                return Err(SecretRetrieverError::Bootstore(
+                    "Timeout".to_string(),
+                ));
+            }
+
             let epoch = 0;
             let salt = [0u8; 32];
             let secret = [0x1d; 32];
@@ -479,6 +490,11 @@ mod tests {
             &self,
             epoch: u64,
         ) -> Result<SecretState, SecretRetrieverError> {
+            if self.inject_error.load(Ordering::SeqCst) {
+                return Err(SecretRetrieverError::Bootstore(
+                    "Timeout".to_string(),
+                ));
+            }
             if epoch != 0 {
                 return Err(SecretRetrieverError::NoSuchEpoch(epoch));
             }
@@ -507,7 +523,7 @@ mod tests {
             "add_u2_disk_while_not_in_normal_stage_and_ensure_it_gets_queued",
         );
         let (mut _key_manager, key_requester) =
-            KeyManager::new(&logctx.log, HardcodedSecretRetriever {});
+            KeyManager::new(&logctx.log, HardcodedSecretRetriever::default());
         let (mut manager, _) = StorageManager::new(&logctx.log, key_requester);
         let zpool_name = ZpoolName::new_external(Uuid::new_v4());
         assert_eq!(StorageManagerState::WaitingForKeyManager, manager.state);
@@ -536,7 +552,7 @@ mod tests {
     async fn ensure_u2_gets_added_to_resources() {
         let logctx = test_setup_log("ensure_u2_gets_added_to_resources");
         let (mut key_manager, key_requester) =
-            KeyManager::new(&logctx.log, HardcodedSecretRetriever {});
+            KeyManager::new(&logctx.log, HardcodedSecretRetriever::default());
         let (mut manager, _) = StorageManager::new(&logctx.log, key_requester);
         let zpool_name = ZpoolName::new_external(Uuid::new_v4());
         let dir = tempdir().unwrap();
@@ -557,7 +573,7 @@ mod tests {
     async fn wait_for_bootdisk() {
         let logctx = test_setup_log("wait_for_bootdisk");
         let (mut key_manager, key_requester) =
-            KeyManager::new(&logctx.log, HardcodedSecretRetriever {});
+            KeyManager::new(&logctx.log, HardcodedSecretRetriever::default());
         let (mut manager, mut handle) =
             StorageManager::new(&logctx.log, key_requester);
         // Spawn the key_manager so that it will respond to requests for encryption keys
@@ -583,7 +599,7 @@ mod tests {
     async fn queued_disks_get_added_as_resources() {
         let logctx = test_setup_log("queued_disks_get_added_as_resources");
         let (mut key_manager, key_requester) =
-            KeyManager::new(&logctx.log, HardcodedSecretRetriever {});
+            KeyManager::new(&logctx.log, HardcodedSecretRetriever::default());
         let (mut manager, mut handle) =
             StorageManager::new(&logctx.log, key_requester);
 
@@ -609,6 +625,59 @@ mod tests {
         handle.key_manager_ready().await;
         let resources = handle.get_latest_resources().await;
         assert_eq!(resources.all_u2_zpools().len(), 1);
+        Zpool::destroy(&zpool_name).unwrap();
+        logctx.cleanup_successful();
+    }
+
+    /// For this test, we are going to step through the msg recv loop directly
+    /// without running the `StorageManager` in a tokio task.
+    /// This allows us to control timing precisely.
+    #[tokio::test]
+    async fn queued_disks_get_requeued_on_secret_retriever_error() {
+        let logctx = test_setup_log("queued_disks_get_added_as_resources");
+        let inject_error = Arc::new(AtomicBool::new(false));
+        let (mut key_manager, key_requester) = KeyManager::new(
+            &logctx.log,
+            HardcodedSecretRetriever { inject_error: inject_error.clone() },
+        );
+        let (mut manager, handle) =
+            StorageManager::new(&logctx.log, key_requester);
+
+        // Spawn the key_manager so that it will respond to requests for encryption keys
+        tokio::spawn(async move { key_manager.run().await });
+
+        // Queue up a disks, as we haven't told the `StorageManager` that
+        // the `KeyManager` is ready yet.
+        let zpool_name = ZpoolName::new_external(Uuid::new_v4());
+        let dir = tempdir().unwrap();
+        let _ = new_disk(dir.path(), &zpool_name);
+        handle.upsert_synthetic_disk(zpool_name.clone()).await;
+        manager.step().await.unwrap();
+
+        // We can't wait for a reply through the handle as the storage manager task
+        // isn't actually running. We just check the resources directly.
+        assert!(manager.resources.all_u2_zpools().is_empty());
+
+        // Let's inject an error to the `SecretRetriever` to simulate a trust
+        // quorum timeout
+        inject_error.store(true, Ordering::SeqCst);
+
+        // Now inform the storage manager that the key manager is ready
+        // The queued disk should not be added due to the error
+        handle.key_manager_ready().await;
+        manager.step().await.unwrap();
+        assert!(manager.resources.all_u2_zpools().is_empty());
+
+        // Manually simulating a timer tick to add queued disks should also
+        // still hit the error
+        manager.add_queued_disks().await;
+        assert!(manager.resources.all_u2_zpools().is_empty());
+
+        // Clearing the injected error will cause the disk to get added
+        inject_error.store(false, Ordering::SeqCst);
+        manager.add_queued_disks().await;
+        assert_eq!(1, manager.resources.all_u2_zpools().len());
+
         Zpool::destroy(&zpool_name).unwrap();
         logctx.cleanup_successful();
     }
