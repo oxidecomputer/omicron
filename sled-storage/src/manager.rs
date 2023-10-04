@@ -766,11 +766,10 @@ mod tests {
 
         // Ensure the one modified disk changed as we expected
         assert_eq!(5, resources.disks.len());
-        //assert_eq!(5, resources.pools.len());
         for raw_disk in expected {
-            let disk = resources.disks.get(raw_disk.identity()).unwrap();
+            let (disk, pool) =
+                resources.disks.get(raw_disk.identity()).unwrap();
             assert_eq!(disk.zpool_name(), raw_disk.zpool_name());
-            let pool = resources.pools.get(&disk.zpool_name().id()).unwrap();
             assert_eq!(&pool.name, disk.zpool_name());
             assert_eq!(raw_disk.identity(), &pool.parent);
         }

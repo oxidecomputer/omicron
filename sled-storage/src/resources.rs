@@ -40,10 +40,7 @@ const ZONE_BUNDLE_DIRECTORY: &str = "zone";
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StorageResources {
     // All disks, real and synthetic, being managed by this sled
-    pub disks: Arc<BTreeMap<DiskIdentity, Disk>>,
-
-    // A map of "Uuid" to "pool".
-    pub pools: Arc<BTreeMap<Uuid, Pool>>,
+    pub disks: Arc<BTreeMap<DiskIdentity, (Disk, Pool)>>,
 }
 
 impl StorageResources {
@@ -54,21 +51,16 @@ impl StorageResources {
         let disk_id = disk.identity().clone();
         let zpool_name = disk.zpool_name().clone();
         let zpool = Pool::new(zpool_name, disk_id.clone())?;
-        if let Some(stored_disk) = self.disks.get(&disk_id) {
-            if let Some(stored_pool) = self.pools.get(&zpool.name.id()) {
-                if stored_disk == &disk
-                    && stored_pool.info.size() == zpool.info.size()
-                    && stored_pool.name == zpool.name
-                {
-                    return Ok(false);
-                }
-            } else {
-                // We must delete the stored pool which no longer matches our disk
+        if let Some((stored_disk, stored_pool)) = self.disks.get(&disk_id) {
+            if stored_disk == &disk
+                && stored_pool.info.size() == zpool.info.size()
+                && stored_pool.name == zpool.name
+            {
+                return Ok(false);
             }
         }
         // Either the disk or zpool changed
-        Arc::make_mut(&mut self.disks).insert(disk_id, disk);
-        Arc::make_mut(&mut self.pools).insert(zpool.name.id(), zpool);
+        Arc::make_mut(&mut self.disks).insert(disk_id, (disk, zpool));
         Ok(true)
     }
 
@@ -80,8 +72,7 @@ impl StorageResources {
             return false;
         }
         // Safe to unwrap as we just checked the key existed above
-        let parsed_disk = Arc::make_mut(&mut self.disks).remove(id).unwrap();
-        Arc::make_mut(&mut self.pools).remove(&parsed_disk.zpool_name().id());
+        Arc::make_mut(&mut self.disks).remove(id).unwrap();
         true
     }
 
@@ -89,7 +80,7 @@ impl StorageResources {
     ///
     /// If this returns `None`, we have not processed the boot disk yet.
     pub fn boot_disk(&self) -> Option<(DiskIdentity, ZpoolName)> {
-        for (id, disk) in self.disks.iter() {
+        for (id, (disk, _)) in self.disks.iter() {
             if disk.is_boot_disk() {
                 return Some((id.clone(), disk.zpool_name().clone()));
             }
@@ -126,7 +117,7 @@ impl StorageResources {
     pub fn all_zpools(&self, variant: DiskVariant) -> Vec<ZpoolName> {
         self.disks
             .values()
-            .filter_map(|disk| {
+            .filter_map(|(disk, _)| {
                 if disk.variant() == variant {
                     return Some(disk.zpool_name().clone());
                 }
