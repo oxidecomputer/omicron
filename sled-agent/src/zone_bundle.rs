@@ -17,7 +17,20 @@ use chrono::Utc;
 use flate2::bufread::GzDecoder;
 use illumos_utils::running_zone::is_oxide_smf_log_file;
 use illumos_utils::running_zone::RunningZone;
+use illumos_utils::running_zone::ServiceProcess;
+use illumos_utils::zfs::CloneSnapshotError;
+use illumos_utils::zfs::CreateSnapshotError;
+use illumos_utils::zfs::DestroyDatasetError;
+use illumos_utils::zfs::DestroySnapshotError;
+use illumos_utils::zfs::EnsureFilesystemError;
+use illumos_utils::zfs::ListDatasetsError;
+use illumos_utils::zfs::ListSnapshotsError;
+use illumos_utils::zfs::SetValueError;
+use illumos_utils::zfs::Snapshot;
+use illumos_utils::zfs::Zfs;
+use illumos_utils::zfs::ZfsClone;
 use illumos_utils::zfs::ZFS;
+use illumos_utils::zfs::ZONE_BUNDLE_ZFS_DATASET;
 use illumos_utils::zone::AdmError;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -42,6 +55,13 @@ use tokio::sync::Notify;
 use tokio::time::sleep;
 use tokio::time::Instant;
 use uuid::Uuid;
+
+cfg_if::cfg_if! {
+    if #[cfg(not(test))] {
+        use illumos_utils::zfs::DestroyDatasetErrorVariant;
+        use illumos_utils::zfs::Mountpoint;
+    }
+}
 
 /// An identifier for a zone bundle.
 #[derive(
@@ -137,6 +157,125 @@ impl ZoneBundleMetadata {
             time_created: Utc::now(),
             version: Self::VERSION,
             cause,
+        }
+    }
+}
+
+// The base ZFS dataset into which we clone all snapshots.
+//
+// This is deleted when the sled agent starts up, if it exists, to ensure
+// there's no long-lived snapshots which accumulate huge deltas from their
+// origins.
+const BASE_DATASET: &'static str = ZONE_BUNDLE_ZFS_DATASET;
+
+// The name of the snapshot (and clone) created from the zone root filesystem.
+const ZONE_ROOT_SNAPSHOT_NAME: &'static str = "zone-root";
+
+// The prefix for all the snapshots (and clones) for each filesystem containing
+// archived logs. Each debug data, such as `oxp_<UUID>/crypt/debug`, generates a
+// snapshot and clone named `zone-archives-<UUID>`.
+const ARCHIVE_SNAPSHOT_PREFIX: &'static str = "zone-archives-";
+
+// An extra ZFS user property attached to all zone bundle snapshots and clones.
+//
+// This is used to ensure that we are not accidentally deleting ZFS objects that
+// a user has created, but which happen to be named the same thing.
+const ZONE_BUNDLE_ZFS_PROPERTY_NAME: &'static str = "for-zone-bundle";
+const ZONE_BUNDLE_ZFS_PROPERTY_VALUE: &'static str = "true";
+
+// Initialize the ZFS resources we need for zone bundling.
+//
+// This first deletes any existing ZFS filesystem that matches the root we use
+// for all zone bundle snapshots and clones. This ensures that a sled-agent
+// crash during zone bundling doesn't leave unwanted snapshots growing without
+// bound as they diverge from their origin.
+//
+// This also recreates that zone-bundle root afterwards.
+#[cfg(not(test))]
+fn initialize_zfs_resources(log: &Logger) -> Result<(), BundleError> {
+    // Destroy the base dataset in which we create any clones during zone
+    // bundling. This will destroy all the clones as well.
+    match Zfs::destroy_dataset(BASE_DATASET) {
+        Ok(_) => {
+            debug!(
+                log,
+                "destroyed pre-existing zone bundle base dataset";
+                "dataset" => BASE_DATASET,
+            );
+        }
+        Err(DestroyDatasetError {
+            err: DestroyDatasetErrorVariant::NotFound,
+            ..
+        }) => {}
+        Err(e) => return Err(BundleError::from(e)),
+    }
+
+    // Delete any existing snapshots that still exist as well.
+    let zb_snapshots =
+        Zfs::list_snapshots().unwrap().into_iter().filter(|snap| {
+            // Check for snapshots named how we expect to create them.
+            if snap.snap_name != ZONE_ROOT_SNAPSHOT_NAME
+                || !snap.snap_name.starts_with(ARCHIVE_SNAPSHOT_PREFIX)
+            {
+                return false;
+            }
+
+            // Additionally check for the zone-bundle-specific property.
+            //
+            // If we find a dataset that matches our names, but which _does not_
+            // have such a property, we'll panic rather than possibly deleting
+            // user data.
+            let name = snap.to_string();
+            let value =
+                Zfs::get_oxide_value(&name, ZONE_BUNDLE_ZFS_PROPERTY_NAME)
+                    .unwrap_or_else(|_| {
+                        panic!(
+                            "Found a ZFS snapshot with a name reserved for \
+                            zone bundling, but which does not have the \
+                            zone-bundle-specific property. Bailing out, \
+                            rather than risking deletion of user data. \
+                            snap_name = {}, property = {}",
+                            &name, ZONE_BUNDLE_ZFS_PROPERTY_NAME
+                        )
+                    });
+            assert_eq!(value, ZONE_BUNDLE_ZFS_PROPERTY_VALUE);
+            true
+        });
+    for snapshot in zb_snapshots {
+        Zfs::destroy_snapshot(&snapshot.filesystem, &snapshot.snap_name)?;
+        debug!(
+            log,
+            "destroyed pre-existing zone bundle snapshot";
+            "snapshot" => %snapshot,
+        );
+    }
+
+    // Create the filesystem within which we'll create all the snapshots and
+    // clones for zone bundle operations.
+    match Zfs::ensure_filesystem(
+        BASE_DATASET,
+        Mountpoint::Path(Utf8PathBuf::from(&format!("/{}", BASE_DATASET))),
+        /* zoned = */ false,
+        /* format = */ true,
+        /* encryption_details = */ None,
+        /* size_details = */ None,
+    ) {
+        Ok(_) => {
+            info!(
+                log,
+                "created zone bundle base filesystem";
+                "filesystem" => BASE_DATASET,
+            );
+            Ok(())
+        }
+        Err(err) => {
+            error!(
+                log,
+                "failed to create zone bundle base filesystem";
+                "filesystem" => BASE_DATASET,
+                "error" => ?err,
+            );
+            Err(BundleError::from(err))
         }
     }
 }
@@ -256,6 +395,11 @@ impl ZoneBundler {
         resources: StorageResources,
         cleanup_context: CleanupContext,
     ) -> Self {
+        // This is compiled out in tests because there's no way to set our
+        // expectations on the mockall object it uses internally. Not great.
+        #[cfg(not(test))]
+        initialize_zfs_resources(&log)
+            .expect("Failed to initialize existing ZFS resources");
         let notify_cleanup = Arc::new(Notify::new());
         let inner = Arc::new(Mutex::new(Inner {
             resources,
@@ -572,7 +716,47 @@ pub enum BundleError {
 
     #[error("Cleanup failed")]
     Cleanup(#[source] anyhow::Error),
+
+    #[error("Failed to create ZFS snapshot")]
+    CreateSnapshot(#[from] CreateSnapshotError),
+
+    #[error("Failed to create ZFS clone from snapshot")]
+    CloneSnapshot(#[from] CloneSnapshotError),
+
+    #[error("Failed to destroy ZFS snapshot")]
+    DestroySnapshot(#[from] DestroySnapshotError),
+
+    #[error("Failed to list ZFS snapshots")]
+    ListSnapshot(#[from] ListSnapshotsError),
+
+    #[error("Failed to ensure ZFS filesystem")]
+    EnsureFilesystem(#[from] EnsureFilesystemError),
+
+    #[error("Failed to destroy ZFS dataset")]
+    DestroyDataset(#[from] DestroyDatasetError),
+
+    #[error("Failed to list ZFS datasets")]
+    ListDatasets(#[from] ListDatasetsError),
+
+    #[error("Failed to set Oxide-specific ZFS property")]
+    ZfsProperty(#[from] SetValueError),
 }
+
+// There are at least two big issues:
+//
+// - The list of current / rotated (not archived) log files might be wrong
+// - To what extent do we need a consistent snapshot of the logs in a program?
+//
+// We're fighting both the logadm + archival process, _and_ the actual program
+// writing to the logs.
+//
+// So, `logadm` will be moving files from N -> N + 1, and then copying the
+// current to .0 and truncating the current. It takes an exclusive lock on the
+// current at the "end" of the copy and during the truncation.
+//
+// dap agrees, ZFS snapshot of the M.2 then U.2, and then copy all the files
+// from that. Make sure to have one, unique snapshot name _per zone kind_, and
+// delete it on startup of the sled agent.
 
 // Helper function to write an array of bytes into the tar archive, with
 // the provided name.
@@ -595,6 +779,307 @@ fn insert_data<W: std::io::Write>(
     builder.append_data(&mut hdr, name, Cursor::new(contents)).map_err(|err| {
         BundleError::AddBundleData { tarball_path: name.into(), err }
     })
+}
+
+// Create a snapshot and clone from an existing filesystem.
+fn snapshot_and_clone(
+    log: &Logger,
+    filesystem: &str,
+    snap_name: &str,
+    clone_name: &str,
+) -> Result<ZfsClone, BundleError> {
+    Zfs::create_snapshot(filesystem, snap_name)?;
+    debug!(
+        log,
+        "created snapshot";
+        "filesystem" => filesystem,
+        "snap_name" => snap_name,
+    );
+    let snapshot = Snapshot {
+        filesystem: filesystem.to_string(),
+        snap_name: snap_name.to_string(),
+    };
+    Zfs::set_oxide_value(
+        &snapshot.to_string(),
+        ZONE_BUNDLE_ZFS_PROPERTY_NAME,
+        ZONE_BUNDLE_ZFS_PROPERTY_VALUE,
+    )?;
+    trace!(
+        log,
+        "set oxide property on snapshot";
+        "filesystem" => filesystem,
+        "snap_name" => snap_name,
+        "property_name" => ZONE_BUNDLE_ZFS_PROPERTY_NAME,
+        "property_value" => ZONE_BUNDLE_ZFS_PROPERTY_VALUE,
+    );
+    Zfs::clone_snapshot(filesystem, snap_name, clone_name)?;
+    debug!(
+        log,
+        "created clone from snapshot";
+        "filesystem" => filesystem,
+        "snap_name" => snap_name,
+        "clone_name" => clone_name,
+    );
+    Zfs::set_oxide_value(
+        clone_name,
+        ZONE_BUNDLE_ZFS_PROPERTY_NAME,
+        ZONE_BUNDLE_ZFS_PROPERTY_VALUE,
+    )?;
+    trace!(
+        log,
+        "set oxide property on clone";
+        "filesystem" => clone_name,
+        "property_name" => ZONE_BUNDLE_ZFS_PROPERTY_NAME,
+        "property_value" => ZONE_BUNDLE_ZFS_PROPERTY_VALUE,
+    );
+    Ok(ZfsClone { snapshot, clone_name: clone_name.to_string() })
+}
+
+// Create snapshots and clones for the filesystems we need to copy out all log
+// files.
+//
+// A key feature of the zone-bundle process is that we pull all the log files
+// for a zone. This is tricky. The logs are both being written to by the
+// programs we're interested in, and also potentially being rotated by `logadm`,
+// and / or archived out to the U.2s through the code in `crate::dump_setup`.
+//
+// We need to capture all these logs, while avoiding inconsistent state (e.g., a
+// missing log message that existed when the bundle was created) and also
+// interrupting the rotation and archival processes. We do this by taking ZFS
+// snapshots of the relevant datasets when we want to create the bundle.
+//
+// When we receive a bundling request, we take a snapshot of a few datasets:
+//
+// - The zone filesystem itself, `oxz_<UUID>/crypt/zone/<ZONE_NAME>`.
+//
+// - All of the U.2 debug datasets, like `oxp_<UUID>/crypt/debug`, which we know
+// contain logs for the given zone. This is done by looking at all the service
+// processes in the zone, and mapping the locations of archived logs, such as
+// `/pool/ext/<UUID>/crypt/debug/<ZONE_NAME>` to the zpool name.
+//
+// This provides us with a consistent view of the log files at the time the
+// bundle was requested. Note that this ordering, taking the root FS snapshot
+// first followed by the archive datasets, ensures that we don't _miss_ log
+// messages that existed when the bundle was requested. It's possible that we
+// double-count them however: the archiver could run concurrently, and result in
+// a log file existing on the root snapshot when we create it, and also on the
+// achive snapshot by the time we get around to creating that.
+//
+// At this point, we operate entirely on clones made from each of those
+// snapshots. We search for "current" log files in the root snapshot, and
+// archived log files in the archive snapshots. The clones are mounted under the
+// "base" dataset for the zone bundle process.
+fn create_zfs_clones(
+    log: &Logger,
+    zone: &RunningZone,
+    extra_log_dirs: &[Utf8PathBuf],
+) -> Result<Vec<ZfsClone>, BundleError> {
+    // Snapshot and clone the root filesystem.
+    let dataset = Zfs::get_dataset_name(zone.root().as_str())?;
+    let root_clone = snapshot_and_clone(
+        log,
+        &dataset,
+        ZONE_ROOT_SNAPSHOT_NAME,
+        &format!("{}/{}", BASE_DATASET, ZONE_ROOT_SNAPSHOT_NAME),
+    )?;
+    let mut clones = vec![root_clone];
+
+    // Look at all the provided extra log directories, and take a snapshot for
+    // any that have a directory with the zone name. These may not have any log
+    // file in them yet, but we'll snapshot now and then filter more judiciously
+    // when we actually find the files we want to bundle.
+    let mut maybe_err = None;
+    for dir in extra_log_dirs.iter() {
+        let zone_dir = dir.join(zone.name());
+        match std::fs::metadata(&zone_dir) {
+            Ok(d) => {
+                if d.is_dir() {
+                    let dataset = match Zfs::get_dataset_name(zone_dir.as_str())
+                    {
+                        Ok(ds) => Utf8PathBuf::from(ds),
+                        Err(e) => {
+                            error!(
+                                log,
+                                "failed to list datasets, will \
+                                unwind any previously created clones";
+                                "error" => ?e,
+                            );
+                            assert!(maybe_err
+                                .replace(BundleError::from(e))
+                                .is_none());
+                            break;
+                        }
+                    };
+
+                    // These datasets are named like `<pool_name>/...`. Since
+                    // we're cloning zero or more of them, we disambiguate with
+                    // the pool name.
+                    let pool_name = dataset
+                        .components()
+                        .next()
+                        .expect("Zone archive datasets must have be non-empty");
+                    let snap_name =
+                        format!("{}{}", ARCHIVE_SNAPSHOT_PREFIX, pool_name);
+                    match snapshot_and_clone(
+                        log,
+                        dataset.as_str(),
+                        &snap_name,
+                        &format!("{}/{}", BASE_DATASET, snap_name),
+                    ) {
+                        Ok(clone) => clones.push(clone),
+                        Err(e) => {
+                            error!(
+                                log,
+                                "failed to create clone, will \
+                                unwind any previously created";
+                                "error" => ?e,
+                            );
+                            assert!(maybe_err.replace(e).is_none());
+                            break;
+                        }
+                    }
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                trace!(
+                    log,
+                    "skipping non-existent zone-bundle directory";
+                    "dir" => %zone_dir,
+                );
+            }
+            Err(e) => {
+                error!(
+                    log,
+                    "failed to get metadata for potential zone directory";
+                    "zone_dir" => %zone_dir,
+                    "error" => ?e,
+                );
+            }
+        }
+    }
+    if let Some(err) = maybe_err {
+        cleanup_zfs_clones(log, &clones);
+        return Err(err);
+    };
+    Ok(clones)
+}
+
+// Destroy any created ZFS clones and snapshots
+fn cleanup_zfs_clones(log: &Logger, clones: &[ZfsClone]) {
+    for clone in clones.iter() {
+        match Zfs::destroy_dataset(&clone.clone_name) {
+            Ok(_) => debug!(
+                log,
+                "destroyed zone bundle ZFS clone";
+                "clone_name" => &clone.clone_name,
+            ),
+            Err(e) => error!(
+                log,
+                "failed to destroy zone bundle ZFS clone";
+                "clone_name" => &clone.clone_name,
+                "error" => ?e,
+            ),
+        }
+        match Zfs::destroy_snapshot(
+            &clone.snapshot.filesystem,
+            &clone.snapshot.snap_name,
+        ) {
+            Ok(_) => debug!(
+                log,
+                "destroyed zone bundle ZFS snapshot";
+                "snapshot" => %clone.snapshot,
+            ),
+            Err(e) => error!(
+                log,
+                "failed to destroy zone bundle ZFS clone";
+                "snapshot" => %clone.snapshot,
+                "error" => ?e,
+            ),
+        }
+    }
+}
+
+// List all log files (current, rotated, and archived) that should be part of
+// the zone bundle for a single service.
+async fn find_service_log_files(
+    log: &Logger,
+    zone_name: &str,
+    svc: &ServiceProcess,
+    extra_log_dirs: &[Utf8PathBuf],
+    clones: &[ZfsClone],
+) -> Result<Vec<Utf8PathBuf>, BundleError> {
+    // The current and any rotated, but not archived, log files live in the zone
+    // root filesystem. Extract any which match.
+    //
+    // There are a few path tricks to keep in mind here. We've created a
+    // snapshot and clone from the zone's filesystem, which is usually something
+    // like `<pool_name>/crypt/zone/<zone_name>`. That clone is place at
+    // `rpool/oxide-sled-agent-zone-bundle/zone-root`.
+    //
+    // The log files themselves are things like `/var/svc/log/...`, but in the
+    // actual ZFS dataset comprising the root FS for the zone, there are
+    // additional directories, most notably `<zonepath>/root`. So the _cloned_
+    // log file will live at
+    // `/rpool/oxide-sled-agent-zone-bundle/zone-root/root/var/svc/log/...`.
+    let mut current_log_file = Utf8PathBuf::from("/");
+    current_log_file.push(&clones[0].clone_name);
+    current_log_file.push(RunningZone::ROOT_FS_PATH);
+    current_log_file.push(svc.log_file.as_str().trim_start_matches('/'));
+    let log_dir =
+        current_log_file.parent().expect("Current log file must have a parent");
+    let mut log_files = vec![current_log_file.clone()];
+    for entry in log_dir.read_dir_utf8().map_err(|err| {
+        BundleError::ReadDirectory { directory: log_dir.into(), err }
+    })? {
+        let entry = entry.map_err(|err| BundleError::ReadDirectory {
+            directory: log_dir.into(),
+            err,
+        })?;
+        let path = entry.path();
+
+        // Camino's Utf8Path only considers whole path components to match,
+        // so convert both paths into a &str and use that object's
+        // starts_with. See the `camino_starts_with_behaviour` test.
+        let path_ref: &str = path.as_ref();
+        let current_log_file_ref: &str = current_log_file.as_ref();
+        if path != current_log_file
+            && path_ref.starts_with(current_log_file_ref)
+        {
+            log_files.push(path.clone().into());
+        }
+    }
+
+    // The _archived_ log files are slightly trickier. They can technically live
+    // in many different datasets, because the archive process may need to start
+    // archiving to one location, but move to another if a quota is hit. We'll
+    // iterate over all the extra log directories and try to find any log files
+    // in those _cloned_ filesystems.
+    for clone in clones.iter().skip(1) {
+        let cloned_extra_log_dirs: Vec<_> = extra_log_dirs
+            .iter()
+            .map(|d| Utf8PathBuf::from(&clone.clone_name).join(d))
+            .collect();
+        debug!(
+            log,
+            "looking for extra log files in cloned filesystems";
+            "extra_dirs" => ?&cloned_extra_log_dirs,
+        );
+        log_files.extend(
+            find_archived_log_files(
+                log,
+                zone_name,
+                &svc.service_name,
+                &cloned_extra_log_dirs,
+            )
+            .await,
+        );
+    }
+    debug!(
+        log,
+        "found log files";
+        "log_files" => ?&log_files,
+    );
+    Ok(log_files)
 }
 
 // Create a service bundle for the provided zone.
@@ -702,14 +1187,18 @@ async fn create(
         }
     }
 
-    // Debugging commands run on the specific processes this zone defines.
-    const ZONE_PROCESS_COMMANDS: [&str; 3] = [
-        "pfiles", "pstack",
-        "pargs",
-        // TODO-completeness: We may want `gcore`, since that encompasses
-        // the above commands and much more. It seems like overkill now,
-        // however.
-    ];
+    // We need to get the service processes here, and then:
+    //
+    // - snapshot and clone the zone root filesystem
+    // - snapshot and clone the dataset(s) containing the archived log files.
+    //
+    // This all has to happen in quick succession, to ensure that we're not
+    // going to miss logs. This would only happen if there is a very fast
+    // writer, fast enough that data makes its way through the current log file
+    // and into the archived before we take the snapshot of the latter.
+
+    // Enumerate the list of Oxide-specific services inside the zone that we
+    // want to include in the bundling process.
     let procs = match zone
         .service_processes()
         .context("failed to enumerate zone service processes")
@@ -733,6 +1222,37 @@ async fn create(
             return Err(BundleError::from(e));
         }
     };
+
+    // Create ZFS snapshots of filesystems containing log files.
+    //
+    // We need to capture log files from two kinds of locations:
+    //
+    // - The zone root filesystem, where the current and rotated (but not
+    // archived) log files live.
+    // - Zero or more filesystems on the U.2s used for archiving older log
+    // files.
+    //
+    // Both of these are dynamic. The current log file is likely being written
+    // by the service itself, and `logadm` may also be rotating files. At the
+    // same time, the log-archival process in `dump_setup.rs` may be copying
+    // these out to the U.2s, after which it deletes those on the zone
+    // filesystem itself.
+    //
+    // To avoid various kinds of corruption, such as a bad tarball or missing
+    // log messages, we'll create ZFS snapshots of each of these relevant
+    // filesystems, and insert those (now-static) files into the zone-bundle
+    // tarballs.
+    let clones = create_zfs_clones(log, zone, &context.extra_log_dirs)
+        .context("failed to create zone bundle ZFS snapshots / clones")?;
+
+    // Debugging commands run on the specific processes this zone defines.
+    const ZONE_PROCESS_COMMANDS: [&str; 3] = [
+        "pfiles", "pstack",
+        "pargs",
+        // TODO-completeness: We may want `gcore`, since that encompasses
+        // the above commands and much more. It seems like overkill now,
+        // however.
+    ];
     for svc in procs.into_iter() {
         let pid_s = svc.pid.to_string();
         for cmd in ZONE_PROCESS_COMMANDS {
@@ -765,72 +1285,61 @@ async fn create(
             }
         }
 
-        // We may need to extract log files that have been archived out of the
-        // zone filesystem itself. See `crate::dump_setup` for the logic which
-        // does this.
-        let archived_log_files = find_archived_log_files(
+        // Collect and insert all log files.
+        //
+        // This takes files from the snapshot of either the zone root
+        // filesystem, or the filesystem containing the archived log files.
+        let all_log_files = match find_service_log_files(
             log,
             zone.name(),
-            &svc.service_name,
+            &svc,
             &context.extra_log_dirs,
+            &clones,
         )
-        .await;
-
-        // Copy any log files, current and rotated, into the tarball as
-        // well.
-        //
-        // Safety: This pathbuf was retrieved by locating an existing file
-        // on the filesystem, so we're sure it has a name and the unwrap is
-        // safe.
-        debug!(
-            log,
-            "appending current log file to zone bundle";
-            "zone" => zone.name(),
-            "log_file" => %svc.log_file,
-        );
-        if let Err(e) = builder.append_path_with_name(
-            &svc.log_file,
-            svc.log_file.file_name().unwrap(),
-        ) {
-            error!(
-                log,
-                "failed to append current log file to zone bundle";
-                "zone" => zone.name(),
-                "log_file" => %svc.log_file,
-                "error" => ?e,
-            );
-            return Err(BundleError::AddBundleData {
-                tarball_path: svc.log_file.file_name().unwrap().into(),
-                err: e,
-            });
-        }
-        for f in svc.rotated_log_files.iter().chain(archived_log_files.iter()) {
-            debug!(
-                log,
-                "appending rotated log file to zone bundle";
-                "zone" => zone.name(),
-                "log_file" => %f,
-            );
-            if let Err(e) =
-                builder.append_path_with_name(f, f.file_name().unwrap())
-            {
+        .await
+        {
+            Ok(f) => f,
+            Err(e) => {
                 error!(
                     log,
-                    "failed to append rotated log file to zone bundle";
+                    "failed to find service log files";
                     "zone" => zone.name(),
-                    "log_file" => %f,
                     "error" => ?e,
                 );
-                return Err(BundleError::AddBundleData {
-                    tarball_path: f.file_name().unwrap().into(),
-                    err: e,
-                });
+                cleanup_zfs_clones(&log, &clones);
+                return Err(e);
+            }
+        };
+        for log_file in all_log_files.into_iter() {
+            match builder
+                .append_path_with_name(&log_file, log_file.file_name().unwrap())
+            {
+                Ok(_) => {
+                    debug!(
+                        log,
+                        "appended log file to zone bundle";
+                        "zone" => zone.name(),
+                        "log_file" => %log_file,
+                    );
+                }
+                Err(e) => {
+                    error!(
+                        log,
+                        "failed to append log file to zone bundle";
+                        "zone" => zone.name(),
+                        "log_file" => %svc.log_file,
+                        "error" => ?e,
+                    );
+                }
             }
         }
     }
 
     // Finish writing out the tarball itself.
-    builder.into_inner().context("Failed to build bundle")?;
+    if let Err(e) = builder.into_inner().context("Failed to build bundle") {
+        cleanup_zfs_clones(&log, &clones);
+        return Err(BundleError::from(e));
+    }
 
     // Copy the bundle to the other locations. We really want the bundles to
     // be duplicates, not an additional, new bundle.
@@ -840,14 +1349,21 @@ async fn create(
     // the final locations should that last copy fail for any of them.
     //
     // See: https://github.com/oxidecomputer/omicron/issues/3876.
+    let mut copy_err = None;
     for other_dir in zone_bundle_dirs.iter().skip(1) {
         let to = other_dir.join(&filename);
         debug!(log, "copying bundle"; "from" => %full_path, "to" => %to);
-        tokio::fs::copy(&full_path, &to).await.map_err(|err| {
+        if let Err(e) = tokio::fs::copy(&full_path, &to).await.map_err(|err| {
             BundleError::CopyArchive { from: full_path.to_owned(), to, err }
-        })?;
+        }) {
+            copy_err = Some(e);
+            break;
+        }
     }
-
+    cleanup_zfs_clones(&log, &clones);
+    if let Some(err) = copy_err {
+        return Err(err);
+    }
     info!(log, "finished zone bundle"; "metadata" => ?zone_metadata);
     Ok(zone_metadata)
 }
@@ -2337,5 +2853,23 @@ mod illumos_tests {
             .iter()
             .zip(should_match.iter())
             .all(|(file, name)| { file.file_name().unwrap() == *name }));
+    }
+
+    #[test]
+    fn camino_starts_with_behaviour() {
+        let logfile =
+            Utf8PathBuf::from("/zonepath/var/svc/log/oxide-nexus:default.log");
+        let rotated_logfile = Utf8PathBuf::from(
+            "/zonepath/var/svc/log/oxide-nexus:default.log.0",
+        );
+
+        let logfile_as_string: &str = logfile.as_ref();
+        let rotated_logfile_as_string: &str = rotated_logfile.as_ref();
+
+        assert!(logfile != rotated_logfile);
+        assert!(logfile_as_string != rotated_logfile_as_string);
+
+        assert!(!rotated_logfile.starts_with(&logfile));
+        assert!(rotated_logfile_as_string.starts_with(&logfile_as_string));
     }
 }

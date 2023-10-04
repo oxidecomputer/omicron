@@ -19,6 +19,12 @@ use std::fmt;
 pub const ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT: &str = "/zone";
 pub const ZONE_ZFS_RAMDISK_DATASET: &str = "rpool/zone";
 
+/// The name of a dataset used for creating zone bundles.
+///
+/// See `sled_agent/src/zone_bundle.rs` for details on the purpose and use of
+/// this dataset.
+pub const ZONE_BUNDLE_ZFS_DATASET: &str = "rpool/oxide-sled-agent-zone-bundle";
+
 pub const ZFS: &str = "/usr/sbin/zfs";
 pub const KEYPATH_ROOT: &str = "/var/run/oxide/";
 
@@ -105,6 +111,35 @@ pub struct GetValueError {
     err: GetValueErrorRaw,
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("Failed to list snapshots: {0}")]
+pub struct ListSnapshotsError(#[from] crate::ExecutionError);
+
+#[derive(Debug, thiserror::Error)]
+#[error("Failed to create snapshot '{snap_name}' from filesystem '{filesystem}': {err}")]
+pub struct CreateSnapshotError {
+    filesystem: String,
+    snap_name: String,
+    err: crate::ExecutionError,
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("Failed to delete snapshot '{filesystem}@{snap_name}': {err}")]
+pub struct DestroySnapshotError {
+    filesystem: String,
+    snap_name: String,
+    err: crate::ExecutionError,
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("Failed to create clone '{clone_name}' from snapshot '{filesystem}@{snap_name}': {err}")]
+pub struct CloneSnapshotError {
+    filesystem: String,
+    snap_name: String,
+    clone_name: String,
+    err: crate::ExecutionError,
+}
+
 /// Wraps commands for interacting with ZFS.
 pub struct Zfs {}
 
@@ -179,6 +214,20 @@ impl Zfs {
             })
             .collect();
         Ok(filesystems)
+    }
+
+    /// Return the name of a dataset for a ZFS object.
+    ///
+    /// The object can either be a dataset name, or a path, in which case it
+    /// will be resolved to the _mounted_ ZFS dataset containing that path.
+    pub fn get_dataset_name(object: &str) -> Result<String, ListDatasetsError> {
+        let mut command = std::process::Command::new(ZFS);
+        let cmd = command.args(&["get", "-Hpo", "name", "name", object]);
+        execute(cmd)
+            .map(|output| {
+                String::from_utf8_lossy(&output.stdout).trim().to_string()
+            })
+            .map_err(|err| ListDatasetsError { name: object.to_string(), err })
     }
 
     /// Destroys a dataset.
@@ -353,6 +402,7 @@ impl Zfs {
         }
     }
 
+    /// Set the value of an Oxide-managed ZFS property.
     pub fn set_oxide_value(
         filesystem_name: &str,
         name: &str,
@@ -378,6 +428,7 @@ impl Zfs {
         Ok(())
     }
 
+    /// Get the value of an Oxide-managed ZFS property.
     pub fn get_oxide_value(
         filesystem_name: &str,
         name: &str,
@@ -408,6 +459,96 @@ impl Zfs {
         }
         Ok(value.to_string())
     }
+
+    /// List all extant snapshots.
+    pub fn list_snapshots() -> Result<Vec<Snapshot>, ListSnapshotsError> {
+        let mut command = std::process::Command::new(ZFS);
+        let cmd = command.args(&["list", "-H", "-o", "name", "-t", "snapshot"]);
+        execute(cmd)
+            .map(|output| {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                stdout
+                    .trim()
+                    .lines()
+                    .map(|line| {
+                        let (filesystem, snap_name) =
+                            line.split_once('@').unwrap();
+                        Snapshot {
+                            filesystem: filesystem.to_string(),
+                            snap_name: snap_name.to_string(),
+                        }
+                    })
+                    .collect()
+            })
+            .map_err(ListSnapshotsError::from)
+    }
+
+    /// Create a snapshot of a filesystem.
+    pub fn create_snapshot(
+        filesystem: &str,
+        snap_name: &str,
+    ) -> Result<(), CreateSnapshotError> {
+        let mut command = std::process::Command::new(ZFS);
+        let path = format!("{filesystem}@{snap_name}");
+        let cmd = command.args(&["snapshot", &path]);
+        execute(cmd).map(|_| ()).map_err(|err| CreateSnapshotError {
+            filesystem: filesystem.to_string(),
+            snap_name: snap_name.to_string(),
+            err,
+        })
+    }
+
+    /// Destroy a named snapshot of a filesystem.
+    pub fn destroy_snapshot(
+        filesystem: &str,
+        snap_name: &str,
+    ) -> Result<(), DestroySnapshotError> {
+        let mut command = std::process::Command::new(ZFS);
+        let path = format!("{filesystem}@{snap_name}");
+        let cmd = command.args(&["destroy", &path]);
+        execute(cmd).map(|_| ()).map_err(|err| DestroySnapshotError {
+            filesystem: filesystem.to_string(),
+            snap_name: snap_name.to_string(),
+            err,
+        })
+    }
+
+    /// Create a clone of a snapshot.
+    pub fn clone_snapshot(
+        filesystem: &str,
+        snap_name: &str,
+        clone_name: &str,
+    ) -> Result<(), CloneSnapshotError> {
+        let mut command = std::process::Command::new(ZFS);
+        let snap_path = format!("{filesystem}@{snap_name}");
+        let cmd = command.args(&["clone", &snap_path, clone_name]);
+        execute(cmd).map(|_| ()).map_err(|err| CloneSnapshotError {
+            filesystem: filesystem.to_string(),
+            snap_name: snap_name.to_string(),
+            clone_name: clone_name.to_string(),
+            err,
+        })
+    }
+}
+
+/// A read-only snapshot of a ZFS filesystem.
+#[derive(Clone, Debug)]
+pub struct Snapshot {
+    pub filesystem: String,
+    pub snap_name: String,
+}
+
+impl fmt::Display for Snapshot {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}@{}", self.filesystem, self.snap_name)
+    }
+}
+
+/// A clone of a ZFS snapshot.
+#[derive(Clone, Debug)]
+pub struct ZfsClone {
+    pub snapshot: Snapshot,
+    pub clone_name: String,
 }
 
 /// Returns all datasets managed by Omicron
@@ -443,6 +584,11 @@ pub fn get_all_omicron_datasets_for_delete() -> anyhow::Result<Vec<String>> {
             datasets.push(format!("{}/{dataset}", ZONE_ZFS_RAMDISK_DATASET));
         }
     };
+
+    // Delete the zone-bundle dataset, if it exists.
+    if let Ok(zb_dataset) = Zfs::get_dataset_name(&ZONE_BUNDLE_ZFS_DATASET) {
+        datasets.push(zb_dataset);
+    }
 
     Ok(datasets)
 }
