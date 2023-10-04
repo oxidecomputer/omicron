@@ -108,10 +108,6 @@ snapshot_delete                          DELETE   /v1/snapshots/{snapshot}
 snapshot_list                            GET      /v1/snapshots
 snapshot_view                            GET      /v1/snapshots/{snapshot}
 
-API operations found with tag "system"
-OPERATION ID                             METHOD   URL PATH
-system_health                            GET      /v1/system/health
-
 API operations found with tag "system/hardware"
 OPERATION ID                             METHOD   URL PATH
 networking_switch_port_apply_settings    POST     /v1/system/hardware/switch-port/{port}/settings
@@ -175,6 +171,10 @@ silo_user_view                           GET      /v1/system/users/{user_id}
 silo_view                                GET      /v1/system/silos/{silo}
 user_builtin_list                        GET      /v1/system/users-builtin
 user_builtin_view                        GET      /v1/system/users-builtin/{user}
+
+API operations found with tag "system/status"
+OPERATION ID                             METHOD   URL PATH
+ping                                     GET      /v1/ping
 
 API operations found with tag "vpcs"
 OPERATION ID                             METHOD   URL PATH

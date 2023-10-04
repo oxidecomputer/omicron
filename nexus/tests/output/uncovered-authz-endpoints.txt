@@ -1,5 +1,5 @@
 API endpoints with no coverage in authz tests:
-system_health                            (get    "/v1/system/health")
+ping                                     (get    "/v1/ping")
 device_auth_request                      (post   "/device/auth")
 device_auth_confirm                      (post   "/device/confirm")
 device_access_token                      (post   "/device/token")

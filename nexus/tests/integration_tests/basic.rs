@@ -549,11 +549,11 @@ async fn test_projects_list(cptestctx: &ControlPlaneTestContext) {
 }
 
 #[nexus_test]
-async fn test_system_health(cptestctx: &ControlPlaneTestContext) {
+async fn test_ping(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    let health = NexusRequest::object_get(client, "/v1/system/health")
-        .execute_and_parse_unwrap::<views::SystemHealth>()
+    let health = NexusRequest::object_get(client, "/v1/ping")
+        .execute_and_parse_unwrap::<views::Ping>()
         .await;
-    assert_eq!(health.api, views::SystemHealthStatus::Ok);
+    assert_eq!(health.status, views::PingStatus::Ok);
 }

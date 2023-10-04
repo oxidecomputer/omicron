@@ -98,7 +98,7 @@ type NexusApiDescription = ApiDescription<Arc<ServerContext>>;
 /// Returns a description of the external nexus API
 pub(crate) fn external_api() -> NexusApiDescription {
     fn register_endpoints(api: &mut NexusApiDescription) -> Result<(), String> {
-        api.register(system_health)?;
+        api.register(ping)?;
 
         api.register(system_policy_view)?;
         api.register(system_policy_update)?;
@@ -366,20 +366,18 @@ pub(crate) fn external_api() -> NexusApiDescription {
 // clients. Client generators use operationId to name API methods, so changing
 // a function name is a breaking change from a client perspective.
 
-/// Fetch system status
+/// Ping API
 ///
 /// Always responds with Ok if it responds at all.
 #[endpoint {
     method = GET,
-    path = "/v1/system/health",
-    tags = ["system"],
+    path = "/v1/ping",
+    tags = ["system/status"],
 }]
-async fn system_health(
+async fn ping(
     _rqctx: RequestContext<Arc<ServerContext>>,
-) -> Result<HttpResponseOk<views::SystemHealth>, HttpError> {
-    Ok(HttpResponseOk(views::SystemHealth {
-        api: views::SystemHealthStatus::Ok,
-    }))
+) -> Result<HttpResponseOk<views::Ping>, HttpError> {
+    Ok(HttpResponseOk(views::Ping { status: views::PingStatus::Ok }))
 }
 
 /// Fetch the top-level IAM policy

@@ -80,10 +80,10 @@
         "url": "http://docs.oxide.computer/api/vpcs"
       }
     },
-    "system": {
-      "description": "General system endpoints",
+    "system/status": {
+      "description": "Endpoints related to system health",
       "external_docs": {
-        "url": "http://docs.oxide.computer/api/system"
+        "url": "http://docs.oxide.computer/api/system-status"
       }
     },
     "system/hardware": {

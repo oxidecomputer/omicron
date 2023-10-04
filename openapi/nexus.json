@@ -2816,6 +2816,34 @@
         }
       }
     },
+    "/v1/ping": {
+      "get": {
+        "tags": [
+          "system/status"
+        ],
+        "summary": "Ping API",
+        "description": "Always responds with Ok if it responds at all.",
+        "operationId": "ping",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ping"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/policy": {
       "get": {
         "tags": [
@@ -4023,34 +4051,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Switch"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/v1/system/health": {
-      "get": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Fetch system status",
-        "description": "Always responds with Ok if it responds at all.",
-        "operationId": "system_health",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SystemHealth"
                 }
               }
             }
@@ -12057,6 +12057,28 @@
           "items"
         ]
       },
+      "Ping": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "description": "Whether the external API is reachable. Will always be Ok if the endpoint returns anything at all.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PingStatus"
+              }
+            ]
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "PingStatus": {
+        "type": "string",
+        "enum": [
+          "ok"
+        ]
+      },
       "Project": {
         "description": "View of a Project",
         "type": "object",
@@ -14059,28 +14081,6 @@
           "vlan_id"
         ]
       },
-      "SystemHealth": {
-        "type": "object",
-        "properties": {
-          "api": {
-            "description": "Whether the external API is reachable. Will always be Ok if the endpoint returns anything at all.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SystemHealthStatus"
-              }
-            ]
-          }
-        },
-        "required": [
-          "api"
-        ]
-      },
-      "SystemHealthStatus": {
-        "type": "string",
-        "enum": [
-          "ok"
-        ]
-      },
       "User": {
         "description": "View of a User",
         "type": "object",
@@ -15298,13 +15298,6 @@
       }
     },
     {
-      "name": "system",
-      "description": "General system endpoints",
-      "externalDocs": {
-        "url": "http://docs.oxide.computer/api/system"
-      }
-    },
-    {
       "name": "system/hardware",
       "description": "These operations pertain to hardware inventory and management. Racks are the unit of expansion of an Oxide deployment. Racks are in turn composed of sleds, switches, power supplies, and a cabled backplane.",
       "externalDocs": {
@@ -15330,6 +15323,13 @@
       "description": "Silos represent a logical partition of users and resources.",
       "externalDocs": {
         "url": "http://docs.oxide.computer/api/system-silos"
+      }
+    },
+    {
+      "name": "system/status",
+      "description": "Endpoints related to system health",
+      "externalDocs": {
+        "url": "http://docs.oxide.computer/api/system-status"
       }
     },
     {
