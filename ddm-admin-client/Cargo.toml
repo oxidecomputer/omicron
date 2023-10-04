@@ -15,7 +15,7 @@ tokio.workspace = true
 
 omicron-common.workspace = true
 sled-hardware.workspace = true
-omicron-workspace-hack = { version = "0.1", path = "../workspace-hack" }
+omicron-workspace-hack.workspace = true
 
 [build-dependencies]
 anyhow.workspace = true
