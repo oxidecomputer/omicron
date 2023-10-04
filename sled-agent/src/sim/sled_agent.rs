@@ -617,15 +617,8 @@ impl SledAgent {
             ..Default::default()
         };
         let propolis_log = log.new(o!("component" => "propolis-server-mock"));
-        let config = propolis_server::config::Config {
-            bootrom: Default::default(),
-            pci_bridges: Default::default(),
-            chipset: Default::default(),
-            devices: Default::default(),
-            block_devs: Default::default(),
-            cpuid_profiles: Default::default(),
-        };
-        let private = Arc::new(PropolisContext::new(config, propolis_log));
+        let private =
+            Arc::new(PropolisContext::new(Default::default(), propolis_log));
         info!(log, "Starting mock propolis-server...");
         let dropshot_log = log.new(o!("component" => "dropshot"));
         let mock_api = propolis_server::mock_server::api();
