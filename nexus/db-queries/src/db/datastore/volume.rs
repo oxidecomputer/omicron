@@ -736,33 +736,36 @@ impl DataStore {
                             // delete a read-only downstairs running for a
                             // snapshot that doesn't exist will return a 404,
                             // causing the saga to error and unwind.
-                            //
-                            // XXX are any other filters required, except the
-                            // three from snapshots_to_delete?
                             .filter(
                                 dsl::snapshot_addr.eq_any(
                                     &crucible_targets.read_only_targets,
                                 ),
                             )
-                            // XXX is there a better way to do this, rather than
-                            // one filter per struct field?
+                            // Match the dataset, region, and snapshot ID
                             .filter(
-                                dsl::dataset_id.eq_any(
-                                    snapshots_to_delete
-                                        .iter()
-                                        .map(|x| x.dataset_id),
-                                ),
+                                dsl::dataset_id
+                                    .eq_any(
+                                        snapshots_to_delete
+                                            .iter()
+                                            .map(|x| x.dataset_id),
+                                    )
+                                    .and(
+                                        dsl::region_id
+                                            .eq_any(
+                                                snapshots_to_delete
+                                                    .iter()
+                                                    .map(|x| x.region_id),
+                                            )
+                                            .and(
+                                                dsl::snapshot_id.eq_any(
+                                                    snapshots_to_delete
+                                                        .iter()
+                                                        .map(|x| x.snapshot_id),
+                                                ),
+                                            ),
+                                    ),
                             )
-                            .filter(dsl::region_id.eq_any(
-                                snapshots_to_delete.iter().map(|x| x.region_id),
-                            ))
-                            .filter(
-                                dsl::snapshot_id.eq_any(
-                                    snapshots_to_delete
-                                        .iter()
-                                        .map(|x| x.snapshot_id),
-                                ),
-                            )
+                            // Match only rows where deleting = true
                             .filter(dsl::deleting.eq(true))
                             .filter(
                                 dsl::volume_references
