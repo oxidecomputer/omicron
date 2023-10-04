@@ -19,7 +19,19 @@ SELECT CAST(
 );
 
 ALTER TABLE omicron.public.region_snapshot
-    ADD COLUMN IF NOT EXISTS deleting BOOL NOT NULL;
+    ADD COLUMN IF NOT EXISTS deleting BOOL NOT NULL DEFAULT false;
+
+COMMIT;
+
+-- Do this in two stages, otherwise you'll see:
+--
+-- ERROR: transaction committed but schema change aborted with error: (23502): null value in column "deleting" violates not-null constraint
+-- SQLSTATE: XXA00
+
+BEGIN;
+
+ALTER TABLE omicron.public.region_snapshot
+    ALTER COLUMN deleting DROP DEFAULT;
 
 COMMIT;
 
