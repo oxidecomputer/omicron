@@ -100,14 +100,13 @@ use super::{
 };
 use crate::app::sagas::declare_saga_actions;
 use crate::app::sagas::retry_until_known_result;
+use crate::app::{authn, authz, db};
 use crate::external_api::params;
 use anyhow::anyhow;
 use crucible_agent_client::{types::RegionId, Client as CrucibleAgentClient};
 use nexus_db_model::Generation;
-use nexus_db_queries::db::datastore::RegionAllocationStrategy;
 use nexus_db_queries::db::identity::{Asset, Resource};
 use nexus_db_queries::db::lookup::LookupPath;
-use nexus_db_queries::{authn, authz, db};
 use omicron_common::api::external;
 use omicron_common::api::external::Error;
 use rand::{rngs::StdRng, RngCore, SeedableRng};
@@ -332,6 +331,8 @@ async fn ssc_alloc_regions(
         .await
         .map_err(ActionError::action_failed)?;
 
+    let strategy = &osagactx.nexus().default_region_allocation_strategy;
+
     let datasets_and_regions = osagactx
         .datastore()
         .region_allocate(
@@ -344,7 +345,7 @@ async fn ssc_alloc_regions(
                 .map_err(|e| ActionError::action_failed(e.to_string()))?,
             },
             external::ByteCount::from(disk.size),
-            &RegionAllocationStrategy::Random(None),
+            &strategy,
         )
         .await
         .map_err(ActionError::action_failed)?;
@@ -1886,7 +1887,9 @@ mod test {
         dsl::snapshot
             .filter(dsl::time_deleted.is_null())
             .select(Snapshot::as_select())
-            .first_async::<Snapshot>(datastore.pool_for_tests().await.unwrap())
+            .first_async::<Snapshot>(
+                &*datastore.pool_connection_for_tests().await.unwrap(),
+            )
             .await
             .optional()
             .unwrap()
@@ -1900,7 +1903,7 @@ mod test {
         dsl::region_snapshot
             .select(RegionSnapshot::as_select())
             .first_async::<RegionSnapshot>(
-                datastore.pool_for_tests().await.unwrap(),
+                &*datastore.pool_connection_for_tests().await.unwrap(),
             )
             .await
             .optional()

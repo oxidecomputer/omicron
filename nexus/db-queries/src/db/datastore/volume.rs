@@ -6,7 +6,7 @@
 
 use super::DataStore;
 use crate::db;
-use crate::db::error::public_error_from_diesel_pool;
+use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
 use crate::db::identity::Asset;
@@ -19,7 +19,6 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use async_bb8_diesel::OptionalExtension;
 use chrono::Utc;
 use diesel::prelude::*;
-use diesel::OptionalExtension as DieselOptionalExtension;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
@@ -65,19 +64,18 @@ impl DataStore {
             crucible_targets
         };
 
-        self.pool()
-            .transaction(move |conn| {
+        self.pool_connection_unauthorized()
+            .await?
+            .transaction_async(|conn| async move {
                 let maybe_volume: Option<Volume> = dsl::volume
                     .filter(dsl::id.eq(volume.id()))
                     .select(Volume::as_select())
-                    .first(conn)
+                    .first_async(&conn)
+                    .await
                     .optional()
                     .map_err(|e| {
                         TxnError::CustomError(VolumeCreationError::Public(
-                            public_error_from_diesel_pool(
-                                e.into(),
-                                ErrorHandler::Server,
-                            ),
+                            public_error_from_diesel(e, ErrorHandler::Server),
                         ))
                     })?;
 
@@ -97,11 +95,12 @@ impl DataStore {
                     .on_conflict(dsl::id)
                     .do_nothing()
                     .returning(Volume::as_returning())
-                    .get_result(conn)
+                    .get_result_async(&conn)
+                    .await
                     .map_err(|e| {
                         TxnError::CustomError(VolumeCreationError::Public(
-                            public_error_from_diesel_pool(
-                                e.into(),
+                            public_error_from_diesel(
+                                e,
                                 ErrorHandler::Conflict(
                                     ResourceType::Volume,
                                     volume.id().to_string().as_str(),
@@ -125,11 +124,12 @@ impl DataStore {
                             rs_dsl::volume_references
                                 .eq(rs_dsl::volume_references + 1),
                         )
-                        .execute(conn)
+                        .execute_async(&conn)
+                        .await
                         .map_err(|e| {
                             TxnError::CustomError(VolumeCreationError::Public(
-                                public_error_from_diesel_pool(
-                                    e.into(),
+                                public_error_from_diesel(
+                                    e,
                                     ErrorHandler::Server,
                                 ),
                             ))
@@ -157,10 +157,10 @@ impl DataStore {
         dsl::volume
             .filter(dsl::id.eq(volume_id))
             .select(Volume::as_select())
-            .first_async::<Volume>(self.pool())
+            .first_async::<Volume>(&*self.pool_connection_unauthorized().await?)
             .await
             .optional()
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Delete the volume if it exists. If it was already deleted, this is a
@@ -170,10 +170,10 @@ impl DataStore {
 
         diesel::delete(dsl::volume)
             .filter(dsl::id.eq(volume_id))
-            .execute_async(self.pool())
+            .execute_async(&*self.pool_connection_unauthorized().await?)
             .await
             .map(|_| ())
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Checkout a copy of the Volume from the database.
@@ -207,13 +207,15 @@ impl DataStore {
         // types that require it).  The generation number (along with the
         // rest of the volume data) that was in the database is what is
         // returned to the caller.
-        self.pool()
-            .transaction(move |conn| {
+        self.pool_connection_unauthorized()
+            .await?
+            .transaction_async(|conn| async move {
                 // Grab the volume in question.
                 let volume = dsl::volume
                     .filter(dsl::id.eq(volume_id))
                     .select(Volume::as_select())
-                    .get_result(conn)?;
+                    .get_result_async(&conn)
+                    .await?;
 
                 // Turn the volume.data into the VolumeConstructionRequest
                 let vcr: VolumeConstructionRequest =
@@ -290,7 +292,8 @@ impl DataStore {
                                 diesel::update(volume_dsl::volume)
                                     .filter(volume_dsl::id.eq(volume_id))
                                     .set(volume_dsl::data.eq(new_volume_data))
-                                    .execute(conn)?;
+                                    .execute_async(&conn)
+                                    .await?;
 
                             // This should update just one row.  If it does
                             // not, then something is terribly wrong in the
@@ -333,10 +336,7 @@ impl DataStore {
             .await
             .map_err(|e| match e {
                 TxnError::CustomError(VolumeGetError::DieselError(e)) => {
-                    public_error_from_diesel_pool(
-                        e.into(),
-                        ErrorHandler::Server,
-                    )
+                    public_error_from_diesel(e.into(), ErrorHandler::Server)
                 }
 
                 _ => {
@@ -479,9 +479,9 @@ impl DataStore {
                 Region::as_select(),
                 Volume::as_select(),
             ))
-            .load_async(self.pool())
+            .load_async(&*self.pool_connection_unauthorized().await?)
             .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     pub async fn read_only_resources_associated_with_volume(
@@ -577,8 +577,9 @@ impl DataStore {
         //
         // TODO it would be nice to make this transaction_async, but I couldn't
         // get the async optional extension to work.
-        self.pool()
-            .transaction(move |conn| {
+        self.pool_connection_unauthorized()
+            .await?
+            .transaction_async(|conn| async move {
                 // Grab the volume in question. If the volume record was already
                 // hard-deleted, assume clean-up has occurred and return an empty
                 // CrucibleResources. If the volume record was soft-deleted, then
@@ -589,7 +590,8 @@ impl DataStore {
                     let volume = volume_dsl::volume
                         .filter(volume_dsl::id.eq(volume_id))
                         .select(Volume::as_select())
-                        .get_result(conn)
+                        .get_result_async(&conn)
+                        .await
                         .optional()?;
 
                     let volume = if let Some(v) = volume {
@@ -651,7 +653,8 @@ impl DataStore {
                     .filter(dsl::volume_references.gt(0))
                     .filter(dsl::deleting.eq(false))
                     .set(dsl::volume_references.eq(dsl::volume_references - 1))
-                    .execute(conn)?;
+                    .execute_async(&conn)
+                    .await?;
 
                 // Then, note anything that was set to zero from the above
                 // UPDATE, and then mark all those as deleted.
@@ -710,7 +713,8 @@ impl DataStore {
                                     .or(dsl::volume_references.is_null()),
                             )
                             .select((Dataset::as_select(), Region::as_select()))
-                            .get_results::<(Dataset, Region)>(conn)?
+                            .get_results_async::<(Dataset, Region)>(&conn)
+                            .await?
                     },
 
                     // A volume (for a disk or snapshot) may reference another nested
@@ -782,7 +786,10 @@ impl DataStore {
                                 Dataset::as_select(),
                                 RegionSnapshot::as_select(),
                             ))
-                            .get_results::<(Dataset, RegionSnapshot)>(conn)?
+                            .get_results_async::<(Dataset, RegionSnapshot)>(
+                                &conn,
+                            )
+                            .await?
                     },
                 });
 
@@ -803,7 +810,8 @@ impl DataStore {
                             })?,
                         ),
                     ))
-                    .execute(conn)?;
+                    .execute_async(&conn)
+                    .await?;
 
                 Ok(result)
             })
@@ -811,10 +819,7 @@ impl DataStore {
             .map_err(|e| match e {
                 TxnError::CustomError(
                     DecreaseCrucibleResourcesError::DieselError(e),
-                ) => public_error_from_diesel_pool(
-                    e.into(),
-                    ErrorHandler::Server,
-                ),
+                ) => public_error_from_diesel(e.into(), ErrorHandler::Server),
 
                 _ => {
                     Error::internal_error(&format!("Transaction error: {}", e))
@@ -860,8 +865,9 @@ impl DataStore {
         //   data from original volume_id.
         // - Put the new temp VCR into the temp volume.data, update the
         //   temp_volume in the database.
-        self.pool()
-            .transaction(move |conn| {
+        self.pool_connection_unauthorized()
+            .await?
+            .transaction_async(|conn| async move {
                 // Grab the volume in question. If the volume record was already
                 // deleted then we can just return.
                 let volume = {
@@ -870,7 +876,8 @@ impl DataStore {
                     let volume = dsl::volume
                         .filter(dsl::id.eq(volume_id))
                         .select(Volume::as_select())
-                        .get_result(conn)
+                        .get_result_async(&conn)
+                        .await
                         .optional()?;
 
                     let volume = if let Some(v) = volume {
@@ -943,7 +950,8 @@ impl DataStore {
                             let num_updated = diesel::update(volume_dsl::volume)
                                 .filter(volume_dsl::id.eq(volume_id))
                                 .set(volume_dsl::data.eq(new_volume_data))
-                                .execute(conn)?;
+                                .execute_async(&conn)
+                                .await?;
 
                             // This should update just one row.  If it does
                             // not, then something is terribly wrong in the
@@ -981,7 +989,8 @@ impl DataStore {
                                     .filter(volume_dsl::id.eq(temp_volume_id))
                                     .filter(volume_dsl::time_deleted.is_null())
                                     .set(volume_dsl::data.eq(rop_volume_data))
-                                    .execute(conn)?;
+                                    .execute_async(&conn)
+                                    .await?;
                             if num_updated != 1 {
                                 return Err(TxnError::CustomError(
                                     RemoveReadOnlyParentError::UnexpectedDatabaseUpdate(num_updated, 1),
@@ -1007,7 +1016,7 @@ impl DataStore {
             .map_err(|e| match e {
                 TxnError::CustomError(
                     RemoveReadOnlyParentError::DieselError(e),
-                ) => public_error_from_diesel_pool(
+                ) => public_error_from_diesel(
                     e.into(),
                     ErrorHandler::Server,
                 ),

@@ -159,6 +159,11 @@ pub struct BackgroundTask {
     name: String,
     /// brief summary (for developers) of what this task does
     description: String,
+    /// how long after an activation completes before another will be triggered
+    /// automatically
+    ///
+    /// (activations can also be triggered for other reasons)
+    period: Duration,
 
     #[serde(flatten)]
     status: TaskStatus,
@@ -168,11 +173,13 @@ impl BackgroundTask {
     pub fn new(
         name: &str,
         description: &str,
+        period: Duration,
         status: TaskStatus,
     ) -> BackgroundTask {
         BackgroundTask {
             name: name.to_owned(),
             description: description.to_owned(),
+            period,
             status,
         }
     }

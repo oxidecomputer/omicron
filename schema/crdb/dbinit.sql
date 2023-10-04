@@ -388,6 +388,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.zpool (
     total_size INT NOT NULL
 );
 
+/* Create an index on the physical disk id */
+CREATE INDEX IF NOT EXISTS lookup_zpool_by_disk on omicron.public.zpool (
+    physical_disk_id,
+    id
+) WHERE physical_disk_id IS NOT NULL AND time_deleted IS NULL;
+
 CREATE TYPE IF NOT EXISTS omicron.public.dataset_kind AS ENUM (
   'crucible',
   'cockroach',
@@ -436,6 +442,12 @@ CREATE INDEX IF NOT EXISTS lookup_dataset_by_size_used_crucible on omicron.publi
 CREATE INDEX IF NOT EXISTS lookup_dataset_by_size_used on omicron.public.dataset (
     size_used
 ) WHERE size_used IS NOT NULL AND time_deleted IS NULL;
+
+/* Create an index on the zpool id */
+CREATE INDEX IF NOT EXISTS lookup_dataset_by_zpool on omicron.public.dataset (
+    pool_id,
+    id
+) WHERE pool_id IS NOT NULL AND time_deleted IS NULL;
 
 /*
  * A region of space allocated to Crucible Downstairs, within a dataset.

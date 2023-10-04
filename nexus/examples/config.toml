@@ -92,3 +92,14 @@ dns_external.max_concurrent_server_updates = 5
 # certificates it will take _other_ Nexus instances to notice and stop serving
 # them (on a sunny day).
 external_endpoints.period_secs = 60
+
+[default_region_allocation_strategy]
+# allocate region on 3 random distinct zpools, on 3 random distinct sleds.
+type = "random_with_distinct_sleds"
+
+# the same as random_with_distinct_sleds, but without requiring distinct sleds
+# type = "random"
+
+# setting `seed` to a fixed value will make dataset selection ordering use the
+# same shuffling order for every region allocation.
+# seed = 0

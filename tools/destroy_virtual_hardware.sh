@@ -11,7 +11,7 @@ set -u
 set -x
 
 SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-cd "${SOURCE_DIR}/.."
+cd "${SOURCE_DIR}/.." || exit
 OMICRON_TOP="$PWD"
 
 . "$SOURCE_DIR/virtual_hardware.sh"

@@ -3,7 +3,16 @@
 #
 # The required version should be bumped up if we need new features, performance
 # improvements or bugfixes that are present in newer versions of nextest.
-nextest-version = { required = "0.9.55", recommended = "0.9.57" }
+nextest-version = { required = "0.9.59", recommended = "0.9.59" }
+
+experimental = ["setup-scripts"]
+
+[[profile.default.scripts]]
+filter = 'rdeps(nexus-test-utils)'
+setup = 'crdb-seed'
 
 [profile.ci]
 fail-fast = false
+
+[script.crdb-seed]
+command = 'cargo run -p crdb-seed'

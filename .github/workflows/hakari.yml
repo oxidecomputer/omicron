@@ -1,0 +1,37 @@
+# This workflow file serves as an example for cargo-hakari CI integration.
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+name: cargo hakari
+
+jobs:
+  workspace-hack-check:
+    name: Check workspace-hack
+    runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: -D warnings
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+      - name: Install cargo-hakari
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-hakari
+      - name: Check workspace-hack Cargo.toml is up-to-date
+        uses: actions-rs/cargo@v1
+        with:
+          command: hakari
+          args: generate --diff
+      - name: Check all crates depend on workspace-hack
+        uses: actions-rs/cargo@v1
+        with:
+          command: hakari
+          args: manage-deps --dry-run
