@@ -417,6 +417,7 @@ impl StorageWorker {
             do_format,
             encryption_details,
             size_details,
+            None,
         )?;
         // Ensure the dataset has a usable UUID.
         if let Ok(id_str) = Zfs::get_oxide_value(&fs_name, "uuid") {
