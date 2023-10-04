@@ -29,8 +29,8 @@ pub enum DiskError {
 // by a zpool
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SyntheticDisk {
-    identity: DiskIdentity,
-    zpool_name: ZpoolName,
+    pub identity: DiskIdentity,
+    pub zpool_name: ZpoolName,
 }
 
 impl SyntheticDisk {
@@ -95,6 +95,14 @@ impl RawDisk {
                 ZpoolKind::External => DiskVariant::U2,
                 ZpoolKind::Internal => DiskVariant::M2,
             },
+        }
+    }
+
+    #[cfg(test)]
+    pub fn zpool_name(&self) -> &ZpoolName {
+        match self {
+            Self::Real(_) => unreachable!(),
+            Self::Synthetic(disk) => &disk.zpool_name,
         }
     }
 

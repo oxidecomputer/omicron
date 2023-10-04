@@ -37,7 +37,7 @@ const ZONE_BUNDLE_DIRECTORY: &str = "zone";
 /// required by callers when operating on cloned data. The only contention here
 /// is for the refrence counters of the internal Arcs when `StorageResources`
 /// gets cloned or dropped.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StorageResources {
     // All disks, real and synthetic, being managed by this sled
     pub disks: Arc<BTreeMap<DiskIdentity, Disk>>,
@@ -56,9 +56,14 @@ impl StorageResources {
         let zpool = Pool::new(zpool_name, disk_id.clone())?;
         if let Some(stored_disk) = self.disks.get(&disk_id) {
             if let Some(stored_pool) = self.pools.get(&zpool.name.id()) {
-                if stored_disk == &disk && stored_pool == &zpool {
+                if stored_disk == &disk
+                    && stored_pool.info.size() == zpool.info.size()
+                    && stored_pool.name == zpool.name
+                {
                     return Ok(false);
                 }
+            } else {
+                // We must delete the stored pool which no longer matches our disk
             }
         }
         // Either the disk or zpool changed

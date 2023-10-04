@@ -23,7 +23,7 @@ use uuid::Uuid;
 // between the `StorageHandle` and `StorageManager`.
 const QUEUE_SIZE: usize = 256;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StorageManagerState {
     WaitingForKeyManager,
     QueuingDisks,
@@ -47,6 +47,17 @@ enum StorageRequest {
     /// serializes through the `StorageManager` task.
     /// This serialization is particularly useful for tests.
     GetLatestResources(oneshot::Sender<StorageResources>),
+
+    /// Get the internal task state of the manager
+    GetManagerState(oneshot::Sender<StorageManagerData>),
+}
+
+/// Data managed internally to the StorageManagerTask that can be useful
+/// to clients for debugging purposes, and that isn't exposed in other ways.
+#[derive(Debug, Clone)]
+pub struct StorageManagerData {
+    state: StorageManagerState,
+    queued_u2_drives: HashSet<RawDisk>,
 }
 
 /// A mechanism for interacting with the [`StorageManager`]
@@ -122,6 +133,13 @@ impl StorageHandle {
     pub async fn get_latest_resources(&mut self) -> StorageResources {
         let (tx, rx) = oneshot::channel();
         self.tx.send(StorageRequest::GetLatestResources(tx)).await.unwrap();
+        rx.await.unwrap()
+    }
+
+    /// Return internal data useful for debugging and testing
+    pub async fn get_manager_state(&mut self) -> StorageManagerData {
+        let (tx, rx) = oneshot::channel();
+        self.tx.send(StorageRequest::GetManagerState(tx)).await.unwrap();
         rx.await.unwrap()
     }
 }
@@ -208,6 +226,13 @@ impl StorageManager {
             }
             StorageRequest::GetLatestResources(tx) => {
                 let _ = tx.send(self.resources.clone());
+                false
+            }
+            StorageRequest::GetManagerState(tx) => {
+                let _ = tx.send(StorageManagerData {
+                    state: self.state,
+                    queued_u2_drives: self.queued_u2_drives.clone(),
+                });
                 false
             }
         };
@@ -637,6 +662,123 @@ mod tests {
         assert!(resources.all_u2_zpools().is_empty());
 
         Zpool::destroy(&zpool_name).unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn ensure_using_exactly_these_disks() {
+        let logctx = test_setup_log("ensure_using_exactly_these_disks");
+        let (mut key_manager, key_requester) =
+            KeyManager::new(&logctx.log, HardcodedSecretRetriever::default());
+        let (mut manager, mut handle) =
+            StorageManager::new(&logctx.log, key_requester);
+
+        // Spawn the key_manager so that it will respond to requests for encryption keys
+        tokio::spawn(async move { key_manager.run().await });
+
+        // Spawn the storage manager as done by sled-agent
+        tokio::spawn(async move {
+            manager.run().await;
+        });
+
+        // Create a bunch of file backed external disks with zpools
+        let dir = tempdir().unwrap();
+        let zpools: Vec<ZpoolName> =
+            (0..10).map(|_| ZpoolName::new_external(Uuid::new_v4())).collect();
+        let disks: Vec<RawDisk> = zpools
+            .iter()
+            .map(|zpool_name| {
+                SyntheticDisk::create_zpool(dir.path(), zpool_name).into()
+            })
+            .collect();
+
+        // Add the first 3 disks, and ensure they get queued, as we haven't
+        // marked our key manager ready yet
+        handle
+            .ensure_using_exactly_these_disks(disks.iter().take(3).cloned())
+            .await;
+        let state = handle.get_manager_state().await;
+        assert_eq!(state.queued_u2_drives.len(), 3);
+        assert_eq!(state.state, StorageManagerState::WaitingForKeyManager);
+        assert!(handle.get_latest_resources().await.all_u2_zpools().is_empty());
+
+        // Mark the key manager ready and wait for the storage update
+        handle.key_manager_ready().await;
+        let resources = handle.wait_for_changes().await;
+        let expected: HashSet<_> =
+            disks.iter().take(3).map(|d| d.identity()).collect();
+        let actual: HashSet<_> = resources.disks.keys().collect();
+        assert_eq!(expected, actual);
+
+        // Add first three disks after the initial one. The returned resources
+        // should not contain the first disk.
+        handle
+            .ensure_using_exactly_these_disks(
+                disks.iter().skip(1).take(3).cloned(),
+            )
+            .await;
+        let resources = handle.wait_for_changes().await;
+        let expected: HashSet<_> =
+            disks.iter().skip(1).take(3).map(|d| d.identity()).collect();
+        let actual: HashSet<_> = resources.disks.keys().collect();
+        assert_eq!(expected, actual);
+
+        // Ensure the same set of disks and make sure no change occurs
+        // Note that we directly request the resources this time so we aren't
+        // waiting forever for a change notification.
+        handle
+            .ensure_using_exactly_these_disks(
+                disks.iter().skip(1).take(3).cloned(),
+            )
+            .await;
+        let resources2 = handle.get_latest_resources().await;
+        assert_eq!(resources, resources2);
+
+        // Add a disjoint set of disks and see that only they come through
+        handle
+            .ensure_using_exactly_these_disks(
+                disks.iter().skip(4).take(5).cloned(),
+            )
+            .await;
+        let resources = handle.wait_for_changes().await;
+        let expected: HashSet<_> =
+            disks.iter().skip(4).take(5).map(|d| d.identity()).collect();
+        let actual: HashSet<_> = resources.disks.keys().collect();
+        assert_eq!(expected, actual);
+
+        // Finally, change the zpool backing of the 5th disk to be that of the 10th
+        // and ensure that disk changes. Note that we don't change the identity
+        // of the 5th disk.
+        let mut modified_disk = disks[4].clone();
+        if let RawDisk::Synthetic(disk) = &mut modified_disk {
+            disk.zpool_name = disks[9].zpool_name().clone();
+        } else {
+            panic!();
+        }
+        let mut expected: HashSet<_> =
+            disks.iter().skip(5).take(4).cloned().collect();
+        expected.insert(modified_disk);
+
+        handle
+            .ensure_using_exactly_these_disks(expected.clone().into_iter())
+            .await;
+        let resources = handle.wait_for_changes().await;
+
+        // Ensure the one modified disk changed as we expected
+        assert_eq!(5, resources.disks.len());
+        //assert_eq!(5, resources.pools.len());
+        for raw_disk in expected {
+            let disk = resources.disks.get(raw_disk.identity()).unwrap();
+            assert_eq!(disk.zpool_name(), raw_disk.zpool_name());
+            let pool = resources.pools.get(&disk.zpool_name().id()).unwrap();
+            assert_eq!(&pool.name, disk.zpool_name());
+            assert_eq!(raw_disk.identity(), &pool.parent);
+        }
+
+        // Cleanup
+        for zpool in zpools {
+            Zpool::destroy(&zpool).unwrap();
+        }
         logctx.cleanup_successful();
     }
 }
