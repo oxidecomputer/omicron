@@ -6,7 +6,7 @@
 
 use std::collections::HashSet;
 
-use crate::dataset::DatasetError;
+use crate::dataset::{DatasetError, DatasetName};
 use crate::disk::{Disk, DiskError, RawDisk};
 use crate::error::Error;
 use crate::resources::StorageResources;
@@ -17,6 +17,7 @@ use sled_hardware::DiskVariant;
 use slog::{debug, error, info, o, warn, Logger};
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::{interval, Duration, MissedTickBehavior};
+use uuid::Uuid;
 
 // The size of the mpsc bounded channel used to communicate
 // between the `StorageHandle` and `StorageManager`.
@@ -29,11 +30,18 @@ pub enum StorageManagerState {
     Normal,
 }
 
+#[derive(Debug)]
+struct NewFilesystemRequest {
+    dataset_id: Uuid,
+    dataset_name: DatasetName,
+    responder: oneshot::Sender<Result<DatasetName, Error>>,
+}
+
 enum StorageRequest {
     AddDisk(RawDisk),
     RemoveDisk(RawDisk),
     DisksChanged(HashSet<RawDisk>),
-    //    NewFilesystem(NewFilesystemRequest),
+    NewFilesystem(NewFilesystemRequest),
     KeyManagerReady,
     /// This will always grab the latest state after any new updates, as it
     /// serializes through the `StorageManager` task.
@@ -170,7 +178,9 @@ impl StorageManager {
                 _ = interval.tick(),
                     if self.state == StorageManagerState::QueuingDisks =>
                 {
-                    self.add_queued_disks().await;
+                    if self.add_queued_disks().await {
+                        let _ = self.resource_updates.send_replace(self.resources.clone());
+                    }
                 }
             }
         }
@@ -181,23 +191,31 @@ impl StorageManager {
     /// This is useful for testing/debugging
     pub async fn step(&mut self) -> Result<(), Error> {
         // The sending side should never disappear
-        match self.rx.recv().await.unwrap() {
-            StorageRequest::AddDisk(raw_disk) => match raw_disk.variant() {
-                DiskVariant::U2 => self.add_u2_disk(raw_disk).await?,
-                DiskVariant::M2 => self.add_m2_disk(raw_disk).await?,
-            },
-            StorageRequest::RemoveDisk(raw_disk) => {
-                self.remove_disk(raw_disk).await;
+        let should_send_updates = match self.rx.recv().await.unwrap() {
+            StorageRequest::AddDisk(raw_disk) => {
+                self.add_disk(raw_disk).await?
             }
-            StorageRequest::DisksChanged(_raw_disks) => todo!(),
+            StorageRequest::RemoveDisk(raw_disk) => {
+                self.remove_disk(raw_disk).await
+            }
+            StorageRequest::DisksChanged(raw_disks) => {
+                self.ensure_using_exactly_these_disks(raw_disks).await
+            }
+            StorageRequest::NewFilesystem(_req) => todo!(),
             StorageRequest::KeyManagerReady => {
                 self.state = StorageManagerState::Normal;
-                self.add_queued_disks().await;
+                self.add_queued_disks().await
             }
             StorageRequest::GetLatestResources(tx) => {
                 let _ = tx.send(self.resources.clone());
+                false
             }
+        };
+
+        if should_send_updates {
+            let _ = self.resource_updates.send_replace(self.resources.clone());
         }
+
         Ok(())
     }
 
@@ -205,9 +223,12 @@ impl StorageManager {
     // unless we hit a transient error. If we hit a transient error, we return
     // and wait for the next retry window to re-call this method. If we hit a
     // permanent error we log it, but we continue inserting queued disks.
-    async fn add_queued_disks(&mut self) {
+    //
+    // Return true if updates should be sent to watchers, false otherwise
+    async fn add_queued_disks(&mut self) -> bool {
         self.state = StorageManagerState::Normal;
-        // Operate on queued real disks
+
+        let mut send_updates = false;
 
         // Disks that should be requeued.
         let mut saved = HashSet::new();
@@ -222,80 +243,137 @@ impl StorageManager {
                 // have been requeued. If there was a permanent error, it will have been
                 // dropped. If there is an another unexpected error, we will handle it and
                 // requeue ourselves.
-                if let Err(err) = self.add_u2_disk(disk.clone()).await {
-                    warn!(
-                    self.log,
-                    "Potentially transient error: {err}: - requeing disk {:?}",
-                    disk
-                );
-                    saved.insert(disk);
+                match self.add_u2_disk(disk.clone()).await {
+                    Err(err) => {
+                        warn!(
+                            self.log,
+                            "Potentially transient error: {err}: requeuing disk";
+                            "disk_id" => ?disk.identity()
+                        );
+                        saved.insert(disk);
+                    }
+                    Ok(true) => send_updates = true,
+                    Ok(false) => (),
                 }
             }
         }
         // Merge any requeued disks from transient errors with saved disks here
         self.queued_u2_drives.extend(saved);
+        send_updates
     }
 
-    // Add a real U.2 disk to [`StorageResources`] or queue it to be added later
-    async fn add_u2_disk(&mut self, raw_disk: RawDisk) -> Result<(), Error> {
+    // Add a disk to `StorageResources` if it is new and return Ok(true) if so
+    async fn add_disk(&mut self, raw_disk: RawDisk) -> Result<bool, Error> {
+        match raw_disk.variant() {
+            DiskVariant::U2 => self.add_u2_disk(raw_disk).await,
+            DiskVariant::M2 => self.add_m2_disk(raw_disk).await,
+        }
+    }
+
+    // Add a U.2 disk to [`StorageResources`] or queue it to be added later
+    async fn add_u2_disk(&mut self, raw_disk: RawDisk) -> Result<bool, Error> {
         if self.state != StorageManagerState::Normal {
             self.queued_u2_drives.insert(raw_disk);
-            return Ok(());
+            return Ok(false);
         }
 
         match Disk::new(&self.log, raw_disk.clone(), Some(&self.key_requester))
             .await
         {
-            Ok(disk) => {
-                if self.resources.insert_disk(disk)? {
-                    let _ = self
-                        .resource_updates
-                        .send_replace(self.resources.clone());
-                }
-                Ok(())
-            }
+            Ok(disk) => self.resources.insert_disk(disk),
             Err(err @ DiskError::Dataset(DatasetError::KeyManager(_))) => {
                 warn!(
                     self.log,
-                    "Transient error: {err} - queuing disk {:?}", raw_disk
+                    "Transient error: {err}: queuing disk";
+                    "disk_id" => ?raw_disk.identity()
                 );
                 self.queued_u2_drives.insert(raw_disk);
                 self.state = StorageManagerState::QueuingDisks;
-                Ok(())
+                Ok(false)
             }
             Err(err) => {
                 error!(
                     self.log,
-                    "Persistent error: {err} - not queueing disk {:?}",
-                    raw_disk
+                    "Persistent error: {err}: not queueing disk";
+                    "disk_id" => ?raw_disk.identity()
                 );
-                Ok(())
+                Ok(false)
             }
         }
     }
 
-    // Add a real U.2 disk to [`StorageResources`]
+    // Add a U.2 disk to [`StorageResources`] if new and return `Ok(true)` if so
     //
     //
     // We never queue M.2 drives, as they don't rely on [`KeyManager`] based
     // encryption
-    async fn add_m2_disk(&mut self, raw_disk: RawDisk) -> Result<(), Error> {
+    async fn add_m2_disk(&mut self, raw_disk: RawDisk) -> Result<bool, Error> {
         let disk =
             Disk::new(&self.log, raw_disk.clone(), Some(&self.key_requester))
                 .await?;
-        if self.resources.insert_disk(disk)? {
-            let _ = self.resource_updates.send_replace(self.resources.clone());
-        }
-        Ok(())
+        self.resources.insert_disk(disk)
     }
 
-    // Delete a real disk
-    async fn remove_disk(&mut self, raw_disk: RawDisk) {
+    // Delete a real disk and return `true` if the disk was actually removed
+    async fn remove_disk(&mut self, raw_disk: RawDisk) -> bool {
         // If the disk is a U.2, we want to first delete it from any queued disks
         let _ = self.queued_u2_drives.remove(&raw_disk);
-        if self.resources.remove_disk(raw_disk) {
-            let _ = self.resource_updates.send_replace(self.resources.clone());
+        self.resources.remove_disk(raw_disk.identity())
+    }
+
+    // Find all disks to remove that are not in raw_disks and remove them Then
+    // take the remaining disks and try to add them all. `StorageResources` will
+    // inform us if anything changed, and if so we return true, otherwise we
+    // return false.
+    async fn ensure_using_exactly_these_disks(
+        &mut self,
+        raw_disks: HashSet<RawDisk>,
+    ) -> bool {
+        let mut should_update = false;
+
+        // Clear out any queued U.2 disks that are real.
+        // We keep synthetic disks, as they are only added once.
+        self.queued_u2_drives.retain(|d| d.is_synthetic());
+
+        let all_ids: HashSet<_> =
+            raw_disks.iter().map(|d| d.identity()).collect();
+
+        // Find all existing disks not in the current set
+        let to_remove: Vec<DiskIdentity> = self
+            .resources
+            .disks
+            .keys()
+            .filter_map(|id| {
+                if !all_ids.contains(id) {
+                    Some(id.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        for id in to_remove {
+            if self.resources.remove_disk(&id) {
+                should_update = true;
+            }
         }
+
+        for raw_disk in raw_disks {
+            let disk_id = raw_disk.identity().clone();
+            match self.add_disk(raw_disk).await {
+                Ok(true) => should_update = true,
+                Ok(false) => (),
+                Err(err) => {
+                    warn!(
+                        self.log,
+                        "Failed to add disk to storage resources: {err}";
+                        "disk_id" => ?disk_id
+                    );
+                }
+            }
+        }
+
+        should_update
     }
 }
 

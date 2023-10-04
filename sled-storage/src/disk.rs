@@ -97,6 +97,17 @@ impl RawDisk {
             },
         }
     }
+
+    pub fn is_synthetic(&self) -> bool {
+        match self {
+            Self::Real(_) => false,
+            Self::Synthetic(_) => true,
+        }
+    }
+
+    pub fn is_real(&self) -> bool {
+        !self.is_synthetic()
+    }
 }
 
 /// A physical [`PooledDisk`] or a [`SyntheticDisk`] that contains or is backed

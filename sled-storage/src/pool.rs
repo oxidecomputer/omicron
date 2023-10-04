@@ -9,7 +9,7 @@ use illumos_utils::zpool::{Zpool, ZpoolInfo, ZpoolName};
 use omicron_common::disk::DiskIdentity;
 
 /// A ZFS storage pool
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Pool {
     pub name: ZpoolName,
     pub info: ZpoolInfo,

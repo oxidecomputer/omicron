@@ -96,7 +96,7 @@ impl FromStr for ZpoolHealth {
 }
 
 /// Describes a Zpool.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ZpoolInfo {
     name: String,
     size: u64,

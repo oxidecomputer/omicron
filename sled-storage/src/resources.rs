@@ -25,25 +25,25 @@ const ZONE_BUNDLE_DIRECTORY: &str = "zone";
 /// Storage related resources: disks and zpools
 ///
 /// This state is internal to the [`crate::StorageManager`] task. Clones
-/// of this state, or subsets of it, can be retrieved by requests to the
-/// `StorageManager` task from the [`crate::StorageManagerHandle`]. This state
-/// is not `Sync`, and as such does not require any mutexes. However, we do
-/// expect to share it relatively frequently, and we want copies of it to be
-/// as cheaply made as possible. So any large state is stored inside `Arc`s. On
-/// the other hand, we expect infrequent updates to this state, and as such, we
-/// use [`std::sync::Arc::make_mut`] to implement clone on write functionality
+/// of this state can be retrieved by requests to the `StorageManager` task
+/// from the [`crate::StorageManagerHandle`]. This state is not `Sync`, and
+/// as such does not require any mutexes. However, we do expect to share it
+/// relatively frequently, and we want copies of it to be as cheaply made
+/// as possible. So any large state is stored inside `Arc`s. On the other
+/// hand, we expect infrequent updates to this state, and as such, we use
+/// [`std::sync::Arc::make_mut`] to implement clone on write functionality
 /// inside the `StorageManager` task if there are any outstanding copies.
 /// Therefore, we only pay the cost to update infrequently, and no locks are
 /// required by callers when operating on cloned data. The only contention here
-/// is for the refrence counters of the internal Arcs when `StorageResources` gets cloned
-/// or dropped.
+/// is for the refrence counters of the internal Arcs when `StorageResources`
+/// gets cloned or dropped.
 #[derive(Debug, Clone, Default)]
 pub struct StorageResources {
     // All disks, real and synthetic, being managed by this sled
-    disks: Arc<BTreeMap<DiskIdentity, Disk>>,
+    pub disks: Arc<BTreeMap<DiskIdentity, Disk>>,
 
     // A map of "Uuid" to "pool".
-    pools: Arc<BTreeMap<Uuid, Pool>>,
+    pub pools: Arc<BTreeMap<Uuid, Pool>>,
 }
 
 impl StorageResources {
@@ -51,15 +51,18 @@ impl StorageResources {
     ///
     /// Return true, if data was changed, false otherwise
     pub(crate) fn insert_disk(&mut self, disk: Disk) -> Result<bool, Error> {
-        let parent = disk.identity().clone();
+        let disk_id = disk.identity().clone();
         let zpool_name = disk.zpool_name().clone();
-        if let Some(stored) = self.disks.get(&parent) {
-            if stored == &disk {
-                return Ok(false);
+        let zpool = Pool::new(zpool_name, disk_id.clone())?;
+        if let Some(stored_disk) = self.disks.get(&disk_id) {
+            if let Some(stored_pool) = self.pools.get(&zpool.name.id()) {
+                if stored_disk == &disk && stored_pool == &zpool {
+                    return Ok(false);
+                }
             }
         }
-        Arc::make_mut(&mut self.disks).insert(disk.identity().clone(), disk);
-        let zpool = Pool::new(zpool_name, parent)?;
+        // Either the disk or zpool changed
+        Arc::make_mut(&mut self.disks).insert(disk_id, disk);
         Arc::make_mut(&mut self.pools).insert(zpool.name.id(), zpool);
         Ok(true)
     }
@@ -67,13 +70,12 @@ impl StorageResources {
     /// Delete a real disk and its zpool
     ///
     /// Return true, if data was changed, false otherwise
-    pub(crate) fn remove_disk(&mut self, disk: RawDisk) -> bool {
-        if !self.disks.contains_key(disk.identity()) {
+    pub(crate) fn remove_disk(&mut self, id: &DiskIdentity) -> bool {
+        if !self.disks.contains_key(id) {
             return false;
         }
         // Safe to unwrap as we just checked the key existed above
-        let parsed_disk =
-            Arc::make_mut(&mut self.disks).remove(disk.identity()).unwrap();
+        let parsed_disk = Arc::make_mut(&mut self.disks).remove(id).unwrap();
         Arc::make_mut(&mut self.pools).remove(&parsed_disk.zpool_name().id());
         true
     }
