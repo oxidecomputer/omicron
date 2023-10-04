@@ -6,18 +6,25 @@ description = "The oximeter metric collection server"
 license = "MPL-2.0"
 
 [dependencies]
+anyhow.workspace = true
 clap.workspace = true
 dropshot.workspace = true
 futures.workspace = true
 internal-dns.workspace = true
 nexus-client.workspace = true
+nexus-types.workspace = true
 omicron-common.workspace = true
 oximeter.workspace = true
+oximeter-client.workspace = true
 oximeter-db.workspace = true
+rand.workspace = true
 reqwest = { workspace = true, features = [ "json" ] }
+schemars.workspace = true
 serde.workspace = true
 slog.workspace = true
+slog-async.workspace = true
 slog-dtrace.workspace = true
+slog-term.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 toml.workspace = true

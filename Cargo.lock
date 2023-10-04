@@ -5125,6 +5125,7 @@ dependencies = [
  "diesel",
  "dropshot",
  "expectorate",
+ "futures",
  "humantime",
  "internal-dns 0.1.0",
  "ipnetwork",
@@ -5139,6 +5140,7 @@ dependencies = [
  "omicron-rpaths",
  "omicron-test-utils",
  "omicron-workspace-hack",
+ "oximeter-client",
  "pq-sys",
  "regex",
  "serde",
@@ -5716,6 +5718,7 @@ name = "oximeter-client"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "futures",
  "omicron-common 0.1.0",
  "omicron-workspace-hack",
  "progenitor",
@@ -5729,24 +5732,31 @@ dependencies = [
 name = "oximeter-collector"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "clap 4.4.3",
  "dropshot",
  "expectorate",
  "futures",
  "internal-dns 0.1.0",
  "nexus-client 0.1.0",
+ "nexus-types",
  "omicron-common 0.1.0",
  "omicron-test-utils",
  "omicron-workspace-hack",
  "openapi-lint",
  "openapiv3",
  "oximeter 0.1.0",
+ "oximeter-client",
  "oximeter-db",
+ "rand 0.8.5",
  "reqwest",
+ "schemars",
  "serde",
  "serde_json",
  "slog",
+ "slog-async",
  "slog-dtrace",
+ "slog-term",
  "subprocess",
  "thiserror",
  "tokio",
@@ -5821,7 +5831,9 @@ dependencies = [
 name = "oximeter-producer"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "chrono",
+ "clap 4.4.3",
  "dropshot",
  "nexus-client 0.1.0",
  "omicron-common 0.1.0",
