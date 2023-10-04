@@ -46,10 +46,12 @@ impl DataStore {
             .filter(dsl::region_id.eq(region_id))
             .filter(dsl::snapshot_id.eq(snapshot_id))
             .select(RegionSnapshot::as_select())
-            .first_async::<RegionSnapshot>(self.pool())
+            .first_async::<RegionSnapshot>(
+                &*self.pool_connection_unauthorized().await?,
+            )
             .await
             .optional()
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     pub async fn region_snapshot_remove(

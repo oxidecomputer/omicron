@@ -648,7 +648,7 @@ impl DataStore {
                 diesel::update(dsl::region_snapshot)
                     .filter(
                         dsl::snapshot_addr
-                            .eq_any(&crucible_targets.read_only_targets),
+                            .eq_any(crucible_targets.read_only_targets.clone()),
                     )
                     .filter(dsl::volume_references.gt(0))
                     .filter(dsl::deleting.eq(false))
@@ -661,23 +661,26 @@ impl DataStore {
                 let snapshots_to_delete: Vec<RegionSnapshot> =
                     dsl::region_snapshot
                         .filter(
-                            dsl::snapshot_addr
-                                .eq_any(&crucible_targets.read_only_targets),
+                            dsl::snapshot_addr.eq_any(
+                                crucible_targets.read_only_targets.clone(),
+                            ),
                         )
                         .filter(dsl::volume_references.eq(0))
                         .filter(dsl::deleting.eq(false))
                         .select(RegionSnapshot::as_select())
-                        .load(conn)?;
+                        .load_async(&conn)
+                        .await?;
 
                 diesel::update(dsl::region_snapshot)
                     .filter(
                         dsl::snapshot_addr
-                            .eq_any(&crucible_targets.read_only_targets),
+                            .eq_any(crucible_targets.read_only_targets.clone()),
                     )
                     .filter(dsl::volume_references.eq(0))
                     .filter(dsl::deleting.eq(false))
                     .set(dsl::deleting.eq(true))
-                    .execute(conn)?;
+                    .execute_async(&conn)
+                    .await?;
 
                 // Return what results can be cleaned up
                 let result = CrucibleResources::V1(CrucibleResourcesV1 {
@@ -740,11 +743,9 @@ impl DataStore {
                             // delete a read-only downstairs running for a
                             // snapshot that doesn't exist will return a 404,
                             // causing the saga to error and unwind.
-                            .filter(
-                                dsl::snapshot_addr.eq_any(
-                                    &crucible_targets.read_only_targets,
-                                ),
-                            )
+                            .filter(dsl::snapshot_addr.eq_any(
+                                crucible_targets.read_only_targets.clone(),
+                            ))
                             // Match the dataset, region, and snapshot ID
                             .filter(
                                 dsl::dataset_id
