@@ -32,8 +32,8 @@ tabled.workspace = true
 textwrap.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
 uuid.workspace = true
-omicron-workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 ipnetwork.workspace = true
+omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 expectorate.workspace = true

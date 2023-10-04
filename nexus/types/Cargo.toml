@@ -25,4 +25,4 @@ api_identity.workspace = true
 dns-service-client.workspace = true
 omicron-common.workspace = true
 omicron-passwords.workspace = true
-omicron-workspace-hack = { version = "0.1", path = "../../workspace-hack" }
+omicron-workspace-hack.workspace = true
