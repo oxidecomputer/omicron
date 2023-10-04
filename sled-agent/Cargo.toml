@@ -76,7 +76,7 @@ uuid.workspace = true
 zeroize.workspace = true
 zone.workspace = true
 static_assertions.workspace = true
-omicron-workspace-hack = { version = "0.1", path = "../workspace-hack" }
+omicron-workspace-hack.workspace = true
 
 [target.'cfg(target_os = "illumos")'.dependencies]
 opte-ioctl.workspace = true
