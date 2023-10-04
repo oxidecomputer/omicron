@@ -41,7 +41,7 @@ jobs:
     - name: Install Pre-Requisites
       run: ./tools/install_builder_prerequisites.sh -y
     - name: Set default target
-      run: cargo run --bin omicron-package -- -t default target create
+      run: cargo run --bin omicron-package -- -t default target create -r single-sled
     - name: Check build of deployed Omicron packages
       run: cargo run --bin omicron-package -- -t default check
 

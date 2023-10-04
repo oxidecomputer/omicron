@@ -18,3 +18,4 @@ slog.workspace = true
 update-engine.workspace = true
 uuid.workspace = true
 wicket-common.workspace = true
+omicron-workspace-hack.workspace = true

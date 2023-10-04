@@ -6,6 +6,7 @@ mod artifacts;
 mod bootstrap_addrs;
 mod config;
 mod context;
+mod helpers;
 mod http_entrypoints;
 mod installinator_progress;
 mod inventory;

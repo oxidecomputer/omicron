@@ -88,6 +88,13 @@ pub async fn make_resources(
         LookupType::ById(sled_id),
     ));
 
+    let zpool_id = "aaaaaaaa-1233-af7d-9220-afe1d8090900".parse().unwrap();
+    builder.new_resource(authz::Zpool::new(
+        authz::FLEET,
+        zpool_id,
+        LookupType::ById(zpool_id),
+    ));
+
     make_services(&mut builder).await;
 
     builder.new_resource(authz::PhysicalDisk::new(

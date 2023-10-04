@@ -13,6 +13,7 @@ async-bb8-diesel.workspace = true
 async-trait.workspace = true
 base64.workspace = true
 bb8.workspace = true
+camino.workspace = true
 chrono.workspace = true
 cookie.workspace = true
 diesel.workspace = true
@@ -62,6 +63,7 @@ nexus-types.workspace = true
 omicron-common.workspace = true
 omicron-passwords.workspace = true
 oximeter.workspace = true
+omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 assert_matches.workspace = true

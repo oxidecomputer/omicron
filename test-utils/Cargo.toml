@@ -6,6 +6,7 @@ license = "MPL-2.0"
 
 [dependencies]
 anyhow.workspace = true
+camino.workspace = true
 dropshot.workspace = true
 futures.workspace = true
 headers.workspace = true
@@ -24,6 +25,7 @@ usdt.workspace = true
 rcgen.workspace = true
 regex.workspace = true
 reqwest.workspace = true
+omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 expectorate.workspace = true

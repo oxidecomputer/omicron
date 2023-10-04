@@ -593,6 +593,7 @@ mod tests {
         let mut db = test_setup_database(&log).await;
         let cfg = crate::db::Config { url: db.pg_config().clone() };
         let pool = Arc::new(crate::db::Pool::new(&logctx.log, &cfg));
+        let conn = pool.pool().get().await.unwrap();
 
         // We're going to operate on a separate table, for simplicity.
         setup_test_schema(&pool).await;
@@ -607,7 +608,7 @@ mod tests {
         let it = diesel::insert_into(item::dsl::item)
             .values(query)
             .returning(Item::as_returning())
-            .get_result_async(pool.pool())
+            .get_result_async(&*conn)
             .await
             .unwrap();
         assert_eq!(it.value, 0);
@@ -616,7 +617,7 @@ mod tests {
         let it = diesel::insert_into(item::dsl::item)
             .values(query)
             .returning(Item::as_returning())
-            .get_result_async(pool.pool())
+            .get_result_async(&*conn)
             .await
             .unwrap();
         assert_eq!(it.value, 1);
@@ -628,7 +629,7 @@ mod tests {
         let it = diesel::insert_into(item::dsl::item)
             .values(query)
             .returning(Item::as_returning())
-            .get_result_async(pool.pool())
+            .get_result_async(&*conn)
             .await
             .unwrap();
         assert_eq!(it.value, 10);
@@ -638,7 +639,7 @@ mod tests {
         let it = diesel::insert_into(item::dsl::item)
             .values(query)
             .returning(Item::as_returning())
-            .get_result_async(pool.pool())
+            .get_result_async(&*conn)
             .await
             .unwrap();
         assert_eq!(it.value, 2);

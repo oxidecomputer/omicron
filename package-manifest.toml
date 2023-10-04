@@ -92,7 +92,8 @@ source.rust.binary_names = ["nexus", "schema-updater"]
 source.rust.release = true
 source.paths = [
   { from = "/opt/ooce/pgsql-13/lib/amd64", to = "/opt/ooce/pgsql-13/lib/amd64" },
-  { from = "smf/nexus", to = "/var/svc/manifest/site/nexus" },
+  { from = "smf/nexus/manifest.xml", to = "/var/svc/manifest/site/nexus/manifest.xml" },
+  { from = "smf/nexus/{{rack-topology}}", to = "/var/svc/manifest/site/nexus" },
   { from = "out/console-assets", to = "/var/nexus/static" },
   { from = "schema/crdb", to = "/var/nexus/schema/crdb" },
 ]
@@ -259,7 +260,10 @@ service_name = "mgs"
 only_for_targets.image = "standard"
 only_for_targets.switch = "stub"
 source.type = "local"
-source.paths = [ { from = "smf/mgs-sim", to = "/var/svc/manifest/site/mgs" } ]
+source.paths = [ 
+  { from = "smf/mgs/manifest.xml", to = "/var/svc/manifest/site/mgs/manifest.xml" }, 
+  { from = "smf/mgs-sim/config.toml", to = "/var/svc/manifest/site/mgs/config.toml" } 
+]
 output.intermediate_only = true
 output.type = "zone"
 
@@ -268,7 +272,10 @@ service_name = "mgs"
 only_for_targets.image = "standard"
 only_for_targets.switch = "softnpu"
 source.type = "local"
-source.paths = [ { from = "smf/mgs-sim", to = "/var/svc/manifest/site/mgs" } ]
+source.paths = [ 
+  { from = "smf/mgs/manifest.xml", to = "/var/svc/manifest/site/mgs/manifest.xml" }, 
+  { from = "smf/mgs-sim/config.toml", to = "/var/svc/manifest/site/mgs/config.toml" } 
+]
 output.intermediate_only = true
 output.type = "zone"
 

@@ -38,8 +38,4 @@ tempfile.workspace = true
 trust-dns-proto.workspace = true
 trust-dns-resolver.workspace = true
 uuid.workspace = true
-
-[build-dependencies]
-dropshot.workspace = true
-omicron-test-utils.workspace = true
-tokio.workspace = true
+omicron-workspace-hack.workspace = true

@@ -23,7 +23,9 @@ slog-async.workspace = true
 slog-term.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = [ "rt-multi-thread", "macros" ] }
+usdt.workspace = true
 uuid.workspace = true
+omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 itertools.workspace = true
