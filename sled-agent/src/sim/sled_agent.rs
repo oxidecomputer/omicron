@@ -623,6 +623,7 @@ impl SledAgent {
             chipset: Default::default(),
             devices: Default::default(),
             block_devs: Default::default(),
+            cpuid_profiles: Default::default(),
         };
         let private = Arc::new(PropolisContext::new(config, propolis_log));
         info!(log, "Starting mock propolis-server...");
