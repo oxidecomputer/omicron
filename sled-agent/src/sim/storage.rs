@@ -383,16 +383,18 @@ mod test {
         // Create a region, then delete it.
 
         let region_id = Uuid::new_v4();
-        let region = agent.create(CreateRegion {
-            block_size: 512,
-            extent_count: 10,
-            extent_size: 10,
-            id: RegionId(region_id.to_string()),
-            encrypted: true,
-            cert_pem: None,
-            key_pem: None,
-            root_pem: None,
-        });
+        let region = agent
+            .create(CreateRegion {
+                block_size: 512,
+                extent_count: 10,
+                extent_size: 10,
+                id: RegionId(region_id.to_string()),
+                encrypted: true,
+                cert_pem: None,
+                key_pem: None,
+                root_pem: None,
+            })
+            .unwrap();
 
         let first_region_port = region.port_number;
 
@@ -405,32 +407,36 @@ mod test {
         // don't delete it.
 
         let second_region_id = Uuid::new_v4();
-        let second_region = agent.create(CreateRegion {
-            block_size: 512,
-            extent_count: 10,
-            extent_size: 10,
-            id: RegionId(second_region_id.to_string()),
-            encrypted: true,
-            cert_pem: None,
-            key_pem: None,
-            root_pem: None,
-        });
+        let second_region = agent
+            .create(CreateRegion {
+                block_size: 512,
+                extent_count: 10,
+                extent_size: 10,
+                id: RegionId(second_region_id.to_string()),
+                encrypted: true,
+                cert_pem: None,
+                key_pem: None,
+                root_pem: None,
+            })
+            .unwrap();
 
         assert_eq!(second_region.port_number, first_region_port,);
 
         // Create another region, delete it. After this, we still have the
         // second region.
 
-        let third_region = agent.create(CreateRegion {
-            block_size: 512,
-            extent_count: 10,
-            extent_size: 10,
-            id: RegionId(Uuid::new_v4().to_string()),
-            encrypted: true,
-            cert_pem: None,
-            key_pem: None,
-            root_pem: None,
-        });
+        let third_region = agent
+            .create(CreateRegion {
+                block_size: 512,
+                extent_count: 10,
+                extent_size: 10,
+                id: RegionId(Uuid::new_v4().to_string()),
+                encrypted: true,
+                cert_pem: None,
+                key_pem: None,
+                root_pem: None,
+            })
+            .unwrap();
 
         let third_region_port = third_region.port_number;
 
