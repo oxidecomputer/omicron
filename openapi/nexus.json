@@ -9615,6 +9615,7 @@
           },
           "image_id": {
             "nullable": true,
+            "description": "ID of image from which disk was created, if any",
             "type": "string",
             "format": "uuid"
           },
@@ -9635,6 +9636,7 @@
           },
           "snapshot_id": {
             "nullable": true,
+            "description": "ID of snapshot from which disk was created, if any",
             "type": "string",
             "format": "uuid"
           },
