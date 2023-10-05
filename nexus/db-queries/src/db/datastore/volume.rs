@@ -16,9 +16,9 @@ use crate::db::model::RegionSnapshot;
 use crate::db::model::Volume;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
-use async_bb8_diesel::OptionalExtension;
 use chrono::Utc;
 use diesel::prelude::*;
+use diesel::OptionalExtension;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
@@ -335,7 +335,7 @@ impl DataStore {
             .await
             .map_err(|e| match e {
                 TxnError::CustomError(VolumeGetError::DieselError(e)) => {
-                    public_error_from_diesel(e.into(), ErrorHandler::Server)
+                    public_error_from_diesel(e, ErrorHandler::Server)
                 }
 
                 _ => {
@@ -756,7 +756,7 @@ impl DataStore {
             .map_err(|e| match e {
                 TxnError::CustomError(
                     DecreaseCrucibleResourcesError::DieselError(e),
-                ) => public_error_from_diesel(e.into(), ErrorHandler::Server),
+                ) => public_error_from_diesel(e, ErrorHandler::Server),
 
                 _ => {
                     Error::internal_error(&format!("Transaction error: {}", e))
@@ -954,7 +954,7 @@ impl DataStore {
                 TxnError::CustomError(
                     RemoveReadOnlyParentError::DieselError(e),
                 ) => public_error_from_diesel(
-                    e.into(),
+                    e,
                     ErrorHandler::Server,
                 ),
 

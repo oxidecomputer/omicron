@@ -17,6 +17,7 @@ use diesel::prelude::Column;
 use diesel::query_builder::AstPass;
 use diesel::query_builder::QueryFragment;
 use diesel::query_builder::QueryId;
+use diesel::result::Error as DieselError;
 use diesel::sql_types;
 use diesel::Insertable;
 use diesel::QueryResult;
@@ -126,16 +127,14 @@ impl InsertError {
     /// address exhaustion or an attempt to attach an interface to an instance
     /// that is already associated with another VPC.
     pub fn from_diesel(
-        e: async_bb8_diesel::ConnectionError,
+        e: DieselError,
         interface: &IncompleteNetworkInterface,
     ) -> Self {
         use crate::db::error;
-        use async_bb8_diesel::ConnectionError;
-        use diesel::result::Error;
         match e {
             // Catch the specific errors designed to communicate the failures we
             // want to distinguish
-            ConnectionError::Query(Error::DatabaseError(_, _)) => {
+            DieselError::DatabaseError(_, _) => {
                 decode_database_error(e, interface)
             }
             // Any other error at all is a bug
@@ -223,13 +222,11 @@ impl InsertError {
 /// As such, it naturally is extremely tightly coupled to the database itself,
 /// including the software version and our schema.
 fn decode_database_error(
-    err: async_bb8_diesel::ConnectionError,
+    err: DieselError,
     interface: &IncompleteNetworkInterface,
 ) -> InsertError {
     use crate::db::error;
-    use async_bb8_diesel::ConnectionError;
     use diesel::result::DatabaseErrorKind;
-    use diesel::result::Error;
 
     // Error message generated when we attempt to insert an interface in a
     // different VPC from the interface(s) already associated with the instance
@@ -292,10 +289,10 @@ fn decode_database_error(
         // If the address allocation subquery fails, we'll attempt to insert
         // NULL for the `ip` column. This checks that the non-NULL constraint on
         // that colum has been violated.
-        ConnectionError::Query(Error::DatabaseError(
+        DieselError::DatabaseError(
             DatabaseErrorKind::NotNullViolation,
             ref info,
-        )) if info.message() == IP_EXHAUSTION_ERROR_MESSAGE => {
+        ) if info.message() == IP_EXHAUSTION_ERROR_MESSAGE => {
             InsertError::NoAvailableIpAddresses
         }
 
@@ -303,29 +300,28 @@ fn decode_database_error(
         // `push_ensure_unique_vpc_expression` subquery, which generates a
         // UUID parsing error if the resource (e.g. instance) we want to attach
         // to is already associated with another VPC.
-        ConnectionError::Query(Error::DatabaseError(
-            DatabaseErrorKind::Unknown,
-            ref info,
-        )) if info.message() == MULTIPLE_VPC_ERROR_MESSAGE => {
+        DieselError::DatabaseError(DatabaseErrorKind::Unknown, ref info)
+            if info.message() == MULTIPLE_VPC_ERROR_MESSAGE =>
+        {
             InsertError::ResourceSpansMultipleVpcs(interface.parent_id)
         }
 
         // This checks the constraint on the interface slot numbers, used to
         // limit total number of interfaces per resource to a maximum number.
-        ConnectionError::Query(Error::DatabaseError(
+        DieselError::DatabaseError(
             DatabaseErrorKind::CheckViolation,
             ref info,
-        )) if info.message() == NO_SLOTS_AVAILABLE_ERROR_MESSAGE => {
+        ) if info.message() == NO_SLOTS_AVAILABLE_ERROR_MESSAGE => {
             InsertError::NoSlotsAvailable
         }
 
         // If the MAC allocation subquery fails, we'll attempt to insert NULL
         // for the `mac` column. This checks that the non-NULL constraint on
         // that column has been violated.
-        ConnectionError::Query(Error::DatabaseError(
+        DieselError::DatabaseError(
             DatabaseErrorKind::NotNullViolation,
             ref info,
-        )) if info.message() == MAC_EXHAUSTION_ERROR_MESSAGE => {
+        ) if info.message() == MAC_EXHAUSTION_ERROR_MESSAGE => {
             InsertError::NoMacAddrressesAvailable
         }
 
@@ -333,39 +329,36 @@ fn decode_database_error(
         // `push_ensure_unique_vpc_subnet_expression` subquery, which generates
         // a UUID parsing error if the resource has another interface in the VPC
         // Subnet of the one we're trying to insert.
-        ConnectionError::Query(Error::DatabaseError(
-            DatabaseErrorKind::Unknown,
-            ref info,
-        )) if info.message() == NON_UNIQUE_VPC_SUBNET_ERROR_MESSAGE => {
+        DieselError::DatabaseError(DatabaseErrorKind::Unknown, ref info)
+            if info.message() == NON_UNIQUE_VPC_SUBNET_ERROR_MESSAGE =>
+        {
             InsertError::NonUniqueVpcSubnets
         }
 
         // This catches the UUID-cast failure intentionally introduced by
         // `push_instance_state_verification_subquery`, which verifies that
         // the instance is actually stopped when running this query.
-        ConnectionError::Query(Error::DatabaseError(
-            DatabaseErrorKind::Unknown,
-            ref info,
-        )) if info.message() == INSTANCE_BAD_STATE_ERROR_MESSAGE => {
+        DieselError::DatabaseError(DatabaseErrorKind::Unknown, ref info)
+            if info.message() == INSTANCE_BAD_STATE_ERROR_MESSAGE =>
+        {
             assert_eq!(interface.kind, NetworkInterfaceKind::Instance);
             InsertError::InstanceMustBeStopped(interface.parent_id)
         }
         // This catches the UUID-cast failure intentionally introduced by
         // `push_instance_state_verification_subquery`, which verifies that
         // the instance doesn't even exist when running this query.
-        ConnectionError::Query(Error::DatabaseError(
-            DatabaseErrorKind::Unknown,
-            ref info,
-        )) if info.message() == NO_INSTANCE_ERROR_MESSAGE => {
+        DieselError::DatabaseError(DatabaseErrorKind::Unknown, ref info)
+            if info.message() == NO_INSTANCE_ERROR_MESSAGE =>
+        {
             assert_eq!(interface.kind, NetworkInterfaceKind::Instance);
             InsertError::InstanceNotFound(interface.parent_id)
         }
 
         // This path looks specifically at constraint names.
-        ConnectionError::Query(Error::DatabaseError(
+        DieselError::DatabaseError(
             DatabaseErrorKind::UniqueViolation,
             ref info,
-        )) => match info.constraint_name() {
+        ) => match info.constraint_name() {
             // Constraint violated if a user-requested IP address has
             // already been assigned within the same VPC Subnet.
             Some(constraint) if constraint == IP_NOT_AVAILABLE_CONSTRAINT => {
@@ -1550,17 +1543,12 @@ impl DeleteError {
     /// can generate, specifically the intentional errors that indicate that
     /// either the instance is still running, or that the instance has one or
     /// more secondary interfaces.
-    pub fn from_diesel(
-        e: async_bb8_diesel::ConnectionError,
-        query: &DeleteQuery,
-    ) -> Self {
+    pub fn from_diesel(e: DieselError, query: &DeleteQuery) -> Self {
         use crate::db::error;
-        use async_bb8_diesel::ConnectionError;
-        use diesel::result::Error;
         match e {
             // Catch the specific errors designed to communicate the failures we
             // want to distinguish
-            ConnectionError::Query(Error::DatabaseError(_, _)) => {
+            DieselError::DatabaseError(_, _) => {
                 decode_delete_network_interface_database_error(
                     e,
                     query.parent_id,
@@ -1608,13 +1596,11 @@ impl DeleteError {
 /// As such, it naturally is extremely tightly coupled to the database itself,
 /// including the software version and our schema.
 fn decode_delete_network_interface_database_error(
-    err: async_bb8_diesel::ConnectionError,
+    err: DieselError,
     parent_id: Uuid,
 ) -> DeleteError {
     use crate::db::error;
-    use async_bb8_diesel::ConnectionError;
     use diesel::result::DatabaseErrorKind;
-    use diesel::result::Error;
 
     // Error message generated when we're attempting to delete a primary
     // interface, and that instance also has one or more secondary interfaces
@@ -1627,29 +1613,26 @@ fn decode_delete_network_interface_database_error(
         // first CTE, which generates a UUID parsing error if we're trying to
         // delete the primary interface, and the instance also has one or more
         // secondaries.
-        ConnectionError::Query(Error::DatabaseError(
-            DatabaseErrorKind::Unknown,
-            ref info,
-        )) if info.message() == HAS_SECONDARIES_ERROR_MESSAGE => {
+        DieselError::DatabaseError(DatabaseErrorKind::Unknown, ref info)
+            if info.message() == HAS_SECONDARIES_ERROR_MESSAGE =>
+        {
             DeleteError::SecondariesExist(parent_id)
         }
 
         // This catches the UUID-cast failure intentionally introduced by
         // `push_instance_state_verification_subquery`, which verifies that
         // the instance can be worked on when running this query.
-        ConnectionError::Query(Error::DatabaseError(
-            DatabaseErrorKind::Unknown,
-            ref info,
-        )) if info.message() == INSTANCE_BAD_STATE_ERROR_MESSAGE => {
+        DieselError::DatabaseError(DatabaseErrorKind::Unknown, ref info)
+            if info.message() == INSTANCE_BAD_STATE_ERROR_MESSAGE =>
+        {
             DeleteError::InstanceBadState(parent_id)
         }
         // This catches the UUID-cast failure intentionally introduced by
         // `push_instance_state_verification_subquery`, which verifies that
         // the instance doesn't even exist when running this query.
-        ConnectionError::Query(Error::DatabaseError(
-            DatabaseErrorKind::Unknown,
-            ref info,
-        )) if info.message() == NO_INSTANCE_ERROR_MESSAGE => {
+        DieselError::DatabaseError(DatabaseErrorKind::Unknown, ref info)
+            if info.message() == NO_INSTANCE_ERROR_MESSAGE =>
+        {
             DeleteError::InstanceNotFound(parent_id)
         }
 

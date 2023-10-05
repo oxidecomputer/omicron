@@ -22,7 +22,6 @@ use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::TransactionError;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
-use async_bb8_diesel::ConnectionError;
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::result::Error as DieselError;
@@ -111,9 +110,7 @@ impl DataStore {
                     .await
                 {
                     Ok(v) => Ok(Some(v)),
-                    Err(ConnectionError::Query(DieselError::NotFound)) => {
-                        Ok(None)
-                    }
+                    Err(DieselError::NotFound) => Ok(None),
                     Err(e) => Err(e),
                 }?;
 
@@ -161,8 +158,7 @@ impl DataStore {
                         }
                     },
                 },
-
-                TxnError::Connection(e) => {
+                TxnError::Database(e) => {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 }
             })?;

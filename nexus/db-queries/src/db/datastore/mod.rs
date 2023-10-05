@@ -1670,7 +1670,6 @@ mod test {
     async fn test_external_ip_check_constraints() {
         use crate::db::model::IpKind;
         use crate::db::schema::external_ip::dsl;
-        use async_bb8_diesel::ConnectionError::Query;
         use diesel::result::DatabaseErrorKind::CheckViolation;
         use diesel::result::Error::DatabaseError;
 
@@ -1756,10 +1755,10 @@ mod test {
                             assert!(
                                 matches!(
                                     err,
-                                    Query(DatabaseError(
+                                    DatabaseError(
                                         CheckViolation,
                                         _
-                                    ))
+                                    )
                                 ),
                                 "Expected a CHECK violation when inserting a \
                                  Floating IP record with NULL name and/or description",
@@ -1805,10 +1804,10 @@ mod test {
                                     assert!(
                                         matches!(
                                             err,
-                                            Query(DatabaseError(
+                                            DatabaseError(
                                                 CheckViolation,
                                                 _
-                                            ))
+                                            )
                                         ),
                                         "Expected a CHECK violation when inserting an \
                                          Ephemeral Service IP",
@@ -1836,10 +1835,10 @@ mod test {
                                 assert!(
                                     matches!(
                                         err,
-                                        Query(DatabaseError(
+                                        DatabaseError(
                                             CheckViolation,
                                             _
-                                        ))
+                                        )
                                     ),
                                     "Expected a CHECK violation when inserting a \
                                      {:?} IP record with non-NULL name, description, \

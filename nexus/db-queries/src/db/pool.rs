@@ -99,7 +99,9 @@ impl CustomizeConnection<Connection<DbConnection>, ConnectionError>
         &self,
         conn: &mut Connection<DbConnection>,
     ) -> Result<(), ConnectionError> {
-        conn.batch_execute_async(DISALLOW_FULL_TABLE_SCAN_SQL).await
+        conn.batch_execute_async(DISALLOW_FULL_TABLE_SCAN_SQL)
+            .await
+            .map_err(|e| e.into())
     }
 }
 

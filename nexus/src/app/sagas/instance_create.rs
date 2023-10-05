@@ -1372,10 +1372,10 @@ pub mod test {
     };
     use async_bb8_diesel::{
         AsyncConnection, AsyncRunQueryDsl, AsyncSimpleConnection,
-        OptionalExtension,
     };
     use diesel::{
-        BoolExpressionMethods, ExpressionMethods, QueryDsl, SelectableHelper,
+        BoolExpressionMethods, ExpressionMethods, OptionalExtension, QueryDsl,
+        SelectableHelper,
     };
     use dropshot::test_util::ClientTestContext;
     use nexus_db_queries::authn::saga::Serialized;
