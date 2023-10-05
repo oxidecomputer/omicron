@@ -1698,9 +1698,14 @@ impl ServiceManager {
                         "config/mgs-address",
                         &format!("[::1]:{MGS_PORT}"),
                     )?;
+
+                    // We intentionally bind `nexus-proxy-address` to `::` so
+                    // wicketd will serve this on all interfaces, particularly
+                    // the tech port interfaces, allowing external clients to
+                    // connect to this Nexus proxy.
                     smfh.setprop(
                         "config/nexus-proxy-address",
-                        &format!("[::1]:{WICKETD_NEXUS_PROXY_PORT}"),
+                        &format!("[::]:{WICKETD_NEXUS_PROXY_PORT}"),
                     )?;
                     if let Some(underlay_address) = self
                         .inner
@@ -2725,9 +2730,8 @@ impl ServiceManager {
                 );
                 *request = new_request;
 
-                let address = request
-                    .addresses
-                    .get(0)
+                let first_address = request.addresses.get(0);
+                let address = first_address
                     .map(|addr| addr.to_string())
                     .unwrap_or_else(|| "".to_string());
 
@@ -2832,6 +2836,29 @@ impl ServiceManager {
                                 }
                             }
                             smfh.refresh()?;
+                        }
+                        ServiceType::Wicketd { .. } => {
+                            if let Some(&address) = first_address {
+                                let rack_subnet =
+                                    Ipv6Subnet::<AZ_PREFIX>::new(address);
+
+                                info!(
+                                    self.inner.log, "configuring wicketd";
+                                    "rack_subnet" => %rack_subnet.net().ip(),
+                                );
+
+                                smfh.setprop(
+                                    "config/rack-subnet",
+                                    &rack_subnet.net().ip().to_string(),
+                                )?;
+
+                                smfh.refresh()?;
+                            } else {
+                                error!(
+                                    self.inner.log,
+                                    "underlay address unexpectedly missing",
+                                );
+                            }
                         }
                         ServiceType::Tfport { .. } => {
                             // Since tfport and dpd communicate using localhost,

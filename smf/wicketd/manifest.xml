@@ -28,7 +28,7 @@
     listens on a `::1` (IPv6 localhost) address without TLS.
   -->
   <exec_method type='method' name='refresh'
-      exec='curl -X POST http://${config/address}/reload-config'
+      exec='curl -X POST http://%{config/address}/reload-config'
       timeout_seconds='0' />
 
   <property_group name='startd' type='framework'>

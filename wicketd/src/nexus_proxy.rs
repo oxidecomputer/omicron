@@ -104,7 +104,7 @@ impl Inner {
             info!(
                 log,
                 "closing connection; no internal DNS resolver available \
-                 (rack subnet unknown?"
+                 (rack subnet unknown?)"
             );
             return;
         };

@@ -88,10 +88,10 @@ impl SmfConfigValues {
             let addr = rack_subnet.parse().with_context(|| {
                 format!(
                     "failed to parse {CONFIG_PG}/{PROP_RACK_SUBNET} \
-                     value {rack_subnet:?} as a rack subnet"
+                     value {rack_subnet:?} as an IP address"
                 )
             })?;
-            Some(addr)
+            Some(Ipv6Subnet::new(addr))
         };
 
         Ok(Some(Self { rack_subnet }))

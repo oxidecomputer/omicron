@@ -6,11 +6,11 @@
 
 use clap::Parser;
 use omicron_common::{
-    address::{Ipv6Subnet, AZ_PREFIX},
+    address::Ipv6Subnet,
     cmd::{fatal, CmdError},
 };
 use sled_hardware::Baseboard;
-use std::net::SocketAddrV6;
+use std::net::{Ipv6Addr, SocketAddrV6};
 use std::path::PathBuf;
 use wicketd::{self, run_openapi, Config, Server, SmfConfigValues};
 
@@ -54,7 +54,7 @@ enum Args {
         /// The subnet for the rack; typically read directly from our SMF config
         /// via `--read-smf-config` or an SMF refresh
         #[clap(long, action, conflicts_with("read_smf_config"))]
-        rack_subnet: Option<Ipv6Subnet<AZ_PREFIX>>,
+        rack_subnet: Option<Ipv6Addr>,
     },
 }
 
@@ -109,7 +109,7 @@ async fn do_run() -> Result<(), CmdError> {
             })?;
 
             let rack_subnet = match rack_subnet {
-                Some(addr) => Some(addr),
+                Some(addr) => Some(Ipv6Subnet::new(addr)),
                 None if read_smf_config => {
                     let smf_values = SmfConfigValues::read_current()
                         .map_err(|e| CmdError::Failure(e.to_string()))?
