@@ -21,11 +21,17 @@ fn digest_unique_to_schema() -> String {
 
 enum SeedTarballStatus {
     Created,
+    Invalidated,
     Existing,
+}
+
+fn should_invalidate_seed() -> bool {
+    std::env::var("CRDB_SEED_INVALIDATE").as_deref() == Ok("1")
 }
 
 async fn ensure_seed_tarball_exists(
     log: &Logger,
+    should_invalidate: bool,
 ) -> Result<(Utf8PathBuf, SeedTarballStatus)> {
     let base_seed_dir = Utf8PathBuf::from_path_buf(std::env::temp_dir())
         .expect("Not a UTF-8 path")
@@ -34,9 +40,30 @@ async fn ensure_seed_tarball_exists(
     let mut desired_seed_tar = base_seed_dir.join(digest_unique_to_schema());
     desired_seed_tar.set_extension("tar");
 
-    if desired_seed_tar.exists() {
-        return Ok((desired_seed_tar, SeedTarballStatus::Existing));
-    }
+    let invalidated = if desired_seed_tar.exists() {
+        if !should_invalidate {
+            return Ok((desired_seed_tar, SeedTarballStatus::Existing));
+        }
+        slog::info!(
+            log,
+            "CRDB_SEED_INVALIDATE=1 set in the environment, \
+             invalidating seed tarball: `{}`",
+            desired_seed_tar,
+        );
+        std::fs::remove_file(&desired_seed_tar)
+            .context("failed to remove seed tarball")?;
+        true
+    } else {
+        if should_invalidate {
+            slog::info!(
+                log,
+                "CRDB_SEED_INVALIDATE=1 set in the environment, \
+                 but seed tarball does not exist: `{}`",
+                desired_seed_tar,
+            );
+        }
+        false
+    };
 
     // The tarball didn't exist when we started, so try to create it.
     //
@@ -48,7 +75,12 @@ async fn ensure_seed_tarball_exists(
         .await
         .context("failed to setup seed tarball")?;
 
-    Ok((desired_seed_tar, SeedTarballStatus::Created))
+    let status = if invalidated {
+        SeedTarballStatus::Invalidated
+    } else {
+        SeedTarballStatus::Created
+    };
+    Ok((desired_seed_tar, status))
 }
 
 #[tokio::main]
@@ -59,10 +91,18 @@ async fn main() -> Result<()> {
         "crdb_seeding",
         &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Info },
     );
-    let (tarball, status) = ensure_seed_tarball_exists(&logctx.log).await?;
+    let (tarball, status) =
+        ensure_seed_tarball_exists(&logctx.log, should_invalidate_seed())
+            .await?;
     match status {
         SeedTarballStatus::Created => {
             slog::info!(logctx.log, "Created seed tarball: `{tarball}`");
+        }
+        SeedTarballStatus::Invalidated => {
+            slog::info!(
+                logctx.log,
+                "Invalidated and created new seed tarball: `{tarball}`"
+            );
         }
         SeedTarballStatus::Existing => {
             slog::info!(logctx.log, "Using existing seed tarball: `{tarball}`");
