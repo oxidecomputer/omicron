@@ -135,7 +135,8 @@ pub async fn test_setup_database(
     setup_database(log, source).await.unwrap()
 }
 
-// TODO: switch to anyhow entirely -- this function is currently a mishmash
+// TODO: switch to anyhow entirely -- this function is currently a mishmash of
+// anyhow and unwrap/expect calls.
 async fn setup_database(
     log: &Logger,
     storage_source: StorageSource,

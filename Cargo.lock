@@ -1280,7 +1280,6 @@ name = "crdb-seed"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "atomicwrites",
  "camino",
  "camino-tempfile",
  "dropshot",
@@ -1289,7 +1288,6 @@ dependencies = [
  "omicron-workspace-hack",
  "ring",
  "slog",
- "tar",
  "tokio",
 ]
 
