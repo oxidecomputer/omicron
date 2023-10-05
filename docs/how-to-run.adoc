@@ -447,13 +447,18 @@ The following is an example of how to access the console with an SSH tunnel.
 
 Nexus serves the console, so first get a nexus IP from the instructions above.
 
-On the machine from which you which to access the console, set up an SSH tunnel.
-This is an example for the lab machine `dunkin`. Replace the hostname there as
-appropriate, as well as the nexus IP.
+In this example, Omicron is running on the lab machine `dunkin`. Usually, you'll
+want to set up the tunnel from the machine where you run a browser, to the
+machine running Omicron. In this example, one would run this on the machine
+running the browser:
 
 ```
 $ ssh -L 1234:192.168.1.22:80 dunkin.eng.oxide.computer
 ```
+
+The above command configures `ssh` to bind to the TCP port `1234` on the machine
+running the browser, forward packets through the ssh connection, and redirect
+them to 192.168.1.22 port 80 *as seen from the other side of the connection*.
 
 Now you should be able to access the console from the browser on this machine,
 via something like: `127.0.0.1:1234`, using the port from the `ssh` command.
