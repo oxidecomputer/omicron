@@ -20,7 +20,6 @@ use gateway_client::types::SpIgnitionInfo;
 use gateway_client::types::SpIgnitionSystemType;
 use gateway_client::types::SpState;
 use gateway_client::types::SpType;
-use std::cmp::Ordering;
 use tabled::Tabled;
 
 /// Arguments to the "omdb mgs" subcommand
@@ -93,7 +92,7 @@ async fn cmd_mgs_inventory(
         .await
         .context("listing SP identifiers")?
         .into_inner();
-    sp_ids.sort_by(sp_id_cmp);
+    sp_ids.sort();
     show_sp_ids(&sp_ids)?;
     println!("");
 
@@ -104,7 +103,7 @@ async fn cmd_mgs_inventory(
         .await
         .context("listing ignition")?
         .into_inner();
-    sp_list_ignition.sort_by(|a, b| sp_id_cmp(&a.id, &b.id));
+    sp_list_ignition.sort_by(|a, b| a.id.cmp(&b.id));
     show_sps_from_ignition(&sp_list_ignition)?;
     println!("");
 
@@ -121,10 +120,9 @@ async fn cmd_mgs_inventory(
             }
         }))
         .then(|sp_id| async move {
-            let msg = format!("fetching info about SP {:?}", sp_id);
             c.sp_get(sp_id.type_, sp_id.slot)
                 .await
-                .context(msg)
+                .with_context(|| format!("fetching info about SP {:?}", sp_id))
                 .map(|s| (sp_id, s))
         })
         .collect::<Vec<Result<_, _>>>()
@@ -138,7 +136,7 @@ async fn cmd_mgs_inventory(
             }
         })
         .collect::<Vec<_>>();
-    sp_infos.sort_by(|s1, s2| sp_id_cmp(&s1.0, &s2.0));
+    sp_infos.sort();
     show_sp_states(&sp_infos)?;
     println!("");
 
@@ -155,14 +153,6 @@ fn sp_type_to_str(s: &SpType) -> &'static str {
         SpType::Sled => "Sled",
         SpType::Power => "Power",
         SpType::Switch => "Switch",
-    }
-}
-
-/// Comparator for service processor identifiers
-fn sp_id_cmp(&s1: &SpIdentifier, s2: &SpIdentifier) -> Ordering {
-    match sp_type_to_str(&s1.type_).cmp(sp_type_to_str(&s2.type_)) {
-        e @ Ordering::Less | e @ Ordering::Greater => e,
-        Ordering::Equal => s1.slot.cmp(&s2.slot),
     }
 }
 
@@ -293,8 +283,7 @@ fn show_sp_states(
     Ok(())
 }
 
-const COMPONENTS_WITH_CABOOSES: &'static [&'static str] =
-    &["sp", "rot", "host-boot-flash"];
+const COMPONENTS_WITH_CABOOSES: &'static [&'static str] = &["sp", "rot"];
 
 async fn show_sp_details(
     mgs_client: &gateway_client::Client,
@@ -467,7 +456,7 @@ async fn show_sp_details(
                 .with_context(|| {
                     format!(
                         "get caboose for sp type {:?} sp slot {} \
-                                component {:?} slot {}",
+                        component {:?} slot {}",
                         sp_id.type_, sp_id.slot, &c.component, i
                     )
                 });
