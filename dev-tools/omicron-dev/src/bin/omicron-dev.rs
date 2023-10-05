@@ -341,8 +341,6 @@ async fn cmd_run_all(args: &RunAllArgs) -> Result<(), anyhow::Error> {
         config.deployment.dropshot_external.dropshot.bind_address.set_port(p);
     }
 
-    // Start up a ControlPlaneTestContext, which tautologically sets up
-    // everything needed for a simulated control plane.
     println!("omicron-dev: setting up all services ... ");
     let cptestctx = nexus_test_utils::test_setup_with_config::<
         omicron_nexus::Server,

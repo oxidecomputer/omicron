@@ -1280,13 +1280,9 @@ name = "crdb-seed"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "camino",
- "camino-tempfile",
  "dropshot",
- "hex",
  "omicron-test-utils",
  "omicron-workspace-hack",
- "ring",
  "slog",
  "tokio",
 ]
@@ -5352,6 +5348,7 @@ dependencies = [
  "expectorate",
  "futures",
  "headers",
+ "hex",
  "http",
  "libc",
  "omicron-common 0.1.0",
@@ -5360,6 +5357,7 @@ dependencies = [
  "rcgen",
  "regex",
  "reqwest",
+ "ring",
  "rustls",
  "slog",
  "subprocess",

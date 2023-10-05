@@ -24,9 +24,22 @@ fn seed_tar() -> Utf8PathBuf {
 }
 
 /// Wrapper around [`dev::test_setup_database`] which uses a seed tarball
-/// provided at build-time.
+/// provided from the environment.
 pub async fn test_setup_database(log: &Logger) -> dev::db::CockroachInstance {
     let input_tar = seed_tar();
+    dev::test_setup_database(
+        log,
+        dev::StorageSource::CopyFromSeed { input_tar },
+    )
+    .await
+}
+
+/// Wrapper around [`dev::test_setup_database`] which uses a seed tarball
+/// provided as an argument.
+pub async fn test_setup_database_from_seed(
+    log: &Logger,
+    input_tar: Utf8PathBuf,
+) -> dev::db::CockroachInstance {
     dev::test_setup_database(
         log,
         dev::StorageSource::CopyFromSeed { input_tar },

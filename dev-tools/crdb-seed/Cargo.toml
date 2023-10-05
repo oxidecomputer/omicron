@@ -3,15 +3,12 @@ name = "crdb-seed"
 version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
+readme = "README.md"
 
 [dependencies]
 anyhow.workspace = true
-camino.workspace = true
-camino-tempfile.workspace = true
 dropshot.workspace = true
-hex.workspace = true
 omicron-test-utils.workspace = true
-ring.workspace = true
 slog.workspace = true
 tokio.workspace = true
 omicron-workspace-hack.workspace = true

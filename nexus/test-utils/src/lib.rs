@@ -5,7 +5,9 @@
 //! Integration testing facilities for Nexus
 
 use anyhow::Context;
+use anyhow::Result;
 use camino::Utf8Path;
+use camino::Utf8PathBuf;
 use dns_service_client::types::DnsConfigParams;
 use dropshot::test_util::ClientTestContext;
 use dropshot::test_util::LogContext;
@@ -283,15 +285,37 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         }
     }
 
-    pub async fn start_crdb(&mut self, populate: bool) {
+    pub async fn ensure_seed_tarball_exists(&self) -> Result<Utf8PathBuf> {
+        let log = &self.logctx.log;
+        debug!(log, "Ensuring seed tarball exists");
+
+        // Start up a ControlPlaneTestContext, which tautologically sets up
+        // everything needed for a simulated control plane.
+        let why_invalidate =
+            omicron_test_utils::dev::seed::should_invalidate_seed();
+        let (seed_tar, status) =
+            omicron_test_utils::dev::seed::ensure_seed_tarball_exists(
+                log,
+                why_invalidate,
+            )
+            .await
+            .context("ensuring seed tarball exists")?;
+        status.log(log, &seed_tar);
+        Ok(seed_tar)
+    }
+
+    pub async fn start_crdb(&mut self, populate: StartCrdbPopulate) {
         let log = &self.logctx.log;
         debug!(log, "Starting CRDB");
 
         // Start up CockroachDB.
-        let database = if populate {
-            db::test_setup_database(log).await
-        } else {
-            db::test_setup_database_empty(log).await
+        let database = match populate {
+            StartCrdbPopulate::FromSeed { input_tar } => {
+                db::test_setup_database_from_seed(log, input_tar).await
+            }
+            StartCrdbPopulate::Empty => {
+                db::test_setup_database_empty(log).await
+            }
         };
 
         eprintln!("DB URL: {}", database.pg_config());
@@ -759,6 +783,15 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
     }
 }
 
+#[derive(Clone, Debug)]
+pub enum StartCrdbPopulate {
+    /// Populate Cockroach from the seed at this tarball.
+    FromSeed { input_tar: Utf8PathBuf },
+
+    /// Do not populate Cockroach.
+    Empty,
+}
+
 pub async fn test_setup_with_config<N: NexusServer>(
     test_name: &str,
     config: &mut omicron_common::nexus_config::Config,
@@ -768,8 +801,8 @@ pub async fn test_setup_with_config<N: NexusServer>(
     let mut builder =
         ControlPlaneTestContextBuilder::<N>::new(test_name, config);
 
-    let populate = true;
-    builder.start_crdb(populate).await;
+    let input_tar = builder.ensure_seed_tarball_exists().await.unwrap();
+    builder.start_crdb(StartCrdbPopulate::FromSeed { input_tar }).await;
     builder.start_clickhouse().await;
     builder.start_dendrite(SwitchLocation::Switch0).await;
     builder.start_dendrite(SwitchLocation::Switch1).await;
