@@ -8,7 +8,7 @@ use camino::Utf8PathBuf;
 use omicron_test_utils::dev;
 use slog::Logger;
 
-/// Path to the "seed" CockroachDB directory.
+/// Path to the "seed" CockroachDB tarball.
 ///
 /// Populating CockroachDB unfortunately isn't free - creation of
 /// tables, indices, and users takes several seconds to complete.
@@ -16,20 +16,20 @@ use slog::Logger;
 /// By creating a "seed" version of the database, we can cut down
 /// on the time spent performing this operation. Instead, we opt
 /// to copy the database from this seed location.
-fn seed_dir() -> Utf8PathBuf {
+fn seed_tar() -> Utf8PathBuf {
     // The setup script should set this environment variable.
-    let seed_dir = std::env::var("CRDB_SEED_DIR")
-        .expect("CRDB_SEED_DIR missing -- are you running this test with `cargo nextest run`?");
+    let seed_dir = std::env::var("CRDB_SEED_TAR")
+        .expect("CRDB_SEED_TAR missing -- are you running this test with `cargo nextest run`?");
     seed_dir.into()
 }
 
 /// Wrapper around [`dev::test_setup_database`] which uses a a
 /// seed directory provided at build-time.
 pub async fn test_setup_database(log: &Logger) -> dev::db::CockroachInstance {
-    let dir = seed_dir();
+    let input_tar = seed_tar();
     dev::test_setup_database(
         log,
-        dev::StorageSource::CopyFromSeed { input_dir: dir },
+        dev::StorageSource::CopyFromSeed { input_tar },
     )
     .await
 }
