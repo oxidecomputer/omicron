@@ -10,6 +10,8 @@ use crate::dataset::{DatasetError, DatasetName};
 use crate::disk::{Disk, DiskError, RawDisk};
 use crate::error::Error;
 use crate::resources::StorageResources;
+use camino::Utf8PathBuf;
+use illumos_utils::zfs::{Mountpoint, Zfs};
 use illumos_utils::zpool::ZpoolName;
 use key_manager::StorageKeyRequester;
 use omicron_common::disk::DiskIdentity;
@@ -34,7 +36,7 @@ pub enum StorageManagerState {
 struct NewFilesystemRequest {
     dataset_id: Uuid,
     dataset_name: DatasetName,
-    responder: oneshot::Sender<Result<DatasetName, Error>>,
+    responder: oneshot::Sender<Result<(), Error>>,
 }
 
 enum StorageRequest {
@@ -219,7 +221,14 @@ impl StorageManager {
             StorageRequest::DisksChanged(raw_disks) => {
                 self.ensure_using_exactly_these_disks(raw_disks).await
             }
-            StorageRequest::NewFilesystem(_req) => todo!(),
+            StorageRequest::NewFilesystem(request) => {
+                let result = self.add_dataset(&request).await;
+                if result.is_err() {
+                    warn!(self.log, "{result:?}");
+                }
+                let _ = request.responder.send(result);
+                false
+            }
             StorageRequest::KeyManagerReady => {
                 self.state = StorageManagerState::Normal;
                 self.add_queued_disks().await
@@ -399,6 +408,59 @@ impl StorageManager {
         }
 
         should_update
+    }
+
+    // Attempts to add a dataset within a zpool, according to `request`.
+    async fn add_dataset(
+        &mut self,
+        request: &NewFilesystemRequest,
+    ) -> Result<(), Error> {
+        info!(self.log, "add_dataset: {:?}", request);
+        if !self
+            .resources
+            .disks
+            .values()
+            .any(|(_, pool)| &pool.name == request.dataset_name.pool())
+        {
+            return Err(Error::ZpoolNotFound(format!(
+                "{}, looked up while trying to add dataset",
+                request.dataset_name.pool(),
+            )));
+        }
+
+        let zoned = true;
+        let fs_name = &request.dataset_name.full();
+        let do_format = true;
+        let encryption_details = None;
+        let size_details = None;
+        Zfs::ensure_filesystem(
+            fs_name,
+            Mountpoint::Path(Utf8PathBuf::from("/data")),
+            zoned,
+            do_format,
+            encryption_details,
+            size_details,
+        )?;
+        // Ensure the dataset has a usable UUID.
+        if let Ok(id_str) = Zfs::get_oxide_value(&fs_name, "uuid") {
+            if let Ok(id) = id_str.parse::<Uuid>() {
+                if id != request.dataset_id {
+                    return Err(Error::UuidMismatch {
+                        name: Box::new(request.dataset_name.clone()),
+                        old: id,
+                        new: request.dataset_id,
+                    });
+                }
+                return Ok(());
+            }
+        }
+        Zfs::set_oxide_value(
+            &fs_name,
+            "uuid",
+            &request.dataset_id.to_string(),
+        )?;
+
+        Ok(())
     }
 }
 
