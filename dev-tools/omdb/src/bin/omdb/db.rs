@@ -12,6 +12,9 @@
 //! would be the only consumer -- and in that case it's okay to query the
 //! database directly.
 
+// NOTE: eminates from Tabled macros
+#![allow(clippy::useless_vec)]
+
 use crate::Omdb;
 use anyhow::anyhow;
 use anyhow::bail;
@@ -30,7 +33,9 @@ use nexus_db_model::DnsGroup;
 use nexus_db_model::DnsName;
 use nexus_db_model::DnsVersion;
 use nexus_db_model::DnsZone;
+use nexus_db_model::ExternalIp;
 use nexus_db_model::Instance;
+use nexus_db_model::Project;
 use nexus_db_model::Region;
 use nexus_db_model::Sled;
 use nexus_db_model::Zpool;
@@ -86,6 +91,8 @@ enum DbCommands {
     Sleds,
     /// Print information about customer instances
     Instances,
+    /// Print information about the network
+    Network(NetworkArgs),
 }
 
 #[derive(Debug, Args)]
@@ -168,6 +175,22 @@ enum ServicesCommands {
     ListInstances,
     /// List service instances, grouped by sled
     ListBySled,
+}
+
+#[derive(Debug, Args)]
+struct NetworkArgs {
+    #[command(subcommand)]
+    command: NetworkCommands,
+
+    /// Print out raw data structures from the data store.
+    #[clap(long)]
+    verbose: bool,
+}
+
+#[derive(Debug, Subcommand)]
+enum NetworkCommands {
+    /// List external IPs
+    ListEips,
 }
 
 impl DbArgs {
@@ -268,6 +291,13 @@ impl DbArgs {
             }
             DbCommands::Instances => {
                 cmd_db_instances(&datastore, self.fetch_limit).await
+            }
+            DbCommands::Network(NetworkArgs {
+                command: NetworkCommands::ListEips,
+                verbose,
+            }) => {
+                cmd_db_eips(&opctx, &datastore, self.fetch_limit, *verbose)
+                    .await
             }
         }
     }
@@ -1094,6 +1124,156 @@ async fn cmd_db_dns_names(
             print_name("", &name, Ok(records));
         }
     }
+
+    Ok(())
+}
+
+async fn cmd_db_eips(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    limit: NonZeroU32,
+    verbose: bool,
+) -> Result<(), anyhow::Error> {
+    use db::schema::external_ip::dsl;
+    let ips: Vec<ExternalIp> = dsl::external_ip
+        .filter(dsl::time_deleted.is_null())
+        .select(ExternalIp::as_select())
+        .get_results_async(&*datastore.pool_connection_for_tests().await?)
+        .await?;
+
+    check_limit(&ips, limit, || String::from("listing external ips"));
+
+    struct PortRange {
+        first: u16,
+        last: u16,
+    }
+
+    impl Display for PortRange {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{}/{}", self.first, self.last)
+        }
+    }
+
+    #[derive(Tabled)]
+    enum Owner {
+        Instance { project: String, name: String },
+        Service { kind: String },
+        None,
+    }
+
+    impl Display for Owner {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                Self::Instance { project, name } => {
+                    write!(f, "Instance {project}/{name}")
+                }
+                Self::Service { kind } => write!(f, "Service {kind}"),
+                Self::None => write!(f, "None"),
+            }
+        }
+    }
+
+    #[derive(Tabled)]
+    struct IpRow {
+        ip: ipnetwork::IpNetwork,
+        ports: PortRange,
+        kind: String,
+        owner: Owner,
+    }
+
+    if verbose {
+        for ip in &ips {
+            if verbose {
+                println!("{ip:#?}");
+            }
+        }
+        return Ok(());
+    }
+
+    let mut rows = Vec::new();
+
+    for ip in &ips {
+        let owner = if let Some(owner_id) = ip.parent_id {
+            if ip.is_service {
+                let service = match LookupPath::new(opctx, datastore)
+                    .service_id(owner_id)
+                    .fetch()
+                    .await
+                {
+                    Ok(instance) => instance,
+                    Err(e) => {
+                        eprintln!(
+                            "error looking up service with id {owner_id}: {e}"
+                        );
+                        continue;
+                    }
+                };
+                Owner::Service { kind: format!("{:?}", service.1.kind) }
+            } else {
+                use db::schema::instance::dsl as instance_dsl;
+                let instance = match instance_dsl::instance
+                    .filter(instance_dsl::id.eq(owner_id))
+                    .limit(1)
+                    .select(Instance::as_select())
+                    .load_async(&*datastore.pool_connection_for_tests().await?)
+                    .await
+                    .context("loading requested instance")?
+                    .pop()
+                {
+                    Some(instance) => instance,
+                    None => {
+                        eprintln!("instance with id {owner_id} not found");
+                        continue;
+                    }
+                };
+
+                use db::schema::project::dsl as project_dsl;
+                let project = match project_dsl::project
+                    .filter(project_dsl::id.eq(instance.project_id))
+                    .limit(1)
+                    .select(Project::as_select())
+                    .load_async(&*datastore.pool_connection_for_tests().await?)
+                    .await
+                    .context("loading requested project")?
+                    .pop()
+                {
+                    Some(instance) => instance,
+                    None => {
+                        eprintln!(
+                            "project with id {} not found",
+                            instance.project_id
+                        );
+                        continue;
+                    }
+                };
+
+                Owner::Instance {
+                    project: project.name().to_string(),
+                    name: instance.name().to_string(),
+                }
+            }
+        } else {
+            Owner::None
+        };
+
+        let row = IpRow {
+            ip: ip.ip,
+            ports: PortRange {
+                first: ip.first_port.into(),
+                last: ip.last_port.into(),
+            },
+            kind: format!("{:?}", ip.kind),
+            owner,
+        };
+        rows.push(row);
+    }
+
+    rows.sort_by(|a, b| a.ip.cmp(&b.ip));
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .to_string();
+
+    println!("{}", table);
 
     Ok(())
 }

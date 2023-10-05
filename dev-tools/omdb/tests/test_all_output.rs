@@ -41,6 +41,7 @@ async fn test_omdb_usage_errors() {
         &["db", "dns", "diff"],
         &["db", "dns", "names"],
         &["db", "services"],
+        &["db", "network"],
         &["nexus"],
         &["nexus", "background-tasks"],
         &["sled-agent"],

@@ -13,4 +13,4 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 update-engine.workspace = true
-omicron-workspace-hack = { version = "0.1", path = "../workspace-hack" }
+omicron-workspace-hack.workspace = true

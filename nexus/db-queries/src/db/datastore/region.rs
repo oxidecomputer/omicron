@@ -5,7 +5,6 @@
 //! [`DataStore`] methods on [`Region`]s.
 
 use super::DataStore;
-use super::RegionAllocationStrategy;
 use super::RunnableQuery;
 use crate::context::OpContext;
 use crate::db;
@@ -23,6 +22,7 @@ use omicron_common::api::external;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::backoff::{self, BackoffError};
+use omicron_common::nexus_config::RegionAllocationStrategy;
 use slog::Logger;
 use uuid::Uuid;
 
