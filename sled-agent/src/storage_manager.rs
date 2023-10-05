@@ -113,45 +113,6 @@ impl QueuedDiskCreate {
 }
 
 impl StorageWorker {
-    // Ensures the named dataset exists as a filesystem with a UUID, optionally
-    // creating it if `do_format` is true.
-    //
-    // Returns the UUID attached to the ZFS filesystem.
-    fn ensure_dataset(
-        &mut self,
-        dataset_id: Uuid,
-        dataset_name: &DatasetName,
-    ) -> Result<(), Error> {
-        let zoned = true;
-        let fs_name = &dataset_name.full();
-        let do_format = true;
-        let encryption_details = None;
-        let size_details = None;
-        Zfs::ensure_filesystem(
-            &dataset_name.full(),
-            Mountpoint::Path(Utf8PathBuf::from("/data")),
-            zoned,
-            do_format,
-            encryption_details,
-            size_details,
-        )?;
-        // Ensure the dataset has a usable UUID.
-        if let Ok(id_str) = Zfs::get_oxide_value(&fs_name, "uuid") {
-            if let Ok(id) = id_str.parse::<Uuid>() {
-                if id != dataset_id {
-                    return Err(Error::UuidMismatch {
-                        name: Box::new(dataset_name.clone()),
-                        old: id,
-                        new: dataset_id,
-                    });
-                }
-                return Ok(());
-            }
-        }
-        Zfs::set_oxide_value(&fs_name, "uuid", &dataset_id.to_string())?;
-        Ok(())
-    }
-
     // Adds a "notification to nexus" to `nexus_notifications`,
     // informing it about the addition of `pool_id` to this sled.
     async fn add_zpool_notify(&mut self, pool: &Pool, size: ByteCount) {
@@ -712,30 +673,6 @@ impl StorageWorker {
         Ok(())
     }
 
-    // Attempts to add a dataset within a zpool, according to `request`.
-    async fn add_dataset(
-        &mut self,
-        resources: &StorageResources,
-        request: &NewFilesystemRequest,
-    ) -> Result<DatasetName, Error> {
-        info!(self.log, "add_dataset: {:?}", request);
-        let mut pools = resources.pools.lock().await;
-        let pool = pools
-            .get_mut(&request.dataset_name.pool().id())
-            .ok_or_else(|| {
-                Error::ZpoolNotFound(format!(
-                    "{}, looked up while trying to add dataset",
-                    request.dataset_name.pool(),
-                ))
-            })?;
-        let dataset_name = DatasetName::new(
-            pool.name.clone(),
-            request.dataset_name.dataset().clone(),
-        );
-        self.ensure_dataset(request.dataset_id, &dataset_name)?;
-        Ok(dataset_name)
-    }
-
     // Small wrapper around `Self::do_work_internal` that ensures we always
     // emit info to the log when we exit.
     async fn do_work(
@@ -851,77 +788,6 @@ impl StorageWorker {
         }
         Ok(())
     }
-
-    async fn upsert_queued_disks(
-        &mut self,
-        resources: &StorageResources,
-        queued_u2_drives: &mut Option<HashSet<QueuedDiskCreate>>,
-    ) {
-        let queued = queued_u2_drives.take();
-        if let Some(queued) = queued {
-            for disk in queued {
-                if let Some(saved) = queued_u2_drives {
-                    // We already hit a transient error and recreated our queue.
-                    // Add any remaining queued disks back on the queue so we
-                    // can try again later.
-                    saved.insert(disk);
-                } else {
-                    match self.upsert_queued_disk(disk, resources).await {
-                        Ok(()) => {}
-                        Err((_, None)) => {
-                            // We already logged this as a persistent error in
-                            // `add_new_disk` or `add_new_synthetic_disk`
-                        }
-                        Err((_, Some(disk))) => {
-                            // We already logged this as a transient error in
-                            // `add_new_disk` or `add_new_synthetic_disk`
-                            *queued_u2_drives = Some(HashSet::from([disk]));
-                        }
-                    }
-                }
-            }
-        }
-        if queued_u2_drives.is_none() {
-            info!(self.log, "upserted all queued disks");
-        } else {
-            warn!(
-                self.log,
-                "failed to upsert all queued disks - will try again"
-            );
-        }
-    }
-
-    // Attempt to upsert a queued disk. Return the disk and error if the upsert
-    // fails due to a transient error. Examples of transient errors are key
-    // manager errors which indicate that there are not enough sleds available
-    // to unlock the rack.
-    async fn upsert_queued_disk(
-        &mut self,
-        disk: QueuedDiskCreate,
-        resources: &StorageResources,
-    ) -> Result<(), (Error, Option<QueuedDiskCreate>)> {
-        let mut temp: Option<HashSet<QueuedDiskCreate>> = None;
-        let res = match disk {
-            QueuedDiskCreate::Real(disk) => {
-                self.upsert_disk(&resources, disk, &mut temp).await
-            }
-            QueuedDiskCreate::Synthetic(zpool_name) => {
-                self.upsert_synthetic_disk(&resources, zpool_name, &mut temp)
-                    .await
-            }
-        };
-        if let Some(mut disks) = temp.take() {
-            assert!(res.is_err());
-            assert_eq!(disks.len(), 1);
-            return Err((
-                res.unwrap_err(),
-                disks.drain().next().unwrap().into(),
-            ));
-        }
-        // Any error at this point is not transient.
-        // We don't requeue the disk.
-        res.map_err(|e| (e, None))
-    }
 }
 
 enum StorageWorkerRequest {
@@ -997,64 +863,6 @@ impl StorageManager {
         &self.zone_bundler
     }
 
-    /// Ensures that the storage manager tracks exactly the provided disks.
-    ///
-    /// This acts similar to a batch [Self::upsert_disk] for all new disks, and
-    /// [Self::delete_disk] for all removed disks.
-    ///
-    /// If errors occur, an arbitrary "one" of them will be returned, but a
-    /// best-effort attempt to add all disks will still be attempted.
-    // Receiver implemented by [StorageWorker::ensure_using_exactly_these_disks]
-    pub async fn ensure_using_exactly_these_disks<I>(&self, unparsed_disks: I)
-    where
-        I: IntoIterator<Item = UnparsedDisk>,
-    {
-        self.inner
-            .tx
-            .send(StorageWorkerRequest::DisksChanged(
-                unparsed_disks.into_iter().collect::<Vec<_>>(),
-            ))
-            .await
-            .map_err(|e| e.to_string())
-            .expect("Failed to send DisksChanged request");
-    }
-
-    /// Adds a disk and associated zpool to the storage manager.
-    // Receiver implemented by [StorageWorker::upsert_disk].
-    pub async fn upsert_disk(&self, disk: UnparsedDisk) {
-        info!(self.inner.log, "Upserting disk: {disk:?}");
-        self.inner
-            .tx
-            .send(StorageWorkerRequest::AddDisk(disk))
-            .await
-            .map_err(|e| e.to_string())
-            .expect("Failed to send AddDisk request");
-    }
-
-    /// Removes a disk, if it's tracked by the storage manager, as well
-    /// as any associated zpools.
-    // Receiver implemented by [StorageWorker::delete_disk].
-    pub async fn delete_disk(&self, disk: UnparsedDisk) {
-        info!(self.inner.log, "Deleting disk: {disk:?}");
-        self.inner
-            .tx
-            .send(StorageWorkerRequest::RemoveDisk(disk))
-            .await
-            .map_err(|e| e.to_string())
-            .expect("Failed to send RemoveDisk request");
-    }
-
-    /// Adds a synthetic zpool to the storage manager.
-    // Receiver implemented by [StorageWorker::upsert_synthetic_disk].
-    pub async fn upsert_synthetic_disk(&self, name: ZpoolName) {
-        self.inner
-            .tx
-            .send(StorageWorkerRequest::AddSyntheticDisk(name))
-            .await
-            .map_err(|e| e.to_string())
-            .expect("Failed to send AddSyntheticDisk request");
-    }
-
     /// Adds underlay access to the storage manager.
     pub async fn setup_underlay_access(
         &self,
@@ -1116,21 +924,5 @@ impl StorageManager {
         )?;
 
         Ok(dataset_name)
-    }
-
-    /// Inform the storage worker that the KeyManager is capable of retrieving
-    /// secrets now and that any queued disks can be upserted.
-    pub async fn key_manager_ready(&self) {
-        info!(self.inner.log, "KeyManger ready");
-        self.inner
-            .tx
-            .send(StorageWorkerRequest::KeyManagerReady)
-            .await
-            .map_err(|e| e.to_string())
-            .expect("Failed to send KeyManagerReady request");
-    }
-
-    pub fn resources(&self) -> &StorageResources {
-        &self.inner.resources
     }
 }

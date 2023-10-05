@@ -6,7 +6,7 @@
 
 use std::collections::HashSet;
 
-use crate::dataset::{DatasetError, DatasetName};
+use crate::dataset::{DatasetError, DatasetKind, DatasetName};
 use crate::disk::{Disk, DiskError, RawDisk};
 use crate::error::Error;
 use crate::resources::StorageResources;
@@ -142,6 +142,18 @@ impl StorageHandle {
     pub async fn get_manager_state(&mut self) -> StorageManagerData {
         let (tx, rx) = oneshot::channel();
         self.tx.send(StorageRequest::GetManagerState(tx)).await.unwrap();
+        rx.await.unwrap()
+    }
+
+    pub async fn upsert_filesystem(
+        &self,
+        dataset_id: Uuid,
+        dataset_name: DatasetName,
+    ) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        let request =
+            NewFilesystemRequest { dataset_id, dataset_name, responder: tx };
+        self.tx.send(StorageRequest::NewFilesystem(request)).await.unwrap();
         rx.await.unwrap()
     }
 }
@@ -840,6 +852,41 @@ mod tests {
         for zpool in zpools {
             Zpool::destroy(&zpool).unwrap();
         }
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn upsert_filesystem() {
+        let logctx = test_setup_log("upsert_filesystem");
+        let (mut key_manager, key_requester) =
+            KeyManager::new(&logctx.log, HardcodedSecretRetriever::default());
+        let (mut manager, handle) =
+            StorageManager::new(&logctx.log, key_requester);
+
+        // Spawn the key_manager so that it will respond to requests for encryption keys
+        tokio::spawn(async move { key_manager.run().await });
+
+        // Spawn the storage manager as done by sled-agent
+        tokio::spawn(async move {
+            manager.run().await;
+        });
+
+        handle.key_manager_ready().await;
+
+        // Create and add a disk
+        let zpool_name = ZpoolName::new_external(Uuid::new_v4());
+        let dir = tempdir().unwrap();
+        let disk: RawDisk =
+            SyntheticDisk::create_zpool(dir.path(), &zpool_name).into();
+        handle.upsert_disk(disk.clone()).await;
+
+        // Create a filesystem
+        let dataset_id = Uuid::new_v4();
+        let dataset_name =
+            DatasetName::new(zpool_name.clone(), DatasetKind::Crucible);
+        handle.upsert_filesystem(dataset_id, dataset_name).await.unwrap();
+
+        Zpool::destroy(&zpool_name).unwrap();
         logctx.cleanup_successful();
     }
 }
