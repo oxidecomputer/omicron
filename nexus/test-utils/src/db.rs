@@ -18,8 +18,14 @@ use slog::Logger;
 /// to copy the database from this seed location.
 fn seed_tar() -> Utf8PathBuf {
     // The setup script should set this environment variable.
-    let seed_dir = std::env::var("CRDB_SEED_TAR")
-        .expect("CRDB_SEED_TAR missing -- are you running this test with `cargo nextest run`?");
+    let seed_dir =
+        std::env::var(dev::seed::CRDB_SEED_TAR_ENV).unwrap_or_else(|_| {
+            panic!(
+                "{} missing -- are you running this test \
+                 with `cargo nextest run`?",
+                dev::seed::CRDB_SEED_TAR_ENV,
+            )
+        });
     seed_dir.into()
 }
 

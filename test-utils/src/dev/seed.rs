@@ -8,6 +8,9 @@ use anyhow::{ensure, Context, Result};
 use camino::{Utf8Path, Utf8PathBuf};
 use slog::Logger;
 
+/// The environment variable via which the path to the seed tarball is passed.
+pub static CRDB_SEED_TAR_ENV: &str = "CRDB_SEED_TAR";
+
 /// Creates a string identifier for the current DB schema and version.
 //
 /// The goal here is to allow to create different "seed" tarballs
@@ -62,10 +65,24 @@ impl SeedTarballStatus {
 ///
 /// If `why_invalidate` is `Some`, then if the seed tarball exists, it will be
 /// deleted before being recreated.
+///
+/// # Notes
+///
+/// This method should _not_ be used by tests. Instead, rely on the `crdb-seed`
+/// setup script.
 pub async fn ensure_seed_tarball_exists(
     log: &Logger,
     why_invalidate: Option<&str>,
 ) -> Result<(Utf8PathBuf, SeedTarballStatus)> {
+    // If the CRDB_SEED_TAR_ENV variable is set, return an error.
+    if let Ok(val) = std::env::var(CRDB_SEED_TAR_ENV) {
+        anyhow::bail!(
+            "{CRDB_SEED_TAR_ENV} is set to `{val}` -- implying that a test called \
+             ensure_seed_tarball_exists. Instead, tests should rely on the `crdb-seed` \
+             setup script."
+        );
+    }
+
     let base_seed_dir = Utf8PathBuf::from_path_buf(std::env::temp_dir())
         .expect("Not a UTF-8 path")
         .join("crdb-base");

@@ -285,37 +285,30 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         }
     }
 
-    pub async fn ensure_seed_tarball_exists(&self) -> Result<Utf8PathBuf> {
-        let log = &self.logctx.log;
-        debug!(log, "Ensuring seed tarball exists");
-
-        // Start up a ControlPlaneTestContext, which tautologically sets up
-        // everything needed for a simulated control plane.
-        let why_invalidate =
-            omicron_test_utils::dev::seed::should_invalidate_seed();
-        let (seed_tar, status) =
-            omicron_test_utils::dev::seed::ensure_seed_tarball_exists(
-                log,
-                why_invalidate,
-            )
-            .await
-            .context("ensuring seed tarball exists")?;
-        status.log(log, &seed_tar);
-        Ok(seed_tar)
+    pub async fn start_crdb(&mut self, populate: bool) {
+        let populate = if populate {
+            PopulateCrdb::FromEnvironmentSeed
+        } else {
+            PopulateCrdb::Empty
+        };
+        self.start_crdb_impl(populate).await;
     }
 
-    pub async fn start_crdb(&mut self, populate: StartCrdbPopulate) {
+    /// Private implementation of `start_crdb` that allows for a seed tarball to
+    /// be passed in. See [`PopulateCrdb`] for more details.
+    async fn start_crdb_impl(&mut self, populate: PopulateCrdb) {
         let log = &self.logctx.log;
         debug!(log, "Starting CRDB");
 
         // Start up CockroachDB.
         let database = match populate {
-            StartCrdbPopulate::FromSeed { input_tar } => {
+            PopulateCrdb::FromEnvironmentSeed => {
+                db::test_setup_database(log).await
+            }
+            PopulateCrdb::FromSeed { input_tar } => {
                 db::test_setup_database_from_seed(log, input_tar).await
             }
-            StartCrdbPopulate::Empty => {
-                db::test_setup_database_empty(log).await
-            }
+            PopulateCrdb::Empty => db::test_setup_database_empty(log).await,
         };
 
         eprintln!("DB URL: {}", database.pg_config());
@@ -783,26 +776,87 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
     }
 }
 
+/// How to populate CockroachDB.
+///
+/// This is private because we want to ensure that tests use the setup script
+/// rather than trying to create their own seed tarballs. This may need to be
+/// revisited if circumstances change.
 #[derive(Clone, Debug)]
-pub enum StartCrdbPopulate {
-    /// Populate Cockroach from the seed at this tarball.
+enum PopulateCrdb {
+    /// Populate Cockroach from the `CRDB_SEED_TAR_ENV` environment variable.
+    ///
+    /// Any tests that depend on nexus-test-utils should have this environment
+    /// variable available.
+    FromEnvironmentSeed,
+
+    /// Populate Cockroach from the seed located at this path.
     FromSeed { input_tar: Utf8PathBuf },
 
     /// Do not populate Cockroach.
     Empty,
 }
 
+/// Setup routine to use for `omicron-dev`. Use [`test_setup_with_config`] for
+/// tests.
+///
+/// The main difference from tests is that this routine ensures the seed tarball
+/// exists (or creates a seed tarball if it doesn't exist). For tests, this
+/// should be done in the `crdb-seed` setup script.
+pub async fn omicron_dev_setup_with_config<N: NexusServer>(
+    config: &mut omicron_common::nexus_config::Config,
+) -> Result<ControlPlaneTestContext<N>> {
+    let builder =
+        ControlPlaneTestContextBuilder::<N>::new("omicron-dev", config);
+
+    let log = &builder.logctx.log;
+    debug!(log, "Ensuring seed tarball exists");
+
+    // Start up a ControlPlaneTestContext, which tautologically sets up
+    // everything needed for a simulated control plane.
+    let why_invalidate =
+        omicron_test_utils::dev::seed::should_invalidate_seed();
+    let (seed_tar, status) =
+        omicron_test_utils::dev::seed::ensure_seed_tarball_exists(
+            log,
+            why_invalidate,
+        )
+        .await
+        .context("error ensuring seed tarball exists")?;
+    status.log(log, &seed_tar);
+
+    Ok(setup_with_config_impl(
+        builder,
+        PopulateCrdb::FromSeed { input_tar: seed_tar },
+        sim::SimMode::Auto,
+        None,
+    )
+    .await)
+}
+
+/// Setup routine to use for tests.
 pub async fn test_setup_with_config<N: NexusServer>(
     test_name: &str,
     config: &mut omicron_common::nexus_config::Config,
     sim_mode: sim::SimMode,
     initial_cert: Option<Certificate>,
 ) -> ControlPlaneTestContext<N> {
-    let mut builder =
-        ControlPlaneTestContextBuilder::<N>::new(test_name, config);
+    let builder = ControlPlaneTestContextBuilder::<N>::new(test_name, config);
+    setup_with_config_impl(
+        builder,
+        PopulateCrdb::FromEnvironmentSeed,
+        sim_mode,
+        initial_cert,
+    )
+    .await
+}
 
-    let input_tar = builder.ensure_seed_tarball_exists().await.unwrap();
-    builder.start_crdb(StartCrdbPopulate::FromSeed { input_tar }).await;
+async fn setup_with_config_impl<N: NexusServer>(
+    mut builder: ControlPlaneTestContextBuilder<'_, N>,
+    populate: PopulateCrdb,
+    sim_mode: sim::SimMode,
+    initial_cert: Option<Certificate>,
+) -> ControlPlaneTestContext<N> {
+    builder.start_crdb_impl(populate).await;
     builder.start_clickhouse().await;
     builder.start_dendrite(SwitchLocation::Switch0).await;
     builder.start_dendrite(SwitchLocation::Switch1).await;

@@ -509,7 +509,7 @@ pub enum CockroachStartError {
 /// You are **required** to invoke [`CockroachInstance::wait_for_shutdown()`] or
 /// [`CockroachInstance::cleanup()`] before this object is dropped.
 #[derive(Debug)]
-pub struct  CockroachInstance {
+pub struct CockroachInstance {
     /// child process id
     pid: u32,
     /// PostgreSQL config to use to connect to CockroachDB as a SQL client

@@ -62,6 +62,47 @@ async fn test_setup<'a>(
     builder
 }
 
+// Attempts to apply an update as a transaction.
+//
+// Only returns an error if the transaction failed to commit.
+async fn apply_update_as_transaction_inner(
+    client: &omicron_test_utils::dev::db::Client,
+    sql: &str,
+) -> Result<(), tokio_postgres::Error> {
+    client.batch_execute("BEGIN;").await.expect("Failed to BEGIN transaction");
+    client.batch_execute(&sql).await.expect("Failed to execute update");
+    client.batch_execute("COMMIT;").await?;
+    Ok(())
+}
+
+// Applies an update as a transaction.
+//
+// Automatically retries transactions that can be retried client-side.
+async fn apply_update_as_transaction(
+    log: &Logger,
+    client: &omicron_test_utils::dev::db::Client,
+    sql: &str,
+) {
+    loop {
+        match apply_update_as_transaction_inner(client, sql).await {
+            Ok(()) => break,
+            Err(err) => {
+                client
+                    .batch_execute("ROLLBACK;")
+                    .await
+                    .expect("Failed to ROLLBACK failed transaction");
+                if let Some(code) = err.code() {
+                    if code == &tokio_postgres::error::SqlState::T_R_SERIALIZATION_FAILURE {
+                        warn!(log, "Transaction retrying");
+                        continue;
+                    }
+                }
+                panic!("Failed to apply update: {err}");
+            }
+        }
+    }
+}
+
 async fn apply_update(
     log: &Logger,
     crdb: &CockroachInstance,
@@ -87,15 +128,7 @@ async fn apply_update(
 
     for _ in 0..times_to_apply {
         for sql in sqls.iter() {
-            client
-                .batch_execute("BEGIN;")
-                .await
-                .expect("Failed to BEGIN update");
-            client.batch_execute(&sql).await.expect("Failed to execute update");
-            client
-                .batch_execute("COMMIT;")
-                .await
-                .expect("Failed to COMMIT update");
+            apply_update_as_transaction(log, &client, sql).await;
         }
     }
 

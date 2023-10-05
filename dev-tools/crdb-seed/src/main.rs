@@ -5,7 +5,7 @@
 use anyhow::{Context, Result};
 use dropshot::{test_util::LogContext, ConfigLogging, ConfigLoggingLevel};
 use omicron_test_utils::dev::seed::{
-    ensure_seed_tarball_exists, should_invalidate_seed,
+    ensure_seed_tarball_exists, should_invalidate_seed, CRDB_SEED_TAR_ENV,
 };
 use std::io::Write;
 
@@ -25,7 +25,7 @@ async fn main() -> Result<()> {
     if let Ok(env_path) = std::env::var("NEXTEST_ENV") {
         let mut file = std::fs::File::create(&env_path)
             .context("failed to open NEXTEST_ENV file")?;
-        writeln!(file, "CRDB_SEED_TAR={seed_tar}")
+        writeln!(file, "{CRDB_SEED_TAR_ENV}={seed_tar}")
             .context("failed to write to NEXTEST_ENV file")?;
     } else {
         slog::warn!(
