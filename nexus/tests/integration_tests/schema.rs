@@ -62,6 +62,16 @@ async fn test_setup<'a>(
     builder
 }
 
+async fn apply_update_as_transaction(
+    client: &omicron_test_utils::dev::db::Client,
+    sql: &str,
+) -> Result<(), tokio_postgres::Error> {
+    client.batch_execute("BEGIN;").await?;
+    client.batch_execute(&sql).await?;
+    client.batch_execute("COMMIT;").await?;
+    Ok(())
+}
+
 async fn apply_update(
     log: &Logger,
     crdb: &CockroachInstance,
@@ -87,15 +97,21 @@ async fn apply_update(
 
     for _ in 0..times_to_apply {
         for sql in sqls.iter() {
-            client
-                .batch_execute("BEGIN;")
-                .await
-                .expect("Failed to BEGIN update");
-            client.batch_execute(&sql).await.expect("Failed to execute update");
-            client
-                .batch_execute("COMMIT;")
-                .await
-                .expect("Failed to COMMIT update");
+            loop {
+                let result = apply_update_as_transaction(&client, sql).await;
+                match result {
+                    Ok(()) => break,
+                    Err(err) => {
+                        if let Some(code) = err.code() {
+                            if code == &tokio_postgres::error::SqlState::T_R_SERIALIZATION_FAILURE {
+                                warn!(log, "Transaction retrying");
+                                continue;
+                            }
+                        }
+                        panic!("Failed to apply update: {err}");
+                    }
+                }
+            }
         }
     }
 
