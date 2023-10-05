@@ -23,8 +23,8 @@ fn seed_tar() -> Utf8PathBuf {
     seed_dir.into()
 }
 
-/// Wrapper around [`dev::test_setup_database`] which uses a a
-/// seed directory provided at build-time.
+/// Wrapper around [`dev::test_setup_database`] which uses a seed tarball
+/// provided at build-time.
 pub async fn test_setup_database(log: &Logger) -> dev::db::CockroachInstance {
     let input_tar = seed_tar();
     dev::test_setup_database(

@@ -7,7 +7,7 @@ use std::io::Write;
 
 // Creates a string identifier for the current DB schema and version.
 //
-// The goal here is to allow to create different "seed" directories
+// The goal here is to allow to create different "seed" tarballs
 // for each revision of the DB.
 fn digest_unique_to_schema() -> String {
     let schema = include_str!("../../schema/crdb/dbinit.sql");
