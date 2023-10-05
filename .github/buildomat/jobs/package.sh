@@ -3,7 +3,7 @@
 #: name = "helios / package"
 #: variety = "basic"
 #: target = "helios-2.0"
-#: rust_toolchain = "1.72.0"
+#: rust_toolchain = "1.72.1"
 #: output_rules = [
 #:	"=/work/version.txt",
 #:	"=/work/package.tar.gz",
@@ -45,7 +45,7 @@ ptime -m ./tools/ci_download_softnpu_machinery
 
 # Build the test target
 ptime -m cargo run --locked --release --bin omicron-package -- \
-  -t test target create -i standard -m non-gimlet -s softnpu
+  -t test target create -i standard -m non-gimlet -s softnpu -r single-sled
 ptime -m cargo run --locked --release --bin omicron-package -- \
   -t test package
 
@@ -81,9 +81,13 @@ stamp_packages() {
 	done
 }
 
+# Keep the single-sled Nexus zone around for the deploy job. (The global zone
+# build below overwrites the file.)
+mv out/omicron-nexus.tar.gz out/omicron-nexus-single-sled.tar.gz
+
 # Build necessary for the global zone
 ptime -m cargo run --locked --release --bin omicron-package -- \
-  -t host target create -i standard -m gimlet -s asic
+  -t host target create -i standard -m gimlet -s asic -r multi-sled
 ptime -m cargo run --locked --release --bin omicron-package -- \
   -t host package
 stamp_packages omicron-sled-agent maghemite propolis-server overlay
@@ -111,6 +115,7 @@ zones=(
   out/external-dns.tar.gz
   out/internal-dns.tar.gz
   out/omicron-nexus.tar.gz
+  out/omicron-nexus-single-sled.tar.gz
   out/oximeter-collector.tar.gz
   out/propolis-server.tar.gz
   out/switch-*.tar.gz

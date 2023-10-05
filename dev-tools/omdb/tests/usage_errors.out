@@ -12,6 +12,7 @@ Commands:
   db          Query the control plane database (CockroachDB)
   mgs         Debug a specific Management Gateway Service instance
   nexus       Debug a specific Nexus instance
+  oximeter    Query oximeter collector state
   sled-agent  Debug a specific Sled
   help        Print this message or the help of the given subcommand(s)
 
@@ -35,6 +36,7 @@ Commands:
   db          Query the control plane database (CockroachDB)
   mgs         Debug a specific Management Gateway Service instance
   nexus       Debug a specific Nexus instance
+  oximeter    Query oximeter collector state
   sled-agent  Debug a specific Sled
   help        Print this message or the help of the given subcommand(s)
 
@@ -93,6 +95,7 @@ Commands:
   services   Print information about control plane services
   sleds      Print information about sleds
   instances  Print information about customer instances
+  network    Print information about the network
   help       Print this message or the help of the given subcommand(s)
 
 Options:
@@ -114,6 +117,7 @@ Commands:
   services   Print information about control plane services
   sleds      Print information about sleds
   instances  Print information about customer instances
+  network    Print information about the network
   help       Print this message or the help of the given subcommand(s)
 
 Options:
@@ -188,23 +192,23 @@ Commands:
 Options:
   -h, --help  Print help
 =============================================
-EXECUTING COMMAND: omdb ["mgs"]
+EXECUTING COMMAND: omdb ["db", "network"]
 termination: Exited(2)
 ---------------------------------------------
 stdout:
 ---------------------------------------------
 stderr:
-Debug a specific Management Gateway Service instance
+Print information about the network
 
-Usage: omdb mgs [OPTIONS] <COMMAND>
+Usage: omdb db network [OPTIONS] <COMMAND>
 
 Commands:
-  inventory  Show information about devices and components visible to MGS
+  list-eips  List external IPs
   help       Print this message or the help of the given subcommand(s)
 
 Options:
-      --mgs-url <MGS_URL>  URL of an MGS instance to query [env: OMDB_MGS_URL=]
-  -h, --help               Print help
+      --verbose  Print out raw data structures from the data store
+  -h, --help     Print help
 =============================================
 EXECUTING COMMAND: omdb ["nexus"]
 termination: Exited(2)

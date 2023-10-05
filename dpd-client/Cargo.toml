@@ -17,6 +17,7 @@ ipnetwork.workspace = true
 http.workspace = true
 schemars.workspace = true
 rand.workspace = true
+omicron-workspace-hack.workspace = true
 
 [build-dependencies]
 anyhow.workspace = true

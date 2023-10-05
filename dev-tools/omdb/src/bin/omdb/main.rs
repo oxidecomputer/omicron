@@ -43,6 +43,7 @@ use std::net::SocketAddrV6;
 mod db;
 mod mgs;
 mod nexus;
+mod oximeter;
 mod sled_agent;
 
 #[tokio::main]
@@ -59,6 +60,7 @@ async fn main() -> Result<(), anyhow::Error> {
         OmdbCommands::Db(db) => db.run_cmd(&args, &log).await,
         OmdbCommands::Mgs(mgs) => mgs.run_cmd(&args, &log).await,
         OmdbCommands::Nexus(nexus) => nexus.run_cmd(&args, &log).await,
+        OmdbCommands::Oximeter(oximeter) => oximeter.run_cmd(&log).await,
         OmdbCommands::SledAgent(sled) => sled.run_cmd(&args, &log).await,
     }
 }
@@ -159,6 +161,8 @@ enum OmdbCommands {
     Mgs(mgs::MgsArgs),
     /// Debug a specific Nexus instance
     Nexus(nexus::NexusArgs),
+    /// Query oximeter collector state
+    Oximeter(oximeter::OximeterArgs),
     /// Debug a specific Sled
     SledAgent(sled_agent::SledAgentArgs),
 }

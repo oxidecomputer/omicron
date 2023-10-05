@@ -25,6 +25,7 @@ nexus-db-model.workspace = true
 nexus-db-queries.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
+oximeter-client.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
 serde.workspace = true
@@ -36,6 +37,8 @@ tabled.workspace = true
 textwrap.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
 uuid.workspace = true
+ipnetwork.workspace = true
+omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 expectorate.workspace = true

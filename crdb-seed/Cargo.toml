@@ -13,3 +13,4 @@ omicron-test-utils.workspace = true
 ring.workspace = true
 slog.workspace = true
 tokio.workspace = true
+omicron-workspace-hack.workspace = true

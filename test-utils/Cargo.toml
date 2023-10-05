@@ -25,6 +25,7 @@ usdt.workspace = true
 rcgen.workspace = true
 regex.workspace = true
 reqwest.workspace = true
+omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 expectorate.workspace = true
