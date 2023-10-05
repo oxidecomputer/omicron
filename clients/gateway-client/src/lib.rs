@@ -34,7 +34,7 @@
 // it is no longer useful to directly expose the JsonSchema types, we can go
 // back to reusing `omicron_common`.
 progenitor::generate_api!(
-    spec = "../openapi/gateway.json",
+    spec = "../../openapi/gateway.json",
     inner_type = slog::Logger,
     pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
         slog::debug!(log, "client request";

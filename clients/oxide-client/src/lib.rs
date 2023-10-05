@@ -16,7 +16,7 @@ use trust_dns_resolver::config::{
 use trust_dns_resolver::TokioAsyncResolver;
 
 progenitor::generate_api!(
-    spec = "../openapi/nexus.json",
+    spec = "../../openapi/nexus.json",
     interface = Builder,
     tags = Separate,
 );

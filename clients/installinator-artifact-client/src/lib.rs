@@ -5,7 +5,7 @@
 //! Interface for making API requests to installinator-artifactd.
 
 progenitor::generate_api!(
-    spec = "../openapi/installinator-artifactd.json",
+    spec = "../../openapi/installinator-artifactd.json",
     inner_type = slog::Logger,
     pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
         slog::debug!(log, "client request";
