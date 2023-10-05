@@ -15,5 +15,4 @@ setup = 'crdb-seed'
 fail-fast = false
 
 [script.crdb-seed]
-# --profile test means more build artifacts get reused from tests
-command = 'cargo run --profile dev -p crdb-seed'
+command = 'cargo run -p crdb-seed'
