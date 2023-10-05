@@ -40,29 +40,34 @@ async fn ensure_seed_tarball_exists(
     let mut desired_seed_tar = base_seed_dir.join(digest_unique_to_schema());
     desired_seed_tar.set_extension("tar");
 
-    let invalidated = if desired_seed_tar.exists() {
-        if !should_invalidate {
+    let invalidated = match (desired_seed_tar.exists(), should_invalidate) {
+        (true, true) => {
+            slog::info!(
+                log,
+                "CRDB_SEED_INVALIDATE=1 set in the environment, \
+                 invalidating seed tarball: `{}`",
+                desired_seed_tar,
+            );
+            std::fs::remove_file(&desired_seed_tar)
+                .context("failed to remove seed tarball")?;
+            true
+        }
+        (true, false) => {
             return Ok((desired_seed_tar, SeedTarballStatus::Existing));
         }
-        slog::info!(
-            log,
-            "CRDB_SEED_INVALIDATE=1 set in the environment, \
-             invalidating seed tarball: `{}`",
-            desired_seed_tar,
-        );
-        std::fs::remove_file(&desired_seed_tar)
-            .context("failed to remove seed tarball")?;
-        true
-    } else {
-        if should_invalidate {
+        (false, true) => {
             slog::info!(
                 log,
                 "CRDB_SEED_INVALIDATE=1 set in the environment, \
                  but seed tarball does not exist: `{}`",
                 desired_seed_tar,
             );
+            false
         }
-        false
+        (false, false) => {
+            // The tarball doesn't exist.
+            false
+        }
     };
 
     // The tarball didn't exist when we started, so try to create it.
