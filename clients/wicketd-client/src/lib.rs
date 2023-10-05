@@ -5,7 +5,7 @@
 //! Interface for making API requests to wicketd
 
 progenitor::generate_api!(
-    spec = "../openapi/wicketd.json",
+    spec = "../../openapi/wicketd.json",
     inner_type = slog::Logger,
     pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
         slog::debug!(log, "client request";

@@ -9,7 +9,7 @@ use omicron_common::generate_logging_api;
 use std::convert::TryFrom;
 use uuid::Uuid;
 
-generate_logging_api!("../openapi/sled-agent.json");
+generate_logging_api!("../../openapi/sled-agent.json");
 
 impl omicron_common::api::external::ClientError for types::Error {
     fn message(&self) -> String {
