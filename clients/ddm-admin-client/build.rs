@@ -16,23 +16,23 @@ use std::path::Path;
 
 fn main() -> Result<()> {
     // Find the current maghemite repo commit from our package manifest.
-    let manifest = fs::read_to_string("../package-manifest.toml")
-        .context("failed to read ../package-manifest.toml")?;
-    println!("cargo:rerun-if-changed=../package-manifest.toml");
+    let manifest = fs::read_to_string("../../package-manifest.toml")
+        .context("failed to read ../../package-manifest.toml")?;
+    println!("cargo:rerun-if-changed=../../package-manifest.toml");
 
     let config: Config = toml::from_str(&manifest)
-        .context("failed to parse ../package-manifest.toml")?;
+        .context("failed to parse ../../package-manifest.toml")?;
     let maghemite = config
         .packages
         .get("maghemite")
-        .context("missing maghemite package in ../package-manifest.toml")?;
+        .context("missing maghemite package in ../../package-manifest.toml")?;
 
     let local_path = match &maghemite.source {
         PackageSource::Prebuilt { commit, .. } => {
             // Report a relatively verbose error if we haven't downloaded the requisite
             // openapi spec.
             let local_path =
-                format!("../out/downloads/ddm-admin-{commit}.json");
+                format!("../../out/downloads/ddm-admin-{commit}.json");
             if !Path::new(&local_path).exists() {
                 bail!("{local_path} doesn't exist; rerun `tools/ci_download_maghemite_openapi` (after updating `tools/maghemite_openapi_version` if the maghemite commit in package-manifest.toml has changed)");
             }
@@ -42,7 +42,7 @@ fn main() -> Result<()> {
 
         PackageSource::Manual => {
             let local_path =
-                "../out/downloads/ddm-admin-manual.json".to_string();
+                "../../out/downloads/ddm-admin-manual.json".to_string();
             if !Path::new(&local_path).exists() {
                 bail!("{local_path} doesn't exist, please copy manually built ddm-admin.json there!");
             }

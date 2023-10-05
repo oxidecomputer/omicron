@@ -6,7 +6,7 @@
 
 //! Interface for API requests to an Oximeter metric collection server
 
-omicron_common::generate_logging_api!("../openapi/oximeter.json");
+omicron_common::generate_logging_api!("../../openapi/oximeter.json");
 
 impl omicron_common::api::external::ClientError for types::Error {
     fn message(&self) -> String {
