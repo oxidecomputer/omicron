@@ -165,6 +165,19 @@ function restore_xde_and_opte {
     fi
 }
 
+function unfreeze_opte_pkg {
+    OMICRON_FROZEN_PKG_COMMENT="OMICRON-PINNED-PACKAGE"
+
+    # If we've frozen a particular version, let's be good citizens
+    # and clear that as well.
+    if PKG_FROZEN=$(pkg freeze | grep driver/network/opte); then
+        FROZEN_COMMENT=$(echo "$PKG_FROZEN" | awk '{ print $(NF) }')
+        if [ "$FROZEN_COMMENT" == "$OMICRON_FROZEN_PKG_COMMENT" ]; then
+            pkg unfreeze driver/network/opte
+        fi
+    fi
+}
+
 function ensure_not_already_on_helios {
     local RC=0
     pkg list "$STOCK_CONSOLIDATION"* || RC=$?
@@ -179,5 +192,6 @@ uninstall_xde_and_opte
 for PUBLISHER in "${PUBLISHERS[@]}"; do
     remove_publisher "$PUBLISHER"
 done
+unfreeze_opte_pkg
 ensure_not_already_on_helios
 to_stock_helios "$CONSOLIDATION"
