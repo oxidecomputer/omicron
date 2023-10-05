@@ -67,7 +67,7 @@ pub struct InstanceRuntimeState {
 
 /// Information announced by a metric server, used so that clients can contact it and collect
 /// available metric data from it.
-#[derive(Debug, Clone, JsonSchema, Serialize, Deserialize)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
 pub struct ProducerEndpoint {
     pub id: Uuid,
     pub address: SocketAddr,
