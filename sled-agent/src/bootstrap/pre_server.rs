@@ -104,41 +104,6 @@ impl BootstrapManagers {
             }
         }
     }
-
-    // Observe the current hardware state manually.
-    //
-    // We use this when we're monitoring hardware for the first
-    // time, and if we miss notifications.
-    pub(super) async fn check_latest_hardware_snapshot(
-        &self,
-        sled_agent: Option<&SledAgent>,
-        log: &Logger,
-    ) {
-        let underlay_network = sled_agent.map(|sled_agent| {
-            sled_agent.notify_nexus_about_self(log);
-            sled_agent.switch_zone_underlay_info()
-        });
-        info!(
-            log, "Checking current full hardware snapshot";
-            "underlay_network_info" => ?underlay_network,
-        );
-        if self.hardware.is_scrimlet_driver_loaded() {
-            let baseboard = self.hardware.baseboard();
-            if let Err(e) =
-                self.service.activate_switch(underlay_network, baseboard).await
-            {
-                warn!(log, "Failed to activate switch: {e}");
-            }
-        } else {
-            if let Err(e) = self.service.deactivate_switch().await {
-                warn!(log, "Failed to deactivate switch: {e}");
-            }
-        }
-
-        self.storage
-            .ensure_using_exactly_these_disks(self.hardware.disks())
-            .await;
-    }
 }
 
 pub(super) struct BootstrapAgentStartup {
@@ -148,7 +113,6 @@ pub(super) struct BootstrapAgentStartup {
     pub(super) base_log: Logger,
     pub(super) startup_log: Logger,
     pub(super) managers: BootstrapManagers,
-    pub(super) key_manager_handle: JoinHandle<()>,
 }
 
 impl BootstrapAgentStartup {
@@ -202,6 +166,7 @@ impl BootstrapAgentStartup {
         // This should be a no-op if already enabled.
         BootstrapNetworking::enable_ipv6_forwarding().await?;
 
+        // Are we a gimlet or scrimlet?
         let sled_mode = sled_mode_from_config(&config)?;
 
         // Spawn all important long running tasks that live for the lifetime of
@@ -233,7 +198,7 @@ impl BootstrapAgentStartup {
             config.sidecar_revision.clone(),
             config.switch_zone_maghemite_links.clone(),
             long_running_task_handles.storage_manager.clone(),
-            storage_manager.zone_bundler().clone(),
+            long_running_task_handles.zone_bundler.clone(),
         );
 
         Ok(Self {
@@ -242,12 +207,8 @@ impl BootstrapAgentStartup {
             ddm_admin_localhost_client,
             base_log,
             startup_log: log,
-            managers: BootstrapManagers {
-                hardware: hardware_manager,
-                storage: storage_manager,
-                service: service_manager,
-            },
-            key_manager_handle,
+            service_manager,
+            long_running_task_handles,
         })
     }
 }

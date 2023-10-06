@@ -617,7 +617,7 @@ mod tests {
         let logctx = test_setup_log("queued_disks_get_added_as_resources");
         let (mut key_manager, key_requester) =
             KeyManager::new(&logctx.log, HardcodedSecretRetriever::default());
-        let (mut manager, mut handle) =
+        let (mut manager, handle) =
             StorageManager::new(&logctx.log, key_requester);
 
         // Spawn the key_manager so that it will respond to requests for encryption keys

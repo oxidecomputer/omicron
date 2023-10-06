@@ -19,7 +19,6 @@ use crate::bootstrap::secret_retriever::LrtqOrHardcodedSecretRetriever;
 use crate::zone_bundle::{CleanupContext, ZoneBundler};
 use bootstore::schemes::v0 as bootstore;
 use key_manager::{KeyManager, StorageKeyRequester};
-use sled_agent_client::types::CleanupContext;
 use sled_hardware::{HardwareManager, SledMode};
 use sled_storage::manager::{StorageHandle, StorageManager};
 use slog::{info, Logger};
@@ -64,23 +63,24 @@ pub async fn spawn_all_longrunning_tasks(
 
     // Wait for the boot disk so that we can work with any ledgers,
     // such as those needed by the bootstore and sled-agent
-    let _ = storage_handle.wait_for_boot_disk().await;
+    let _ = storage_manager.wait_for_boot_disk().await;
 
     let bootstore = spawn_bootstore_tasks(
         log,
-        &mut storage_handle,
+        &mut storage_manager,
         &hardware_manager,
         global_zone_bootstrap_ip,
     )
     .await;
 
-    let zone_bundler = spawn_zone_bundler_tasks(log, &mut storage_handle);
+    let zone_bundler = spawn_zone_bundler_tasks(log, &mut storage_manager);
 
     LongRunningTaskHandles {
         storage_key_requester,
         storage_manager,
         hardware_manager,
         bootstore,
+        zone_bundler,
     }
 }
 
@@ -156,9 +156,5 @@ fn spawn_zone_bundler_tasks(
     storage_handle: &mut StorageHandle,
 ) -> ZoneBundler {
     let log = log.new(o!("component" => "ZoneBundler"));
-    let zone_bundler = ZoneBundler::new(
-        log,
-        storage_handle.clone(),
-        CleanupContext::default(),
-    );
+    ZoneBundler::new(log, storage_handle.clone(), CleanupContext::default())
 }

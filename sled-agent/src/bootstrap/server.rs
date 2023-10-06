@@ -25,7 +25,6 @@ use crate::config::Config as SledConfig;
 use crate::config::ConfigError;
 use crate::server::Server as SledAgentServer;
 use crate::sled_agent::SledAgent;
-use crate::storage_manager::StorageResources;
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
 use cancel_safe_futures::TryStreamExt;
