@@ -161,10 +161,10 @@ cookie = "0.16"
 criterion = { version = "0.5.1", features = [ "async_tokio" ] }
 crossbeam = "0.8"
 crossterm = { version = "0.27.0", features = ["event-stream"] }
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "aeb69dda26c7e1a8b6eada425670cd4b83f91c07" }
-crucible-client-types = { git = "https://github.com/oxidecomputer/crucible", rev = "aeb69dda26c7e1a8b6eada425670cd4b83f91c07" }
-crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "aeb69dda26c7e1a8b6eada425670cd4b83f91c07" }
-crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "aeb69dda26c7e1a8b6eada425670cd4b83f91c07" }
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "20273bcca1fd5834ebc3e67dfa7020f0e99ad681" }
+crucible-client-types = { git = "https://github.com/oxidecomputer/crucible", rev = "20273bcca1fd5834ebc3e67dfa7020f0e99ad681" }
+crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "20273bcca1fd5834ebc3e67dfa7020f0e99ad681" }
+crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "20273bcca1fd5834ebc3e67dfa7020f0e99ad681" }
 curve25519-dalek = "4"
 datatest-stable = "0.1.3"
 display-error-chain = "0.1.1"
@@ -180,7 +180,7 @@ dns-service-client = { path = "dns-service-client" }
 dpd-client = { path = "dpd-client" }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
 either = "1.9.0"
-expectorate = "1.0.7"
+expectorate = "1.1.0"
 fatfs = "0.3.6"
 flate2 = "1.0.27"
 flume = "0.11.0"
@@ -229,6 +229,7 @@ nexus-db-queries = { path = "nexus/db-queries" }
 nexus-defaults = { path = "nexus/defaults" }
 omicron-certificates = { path = "certificates" }
 omicron-passwords = { path = "passwords" }
+omicron-workspace-hack = "0.1.0"
 nexus-test-interface = { path = "nexus/test-interface" }
 nexus-test-utils-macros = { path = "nexus/test-utils-macros" }
 nexus-test-utils = { path = "nexus/test-utils" }
@@ -276,9 +277,9 @@ pretty-hex = "0.3.0"
 proc-macro2 = "1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "de6369aa45a255f896da0a3ddd2b7152c036a4e9" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "de6369aa45a255f896da0a3ddd2b7152c036a4e9", features = [ "generated-migration" ] }
-propolis-server = { git = "https://github.com/oxidecomputer/propolis", rev = "de6369aa45a255f896da0a3ddd2b7152c036a4e9", default-features = false, features = ["mock-only"] }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "42c878b71a58d430dfc306126af5d40ca816d70f" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "42c878b71a58d430dfc306126af5d40ca816d70f", features = [ "generated-migration" ] }
+propolis-server = { git = "https://github.com/oxidecomputer/propolis", rev = "42c878b71a58d430dfc306126af5d40ca816d70f", default-features = false, features = ["mock-only"] }
 proptest = "1.2.0"
 quote = "1.0"
 rand = "0.8.5"
@@ -554,3 +555,10 @@ opt-level = 3
 [patch.crates-io.pq-sys]
 git = 'https://github.com/oxidecomputer/pq-sys'
 branch = "oxide/omicron"
+
+# Using the workspace-hack via this patch directive means that it only applies
+# while building within this workspace. If another workspace imports a crate
+# from here via a git dependency, it will not have the workspace-hack applied
+# to it.
+[patch.crates-io.omicron-workspace-hack]
+path = "workspace-hack"
