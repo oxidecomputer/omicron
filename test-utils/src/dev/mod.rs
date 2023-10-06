@@ -12,12 +12,14 @@ pub mod poll;
 pub mod test_cmds;
 
 use anyhow::Context;
+use camino::Utf8Path;
+use camino::Utf8PathBuf;
 pub use dropshot::test_util::LogContext;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingIfExists;
 use dropshot::ConfigLoggingLevel;
 use slog::Logger;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 // Helper for copying all the files in one directory to another.
 fn copy_dir(
@@ -77,22 +79,22 @@ pub enum StorageSource {
     /// Do not populate anything. This is primarily used for migration testing.
     DoNotPopulate,
     /// Populate the latest version of the database.
-    PopulateLatest { output_dir: PathBuf },
+    PopulateLatest { output_dir: Utf8PathBuf },
     /// Copy the database from a seed directory, which has previously
     /// been created with `PopulateLatest`.
-    CopyFromSeed { input_dir: PathBuf },
+    CopyFromSeed { input_dir: Utf8PathBuf },
 }
 
 /// Creates a [`db::CockroachInstance`] with a populated storage directory.
 ///
 /// This is intended to optimize subsequent calls to [`test_setup_database`]
 /// by reducing the latency of populating the storage directory.
-pub async fn test_setup_database_seed(log: &Logger, dir: &Path) {
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
+pub async fn test_setup_database_seed(log: &Logger, dir: &Utf8Path) {
+    let _ = std::fs::remove_dir_all(dir);
+    std::fs::create_dir_all(dir).unwrap();
     let mut db = setup_database(
         log,
-        StorageSource::PopulateLatest { output_dir: dir.to_path_buf() },
+        StorageSource::PopulateLatest { output_dir: dir.to_owned() },
     )
     .await;
     db.cleanup().await.unwrap();
@@ -148,7 +150,7 @@ async fn setup_database(
         StorageSource::CopyFromSeed { input_dir } => {
             info!(&log,
                 "cockroach: copying from seed directory ({}) to storage directory ({})",
-                input_dir.to_string_lossy(), starter.store_dir().to_string_lossy(),
+                input_dir, starter.store_dir().to_string_lossy(),
             );
             copy_dir(input_dir, starter.store_dir())
                 .expect("Cannot copy storage from seed directory");

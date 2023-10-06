@@ -36,6 +36,7 @@ zeroize.workspace = true
 # utils`. Unfortunately, it doesn't appear possible to put the `pq-sys` dep
 # only in `[dev-dependencies]`.
 pq-sys = "*"
+omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 assert_matches.workspace = true

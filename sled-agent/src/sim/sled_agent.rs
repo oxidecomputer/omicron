@@ -33,7 +33,9 @@ use std::str::FromStr;
 
 use crucible_client_types::VolumeConstructionRequest;
 use dropshot::HttpServer;
-use illumos_utils::opte::params::SetVirtualNetworkInterfaceHost;
+use illumos_utils::opte::params::{
+    DeleteVirtualNetworkInterfaceHost, SetVirtualNetworkInterfaceHost,
+};
 use nexus_client::types::PhysicalDiskKind;
 use omicron_common::address::PROPOLIS_PORT;
 use propolis_client::Client as PropolisClient;
@@ -574,11 +576,21 @@ impl SledAgent {
     pub async fn unset_virtual_nic_host(
         &self,
         interface_id: Uuid,
-        mapping: &SetVirtualNetworkInterfaceHost,
+        mapping: &DeleteVirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
         let mut v2p_mappings = self.v2p_mappings.lock().await;
         let vec = v2p_mappings.entry(interface_id).or_default();
-        vec.retain(|x| x != mapping);
+        vec.retain(|x| {
+            x.virtual_ip != mapping.virtual_ip || x.vni != mapping.vni
+        });
+
+        // If the last entry was removed, remove the entire interface ID so that
+        // tests don't have to distinguish never-created entries from
+        // previously-extant-but-now-empty entries.
+        if vec.is_empty() {
+            v2p_mappings.remove(&interface_id);
+        }
+
         Ok(())
     }
 
@@ -605,14 +617,8 @@ impl SledAgent {
             ..Default::default()
         };
         let propolis_log = log.new(o!("component" => "propolis-server-mock"));
-        let config = propolis_server::config::Config {
-            bootrom: Default::default(),
-            pci_bridges: Default::default(),
-            chipset: Default::default(),
-            devices: Default::default(),
-            block_devs: Default::default(),
-        };
-        let private = Arc::new(PropolisContext::new(config, propolis_log));
+        let private =
+            Arc::new(PropolisContext::new(Default::default(), propolis_log));
         info!(log, "Starting mock propolis-server...");
         let dropshot_log = log.new(o!("component" => "dropshot"));
         let mock_api = propolis_server::mock_server::api();

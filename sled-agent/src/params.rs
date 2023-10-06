@@ -855,6 +855,11 @@ pub struct TimeSync {
     pub ref_id: u32,
     /// The NTP reference IP address.
     pub ip_addr: IpAddr,
+    /// The NTP stratum (our upstream's stratum plus one).
+    pub stratum: u8,
+    /// The NTP reference time (i.e. what chrony thinks the current time is, not
+    /// necessarily the current system time).
+    pub ref_time: f64,
     // This could be f32, but there is a problem with progenitor/typify
     // where, although the f32 correctly becomes "float" (and not "double") in
     // the API spec, that "float" gets converted back to f64 when generating

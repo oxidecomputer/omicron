@@ -495,14 +495,13 @@ impl<'a> EarlyNetworkSetup<'a> {
                     e
                 ))
             })?;
-        let nexthop = Some(uplink_config.gateway_ip);
         dpd_port_settings.v4_routes.insert(
             Ipv4Cidr { prefix: "0.0.0.0".parse().unwrap(), prefix_len: 0 }
                 .to_string(),
             RouteSettingsV4 {
                 link_id: link_id.0,
                 vid: uplink_config.uplink_vid,
-                nexthop,
+                nexthop: uplink_config.gateway_ip,
             },
         );
         Ok((ipv6_entry, dpd_port_settings, port_id))

@@ -22,6 +22,7 @@ wicket.workspace = true
 
 # used only by wicket-dbg binary
 reedline = "0.23.0"
+omicron-workspace-hack.workspace = true
 
 [[bin]]
 name = "wicket-dbg"

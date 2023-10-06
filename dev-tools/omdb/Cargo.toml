@@ -1,0 +1,56 @@
+[package]
+name = "omicron-omdb"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[build-dependencies]
+omicron-rpaths.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+async-bb8-diesel.workspace = true
+chrono.workspace = true
+clap.workspace = true
+diesel.workspace = true
+dropshot.workspace = true
+futures.workspace = true
+gateway-client.workspace = true
+gateway-messages.workspace = true
+gateway-test-utils.workspace = true
+humantime.workspace = true
+internal-dns.workspace = true
+nexus-client.workspace = true
+nexus-db-model.workspace = true
+nexus-db-queries.workspace = true
+nexus-types.workspace = true
+omicron-common.workspace = true
+oximeter-client.workspace = true
+# See omicron-rpaths for more about the "pq-sys" dependency.
+pq-sys = "*"
+serde.workspace = true
+serde_json.workspace = true
+sled-agent-client.workspace = true
+slog.workspace = true
+strum.workspace = true
+tabled.workspace = true
+textwrap.workspace = true
+tokio = { workspace = true, features = [ "full" ] }
+uuid.workspace = true
+ipnetwork.workspace = true
+omicron-workspace-hack.workspace = true
+
+[dev-dependencies]
+expectorate.workspace = true
+nexus-test-utils.workspace = true
+nexus-test-utils-macros.workspace = true
+omicron-nexus.workspace = true
+omicron-test-utils.workspace = true
+regex.workspace = true
+subprocess.workspace = true
+
+# Disable doc builds by default for our binaries to work around issue
+# rust-lang/cargo#8373.  These docs would not be very useful anyway.
+[[bin]]
+name = "omdb"
+doc = false

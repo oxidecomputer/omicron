@@ -6,7 +6,7 @@
 
 use super::DataStore;
 use crate::db;
-use crate::db::error::public_error_from_diesel_pool;
+use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::model::RegionSnapshot;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -25,10 +25,10 @@ impl DataStore {
         diesel::insert_into(dsl::region_snapshot)
             .values(region_snapshot.clone())
             .on_conflict_do_nothing()
-            .execute_async(self.pool())
+            .execute_async(&*self.pool_connection_unauthorized().await?)
             .await
             .map(|_| ())
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     pub async fn region_snapshot_remove(
@@ -43,9 +43,9 @@ impl DataStore {
             .filter(dsl::dataset_id.eq(dataset_id))
             .filter(dsl::region_id.eq(region_id))
             .filter(dsl::snapshot_id.eq(snapshot_id))
-            .execute_async(self.pool())
+            .execute_async(&*self.pool_connection_unauthorized().await?)
             .await
             .map(|_rows_deleted| ())
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 }

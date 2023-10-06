@@ -6,7 +6,7 @@
 
 use super::DataStore;
 use crate::db;
-use crate::db::error::public_error_from_diesel_pool;
+use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::model::OximeterInfo;
 use crate::db::model::ProducerEndpoint;
@@ -41,10 +41,10 @@ impl DataStore {
                 dsl::ip.eq(info.ip),
                 dsl::port.eq(info.port),
             ))
-            .execute_async(self.pool())
+            .execute_async(&*self.pool_connection_unauthorized().await?)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::Conflict(
                         ResourceType::Oximeter,
@@ -62,9 +62,11 @@ impl DataStore {
     ) -> ListResultVec<OximeterInfo> {
         use db::schema::oximeter::dsl;
         paginated(dsl::oximeter, dsl::id, page_params)
-            .load_async::<OximeterInfo>(self.pool())
+            .load_async::<OximeterInfo>(
+                &*self.pool_connection_unauthorized().await?,
+            )
             .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     // Create a record for a new producer endpoint
@@ -86,10 +88,10 @@ impl DataStore {
                 dsl::interval.eq(producer.interval),
                 dsl::base_route.eq(producer.base_route.clone()),
             ))
-            .execute_async(self.pool())
+            .execute_async(&*self.pool_connection_unauthorized().await?)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::Conflict(
                         ResourceType::MetricProducer,
@@ -111,10 +113,10 @@ impl DataStore {
             .filter(dsl::oximeter_id.eq(oximeter_id))
             .order_by((dsl::oximeter_id, dsl::id))
             .select(ProducerEndpoint::as_select())
-            .load_async(self.pool())
+            .load_async(&*self.pool_connection_unauthorized().await?)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::Conflict(
                         ResourceType::MetricProducer,
