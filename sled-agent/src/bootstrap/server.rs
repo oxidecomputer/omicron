@@ -45,6 +45,8 @@ use serde::Deserialize;
 use serde::Serialize;
 use sled_hardware::underlay;
 use sled_hardware::HardwareUpdate;
+use sled_storage::dataset::CONFIG_DATASET;
+use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::borrow::Cow;
 use std::io;
@@ -175,68 +177,19 @@ impl Server {
             ddm_admin_localhost_client,
             base_log,
             startup_log,
-            managers,
-            key_manager_handle,
+            service_manager,
+            long_running_task_handles,
         } = BootstrapAgentStartup::run(config).await?;
 
-        // From this point on we will listen for hardware notifications and
-        // potentially start the switch zone and be notified of new disks; we
-        // are responsible for responding to updates from this point on.
-        let mut hardware_monitor = managers.hardware.monitor();
-        let storage_resources = managers.storage.resources();
-
-        // Check the latest hardware snapshot; we could have missed events
-        // between the creation of the hardware manager and our subscription of
-        // its monitor.
-        managers.check_latest_hardware_snapshot(None, &startup_log).await;
-
-        // Wait for our boot M.2 to show up.
-        wait_while_handling_hardware_updates(
-            wait_for_boot_m2(storage_resources, &startup_log),
-            &mut hardware_monitor,
-            &managers,
-            None, // No underlay network yet
+        // Do we have a StartSledAgentRequest stored in the ledger?
+        let paths =
+            sled_config_paths(&long_running_task_handles.storage_manager)
+                .await?;
+        let maybe_ledger = Ledger::<PersistentSledAgentRequest<'static>>::new(
             &startup_log,
-            "waiting for boot M.2",
+            paths,
         )
         .await;
-
-        // Wait for the bootstore to start.
-        let bootstore_handles = wait_while_handling_hardware_updates(
-            BootstoreHandles::spawn(
-                storage_resources,
-                ddm_admin_localhost_client.clone(),
-                managers.hardware.baseboard(),
-                global_zone_bootstrap_ip,
-                &base_log,
-            ),
-            &mut hardware_monitor,
-            &managers,
-            None, // No underlay network yet
-            &startup_log,
-            "initializing bootstore",
-        )
-        .await?;
-
-        // Do we have a StartSledAgentRequest stored in the ledger?
-        let maybe_ledger = wait_while_handling_hardware_updates(
-            async {
-                let paths = sled_config_paths(storage_resources).await?;
-                let maybe_ledger =
-                    Ledger::<PersistentSledAgentRequest<'static>>::new(
-                        &startup_log,
-                        paths,
-                    )
-                    .await;
-                Ok::<_, StartError>(maybe_ledger)
-            },
-            &mut hardware_monitor,
-            &managers,
-            None, // No underlay network yet
-            &startup_log,
-            "loading sled-agent request from ledger",
-        )
-        .await?;
 
         // We don't yet _act_ on the `StartSledAgentRequest` if we have one, but
         // if we have one we init our `RssAccess` noting that we're already
@@ -522,28 +475,6 @@ fn start_dropshot_server(
     Ok(http_server)
 }
 
-/// Wait for at least the M.2 we booted from to show up.
-///
-/// TODO-correctness Subsequent steps may assume all M.2s that will ever be
-/// present are present once we return from this function; see
-/// https://github.com/oxidecomputer/omicron/issues/3815.
-async fn wait_for_boot_m2(storage_resources: &StorageResources, log: &Logger) {
-    // Wait for at least the M.2 we booted from to show up.
-    loop {
-        match storage_resources.boot_disk().await {
-            Some(disk) => {
-                info!(log, "Found boot disk M.2: {disk:?}");
-                break;
-            }
-            None => {
-                info!(log, "Waiting for boot disk M.2...");
-                tokio::time::sleep(core::time::Duration::from_millis(250))
-                    .await;
-            }
-        }
-    }
-}
-
 struct MissingM2Paths(&'static str);
 
 impl From<MissingM2Paths> for StartError {
@@ -559,17 +490,17 @@ impl From<MissingM2Paths> for SledAgentServerStartError {
 }
 
 async fn sled_config_paths(
-    storage: &StorageResources,
+    storage: &StorageHandle,
 ) -> Result<Vec<Utf8PathBuf>, MissingM2Paths> {
-    let paths: Vec<_> = storage
-        .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
-        .await
+    let resources = storage.get_latest_resources().await;
+    let paths: Vec<_> = resources
+        .all_m2_mountpoints(CONFIG_DATASET)
         .into_iter()
         .map(|p| p.join(SLED_AGENT_REQUEST_FILE))
         .collect();
 
     if paths.is_empty() {
-        return Err(MissingM2Paths(sled_hardware::disk::CONFIG_DATASET));
+        return Err(MissingM2Paths(CONFIG_DATASET));
     }
     Ok(paths)
 }

@@ -149,6 +149,11 @@ impl HardwareMonitor {
     ///
     /// This should be spawned into a tokio task
     pub async fn run(&mut self) {
+        // Check the latest hardware snapshot; we could have missed events
+        // between the creation of the hardware manager and our subscription of
+        // its monitor.
+        self.check_latest_hardware_snapshot().await;
+
         loop {
             tokio::select! {
                 Some(msg) = self.handle_rx.recv() => {
