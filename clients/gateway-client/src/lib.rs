@@ -48,7 +48,7 @@ progenitor::generate_api!(
     }),
     derives = [schemars::JsonSchema],
     patch = {
-        SpIdentifier = { derives = [Copy, PartialEq, Hash, Eq, PartialOrd, Ord, Serialize, Deserialize] },
+        SpIdentifier = { derives = [Copy, PartialEq, Hash, Eq, Serialize, Deserialize] },
         SpIgnition = { derives = [PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize] },
         SpIgnitionSystemType = { derives = [Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize] },
         SpState = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize] },
@@ -59,3 +59,17 @@ progenitor::generate_api!(
         HostPhase2RecoveryImageId = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize] },
     },
 );
+
+// Override the impl of Ord for SpIdentifier because the default one orders the
+// fields in a different order than people are likely to want.
+impl Ord for crate::types::SpIdentifier {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.type_.cmp(&other.type_).then(self.slot.cmp(&other.slot))
+    }
+}
+
+impl PartialOrd for crate::types::SpIdentifier {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
