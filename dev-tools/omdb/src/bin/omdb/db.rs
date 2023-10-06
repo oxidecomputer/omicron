@@ -19,7 +19,9 @@ use crate::Omdb;
 use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Context;
+use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::AsyncSimpleConnection;
 use chrono::SecondsFormat;
 use clap::Args;
 use clap::Subcommand;
@@ -30,6 +32,9 @@ use diesel::BoolExpressionMethods;
 use diesel::ExpressionMethods;
 use diesel::JoinOnDsl;
 use diesel::NullableExpressionMethods;
+use nexus_db_model::saga_types::Saga;
+use nexus_db_model::saga_types::SagaId;
+use nexus_db_model::saga_types::SagaNodeEvent;
 use nexus_db_model::Dataset;
 use nexus_db_model::Disk;
 use nexus_db_model::DnsGroup;
@@ -37,10 +42,12 @@ use nexus_db_model::DnsName;
 use nexus_db_model::DnsVersion;
 use nexus_db_model::DnsZone;
 use nexus_db_model::ExternalIp;
+use nexus_db_model::Image;
 use nexus_db_model::Instance;
 use nexus_db_model::Project;
 use nexus_db_model::Region;
 use nexus_db_model::Sled;
+use nexus_db_model::Snapshot;
 use nexus_db_model::Vmm;
 use nexus_db_model::Zpool;
 use nexus_db_queries::context::OpContext;
@@ -56,6 +63,10 @@ use nexus_types::internal_api::params::Srv;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Generation;
 use omicron_common::postgres_config::PostgresConfigWithUrl;
+use petgraph::graph::NodeIndex;
+use petgraph::Graph;
+use serde::Deserialize;
+use serde::Serialize;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::collections::HashSet;
@@ -136,6 +147,10 @@ enum DbCommands {
     Instances,
     /// Print information about the network
     Network(NetworkArgs),
+    /// Print information related to sagas
+    Sagas(SagaArgs),
+    /// Print information related to regions
+    Regions(RegionArgs),
 }
 
 #[derive(Debug, Args)]
@@ -234,6 +249,89 @@ struct NetworkArgs {
 enum NetworkCommands {
     /// List external IPs
     ListEips,
+}
+
+#[derive(Debug, Args)]
+struct SagaArgs {
+    #[command(subcommand)]
+    command: SagaCommands,
+}
+
+#[derive(Debug, Subcommand)]
+enum SagaCommands {
+    /// List all sagas
+    List(SagaListArgs),
+
+    /// List sagas that failed to unwind
+    Stuck,
+
+    /// Show the execution of a saga
+    Show(SagaShowArgs),
+
+    /// List sagas that encountered an error and successfully unwound
+    Unwound,
+
+    /// Show any failing nodes
+    Failing,
+
+    /// List any sagas which overlap execution with this one
+    Overlapping(SagaOverlappingArgs),
+
+    /// Show multiple saga executions along a timeline
+    Interleave(SagaInterleaveArgs),
+}
+
+#[derive(Debug, Args)]
+struct SagaListArgs {
+    /// Show saga starting node params
+    #[arg(short)]
+    show_params: bool,
+}
+
+#[derive(Debug, Args)]
+struct SagaShowArgs {
+    saga_id: Uuid,
+}
+
+#[derive(Debug, Args)]
+struct SagaOverlappingArgs {
+    saga_id: Uuid,
+
+    /// Print saga IDs only
+    #[arg(short)]
+    id_only: bool,
+}
+
+#[derive(Debug, Args)]
+struct SagaInterleaveArgs {
+    saga_id: Vec<Uuid>,
+}
+
+#[derive(Debug, Args)]
+struct RegionArgs {
+    #[command(subcommand)]
+    command: RegionCommands,
+}
+
+#[derive(Debug, Subcommand)]
+enum RegionCommands {
+    /// List all regions
+    List(RegionListArgs),
+
+    /// Find what is using a region
+    UsedBy(RegionUsedByArgs),
+}
+
+#[derive(Debug, Args)]
+struct RegionListArgs {
+    /// Print region IDs only
+    #[arg(short)]
+    id_only: bool,
+}
+
+#[derive(Debug, Args)]
+struct RegionUsedByArgs {
+    region_id: Vec<Uuid>,
 }
 
 impl DbArgs {
@@ -341,6 +439,67 @@ impl DbArgs {
             }) => {
                 cmd_db_eips(&opctx, &datastore, self.fetch_limit, *verbose)
                     .await
+            }
+            DbCommands::Sagas(SagaArgs {
+                command: SagaCommands::List(saga_list_args),
+            }) => {
+                cmd_db_sagas_list(&datastore, self.fetch_limit, saga_list_args)
+                    .await
+            }
+            DbCommands::Sagas(SagaArgs { command: SagaCommands::Stuck }) => {
+                cmd_db_sagas_list_stuck(&datastore, self.fetch_limit).await
+            }
+            DbCommands::Sagas(SagaArgs {
+                command: SagaCommands::Show(saga_show_args),
+            }) => {
+                cmd_db_sagas_show(&datastore, self.fetch_limit, saga_show_args)
+                    .await
+            }
+            DbCommands::Sagas(SagaArgs { command: SagaCommands::Unwound }) => {
+                cmd_db_sagas_list_unwound(&datastore, self.fetch_limit).await
+            }
+            DbCommands::Sagas(SagaArgs { command: SagaCommands::Failing }) => {
+                cmd_db_sagas_list_failing(&datastore, self.fetch_limit).await
+            }
+            DbCommands::Sagas(SagaArgs {
+                command: SagaCommands::Overlapping(saga_overlapping_args),
+            }) => {
+                cmd_db_sagas_list_overlapping(
+                    &datastore,
+                    self.fetch_limit,
+                    saga_overlapping_args,
+                )
+                .await
+            }
+            DbCommands::Sagas(SagaArgs {
+                command: SagaCommands::Interleave(saga_interleave_args),
+            }) => {
+                cmd_db_sagas_list_interleave(
+                    &datastore,
+                    self.fetch_limit,
+                    saga_interleave_args,
+                )
+                .await
+            }
+            DbCommands::Regions(RegionArgs {
+                command: RegionCommands::List(region_list_args),
+            }) => {
+                cmd_db_regions_list(
+                    &datastore,
+                    self.fetch_limit,
+                    region_list_args,
+                )
+                .await
+            }
+            DbCommands::Regions(RegionArgs {
+                command: RegionCommands::UsedBy(region_used_by_args),
+            }) => {
+                cmd_db_regions_used_by(
+                    &datastore,
+                    self.fetch_limit,
+                    region_used_by_args,
+                )
+                .await
             }
         }
     }
@@ -1345,6 +1504,991 @@ async fn cmd_db_eips(
     rows.sort_by(|a, b| a.ip.cmp(&b.ip));
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())
+        .to_string();
+
+    println!("{}", table);
+
+    Ok(())
+}
+
+// Copy some types from Steno, because steno uses pub(crate) everywhere. We
+// don't want to change Steno to make the internals public, but these types
+// should be fairly stable.
+
+#[derive(Serialize, Deserialize)]
+struct StenoDag {
+    pub saga_name: String,
+    pub graph: Graph<StenoNode, ()>,
+    pub start_node: NodeIndex,
+    pub end_node: NodeIndex,
+}
+
+impl StenoDag {
+    pub fn get(&self, node_index: NodeIndex) -> Option<&StenoNode> {
+        self.graph.node_weight(node_index)
+    }
+
+    pub fn get_from_saga_node_id(
+        &self,
+        saga_node_id: &nexus_db_model::saga_types::SagaNodeId,
+    ) -> Option<&StenoNode> {
+        self.get(u32::from(saga_node_id.0).into())
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+enum StenoNode {
+    Start { params: Arc<serde_json::Value> },
+    End,
+    Action { name: String, label: String, action_name: String },
+    Constant { name: String, value: Arc<serde_json::Value> },
+    SubsagaStart { saga_name: String, params_node_name: String },
+    SubsagaEnd { name: String },
+}
+
+fn print_sagas(sagas: Vec<Saga>, with_start_params: bool) {
+    if with_start_params {
+        // Using Tabled isn't recommended: the data column could be huge, and Tabled
+        // will print spaces in order to make each column the same size
+
+        struct SagaRow {
+            id: Uuid,
+            time_created: chrono::DateTime<chrono::Utc>,
+            name: String,
+            state: String,
+            start_params: String,
+        }
+
+        let rows: Vec<_> = sagas
+            .into_iter()
+            .map(|saga: Saga| SagaRow {
+                id: saga.id.0.into(),
+                time_created: saga.time_created,
+                name: saga.name,
+                state: format!("{:?}", saga.saga_state),
+                start_params: {
+                    let dag: StenoDag =
+                        serde_json::from_value(saga.saga_dag).unwrap();
+
+                    let start_node: &StenoNode =
+                        dag.get(dag.start_node).unwrap();
+                    match start_node {
+                        StenoNode::Start { params } => {
+                            serde_json::to_string(params).unwrap()
+                        }
+
+                        _ => {
+                            panic!("start node wasn't start node!");
+                        }
+                    }
+                },
+            })
+            .collect();
+
+        let row_char_counts: Vec<_> = rows
+            .iter()
+            .map(|x| {
+                (
+                    format!("{}", x.id).chars().count(),
+                    format!("{}", x.time_created).chars().count(),
+                    x.name.chars().count(),
+                    x.state.chars().count(),
+                    x.start_params.chars().count(),
+                )
+            })
+            .collect();
+
+        let (width0, width1, width2, width3): (usize, usize, usize, usize) = (
+            std::cmp::max(
+                row_char_counts.iter().map(|x| x.0).max().unwrap(),
+                "saga id".len(),
+            ),
+            std::cmp::max(
+                row_char_counts.iter().map(|x| x.1).max().unwrap(),
+                "time created".len(),
+            ),
+            std::cmp::max(
+                row_char_counts.iter().map(|x| x.2).max().unwrap(),
+                "name".len(),
+            ),
+            std::cmp::max(
+                row_char_counts.iter().map(|x| x.3).max().unwrap(),
+                "state".len(),
+            ),
+        );
+
+        println!(
+            "{:>width0$} | {:width1$} | {:width2$} | {:width3$} | {}",
+            String::from("saga id"),
+            String::from("time created"),
+            String::from("name"),
+            String::from("state"),
+            String::from("start params"),
+        );
+
+        println!(
+            "{:>width0$} | {:width1$} | {:width2$} | {:width3$} | {}",
+            (0..width0).map(|_| "-").collect::<String>(),
+            (0..width1).map(|_| "-").collect::<String>(),
+            (0..width2).map(|_| "-").collect::<String>(),
+            (0..width3).map(|_| "-").collect::<String>(),
+            String::from("-------------"),
+        );
+
+        for row in rows {
+            println!(
+                "{:>width0$} | {:width1$} | {:width2$} | {:width3$} | {}",
+                row.id, row.time_created, row.name, row.state, row.start_params,
+            );
+        }
+    } else {
+        #[derive(Tabled)]
+        struct SagaRow {
+            id: Uuid,
+            time_created: chrono::DateTime<chrono::Utc>,
+            name: String,
+            state: String,
+        }
+
+        let rows: Vec<_> = sagas
+            .into_iter()
+            .map(|saga: Saga| SagaRow {
+                id: saga.id.0.into(),
+                time_created: saga.time_created,
+                name: saga.name,
+                state: format!("{:?}", saga.saga_state),
+            })
+            .collect();
+
+        let table = tabled::Table::new(rows)
+            .with(tabled::settings::Style::psql())
+            .to_string();
+
+        println!("{}", table);
+    }
+}
+
+/// Print a table showing saga nodes. If a Saga object is supplied as the first
+/// argument, then look up the saga node's name and use that for output instead
+/// of a node id.
+fn print_saga_nodes(saga: Option<Saga>, saga_nodes: Vec<SagaNodeEvent>) {
+    let dag: Option<StenoDag> = saga.as_ref().map(|saga: &Saga| {
+        serde_json::from_value(saga.saga_dag.clone()).unwrap()
+    });
+
+    if let Some(saga) = saga {
+        let dag = saga.saga_dag.clone();
+
+        print_sagas(vec![saga], true);
+        println!();
+
+        println!("DAG: {}", dag);
+        println!();
+    }
+
+    struct SagaNodeRow {
+        saga_id: Uuid,
+        event_time: chrono::DateTime<chrono::Utc>,
+        node_id: String,
+        event_type: String,
+        data: String,
+    }
+
+    let rows: Vec<_> = saga_nodes
+        .into_iter()
+        .map(|saga_node: SagaNodeEvent| SagaNodeRow {
+            saga_id: saga_node.saga_id.0.into(),
+            event_time: saga_node.event_time,
+            node_id: if let Some(dag) = &dag {
+                format!(
+                    "{:3}: {}",
+                    saga_node.node_id.0,
+                    match dag.get_from_saga_node_id(&saga_node.node_id).unwrap()
+                    {
+                        StenoNode::Start { .. } => String::from("start"),
+                        StenoNode::End => String::from("end"),
+                        StenoNode::Action { action_name, .. } =>
+                            action_name.clone(),
+                        StenoNode::Constant { name, .. } => name.clone(),
+                        StenoNode::SubsagaStart { saga_name, .. } =>
+                            format!("subsaga start {}", saga_name),
+                        StenoNode::SubsagaEnd { name } =>
+                            format!("subsaga end {}", name),
+                    },
+                )
+            } else {
+                format!("{}", saga_node.node_id.0)
+            },
+            event_type: saga_node.event_type,
+            data: saga_node
+                .data
+                .map(|x| match x {
+                    serde_json::Value::Null => String::from(""),
+                    _ => serde_json::to_string(&x).unwrap(),
+                })
+                .unwrap_or(String::from("")),
+        })
+        .collect();
+
+    // Using Tabled isn't recommended: the data column could be huge, and Tabled
+    // will print spaces in order to make each column the same size
+
+    let row_char_counts: Vec<_> = rows
+        .iter()
+        .map(|x| {
+            (
+                format!("{}", x.saga_id).chars().count(),
+                format!("{}", x.event_time).chars().count(),
+                x.node_id.chars().count(),
+                x.event_type.chars().count(),
+                x.data.chars().count(),
+            )
+        })
+        .collect();
+
+    let (width0, width1, width2, width3): (usize, usize, usize, usize) = (
+        row_char_counts.iter().map(|x| x.0).max().unwrap(),
+        row_char_counts.iter().map(|x| x.1).max().unwrap(),
+        std::cmp::max(
+            row_char_counts.iter().map(|x| x.2).max().unwrap(),
+            "node id".len(),
+        ),
+        std::cmp::max(
+            row_char_counts.iter().map(|x| x.3).max().unwrap(),
+            "event type".len(),
+        ),
+    );
+
+    println!(
+        "{:>width0$} | {:width1$} | {:width2$} | {:width3$} | {}",
+        String::from("saga id"),
+        String::from("event time"),
+        String::from("node id"),
+        String::from("event type"),
+        String::from("data"),
+    );
+
+    println!(
+        "{:>width0$} | {:width1$} | {:width2$} | {:width3$} | {}",
+        (0..width0).map(|_| "-").collect::<String>(),
+        (0..width1).map(|_| "-").collect::<String>(),
+        (0..width2).map(|_| "-").collect::<String>(),
+        (0..width3).map(|_| "-").collect::<String>(),
+        String::from("---"),
+    );
+
+    for row in rows {
+        println!(
+            "{:>width0$} | {:width1$} | {:width2$} | {:width3$} | {}",
+            row.saga_id, row.event_time, row.node_id, row.event_type, row.data,
+        );
+    }
+}
+
+/// List all sagas
+async fn cmd_db_sagas_list(
+    datastore: &DataStore,
+    limit: NonZeroU32,
+    args: &SagaListArgs,
+) -> Result<(), anyhow::Error> {
+    let sagas = datastore
+        .pool_connection_for_tests()
+        .await?
+        .transaction_async(|conn| async move {
+            use db::schema::saga::dsl;
+
+            // Sorting by time_created requires a full table scan with the
+            // current index definitions.
+            conn.batch_execute_async(
+                nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL,
+            )
+            .await?;
+
+            db::paginated(
+                dsl::saga,
+                dsl::time_created,
+                &first_page::<dsl::time_created>(limit),
+            )
+            .load_async(&conn)
+            .await
+        })
+        .await?;
+
+    check_limit(&sagas, limit, || String::from("listing sagas"));
+
+    print_sagas(sagas, args.show_params);
+
+    Ok(())
+}
+
+/// List all stuck sagas
+async fn cmd_db_sagas_list_stuck(
+    datastore: &DataStore,
+    limit: NonZeroU32,
+) -> Result<(), anyhow::Error> {
+    let sagas = datastore
+        .pool_connection_for_tests()
+        .await?
+        .transaction_async(|conn| async move {
+            use db::schema::saga_node_event::dsl;
+
+            // Sorting by time_created requires a full table scan with the
+            // current index definitions.
+            conn.batch_execute_async(
+                nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL,
+            )
+            .await?;
+
+            let stuck_sagas: Vec<SagaId> = db::paginated(
+                dsl::saga_node_event,
+                dsl::event_time,
+                &first_page::<dsl::event_time>(limit),
+            )
+            .filter(dsl::event_type.eq(String::from("undo_failed")))
+            .select(dsl::saga_id)
+            .order_by(dsl::event_time)
+            .load_async(&conn)
+            .await?;
+
+            use db::schema::saga::dsl as saga_dsl;
+
+            db::paginated(
+                saga_dsl::saga,
+                saga_dsl::time_created,
+                &first_page::<saga_dsl::time_created>(limit),
+            )
+            .filter(saga_dsl::id.eq_any(stuck_sagas))
+            .load_async(&conn)
+            .await
+        })
+        .await?;
+
+    check_limit(&sagas, limit, || String::from("listing stuck sagas"));
+
+    print_sagas(sagas, false);
+
+    Ok(())
+}
+
+async fn get_saga(
+    datastore: &DataStore,
+    saga_id: Uuid,
+) -> Result<Saga, anyhow::Error> {
+    use db::schema::saga::dsl;
+
+    let saga = dsl::saga
+        .filter(dsl::id.eq(saga_id))
+        .first_async(&*datastore.pool_connection_for_tests().await?)
+        .await?;
+
+    Ok(saga)
+}
+
+/// Show the execution of a saga
+async fn cmd_db_sagas_show(
+    datastore: &DataStore,
+    limit: NonZeroU32,
+    args: &SagaShowArgs,
+) -> Result<(), anyhow::Error> {
+    use db::schema::saga_node_event::dsl;
+
+    let saga_nodes = db::paginated(
+        dsl::saga_node_event,
+        dsl::event_time,
+        &first_page::<dsl::event_time>(limit),
+    )
+    .filter(dsl::saga_id.eq(args.saga_id))
+    .order_by(dsl::event_time)
+    .load_async(&*datastore.pool_connection_for_tests().await?)
+    .await?;
+
+    print_saga_nodes(
+        Some(get_saga(datastore, args.saga_id).await?),
+        saga_nodes,
+    );
+
+    Ok(())
+}
+
+/// List all sagas that unwound sucessfully
+async fn cmd_db_sagas_list_unwound(
+    datastore: &DataStore,
+    limit: NonZeroU32,
+) -> Result<(), anyhow::Error> {
+    let sagas = datastore
+        .pool_connection_for_tests()
+        .await?
+        .transaction_async(|conn| async move {
+            use db::schema::saga_node_event::dsl;
+
+            // Sorting by time_created requires a full table scan with the
+            // current index definitions.
+            conn.batch_execute_async(
+                nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL,
+            )
+            .await?;
+
+            let undo_failed_sagas: HashSet<SagaId> = db::paginated(
+                dsl::saga_node_event,
+                dsl::event_time,
+                &first_page::<dsl::event_time>(limit),
+            )
+            .filter(dsl::event_type.eq(String::from("undo_failed")))
+            .select(dsl::saga_id)
+            .order_by(dsl::event_time)
+            .load_async(&conn)
+            .await?
+            .into_iter()
+            .collect();
+
+            let undo_started_sagas: HashSet<SagaId> = db::paginated(
+                dsl::saga_node_event,
+                dsl::event_time,
+                &first_page::<dsl::event_time>(limit),
+            )
+            .filter(dsl::event_type.eq(String::from("undo_started")))
+            .select(dsl::saga_id)
+            .order_by(dsl::event_time)
+            .load_async(&conn)
+            .await?
+            .into_iter()
+            .collect();
+
+            // A saga successfully unwound if it started unwinding and didn't
+            // fail for any of the nodes.
+            let sagas: Vec<_> = undo_started_sagas
+                .difference(&undo_failed_sagas)
+                .cloned()
+                .collect();
+
+            use db::schema::saga::dsl as saga_dsl;
+
+            db::paginated(
+                saga_dsl::saga,
+                saga_dsl::time_created,
+                &first_page::<saga_dsl::time_created>(limit),
+            )
+            .filter(saga_dsl::id.eq_any(sagas))
+            .load_async(&conn)
+            .await
+        })
+        .await?;
+
+    check_limit(&sagas, limit, || {
+        String::from("listing sagas that successfully unwound")
+    });
+
+    print_sagas(sagas, false);
+
+    Ok(())
+}
+
+/// Show any failing nodes
+async fn cmd_db_sagas_list_failing(
+    datastore: &DataStore,
+    limit: NonZeroU32,
+) -> Result<(), anyhow::Error> {
+    let saga_nodes = datastore
+        .pool_connection_for_tests()
+        .await?
+        .transaction_async(|conn| async move {
+            use db::schema::saga_node_event::dsl;
+
+            // Sorting by event_time without selecting by id requires a full
+            // table scan with the current index definitions.
+            conn.batch_execute_async(
+                nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL,
+            )
+            .await?;
+
+            db::paginated(
+                dsl::saga_node_event,
+                dsl::event_time,
+                &first_page::<dsl::event_time>(limit),
+            )
+            .filter(dsl::event_type.eq(String::from("failed")))
+            .order_by(dsl::event_time)
+            .load_async(&conn)
+            .await
+        })
+        .await?;
+
+    check_limit(&saga_nodes, limit, || {
+        String::from("listing failing saga nodes")
+    });
+
+    print_saga_nodes(None, saga_nodes);
+
+    Ok(())
+}
+
+/// List any sagas which overlap execution with this one
+async fn cmd_db_sagas_list_overlapping(
+    datastore: &DataStore,
+    limit: NonZeroU32,
+    args: &SagaOverlappingArgs,
+) -> Result<(), anyhow::Error> {
+    // First, get the saga nodes for this saga
+    let saga_nodes: Vec<SagaNodeEvent> = {
+        use db::schema::saga_node_event::dsl;
+
+        let saga_nodes = db::paginated(
+            dsl::saga_node_event,
+            dsl::event_time,
+            &first_page::<dsl::event_time>(limit),
+        )
+        .filter(dsl::saga_id.eq(args.saga_id))
+        .order_by(dsl::event_time)
+        .load_async(&*datastore.pool_connection_for_tests().await?)
+        .await?;
+
+        check_limit(&saga_nodes, limit, || String::from("listing saga nodes"));
+
+        saga_nodes
+    };
+
+    // Then, find each saga whose saga nodes lie between the start and end nodes
+    // for this saga. Remember to remove this saga from the list.
+    let start = saga_nodes[0].event_time;
+    let end = saga_nodes[saga_nodes.len() - 1].event_time;
+
+    let sagas: Vec<Saga> = datastore
+        .pool_connection_for_tests()
+        .await?
+        .transaction_async(|conn| async move {
+            use db::schema::saga_node_event::dsl;
+
+            // Sorting by time_created requires a full table scan with the
+            // current index definitions.
+            conn.batch_execute_async(
+                nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL,
+            )
+            .await?;
+
+            let saga_ids: Vec<SagaId> = db::paginated(
+                dsl::saga_node_event,
+                dsl::saga_id,
+                &first_page::<dsl::saga_id>(limit),
+            )
+            .filter(dsl::event_time.le(end).and(dsl::event_time.ge(start)))
+            .select(dsl::saga_id)
+            .load_async(&conn)
+            .await?;
+
+            use db::schema::saga::dsl as saga_dsl;
+
+            db::paginated(
+                saga_dsl::saga,
+                saga_dsl::time_created,
+                &first_page::<saga_dsl::time_created>(limit),
+            )
+            .filter(saga_dsl::id.eq_any(saga_ids))
+            .load_async(&conn)
+            .await
+        })
+        .await?;
+
+    check_limit(&sagas, limit, || String::from("listing overlapping sagas"));
+
+    if args.id_only {
+        for saga in sagas {
+            println!("{}", saga.id.0 .0);
+        }
+    } else {
+        print_sagas(sagas, false);
+    }
+
+    Ok(())
+}
+
+/// Show multiple saga executions along a timeline
+async fn cmd_db_sagas_list_interleave(
+    datastore: &DataStore,
+    limit: NonZeroU32,
+    args: &SagaInterleaveArgs,
+) -> Result<(), anyhow::Error> {
+    // Print the sagas first
+    let sagas = datastore
+        .pool_connection_for_tests()
+        .await?
+        .transaction_async(|conn| async move {
+            use db::schema::saga::dsl;
+
+            db::paginated(dsl::saga, dsl::id, &first_page::<dsl::id>(limit))
+                .filter(dsl::id.eq_any(args.saga_id.clone()))
+                .load_async(&conn)
+                .await
+        })
+        .await?;
+
+    check_limit(&sagas, limit, || String::from("listing sagas"));
+
+    // When listing interleaved sagas, we want to know if there are sagas with
+    // duplicate start params.
+    print_sagas(sagas, true);
+    println!();
+
+    // First, get all the saga nodes for each saga
+    use db::schema::saga_node_event::dsl;
+
+    let saga_nodes: Vec<SagaNodeEvent> = db::paginated(
+        dsl::saga_node_event,
+        dsl::event_time,
+        &first_page::<dsl::event_time>(limit),
+    )
+    .filter(dsl::saga_id.eq_any(args.saga_id.clone()))
+    .order_by(dsl::event_time)
+    .load_async(&*datastore.pool_connection_for_tests().await?)
+    .await?;
+
+    check_limit(&saga_nodes, limit, || String::from("listing saga nodes"));
+
+    let mut rows: Vec<Vec<String>> = Vec::with_capacity(saga_nodes.len());
+    let saga_id_to_column: BTreeMap<Uuid, usize> = args
+        .saga_id
+        .iter()
+        .cloned()
+        .enumerate()
+        .map(|(i, id)| (id, i))
+        .collect();
+
+    {
+        let mut title_row: Vec<String> =
+            Vec::with_capacity(args.saga_id.len() + 1);
+        title_row.resize(args.saga_id.len() + 1, String::from(""));
+
+        title_row[0] = String::from("event time");
+
+        for saga_id in &args.saga_id {
+            let col = saga_id_to_column[&saga_id] + 1;
+
+            // Print which column maps to a saga
+            println!("saga {} = {}", col - 1, saga_id);
+
+            title_row[col] = format!("{}", col - 1);
+        }
+        println!();
+
+        rows.push(title_row);
+
+        let mut divider_row: Vec<String> =
+            Vec::with_capacity(args.saga_id.len() + 1);
+        divider_row.resize(args.saga_id.len() + 1, String::from(""));
+
+        for i in 0..divider_row.len() {
+            divider_row[i] = String::from("---");
+        }
+
+        rows.push(divider_row);
+    }
+
+    let mut executing: Vec<bool> = Vec::with_capacity(args.saga_id.len());
+    executing.resize(args.saga_id.len(), false);
+
+    for saga_node in saga_nodes {
+        let mut row: Vec<String> = Vec::with_capacity(args.saga_id.len() + 1);
+        row.resize(args.saga_id.len() + 1, String::from(""));
+
+        row[0] = saga_node.event_time.to_string();
+
+        let this_sagas_col = saga_id_to_column[&saga_node.saga_id.0 .0];
+
+        // draw block if node is executing
+        for col in 0..args.saga_id.len() {
+            if col == this_sagas_col {
+                row[col + 1] =
+                    format!("{} {}", saga_node.node_id.0, saga_node.event_type);
+            } else {
+                if executing[col] {
+                    row[col + 1] = String::from("▒");
+                }
+            }
+        }
+
+        let currently_executing = match saga_node.event_type.as_str() {
+            "started" => true,
+            "succeeded" => false,
+
+            "failed" => false,
+            "undo_started" => true,
+            "undo_finished" => false,
+
+            _ => panic!("unknown event type {}", saga_node.event_type),
+        };
+
+        executing[this_sagas_col] = currently_executing;
+
+        rows.push(row);
+    }
+
+    let col_char_max: Vec<usize> = {
+        let row_col_char_counts: Vec<Vec<usize>> = rows
+            .iter()
+            .map(|x: &Vec<String>| {
+                x.iter().map(|y: &String| y.chars().count()).collect()
+            })
+            .collect();
+
+        let mut col_char_max: Vec<usize> = vec![0; args.saga_id.len() + 1];
+
+        for row in row_col_char_counts {
+            for (i, col) in row.iter().enumerate() {
+                col_char_max[i] = std::cmp::max(col_char_max[i], *col);
+            }
+        }
+
+        col_char_max
+    };
+
+    for row in rows {
+        for (width, col) in std::iter::zip(col_char_max.iter(), row) {
+            print!("{:>width$} |", col);
+        }
+        println!();
+    }
+
+    Ok(())
+}
+
+// Regions
+
+/// List all regions
+async fn cmd_db_regions_list(
+    datastore: &DataStore,
+    limit: NonZeroU32,
+    args: &RegionListArgs,
+) -> Result<(), anyhow::Error> {
+    use db::schema::region::dsl;
+
+    let regions: Vec<Region> =
+        db::paginated(dsl::region, dsl::id, &first_page::<dsl::id>(limit))
+            .select(Region::as_select())
+            .load_async(&*datastore.pool_connection_for_tests().await?)
+            .await?;
+
+    check_limit(&regions, limit, || String::from("listing regions"));
+
+    if args.id_only {
+        for region in regions {
+            println!("{}", region.id());
+        }
+    } else {
+        #[derive(Tabled)]
+        struct RegionRow {
+            id: Uuid,
+            dataset_id: Uuid,
+            volume_id: Uuid,
+            block_size: i64,
+            blocks_per_extent: u64,
+            extent_count: u64,
+        }
+
+        let rows: Vec<_> = regions
+            .into_iter()
+            .map(|region: Region| RegionRow {
+                id: region.id(),
+                dataset_id: region.dataset_id(),
+                volume_id: region.volume_id(),
+                block_size: region.block_size().into(),
+                blocks_per_extent: region.blocks_per_extent(),
+                extent_count: region.extent_count(),
+            })
+            .collect();
+
+        let table = tabled::Table::new(rows)
+            .with(tabled::settings::Style::psql())
+            .to_string();
+
+        println!("{}", table);
+    }
+
+    Ok(())
+}
+
+/// Find what is using a region
+async fn cmd_db_regions_used_by(
+    datastore: &DataStore,
+    limit: NonZeroU32,
+    args: &RegionUsedByArgs,
+) -> Result<(), anyhow::Error> {
+    use db::schema::region::dsl;
+
+    let regions: Vec<Region> =
+        db::paginated(dsl::region, dsl::id, &first_page::<dsl::id>(limit))
+            .filter(dsl::id.eq_any(args.region_id.clone()))
+            .select(Region::as_select())
+            .load_async(&*datastore.pool_connection_for_tests().await?)
+            .await?;
+
+    check_limit(&regions, limit, || String::from("listing regions"));
+
+    let volumes: Vec<Uuid> = regions.iter().map(|x| x.volume_id()).collect();
+
+    let disks_used: Vec<Disk> = {
+        let volumes = volumes.clone();
+        datastore
+            .pool_connection_for_tests()
+            .await?
+            .transaction_async(|conn| async move {
+                use db::schema::disk::dsl;
+
+                conn.batch_execute_async(
+                    nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL,
+                )
+                .await?;
+
+                db::paginated(dsl::disk, dsl::id, &first_page::<dsl::id>(limit))
+                    .filter(dsl::volume_id.eq_any(volumes))
+                    .select(Disk::as_select())
+                    .load_async(&conn)
+                    .await
+            })
+            .await?
+    };
+
+    check_limit(&disks_used, limit, || String::from("listing disks used"));
+
+    let snapshots_used: Vec<Snapshot> = {
+        let volumes = volumes.clone();
+        datastore
+            .pool_connection_for_tests()
+            .await?
+            .transaction_async(|conn| async move {
+                use db::schema::snapshot::dsl;
+
+                conn.batch_execute_async(
+                    nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL,
+                )
+                .await?;
+
+                db::paginated(
+                    dsl::snapshot,
+                    dsl::id,
+                    &first_page::<dsl::id>(limit),
+                )
+                .filter(
+                    dsl::volume_id
+                        .eq_any(volumes.clone())
+                        .or(dsl::destination_volume_id.eq_any(volumes.clone())),
+                )
+                .select(Snapshot::as_select())
+                .load_async(&conn)
+                .await
+            })
+            .await?
+    };
+
+    check_limit(&snapshots_used, limit, || {
+        String::from("listing snapshots used")
+    });
+
+    let images_used: Vec<Image> = {
+        let volumes = volumes.clone();
+        datastore
+            .pool_connection_for_tests()
+            .await?
+            .transaction_async(|conn| async move {
+                use db::schema::image::dsl;
+
+                conn.batch_execute_async(
+                    nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL,
+                )
+                .await?;
+
+                db::paginated(
+                    dsl::image,
+                    dsl::id,
+                    &first_page::<dsl::id>(limit),
+                )
+                .filter(dsl::volume_id.eq_any(volumes))
+                .select(Image::as_select())
+                .load_async(&conn)
+                .await
+            })
+            .await?
+    };
+
+    check_limit(&images_used, limit, || String::from("listing images used"));
+
+    #[derive(Tabled)]
+    struct RegionRow {
+        id: Uuid,
+        volume_id: Uuid,
+        usage_type: String,
+        usage_id: String,
+        usage_name: String,
+        deleted: bool,
+    }
+
+    let rows: Vec<_> = regions
+        .into_iter()
+        .map(|region: Region| {
+            if let Some(image) =
+                images_used.iter().find(|x| x.volume_id == region.volume_id())
+            {
+                RegionRow {
+                    id: region.id(),
+                    volume_id: region.volume_id(),
+
+                    usage_type: String::from("image"),
+                    usage_id: image.id().to_string(),
+                    usage_name: image.name().to_string(),
+                    deleted: image.time_deleted().is_some(),
+                }
+            } else if let Some(snapshot) = snapshots_used
+                .iter()
+                .find(|x| x.volume_id == region.volume_id())
+            {
+                RegionRow {
+                    id: region.id(),
+                    volume_id: region.volume_id(),
+
+                    usage_type: String::from("snapshot"),
+                    usage_id: snapshot.id().to_string(),
+                    usage_name: snapshot.name().to_string(),
+                    deleted: snapshot.time_deleted().is_some(),
+                }
+            } else if let Some(snapshot) = snapshots_used
+                .iter()
+                .find(|x| x.destination_volume_id == region.volume_id())
+            {
+                RegionRow {
+                    id: region.id(),
+                    volume_id: region.volume_id(),
+
+                    usage_type: String::from("snapshot dest"),
+                    usage_id: snapshot.id().to_string(),
+                    usage_name: snapshot.name().to_string(),
+                    deleted: snapshot.time_deleted().is_some(),
+                }
+            } else if let Some(disk) =
+                disks_used.iter().find(|x| x.volume_id == region.volume_id())
+            {
+                RegionRow {
+                    id: region.id(),
+                    volume_id: region.volume_id(),
+
+                    usage_type: String::from("disk"),
+                    usage_id: disk.id().to_string(),
+                    usage_name: disk.name().to_string(),
+                    deleted: disk.time_deleted().is_some(),
+                }
+            } else {
+                RegionRow {
+                    id: region.id(),
+                    volume_id: region.volume_id(),
+
+                    usage_type: String::from("unknown!"),
+                    usage_id: String::from(""),
+                    usage_name: String::from(""),
+                    deleted: false,
+                }
+            }
+        })
+        .collect();
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::psql())
         .to_string();
 
     println!("{}", table);

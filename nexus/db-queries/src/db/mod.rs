@@ -47,3 +47,4 @@ pub use saga_types::SecId;
 pub use sec_store::CockroachDbSecStore;
 
 pub use nexus_types::identity;
+pub use pagination::paginated;
