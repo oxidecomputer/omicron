@@ -66,10 +66,6 @@ pub struct VmmRuntimeState {
     pub state: InstanceState,
     /// The generation number for this VMM's state.
     pub gen: Generation,
-    /// The sled where this VMM is running.
-    pub sled_id: Uuid,
-    /// The IP of this VMM's Propolis server.
-    pub propolis_addr: SocketAddr,
     /// Timestamp for the VMM's state.
     pub time_updated: DateTime<Utc>,
 }

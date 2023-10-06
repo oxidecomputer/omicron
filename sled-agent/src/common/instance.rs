@@ -525,14 +525,11 @@ impl InstanceStates {
 
 #[cfg(test)]
 mod test {
-    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-
     use super::*;
 
     use crate::params::InstanceMigrationSourceParams;
 
     use chrono::Utc;
-    use omicron_common::address::PROPOLIS_PORT;
     use omicron_common::api::external::Generation;
     use omicron_common::api::internal::nexus::InstanceRuntimeState;
     use propolis_client::api::InstanceState as Observed;
@@ -553,11 +550,6 @@ mod test {
         let vmm = VmmRuntimeState {
             state: ApiInstanceState::Starting,
             gen: Generation::new(),
-            sled_id: Uuid::new_v4(),
-            propolis_addr: SocketAddr::new(
-                IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)),
-                PROPOLIS_PORT,
-            ),
             time_updated: now,
         };
 

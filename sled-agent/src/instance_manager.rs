@@ -25,6 +25,7 @@ use omicron_common::api::internal::nexus::SledInstanceState;
 use omicron_common::api::internal::nexus::VmmRuntimeState;
 use slog::Logger;
 use std::collections::BTreeMap;
+use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
@@ -182,6 +183,7 @@ impl InstanceManager {
         hardware: InstanceHardware,
         instance_runtime: InstanceRuntimeState,
         vmm_runtime: VmmRuntimeState,
+        propolis_addr: SocketAddr,
     ) -> Result<SledInstanceState, Error> {
         info!(
             &self.inner.log,
@@ -191,6 +193,7 @@ impl InstanceManager {
             "hardware" => ?hardware,
             "instance_runtime" => ?instance_runtime,
             "vmm_runtime" => ?vmm_runtime,
+            "propolis_addr" => ?propolis_addr,
         );
 
         let instance = {
@@ -235,6 +238,7 @@ impl InstanceManager {
                     hardware,
                     instance_runtime,
                     vmm_runtime,
+                    propolis_addr,
                 };
 
                 let instance = Instance::new(

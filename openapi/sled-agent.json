@@ -1663,6 +1663,10 @@
               }
             ]
           },
+          "propolis_addr": {
+            "description": "The address at which this VMM should serve a Propolis server API.",
+            "type": "string"
+          },
           "propolis_id": {
             "description": "The ID of the VMM being registered. This may not be the active VMM ID in the instance runtime state (e.g. if the new VMM is going to be a migration target).",
             "type": "string",
@@ -1680,6 +1684,7 @@
         "required": [
           "hardware",
           "instance_runtime",
+          "propolis_addr",
           "propolis_id",
           "vmm_runtime"
         ]
@@ -2880,15 +2885,6 @@
               }
             ]
           },
-          "propolis_addr": {
-            "description": "The IP of this VMM's Propolis server.",
-            "type": "string"
-          },
-          "sled_id": {
-            "description": "The sled where this VMM is running.",
-            "type": "string",
-            "format": "uuid"
-          },
           "state": {
             "description": "The last state reported by this VMM.",
             "allOf": [
@@ -2905,8 +2901,6 @@
         },
         "required": [
           "gen",
-          "propolis_addr",
-          "sled_id",
           "state",
           "time_updated"
         ]

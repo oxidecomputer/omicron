@@ -104,8 +104,6 @@ impl From<omicron_common::api::internal::nexus::VmmRuntimeState>
     fn from(s: omicron_common::api::internal::nexus::VmmRuntimeState) -> Self {
         Self {
             gen: s.gen.into(),
-            propolis_addr: s.propolis_addr.to_string(),
-            sled_id: s.sled_id,
             state: s.state.into(),
             time_updated: s.time_updated,
         }

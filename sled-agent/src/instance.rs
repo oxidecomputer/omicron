@@ -567,6 +567,7 @@ pub(crate) struct InstanceInitialState {
     pub hardware: InstanceHardware,
     pub instance_runtime: InstanceRuntimeState,
     pub vmm_runtime: VmmRuntimeState,
+    pub propolis_addr: SocketAddr,
 }
 
 impl Instance {
@@ -594,8 +595,12 @@ impl Instance {
               "propolis_id" => %propolis_id,
               "state" => ?state);
 
-        let InstanceInitialState { hardware, instance_runtime, vmm_runtime } =
-            state;
+        let InstanceInitialState {
+            hardware,
+            instance_runtime,
+            vmm_runtime,
+            propolis_addr,
+        } = state;
 
         let InstanceManagerServices {
             nexus_client,
@@ -621,7 +626,7 @@ impl Instance {
                 vcpus: hardware.properties.ncpus.0 as u8,
             },
             propolis_id,
-            propolis_ip: vmm_runtime.propolis_addr.ip(),
+            propolis_ip: propolis_addr.ip(),
             vnic_allocator,
             port_manager,
             requested_nics: hardware.nics,

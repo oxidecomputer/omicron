@@ -12,12 +12,9 @@
 //! state updates to each other without sending parameters that are useless to
 //! sled agent or that sled agent will never update (like the sled ID).
 
-use std::net::SocketAddr;
-
 use super::{Generation, InstanceState};
 use crate::schema::vmm;
 use chrono::{DateTime, Utc};
-use omicron_common::address::PROPOLIS_PORT;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -133,9 +130,6 @@ impl From<Vmm> for sled_agent_client::types::VmmRuntimeState {
     fn from(s: Vmm) -> Self {
         Self {
             gen: s.runtime.gen.into(),
-            propolis_addr: SocketAddr::new(s.propolis_ip.ip(), PROPOLIS_PORT)
-                .to_string(),
-            sled_id: s.sled_id,
             state: s.runtime.state.into(),
             time_updated: s.runtime.time_state_updated,
         }

@@ -91,6 +91,9 @@ pub struct InstanceEnsureBody {
     /// the instance runtime state (e.g. if the new VMM is going to be a
     /// migration target).
     pub propolis_id: Uuid,
+
+    /// The address at which this VMM should serve a Propolis server API.
+    pub propolis_addr: SocketAddr,
 }
 
 /// The body of a request to move a previously-ensured instance into a specific

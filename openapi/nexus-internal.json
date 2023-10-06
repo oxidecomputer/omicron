@@ -5180,15 +5180,6 @@
               }
             ]
           },
-          "propolis_addr": {
-            "description": "The IP of this VMM's Propolis server.",
-            "type": "string"
-          },
-          "sled_id": {
-            "description": "The sled where this VMM is running.",
-            "type": "string",
-            "format": "uuid"
-          },
           "state": {
             "description": "The last state reported by this VMM.",
             "allOf": [
@@ -5205,8 +5196,6 @@
         },
         "required": [
           "gen",
-          "propolis_addr",
-          "sled_id",
           "state",
           "time_updated"
         ]

@@ -1003,6 +1003,11 @@ impl super::Nexus {
                     instance_runtime: db_instance.runtime().clone().into(),
                     vmm_runtime: initial_vmm.clone().into(),
                     propolis_id: *vmm_id,
+                    propolis_addr: SocketAddr::new(
+                        initial_vmm.propolis_ip.ip(),
+                        PROPOLIS_PORT,
+                    )
+                    .to_string(),
                 },
             )
             .await

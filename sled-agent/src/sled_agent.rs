@@ -51,7 +51,7 @@ use sled_hardware::underlay;
 use sled_hardware::HardwareManager;
 use slog::Logger;
 use std::collections::BTreeMap;
-use std::net::{Ipv6Addr, SocketAddrV6};
+use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -765,6 +765,7 @@ impl SledAgent {
         hardware: InstanceHardware,
         instance_runtime: InstanceRuntimeState,
         vmm_runtime: VmmRuntimeState,
+        propolis_addr: SocketAddr,
     ) -> Result<SledInstanceState, Error> {
         self.inner
             .instances
@@ -774,6 +775,7 @@ impl SledAgent {
                 hardware,
                 instance_runtime,
                 vmm_runtime,
+                propolis_addr,
             )
             .await
             .map_err(|e| Error::Instance(e))

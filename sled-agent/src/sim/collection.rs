@@ -400,8 +400,6 @@ impl<S: Simulatable + Clone + 'static> SimCollection<S> {
 
 #[cfg(test)]
 mod test {
-    use std::net::{Ipv4Addr, SocketAddrV4};
-
     use crate::params::{DiskStateRequested, InstanceStateRequested};
     use crate::sim::collection::SimObject;
     use crate::sim::disk::SimDisk;
@@ -437,11 +435,6 @@ mod test {
         let vmm_state = VmmRuntimeState {
             state: InstanceState::Starting,
             gen: Generation::new(),
-            sled_id: Uuid::new_v4(),
-            propolis_addr: std::net::SocketAddr::V4(SocketAddrV4::new(
-                Ipv4Addr::new(0, 0, 0, 0),
-                12400,
-            )),
             time_updated: Utc::now(),
         };
 

@@ -96,8 +96,6 @@ impl From<types::VmmRuntimeState>
         Self {
             state: s.state.into(),
             gen: s.gen.into(),
-            sled_id: s.sled_id,
-            propolis_addr: s.propolis_addr.parse().unwrap(),
             time_updated: s.time_updated,
         }
     }
