@@ -3372,13 +3372,13 @@ async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
         .fetch()
         .await
         .unwrap();
-    let vmm_id = db_instance
+    let propolis_id = db_instance
         .runtime()
         .propolis_id
         .expect("running instance should have vmm");
     let localhost = std::net::IpAddr::V6(std::net::Ipv6Addr::LOCALHOST);
     let updated_vmm = datastore
-        .vmm_overwrite_ip_for_test(&opctx, &vmm_id, localhost.into())
+        .vmm_overwrite_ip_for_test(&opctx, &propolis_id, localhost.into())
         .await
         .unwrap();
     assert_eq!(updated_vmm.propolis_ip.ip(), localhost);

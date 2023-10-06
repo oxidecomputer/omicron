@@ -78,7 +78,7 @@ pub struct SledInstanceState {
     pub instance_state: InstanceRuntimeState,
 
     /// The ID of the VMM whose state is being reported.
-    pub vmm_id: Uuid,
+    pub propolis_id: Uuid,
 
     /// The most recent state of the sled's VMM process.
     pub vmm_state: VmmRuntimeState,

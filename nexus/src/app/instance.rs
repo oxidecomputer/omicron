@@ -826,7 +826,7 @@ impl super::Nexus {
         opctx: &OpContext,
         authz_instance: &authz::Instance,
         db_instance: &db::model::Instance,
-        vmm_id: &Uuid,
+        propolis_id: &Uuid,
         initial_vmm: &db::model::Vmm,
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
@@ -1002,7 +1002,7 @@ impl super::Nexus {
                     hardware: instance_hardware,
                     instance_runtime: db_instance.runtime().clone().into(),
                     vmm_runtime: initial_vmm.clone().into(),
-                    propolis_id: *vmm_id,
+                    propolis_id: *propolis_id,
                     propolis_addr: SocketAddr::new(
                         initial_vmm.propolis_ip.ip(),
                         PROPOLIS_PORT,
@@ -1064,7 +1064,7 @@ impl super::Nexus {
                     .instance_and_vmm_update_runtime(
                         instance_id,
                         &new_state.instance_state.into(),
-                        &new_state.vmm_id,
+                        &new_state.propolis_id,
                         &new_state.vmm_state.into(),
                     )
                     .await;
@@ -1072,7 +1072,7 @@ impl super::Nexus {
                 slog::debug!(&self.log,
                              "Attempted DB update after instance PUT";
                              "instance_id" => %instance_id,
-                             "vmm_id" => %new_state.vmm_id,
+                             "propolis_id" => %new_state.propolis_id,
                              "result" => ?update_result);
 
                 update_result
@@ -1276,12 +1276,12 @@ impl super::Nexus {
         new_runtime_state: &nexus::SledInstanceState,
     ) -> Result<(), Error> {
         let log = &self.log;
-        let vmm_id = new_runtime_state.vmm_id;
+        let propolis_id = new_runtime_state.propolis_id;
 
         info!(log, "received new runtime state from sled agent";
               "instance_id" => %instance_id,
               "instance_state" => ?new_runtime_state.instance_state,
-              "propolis_id" => %vmm_id,
+              "propolis_id" => %propolis_id,
               "vmm_state" => ?new_runtime_state.vmm_state);
 
         // Update OPTE and Dendrite if the instance's active sled assignment
@@ -1322,7 +1322,7 @@ impl super::Nexus {
                 &db::model::InstanceRuntimeState::from(
                     new_runtime_state.instance_state.clone(),
                 ),
-                &vmm_id,
+                &propolis_id,
                 &db::model::VmmRuntimeState::from(
                     new_runtime_state.vmm_state.clone(),
                 ),
@@ -1332,24 +1332,28 @@ impl super::Nexus {
         // If the VMM is now in a terminal state, make sure its resources get
         // cleaned up.
         if let Ok((_, true)) = result {
-            let vmm_terminated = matches!(
+            let propolis_terminated = matches!(
                 new_runtime_state.vmm_state.state,
                 InstanceState::Destroyed | InstanceState::Failed
             );
 
-            if vmm_terminated {
+            if propolis_terminated {
                 info!(log, "vmm is terminated, cleaning up resources";
                       "instance_id" => %instance_id,
-                      "propolis_id" => %vmm_id);
+                      "propolis_id" => %propolis_id);
 
                 self.db_datastore
-                    .sled_reservation_delete(opctx, vmm_id)
+                    .sled_reservation_delete(opctx, propolis_id)
                     .await?;
 
-                if !self.db_datastore.vmm_mark_deleted(opctx, &vmm_id).await? {
+                if !self
+                    .db_datastore
+                    .vmm_mark_deleted(opctx, &propolis_id)
+                    .await?
+                {
                     warn!(log, "failed to mark vmm record as deleted";
                       "instance_id" => %instance_id,
-                      "propolis_id" => %vmm_id,
+                      "propolis_id" => %propolis_id,
                       "vmm_state" => ?new_runtime_state.vmm_state);
                 }
             }
@@ -1359,7 +1363,7 @@ impl super::Nexus {
             Ok((instance_updated, vmm_updated)) => {
                 info!(log, "instance and vmm updated by sled agent";
                       "instance_id" => %instance_id,
-                      "propolis_id" => %vmm_id,
+                      "propolis_id" => %propolis_id,
                       "instance_updated" => instance_updated,
                       "vmm_updated" => vmm_updated);
                 Ok(())
@@ -1372,7 +1376,7 @@ impl super::Nexus {
                 error!(log, "instance/vmm update unexpectedly returned \
                        an object not found error";
                        "instance_id" => %instance_id,
-                       "vmm_id" => %vmm_id);
+                       "propolis_id" => %propolis_id);
                 Ok(())
             }
 
@@ -1383,7 +1387,7 @@ impl super::Nexus {
             Err(error) => {
                 warn!(log, "failed to update instance from sled agent";
                       "instance_id" => %instance_id,
-                      "vmm_id" => %vmm_id,
+                      "propolis_id" => %propolis_id,
                       "error" => ?error);
                 Err(error)
             }

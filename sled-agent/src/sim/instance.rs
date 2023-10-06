@@ -431,7 +431,7 @@ impl Simulatable for SimInstance {
                 state: InstanceStates::new(
                     current.instance_state,
                     current.vmm_state,
-                    current.vmm_id,
+                    current.propolis_id,
                 ),
                 last_response: InstanceStateMonitorResponse {
                     gen: 1,

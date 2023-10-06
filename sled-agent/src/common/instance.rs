@@ -228,7 +228,7 @@ impl InstanceStates {
         SledInstanceState {
             instance_state: self.instance.clone(),
             vmm_state: self.vmm.clone(),
-            vmm_id: self.propolis_id,
+            propolis_id: self.propolis_id,
         }
     }
 

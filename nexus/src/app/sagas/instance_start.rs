@@ -453,7 +453,7 @@ async fn sis_ensure_registered(
     let instance_id = db_instance.id();
     let sled_id = sagactx.lookup::<Uuid>("sled_id")?;
     let vmm_record = sagactx.lookup::<db::model::Vmm>("vmm_record")?;
-    let vmm_id = sagactx.lookup::<Uuid>("propolis_id")?;
+    let propolis_id = sagactx.lookup::<Uuid>("propolis_id")?;
 
     info!(osagactx.log(), "start saga: ensuring instance is registered on sled";
           "instance_id" => %instance_id,
@@ -471,7 +471,7 @@ async fn sis_ensure_registered(
             &opctx,
             &authz_instance,
             &db_instance,
-            &vmm_id,
+            &propolis_id,
             &vmm_record,
         )
         .await

@@ -204,7 +204,7 @@ async fn sim_create_vmm_record(
 
     info!(osagactx.log(), "creating vmm record for migration destination";
           "instance_id" => %instance_id,
-          "vmm_id" => %propolis_id,
+          "propolis_id" => %propolis_id,
           "sled_id" => %sled_id);
 
     super::instance_common::create_and_insert_vmm_record(
@@ -231,7 +231,7 @@ async fn sim_destroy_vmm_record(
 
     let vmm = sagactx.lookup::<db::model::Vmm>("dst_vmm_record")?;
     info!(osagactx.log(), "destroying vmm record for migration unwind";
-          "vmm_id" => %vmm.id);
+          "propolis_id" => %vmm.id);
 
     super::instance_common::destroy_vmm_record(
         osagactx.datastore(),
@@ -260,7 +260,7 @@ async fn sim_set_migration_ids(
           "instance_id" => %db_instance.id(),
           "sled_id" => %src_sled_id,
           "migration_id" => %migration_id,
-          "dst_vmm_id" => %dst_propolis_id,
+          "dst_propolis_id" => %dst_propolis_id,
           "prev_runtime_state" => ?db_instance.runtime());
 
     let updated_record = osagactx
@@ -338,7 +338,7 @@ async fn sim_ensure_destination_propolis(
 
     info!(osagactx.log(), "ensuring migration destination vmm exists";
           "instance_id" => %db_instance.id(),
-          "dst_vmm_id" => %vmm.id,
+          "dst_propolis_id" => %vmm.id,
           "dst_vmm_state" => ?vmm);
 
     let (.., authz_instance) = LookupPath::new(&opctx, &osagactx.datastore())
@@ -438,7 +438,7 @@ async fn sim_instance_migrate(
     info!(osagactx.log(), "initiating migration from destination sled";
           "instance_id" => %db_instance.id(),
           "dst_vmm_record" => ?dst_vmm,
-          "src_vmm_id" => %src_propolis_id);
+          "src_propolis_id" => %src_propolis_id);
 
     // TODO-correctness: This needs to be retried if a transient error occurs to
     // avoid a problem like the following:

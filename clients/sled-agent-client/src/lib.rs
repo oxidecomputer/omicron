@@ -107,7 +107,7 @@ impl From<types::SledInstanceState>
     fn from(s: types::SledInstanceState) -> Self {
         Self {
             instance_state: s.instance_state.into(),
-            vmm_id: s.vmm_id,
+            propolis_id: s.propolis_id,
             vmm_state: s.vmm_state.into(),
         }
     }

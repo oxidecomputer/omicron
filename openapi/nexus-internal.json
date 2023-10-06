@@ -4965,7 +4965,7 @@
               }
             ]
           },
-          "vmm_id": {
+          "propolis_id": {
             "description": "The ID of the VMM whose state is being reported.",
             "type": "string",
             "format": "uuid"
@@ -4981,7 +4981,7 @@
         },
         "required": [
           "instance_state",
-          "vmm_id",
+          "propolis_id",
           "vmm_state"
         ]
       },

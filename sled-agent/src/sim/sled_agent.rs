@@ -307,7 +307,7 @@ impl SledAgent {
                 SledInstanceState {
                     instance_state: instance_runtime,
                     vmm_state: vmm_runtime,
-                    vmm_id: propolis_id,
+                    propolis_id,
                 },
                 None,
             )

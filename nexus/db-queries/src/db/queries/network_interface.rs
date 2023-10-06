@@ -1812,10 +1812,10 @@ mod tests {
     async fn instance_set_active_vmm(
         db_datastore: &DataStore,
         mut instance: Instance,
-        vmm_id: Option<Uuid>,
+        propolis_id: Option<Uuid>,
     ) -> Instance {
         let new_runtime = model::InstanceRuntimeState {
-            propolis_id: vmm_id,
+            propolis_id,
             gen: instance.runtime_state.gen.next().into(),
             ..instance.runtime_state.clone()
         };

@@ -441,7 +441,7 @@ mod test {
         let state = SledInstanceState {
             instance_state: instance_vmm,
             vmm_state,
-            vmm_id: propolis_id,
+            propolis_id,
         };
 
         SimObject::new_simulated_auto(&state, logctx.log.new(o!()))
