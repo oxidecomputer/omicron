@@ -70,6 +70,22 @@ pub struct HardwareMonitorHandle {
     tx: mpsc::Sender<HardwareMonitorMsg>,
 }
 
+impl HardwareMonitorHandle {
+    pub async fn service_manager_ready(&self, service_manager: ServiceManager) {
+        self.tx
+            .send(HardwareMonitorMsg::ServiceManagerCreated(service_manager))
+            .await
+            .unwrap();
+    }
+
+    pub async fn sled_agent_started(&self, sled_agent: SledAgent) {
+        self.tx
+            .send(HardwareMonitorMsg::SledAgentStarted(sled_agent))
+            .await
+            .unwrap();
+    }
+}
+
 pub struct HardwareMonitor {
     log: Logger,
 
@@ -106,8 +122,8 @@ pub struct HardwareMonitor {
 impl HardwareMonitor {
     pub fn new(
         log: &Logger,
-        hardware_manager: &mut HardwareManager,
-        storage_manager: &mut StorageHandle,
+        hardware_manager: &HardwareManager,
+        storage_manager: &StorageHandle,
     ) -> (HardwareMonitor, HardwareMonitorHandle) {
         let baseboard = hardware_manager.baseboard();
         let (handle_tx, handle_rx) = mpsc::channel(QUEUE_SIZE);

@@ -17,8 +17,6 @@ use crate::long_running_tasks::{
     spawn_all_longrunning_tasks, LongRunningTaskHandles,
 };
 use crate::services::ServiceManager;
-use crate::sled_agent::SledAgent;
-use crate::storage_manager::StorageManager;
 use camino::Utf8PathBuf;
 use cancel_safe_futures::TryStreamExt;
 use ddm_admin_client::Client as DdmAdminClient;
@@ -35,8 +33,6 @@ use omicron_common::address::Ipv6Subnet;
 use omicron_common::FileKv;
 use sled_hardware::underlay;
 use sled_hardware::DendriteAsic;
-use sled_hardware::HardwareManager;
-use sled_hardware::HardwareUpdate;
 use sled_hardware::SledMode;
 use sled_storage::disk::SyntheticDisk;
 use sled_storage::manager::StorageHandle;
@@ -44,67 +40,6 @@ use slog::Drain;
 use slog::Logger;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
-use tokio::sync::broadcast;
-use tokio::task::JoinHandle;
-
-pub(super) struct BootstrapManagers {
-    pub(super) hardware: HardwareManager,
-    pub(super) storage: StorageManager,
-    pub(super) service: ServiceManager,
-}
-
-impl BootstrapManagers {
-    pub(super) async fn handle_hardware_update(
-        &self,
-        update: Result<HardwareUpdate, broadcast::error::RecvError>,
-        sled_agent: Option<&SledAgent>,
-        log: &Logger,
-    ) {
-        match update {
-            Ok(update) => match update {
-                HardwareUpdate::TofinoLoaded => {
-                    let baseboard = self.hardware.baseboard();
-                    if let Err(e) = self
-                        .service
-                        .activate_switch(
-                            sled_agent.map(|sa| sa.switch_zone_underlay_info()),
-                            baseboard,
-                        )
-                        .await
-                    {
-                        warn!(log, "Failed to activate switch: {e}");
-                    }
-                }
-                HardwareUpdate::TofinoUnloaded => {
-                    if let Err(e) = self.service.deactivate_switch().await {
-                        warn!(log, "Failed to deactivate switch: {e}");
-                    }
-                }
-                HardwareUpdate::TofinoDeviceChange => {
-                    if let Some(sled_agent) = sled_agent {
-                        sled_agent.notify_nexus_about_self(log);
-                    }
-                }
-                HardwareUpdate::DiskAdded(disk) => {
-                    self.storage.upsert_disk(disk).await;
-                }
-                HardwareUpdate::DiskRemoved(disk) => {
-                    self.storage.delete_disk(disk).await;
-                }
-            },
-            Err(broadcast::error::RecvError::Lagged(count)) => {
-                warn!(log, "Hardware monitor missed {count} messages");
-                self.check_latest_hardware_snapshot(sled_agent, log).await;
-            }
-            Err(broadcast::error::RecvError::Closed) => {
-                // The `HardwareManager` monitoring task is an infinite loop -
-                // the only way for us to get `Closed` here is if it panicked,
-                // so we will propagate such a panic.
-                panic!("Hardware manager monitor task panicked");
-            }
-        }
-    }
-}
 
 pub(super) struct BootstrapAgentStartup {
     pub(super) config: Config,
@@ -112,7 +47,8 @@ pub(super) struct BootstrapAgentStartup {
     pub(super) ddm_admin_localhost_client: DdmAdminClient,
     pub(super) base_log: Logger,
     pub(super) startup_log: Logger,
-    pub(super) managers: BootstrapManagers,
+    pub(super) service_manager: ServiceManager,
+    pub(super) long_running_task_handles: LongRunningTaskHandles,
 }
 
 impl BootstrapAgentStartup {
@@ -200,6 +136,11 @@ impl BootstrapAgentStartup {
             long_running_task_handles.storage_manager.clone(),
             long_running_task_handles.zone_bundler.clone(),
         );
+
+        long_running_task_handles
+            .hardware_monitor
+            .service_manager_ready(service_manager.clone())
+            .await;
 
         Ok(Self {
             config,

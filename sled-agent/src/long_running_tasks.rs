@@ -16,6 +16,7 @@ use crate::bootstrap::bootstore::{
     new_bootstore_config, poll_ddmd_for_bootstore_peer_update,
 };
 use crate::bootstrap::secret_retriever::LrtqOrHardcodedSecretRetriever;
+use crate::hardware_monitor::{HardwareMonitor, HardwareMonitorHandle};
 use crate::zone_bundle::{CleanupContext, ZoneBundler};
 use bootstore::schemes::v0 as bootstore;
 use key_manager::{KeyManager, StorageKeyRequester};
@@ -41,6 +42,10 @@ pub struct LongRunningTaskHandles {
     /// A mechanism for interacting with the hardware device tree
     pub hardware_manager: HardwareManager,
 
+    /// A mechanism for interacting with the task that monitors for hardware
+    /// updates from the [`HardwareManager`]
+    pub hardware_monitor: HardwareMonitorHandle,
+
     // A handle for interacting with the bootstore
     pub bootstore: bootstore::NodeHandle,
 
@@ -61,6 +66,10 @@ pub async fn spawn_all_longrunning_tasks(
     // TODO: Does this need to run inside tokio::task::spawn_blocking?
     let hardware_manager = spawn_hardware_manager(log, sled_mode);
 
+    // Start monitoring for hardware changes
+    let hardware_monitor =
+        spawn_hardware_monitor(log, &hardware_manager, &storage_manager);
+
     // Wait for the boot disk so that we can work with any ledgers,
     // such as those needed by the bootstore and sled-agent
     let _ = storage_manager.wait_for_boot_disk().await;
@@ -79,6 +88,7 @@ pub async fn spawn_all_longrunning_tasks(
         storage_key_requester,
         storage_manager,
         hardware_manager,
+        hardware_monitor,
         bootstore,
         zone_bundler,
     }
@@ -120,6 +130,19 @@ fn spawn_hardware_manager(
     // the handle in this case is the `HardwareManager` itself.
     info!(log, "Starting HardwareManager"; "sled_mode" => ?sled_mode);
     HardwareManager::new(log, sled_mode).unwrap()
+}
+
+fn spawn_hardware_monitor(
+    log: &Logger,
+    hardware_manager: &HardwareManager,
+    storage_handle: &StorageHandle,
+) -> HardwareMonitorHandle {
+    let (monitor, handle) =
+        HardwareMonitor::new(log, hardware_manager, storage_handle);
+    tokio::spawn(async move {
+        monitor.run().await;
+    });
+    handle
 }
 
 async fn spawn_bootstore_tasks(
