@@ -201,21 +201,14 @@ impl DataStore {
             .unwrap();
     }
 
-    async fn pool_authorized(
-        &self,
-        opctx: &OpContext,
-    ) -> Result<&bb8::Pool<ConnectionManager<DbConnection>>, Error> {
-        opctx.authorize(authz::Action::Query, &authz::DATABASE).await?;
-        Ok(self.pool.pool())
-    }
-
     /// Returns a connection to a connection from the database connection pool.
     pub(super) async fn pool_connection_authorized(
         &self,
         opctx: &OpContext,
     ) -> Result<bb8::PooledConnection<ConnectionManager<DbConnection>>, Error>
     {
-        let pool = self.pool_authorized(opctx).await?;
+        opctx.authorize(authz::Action::Query, &authz::DATABASE).await?;
+        let pool = self.pool.pool();
         let connection = pool.get().await.map_err(|err| {
             Error::unavail(&format!("Failed to access DB connection: {err}"))
         })?;

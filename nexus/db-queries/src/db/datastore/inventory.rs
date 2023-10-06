@@ -6,7 +6,7 @@ use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
-use crate::db::error::public_error_from_diesel_pool;
+use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::TransactionError;
 use async_bb8_diesel::AsyncConnection;
@@ -42,7 +42,7 @@ impl DataStore {
         // Even better would be a large hunk of SQL sent over at once.  None of
         // this needs to be interactive.  But we don't yet have support for
         // this.  See oxidecomputer/omicron#973.
-        let pool = self.pool_authorized(opctx).await?;
+        let pool = self.pool_connection_authorized(opctx).await?;
         pool.transaction_async(|conn| async move {
             let row_collection = InvCollection::from(collection);
             let collection_id = row_collection.id;
@@ -56,7 +56,7 @@ impl DataStore {
                     .await
                     .map_err(|e| {
                         TransactionError::CustomError(
-                            public_error_from_diesel_pool(
+                            public_error_from_diesel(
                                 e.into(),
                                 ErrorHandler::Server,
                             )
@@ -83,7 +83,7 @@ impl DataStore {
                     .await
                     .map_err(|e| {
                         TransactionError::CustomError(
-                            public_error_from_diesel_pool(
+                            public_error_from_diesel(
                                 e.into(),
                                 ErrorHandler::Server,
                             )
@@ -108,7 +108,7 @@ impl DataStore {
                     .await
                     .map_err(|e| {
                         TransactionError::CustomError(
-                            public_error_from_diesel_pool(
+                            public_error_from_diesel(
                                 e.into(),
                                 ErrorHandler::Server,
                             )
@@ -181,7 +181,7 @@ impl DataStore {
                     .await
                     .map_err(|e| {
                         TransactionError::CustomError(
-                            public_error_from_diesel_pool(
+                            public_error_from_diesel(
                                 e.into(),
                                 ErrorHandler::Server,
                             )
@@ -258,7 +258,7 @@ impl DataStore {
                     .await
                     .map_err(|e| {
                         TransactionError::CustomError(
-                            public_error_from_diesel_pool(
+                            public_error_from_diesel(
                                 e.into(),
                                 ErrorHandler::Server,
                             )
@@ -296,7 +296,7 @@ impl DataStore {
                     .await
                     .map_err(|e| {
                         TransactionError::CustomError(
-                            public_error_from_diesel_pool(
+                            public_error_from_diesel(
                                 e.into(),
                                 ErrorHandler::Server,
                             )
@@ -310,8 +310,8 @@ impl DataStore {
         .await
         .map_err(|error| match error {
             TransactionError::CustomError(e) => e,
-            TransactionError::Pool(e) => {
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            TransactionError::Connection(e) => {
+                public_error_from_diesel(e, ErrorHandler::Server)
             }
         })
     }
