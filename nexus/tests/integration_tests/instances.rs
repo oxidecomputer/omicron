@@ -3661,12 +3661,7 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
     // Validate that every sled no longer has the V2P mapping for this instance
     for sled_agent in &sled_agents {
         let v2p_mappings = sled_agent.v2p_mappings.lock().await;
-        if sled_agent.id != db_instance.runtime().sled_id {
-            assert!(!v2p_mappings.is_empty());
-            assert!(v2p_mappings.get(&nics[0].identity.id).unwrap().is_empty());
-        } else {
-            assert!(v2p_mappings.is_empty());
-        }
+        assert!(v2p_mappings.is_empty());
     }
 }
 

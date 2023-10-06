@@ -63,6 +63,7 @@ nexus-types.workspace = true
 omicron-common.workspace = true
 omicron-passwords.workspace = true
 oximeter.workspace = true
+omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 assert_matches.workspace = true

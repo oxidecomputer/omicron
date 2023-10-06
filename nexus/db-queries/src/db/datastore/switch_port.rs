@@ -9,7 +9,7 @@ use crate::db::datastore::address_lot::{
     ReserveBlockError, ReserveBlockTxnError,
 };
 use crate::db::datastore::UpdatePrecondition;
-use crate::db::error::public_error_from_diesel_pool;
+use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
 use crate::db::model::{
@@ -20,9 +20,7 @@ use crate::db::model::{
     SwitchVlanInterfaceConfig,
 };
 use crate::db::pagination::paginated;
-use async_bb8_diesel::{
-    AsyncConnection, AsyncRunQueryDsl, ConnectionError, PoolError,
-};
+use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl, ConnectionError};
 use diesel::result::Error as DieselError;
 use diesel::{
     ExpressionMethods, JoinOnDsl, NullableExpressionMethods, QueryDsl,
@@ -128,11 +126,11 @@ impl DataStore {
         }
         type TxnError = TransactionError<SwitchPortSettingsCreateError>;
 
-        let pool = self.pool_authorized(opctx).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
 
         // TODO https://github.com/oxidecomputer/omicron/issues/2811
         // Audit external networking database transaction usage
-        pool.transaction_async(|conn| async move {
+        conn.transaction_async(|conn| async move {
 
             // create the top level port settings object
             let port_settings = SwitchPortSettings::new(&params.identity);
@@ -371,7 +369,7 @@ impl DataStore {
                                     SwitchPortSettingsCreateError::ReserveBlock(err)
                                 )
                             }
-                            ReserveBlockTxnError::Pool(err) => TxnError::Pool(err),
+                            ReserveBlockTxnError::Connection(err) => TxnError::Connection(err),
                         })?;
 
                     address_config.push(SwitchPortAddressConfig::new(
@@ -418,17 +416,17 @@ impl DataStore {
                     ReserveBlockError::AddressNotInLot
                 )
             ) => Error::invalid_request("address not in lot"),
-            TxnError::Pool(e) => match e {
-                PoolError::Connection(ConnectionError::Query(
+            TxnError::Connection(e) => match e {
+                ConnectionError::Query(
                     DieselError::DatabaseError(_, _),
-                )) => public_error_from_diesel_pool(
+                ) => public_error_from_diesel(
                     e,
                     ErrorHandler::Conflict(
                         ResourceType::SwitchPortSettings,
                         params.identity.name.as_str(),
                     ),
                 ),
-                _ => public_error_from_diesel_pool(e, ErrorHandler::Server),
+                _ => public_error_from_diesel(e, ErrorHandler::Server),
             },
         })
     }
@@ -446,7 +444,7 @@ impl DataStore {
         }
         type TxnError = TransactionError<SwitchPortSettingsDeleteError>;
 
-        let pool = self.pool_authorized(opctx).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
 
         let selector = match &params.port_settings {
             None => return Err(Error::invalid_request("name or id required")),
@@ -455,7 +453,7 @@ impl DataStore {
 
         // TODO https://github.com/oxidecomputer/omicron/issues/2811
         // Audit external networking database transaction usage
-        pool.transaction_async(|conn| async move {
+        conn.transaction_async(|conn| async move {
 
             use db::schema::switch_port_settings;
             let id = match selector {
@@ -601,15 +599,15 @@ impl DataStore {
                 SwitchPortSettingsDeleteError::SwitchPortSettingsNotFound) => {
                 Error::invalid_request("port settings not found")
             }
-            TxnError::Pool(e) => match e {
-                PoolError::Connection(ConnectionError::Query(
+            TxnError::Connection(e) => match e {
+                ConnectionError::Query(
                     DieselError::DatabaseError(_, _),
-                )) => {
+                ) => {
                     let name = match &params.port_settings {
                         Some(name_or_id) => name_or_id.to_string(),
                         None => String::new(),
                     };
-                    public_error_from_diesel_pool(
+                    public_error_from_diesel(
                         e,
                         ErrorHandler::Conflict(
                             ResourceType::SwitchPortSettings,
@@ -617,7 +615,7 @@ impl DataStore {
                         ),
                     )
                 },
-                _ => public_error_from_diesel_pool(e, ErrorHandler::Server),
+                _ => public_error_from_diesel(e, ErrorHandler::Server),
             },
         })
     }
@@ -641,9 +639,9 @@ impl DataStore {
         }
         .filter(dsl::time_deleted.is_null())
         .select(SwitchPortSettings::as_select())
-        .load_async(self.pool_authorized(opctx).await?)
+        .load_async(&*self.pool_connection_authorized(opctx).await?)
         .await
-        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     pub async fn switch_port_settings_get(
@@ -657,11 +655,11 @@ impl DataStore {
         }
         type TxnError = TransactionError<SwitchPortSettingsGetError>;
 
-        let pool = self.pool_authorized(opctx).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
 
         // TODO https://github.com/oxidecomputer/omicron/issues/2811
         // Audit external networking database transaction usage
-        pool.transaction_async(|conn| async move {
+        conn.transaction_async(|conn| async move {
 
             // get the top level port settings object
             use db::schema::switch_port_settings::dsl as port_settings_dsl;
@@ -806,12 +804,12 @@ impl DataStore {
                 SwitchPortSettingsGetError::NotFound(name)) => {
                 Error::not_found_by_name(ResourceType::SwitchPortSettings, &name)
             }
-            TxnError::Pool(e) => match e {
-                PoolError::Connection(ConnectionError::Query(
+            TxnError::Connection(e) => match e {
+                ConnectionError::Query(
                     DieselError::DatabaseError(_, _),
-                )) => {
+                ) => {
                     let name = name_or_id.to_string();
-                    public_error_from_diesel_pool(
+                    public_error_from_diesel(
                         e,
                         ErrorHandler::Conflict(
                             ResourceType::SwitchPortSettings,
@@ -819,7 +817,7 @@ impl DataStore {
                         ),
                     )
                 },
-                _ => public_error_from_diesel_pool(e, ErrorHandler::Server),
+                _ => public_error_from_diesel(e, ErrorHandler::Server),
             },
         })
     }
@@ -839,7 +837,7 @@ impl DataStore {
         }
         type TxnError = TransactionError<SwitchPortCreateError>;
 
-        let pool = self.pool_authorized(opctx).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
         let switch_port = SwitchPort::new(
             rack_id,
             switch_location.to_string(),
@@ -848,7 +846,7 @@ impl DataStore {
 
         // TODO https://github.com/oxidecomputer/omicron/issues/2811
         // Audit external networking database transaction usage
-        pool.transaction_async(|conn| async move {
+        conn.transaction_async(|conn| async move {
             use db::schema::rack;
             use db::schema::rack::dsl as rack_dsl;
             rack_dsl::rack
@@ -880,17 +878,20 @@ impl DataStore {
             TxnError::CustomError(SwitchPortCreateError::RackNotFound) => {
                 Error::invalid_request("rack not found")
             }
-            TxnError::Pool(e) => match e {
-                PoolError::Connection(ConnectionError::Query(
-                    DieselError::DatabaseError(_, _),
-                )) => public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::Conflict(
-                        ResourceType::SwitchPort,
-                        &format!("{}/{}/{}", rack_id, &switch_location, &port,),
-                    ),
-                ),
-                _ => public_error_from_diesel_pool(e, ErrorHandler::Server),
+            TxnError::Connection(e) => match e {
+                ConnectionError::Query(DieselError::DatabaseError(_, _)) => {
+                    public_error_from_diesel(
+                        e,
+                        ErrorHandler::Conflict(
+                            ResourceType::SwitchPort,
+                            &format!(
+                                "{}/{}/{}",
+                                rack_id, &switch_location, &port,
+                            ),
+                        ),
+                    )
+                }
+                _ => public_error_from_diesel(e, ErrorHandler::Server),
             },
         })
     }
@@ -908,11 +909,11 @@ impl DataStore {
         }
         type TxnError = TransactionError<SwitchPortDeleteError>;
 
-        let pool = self.pool_authorized(opctx).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
 
         // TODO https://github.com/oxidecomputer/omicron/issues/2811
         // Audit external networking database transaction usage
-        pool.transaction_async(|conn| async move {
+        conn.transaction_async(|conn| async move {
             use db::schema::switch_port;
             use db::schema::switch_port::dsl as switch_port_dsl;
 
@@ -957,8 +958,8 @@ impl DataStore {
             TxnError::CustomError(SwitchPortDeleteError::ActiveSettings) => {
                 Error::invalid_request("must clear port settings first")
             }
-            TxnError::Pool(e) => {
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            TxnError::Connection(e) => {
+                public_error_from_diesel(e, ErrorHandler::Server)
             }
         })
     }
@@ -972,9 +973,9 @@ impl DataStore {
 
         paginated(dsl::switch_port, dsl::id, pagparams)
             .select(SwitchPort::as_select())
-            .load_async(self.pool_authorized(opctx).await?)
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     pub async fn switch_port_get(
@@ -985,15 +986,15 @@ impl DataStore {
         use db::schema::switch_port;
         use db::schema::switch_port::dsl as switch_port_dsl;
 
-        let pool = self.pool_authorized(opctx).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
 
         switch_port_dsl::switch_port
             .filter(switch_port::id.eq(id))
             .select(SwitchPort::as_select())
             .limit(1)
-            .first_async::<SwitchPort>(pool)
+            .first_async::<SwitchPort>(&*conn)
             .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     pub async fn switch_port_set_settings_id(
@@ -1006,17 +1007,17 @@ impl DataStore {
         use db::schema::switch_port;
         use db::schema::switch_port::dsl as switch_port_dsl;
 
-        let pool = self.pool_authorized(opctx).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
 
         match current {
             UpdatePrecondition::DontCare => {
                 diesel::update(switch_port_dsl::switch_port)
                     .filter(switch_port::id.eq(switch_port_id))
                     .set(switch_port::port_settings_id.eq(port_settings_id))
-                    .execute_async(pool)
+                    .execute_async(&*conn)
                     .await
                     .map_err(|e| {
-                        public_error_from_diesel_pool(e, ErrorHandler::Server)
+                        public_error_from_diesel(e, ErrorHandler::Server)
                     })?;
             }
             UpdatePrecondition::Null => {
@@ -1024,10 +1025,10 @@ impl DataStore {
                     .filter(switch_port::id.eq(switch_port_id))
                     .filter(switch_port::port_settings_id.is_null())
                     .set(switch_port::port_settings_id.eq(port_settings_id))
-                    .execute_async(pool)
+                    .execute_async(&*conn)
                     .await
                     .map_err(|e| {
-                        public_error_from_diesel_pool(e, ErrorHandler::Server)
+                        public_error_from_diesel(e, ErrorHandler::Server)
                     })?;
             }
             UpdatePrecondition::Value(current_id) => {
@@ -1035,10 +1036,10 @@ impl DataStore {
                     .filter(switch_port::id.eq(switch_port_id))
                     .filter(switch_port::port_settings_id.eq(current_id))
                     .set(switch_port::port_settings_id.eq(port_settings_id))
-                    .execute_async(pool)
+                    .execute_async(&*conn)
                     .await
                     .map_err(|e| {
-                        public_error_from_diesel_pool(e, ErrorHandler::Server)
+                        public_error_from_diesel(e, ErrorHandler::Server)
                     })?;
             }
         }
@@ -1056,7 +1057,7 @@ impl DataStore {
         use db::schema::switch_port;
         use db::schema::switch_port::dsl as switch_port_dsl;
 
-        let pool = self.pool_authorized(opctx).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
         let id: Uuid = switch_port_dsl::switch_port
             .filter(switch_port::rack_id.eq(rack_id))
             .filter(
@@ -1065,7 +1066,7 @@ impl DataStore {
             .filter(switch_port::port_name.eq(port_name.to_string()))
             .select(switch_port::id)
             .limit(1)
-            .first_async::<Uuid>(pool)
+            .first_async::<Uuid>(&*conn)
             .await
             .map_err(|_| {
                 Error::not_found_by_name(ResourceType::SwitchPort, &port_name)
@@ -1082,7 +1083,7 @@ impl DataStore {
         use db::schema::switch_port_settings;
         use db::schema::switch_port_settings::dsl as port_settings_dsl;
 
-        let pool = self.pool_authorized(opctx).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
 
         let db_name = name.to_string();
         let id = port_settings_dsl::switch_port_settings
@@ -1090,7 +1091,7 @@ impl DataStore {
             .filter(switch_port_settings::name.eq(db_name))
             .select(switch_port_settings::id)
             .limit(1)
-            .first_async::<Uuid>(pool)
+            .first_async::<Uuid>(&*conn)
             .await
             .map_err(|_| {
                 Error::not_found_by_name(
@@ -1122,8 +1123,10 @@ impl DataStore {
             // pagination in the future, or maybe a way to constrain the query to
             // a rack?
             .limit(64)
-            .load_async::<SwitchPort>(self.pool_authorized(opctx).await?)
+            .load_async::<SwitchPort>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
             .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 }

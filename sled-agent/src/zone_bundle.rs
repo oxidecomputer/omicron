@@ -899,9 +899,9 @@ async fn find_archived_log_files(
                             continue;
                         };
                         let fname = path.file_name().unwrap();
-                        if is_oxide_smf_log_file(fname)
-                            && fname.contains(svc_name)
-                        {
+                        let is_oxide = is_oxide_smf_log_file(fname);
+                        let contains = fname.contains(svc_name);
+                        if is_oxide && contains {
                             debug!(
                                 log,
                                 "found archived log file";
@@ -910,6 +910,14 @@ async fn find_archived_log_files(
                                 "path" => ?path,
                             );
                             files.push(path);
+                        } else {
+                            debug!(
+                                log,
+                                "skipping non-matching log file";
+                                "filename" => fname,
+                                "is_oxide_smf_log_file" => is_oxide,
+                                "contains_svc_name" => contains,
+                            );
                         }
                     }
                     Err(e) => {
@@ -1764,6 +1772,7 @@ mod tests {
 
 #[cfg(all(target_os = "illumos", test))]
 mod illumos_tests {
+    use super::find_archived_log_files;
     use super::zfs_quota;
     use super::CleanupContext;
     use super::CleanupPeriod;
@@ -1852,12 +1861,17 @@ mod illumos_tests {
         }
     }
 
-    async fn setup_fake_cleanup_task() -> anyhow::Result<CleanupTestContext> {
+    fn test_logger() -> Logger {
         let dec =
             slog_term::PlainSyncDecorator::new(slog_term::TestStdoutWriter);
         let drain = slog_term::FullFormat::new(dec).build().fuse();
         let log =
             Logger::root(drain, slog::o!("component" => "fake-cleanup-task"));
+        log
+    }
+
+    async fn setup_fake_cleanup_task() -> anyhow::Result<CleanupTestContext> {
+        let log = test_logger();
         let context = CleanupContext::default();
         let resource_wrapper = ResourceWrapper::new().await;
         let bundler =
@@ -2278,5 +2292,50 @@ mod illumos_tests {
         let _ = builder.into_inner().context("failed to finish tarball")?;
         let bytes = tokio::fs::metadata(&path).await?.len();
         Ok(ZoneBundleInfo { metadata, path, bytes })
+    }
+
+    #[tokio::test]
+    async fn test_find_archived_log_files() {
+        let log = test_logger();
+        let tmpdir = tempfile::tempdir().expect("Failed to make tempdir");
+
+        let mut should_match = [
+            "oxide-foo:default.log",
+            "oxide-foo:default.log.1000",
+            "system-illumos-foo:default.log",
+            "system-illumos-foo:default.log.100",
+        ];
+        let should_not_match = [
+            "oxide-foo:default",
+            "not-oxide-foo:default.log.1000",
+            "system-illumos-foo",
+            "not-system-illumos-foo:default.log.100",
+        ];
+        for name in should_match.iter().chain(should_not_match.iter()) {
+            let path = tmpdir.path().join(name);
+            tokio::fs::File::create(path)
+                .await
+                .expect("failed to create dummy file");
+        }
+
+        let path =
+            Utf8PathBuf::try_from(tmpdir.path().as_os_str().to_str().unwrap())
+                .unwrap();
+        let mut files = find_archived_log_files(
+            &log,
+            "zone-name", // unused here, for logging only
+            "foo",
+            &[path],
+        )
+        .await;
+
+        // Sort everything to compare correctly.
+        should_match.sort();
+        files.sort();
+        assert_eq!(files.len(), should_match.len());
+        assert!(files
+            .iter()
+            .zip(should_match.iter())
+            .all(|(file, name)| { file.file_name().unwrap() == *name }));
     }
 }
