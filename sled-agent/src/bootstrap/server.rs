@@ -514,8 +514,8 @@ struct Inner {
     )>,
     sled_reset_rx: mpsc::Receiver<oneshot::Sender<Result<(), BootstrapError>>>,
     ddm_admin_localhost_client: DdmAdminClient,
-    service_manager: ServiceManager,
     long_running_task_handles: LongRunningTaskHandles,
+    service_manager: ServiceManager,
     _sprockets_server_handle: JoinHandle<()>,
     base_log: Logger,
 }

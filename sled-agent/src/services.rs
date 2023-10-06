@@ -92,9 +92,8 @@ use sled_hardware::underlay;
 use sled_hardware::underlay::BOOTSTRAP_PREFIX;
 use sled_hardware::Baseboard;
 use sled_hardware::SledMode;
-use sled_storage::dataset::{CONFIG_DATASET, ZONE_DATASET};
+use sled_storage::dataset::{CONFIG_DATASET, INSTALL_DATASET, ZONE_DATASET};
 use sled_storage::manager::StorageHandle;
-use sled_storage::resources::StorageResources;
 use slog::Logger;
 use std::collections::HashSet;
 use std::collections::{BTreeMap, HashMap};
@@ -1084,11 +1083,11 @@ impl ServiceManager {
 
         // If the boot disk exists, look for the image in the "install" dataset
         // there too.
-        if let Some((_, boot_zpool)) = self.inner.storage.boot_disk().await {
-            zone_image_paths.push(
-                boot_zpool
-                    .dataset_mountpoint(sled_hardware::disk::INSTALL_DATASET),
-            );
+        if let Some((_, boot_zpool)) =
+            self.inner.storage.get_latest_resources().await.boot_disk()
+        {
+            zone_image_paths
+                .push(boot_zpool.dataset_mountpoint(INSTALL_DATASET));
         }
 
         let installed_zone = InstalledZone::install(
@@ -2195,8 +2194,12 @@ impl ServiceManager {
 
         // Create zones that should be running
         let mut zone_requests = AllZoneRequests::default();
-        let all_u2_roots =
-            self.inner.storage.all_u2_mountpoints(ZONE_DATASET).await;
+        let all_u2_roots = self
+            .inner
+            .storage
+            .get_latest_resources()
+            .await
+            .all_u2_mountpoints(ZONE_DATASET);
         for zone in zones_to_be_added {
             // Check if we think the zone should already be running
             let name = zone.zone_name();
@@ -2870,8 +2873,12 @@ impl ServiceManager {
         let root = if request.zone_type == ZoneType::Switch {
             Utf8PathBuf::from(ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT)
         } else {
-            let all_u2_roots =
-                self.inner.storage.all_u2_mountpoints(ZONE_DATASET).await;
+            let all_u2_roots = self
+                .inner
+                .storage
+                .get_latest_resources()
+                .await
+                .all_u2_mountpoints(ZONE_DATASET);
             let mut rng = rand::rngs::StdRng::from_entropy();
             all_u2_roots
                 .choose(&mut rng)
