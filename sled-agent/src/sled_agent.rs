@@ -10,6 +10,7 @@ use crate::bootstrap::early_networking::{
 use crate::bootstrap::params::StartSledAgentRequest;
 use crate::config::Config;
 use crate::instance_manager::InstanceManager;
+use crate::long_running_tasks::LongRunningTaskHandles;
 use crate::nexus::{NexusClientWithResolver, NexusRequestQueue};
 use crate::params::{
     DiskStateRequested, InstanceHardware, InstanceMigrationSourceParams,
@@ -18,11 +19,9 @@ use crate::params::{
     VpcFirewallRule, ZoneBundleMetadata, Zpool,
 };
 use crate::services::{self, ServiceManager};
-use crate::storage_manager::{self, StorageManager};
 use crate::updates::{ConfigUpdates, UpdateManager};
 use crate::zone_bundle;
 use crate::zone_bundle::BundleError;
-use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
 use dropshot::HttpError;
 use illumos_utils::opte::params::{
@@ -46,6 +45,8 @@ use omicron_common::backoff::{
 };
 use sled_hardware::underlay;
 use sled_hardware::HardwareManager;
+use sled_storage::dataset::DatasetName;
+use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::net::{Ipv6Addr, SocketAddrV6};
@@ -200,7 +201,7 @@ struct SledAgentInner {
     subnet: Ipv6Subnet<SLED_PREFIX>,
 
     // Component of Sled Agent responsible for storage and dataset management.
-    storage: StorageManager,
+    storage: StorageHandle,
 
     // Component of Sled Agent responsible for managing Propolis instances.
     instances: InstanceManager,
@@ -254,8 +255,7 @@ impl SledAgent {
         nexus_client: NexusClientWithResolver,
         request: StartSledAgentRequest,
         services: ServiceManager,
-        storage: StorageManager,
-        bootstore: bootstore::NodeHandle,
+        long_running_task_handles: LongRunningTaskHandles,
     ) -> Result<SledAgent, Error> {
         // Pass the "parent_log" to all subcomponents that want to set their own
         // "component" value.
@@ -268,12 +268,17 @@ impl SledAgent {
         ));
         info!(&log, "SledAgent::new(..) starting");
 
+        let storage_manager = &long_running_task_handles.storage_manager;
+
         // Configure a swap device of the configured size before other system setup.
         match config.swap_device_size_gb {
             Some(sz) if sz > 0 => {
                 info!(log, "Requested swap device of size {} GiB", sz);
-                let boot_disk =
-                    storage.resources().boot_disk().await.ok_or_else(|| {
+                let boot_disk = storage_manager
+                    .get_latest_resources()
+                    .await
+                    .boot_disk()
+                    .ok_or_else(|| {
                         crate::swap_device::SwapDeviceError::BootDiskNotFound
                     })?;
                 crate::swap_device::ensure_swap_device(
@@ -324,28 +329,13 @@ impl SledAgent {
             *sled_address.ip(),
         );
 
-        storage
-            .setup_underlay_access(storage_manager::UnderlayAccess {
-                nexus_client: nexus_client.clone(),
-                sled_id: request.id,
-            })
-            .await?;
-
-        // TODO-correctness The bootstrap agent _also_ has a `HardwareManager`.
-        // We only use it for reading properties, but it's not `Clone`able
-        // because it's holding an inner task handle. Could we add a way to get
-        // a read-only handle to it, and have bootstrap agent give us that
-        // instead of creating a new full one ourselves?
-        let hardware = HardwareManager::new(&parent_log, services.sled_mode())
-            .map_err(|e| Error::Hardware(e))?;
-
         let instances = InstanceManager::new(
             parent_log.clone(),
             nexus_client.clone(),
             etherstub.clone(),
             port_manager.clone(),
-            storage.resources().clone(),
-            storage.zone_bundler().clone(),
+            storage_manager.clone(),
+            long_running_task_handles.zone_bundler.clone(),
         )?;
 
         match config.vmm_reservoir_percentage {
@@ -378,7 +368,8 @@ impl SledAgent {
         // until we have this, as we need to know which switches have uplinks to
         // correctly set up services.
         let get_network_config = || async {
-            let serialized_config = bootstore
+            let serialized_config = long_running_task_handles
+                .bootstore
                 .get_network_config()
                 .await
                 .map_err(|err| BackoffError::transient(err.to_string()))?
@@ -421,14 +412,13 @@ impl SledAgent {
             rack_network_config.clone(),
         )?;
 
-        let zone_bundler = storage.zone_bundler().clone();
         let sled_agent = SledAgent {
             inner: Arc::new(SledAgentInner {
                 id: request.id,
                 subnet: request.subnet,
-                storage,
+                storage: long_running_task_handles.storage_manager.clone(),
                 instances,
-                hardware,
+                hardware: long_running_task_handles.hardware_manager.clone(),
                 updates,
                 port_manager,
                 services,
@@ -442,7 +432,7 @@ impl SledAgent {
                 // request queue?
                 nexus_request_queue: NexusRequestQueue::new(),
                 rack_network_config,
-                zone_bundler,
+                zone_bundler: long_running_task_handles.zone_bundler.clone(),
             }),
             log: log.clone(),
         };
@@ -462,6 +452,7 @@ impl SledAgent {
     /// Blocks until all services have started, retrying indefinitely on
     /// failure.
     pub(crate) async fn cold_boot_load_services(&self) {
+        info!(self.log, "Loading cold boot services");
         retry_notify(
             retry_policy_internal_service_aggressive(),
             || async {

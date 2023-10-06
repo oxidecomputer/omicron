@@ -12,7 +12,6 @@ use crate::params::{
     InstanceHardware, InstanceMigrationSourceParams, InstancePutStateResponse,
     InstanceStateRequested, InstanceUnregisterResponse,
 };
-use crate::storage_manager::StorageResources;
 use crate::zone_bundle::BundleError;
 use crate::zone_bundle::ZoneBundler;
 use illumos_utils::dladm::Etherstub;
@@ -21,6 +20,7 @@ use illumos_utils::opte::PortManager;
 use illumos_utils::vmm_reservoir;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
+use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -62,7 +62,7 @@ struct InstanceManagerInternal {
 
     vnic_allocator: VnicAllocator<Etherstub>,
     port_manager: PortManager,
-    storage: StorageResources,
+    storage: StorageHandle,
     zone_bundler: ZoneBundler,
 }
 
@@ -78,7 +78,7 @@ impl InstanceManager {
         nexus_client: NexusClientWithResolver,
         etherstub: Etherstub,
         port_manager: PortManager,
-        storage: StorageResources,
+        storage: StorageHandle,
         zone_bundler: ZoneBundler,
     ) -> Result<InstanceManager, Error> {
         Ok(InstanceManager {

@@ -8,11 +8,11 @@ use crate::bootstrap::http_entrypoints::RackOperationStatus;
 use crate::bootstrap::params::RackInitializeRequest;
 use crate::bootstrap::rss_handle::RssHandle;
 use crate::rack_setup::service::SetupServiceError;
-use crate::storage_manager::StorageResources;
 use bootstore::schemes::v0 as bootstore;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::mem;
 use std::net::Ipv6Addr;
@@ -171,7 +171,7 @@ impl RssAccess {
         &self,
         parent_log: &Logger,
         global_zone_bootstrap_ip: Ipv6Addr,
-        storage_resources: &StorageResources,
+        storage_manager: &StorageHandle,
         bootstore_node_handle: &bootstore::NodeHandle,
         request: RackInitializeRequest,
     ) -> Result<RackInitId, RssAccessError> {
@@ -207,14 +207,14 @@ impl RssAccess {
                 mem::drop(status);
 
                 let parent_log = parent_log.clone();
-                let storage_resources = storage_resources.clone();
+                let storage_manager = storage_manager.clone();
                 let bootstore_node_handle = bootstore_node_handle.clone();
                 let status = Arc::clone(&self.status);
                 tokio::spawn(async move {
                     let result = rack_initialize(
                         &parent_log,
                         global_zone_bootstrap_ip,
-                        storage_resources,
+                        storage_manager,
                         bootstore_node_handle,
                         request,
                     )
@@ -342,7 +342,7 @@ enum RssStatus {
 async fn rack_initialize(
     parent_log: &Logger,
     global_zone_bootstrap_ip: Ipv6Addr,
-    storage_resources: StorageResources,
+    storage_manager: StorageHandle,
     bootstore_node_handle: bootstore::NodeHandle,
     request: RackInitializeRequest,
 ) -> Result<(), SetupServiceError> {
@@ -350,7 +350,7 @@ async fn rack_initialize(
         parent_log,
         request,
         global_zone_bootstrap_ip,
-        storage_resources,
+        storage_manager,
         bootstore_node_handle,
     )
     .await

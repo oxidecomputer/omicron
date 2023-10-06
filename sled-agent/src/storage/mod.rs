@@ -4,5 +4,4 @@
 
 //! Management of local storage
 
-pub(crate) mod dataset;
 pub(crate) mod dump_setup;

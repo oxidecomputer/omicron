@@ -10,7 +10,6 @@
 
 pub mod dataset;
 pub mod disk;
-pub(crate) mod dump_setup;
 pub mod error;
 pub(crate) mod keyfile;
 pub mod manager;

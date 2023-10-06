@@ -13,6 +13,8 @@ use camino::Utf8PathBuf;
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sled_storage::dataset::CONFIG_DATASET;
+use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::collections::{HashMap, HashSet};
 use std::net::{Ipv6Addr, SocketAddrV6};
@@ -77,7 +79,7 @@ impl Plan {
     pub async fn create(
         log: &Logger,
         config: &Config,
-        storage: &StorageResources,
+        storage_manager: &StorageHandle,
         bootstrap_addrs: HashSet<Ipv6Addr>,
         use_trust_quorum: bool,
     ) -> Result<Self, PlanError> {
@@ -119,9 +121,10 @@ impl Plan {
         let plan = Self { rack_id, sleds, config: config.clone() };
 
         // Once we've constructed a plan, write it down to durable storage.
-        let paths: Vec<Utf8PathBuf> = storage
-            .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
+        let paths: Vec<Utf8PathBuf> = storage_manager
+            .get_latest_resources()
             .await
+            .all_m2_mountpoints(CONFIG_DATASET)
             .into_iter()
             .map(|p| p.join(RSS_SLED_PLAN_FILENAME))
             .collect();
