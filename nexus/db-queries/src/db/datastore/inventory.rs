@@ -15,7 +15,6 @@ use diesel::sql_types::Nullable;
 use diesel::ExpressionMethods;
 use diesel::IntoSql;
 use diesel::QueryDsl;
-use nexus_db_model::CabooseWhichEnum;
 use nexus_db_model::HwBaseboardId;
 use nexus_db_model::HwPowerState;
 use nexus_db_model::HwPowerStateEnum;
@@ -276,68 +275,6 @@ impl DataStore {
             // how to extend it to two different dependent tables.  I can do it
             // with a CTE:
             // https://www.db-fiddle.com/f/aaegKd3RXqaqyuxBLXSxaJ/0
-            {
-                use db::schema::hw_baseboard_id::dsl as baseboard_dsl;
-                use db::schema::inv_caboose::dsl as inv_caboose_dsl;
-                use db::schema::sw_caboose::dsl as sw_caboose_dsl;
-
-                for (which, tree) in &collection.cabooses_found {
-                    let db_which = nexus_db_model::CabooseWhich::from(*which);
-                    for (baseboard_id, found_caboose) in tree {
-                        // XXX-dap
-                        todo!();
-                        // let selection = db::schema::hw_baseboard_id::table
-                        //     .select((
-                        //         collection_id.into_sql::<diesel::sql_types::Uuid>(),
-                        //         baseboard_dsl::id,
-                        //         found_caboose.time_collected
-                        //             .into_sql::<diesel::sql_types::Timestamptz>(),
-                        //         found_caboose.source
-                        //             .clone()
-                        //             .into_sql::<diesel::sql_types::Text>(),
-                        //         db_which.into_sql::<CabooseWhichEnum>(),
-                        //     ))
-                        //     .filter(
-                        //         baseboard_dsl::part_number
-                        //             .eq(baseboard_id.part_number.clone()),
-                        //     )
-                        //     .filter(
-                        //         baseboard_dsl::serial_number
-                        //             .eq(baseboard_id.serial_number.clone()),
-                        //     )
-                        //     .left_join(db::schema::sw_caboose::table
-                        //         .select(sw_caboose_dsl::id)
-                        //         .filter(sw_caboose_dsl::board.eq(found_caboose.board))
-                        //         .filter(sw_caboose_dsl::git_commit.eq(found_caboose.git_commit))
-                        //         .filter(sw_caboose_dsl::name.eq(found_caboose.name))
-                        //         .filter(sw_caboose_dsl::version.eq(found_caboose.version)));
-
-                        // let _ = diesel::insert_into(
-                        //     db::schema::inv_root_of_trust::table,
-                        // )
-                        // .values(selection)
-                        // .into_columns((
-                        //     inv_caboose_dsl::inv_collection_id,
-                        //     inv_caboose_dsl::hw_baseboard_id,
-                        //     inv_caboose_dsl::time_collected,
-                        //     inv_caboose_dsl::source,
-                        //     inv_caboose_dsl::which,
-                        //     inv_caboose_dsl::sw_caboose_id,
-                        // ))
-                        // .execute_async(&conn)
-                        // .await
-                        // .map_err(|e| {
-                        //     TransactionError::CustomError(
-                        //         public_error_from_diesel_pool(
-                        //             e.into(),
-                        //             ErrorHandler::Server,
-                        //         )
-                        //         .internal_context("inserting service processor"),
-                        //     )
-                        // });
-                    }
-                }
-            }
 
             // Finally, insert the list of errors.
             {

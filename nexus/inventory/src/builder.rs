@@ -12,12 +12,13 @@ use crate::ServiceProcessor;
 use anyhow::anyhow;
 use chrono::DateTime;
 use chrono::Utc;
+use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpState;
+use nexus_types::inventory::CabooseFound;
 use nexus_types::inventory::CabooseWhich;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::sync::Arc;
-use gateway_client::types::SpComponentCaboose;
 
 // XXX-dap add rack id
 
@@ -32,7 +33,7 @@ pub struct CollectionBuilder {
     sps: BTreeMap<Arc<BaseboardId>, ServiceProcessor>,
     rots: BTreeMap<Arc<BaseboardId>, RotState>,
     cabooses_found:
-        BTreeMap<CabooseWhich, BTreeMap<Arc<BaseboardId>, Arc<Caboose>>>,
+        BTreeMap<CabooseWhich, BTreeMap<Arc<BaseboardId>, CabooseFound>>,
 }
 
 impl CollectionBuilder {
@@ -145,10 +146,8 @@ impl CollectionBuilder {
         source: &str,
         caboose: SpComponentCaboose,
     ) -> Result<(), anyhow::Error> {
-        // XXX-dap I messed around with the Caboose structure in nexus/types to
-        // include time_collected, source, etc. and now I need to unpack what
-        // needs to be fixed here.
-        let caboose = Self::enum_item(&mut self.cabooses, caboose);
+        let sw_caboose =
+            Self::enum_item(&mut self.cabooses, Caboose::from(caboose));
         let (baseboard, _) =
             self.sps.get_key_value(baseboard).ok_or_else(|| {
                 anyhow!(
@@ -160,26 +159,20 @@ impl CollectionBuilder {
             self.cabooses_found.entry(which).or_insert_with(|| BTreeMap::new());
         if let Some(previous) = by_id.insert(
             baseboard.clone(),
-            Caboose {
+            CabooseFound {
                 time_collected: Utc::now(),
                 source: source.to_owned(),
-                board: caboose.board,
-                git_commit: caboose.git_commit,
-                name: caboose.name,
-                // XXX-dap TODO-doc
-                version: caboose
-                    .version
-                    .unwrap_or_else(|| String::from("unspecified")),
+                caboose: sw_caboose.clone(),
             },
         ) {
-            let error = if *previous == *caboose {
+            let error = if *previous.caboose == *sw_caboose {
                 anyhow!("reported multiple times (same value)",)
             } else {
                 anyhow!(
                     "reported caboose multiple times (previously {:?}, \
                     now {:?})",
                     previous,
-                    caboose
+                    sw_caboose
                 )
             };
             Err(error.context(format!(

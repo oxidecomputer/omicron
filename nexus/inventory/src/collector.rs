@@ -5,7 +5,6 @@
 //! Collection of inventory from Omicron components
 
 use crate::builder::CollectionBuilder;
-use crate::Caboose;
 use crate::Collection;
 use anyhow::Context;
 use std::sync::Arc;
@@ -145,6 +144,7 @@ impl Collector {
                 self.in_progress.found_sp_caboose(
                     &baseboard_id,
                     which,
+                    client.baseurl(),
                     caboose,
                 )?;
             }
