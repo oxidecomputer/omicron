@@ -25,7 +25,7 @@ use crate::db::update_and_check::UpdateStatus;
 // The single-table update-and-check CTE has the following form:
 //
 // WITH found   AS (SELECT <primary key> FROM T WHERE <primary key = value>)
-//      updated AS (UPDATE T SET <constraints> RETURNING *)
+//      updated AS (UPDATE T SET <values> RETURNING *)
 // SELECT
 //      found.<primary key>
 //      updated.<primary key>
@@ -217,11 +217,11 @@ impl QueryFragment<Pg> for InstanceAndVmmUpdate {
 
         out.push_sql("instance_updated AS (");
         self.instance_update.walk_ast(out.reborrow())?;
-        out.push_sql(" RETURNING *), ");
+        out.push_sql(" RETURNING id), ");
 
         out.push_sql("vmm_updated AS (");
         self.vmm_update.walk_ast(out.reborrow())?;
-        out.push_sql(" RETURNING *), ");
+        out.push_sql(" RETURNING id), ");
 
         out.push_sql("vmm_result AS (");
         out.push_sql("SELECT vmm_found.");
