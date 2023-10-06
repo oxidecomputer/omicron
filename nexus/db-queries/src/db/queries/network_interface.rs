@@ -291,7 +291,7 @@ fn decode_database_error(
         // that colum has been violated.
         DieselError::DatabaseError(
             DatabaseErrorKind::NotNullViolation,
-            ref info,
+            info,
         ) if info.message() == IP_EXHAUSTION_ERROR_MESSAGE => {
             InsertError::NoAvailableIpAddresses
         }
@@ -300,7 +300,7 @@ fn decode_database_error(
         // `push_ensure_unique_vpc_expression` subquery, which generates a
         // UUID parsing error if the resource (e.g. instance) we want to attach
         // to is already associated with another VPC.
-        DieselError::DatabaseError(DatabaseErrorKind::Unknown, ref info)
+        DieselError::DatabaseError(DatabaseErrorKind::Unknown, info)
             if info.message() == MULTIPLE_VPC_ERROR_MESSAGE =>
         {
             InsertError::ResourceSpansMultipleVpcs(interface.parent_id)
@@ -308,10 +308,9 @@ fn decode_database_error(
 
         // This checks the constraint on the interface slot numbers, used to
         // limit total number of interfaces per resource to a maximum number.
-        DieselError::DatabaseError(
-            DatabaseErrorKind::CheckViolation,
-            ref info,
-        ) if info.message() == NO_SLOTS_AVAILABLE_ERROR_MESSAGE => {
+        DieselError::DatabaseError(DatabaseErrorKind::CheckViolation, info)
+            if info.message() == NO_SLOTS_AVAILABLE_ERROR_MESSAGE =>
+        {
             InsertError::NoSlotsAvailable
         }
 
@@ -320,7 +319,7 @@ fn decode_database_error(
         // that column has been violated.
         DieselError::DatabaseError(
             DatabaseErrorKind::NotNullViolation,
-            ref info,
+            info,
         ) if info.message() == MAC_EXHAUSTION_ERROR_MESSAGE => {
             InsertError::NoMacAddrressesAvailable
         }
@@ -329,7 +328,7 @@ fn decode_database_error(
         // `push_ensure_unique_vpc_subnet_expression` subquery, which generates
         // a UUID parsing error if the resource has another interface in the VPC
         // Subnet of the one we're trying to insert.
-        DieselError::DatabaseError(DatabaseErrorKind::Unknown, ref info)
+        DieselError::DatabaseError(DatabaseErrorKind::Unknown, info)
             if info.message() == NON_UNIQUE_VPC_SUBNET_ERROR_MESSAGE =>
         {
             InsertError::NonUniqueVpcSubnets
@@ -338,7 +337,7 @@ fn decode_database_error(
         // This catches the UUID-cast failure intentionally introduced by
         // `push_instance_state_verification_subquery`, which verifies that
         // the instance is actually stopped when running this query.
-        DieselError::DatabaseError(DatabaseErrorKind::Unknown, ref info)
+        DieselError::DatabaseError(DatabaseErrorKind::Unknown, info)
             if info.message() == INSTANCE_BAD_STATE_ERROR_MESSAGE =>
         {
             assert_eq!(interface.kind, NetworkInterfaceKind::Instance);
@@ -347,7 +346,7 @@ fn decode_database_error(
         // This catches the UUID-cast failure intentionally introduced by
         // `push_instance_state_verification_subquery`, which verifies that
         // the instance doesn't even exist when running this query.
-        DieselError::DatabaseError(DatabaseErrorKind::Unknown, ref info)
+        DieselError::DatabaseError(DatabaseErrorKind::Unknown, info)
             if info.message() == NO_INSTANCE_ERROR_MESSAGE =>
         {
             assert_eq!(interface.kind, NetworkInterfaceKind::Instance);

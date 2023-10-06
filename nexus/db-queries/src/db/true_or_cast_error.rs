@@ -93,7 +93,7 @@ pub fn matches_sentinel(
     match e {
         // Catch the specific errors designed to communicate the failures we
         // want to distinguish.
-        Error::DatabaseError(DatabaseErrorKind::Unknown, ref info) => {
+        Error::DatabaseError(DatabaseErrorKind::Unknown, info) => {
             for sentinel in sentinels {
                 if info.message() == bool_parse_error(sentinel) {
                     return Some(sentinel);
