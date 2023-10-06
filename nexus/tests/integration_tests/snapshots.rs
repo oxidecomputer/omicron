@@ -1288,13 +1288,16 @@ async fn test_multiple_deletes_not_sent(cptestctx: &ControlPlaneTestContext) {
         .unwrap();
 
     let resources_1 = match resources_1 {
-        db::datastore::CrucibleResources::V1(resources_1) => resources_1,
+        db::datastore::CrucibleResources::V1(_) => panic!("using old style!"),
+        db::datastore::CrucibleResources::V2(resources_1) => resources_1,
     };
     let resources_2 = match resources_2 {
-        db::datastore::CrucibleResources::V1(resources_2) => resources_2,
+        db::datastore::CrucibleResources::V1(_) => panic!("using old style!"),
+        db::datastore::CrucibleResources::V2(resources_2) => resources_2,
     };
     let resources_3 = match resources_3 {
-        db::datastore::CrucibleResources::V1(resources_3) => resources_3,
+        db::datastore::CrucibleResources::V1(_) => panic!("using old style!"),
+        db::datastore::CrucibleResources::V2(resources_3) => resources_3,
     };
 
     // No region deletions yet, these are just snapshot deletes
@@ -1305,24 +1308,24 @@ async fn test_multiple_deletes_not_sent(cptestctx: &ControlPlaneTestContext) {
 
     // But there are snapshots to delete
 
-    assert!(!resources_1.datasets_and_snapshots.is_empty());
-    assert!(!resources_2.datasets_and_snapshots.is_empty());
-    assert!(!resources_3.datasets_and_snapshots.is_empty());
+    assert!(!resources_1.snapshots_to_delete.is_empty());
+    assert!(!resources_2.snapshots_to_delete.is_empty());
+    assert!(!resources_3.snapshots_to_delete.is_empty());
 
-    // Assert there are no overlaps in the datasets_and_snapshots to delete.
+    // Assert there are no overlaps in the snapshots_to_delete to delete.
 
-    for tuple in &resources_1.datasets_and_snapshots {
-        assert!(!resources_2.datasets_and_snapshots.contains(tuple));
-        assert!(!resources_3.datasets_and_snapshots.contains(tuple));
+    for tuple in &resources_1.snapshots_to_delete {
+        assert!(!resources_2.snapshots_to_delete.contains(tuple));
+        assert!(!resources_3.snapshots_to_delete.contains(tuple));
     }
 
-    for tuple in &resources_2.datasets_and_snapshots {
-        assert!(!resources_1.datasets_and_snapshots.contains(tuple));
-        assert!(!resources_3.datasets_and_snapshots.contains(tuple));
+    for tuple in &resources_2.snapshots_to_delete {
+        assert!(!resources_1.snapshots_to_delete.contains(tuple));
+        assert!(!resources_3.snapshots_to_delete.contains(tuple));
     }
 
-    for tuple in &resources_3.datasets_and_snapshots {
-        assert!(!resources_1.datasets_and_snapshots.contains(tuple));
-        assert!(!resources_2.datasets_and_snapshots.contains(tuple));
+    for tuple in &resources_3.snapshots_to_delete {
+        assert!(!resources_1.snapshots_to_delete.contains(tuple));
+        assert!(!resources_2.snapshots_to_delete.contains(tuple));
     }
 }

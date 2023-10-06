@@ -1982,6 +1982,11 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
             assert!(cr.datasets_and_regions.is_empty());
             assert_eq!(cr.datasets_and_snapshots.len(), 3);
         }
+
+        nexus_db_queries::db::datastore::CrucibleResources::V2(cr) => {
+            assert!(cr.datasets_and_regions.is_empty());
+            assert_eq!(cr.snapshots_to_delete.len(), 3);
+        }
     }
 
     // Now, let's say we're at a spot where the running snapshots have been
@@ -2107,6 +2112,11 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
         nexus_db_queries::db::datastore::CrucibleResources::V1(cr) => {
             assert!(cr.datasets_and_regions.is_empty());
             assert_eq!(cr.datasets_and_snapshots.len(), 3);
+        }
+
+        nexus_db_queries::db::datastore::CrucibleResources::V2(cr) => {
+            assert!(cr.datasets_and_regions.is_empty());
+            assert_eq!(cr.snapshots_to_delete.len(), 3);
         }
     }
 }

@@ -683,7 +683,7 @@ impl DataStore {
                     .await?;
 
                 // Return what results can be cleaned up
-                let result = CrucibleResources::V1(CrucibleResourcesV1 {
+                let result = CrucibleResources::V2(CrucibleResourcesV2 {
                     // The only use of a read-write region will be at the top level of a
                     // Volume. These are not shared, but if any snapshots are taken this
                     // will prevent deletion of the region. Filter out any regions that
@@ -707,12 +707,12 @@ impl DataStore {
                                     .eq(region_dsl::id)
                                     .and(dsl::dataset_id.eq(dataset_dsl::id))),
                             )
-                            .filter(dsl::deleting.eq(true))
                             .filter(
                                 dsl::volume_references
                                     .eq(0)
                                     // Despite the SQL specifying that this column is NOT NULL,
                                     // this null check is required for this function to work!
+                                    // The left join of region_snapshot might cause a null here.
                                     .or(dsl::volume_references.is_null()),
                             )
                             .select((Dataset::as_select(), Region::as_select()))
@@ -720,78 +720,17 @@ impl DataStore {
                             .await?
                     },
 
-                    // A volume (for a disk or snapshot) may reference another nested
-                    // volume as a read-only parent, and this may be arbitrarily deep.
-                    // After decrementing volume_references above, get the region
-                    // snapshot records for these read_only_targets where the
-                    // volume_references has gone to 0. Consumers of this struct will
-                    // be responsible for deleting the read-only downstairs running
-                    // for the snapshot and the snapshot itself.
-                    datasets_and_snapshots: {
-                        use db::schema::dataset::dsl as dataset_dsl;
-
-                        dsl::region_snapshot
-                            // Only return region_snapshot records related to
-                            // this volume that have zero references. This will
-                            // only happen one time, on the last decrease of a
-                            // volume containing these read-only targets.
-                            //
-                            // It's important to not return *every* region
-                            // snapshot with zero references: multiple volume
-                            // delete sub-sagas will then be issues duplicate
-                            // DELETE calls to Crucible agents, and a request to
-                            // delete a read-only downstairs running for a
-                            // snapshot that doesn't exist will return a 404,
-                            // causing the saga to error and unwind.
-                            .filter(dsl::snapshot_addr.eq_any(
-                                crucible_targets.read_only_targets.clone(),
-                            ))
-                            // Match the dataset, region, and snapshot ID
-                            .filter(
-                                dsl::dataset_id
-                                    .eq_any(
-                                        snapshots_to_delete
-                                            .iter()
-                                            .map(|x| x.dataset_id),
-                                    )
-                                    .and(
-                                        dsl::region_id
-                                            .eq_any(
-                                                snapshots_to_delete
-                                                    .iter()
-                                                    .map(|x| x.region_id),
-                                            )
-                                            .and(
-                                                dsl::snapshot_id.eq_any(
-                                                    snapshots_to_delete
-                                                        .iter()
-                                                        .map(|x| x.snapshot_id),
-                                                ),
-                                            ),
-                                    ),
-                            )
-                            // Match only rows where deleting = true
-                            .filter(dsl::deleting.eq(true))
-                            .filter(
-                                dsl::volume_references
-                                    .eq(0)
-                                    // Despite the SQL specifying that this column is NOT NULL,
-                                    // this null check is required for this function to work!
-                                    .or(dsl::volume_references.is_null()),
-                            )
-                            .inner_join(
-                                dataset_dsl::dataset
-                                    .on(dsl::dataset_id.eq(dataset_dsl::id)),
-                            )
-                            .select((
-                                Dataset::as_select(),
-                                RegionSnapshot::as_select(),
-                            ))
-                            .get_results_async::<(Dataset, RegionSnapshot)>(
-                                &conn,
-                            )
-                            .await?
-                    },
+                    // Consumers of this struct will be responsible for deleting
+                    // the read-only downstairs running for the snapshot and the
+                    // snapshot itself.
+                    //
+                    // It's important to not return *every* region snapshot with
+                    // zero references: multiple volume delete sub-sagas will
+                    // then be issues duplicate DELETE calls to Crucible agents,
+                    // and a request to delete a read-only downstairs running
+                    // for a snapshot that doesn't exist will return a 404,
+                    // causing the saga to error and unwind.
+                    snapshots_to_delete,
                 });
 
                 // Soft delete this volume, and serialize the resources that are to
@@ -1039,12 +978,19 @@ pub struct CrucibleTargets {
 #[derive(Debug, Serialize, Deserialize)]
 pub enum CrucibleResources {
     V1(CrucibleResourcesV1),
+    V2(CrucibleResourcesV2),
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct CrucibleResourcesV1 {
     pub datasets_and_regions: Vec<(Dataset, Region)>,
     pub datasets_and_snapshots: Vec<(Dataset, RegionSnapshot)>,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct CrucibleResourcesV2 {
+    pub datasets_and_regions: Vec<(Dataset, Region)>,
+    pub snapshots_to_delete: Vec<RegionSnapshot>,
 }
 
 /// Return the targets from a VolumeConstructionRequest.
