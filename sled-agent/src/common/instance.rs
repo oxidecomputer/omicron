@@ -407,30 +407,14 @@ impl InstanceStates {
     /// sufficient to ensure that no other Propolis observations arrive in the
     /// transaction that terminates the zone and then calls this function.
     ///
-    /// This function does not synchronize with ongoing live migrations. Sled
-    /// agent's callers are responsible for tearing down all of a migrating
-    /// instance's VMMs in a safe order when asking to rudely terminate a VMM
-    /// (targets before sources).
+    /// TODO(#4004): This routine works by synthesizing a Propolis state change
+    /// that says "this Propolis is destroyed and its active migration failed."
+    /// If this conflicts with the actual Propolis state--e.g., if the
+    /// underlying Propolis was destroyed but migration *succeeded*--the
+    /// instance's state in Nexus may become inconsistent. This routine should
+    /// therefore only be invoked by callers who know that an instance is not
+    /// migrating.
     pub(crate) fn terminate_rudely(&mut self) {
-        // Construct a fake Propolis observation that reports that the VMM is
-        // destroyed.
-        //
-        // Doing this with a live migration in progress is perilous because of
-        // the following race:
-        //
-        // 1. The source and target VMMs agree the migration has completed
-        //    successfully.
-        // 2. Before either sled agent observes that the migration has finished,
-        //    the source is rudely terminated.
-        // 3. The instance is now running in the target VMM, but the source
-        //    sled, thinking that it still hosts the active VMM, clears the
-        //    active Propolis ID and migration IDs.
-        //
-        // There is no way to resolve this problem in the sled agent; callers
-        // who want to terminate an instance's VMMs need to do it from the
-        // "outside in" and terminate migration targets before migration
-        // sources to avoid this issue (or terminate VMMs only in situations
-        // where it is known that they cannot be participating in a migration).
         let fake_observed = ObservedPropolisState {
             vmm_state: PropolisInstanceState(PropolisApiState::Destroyed),
             migration_status: if self.instance.migration_id.is_some() {
