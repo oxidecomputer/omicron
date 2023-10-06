@@ -6,7 +6,7 @@
 
 use std::collections::HashSet;
 
-use crate::dataset::{DatasetError, DatasetKind, DatasetName};
+use crate::dataset::{DatasetError, DatasetName};
 use crate::disk::{Disk, DiskError, RawDisk};
 use crate::error::Error;
 use crate::resources::StorageResources;
@@ -16,7 +16,7 @@ use illumos_utils::zpool::ZpoolName;
 use key_manager::StorageKeyRequester;
 use omicron_common::disk::DiskIdentity;
 use sled_hardware::DiskVariant;
-use slog::{debug, error, info, o, warn, Logger};
+use slog::{error, info, o, warn, Logger};
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::{interval, Duration, MissedTickBehavior};
 use uuid::Uuid;
@@ -58,11 +58,12 @@ enum StorageRequest {
 /// to clients for debugging purposes, and that isn't exposed in other ways.
 #[derive(Debug, Clone)]
 pub struct StorageManagerData {
-    state: StorageManagerState,
-    queued_u2_drives: HashSet<RawDisk>,
+    pub state: StorageManagerState,
+    pub queued_u2_drives: HashSet<RawDisk>,
 }
 
 /// A mechanism for interacting with the [`StorageManager`]
+#[derive(Clone)]
 pub struct StorageHandle {
     tx: mpsc::Sender<StorageRequest>,
     resource_updates: watch::Receiver<StorageResources>,
@@ -480,6 +481,7 @@ impl StorageManager {
 /// systems.
 #[cfg(all(test, target_os = "illumos"))]
 mod tests {
+    use crate::dataset::DatasetKind;
     use crate::disk::SyntheticDisk;
 
     use super::*;

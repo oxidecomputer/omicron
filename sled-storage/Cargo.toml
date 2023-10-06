@@ -1,5 +1,5 @@
 [package]
-name = "omicron-sled-storage"
+name = "sled-storage"
 version = "0.1.0"
 edition = "2021"
 

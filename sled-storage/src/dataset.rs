@@ -237,7 +237,7 @@ pub enum DatasetError {
 /// be used. The `StorageManager` for the sled-agent always has a
 /// `StorageKeyRequester` available, and so the only place we should pass
 /// `None` is for the M.2s touched by the Installinator.
-pub async fn ensure_zpool_has_datasets(
+pub(crate) async fn ensure_zpool_has_datasets(
     log: &Logger,
     zpool_name: &ZpoolName,
     disk_identity: &DiskIdentity,

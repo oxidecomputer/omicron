@@ -5246,6 +5246,7 @@ dependencies = [
  "sha3",
  "sled-agent-client",
  "sled-hardware",
+ "sled-storage",
  "slog",
  "slog-async",
  "slog-dtrace",
@@ -5263,32 +5264,6 @@ dependencies = [
  "uuid",
  "zeroize",
  "zone",
-]
-
-[[package]]
-name = "omicron-sled-storage"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "camino",
- "camino-tempfile",
- "derive_more",
- "glob",
- "illumos-utils",
- "key-manager",
- "nexus-client 0.1.0",
- "omicron-common 0.1.0",
- "omicron-test-utils",
- "rand 0.8.5",
- "schemars",
- "serde",
- "serde_json",
- "sled-agent-client",
- "sled-hardware",
- "slog",
- "thiserror",
- "tokio",
- "uuid",
 ]
 
 [[package]]
@@ -7978,6 +7953,32 @@ dependencies = [
  "slog",
  "thiserror",
  "tofino",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "sled-storage"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "camino",
+ "camino-tempfile",
+ "derive_more",
+ "glob",
+ "illumos-utils",
+ "key-manager",
+ "nexus-client 0.1.0",
+ "omicron-common 0.1.0",
+ "omicron-test-utils",
+ "rand 0.8.5",
+ "schemars",
+ "serde",
+ "serde_json",
+ "sled-agent-client",
+ "sled-hardware",
+ "slog",
+ "thiserror",
  "tokio",
  "uuid",
 ]

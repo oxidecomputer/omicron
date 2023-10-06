@@ -8,7 +8,7 @@
 //! hardware partitions from the `sled-hardware` crate. It utilizes the
 //! `illumos-utils` crate to actually perform ZFS related OS calls.
 
-pub(crate) mod dataset;
+pub mod dataset;
 pub(crate) mod disk;
 pub(crate) mod dump_setup;
 pub mod error;
