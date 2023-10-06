@@ -17,6 +17,7 @@ use nexus_types::inventory::CabooseWhich;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::sync::Arc;
+use gateway_client::types::SpComponentCaboose;
 
 // XXX-dap add rack id
 
@@ -141,8 +142,12 @@ impl CollectionBuilder {
         &mut self,
         baseboard: &BaseboardId,
         which: CabooseWhich,
-        caboose: Caboose,
+        source: &str,
+        caboose: SpComponentCaboose,
     ) -> Result<(), anyhow::Error> {
+        // XXX-dap I messed around with the Caboose structure in nexus/types to
+        // include time_collected, source, etc. and now I need to unpack what
+        // needs to be fixed here.
         let caboose = Self::enum_item(&mut self.cabooses, caboose);
         let (baseboard, _) =
             self.sps.get_key_value(baseboard).ok_or_else(|| {
@@ -153,8 +158,20 @@ impl CollectionBuilder {
             })?;
         let by_id =
             self.cabooses_found.entry(which).or_insert_with(|| BTreeMap::new());
-        if let Some(previous) = by_id.insert(baseboard.clone(), caboose.clone())
-        {
+        if let Some(previous) = by_id.insert(
+            baseboard.clone(),
+            Caboose {
+                time_collected: Utc::now(),
+                source: source.to_owned(),
+                board: caboose.board,
+                git_commit: caboose.git_commit,
+                name: caboose.name,
+                // XXX-dap TODO-doc
+                version: caboose
+                    .version
+                    .unwrap_or_else(|| String::from("unspecified")),
+            },
+        ) {
             let error = if *previous == *caboose {
                 anyhow!("reported multiple times (same value)",)
             } else {

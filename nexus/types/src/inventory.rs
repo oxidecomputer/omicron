@@ -48,24 +48,13 @@ pub struct BaseboardId {
 
 #[derive(Clone, Debug, Ord, Eq, PartialOrd, PartialEq)]
 pub struct Caboose {
+    pub time_collected: DateTime<Utc>,
+    pub source: String,
+
     pub board: String,
     pub git_commit: String,
     pub name: String,
     pub version: String,
-}
-
-impl From<gateway_client::types::SpComponentCaboose> for Caboose {
-    fn from(c: gateway_client::types::SpComponentCaboose) -> Self {
-        Caboose {
-            board: c.board,
-            git_commit: c.git_commit,
-            name: c.name,
-            // The MGS API uses an `Option` here because old SP versions did not
-            // supply it.  But modern SP versions do.  So we should never hit
-            // this `unwrap_or()`.
-            version: c.version.unwrap_or(String::from("<unspecified>")),
-        }
-    }
 }
 
 #[derive(Clone, Debug, Ord, Eq, PartialOrd, PartialEq)]

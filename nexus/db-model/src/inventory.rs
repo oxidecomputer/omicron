@@ -78,6 +78,25 @@ impl_enum_type!(
     RotSlotB => b"rot_slot_B"
 );
 
+impl From<nexus_types::inventory::CabooseWhich> for CabooseWhich {
+    fn from(c: nexus_types::inventory::CabooseWhich) -> Self {
+        match c {
+            nexus_types::inventory::CabooseWhich::SpSlot0 => {
+                CabooseWhich::SpSlot0
+            }
+            nexus_types::inventory::CabooseWhich::SpSlot1 => {
+                CabooseWhich::SpSlot1
+            }
+            nexus_types::inventory::CabooseWhich::RotSlotA => {
+                CabooseWhich::RotSlotA
+            }
+            nexus_types::inventory::CabooseWhich::RotSlotB => {
+                CabooseWhich::RotSlotB
+            }
+        }
+    }
+}
+
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
 #[diesel(table_name = inv_collection)]
 pub struct InvCollection {

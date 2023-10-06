@@ -140,7 +140,7 @@ impl Collector {
                         self.in_progress.found_error(error);
                         continue;
                     }
-                    Ok(response) => Caboose::from(response.into_inner()),
+                    Ok(response) => response.into_inner(),
                 };
                 self.in_progress.found_sp_caboose(
                     &baseboard_id,
