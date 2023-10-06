@@ -241,7 +241,7 @@ impl Server {
                 &config,
                 &sled_request.request,
                 long_running_task_handles.clone(),
-                service_manager,
+                service_manager.clone(),
                 &ddm_admin_localhost_client,
                 &base_log,
                 &startup_log,

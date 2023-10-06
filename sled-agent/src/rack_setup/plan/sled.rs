@@ -8,7 +8,6 @@ use crate::bootstrap::{
     config::BOOTSTRAP_AGENT_RACK_INIT_PORT, params::StartSledAgentRequest,
 };
 use crate::rack_setup::config::SetupServiceConfig as Config;
-use crate::storage_manager::StorageResources;
 use camino::Utf8PathBuf;
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use schemars::JsonSchema;
@@ -56,11 +55,12 @@ pub struct Plan {
 impl Plan {
     pub async fn load(
         log: &Logger,
-        storage: &StorageResources,
+        storage: &StorageHandle,
     ) -> Result<Option<Self>, PlanError> {
         let paths: Vec<Utf8PathBuf> = storage
-            .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
+            .get_latest_resources()
             .await
+            .all_m2_mountpoints(CONFIG_DATASET)
             .into_iter()
             .map(|p| p.join(RSS_SLED_PLAN_FILENAME))
             .collect();

@@ -19,7 +19,6 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::Mutex;
 use tokio::sync::broadcast;
-use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 mod gpt;

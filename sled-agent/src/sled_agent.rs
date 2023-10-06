@@ -22,6 +22,7 @@ use crate::services::{self, ServiceManager};
 use crate::updates::{ConfigUpdates, UpdateManager};
 use crate::zone_bundle;
 use crate::zone_bundle::BundleError;
+use bootstore::schemes::v0::NodeRequestError as BootstoreNodeRequestError;
 use camino::Utf8PathBuf;
 use dropshot::HttpError;
 use illumos_utils::opte::params::{
@@ -45,7 +46,6 @@ use omicron_common::backoff::{
 };
 use sled_hardware::underlay;
 use sled_hardware::HardwareManager;
-use sled_storage::dataset::DatasetName;
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::collections::BTreeMap;
@@ -112,7 +112,7 @@ pub enum Error {
     EarlyNetworkError(#[from] EarlyNetworkSetupError),
 
     #[error("Bootstore Error: {0}")]
-    Bootstore(#[from] bootstore::NodeRequestError),
+    Bootstore(#[from] BootstoreNodeRequestError),
 
     #[error("Failed to deserialize early network config: {0}")]
     EarlyNetworkDeserialize(serde_json::Error),
@@ -340,10 +340,15 @@ impl SledAgent {
 
         match config.vmm_reservoir_percentage {
             Some(sz) if sz > 0 && sz < 100 => {
-                instances.set_reservoir_size(&hardware, sz).map_err(|e| {
-                    error!(log, "Failed to set VMM reservoir size: {e}");
-                    e
-                })?;
+                instances
+                    .set_reservoir_size(
+                        &long_running_task_handles.hardware_manager,
+                        sz,
+                    )
+                    .map_err(|e| {
+                        error!(log, "Failed to set VMM reservoir size: {e}");
+                        e
+                    })?;
             }
             Some(sz) if sz == 0 => {
                 warn!(log, "Not using VMM reservoir (size 0 bytes requested)");
@@ -729,9 +734,18 @@ impl SledAgent {
     }
 
     /// Gets the sled's current list of all zpools.
-    pub async fn zpools_get(&self) -> Result<Vec<Zpool>, Error> {
-        let zpools = self.inner.storage.get_zpools().await?;
-        Ok(zpools)
+    pub async fn zpools_get(&self) -> Vec<Zpool> {
+        self.inner
+            .storage
+            .get_latest_resources()
+            .await
+            .get_all_zpools()
+            .into_iter()
+            .map(|(name, variant)| Zpool {
+                id: name.id(),
+                disk_type: variant.into(),
+            })
+            .collect()
     }
 
     /// Returns whether or not the sled believes itself to be a scrimlet

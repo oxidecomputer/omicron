@@ -6,11 +6,10 @@
 
 use crate::bootstrap::params::StartSledAgentRequest;
 use crate::params::{
-    DatasetKind, DatasetRequest, ServiceType, ServiceZoneRequest,
-    ServiceZoneService, ZoneType,
+    DatasetRequest, ServiceType, ServiceZoneRequest, ServiceZoneService,
+    ZoneType,
 };
 use crate::rack_setup::config::SetupServiceConfig as Config;
-use crate::storage::dataset::DatasetName;
 use camino::Utf8PathBuf;
 use dns_service_client::types::DnsConfigParams;
 use illumos_utils::zpool::ZpoolName;
@@ -34,7 +33,7 @@ use serde::{Deserialize, Serialize};
 use sled_agent_client::{
     types as SledAgentTypes, Client as SledAgentClient, Error as SledAgentError,
 };
-use sled_storage::dataset::CONFIG_DATASET;
+use sled_storage::dataset::{DatasetKind, DatasetName, CONFIG_DATASET};
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::collections::{BTreeSet, HashMap, HashSet};

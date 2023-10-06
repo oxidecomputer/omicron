@@ -5,16 +5,15 @@
 //! Discovered and usable disks and zpools
 
 use crate::dataset::M2_DEBUG_DATASET;
-use crate::disk::{Disk, RawDisk};
+use crate::disk::Disk;
 use crate::error::Error;
 use crate::pool::Pool;
 use camino::Utf8PathBuf;
 use illumos_utils::zpool::ZpoolName;
 use omicron_common::disk::DiskIdentity;
-use sled_hardware::{DiskVariant, UnparsedDisk};
+use sled_hardware::DiskVariant;
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use uuid::Uuid;
 
 // The directory within the debug dataset in which bundles are created.
 const BUNDLE_DIRECTORY: &str = "bundle";
@@ -113,8 +112,16 @@ impl StorageResources {
             .collect()
     }
 
-    /// Returns all zpools of a particular variant
-    pub fn all_zpools(&self, variant: DiskVariant) -> Vec<ZpoolName> {
+    pub fn get_all_zpools(&self) -> Vec<(ZpoolName, DiskVariant)> {
+        self.disks
+            .values()
+            .cloned()
+            .map(|(disk, _)| (disk.zpool_name().clone(), disk.variant()))
+            .collect()
+    }
+
+    // Returns all zpools of a particular variant
+    fn all_zpools(&self, variant: DiskVariant) -> Vec<ZpoolName> {
         self.disks
             .values()
             .filter_map(|(disk, _)| {

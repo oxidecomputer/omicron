@@ -99,8 +99,7 @@ fn spawn_key_manager(log: &Logger) -> StorageKeyRequester {
     let secret_retriever = LrtqOrHardcodedSecretRetriever::new();
     let (mut key_manager, storage_key_requester) =
         KeyManager::new(log, secret_retriever);
-    let key_manager_handle =
-        tokio::spawn(async move { key_manager.run().await });
+    tokio::spawn(async move { key_manager.run().await });
     storage_key_requester
 }
 
@@ -137,7 +136,7 @@ fn spawn_hardware_monitor(
     hardware_manager: &HardwareManager,
     storage_handle: &StorageHandle,
 ) -> HardwareMonitorHandle {
-    let (monitor, handle) =
+    let (mut monitor, handle) =
         HardwareMonitor::new(log, hardware_manager, storage_handle);
     tokio::spawn(async move {
         monitor.run().await;

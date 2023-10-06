@@ -55,13 +55,12 @@ impl TofinoManager {
     //
     // Returns whether the tofino was loaded or not
     pub fn become_ready(&mut self, service_manager: ServiceManager) -> bool {
-        match self {
+        let tofino_loaded = match self {
             Self::Ready(_) => panic!("ServiceManager is already available"),
-            Self::NotReady { tofino_loaded } => {
-                *self = Self::Ready(service_manager);
-                *tofino_loaded
-            }
-        }
+            Self::NotReady { tofino_loaded } => *tofino_loaded,
+        };
+        *self = Self::Ready(service_manager);
+        tofino_loaded
     }
 }
 
