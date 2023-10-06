@@ -7,7 +7,6 @@
 use anyhow::Context;
 use anyhow::Result;
 use camino::Utf8Path;
-use camino::Utf8PathBuf;
 use dns_service_client::types::DnsConfigParams;
 use dropshot::test_util::ClientTestContext;
 use dropshot::test_util::LogContext;
@@ -305,6 +304,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             PopulateCrdb::FromEnvironmentSeed => {
                 db::test_setup_database(log).await
             }
+            #[cfg(feature = "omicron-dev")]
             PopulateCrdb::FromSeed { input_tar } => {
                 db::test_setup_database_from_seed(log, input_tar).await
             }
@@ -790,7 +790,8 @@ enum PopulateCrdb {
     FromEnvironmentSeed,
 
     /// Populate Cockroach from the seed located at this path.
-    FromSeed { input_tar: Utf8PathBuf },
+    #[cfg(feature = "omicron-dev")]
+    FromSeed { input_tar: camino::Utf8PathBuf },
 
     /// Do not populate Cockroach.
     Empty,
@@ -802,6 +803,7 @@ enum PopulateCrdb {
 /// The main difference from tests is that this routine ensures the seed tarball
 /// exists (or creates a seed tarball if it doesn't exist). For tests, this
 /// should be done in the `crdb-seed` setup script.
+#[cfg(feature = "omicron-dev")]
 pub async fn omicron_dev_setup_with_config<N: NexusServer>(
     config: &mut omicron_common::nexus_config::Config,
 ) -> Result<ControlPlaneTestContext<N>> {

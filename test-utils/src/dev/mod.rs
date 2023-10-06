@@ -9,6 +9,7 @@ pub mod clickhouse;
 pub mod db;
 pub mod dendrite;
 pub mod poll;
+#[cfg(feature = "seed-gen")]
 pub mod seed;
 pub mod test_cmds;
 
@@ -20,6 +21,9 @@ use dropshot::ConfigLoggingIfExists;
 use dropshot::ConfigLoggingLevel;
 use slog::Logger;
 use std::io::BufReader;
+
+/// The environment variable via which the path to the seed tarball is passed.
+pub static CRDB_SEED_TAR_ENV: &str = "CRDB_SEED_TAR";
 
 /// Set up a [`dropshot::test_util::LogContext`] appropriate for a test named
 /// `test_name`

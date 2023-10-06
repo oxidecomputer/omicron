@@ -6,10 +6,10 @@ use std::io::{BufWriter, Write};
 
 use anyhow::{ensure, Context, Result};
 use camino::{Utf8Path, Utf8PathBuf};
+use filetime::FileTime;
 use slog::Logger;
 
-/// The environment variable via which the path to the seed tarball is passed.
-pub static CRDB_SEED_TAR_ENV: &str = "CRDB_SEED_TAR";
+use super::CRDB_SEED_TAR_ENV;
 
 /// Creates a string identifier for the current DB schema and version.
 //
@@ -63,6 +63,10 @@ impl SeedTarballStatus {
 /// Ensures that a seed tarball corresponding to the schema returned by
 /// [`digest_unique_to_schema`] exists, recreating it if necessary.
 ///
+/// This used to create a directory rather than a tarball, but that was changed
+/// due to [Omicron issue
+/// #4193](https://github.com/oxidecomputer/omicron/issues/4193).
+///
 /// If `why_invalidate` is `Some`, then if the seed tarball exists, it will be
 /// deleted before being recreated.
 ///
@@ -75,6 +79,11 @@ pub async fn ensure_seed_tarball_exists(
     why_invalidate: Option<&str>,
 ) -> Result<(Utf8PathBuf, SeedTarballStatus)> {
     // If the CRDB_SEED_TAR_ENV variable is set, return an error.
+    //
+    // Even though this module is gated behind a feature flag, omicron-dev needs
+    // this function -- and so, if you're doing a top-level `cargo nextest run`
+    // like CI does, feature unification would mean this gets included in test
+    // binaries anyway. So this acts as a belt-and-suspenders check.
     if let Ok(val) = std::env::var(CRDB_SEED_TAR_ENV) {
         anyhow::bail!(
             "{CRDB_SEED_TAR_ENV} is set to `{val}` -- implying that a test called \
@@ -84,7 +93,8 @@ pub async fn ensure_seed_tarball_exists(
     }
 
     // XXX: we aren't considering cross-user permissions for this file. Might be
-    // worth setting more restrictive permissions on it.
+    // worth setting more restrictive permissions on it, or using a per-user
+    // cache dir.
     let base_seed_dir = Utf8PathBuf::from_path_buf(std::env::temp_dir())
         .expect("Not a UTF-8 path")
         .join("crdb-base");
@@ -103,12 +113,11 @@ pub async fn ensure_seed_tarball_exists(
             true
         }
         (true, None) => {
-            // The tarball exists. Update its mtime (i.e. `touch` it) to ensure
-            // that it doesn't get deleted by a /tmp cleaner like on macOS.
-            std::fs::OpenOptions::new()
-                .append(true)
-                .open(&desired_seed_tar)
-                .context("failed to touch seed tarball")?;
+            // The tarball exists. Update its atime and mtime (i.e. `touch` it)
+            // to ensure that it doesn't get deleted by a /tmp cleaner.
+            let now = FileTime::now();
+            filetime::set_file_times(&desired_seed_tar, now, now)
+                .context("failed to update seed tarball atime and mtime")?;
             return Ok((desired_seed_tar, SeedTarballStatus::Existing));
         }
         (false, Some(why)) => {
@@ -124,12 +133,14 @@ pub async fn ensure_seed_tarball_exists(
         }
     };
 
-    // The tarball didn't exist when we started, so try to create it.
+    // At this point the tarball does not exist (either because it didn't exist
+    // in the first place or because it was deleted above), so try to create it.
     //
-    // Nextest will execute it just once, but it is possible for a user to start
-    // up multiple nextest processes to be running at the same time. So we
-    // should consider it possible for another caller to create this seed
-    // tarball before we finish setting it up ourselves.
+    // Nextest will execute this function just once via the `crdb-seed` binary,
+    // but it is possible for a user to start up multiple nextest processes to
+    // be running at the same time. So we should consider it possible for
+    // another caller to create this seed tarball before we finish setting it up
+    // ourselves.
     test_setup_database_seed(log, &desired_seed_tar)
         .await
         .context("failed to setup seed tarball")?;

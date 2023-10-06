@@ -5,8 +5,9 @@
 use anyhow::{Context, Result};
 use dropshot::{test_util::LogContext, ConfigLogging, ConfigLoggingLevel};
 use omicron_test_utils::dev::seed::{
-    ensure_seed_tarball_exists, should_invalidate_seed, CRDB_SEED_TAR_ENV,
+    ensure_seed_tarball_exists, should_invalidate_seed,
 };
+use omicron_test_utils::dev::CRDB_SEED_TAR_ENV;
 use std::io::Write;
 
 #[tokio::main]

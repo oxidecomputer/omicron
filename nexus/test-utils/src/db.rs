@@ -18,14 +18,13 @@ use slog::Logger;
 /// to copy the database from this seed location.
 fn seed_tar() -> Utf8PathBuf {
     // The setup script should set this environment variable.
-    let seed_dir =
-        std::env::var(dev::seed::CRDB_SEED_TAR_ENV).unwrap_or_else(|_| {
-            panic!(
-                "{} missing -- are you running this test \
+    let seed_dir = std::env::var(dev::CRDB_SEED_TAR_ENV).unwrap_or_else(|_| {
+        panic!(
+            "{} missing -- are you running this test \
                  with `cargo nextest run`?",
-                dev::seed::CRDB_SEED_TAR_ENV,
-            )
-        });
+            dev::CRDB_SEED_TAR_ENV,
+        )
+    });
     seed_dir.into()
 }
 
@@ -42,6 +41,7 @@ pub async fn test_setup_database(log: &Logger) -> dev::db::CockroachInstance {
 
 /// Wrapper around [`dev::test_setup_database`] which uses a seed tarball
 /// provided as an argument.
+#[cfg(feature = "omicron-dev")]
 pub async fn test_setup_database_from_seed(
     log: &Logger,
     input_tar: Utf8PathBuf,
