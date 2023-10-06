@@ -83,6 +83,8 @@ pub async fn ensure_seed_tarball_exists(
         );
     }
 
+    // XXX: we aren't considering cross-user permissions for this file. Might be
+    // worth setting more restrictive permissions on it.
     let base_seed_dir = Utf8PathBuf::from_path_buf(std::env::temp_dir())
         .expect("Not a UTF-8 path")
         .join("crdb-base");
@@ -140,11 +142,11 @@ pub async fn ensure_seed_tarball_exists(
     Ok((desired_seed_tar, status))
 }
 
-/// Creates a [`db::CockroachInstance`] with a populated storage directory
-/// inside a tarball.
+/// Creates a seed file for a Cockroach database at the output tarball.
 ///
-/// This is intended to optimize subsequent calls to [`test_setup_database`] by
-/// reducing the latency of populating the storage directory.
+/// This is intended to optimize subsequent calls to
+/// [`test_setup_database`](super::test_setup_database) by reducing the latency
+/// of populating the storage directory.
 pub async fn test_setup_database_seed(
     log: &Logger,
     output_tar: &Utf8Path,
