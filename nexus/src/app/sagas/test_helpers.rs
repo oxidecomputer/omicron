@@ -398,7 +398,7 @@ pub(crate) async fn assert_no_failed_undo_steps(
     use nexus_db_queries::db::model::saga_types::SagaNodeEvent;
 
     let saga_node_events: Vec<SagaNodeEvent> = datastore
-        .pool_for_tests()
+        .pool_connection_for_tests()
         .await
         .unwrap()
         .transaction_async(|conn| async move {

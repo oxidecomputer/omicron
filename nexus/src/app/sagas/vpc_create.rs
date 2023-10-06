@@ -599,7 +599,9 @@ pub(crate) mod test {
             // ignore built-in services VPC
             .filter(dsl::id.ne(*SERVICES_VPC_ID))
             .select(Vpc::as_select())
-            .first_async::<Vpc>(datastore.pool_for_tests().await.unwrap())
+            .first_async::<Vpc>(
+                &*datastore.pool_connection_for_tests().await.unwrap(),
+            )
             .await
             .optional()
             .unwrap()
@@ -618,7 +620,9 @@ pub(crate) mod test {
             // ignore built-in services VPC
             .filter(dsl::vpc_id.ne(*SERVICES_VPC_ID))
             .select(VpcRouter::as_select())
-            .first_async::<VpcRouter>(datastore.pool_for_tests().await.unwrap())
+            .first_async::<VpcRouter>(
+                &*datastore.pool_connection_for_tests().await.unwrap(),
+            )
             .await
             .optional()
             .unwrap()
@@ -646,7 +650,7 @@ pub(crate) mod test {
             )
             .select(RouterRoute::as_select())
             .first_async::<RouterRoute>(
-                datastore.pool_for_tests().await.unwrap(),
+                &*datastore.pool_connection_for_tests().await.unwrap(),
             )
             .await
             .optional()
@@ -666,7 +670,9 @@ pub(crate) mod test {
             // ignore built-in services VPC
             .filter(dsl::vpc_id.ne(*SERVICES_VPC_ID))
             .select(VpcSubnet::as_select())
-            .first_async::<VpcSubnet>(datastore.pool_for_tests().await.unwrap())
+            .first_async::<VpcSubnet>(
+                &*datastore.pool_connection_for_tests().await.unwrap(),
+            )
             .await
             .optional()
             .unwrap()
@@ -686,7 +692,7 @@ pub(crate) mod test {
             .filter(dsl::vpc_id.ne(*SERVICES_VPC_ID))
             .select(VpcFirewallRule::as_select())
             .first_async::<VpcFirewallRule>(
-                datastore.pool_for_tests().await.unwrap(),
+                &*datastore.pool_connection_for_tests().await.unwrap(),
             )
             .await
             .optional()

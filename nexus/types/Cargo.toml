@@ -26,3 +26,4 @@ dns-service-client.workspace = true
 gateway-client.workspace = true
 omicron-common.workspace = true
 omicron-passwords.workspace = true
+omicron-workspace-hack.workspace = true

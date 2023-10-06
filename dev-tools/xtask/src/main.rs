@@ -78,6 +78,8 @@ fn cmd_clippy() -> Result<()> {
     Ok(())
 }
 
+const WORKSPACE_HACK_PACKAGE_NAME: &str = "omicron-workspace-hack";
+
 fn cmd_check_workspace_deps() -> Result<()> {
     // Ignore issues with "pq-sys".  See the omicron-rpaths package for details.
     const EXCLUDED: &[&'static str] = &["pq-sys"];
@@ -97,6 +99,12 @@ fn cmd_check_workspace_deps() -> Result<()> {
 
     // Iterate the workspace packages and fill out the maps above.
     for pkg_info in workspace.workspace_packages() {
+        if pkg_info.name == WORKSPACE_HACK_PACKAGE_NAME {
+            // Skip over workspace-hack because hakari doesn't yet support
+            // workspace deps: https://github.com/guppy-rs/guppy/issues/7
+            continue;
+        }
+
         let manifest_path = &pkg_info.manifest_path;
         let manifest = read_cargo_toml(manifest_path)?;
         for tree in [

@@ -952,7 +952,9 @@ pub struct Disk {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
     pub project_id: Uuid,
+    /// ID of snapshot from which disk was created, if any
     pub snapshot_id: Option<Uuid>,
+    /// ID of image from which disk was created, if any
     pub image_id: Option<Uuid>,
     pub size: ByteCount,
     pub block_size: ByteCount,

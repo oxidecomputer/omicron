@@ -8,7 +8,7 @@ use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
-use crate::db::error::public_error_from_diesel_pool;
+use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Resource;
 use crate::db::model::Name;
@@ -48,9 +48,9 @@ impl DataStore {
         .filter(dsl::silo_user_id.eq(authz_user.id()))
         .filter(dsl::time_deleted.is_null())
         .select(SshKey::as_select())
-        .load_async(self.pool_authorized(opctx).await?)
+        .load_async(&*self.pool_connection_authorized(opctx).await?)
         .await
-        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Create a new SSH public key for a user.
@@ -68,10 +68,10 @@ impl DataStore {
         diesel::insert_into(dsl::ssh_key)
             .values(ssh_key)
             .returning(SshKey::as_returning())
-            .get_result_async(self.pool_authorized(opctx).await?)
+            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::Conflict(ResourceType::SshKey, &name),
                 )
@@ -92,10 +92,10 @@ impl DataStore {
             .filter(dsl::time_deleted.is_null())
             .set(dsl::time_deleted.eq(Utc::now()))
             .check_if_exists::<SshKey>(authz_ssh_key.id())
-            .execute_and_check(self.pool_authorized(opctx).await?)
+            .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::NotFoundByResource(authz_ssh_key),
                 )

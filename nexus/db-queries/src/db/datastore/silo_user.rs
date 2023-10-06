@@ -10,7 +10,7 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::datastore::IdentityMetadataCreateParams;
-use crate::db::error::public_error_from_diesel_pool;
+use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::model::Name;
 use crate::db::model::Silo;
@@ -53,13 +53,14 @@ impl DataStore {
         use db::schema::silo_user::dsl;
 
         let silo_user_external_id = silo_user.external_id.clone();
+        let conn = self.pool_connection_unauthorized().await?;
         diesel::insert_into(dsl::silo_user)
             .values(silo_user)
             .returning(SiloUser::as_returning())
-            .get_result_async(self.pool())
+            .get_result_async(&*conn)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::Conflict(
                         ResourceType::SiloUser,
@@ -91,7 +92,7 @@ impl DataStore {
         // TODO-robustness We might consider the RFD 192 "rcgen" pattern as well
         // so that people can't, say, login while we do this.
         let authz_silo_user_id = authz_silo_user.id();
-        self.pool_authorized(opctx)
+        self.pool_connection_authorized(opctx)
             .await?
             .transaction_async(|mut conn| async move {
                 // Delete the user record.
@@ -148,7 +149,7 @@ impl DataStore {
             })
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::NotFoundByResource(authz_silo_user),
                 )
@@ -176,11 +177,11 @@ impl DataStore {
             .filter(dsl::external_id.eq(external_id.to_string()))
             .filter(dsl::time_deleted.is_null())
             .select(SiloUser::as_select())
-            .load_async::<SiloUser>(self.pool_authorized(opctx).await?)
+            .load_async::<SiloUser>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
-            })?
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
             .pop()
             .map(|db_silo_user| {
                 let authz_silo_user = authz::SiloUser::new(
@@ -208,9 +209,11 @@ impl DataStore {
             .filter(silo_id.eq(authz_silo_user_list.silo().id()))
             .filter(time_deleted.is_null())
             .select(SiloUser::as_select())
-            .load_async::<SiloUser>(self.pool_authorized(opctx).await?)
+            .load_async::<SiloUser>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
             .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     pub async fn silo_group_users_list(
@@ -237,9 +240,11 @@ impl DataStore {
                 ),
             ))
             .select(SiloUser::as_select())
-            .load_async::<SiloUser>(self.pool_authorized(opctx).await?)
+            .load_async::<SiloUser>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
             .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Updates or deletes the password hash for a given Silo user
@@ -280,18 +285,18 @@ impl DataStore {
                 .on_conflict(dsl::silo_user_id)
                 .do_update()
                 .set(SiloUserPasswordUpdate::new(hash_for_update))
-                .execute_async(self.pool_authorized(opctx).await?)
+                .execute_async(&*self.pool_connection_authorized(opctx).await?)
                 .await
                 .map_err(|e| {
-                    public_error_from_diesel_pool(e, ErrorHandler::Server)
+                    public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
         } else {
             diesel::delete(dsl::silo_user_password_hash)
                 .filter(dsl::silo_user_id.eq(authz_silo_user.id()))
-                .execute_async(self.pool_authorized(opctx).await?)
+                .execute_async(&*self.pool_connection_authorized(opctx).await?)
                 .await
                 .map_err(|e| {
-                    public_error_from_diesel_pool(e, ErrorHandler::Server)
+                    public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
         }
 
@@ -323,12 +328,10 @@ impl DataStore {
             .filter(dsl::silo_user_id.eq(authz_silo_user.id()))
             .select(SiloUserPasswordHash::as_select())
             .load_async::<SiloUserPasswordHash>(
-                self.pool_authorized(opctx).await?,
+                &*self.pool_connection_authorized(opctx).await?,
             )
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
-            })?
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
             .pop())
     }
 
@@ -341,9 +344,11 @@ impl DataStore {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         paginated(dsl::user_builtin, dsl::name, pagparams)
             .select(UserBuiltin::as_select())
-            .load_async::<UserBuiltin>(self.pool_authorized(opctx).await?)
+            .load_async::<UserBuiltin>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
             .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Load built-in users into the database
@@ -383,11 +388,9 @@ impl DataStore {
             .values(builtin_users)
             .on_conflict(dsl::id)
             .do_nothing()
-            .execute_async(self.pool_authorized(opctx).await?)
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
-            })?;
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
         info!(opctx.log, "created {} built-in users", count);
 
         Ok(())
@@ -410,11 +413,9 @@ impl DataStore {
             .values(users)
             .on_conflict(dsl::id)
             .do_nothing()
-            .execute_async(self.pool_authorized(opctx).await?)
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
-            })?;
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
         info!(opctx.log, "created {} silo users", count);
 
         Ok(())
@@ -437,11 +438,9 @@ impl DataStore {
                 dsl::role_name,
             ))
             .do_nothing()
-            .execute_async(self.pool_authorized(opctx).await?)
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
-            })?;
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
         info!(opctx.log, "created {} silo user role assignments", count);
 
         Ok(())

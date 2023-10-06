@@ -30,6 +30,7 @@ async fn main() -> Result<(), anyhow::Error> {
         OmicronDb::DbPopulate { ref args } => cmd_db_populate(args).await,
         OmicronDb::DbWipe { ref args } => cmd_db_wipe(args).await,
         OmicronDb::ChRun { ref args } => cmd_clickhouse_run(args).await,
+        OmicronDb::MgsRun { ref args } => cmd_mgs_run(args).await,
         OmicronDb::RunAll { ref args } => cmd_run_all(args).await,
         OmicronDb::CertCreate { ref args } => cmd_cert_create(args).await,
     };
@@ -66,6 +67,12 @@ enum OmicronDb {
     ChRun {
         #[clap(flatten)]
         args: ChRunArgs,
+    },
+
+    /// Run a simulated Management Gateway Service for development
+    MgsRun {
+        #[clap(flatten)]
+        args: MgsRunArgs,
     },
 
     /// Run a full simulated control plane
@@ -464,4 +471,35 @@ fn write_private_file(
         .open(path)
         .with_context(|| format!("open {:?} for writing", path))?;
     file.write_all(contents).with_context(|| format!("write to {:?}", path))
+}
+
+#[derive(Clone, Debug, Args)]
+struct MgsRunArgs {}
+
+async fn cmd_mgs_run(_args: &MgsRunArgs) -> Result<(), anyhow::Error> {
+    // Start a stream listening for SIGINT
+    let signals = Signals::new(&[SIGINT]).expect("failed to wait for SIGINT");
+    let mut signal_stream = signals.fuse();
+
+    println!("omicron-dev: setting up MGS ... ");
+    let gwtestctx = gateway_test_utils::setup::test_setup(
+        "omicron-dev",
+        gateway_messages::SpPort::One,
+    )
+    .await;
+    println!("omicron-dev: MGS is running.");
+
+    let addr = gwtestctx.client.bind_address;
+    println!("omicron-dev: MGS API: http://{:?}", addr);
+
+    // Wait for a signal.
+    let caught_signal = signal_stream.next().await;
+    assert_eq!(caught_signal.unwrap(), SIGINT);
+    eprintln!(
+        "omicron-dev: caught signal, shutting down and removing \
+        temporary directory"
+    );
+
+    gwtestctx.teardown().await;
+    Ok(())
 }
