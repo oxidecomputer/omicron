@@ -11,9 +11,11 @@
 #![allow(clippy::result_large_err)]
 
 use super::maghemite;
-use super::secret_retriever::LrtqOrHardcodedSecretRetriever;
 use super::server::StartError;
 use crate::config::Config;
+use crate::long_running_tasks::{
+    spawn_all_longrunning_tasks, LongRunningTaskHandles,
+};
 use crate::services::ServiceManager;
 use crate::sled_agent::SledAgent;
 use crate::storage_manager::StorageManager;
@@ -29,8 +31,6 @@ use illumos_utils::zfs;
 use illumos_utils::zfs::Zfs;
 use illumos_utils::zone;
 use illumos_utils::zone::Zones;
-use key_manager::KeyManager;
-use key_manager::StorageKeyRequester;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::FileKv;
 use sled_hardware::underlay;
@@ -38,6 +38,8 @@ use sled_hardware::DendriteAsic;
 use sled_hardware::HardwareManager;
 use sled_hardware::HardwareUpdate;
 use sled_hardware::SledMode;
+use sled_storage::disk::SyntheticDisk;
+use sled_storage::manager::StorageHandle;
 use slog::Drain;
 use slog::Logger;
 use std::net::IpAddr;
@@ -200,36 +202,24 @@ impl BootstrapAgentStartup {
         // This should be a no-op if already enabled.
         BootstrapNetworking::enable_ipv6_forwarding().await?;
 
-        // Spawn the `KeyManager` which is needed by the the StorageManager to
-        // retrieve encryption keys.
-        let (storage_key_requester, key_manager_handle) =
-            spawn_key_manager_task(&base_log);
-
         let sled_mode = sled_mode_from_config(&config)?;
 
-        // Start monitoring hardware. This is blocking so we use
-        // `spawn_blocking`; similar to above, we move some things in and (on
-        // success) it gives them back.
-        let (base_log, log, hardware_manager) = {
-            tokio::task::spawn_blocking(move || {
-                info!(
-                    log, "Starting hardware monitor";
-                    "sled_mode" => ?sled_mode,
-                );
-                let hardware_manager =
-                    HardwareManager::new(&base_log, sled_mode)
-                        .map_err(StartError::StartHardwareManager)?;
-                Ok::<_, StartError>((base_log, log, hardware_manager))
-            })
-            .await
-            .unwrap()?
-        };
+        // Spawn all important long running tasks that live for the lifetime of
+        // the process and are used by both the bootstrap agent and sled agent
+        let long_running_task_handles = spawn_all_longrunning_tasks(
+            &base_log,
+            sled_mode,
+            startup_networking.global_zone_bootstrap_ip,
+        )
+        .await;
 
-        // Create a `StorageManager` and (possibly) synthetic disks.
-        let storage_manager =
-            StorageManager::new(&base_log, storage_key_requester).await;
-        upsert_synthetic_zpools_if_needed(&log, &storage_manager, &config)
-            .await;
+        // Add some synthetic disks if necessary.
+        upsert_synthetic_zpools_if_needed(
+            &log,
+            &long_running_task_handles.storage_manager,
+            &config,
+        )
+        .await;
 
         let global_zone_bootstrap_ip =
             startup_networking.global_zone_bootstrap_ip;
@@ -242,7 +232,7 @@ impl BootstrapAgentStartup {
             config.skip_timesync,
             config.sidecar_revision.clone(),
             config.switch_zone_maghemite_links.clone(),
-            storage_manager.resources().clone(),
+            long_running_task_handles.storage_manager.clone(),
             storage_manager.zone_bundler().clone(),
         );
 
@@ -357,13 +347,10 @@ fn ensure_zfs_key_directory_exists(log: &Logger) -> Result<(), StartError> {
     // to create and mount encrypted datasets.
     info!(
         log, "Ensuring zfs key directory exists";
-        "path" => sled_hardware::disk::KEYPATH_ROOT,
+        "path" => zfs::KEYPATH_ROOT,
     );
-    std::fs::create_dir_all(sled_hardware::disk::KEYPATH_ROOT).map_err(|err| {
-        StartError::CreateZfsKeyDirectory {
-            dir: sled_hardware::disk::KEYPATH_ROOT,
-            err,
-        }
+    std::fs::create_dir_all(zfs::KEYPATH_ROOT).map_err(|err| {
+        StartError::CreateZfsKeyDirectory { dir: zfs::KEYPATH_ROOT, err }
     })
 }
 
@@ -387,7 +374,7 @@ fn ensure_zfs_ramdisk_dataset() -> Result<(), StartError> {
 
 async fn upsert_synthetic_zpools_if_needed(
     log: &Logger,
-    storage_manager: &StorageManager,
+    storage_manager: &StorageHandle,
     config: &Config,
 ) {
     if let Some(pools) = &config.zpools {
@@ -397,7 +384,8 @@ async fn upsert_synthetic_zpools_if_needed(
                 "Upserting synthetic zpool to Storage Manager: {}",
                 pool.to_string()
             );
-            storage_manager.upsert_synthetic_disk(pool.clone()).await;
+            let disk = SyntheticDisk::new(pool.clone()).into();
+            storage_manager.upsert_disk(disk).await;
         }
     }
 }
@@ -433,19 +421,6 @@ fn sled_mode_from_config(config: &Config) -> Result<SledMode, StartError> {
         }
     };
     Ok(sled_mode)
-}
-
-fn spawn_key_manager_task(
-    log: &Logger,
-) -> (StorageKeyRequester, JoinHandle<()>) {
-    let secret_retriever = LrtqOrHardcodedSecretRetriever::new();
-    let (mut key_manager, storage_key_requester) =
-        KeyManager::new(log, secret_retriever);
-
-    let key_manager_handle =
-        tokio::spawn(async move { key_manager.run().await });
-
-    (storage_key_requester, key_manager_handle)
 }
 
 #[derive(Debug, Clone)]

@@ -13,7 +13,6 @@ use super::rack_ops::RackInitId;
 use super::views::SledAgentResponse;
 use super::BootstrapError;
 use super::RssAccessError;
-use crate::bootstrap::bootstore::BootstoreHandles;
 use crate::bootstrap::config::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use crate::bootstrap::http_entrypoints::api as http_api;
 use crate::bootstrap::http_entrypoints::BootstrapServerContext;

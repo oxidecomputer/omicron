@@ -5,7 +5,7 @@
 //! Sled-local service management.
 //!
 //! For controlling zone-based storage services, refer to
-//! [crate::storage_manager::StorageManager].
+//! [sled_hardware:manager::StorageManager].
 //!
 //! For controlling virtual machine instances, refer to
 //! [crate::instance_manager::InstanceManager].
@@ -38,7 +38,6 @@ use crate::params::{
 use crate::profile::*;
 use crate::smf_helper::Service;
 use crate::smf_helper::SmfHelper;
-use crate::storage_manager::StorageResources;
 use crate::zone_bundle::BundleError;
 use crate::zone_bundle::ZoneBundler;
 use anyhow::anyhow;
@@ -88,12 +87,14 @@ use omicron_common::nexus_config::{
 use once_cell::sync::OnceCell;
 use rand::prelude::SliceRandom;
 use rand::SeedableRng;
-use sled_hardware::disk::ZONE_DATASET;
 use sled_hardware::is_gimlet;
 use sled_hardware::underlay;
 use sled_hardware::underlay::BOOTSTRAP_PREFIX;
 use sled_hardware::Baseboard;
 use sled_hardware::SledMode;
+use sled_storage::dataset::{CONFIG_DATASET, ZONE_DATASET};
+use sled_storage::manager::StorageHandle;
+use sled_storage::resources::StorageResources;
 use slog::Logger;
 use std::collections::HashSet;
 use std::collections::{BTreeMap, HashMap};
@@ -370,7 +371,7 @@ pub struct ServiceManagerInner {
     advertised_prefixes: Mutex<HashSet<Ipv6Subnet<SLED_PREFIX>>>,
     sled_info: OnceCell<SledAgentInfo>,
     switch_zone_bootstrap_address: Ipv6Addr,
-    storage: StorageResources,
+    storage: StorageHandle,
     zone_bundler: ZoneBundler,
     ledger_directory_override: OnceCell<Utf8PathBuf>,
     image_directory_override: OnceCell<Utf8PathBuf>,
@@ -415,7 +416,7 @@ impl ServiceManager {
         skip_timesync: Option<bool>,
         sidecar_revision: SidecarRevision,
         switch_zone_maghemite_links: Vec<PhysicalLink>,
-        storage: StorageResources,
+        storage: StorageHandle,
         zone_bundler: ZoneBundler,
     ) -> Self {
         let log = log.new(o!("component" => "ServiceManager"));
@@ -470,13 +471,12 @@ impl ServiceManager {
     }
 
     async fn all_service_ledgers(&self) -> Vec<Utf8PathBuf> {
+        let resources = self.inner.storage.get_latest_resources().await;
         if let Some(dir) = self.inner.ledger_directory_override.get() {
             return vec![dir.join(SERVICES_LEDGER_FILENAME)];
         }
-        self.inner
-            .storage
-            .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
-            .await
+        resources
+            .all_m2_mountpoints(CONFIG_DATASET)
             .into_iter()
             .map(|p| p.join(SERVICES_LEDGER_FILENAME))
             .collect()

@@ -9,7 +9,7 @@
 //! `illumos-utils` crate to actually perform ZFS related OS calls.
 
 pub mod dataset;
-pub(crate) mod disk;
+pub mod disk;
 pub(crate) mod dump_setup;
 pub mod error;
 pub(crate) mod keyfile;

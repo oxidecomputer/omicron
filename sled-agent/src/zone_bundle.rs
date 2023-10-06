@@ -6,7 +6,6 @@
 
 //! Tools for collecting and inspecting service bundles for zones.
 
-use crate::storage_manager::StorageResources;
 use anyhow::anyhow;
 use anyhow::Context;
 use camino::FromPathBufError;
@@ -22,6 +21,8 @@ use illumos_utils::zone::AdmError;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use sled_storage::dataset::U2_DEBUG_DATASET;
+use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::cmp::Ord;
 use std::cmp::Ordering;
@@ -148,20 +149,12 @@ pub struct ZoneBundler {
     inner: Arc<Mutex<Inner>>,
     // Channel for notifying the cleanup task that it should reevaluate.
     notify_cleanup: Arc<Notify>,
-    // Tokio task handle running the period cleanup operation.
-    cleanup_task: Arc<tokio::task::JoinHandle<()>>,
-}
-
-impl Drop for ZoneBundler {
-    fn drop(&mut self) {
-        self.cleanup_task.abort();
-    }
 }
 
 // State shared between tasks, e.g., used when creating a bundle in different
 // tasks or between a creation and cleanup.
 struct Inner {
-    resources: StorageResources,
+    storage_handle: StorageHandle,
     cleanup_context: CleanupContext,
     last_cleanup_at: Instant,
 }
@@ -189,7 +182,8 @@ impl Inner {
     // that can exist but do not, i.e., those whose parent datasets already
     // exist; and returns those.
     async fn bundle_directories(&self) -> Vec<Utf8PathBuf> {
-        let expected = self.resources.all_zone_bundle_directories().await;
+        let resources = self.storage_handle.get_latest_resources().await;
+        let expected = resources.all_zone_bundle_directories();
         let mut out = Vec::with_capacity(expected.len());
         for each in expected.into_iter() {
             if tokio::fs::create_dir_all(&each).await.is_ok() {
@@ -249,26 +243,28 @@ impl ZoneBundler {
     /// Create a new zone bundler.
     ///
     /// This creates an object that manages zone bundles on the system. It can
-    /// be used to create bundles from running zones, and runs a period task to
-    /// clean them up to free up space.
+    /// be used to create bundles from running zones, and runs a periodic task
+    /// to clean them up to free up space.
     pub fn new(
         log: Logger,
-        resources: StorageResources,
+        storage_handle: StorageHandle,
         cleanup_context: CleanupContext,
     ) -> Self {
         let notify_cleanup = Arc::new(Notify::new());
         let inner = Arc::new(Mutex::new(Inner {
-            resources,
+            storage_handle,
             cleanup_context,
             last_cleanup_at: Instant::now(),
         }));
         let cleanup_log = log.new(slog::o!("component" => "auto-cleanup-task"));
         let notify_clone = notify_cleanup.clone();
         let inner_clone = inner.clone();
-        let cleanup_task = Arc::new(tokio::task::spawn(
-            Self::periodic_cleanup(cleanup_log, inner_clone, notify_clone),
+        tokio::task::spawn(Self::periodic_cleanup(
+            cleanup_log,
+            inner_clone,
+            notify_clone,
         ));
-        Self { log, inner, notify_cleanup, cleanup_task }
+        Self { log, inner, notify_cleanup }
     }
 
     /// Trigger an immediate cleanup of low-priority zone bundles.
@@ -353,10 +349,9 @@ impl ZoneBundler {
     ) -> Result<ZoneBundleMetadata, BundleError> {
         let inner = self.inner.lock().await;
         let storage_dirs = inner.bundle_directories().await;
-        let extra_log_dirs = inner
-            .resources
-            .all_u2_mountpoints(sled_hardware::disk::U2_DEBUG_DATASET)
-            .await
+        let resources = inner.storage_handle.get_latest_resources().await;
+        let extra_log_dirs = resources
+            .all_u2_mountpoints(U2_DEBUG_DATASET)
             .into_iter()
             .map(|p| p.join(zone.name()))
             .collect();

@@ -133,14 +133,14 @@ impl StorageHandle {
 
     /// Retrieve the latest value of `StorageResources` from the
     /// `StorageManager` task.
-    pub async fn get_latest_resources(&mut self) -> StorageResources {
+    pub async fn get_latest_resources(&self) -> StorageResources {
         let (tx, rx) = oneshot::channel();
         self.tx.send(StorageRequest::GetLatestResources(tx)).await.unwrap();
         rx.await.unwrap()
     }
 
     /// Return internal data useful for debugging and testing
-    pub async fn get_manager_state(&mut self) -> StorageManagerData {
+    pub async fn get_manager_state(&self) -> StorageManagerData {
         let (tx, rx) = oneshot::channel();
         self.tx.send(StorageRequest::GetManagerState(tx)).await.unwrap();
         rx.await.unwrap()

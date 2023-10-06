@@ -16,8 +16,10 @@ use crate::bootstrap::bootstore::{
     new_bootstore_config, poll_ddmd_for_bootstore_peer_update,
 };
 use crate::bootstrap::secret_retriever::LrtqOrHardcodedSecretRetriever;
+use crate::zone_bundle::{CleanupContext, ZoneBundler};
 use bootstore::schemes::v0 as bootstore;
 use key_manager::{KeyManager, StorageKeyRequester};
+use sled_agent_client::types::CleanupContext;
 use sled_hardware::{HardwareManager, SledMode};
 use sled_storage::manager::{StorageHandle, StorageManager};
 use slog::{info, Logger};
@@ -35,24 +37,29 @@ pub struct LongRunningTaskHandles {
 
     /// A mechanism for talking to the [`StorageManager`] which is responsible
     /// for establishing zpools on disks and managing their datasets.
-    pub storage_handle: StorageHandle,
+    pub storage_manager: StorageHandle,
 
     /// A mechanism for interacting with the hardware device tree
     pub hardware_manager: HardwareManager,
 
     // A handle for interacting with the bootstore
     pub bootstore: bootstore::NodeHandle,
+
+    // A reference to the object used to manage zone bundles
+    pub zone_bundler: ZoneBundler,
 }
 
 /// Spawn all long running tasks
-pub async fn spawn_all(
+pub async fn spawn_all_longrunning_tasks(
     log: &Logger,
     sled_mode: SledMode,
     global_zone_bootstrap_ip: Ipv6Addr,
 ) -> LongRunningTaskHandles {
     let storage_key_requester = spawn_key_manager(log);
-    let mut storage_handle =
+    let mut storage_manager =
         spawn_storage_manager(log, storage_key_requester.clone());
+
+    // TODO: Does this need to run inside tokio::task::spawn_blocking?
     let hardware_manager = spawn_hardware_manager(log, sled_mode);
 
     // Wait for the boot disk so that we can work with any ledgers,
@@ -67,9 +74,11 @@ pub async fn spawn_all(
     )
     .await;
 
+    let zone_bundler = spawn_zone_bundler_tasks(log, &mut storage_handle);
+
     LongRunningTaskHandles {
         storage_key_requester,
-        storage_handle,
+        storage_manager,
         hardware_manager,
         bootstore,
     }
@@ -139,4 +148,17 @@ async fn spawn_bootstore_tasks(
     });
 
     node_handle
+}
+
+// `ZoneBundler::new` spawns a periodic cleanup task that runs indefinitely
+fn spawn_zone_bundler_tasks(
+    log: &Logger,
+    storage_handle: &mut StorageHandle,
+) -> ZoneBundler {
+    let log = log.new(o!("component" => "ZoneBundler"));
+    let zone_bundler = ZoneBundler::new(
+        log,
+        storage_handle.clone(),
+        CleanupContext::default(),
+    );
 }

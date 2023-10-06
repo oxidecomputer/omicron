@@ -90,7 +90,7 @@ pub enum Error {
     Instance(#[from] crate::instance_manager::Error),
 
     #[error("Error managing storage: {0}")]
-    Storage(#[from] crate::storage_manager::Error),
+    Storage(#[from] sled_storage::error::Error),
 
     #[error("Error updating: {0}")]
     Download(#[from] crate::updates::Error),
