@@ -13,4 +13,4 @@ omicron-test-utils.workspace = true
 ring.workspace = true
 slog.workspace = true
 tokio.workspace = true
-omicron-workspace-hack = { version = "0.1", path = "../workspace-hack" }
+omicron-workspace-hack.workspace = true
