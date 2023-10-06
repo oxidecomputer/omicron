@@ -1717,7 +1717,6 @@ mod tests {
     use omicron_common::api::external::Error;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::api::external::InstanceCpuCount;
-    use omicron_common::api::external::InstanceState;
     use omicron_common::api::external::Ipv4Net;
     use omicron_common::api::external::Ipv6Net;
     use omicron_common::api::external::MacAddr;
@@ -1756,12 +1755,7 @@ mod tests {
             start: true,
         };
 
-        let instance = Instance::new(
-            instance_id,
-            project_id,
-            &params,
-            crate::db::model::InstanceState::new(InstanceState::Creating),
-        );
+        let instance = Instance::new(instance_id, project_id, &params);
 
         let (.., authz_project) = LookupPath::new(&opctx, &db_datastore)
             .project_id(project_id)

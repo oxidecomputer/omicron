@@ -793,7 +793,6 @@ async fn sic_create_instance_record(
         instance_id,
         params.project_id,
         &params.create_params,
-        db::model::InstanceState::new(InstanceState::Creating),
     );
 
     let (.., authz_project) = LookupPath::new(&opctx, &osagactx.datastore())

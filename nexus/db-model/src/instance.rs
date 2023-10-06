@@ -57,18 +57,21 @@ pub struct Instance {
 
 impl Instance {
     /// Constructs a new instance record with no VMM that will initially appear
-    /// to be in `initial-state`.
+    /// to be in the Creating state.
     pub fn new(
         instance_id: Uuid,
         project_id: Uuid,
         params: &params::InstanceCreate,
-        initial_state: InstanceState,
     ) -> Self {
         let identity =
             InstanceIdentity::new(instance_id, params.identity.clone());
 
-        let runtime_state =
-            InstanceRuntimeState::new(initial_state, identity.time_modified);
+        let runtime_state = InstanceRuntimeState::new(
+            InstanceState::new(
+                omicron_common::api::external::InstanceState::Creating,
+            ),
+            identity.time_modified,
+        );
 
         Self {
             identity,
