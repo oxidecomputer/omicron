@@ -239,11 +239,15 @@ async fn sis_move_to_starting(
         }
 
         // If the instance has no Propolis ID, try to write this saga's chosen
-        // ID into the instance and put it in the Starting state.
+        // ID into the instance and put it in the Running state. (While the
+        // instance is still technically starting up, writing the Propolis ID at
+        // this point causes the VMM's state, which is Starting, to supersede
+        // the instance's state, so this won't cause the instance to appear to
+        // be running before Propolis thinks it has started.)
         None => {
             let new_runtime = db::model::InstanceRuntimeState {
                 fallback_state: db::model::InstanceState::new(
-                    InstanceState::Starting,
+                    InstanceState::Running,
                 ),
                 propolis_id: Some(propolis_id),
                 time_updated: Utc::now(),
