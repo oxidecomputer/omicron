@@ -319,6 +319,13 @@ impl DataStore {
     /// Updates an instance record and a VMM record with a single database
     /// command.
     ///
+    /// This is intended to be used to apply updates from sled agent that
+    /// may change a VMM's runtime state (e.g. moving an instance from Running
+    /// to Stopped) and its corresponding instance's state (e.g. changing the
+    /// active Propolis ID to reflect a completed migration) in a single
+    /// transaction. The caller is responsible for ensuring the instance and
+    /// VMM states are consistent with each other before calling this routine.
+    ///
     /// # Arguments
     ///
     /// - instance_id: The ID of the instance to update.
