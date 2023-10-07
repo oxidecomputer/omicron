@@ -5472,7 +5472,7 @@ dependencies = [
  "tokio-stream",
  "toml 0.7.8",
  "toml_datetime",
- "toml_edit 0.19.15",
+ "toml_edit 0.20.0",
  "tracing",
  "tracing-core",
  "trust-dns-proto",
@@ -5546,7 +5546,7 @@ version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "75e56d5c441965b6425165b7e3223cc933ca469834f4a8b4786817a1f9dc4f13"
 dependencies = [
- "indexmap 2.0.0",
+ "indexmap 1.9.3",
  "serde",
  "serde_json",
 ]
@@ -9471,7 +9471,7 @@ version = "1.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97fee6b57c6a41524a810daee9286c02d7752c4253064d0b05472833a438f675"
 dependencies = [
- "cfg-if 1.0.0",
+ "cfg-if 0.1.10",
  "rand 0.8.5",
  "static_assertions",
 ]
@@ -10032,7 +10032,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "toml 0.7.8",
- "toml_edit 0.19.15",
+ "toml_edit 0.20.0",
  "tui-tree-widget",
  "unicode-width",
  "update-engine",

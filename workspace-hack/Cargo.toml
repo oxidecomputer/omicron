@@ -266,7 +266,7 @@ once_cell = { version = "1.18.0", features = ["unstable"] }
 rustix-d585fab2519d2d1 = { package = "rustix", version = "0.38.9", features = ["fs", "termios"] }
 rustix-d736d0ac4424f0f1 = { package = "rustix", version = "0.37.23", features = ["fs", "termios"] }
 toml_datetime = { version = "0.6.3", default-features = false, features = ["serde"] }
-toml_edit = { version = "0.19.15", features = ["serde"] }
+toml_edit = { version = "0.20.0", features = ["serde"] }
 
 [target.x86_64-unknown-illumos.build-dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.4.0", default-features = false, features = ["std"] }
@@ -276,6 +276,6 @@ once_cell = { version = "1.18.0", features = ["unstable"] }
 rustix-d585fab2519d2d1 = { package = "rustix", version = "0.38.9", features = ["fs", "termios"] }
 rustix-d736d0ac4424f0f1 = { package = "rustix", version = "0.37.23", features = ["fs", "termios"] }
 toml_datetime = { version = "0.6.3", default-features = false, features = ["serde"] }
-toml_edit = { version = "0.19.15", features = ["serde"] }
+toml_edit = { version = "0.20.0", features = ["serde"] }
 
 ### END HAKARI SECTION
