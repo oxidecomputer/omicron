@@ -24,7 +24,6 @@ impl From<omicron_common::api::internal::nexus::InstanceRuntimeState>
         s: omicron_common::api::internal::nexus::InstanceRuntimeState,
     ) -> Self {
         Self {
-            fallback_state: s.fallback_state.into(),
             propolis_id: s.propolis_id,
             dst_propolis_id: s.dst_propolis_id,
             migration_id: s.migration_id,
@@ -79,7 +78,6 @@ impl From<types::InstanceRuntimeState>
 {
     fn from(s: types::InstanceRuntimeState) -> Self {
         Self {
-            fallback_state: s.fallback_state.into(),
             propolis_id: s.propolis_id,
             dst_propolis_id: s.dst_propolis_id,
             migration_id: s.migration_id,

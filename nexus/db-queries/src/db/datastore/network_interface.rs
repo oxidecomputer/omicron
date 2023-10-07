@@ -473,7 +473,7 @@ impl DataStore {
                 let instance_runtime =
                     instance_query.get_result_async(&conn).await?.runtime_state;
                 if instance_runtime.propolis_id.is_some()
-                    || instance_runtime.fallback_state != stopped
+                    || instance_runtime.nexus_state != stopped
                 {
                     return Err(TxnError::CustomError(
                         NetworkInterfaceUpdateError::InstanceNotStopped,
@@ -516,7 +516,7 @@ impl DataStore {
                 let instance_state =
                     instance_query.get_result_async(&conn).await?.runtime_state;
                 if instance_state.propolis_id.is_some()
-                    || instance_state.fallback_state != stopped
+                    || instance_state.nexus_state != stopped
                 {
                     return Err(TxnError::CustomError(
                         NetworkInterfaceUpdateError::InstanceNotStopped,

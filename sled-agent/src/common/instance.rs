@@ -57,9 +57,9 @@ impl From<PropolisInstanceState> for ApiInstanceState {
             // Nexus needs to learn when a VM has entered the "destroyed" state
             // so that it can release its resource reservation. When this
             // happens, this module also clears the active VMM ID from the
-            // instance record (and updates the instance's fallback state
-            // accordingly), so this state won't be used as an
-            // externally-visible instance state.
+            // instance record, which will accordingly set the Nexus-owned
+            // instance state to Stopped, preventing this state from being used
+            // as an externally-visible instance state.
             State::Destroyed => ApiInstanceState::Destroyed,
         }
     }
@@ -358,12 +358,6 @@ impl InstanceStates {
     fn retire_active_propolis(&mut self, now: DateTime<Utc>) {
         assert!(self.propolis_role() == PropolisRole::Active);
 
-        self.instance.fallback_state = match self.vmm.state {
-            ApiInstanceState::Destroyed => ApiInstanceState::Stopped,
-            ApiInstanceState::Failed => ApiInstanceState::Failed,
-            _ => unreachable!("Can only retire active Propolis if VMM exited"),
-        };
-
         self.instance.propolis_id = None;
         self.instance.gen = self.instance.gen.next();
         self.instance.time_updated = now;
@@ -523,7 +517,6 @@ mod test {
         let propolis_id = Uuid::new_v4();
         let now = Utc::now();
         let instance = InstanceRuntimeState {
-            fallback_state: ApiInstanceState::Starting,
             propolis_id: Some(propolis_id),
             dst_propolis_id: None,
             migration_id: None,
@@ -585,10 +578,6 @@ mod test {
         // sleds that expect their own attempts to advance the generation number
         // to cause new state to be recorded.
         if prev.instance.gen == next.instance.gen {
-            assert_eq!(
-                prev.instance.fallback_state,
-                next.instance.fallback_state
-            );
             assert_eq!(prev.instance.propolis_id, next.instance.propolis_id);
             assert_eq!(
                 prev.instance.dst_propolis_id,
@@ -597,8 +586,7 @@ mod test {
             assert_eq!(prev.instance.migration_id, next.instance.migration_id);
         } else {
             assert!(
-                (prev.instance.fallback_state != next.instance.fallback_state)
-                    || (prev.instance.propolis_id != next.instance.propolis_id)
+                (prev.instance.propolis_id != next.instance.propolis_id)
                     || (prev.instance.dst_propolis_id
                         != next.instance.dst_propolis_id)
                     || (prev.instance.migration_id

@@ -727,7 +727,7 @@ mod tests {
                     let new_instance = new_state.instance();
                     let new_vmm = new_state.vmm().as_ref();
                     assert_eq!(
-                        new_instance.runtime().fallback_state.0,
+                        new_instance.runtime().nexus_state.0,
                         omicron_common::api::external::InstanceState::Stopped
                     );
                     assert!(new_instance.runtime().propolis_id.is_none());

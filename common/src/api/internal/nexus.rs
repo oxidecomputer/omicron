@@ -45,8 +45,6 @@ pub struct InstanceProperties {
 /// no active VMM.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceRuntimeState {
-    /// The state of the instance if it has no active VMM.
-    pub fallback_state: InstanceState,
     /// The instance's currently active VMM ID.
     pub propolis_id: Option<Uuid>,
     /// If a migration is active, the ID of the target VMM.

@@ -851,7 +851,7 @@ async fn sic_delete_instance_record(
     };
 
     let runtime_state = db::model::InstanceRuntimeState {
-        fallback_state: db::model::InstanceState::new(InstanceState::Failed),
+        nexus_state: db::model::InstanceState::new(InstanceState::Failed),
         // Must update the generation, or the database query will fail.
         //
         // The runtime state of the instance record is only changed as a result
@@ -892,7 +892,7 @@ async fn sic_move_to_stopped(
     // update will (correctly) be ignored because its generation number is out
     // of date.
     let new_state = db::model::InstanceRuntimeState {
-        fallback_state: db::model::InstanceState::new(InstanceState::Stopped),
+        nexus_state: db::model::InstanceState::new(InstanceState::Stopped),
         gen: db::model::Generation::from(
             instance_record.runtime_state.gen.next(),
         ),

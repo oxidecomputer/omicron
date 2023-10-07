@@ -68,7 +68,7 @@ impl InstanceAndActiveVmm {
         if let Some(vmm) = &self.vmm {
             vmm.runtime.state.0
         } else {
-            self.instance.runtime().fallback_state.0
+            self.instance.runtime().nexus_state.0
         }
     }
 }
@@ -85,7 +85,7 @@ impl From<InstanceAndActiveVmm> for omicron_common::api::external::Instance {
             (vmm.runtime.state, vmm.runtime.time_state_updated)
         } else {
             (
-                value.instance.runtime_state.fallback_state.clone(),
+                value.instance.runtime_state.nexus_state.clone(),
                 value.instance.runtime_state.time_updated,
             )
         };
@@ -161,10 +161,10 @@ impl DataStore {
         })?;
 
         bail_unless!(
-            instance.runtime().fallback_state.state()
+            instance.runtime().nexus_state.state()
                 == &api::external::InstanceState::Creating,
             "newly-created Instance has unexpected state: {:?}",
-            instance.runtime().fallback_state
+            instance.runtime().nexus_state
         );
         bail_unless!(
             instance.runtime().gen == gen,
@@ -435,7 +435,7 @@ impl DataStore {
                     );
                 }
                 let instance_state =
-                    collection.runtime_state.fallback_state.state();
+                    collection.runtime_state.nexus_state.state();
                 match instance_state {
                     api::external::InstanceState::Stopped
                     | api::external::InstanceState::Failed => {

@@ -246,7 +246,7 @@ async fn sis_move_to_starting(
         // be running before Propolis thinks it has started.)
         None => {
             let new_runtime = db::model::InstanceRuntimeState {
-                fallback_state: db::model::InstanceState::new(
+                nexus_state: db::model::InstanceState::new(
                     InstanceState::Running,
                 ),
                 propolis_id: Some(propolis_id),
@@ -286,7 +286,7 @@ async fn sis_move_to_starting_undo(
           "instance_id" => %instance_id);
 
     let new_runtime = db::model::InstanceRuntimeState {
-        fallback_state: db::model::InstanceState::new(InstanceState::Stopped),
+        nexus_state: db::model::InstanceState::new(InstanceState::Stopped),
         propolis_id: None,
         gen: db_instance.runtime_state.gen.next().into(),
         ..db_instance.runtime_state
@@ -703,7 +703,7 @@ mod test {
 
                         assert!(new_db_instance.runtime().propolis_id.is_none());
                         assert_eq!(
-                            new_db_instance.runtime().fallback_state.0,
+                            new_db_instance.runtime().nexus_state.0,
                             InstanceState::Stopped
                         );
                     }

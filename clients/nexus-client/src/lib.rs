@@ -89,7 +89,6 @@ impl From<omicron_common::api::internal::nexus::InstanceRuntimeState>
     ) -> Self {
         Self {
             dst_propolis_id: s.dst_propolis_id,
-            fallback_state: s.fallback_state.into(),
             gen: s.gen.into(),
             migration_id: s.migration_id,
             propolis_id: s.propolis_id,

@@ -661,7 +661,7 @@ impl super::Nexus {
         let effective_state = if let Some(vmm) = vmm_state {
             vmm.runtime.state.0
         } else {
-            instance_state.runtime().fallback_state.0
+            instance_state.runtime().nexus_state.0
         };
 
         // Requests that operate on active instances have to be directed to the
@@ -1118,7 +1118,7 @@ impl super::Nexus {
                     //   that the VMM is gone, however.)
                     _ => {
                         let new_runtime = db::model::InstanceRuntimeState {
-                            fallback_state: db::model::InstanceState::new(
+                            nexus_state: db::model::InstanceState::new(
                                 InstanceState::Failed,
                             ),
 
@@ -1543,7 +1543,7 @@ impl super::Nexus {
                 internal_message: format!(
                     "instance is in state {:?} and has no active serial console \
                     server",
-                    instance.runtime().fallback_state
+                    instance.runtime().nexus_state
                 )
             })
         }

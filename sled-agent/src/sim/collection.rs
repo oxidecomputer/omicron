@@ -424,7 +424,6 @@ mod test {
     ) -> (SimObject<SimInstance>, Receiver<()>) {
         let propolis_id = Uuid::new_v4();
         let instance_vmm = InstanceRuntimeState {
-            fallback_state: InstanceState::Creating,
             propolis_id: Some(propolis_id),
             dst_propolis_id: None,
             migration_id: None,
@@ -484,7 +483,7 @@ mod test {
         assert!(rx.try_next().is_err());
 
         // Stopping an instance that was never started synchronously destroys
-        // its VMM and sets the fallback state to Stopped.
+        // its VMM.
         let rprev = r1;
         let dropped =
             instance.transition(InstanceStateRequested::Stopped).unwrap();
@@ -498,7 +497,6 @@ mod test {
                 >= rprev.instance_state.time_updated
         );
         assert!(rnext.vmm_state.time_updated >= rprev.vmm_state.time_updated);
-        assert_eq!(rnext.instance_state.fallback_state, InstanceState::Stopped);
         assert!(rnext.instance_state.propolis_id.is_none());
         assert_eq!(rnext.vmm_state.state, InstanceState::Destroyed);
         assert!(rx.try_next().is_err());
@@ -624,7 +622,6 @@ mod test {
         assert_eq!(rprev.vmm_state.state, InstanceState::Stopping);
         assert_eq!(rnext.vmm_state.state, InstanceState::Destroyed);
         assert!(rnext.instance_state.gen > rprev.instance_state.gen);
-        assert_eq!(rnext.instance_state.fallback_state, InstanceState::Stopped);
         logctx.cleanup_successful();
     }
 

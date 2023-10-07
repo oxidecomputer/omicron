@@ -1789,7 +1789,7 @@ mod tests {
         state: external::InstanceState,
     ) -> Instance {
         let new_runtime = model::InstanceRuntimeState {
-            fallback_state: model::InstanceState::new(state),
+            nexus_state: model::InstanceState::new(state),
             gen: instance.runtime_state.gen.next().into(),
             ..instance.runtime_state.clone()
         };

@@ -240,7 +240,7 @@ impl DataStore {
                                     )
                                 );
                             }
-                            match collection.runtime_state.fallback_state.state() {
+                            match collection.runtime_state.nexus_state.state() {
                                 // Ok-to-be-attached instance states:
                                 api::external::InstanceState::Creating |
                                 api::external::InstanceState::Stopped => {
@@ -264,7 +264,7 @@ impl DataStore {
                                 _ => {
                                     Err(Error::invalid_request(&format!(
                                         "cannot attach disk to instance in {} state",
-                                        collection.runtime_state.fallback_state.state(),
+                                        collection.runtime_state.nexus_state.state(),
                                     )))
                                 }
                             }
@@ -381,7 +381,7 @@ impl DataStore {
                                     )
                                 );
                             }
-                            match collection.runtime_state.fallback_state.state() {
+                            match collection.runtime_state.nexus_state.state() {
                                 // Ok-to-be-detached instance states:
                                 api::external::InstanceState::Creating |
                                 api::external::InstanceState::Stopped => {
@@ -395,7 +395,7 @@ impl DataStore {
                                 _ => {
                                     Err(Error::invalid_request(&format!(
                                         "cannot detach disk from instance in {} state",
-                                        collection.runtime_state.fallback_state.state(),
+                                        collection.runtime_state.nexus_state.state(),
                                     )))
                                 }
                             }

@@ -1889,14 +1889,6 @@
             "type": "string",
             "format": "uuid"
           },
-          "fallback_state": {
-            "description": "The state of the instance if it has no active VMM.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/InstanceState"
-              }
-            ]
-          },
           "gen": {
             "description": "Generation number for this state.",
             "allOf": [
@@ -1924,7 +1916,6 @@
           }
         },
         "required": [
-          "fallback_state",
           "gen",
           "time_updated"
         ]

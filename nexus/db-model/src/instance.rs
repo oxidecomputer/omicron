@@ -125,7 +125,7 @@ pub struct InstanceRuntimeState {
     ///
     /// This field is guarded by the instance's `gen` field.
     #[diesel(column_name = state)]
-    pub fallback_state: InstanceState,
+    pub nexus_state: InstanceState,
 
     /// The time at which the runtime state was last updated. This is distinct
     /// from the time the record was last modified, because some updates don't
@@ -166,7 +166,7 @@ pub struct InstanceRuntimeState {
 impl InstanceRuntimeState {
     fn new(initial_state: InstanceState, creation_time: DateTime<Utc>) -> Self {
         Self {
-            fallback_state: initial_state,
+            nexus_state: initial_state,
             time_updated: creation_time,
             propolis_id: None,
             dst_propolis_id: None,
@@ -182,8 +182,14 @@ impl From<omicron_common::api::internal::nexus::InstanceRuntimeState>
     fn from(
         state: omicron_common::api::internal::nexus::InstanceRuntimeState,
     ) -> Self {
+        let nexus_state = if state.propolis_id.is_some() {
+            omicron_common::api::external::InstanceState::Running
+        } else {
+            omicron_common::api::external::InstanceState::Stopped
+        };
+
         Self {
-            fallback_state: InstanceState::new(state.fallback_state),
+            nexus_state: InstanceState::new(nexus_state),
             time_updated: state.time_updated,
             gen: state.gen.into(),
             propolis_id: state.propolis_id,
@@ -199,7 +205,6 @@ impl From<InstanceRuntimeState>
     fn from(state: InstanceRuntimeState) -> Self {
         Self {
             dst_propolis_id: state.dst_propolis_id,
-            fallback_state: state.fallback_state.into(),
             gen: state.gen.into(),
             migration_id: state.migration_id,
             propolis_id: state.propolis_id,
