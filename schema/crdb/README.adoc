@@ -75,7 +75,7 @@ SQL Validation, via Automated Tests:
 
 CockroachDB's schema includes a description of all of the database's CHECK
 constraints. If a CHECK constraint is anonymous (i.e. it is written simply as
-`CHECK <expression>` and not `CONSTRAINT <name> CHECK `expression`), CRDB
+`CHECK <expression>` and not `CONSTRAINT <name> CHECK expression`), CRDB
 assigns it a name based on the table and column to which the constraint applies.
 The challenge is that CRDB identifies tables and columns using opaque
 identifiers whose values depend on the order in which tables and views were
@@ -83,6 +83,11 @@ defined in the current database. This means that adding, removing, or renaming
 objects needs to be done carefully to preserve the relative ordering of objects
 in new databases created by `dbinit.sql` and upgraded databases created by
 applying `up.sql` transformations.
+
+===== Adding new columns with constraints
+
+Strongly consider naming new constraints (`CONSTRAINT <name> <expression>`) to
+avoid the problems with anonymous constraints described above.
 
 ===== Adding tables and views
 
