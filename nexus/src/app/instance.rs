@@ -1107,7 +1107,7 @@ impl super::Nexus {
                     // the instance state to failed, we don't know what state
                     // the instance is in.
                     //
-                    // TODO(#XXX): This logic needs to be revisited:
+                    // TODO(#4226): This logic needs to be revisited:
                     // - Some errors that don't get classified as
                     //   Error::InvalidRequest (timeouts, disconnections due to
                     //   network weather, etc.) are not necessarily fatal to the
@@ -1122,7 +1122,7 @@ impl super::Nexus {
                                 InstanceState::Failed,
                             ),
 
-                            // TODO(#XXX): Clearing the Propolis ID is required
+                            // TODO(#4226): Clearing the Propolis ID is required
                             // to allow the instance to be deleted, but this
                             // doesn't actually terminate the VMM (see above).
                             propolis_id: None,
