@@ -299,7 +299,7 @@ rstest = "0.18.2"
 rustfmt-wrapper = "0.2"
 rustls = "0.21.7"
 samael = { git = "https://github.com/njaremko/samael", features = ["xmlsec"], branch = "master" }
-schemars = "0.8.12"
+schemars = "0.8.15"
 secrecy = "0.8.0"
 semver = { version = "1.0.18", features = ["std", "serde"] }
 serde = { version = "1.0", default-features = false, features = [ "derive" ] }

@@ -81,7 +81,7 @@ regex-automata = { version = "0.3.8", default-features = false, features = ["dfa
 regex-syntax = { version = "0.7.5" }
 reqwest = { version = "0.11.20", features = ["blocking", "json", "rustls-tls", "stream"] }
 ring = { version = "0.16.20", features = ["std"] }
-schemars = { version = "0.8.13", features = ["bytes", "chrono", "uuid1"] }
+schemars = { version = "0.8.15", features = ["bytes", "chrono", "uuid1"] }
 semver = { version = "1.0.18", features = ["serde"] }
 serde = { version = "1.0.188", features = ["alloc", "derive", "rc"] }
 sha2 = { version = "0.10.7", features = ["oid"] }
@@ -179,7 +179,7 @@ regex-automata = { version = "0.3.8", default-features = false, features = ["dfa
 regex-syntax = { version = "0.7.5" }
 reqwest = { version = "0.11.20", features = ["blocking", "json", "rustls-tls", "stream"] }
 ring = { version = "0.16.20", features = ["std"] }
-schemars = { version = "0.8.13", features = ["bytes", "chrono", "uuid1"] }
+schemars = { version = "0.8.15", features = ["bytes", "chrono", "uuid1"] }
 semver = { version = "1.0.18", features = ["serde"] }
 serde = { version = "1.0.188", features = ["alloc", "derive", "rc"] }
 sha2 = { version = "0.10.7", features = ["oid"] }
