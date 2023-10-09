@@ -66,7 +66,7 @@ pub enum Error {
     Config(#[from] crate::config::ConfigError),
 
     #[error("Error setting up backing filesystems: {0}")]
-    BackingFs(#[from] crate::backingfs::BackingFsError),
+    BackingFs(#[from] crate::backing_fs::BackingFsError),
 
     #[error("Error setting up swap device: {0}")]
     SwapDevice(#[from] crate::swap_device::SwapDeviceError),
@@ -300,7 +300,7 @@ impl SledAgent {
         }
 
         info!(log, "Mounting backing filesystems");
-        crate::backingfs::ensure_backing_fs(&parent_log, &boot_disk.1)?;
+        crate::backing_fs::ensure_backing_fs(&parent_log, &boot_disk.1)?;
 
         // Ensure we have a thread that automatically reaps process contracts
         // when they become empty. See the comments in
