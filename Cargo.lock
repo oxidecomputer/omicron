@@ -867,7 +867,7 @@ checksum = "fb9ac64500cc83ce4b9f8dafa78186aa008c8dea77a09b94cd307fd0cd5022a8"
 dependencies = [
  "camino",
  "cargo-platform",
- "semver 1.0.18",
+ "semver 1.0.19",
  "serde",
  "serde_json",
  "thiserror",
@@ -4354,7 +4354,7 @@ dependencies = [
  "rand 0.8.5",
  "ref-cast",
  "schemars",
- "semver 1.0.18",
+ "semver 1.0.19",
  "serde",
  "serde_json",
  "sled-agent-client",
@@ -4876,7 +4876,7 @@ dependencies = [
  "reqwest",
  "ring",
  "schemars",
- "semver 1.0.18",
+ "semver 1.0.19",
  "serde",
  "serde_derive",
  "serde_human_bytes",
@@ -4918,7 +4918,7 @@ dependencies = [
  "reqwest",
  "ring",
  "schemars",
- "semver 1.0.18",
+ "semver 1.0.19",
  "serde",
  "serde_derive",
  "serde_human_bytes",
@@ -5112,7 +5112,7 @@ dependencies = [
  "rustls",
  "samael",
  "schemars",
- "semver 1.0.18",
+ "semver 1.0.19",
  "serde",
  "serde_json",
  "serde_urlencoded",
@@ -5200,7 +5200,7 @@ dependencies = [
  "rayon",
  "reqwest",
  "ring",
- "semver 1.0.18",
+ "semver 1.0.19",
  "serde",
  "serde_derive",
  "sled-hardware",
@@ -5314,7 +5314,7 @@ dependencies = [
  "rcgen",
  "reqwest",
  "schemars",
- "semver 1.0.18",
+ "semver 1.0.19",
  "serde",
  "serde_json",
  "serial_test",
@@ -5453,7 +5453,7 @@ dependencies = [
  "rustix 0.37.23",
  "rustix 0.38.9",
  "schemars",
- "semver 1.0.18",
+ "semver 1.0.19",
  "serde",
  "sha2",
  "signature 2.1.0",
@@ -5499,7 +5499,7 @@ dependencies = [
  "flate2",
  "futures-util",
  "reqwest",
- "semver 1.0.18",
+ "semver 1.0.19",
  "serde",
  "serde_derive",
  "tar",
@@ -7431,7 +7431,7 @@ version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bfa0f585226d2e68097d4f95d113b15b83a82e819ab25717ec0590d9584ef366"
 dependencies = [
- "semver 1.0.18",
+ "semver 1.0.19",
 ]
 
 [[package]]
@@ -7715,9 +7715,9 @@ dependencies = [
 
 [[package]]
 name = "semver"
-version = "1.0.18"
+version = "1.0.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b0293b4b29daaf487284529cc2f5675b8e57c61f70167ba415a463651fd6a918"
+checksum = "ad977052201c6de01a8ef2aa3378c4bd23217a056337d1d6da40468d267a4fb0"
 dependencies = [
  "serde",
 ]
@@ -10019,7 +10019,7 @@ dependencies = [
  "ratatui",
  "reqwest",
  "rpassword",
- "semver 1.0.18",
+ "semver 1.0.19",
  "serde",
  "serde_json",
  "shell-words",
@@ -10402,7 +10402,7 @@ dependencies = [
  "reqwest",
  "rustls",
  "schemars",
- "semver 1.0.18",
+ "semver 1.0.19",
  "serde",
  "slog",
  "syn 1.0.109",

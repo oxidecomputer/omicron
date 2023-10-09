@@ -82,7 +82,7 @@ regex-syntax = { version = "0.7.5" }
 reqwest = { version = "0.11.20", features = ["blocking", "json", "rustls-tls", "stream"] }
 ring = { version = "0.16.20", features = ["std"] }
 schemars = { version = "0.8.13", features = ["bytes", "chrono", "uuid1"] }
-semver = { version = "1.0.18", features = ["serde"] }
+semver = { version = "1.0.19", features = ["serde"] }
 serde = { version = "1.0.188", features = ["alloc", "derive", "rc"] }
 sha2 = { version = "0.10.7", features = ["oid"] }
 signature = { version = "2.1.0", default-features = false, features = ["digest", "rand_core", "std"] }
@@ -180,7 +180,7 @@ regex-syntax = { version = "0.7.5" }
 reqwest = { version = "0.11.20", features = ["blocking", "json", "rustls-tls", "stream"] }
 ring = { version = "0.16.20", features = ["std"] }
 schemars = { version = "0.8.13", features = ["bytes", "chrono", "uuid1"] }
-semver = { version = "1.0.18", features = ["serde"] }
+semver = { version = "1.0.19", features = ["serde"] }
 serde = { version = "1.0.188", features = ["alloc", "derive", "rc"] }
 sha2 = { version = "0.10.7", features = ["oid"] }
 signature = { version = "2.1.0", default-features = false, features = ["digest", "rand_core", "std"] }
