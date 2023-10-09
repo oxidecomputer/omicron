@@ -256,6 +256,7 @@ pub const CRASH_DATASET: &'static str = "crash";
 pub const CLUSTER_DATASET: &'static str = "cluster";
 pub const CONFIG_DATASET: &'static str = "config";
 pub const M2_DEBUG_DATASET: &'static str = "debug";
+pub const M2_BACKING_DATASET: &'static str = "backing";
 // TODO-correctness: This value of 100GiB is a pretty wild guess, and should be
 // tuned as needed.
 pub const DEBUG_DATASET_QUOTA: usize = 100 * (1 << 30);
@@ -282,7 +283,7 @@ static U2_EXPECTED_DATASETS: [ExpectedDataset; U2_EXPECTED_DATASET_COUNT] = [
         .compression(DUMP_DATASET_COMPRESSION),
 ];
 
-const M2_EXPECTED_DATASET_COUNT: usize = 5;
+const M2_EXPECTED_DATASET_COUNT: usize = 6;
 static M2_EXPECTED_DATASETS: [ExpectedDataset; M2_EXPECTED_DATASET_COUNT] = [
     // Stores software images.
     //
@@ -290,7 +291,11 @@ static M2_EXPECTED_DATASETS: [ExpectedDataset; M2_EXPECTED_DATASET_COUNT] = [
     ExpectedDataset::new(INSTALL_DATASET),
     // Stores crash dumps.
     ExpectedDataset::new(CRASH_DATASET),
-    // Stores cluter configuration information.
+    // Backing store for OS data that should be persisted across reboots.
+    // Its children are selectively overlay mounted onto parts of the ramdisk
+    // root.
+    ExpectedDataset::new(M2_BACKING_DATASET),
+    // Stores cluster configuration information.
     //
     // Should be duplicated to both M.2s.
     ExpectedDataset::new(CLUSTER_DATASET),
@@ -524,6 +529,7 @@ impl Disk {
                 do_format,
                 Some(encryption_details),
                 None,
+                None,
             );
 
             keyfile.zero_and_unlink().await.map_err(|error| {
@@ -562,8 +568,8 @@ impl Disk {
                             "Automatically destroying dataset: {}", name
                         );
                         Zfs::destroy_dataset(name).or_else(|err| {
-                            // If we can't find the dataset, that's fine -- it might
-                            // not have been formatted yet.
+                            // If we can't find the dataset, that's fine -- it
+                            // might not have been formatted yet.
                             if let DestroyDatasetErrorVariant::NotFound =
                                 err.err
                             {
@@ -588,6 +594,7 @@ impl Disk {
                 do_format,
                 encryption_details,
                 size_details,
+                None,
             )?;
 
             if dataset.wipe {
