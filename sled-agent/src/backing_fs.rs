@@ -15,7 +15,7 @@
 // there are multiple disks which can be used to boot, these datasets are also
 // marked with the "canmount=noauto" attribute so that they do not all try to
 // mount automatically and race -- only one could ever succeed. This allows us
-// to come along later an specifically mount the one that we want (the one from
+// to come along later and specifically mount the one that we want (the one from
 // the current boot disk) and also perform an overlay mount so that it succeeds
 // even if there is content from the ramdisk image or early boot services
 // present underneath. The overlay mount action is optionally bracketed with a

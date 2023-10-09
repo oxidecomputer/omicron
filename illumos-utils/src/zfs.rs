@@ -213,7 +213,7 @@ impl Zfs {
         do_format: bool,
         encryption_details: Option<EncryptionDetails>,
         size_details: Option<SizeDetails>,
-        options: Option<Vec<String>>,
+        additional_options: Option<Vec<String>>,
     ) -> Result<(), EnsureFilesystemError> {
         let (exists, mounted) = Self::dataset_exists(name, &mountpoint)?;
         if exists {
@@ -266,7 +266,7 @@ impl Zfs {
             ]);
         }
 
-        if let Some(opts) = options {
+        if let Some(opts) = additional_options {
             for o in &opts {
                 cmd.args(&["-o", &o]);
             }

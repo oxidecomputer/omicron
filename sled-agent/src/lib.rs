@@ -17,7 +17,7 @@ pub mod sim;
 pub mod common;
 
 // Modules for the non-simulated sled agent.
-mod backingfs;
+mod backing_fs;
 pub mod bootstrap;
 pub mod config;
 mod http_entrypoints;
