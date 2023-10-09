@@ -59,8 +59,8 @@ use uuid::Uuid;
 
 const MAX_KEYS_PER_INSTANCE: u32 = 8;
 
-/// The kinds of state changes that can be requested of an instance's active
-/// sled agent.
+/// The kinds of state changes that can be requested of an instance's current
+/// VMM (i.e. the VMM pointed to be the instance's `propolis_id` field).
 pub(crate) enum InstanceStateChangeRequest {
     Run,
     Reboot,
