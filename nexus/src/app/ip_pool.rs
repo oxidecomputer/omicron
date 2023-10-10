@@ -74,6 +74,31 @@ impl super::Nexus {
         self.db_datastore.ip_pool_create(opctx, pool).await
     }
 
+    pub(crate) async fn ip_pool_associate_resource(
+        &self,
+        opctx: &OpContext,
+        pool_lookup: &lookup::IpPool<'_>,
+        ip_pool_resource: &params::IpPoolResource,
+    ) -> CreateResult<db::model::IpPoolResource> {
+        // TODO: check for perms on specified resource
+        let (.., authz_pool) =
+            pool_lookup.lookup_for(authz::Action::Modify).await?;
+        self.db_datastore
+            .ip_pool_associate_resource(
+                opctx,
+                db::model::IpPoolResource {
+                    ip_pool_id: authz_pool.id(),
+                    resource_type: ip_pool_resource
+                        .resource_type
+                        .clone()
+                        .into(),
+                    resource_id: ip_pool_resource.resource_id,
+                    is_default: ip_pool_resource.is_default,
+                },
+            )
+            .await
+    }
+
     pub(crate) async fn ip_pools_list(
         &self,
         opctx: &OpContext,

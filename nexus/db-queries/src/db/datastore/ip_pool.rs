@@ -17,6 +17,7 @@ use crate::db::fixed_data::silo::INTERNAL_SILO_ID;
 use crate::db::identity::Resource;
 use crate::db::model::IpPool;
 use crate::db::model::IpPoolRange;
+use crate::db::model::IpPoolResource;
 use crate::db::model::IpPoolUpdate;
 use crate::db::model::Name;
 use crate::db::pagination::paginated;
@@ -26,6 +27,7 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
 use ipnetwork::IpNetwork;
+use nexus_db_model::IpPoolResourceType;
 use nexus_types::external_api::shared::IpRange;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
@@ -79,7 +81,8 @@ impl DataStore {
         &self,
         opctx: &OpContext,
     ) -> LookupResult<IpPool> {
-        use db::schema::ip_pool::dsl;
+        use db::schema::ip_pool;
+        use db::schema::ip_pool_resource;
 
         let authz_silo_id = opctx.authn.silo_required()?.id();
 
@@ -92,17 +95,26 @@ impl DataStore {
         //     .authorize(authz::Action::ListChildren, &authz::IP_POOL_LIST)
         //     .await?;
 
-        dsl::ip_pool
-            .filter(dsl::silo_id.eq(authz_silo_id).or(dsl::silo_id.is_null()))
-            .filter(dsl::is_default.eq(true))
-            .filter(dsl::time_deleted.is_null())
-            // this will sort by most specific first, i.e.,
-            //
-            //   (silo)
-            //   (null)
-            //
-            // then by only taking the first result, we get the most specific one
-            .order(dsl::silo_id.asc().nulls_last())
+        // join ip_pool to ip_pool_resource and filter
+
+        ip_pool::table
+            .inner_join(
+                ip_pool_resource::table
+                    .on(ip_pool::id.eq(ip_pool_resource::ip_pool_id)),
+            )
+            .filter(
+                (ip_pool_resource::resource_type
+                    .eq(IpPoolResourceType::Silo)
+                    .and(ip_pool_resource::resource_id.eq(authz_silo_id)))
+                .or(ip_pool_resource::resource_type
+                    .eq(IpPoolResourceType::Fleet)),
+            )
+            .filter(ip_pool::is_default.eq(true))
+            .filter(ip_pool::time_deleted.is_null())
+            // TODO: order by most specific first so we get the most specific
+            // when we select the first one. alphabetical desc technically
+            // works but come on. won't work when we have project association
+            .order(ip_pool_resource::resource_type.desc())
             .select(IpPool::as_select())
             .first_async::<IpPool>(
                 &*self.pool_connection_authorized(opctx).await?,
@@ -257,6 +269,32 @@ impl DataStore {
                 public_error_from_diesel(
                     e,
                     ErrorHandler::NotFoundByResource(authz_pool),
+                )
+            })
+    }
+
+    pub async fn ip_pool_associate_resource(
+        &self,
+        opctx: &OpContext,
+        ip_pool_resource: IpPoolResource,
+    ) -> CreateResult<IpPoolResource> {
+        use db::schema::ip_pool_resource::dsl;
+        opctx
+            .authorize(authz::Action::CreateChild, &authz::IP_POOL_LIST)
+            .await?;
+
+        diesel::insert_into(dsl::ip_pool_resource)
+            .values(ip_pool_resource.clone())
+            .returning(IpPoolResource::as_returning())
+            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::Conflict(
+                        ResourceType::IpPool,
+                        &ip_pool_resource.ip_pool_id.to_string(),
+                    ),
                 )
             })
     }
@@ -430,7 +468,7 @@ impl DataStore {
 #[cfg(test)]
 mod test {
     use crate::db::datastore::datastore_test;
-    use crate::db::model::IpPool;
+    use crate::db::model::{IpPool, IpPoolResource, IpPoolResourceType};
     use assert_matches::assert_matches;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::identity::Resource;
@@ -453,6 +491,8 @@ mod test {
         assert_eq!(fleet_default_pool.silo_id, None);
 
         // unique index prevents second fleet-level default
+        // TODO: create the pool, and then the failure is on the attempt to
+        // associate it with the fleet as default
         let identity = IdentityMetadataCreateParams {
             name: "another-fleet-default".parse().unwrap(),
             description: "".to_string(),
@@ -497,10 +537,22 @@ mod test {
             name: "default-for-silo".parse().unwrap(),
             description: "".to_string(),
         };
-        datastore
+        let default_for_silo = datastore
             .ip_pool_create(&opctx, IpPool::new(&identity, Some(silo_id), true))
             .await
             .expect("Failed to create silo default IP pool");
+        datastore
+            .ip_pool_associate_resource(
+                &opctx,
+                IpPoolResource {
+                    ip_pool_id: default_for_silo.id(),
+                    resource_type: IpPoolResourceType::Silo,
+                    resource_id: silo_id,
+                    is_default: true,
+                },
+            )
+            .await
+            .expect("Failed to associate IP pool with silo");
 
         // now when we ask for the default pool, we get the one we just made
         let ip_pool = datastore

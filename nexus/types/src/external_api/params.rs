@@ -751,6 +751,20 @@ pub struct IpPoolUpdate {
     pub identity: IdentityMetadataUpdateParams,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub enum IpPoolResourceType {
+    Fleet,
+    Silo,
+}
+
+/// Parameters for associating an IP pool with a resource (fleet, silo)
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct IpPoolResource {
+    pub resource_id: Uuid,
+    pub resource_type: IpPoolResourceType,
+    pub is_default: bool,
+}
+
 // INSTANCES
 
 /// Describes an attachment of an `InstanceNetworkInterface` to an `Instance`,

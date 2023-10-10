@@ -108,6 +108,15 @@ impl_enum_type!(
      Silo => b"silo"
 );
 
+impl From<params::IpPoolResourceType> for IpPoolResourceType {
+    fn from(typ: params::IpPoolResourceType) -> Self {
+        match typ {
+            params::IpPoolResourceType::Fleet => IpPoolResourceType::Fleet,
+            params::IpPoolResourceType::Silo => IpPoolResourceType::Silo,
+        }
+    }
+}
+
 #[derive(Queryable, Insertable, Selectable, Clone, Debug)]
 #[diesel(table_name = ip_pool_resource)]
 pub struct IpPoolResource {

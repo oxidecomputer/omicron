@@ -19,6 +19,7 @@ use crate::db::fixed_data::silo::INTERNAL_SILO_ID;
 use crate::db::fixed_data::vpc_subnet::DNS_VPC_SUBNET;
 use crate::db::fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
 use crate::db::fixed_data::vpc_subnet::NTP_VPC_SUBNET;
+use crate::db::fixed_data::FLEET_ID;
 use crate::db::identity::Asset;
 use crate::db::model::Dataset;
 use crate::db::model::IncompleteExternalIp;
@@ -565,12 +566,24 @@ impl DataStore {
             true, // default for internal silo
         );
 
-        self.ip_pool_create(opctx, internal_pool).await.map(|_| ()).or_else(
-            |e| match e {
+        self.ip_pool_create(opctx, internal_pool.clone())
+            .await
+            .map(|_| ())
+            .or_else(|e| match e {
                 Error::ObjectAlreadyExists { .. } => Ok(()),
                 _ => Err(e),
+            })?;
+
+        self.ip_pool_associate_resource(
+            opctx,
+            db::model::IpPoolResource {
+                ip_pool_id: internal_pool.id(),
+                resource_type: db::model::IpPoolResourceType::Silo,
+                resource_id: *INTERNAL_SILO_ID,
+                is_default: true,
             },
-        )?;
+        )
+        .await?;
 
         let default_pool = db::model::IpPool::new(
             &IdentityMetadataCreateParams {
@@ -580,6 +593,18 @@ impl DataStore {
             None, // no silo ID, fleet scoped
             true, // default for fleet
         );
+
+        self.ip_pool_associate_resource(
+            opctx,
+            db::model::IpPoolResource {
+                ip_pool_id: default_pool.id(),
+                resource_type: db::model::IpPoolResourceType::Fleet,
+                resource_id: *FLEET_ID,
+                is_default: true,
+            },
+        )
+        .await?;
+
         self.ip_pool_create(opctx, default_pool).await.map(|_| ()).or_else(
             |e| match e {
                 Error::ObjectAlreadyExists { .. } => Ok(()),
