@@ -19,6 +19,7 @@ pub mod common;
 // Modules for the non-simulated sled agent.
 pub mod bootstrap;
 pub mod config;
+pub(crate) mod dump_setup;
 pub(crate) mod hardware_monitor;
 mod http_entrypoints;
 mod instance;
@@ -32,7 +33,7 @@ pub mod server;
 mod services;
 mod sled_agent;
 mod smf_helper;
-pub(crate) mod storage;
+mod storage_monitor;
 mod swap_device;
 mod updates;
 mod zone_bundle;

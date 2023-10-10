@@ -144,7 +144,7 @@ impl HardwareMonitor {
         )
     }
 
-    /// Run the main receive loop of the `StorageManager`
+    /// Run the main receive loop of the `HardwareMonitor`
     ///
     /// This should be spawned into a tokio task
     pub async fn run(&mut self) {

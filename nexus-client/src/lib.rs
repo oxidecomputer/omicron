@@ -375,3 +375,12 @@ impl From<omicron_common::api::internal::shared::ExternalPortDiscovery>
         }
     }
 }
+
+impl From<sled_hardware::DiskVariant> for types::PhysicalDiskKind {
+    fn from(value: sled_hardware::DiskVariant) -> Self {
+        match value {
+            sled_hardware::DiskVariant::U2 => types::PhysicalDiskKind::U2,
+            sled_hardware::DiskVariant::M2 => types::PhysicalDiskKind::M2,
+        }
+    }
+}
