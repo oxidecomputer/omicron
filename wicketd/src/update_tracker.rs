@@ -1654,7 +1654,7 @@ impl UpdateContext {
                 .map_err(|error| {
                     UpdateTerminalError::FailedFindingSignedRotImage { error }
                 })?;
-            let mut archive =
+            let archive =
                 RawHubrisArchive::from_vec(image).map_err(|err| {
                     UpdateTerminalError::FailedFindingSignedRotImage {
                         error: anyhow::Error::new(err).context(format!(
