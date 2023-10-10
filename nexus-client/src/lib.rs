@@ -384,3 +384,13 @@ impl From<sled_hardware::DiskVariant> for types::PhysicalDiskKind {
         }
     }
 }
+
+impl From<sled_hardware::Baseboard> for types::Baseboard {
+    fn from(b: sled_hardware::Baseboard) -> types::Baseboard {
+        types::Baseboard {
+            serial_number: b.identifier().to_string(),
+            part_number: b.model().to_string(),
+            revision: b.revision(),
+        }
+    }
+}

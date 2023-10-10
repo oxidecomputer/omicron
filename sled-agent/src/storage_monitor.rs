@@ -7,20 +7,32 @@
 //! code.
 
 use crate::nexus::NexusClientWithResolver;
+use derive_more::From;
+use futures::stream::FuturesOrdered;
+use futures::FutureExt;
 use nexus_client::types::PhysicalDiskDeleteRequest;
 use nexus_client::types::PhysicalDiskKind;
 use nexus_client::types::PhysicalDiskPutRequest;
 use nexus_client::types::ZpoolPutRequest;
 use omicron_common::api::external::ByteCount;
+use omicron_common::backoff;
 use sled_storage::disk::Disk;
 use sled_storage::manager::StorageHandle;
+use sled_storage::pool::Pool;
 use sled_storage::resources::StorageResources;
 use slog::Logger;
 use std::fmt::Debug;
+use std::pin::Pin;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
 const QUEUE_SIZE: usize = 10;
+
+#[derive(From, Clone, Debug)]
+enum NexusDiskRequest {
+    Put(PhysicalDiskPutRequest),
+    Delete(PhysicalDiskDeleteRequest),
+}
 
 /// A message sent from the `StorageMonitorHandle` to the `StorageMonitor`.
 #[derive(Debug)]
@@ -29,6 +41,7 @@ pub enum StorageMonitorMsg {
 }
 
 /// Describes the access to the underlay used by the StorageManager.
+#[derive(Clone)]
 pub struct UnderlayAccess {
     pub nexus_client: NexusClientWithResolver,
     pub sled_id: Uuid,
@@ -58,6 +71,9 @@ pub struct StorageMonitor {
 
     // Ability to access the underlay network
     underlay: Option<UnderlayAccess>,
+
+    // A queue for sending nexus notifications in order
+    nexus_notifications: FuturesOrdered<NotifyFut>,
 }
 
 impl StorageMonitor {
@@ -75,6 +91,7 @@ impl StorageMonitor {
                 handle_rx,
                 storage_resources,
                 underlay: None,
+                nexus_notifications: FuturesOrdered::new(),
             },
             StorageMonitorHandle { tx: handle_tx },
         )
@@ -106,6 +123,8 @@ impl StorageMonitor {
         }
     }
 
+    async fn handle_monitor_msg(&mut self, msg: StorageMonitorMsg) {}
+
     async fn handle_resource_update(
         &mut self,
         updated_resources: StorageResources,
@@ -119,20 +138,136 @@ impl StorageMonitor {
                 &self.storage_resources,
                 &updated_resources,
             );
-            // TODO: Notify nexus about diffs
+            for put in nexus_updates.disk_puts {
+                self.physical_disk_notify(put.into()).await;
+            }
+            for del in nexus_updates.disk_deletes {
+                self.physical_disk_notify(del.into()).await;
+            }
+            for (pool, put) in nexus_updates.zpool_puts {
+                self.add_zpool_notify(pool, put).await;
+            }
+
+            // TODO: Update Dump Setup if any diffs
         }
         // Save the updated `StorageResources`
         self.storage_resources = updated_resources;
     }
+
+    // Adds a "notification to nexus" to `self.nexus_notifications`, informing it
+    // about the addition/removal of a physical disk to this sled.
+    async fn physical_disk_notify(&mut self, disk: NexusDiskRequest) {
+        let underlay = self.underlay.as_ref().unwrap().clone();
+        let disk2 = disk.clone();
+        let notify_nexus = move || {
+            let underlay = underlay.clone();
+            let disk = disk.clone();
+            async move {
+                let nexus_client = underlay.nexus_client.client().clone();
+
+                match &disk {
+                    NexusDiskRequest::Put(request) => {
+                        nexus_client
+                            .physical_disk_put(&request)
+                            .await
+                            .map_err(|e| {
+                                backoff::BackoffError::transient(e.to_string())
+                            })?;
+                    }
+                    NexusDiskRequest::Delete(request) => {
+                        nexus_client
+                            .physical_disk_delete(&request)
+                            .await
+                            .map_err(|e| {
+                                backoff::BackoffError::transient(e.to_string())
+                            })?;
+                    }
+                }
+                Ok(())
+            }
+        };
+
+        let log = self.log.clone();
+        // This notification is often invoked before Nexus has started
+        // running, so avoid flagging any errors as concerning until some
+        // time has passed.
+        let log_post_failure = move |_, call_count, total_duration| {
+            if call_count == 0 {
+                info!(log, "failed to notify nexus about {disk2:?}");
+            } else if total_duration > std::time::Duration::from_secs(30) {
+                warn!(log, "failed to notify nexus about {disk2:?}";
+                    "total duration" => ?total_duration);
+            }
+        };
+        self.nexus_notifications.push_back(
+            backoff::retry_notify_ext(
+                backoff::retry_policy_internal_service_aggressive(),
+                notify_nexus,
+                log_post_failure,
+            )
+            .boxed(),
+        );
+    }
+
+    // Adds a "notification to nexus" to `nexus_notifications`,
+    // informing it about the addition of `pool_id` to this sled.
+    async fn add_zpool_notify(
+        &mut self,
+        pool: Pool,
+        zpool_request: ZpoolPutRequest,
+    ) {
+        let pool_id = pool.name.id();
+        let underlay = self.underlay.as_ref().unwrap().clone();
+
+        let notify_nexus = move || {
+            let underlay = underlay.clone();
+            let zpool_request = zpool_request.clone();
+            async move {
+                let sled_id = underlay.sled_id;
+                let nexus_client = underlay.nexus_client.client().clone();
+                nexus_client
+                    .zpool_put(&sled_id, &pool_id, &zpool_request)
+                    .await
+                    .map_err(|e| {
+                        backoff::BackoffError::transient(e.to_string())
+                    })?;
+                Ok(())
+            }
+        };
+
+        let log = self.log.clone();
+        let name = pool.name.clone();
+        let disk = pool.parent.clone();
+        let log_post_failure = move |_, call_count, total_duration| {
+            if call_count == 0 {
+                info!(log, "failed to notify nexus about a new pool {name} on disk {disk:?}");
+            } else if total_duration > std::time::Duration::from_secs(30) {
+                warn!(log, "failed to notify nexus about a new pool {name} on disk {disk:?}";
+                    "total duration" => ?total_duration);
+            }
+        };
+        self.nexus_notifications.push_back(
+            backoff::retry_notify_ext(
+                backoff::retry_policy_internal_service_aggressive(),
+                notify_nexus,
+                log_post_failure,
+            )
+            .boxed(),
+        );
+    }
 }
+
+// The type of a future which is used to send a notification to Nexus.
+type NotifyFut =
+    Pin<Box<dyn futures::Future<Output = Result<(), String>> + Send>>;
 
 struct NexusUpdates {
     disk_puts: Vec<PhysicalDiskPutRequest>,
     disk_deletes: Vec<PhysicalDiskDeleteRequest>,
-    zpool_puts: Vec<ZpoolPutRequest>,
+    zpool_puts: Vec<(Pool, ZpoolPutRequest)>,
 }
 
-async fn compute_resource_diffs(
+fn compute_resource_diffs(
     log: &Logger,
     sled_id: &Uuid,
     current: &StorageResources,
@@ -158,12 +293,15 @@ async fn compute_resource_diffs(
                 }
                 if pool != updated_pool {
                     match ByteCount::try_from(pool.info.size()) {
-                        Ok(size) => zpool_puts.push(ZpoolPutRequest {
-                            size: size.into(),
-                            disk_model: disk_id.model.clone(),
-                            disk_serial: disk_id.serial.clone(),
-                            disk_vendor: disk_id.vendor.clone(),
-                        }),
+                        Ok(size) => zpool_puts.push((
+                            pool.clone(),
+                            ZpoolPutRequest {
+                                size: size.into(),
+                                disk_model: disk_id.model.clone(),
+                                disk_serial: disk_id.serial.clone(),
+                                disk_vendor: disk_id.vendor.clone(),
+                            },
+                        )),
                         Err(err) => error!(
                             log, 
                             "Error parsing pool size";
@@ -176,7 +314,7 @@ async fn compute_resource_diffs(
                 model: disk_id.model.clone(),
                 serial: disk_id.serial.clone(),
                 vendor: disk_id.vendor.clone(),
-                sled_id,
+                sled_id: *sled_id,
             }),
         }
     }

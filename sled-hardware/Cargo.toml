@@ -13,7 +13,6 @@ futures.workspace = true
 illumos-utils.workspace = true
 libc.workspace = true
 macaddr.workspace = true
-nexus-client.workspace = true
 omicron-common.workspace = true
 rand.workspace = true
 schemars.workspace = true

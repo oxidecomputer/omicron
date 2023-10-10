@@ -13,5 +13,5 @@ pub mod disk;
 pub mod error;
 pub(crate) mod keyfile;
 pub mod manager;
-pub(crate) mod pool;
+pub mod pool;
 pub mod resources;
