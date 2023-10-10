@@ -459,6 +459,15 @@ table! {
 }
 
 table! {
+    ip_pool_resource (ip_pool_id, resource_type, resource_id) {
+        ip_pool_id -> Uuid,
+        resource_type -> crate::IpPoolResourceTypeEnum,
+        resource_id -> Uuid,
+        is_default -> Bool,
+    }
+}
+
+table! {
     ip_pool_range (id) {
         id -> Uuid,
         time_created -> Timestamptz,
@@ -1131,7 +1140,7 @@ table! {
 ///
 /// This should be updated whenever the schema is changed. For more details,
 /// refer to: schema/crdb/README.adoc
-pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(6, 0, 0);
+pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(7, 0, 0);
 
 allow_tables_to_appear_in_same_query!(
     system_update,
@@ -1140,7 +1149,7 @@ allow_tables_to_appear_in_same_query!(
 );
 joinable!(system_update_component_update -> component_update (component_update_id));
 
-allow_tables_to_appear_in_same_query!(ip_pool_range, ip_pool);
+allow_tables_to_appear_in_same_query!(ip_pool_range, ip_pool, ip_pool_resource);
 joinable!(ip_pool_range -> ip_pool (ip_pool_id));
 
 allow_tables_to_appear_in_same_query!(

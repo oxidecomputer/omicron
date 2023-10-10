@@ -5,8 +5,10 @@
 //! Model types for IP Pools and the CIDR blocks therein.
 
 use crate::collection::DatastoreCollectionConfig;
+use crate::impl_enum_type;
 use crate::schema::ip_pool;
 use crate::schema::ip_pool_range;
+use crate::schema::ip_pool_resource;
 use crate::Name;
 use chrono::DateTime;
 use chrono::Utc;
@@ -91,6 +93,28 @@ impl From<params::IpPoolUpdate> for IpPoolUpdate {
             time_modified: Utc::now(),
         }
     }
+}
+
+impl_enum_type!(
+    #[derive(SqlType, Debug, Clone, Copy, QueryId)]
+    #[diesel(postgres_type(name = "ip_pool_resource_type"))]
+     pub struct IpPoolResourceTypeEnum;
+
+     #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq)]
+     #[diesel(sql_type = IpPoolResourceTypeEnum)]
+     pub enum IpPoolResourceType;
+
+     Fleet => b"fleet"
+     Silo => b"silo"
+);
+
+#[derive(Queryable, Insertable, Selectable, Clone, Debug)]
+#[diesel(table_name = ip_pool_resource)]
+pub struct IpPoolResource {
+    pub ip_pool_id: Uuid,
+    pub resource_type: IpPoolResourceType,
+    pub resource_id: Uuid,
+    pub is_default: bool,
 }
 
 /// A range of IP addresses for an IP Pool.

@@ -2577,7 +2577,31 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '6.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '7.0.0', NULL)
 ON CONFLICT DO NOTHING;
+
+CREATE TYPE IF NOT EXISTS omicron.public.ip_pool_resource_type AS ENUM (
+    'fleet',
+    'silo'
+);
+
+-- join table associating IP pools with resources like fleet or silo
+CREATE TABLE IF NOT EXISTS omicron.public.ip_pool_resource (
+    ip_pool_id UUID NOT NULL,
+    resource_type ip_pool_resource_type NOT NULL,
+    resource_id UUID NOT NULL,
+    is_default BOOL NOT NULL,
+    -- TODO: timestamps for soft deletes?
+
+    -- resource_type is redundant because resource IDs are globally unique, but
+    -- logically it belongs here
+    PRIMARY KEY (ip_pool_id, resource_type, resource_id)
+);
+
+-- a given resource can only have one default ip pool
+CREATE UNIQUE INDEX IF NOT EXISTS one_default_ip_pool_per_resource ON omicron.public.ip_pool_resource (
+    resource_id
+) where
+    is_default = true;
 
 COMMIT;
