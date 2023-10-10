@@ -14,7 +14,6 @@ use futures::stream::StreamExt;
 use nexus_test_interface::NexusServer;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
-use omicron_sled_agent::sim;
 use omicron_test_utils::dev;
 use signal_hook::consts::signal::SIGINT;
 use signal_hook_tokio::Signals;
@@ -348,13 +347,12 @@ async fn cmd_run_all(args: &RunAllArgs) -> Result<(), anyhow::Error> {
         config.deployment.dropshot_external.dropshot.bind_address.set_port(p);
     }
 
-    // Start up a ControlPlaneTestContext, which tautologically sets up
-    // everything needed for a simulated control plane.
     println!("omicron-dev: setting up all services ... ");
-    let cptestctx = nexus_test_utils::test_setup_with_config::<
+    let cptestctx = nexus_test_utils::omicron_dev_setup_with_config::<
         omicron_nexus::Server,
-    >("omicron-dev", &mut config, sim::SimMode::Auto, None)
-    .await;
+    >(&mut config)
+    .await
+    .context("error setting up services")?;
     println!("omicron-dev: services are running.");
 
     // Print out basic information about what was started.

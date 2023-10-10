@@ -9,9 +9,6 @@ use zeroize::Zeroize;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SwapDeviceError {
-    #[error("Could not find boot disk")]
-    BootDiskNotFound,
-
     #[error("Error running ZFS command: {0}")]
     Zfs(illumos_utils::ExecutionError),
 

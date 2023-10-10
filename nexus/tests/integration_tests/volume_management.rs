@@ -19,6 +19,7 @@ use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
 use nexus_types::external_api::views;
+use nexus_types::identity::Asset;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -1811,6 +1812,313 @@ async fn test_volume_checkout_updates_sparse_mid_multiple_gen(
     // Request again, we should see the incremented values now..
     let new_vol = datastore.volume_checkout(volume_id).await.unwrap();
     volume_match_gen(new_vol, vec![Some(8), None, Some(10)]);
+}
+
+/// Test that the Crucible agent's port reuse does not confuse
+/// `decrease_crucible_resource_count_and_soft_delete_volume`, due to the
+/// `[ipv6]:port` targets being reused.
+#[nexus_test]
+async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
+    let nexus = &cptestctx.server.apictx().nexus;
+    let datastore = nexus.datastore();
+
+    // Four zpools, one dataset each
+    let mut disk_test = DiskTest::new(&cptestctx).await;
+    disk_test
+        .add_zpool_with_dataset(&cptestctx, DiskTest::DEFAULT_ZPOOL_SIZE_GIB)
+        .await;
+
+    // This bug occurs when region_snapshot records share a snapshot_addr, so
+    // insert those here manually.
+
+    // (dataset_id, region_id, snapshot_id, snapshot_addr)
+    let region_snapshots = vec![
+        // first snapshot-create
+        (
+            disk_test.zpools[0].datasets[0].id,
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            String::from("[fd00:1122:3344:101:7]:19016"),
+        ),
+        (
+            disk_test.zpools[1].datasets[0].id,
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            String::from("[fd00:1122:3344:102:7]:19016"),
+        ),
+        (
+            disk_test.zpools[2].datasets[0].id,
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            String::from("[fd00:1122:3344:103:7]:19016"),
+        ),
+        // second snapshot-create
+        (
+            disk_test.zpools[0].datasets[0].id,
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            String::from("[fd00:1122:3344:101:7]:19016"), // duplicate!
+        ),
+        (
+            disk_test.zpools[3].datasets[0].id,
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            String::from("[fd00:1122:3344:104:7]:19016"),
+        ),
+        (
+            disk_test.zpools[2].datasets[0].id,
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            String::from("[fd00:1122:3344:103:7]:19017"),
+        ),
+    ];
+
+    // First, three `region_snapshot` records created in the snapshot-create
+    // saga, which are then used to make snapshot's volume construction request
+
+    for i in 0..3 {
+        let (dataset_id, region_id, snapshot_id, snapshot_addr) =
+            &region_snapshots[i];
+        datastore
+            .region_snapshot_create(nexus_db_model::RegionSnapshot {
+                dataset_id: *dataset_id,
+                region_id: *region_id,
+                snapshot_id: *snapshot_id,
+                snapshot_addr: snapshot_addr.clone(),
+                volume_references: 0,
+                deleting: false,
+            })
+            .await
+            .unwrap();
+    }
+
+    let volume_id = Uuid::new_v4();
+    let volume = datastore
+        .volume_create(nexus_db_model::Volume::new(
+            volume_id,
+            serde_json::to_string(&VolumeConstructionRequest::Volume {
+                id: volume_id,
+                block_size: 512,
+                sub_volumes: vec![],
+                read_only_parent: Some(Box::new(
+                    VolumeConstructionRequest::Region {
+                        block_size: 512,
+                        blocks_per_extent: 1,
+                        extent_count: 1,
+                        gen: 1,
+                        opts: CrucibleOpts {
+                            id: Uuid::new_v4(),
+                            target: vec![
+                                region_snapshots[0].3.clone(),
+                                region_snapshots[1].3.clone(),
+                                region_snapshots[2].3.clone(),
+                            ],
+                            lossy: false,
+                            flush_timeout: None,
+                            key: None,
+                            cert_pem: None,
+                            key_pem: None,
+                            root_cert_pem: None,
+                            control: None,
+                            read_only: true,
+                        },
+                    },
+                )),
+            })
+            .unwrap(),
+        ))
+        .await
+        .unwrap();
+
+    // Sanity check
+
+    assert_eq!(volume.id(), volume_id);
+
+    // Make sure the volume has only three read-only targets:
+
+    let crucible_targets = datastore
+        .read_only_resources_associated_with_volume(volume_id)
+        .await
+        .unwrap();
+    assert_eq!(crucible_targets.read_only_targets.len(), 3);
+
+    // Also validate the volume's region_snapshots got incremented by
+    // volume_create
+
+    for i in 0..3 {
+        let (dataset_id, region_id, snapshot_id, _) = region_snapshots[i];
+        let region_snapshot = datastore
+            .region_snapshot_get(dataset_id, region_id, snapshot_id)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(region_snapshot.volume_references, 1);
+        assert_eq!(region_snapshot.deleting, false);
+    }
+
+    // Soft delete the volume, and validate that only three region_snapshot
+    // records are returned.
+
+    let cr = datastore
+        .decrease_crucible_resource_count_and_soft_delete_volume(volume_id)
+        .await
+        .unwrap();
+
+    for i in 0..3 {
+        let (dataset_id, region_id, snapshot_id, _) = region_snapshots[i];
+        let region_snapshot = datastore
+            .region_snapshot_get(dataset_id, region_id, snapshot_id)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(region_snapshot.volume_references, 0);
+        assert_eq!(region_snapshot.deleting, true);
+    }
+
+    match cr {
+        nexus_db_queries::db::datastore::CrucibleResources::V1(cr) => {
+            assert!(cr.datasets_and_regions.is_empty());
+            assert_eq!(cr.datasets_and_snapshots.len(), 3);
+        }
+
+        nexus_db_queries::db::datastore::CrucibleResources::V2(cr) => {
+            assert!(cr.datasets_and_regions.is_empty());
+            assert_eq!(cr.snapshots_to_delete.len(), 3);
+        }
+    }
+
+    // Now, let's say we're at a spot where the running snapshots have been
+    // deleted, but before volume_hard_delete or region_snapshot_remove are
+    // called. Pretend another snapshot-create and snapshot-delete snuck in
+    // here, and the second snapshot hits a agent that reuses the first target.
+
+    for i in 3..6 {
+        let (dataset_id, region_id, snapshot_id, snapshot_addr) =
+            &region_snapshots[i];
+        datastore
+            .region_snapshot_create(nexus_db_model::RegionSnapshot {
+                dataset_id: *dataset_id,
+                region_id: *region_id,
+                snapshot_id: *snapshot_id,
+                snapshot_addr: snapshot_addr.clone(),
+                volume_references: 0,
+                deleting: false,
+            })
+            .await
+            .unwrap();
+    }
+
+    let volume_id = Uuid::new_v4();
+    let volume = datastore
+        .volume_create(nexus_db_model::Volume::new(
+            volume_id,
+            serde_json::to_string(&VolumeConstructionRequest::Volume {
+                id: volume_id,
+                block_size: 512,
+                sub_volumes: vec![],
+                read_only_parent: Some(Box::new(
+                    VolumeConstructionRequest::Region {
+                        block_size: 512,
+                        blocks_per_extent: 1,
+                        extent_count: 1,
+                        gen: 1,
+                        opts: CrucibleOpts {
+                            id: Uuid::new_v4(),
+                            target: vec![
+                                region_snapshots[3].3.clone(),
+                                region_snapshots[4].3.clone(),
+                                region_snapshots[5].3.clone(),
+                            ],
+                            lossy: false,
+                            flush_timeout: None,
+                            key: None,
+                            cert_pem: None,
+                            key_pem: None,
+                            root_cert_pem: None,
+                            control: None,
+                            read_only: true,
+                        },
+                    },
+                )),
+            })
+            .unwrap(),
+        ))
+        .await
+        .unwrap();
+
+    // Sanity check
+
+    assert_eq!(volume.id(), volume_id);
+
+    // Make sure the volume has only three read-only targets:
+
+    let crucible_targets = datastore
+        .read_only_resources_associated_with_volume(volume_id)
+        .await
+        .unwrap();
+    assert_eq!(crucible_targets.read_only_targets.len(), 3);
+
+    // Also validate only the volume's region_snapshots got incremented by
+    // volume_create.
+
+    for i in 0..3 {
+        let (dataset_id, region_id, snapshot_id, _) = region_snapshots[i];
+        let region_snapshot = datastore
+            .region_snapshot_get(dataset_id, region_id, snapshot_id)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(region_snapshot.volume_references, 0);
+        assert_eq!(region_snapshot.deleting, true);
+    }
+    for i in 3..6 {
+        let (dataset_id, region_id, snapshot_id, _) = region_snapshots[i];
+        let region_snapshot = datastore
+            .region_snapshot_get(dataset_id, region_id, snapshot_id)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(region_snapshot.volume_references, 1);
+        assert_eq!(region_snapshot.deleting, false);
+    }
+
+    // Soft delete the volume, and validate that only three region_snapshot
+    // records are returned.
+
+    let cr = datastore
+        .decrease_crucible_resource_count_and_soft_delete_volume(volume_id)
+        .await
+        .unwrap();
+
+    // Make sure every region_snapshot is now 0, and deleting
+
+    for i in 0..6 {
+        let (dataset_id, region_id, snapshot_id, _) = region_snapshots[i];
+        let region_snapshot = datastore
+            .region_snapshot_get(dataset_id, region_id, snapshot_id)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(region_snapshot.volume_references, 0);
+        assert_eq!(region_snapshot.deleting, true);
+    }
+
+    match cr {
+        nexus_db_queries::db::datastore::CrucibleResources::V1(cr) => {
+            assert!(cr.datasets_and_regions.is_empty());
+            assert_eq!(cr.datasets_and_snapshots.len(), 3);
+        }
+
+        nexus_db_queries::db::datastore::CrucibleResources::V2(cr) => {
+            assert!(cr.datasets_and_regions.is_empty());
+            assert_eq!(cr.snapshots_to_delete.len(), 3);
+        }
+    }
 }
 
 #[nexus_test]
