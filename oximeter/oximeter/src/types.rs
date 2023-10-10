@@ -95,17 +95,17 @@ impl_field_type_from! { bool, FieldType::Bool }
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum FieldValue {
     String(String),
+    I64(i64),
+    IpAddr(IpAddr),
+    Uuid(Uuid),
+    Bool(bool),
     I8(i8),
     U8(u8),
     I16(i16),
     U16(u16),
     I32(i32),
     U32(u32),
-    I64(i64),
     U64(u64),
-    IpAddr(IpAddr),
-    Uuid(Uuid),
-    Bool(bool),
 }
 
 impl FieldValue {
