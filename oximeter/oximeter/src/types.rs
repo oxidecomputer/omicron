@@ -757,7 +757,9 @@ impl Sample {
     }
 
     /// Return the fields of this sample's target.
-    pub fn target_fields(&self) -> impl Iterator<Item = &Field> {
+    pub fn target_fields(
+        &self,
+    ) -> impl Iterator<Item = &Field> + std::fmt::Debug {
         self.target.fields.values()
     }
 
@@ -767,7 +769,9 @@ impl Sample {
     }
 
     /// Return the fields of this sample's metric.
-    pub fn metric_fields(&self) -> impl Iterator<Item = &Field> {
+    pub fn metric_fields(
+        &self,
+    ) -> impl Iterator<Item = &Field> + std::fmt::Debug {
         self.metric.fields.values()
     }
 
