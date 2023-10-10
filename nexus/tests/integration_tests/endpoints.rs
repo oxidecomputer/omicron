@@ -1876,6 +1876,5 @@ lazy_static! {
                 AllowedMethod::GetNonexistent
             ],
         },
-
     ];
 }

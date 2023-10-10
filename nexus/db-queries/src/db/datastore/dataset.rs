@@ -8,20 +8,36 @@ use super::DataStore;
 use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
-use crate::db::error::public_error_from_diesel_pool;
+use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Asset;
 use crate::db::model::Dataset;
 use crate::db::model::Zpool;
+use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::upsert::excluded;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
+use uuid::Uuid;
 
 impl DataStore {
+    pub async fn dataset_get(&self, dataset_id: Uuid) -> LookupResult<Dataset> {
+        use db::schema::dataset::dsl;
+
+        dsl::dataset
+            .filter(dsl::id.eq(dataset_id))
+            .select(Dataset::as_select())
+            .first_async::<Dataset>(
+                &*self.pool_connection_unauthorized().await?,
+            )
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
     /// Stores a new dataset in the database.
     pub async fn dataset_upsert(
         &self,
@@ -44,22 +60,22 @@ impl DataStore {
                     dsl::kind.eq(excluded(dsl::kind)),
                 )),
         )
-        .insert_and_get_result_async(self.pool())
+        .insert_and_get_result_async(
+            &*self.pool_connection_unauthorized().await?,
+        )
         .await
         .map_err(|e| match e {
             AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
                 type_name: ResourceType::Zpool,
                 lookup_type: LookupType::ById(zpool_id),
             },
-            AsyncInsertError::DatabaseError(e) => {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::Conflict(
-                        ResourceType::Dataset,
-                        &dataset.id().to_string(),
-                    ),
-                )
-            }
+            AsyncInsertError::DatabaseError(e) => public_error_from_diesel(
+                e,
+                ErrorHandler::Conflict(
+                    ResourceType::Dataset,
+                    &dataset.id().to_string(),
+                ),
+            ),
         })
     }
 }

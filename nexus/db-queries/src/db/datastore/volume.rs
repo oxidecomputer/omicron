@@ -6,7 +6,7 @@
 
 use super::DataStore;
 use crate::db;
-use crate::db::error::public_error_from_diesel_pool;
+use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
 use crate::db::identity::Asset;
@@ -19,7 +19,6 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use async_bb8_diesel::OptionalExtension;
 use chrono::Utc;
 use diesel::prelude::*;
-use diesel::OptionalExtension as DieselOptionalExtension;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
@@ -65,19 +64,18 @@ impl DataStore {
             crucible_targets
         };
 
-        self.pool()
-            .transaction(move |conn| {
+        self.pool_connection_unauthorized()
+            .await?
+            .transaction_async(|conn| async move {
                 let maybe_volume: Option<Volume> = dsl::volume
                     .filter(dsl::id.eq(volume.id()))
                     .select(Volume::as_select())
-                    .first(conn)
+                    .first_async(&conn)
+                    .await
                     .optional()
                     .map_err(|e| {
                         TxnError::CustomError(VolumeCreationError::Public(
-                            public_error_from_diesel_pool(
-                                e.into(),
-                                ErrorHandler::Server,
-                            ),
+                            public_error_from_diesel(e, ErrorHandler::Server),
                         ))
                     })?;
 
@@ -97,11 +95,12 @@ impl DataStore {
                     .on_conflict(dsl::id)
                     .do_nothing()
                     .returning(Volume::as_returning())
-                    .get_result(conn)
+                    .get_result_async(&conn)
+                    .await
                     .map_err(|e| {
                         TxnError::CustomError(VolumeCreationError::Public(
-                            public_error_from_diesel_pool(
-                                e.into(),
+                            public_error_from_diesel(
+                                e,
                                 ErrorHandler::Conflict(
                                     ResourceType::Volume,
                                     volume.id().to_string().as_str(),
@@ -120,15 +119,17 @@ impl DataStore {
                         .filter(
                             rs_dsl::snapshot_addr.eq(read_only_target.clone()),
                         )
+                        .filter(rs_dsl::deleting.eq(false))
                         .set(
                             rs_dsl::volume_references
                                 .eq(rs_dsl::volume_references + 1),
                         )
-                        .execute(conn)
+                        .execute_async(&conn)
+                        .await
                         .map_err(|e| {
                             TxnError::CustomError(VolumeCreationError::Public(
-                                public_error_from_diesel_pool(
-                                    e.into(),
+                                public_error_from_diesel(
+                                    e,
                                     ErrorHandler::Server,
                                 ),
                             ))
@@ -156,10 +157,10 @@ impl DataStore {
         dsl::volume
             .filter(dsl::id.eq(volume_id))
             .select(Volume::as_select())
-            .first_async::<Volume>(self.pool())
+            .first_async::<Volume>(&*self.pool_connection_unauthorized().await?)
             .await
             .optional()
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Delete the volume if it exists. If it was already deleted, this is a
@@ -169,10 +170,10 @@ impl DataStore {
 
         diesel::delete(dsl::volume)
             .filter(dsl::id.eq(volume_id))
-            .execute_async(self.pool())
+            .execute_async(&*self.pool_connection_unauthorized().await?)
             .await
             .map(|_| ())
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Checkout a copy of the Volume from the database.
@@ -206,13 +207,15 @@ impl DataStore {
         // types that require it).  The generation number (along with the
         // rest of the volume data) that was in the database is what is
         // returned to the caller.
-        self.pool()
-            .transaction(move |conn| {
+        self.pool_connection_unauthorized()
+            .await?
+            .transaction_async(|conn| async move {
                 // Grab the volume in question.
                 let volume = dsl::volume
                     .filter(dsl::id.eq(volume_id))
                     .select(Volume::as_select())
-                    .get_result(conn)?;
+                    .get_result_async(&conn)
+                    .await?;
 
                 // Turn the volume.data into the VolumeConstructionRequest
                 let vcr: VolumeConstructionRequest =
@@ -289,7 +292,8 @@ impl DataStore {
                                 diesel::update(volume_dsl::volume)
                                     .filter(volume_dsl::id.eq(volume_id))
                                     .set(volume_dsl::data.eq(new_volume_data))
-                                    .execute(conn)?;
+                                    .execute_async(&conn)
+                                    .await?;
 
                             // This should update just one row.  If it does
                             // not, then something is terribly wrong in the
@@ -332,10 +336,7 @@ impl DataStore {
             .await
             .map_err(|e| match e {
                 TxnError::CustomError(VolumeGetError::DieselError(e)) => {
-                    public_error_from_diesel_pool(
-                        e.into(),
-                        ErrorHandler::Server,
-                    )
+                    public_error_from_diesel(e.into(), ErrorHandler::Server)
                 }
 
                 _ => {
@@ -478,9 +479,9 @@ impl DataStore {
                 Region::as_select(),
                 Volume::as_select(),
             ))
-            .load_async(self.pool())
+            .load_async(&*self.pool_connection_unauthorized().await?)
             .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     pub async fn read_only_resources_associated_with_volume(
@@ -573,11 +574,10 @@ impl DataStore {
         // multiple times, and that is done by soft-deleting the volume during
         // the transaction, and returning the previously serialized list of
         // resources to clean up if a soft-delete has already occurred.
-        //
-        // TODO it would be nice to make this transaction_async, but I couldn't
-        // get the async optional extension to work.
-        self.pool()
-            .transaction(move |conn| {
+
+        self.pool_connection_unauthorized()
+            .await?
+            .transaction_async(|conn| async move {
                 // Grab the volume in question. If the volume record was already
                 // hard-deleted, assume clean-up has occurred and return an empty
                 // CrucibleResources. If the volume record was soft-deleted, then
@@ -588,7 +588,8 @@ impl DataStore {
                     let volume = volume_dsl::volume
                         .filter(volume_dsl::id.eq(volume_id))
                         .select(Volume::as_select())
-                        .get_result(conn)
+                        .get_result_async(&conn)
+                        .await
                         .optional()?;
 
                     let volume = if let Some(v) = volume {
@@ -637,19 +638,50 @@ impl DataStore {
                     }
                 };
 
-                // Decrease the number of uses for each referenced region snapshot.
+                // Decrease the number of uses for each non-deleted referenced
+                // region snapshot.
+
                 use db::schema::region_snapshot::dsl;
 
                 diesel::update(dsl::region_snapshot)
                     .filter(
                         dsl::snapshot_addr
-                            .eq_any(&crucible_targets.read_only_targets),
+                            .eq_any(crucible_targets.read_only_targets.clone()),
                     )
+                    .filter(dsl::volume_references.gt(0))
+                    .filter(dsl::deleting.eq(false))
                     .set(dsl::volume_references.eq(dsl::volume_references - 1))
-                    .execute(conn)?;
+                    .execute_async(&conn)
+                    .await?;
+
+                // Then, note anything that was set to zero from the above
+                // UPDATE, and then mark all those as deleted.
+                let snapshots_to_delete: Vec<RegionSnapshot> =
+                    dsl::region_snapshot
+                        .filter(
+                            dsl::snapshot_addr.eq_any(
+                                crucible_targets.read_only_targets.clone(),
+                            ),
+                        )
+                        .filter(dsl::volume_references.eq(0))
+                        .filter(dsl::deleting.eq(false))
+                        .select(RegionSnapshot::as_select())
+                        .load_async(&conn)
+                        .await?;
+
+                diesel::update(dsl::region_snapshot)
+                    .filter(
+                        dsl::snapshot_addr
+                            .eq_any(crucible_targets.read_only_targets.clone()),
+                    )
+                    .filter(dsl::volume_references.eq(0))
+                    .filter(dsl::deleting.eq(false))
+                    .set(dsl::deleting.eq(true))
+                    .execute_async(&conn)
+                    .await?;
 
                 // Return what results can be cleaned up
-                let result = CrucibleResources::V1(CrucibleResourcesV1 {
+                let result = CrucibleResources::V2(CrucibleResourcesV2 {
                     // The only use of a read-write region will be at the top level of a
                     // Volume. These are not shared, but if any snapshots are taken this
                     // will prevent deletion of the region. Filter out any regions that
@@ -678,51 +710,25 @@ impl DataStore {
                                     .eq(0)
                                     // Despite the SQL specifying that this column is NOT NULL,
                                     // this null check is required for this function to work!
+                                    // The left join of region_snapshot might cause a null here.
                                     .or(dsl::volume_references.is_null()),
                             )
                             .select((Dataset::as_select(), Region::as_select()))
-                            .get_results::<(Dataset, Region)>(conn)?
+                            .get_results_async::<(Dataset, Region)>(&conn)
+                            .await?
                     },
 
-                    // A volume (for a disk or snapshot) may reference another nested
-                    // volume as a read-only parent, and this may be arbitrarily deep.
-                    // After decrementing volume_references above, get the region
-                    // snapshot records for these read_only_targets where the
-                    // volume_references has gone to 0. Consumers of this struct will
-                    // be responsible for deleting the read-only downstairs running
-                    // for the snapshot and the snapshot itself.
-                    datasets_and_snapshots: {
-                        use db::schema::dataset::dsl as dataset_dsl;
-
-                        dsl::region_snapshot
-                            // Only return region_snapshot records related to
-                            // this volume that have zero references. This will
-                            // only happen one time, on the last decrease of a
-                            // volume containing these read-only targets.
-                            //
-                            // It's important to not return *every* region
-                            // snapshot with zero references: multiple volume
-                            // delete sub-sagas will then be issues duplicate
-                            // DELETE calls to Crucible agents, and a request to
-                            // delete a read-only downstairs running for a
-                            // snapshot that doesn't exist will return a 404,
-                            // causing the saga to error and unwind.
-                            .filter(
-                                dsl::snapshot_addr.eq_any(
-                                    &crucible_targets.read_only_targets,
-                                ),
-                            )
-                            .filter(dsl::volume_references.eq(0))
-                            .inner_join(
-                                dataset_dsl::dataset
-                                    .on(dsl::dataset_id.eq(dataset_dsl::id)),
-                            )
-                            .select((
-                                Dataset::as_select(),
-                                RegionSnapshot::as_select(),
-                            ))
-                            .get_results::<(Dataset, RegionSnapshot)>(conn)?
-                    },
+                    // Consumers of this struct will be responsible for deleting
+                    // the read-only downstairs running for the snapshot and the
+                    // snapshot itself.
+                    //
+                    // It's important to not return *every* region snapshot with
+                    // zero references: multiple volume delete sub-sagas will
+                    // then be issues duplicate DELETE calls to Crucible agents,
+                    // and a request to delete a read-only downstairs running
+                    // for a snapshot that doesn't exist will return a 404,
+                    // causing the saga to error and unwind.
+                    snapshots_to_delete,
                 });
 
                 // Soft delete this volume, and serialize the resources that are to
@@ -742,7 +748,8 @@ impl DataStore {
                             })?,
                         ),
                     ))
-                    .execute(conn)?;
+                    .execute_async(&conn)
+                    .await?;
 
                 Ok(result)
             })
@@ -750,10 +757,7 @@ impl DataStore {
             .map_err(|e| match e {
                 TxnError::CustomError(
                     DecreaseCrucibleResourcesError::DieselError(e),
-                ) => public_error_from_diesel_pool(
-                    e.into(),
-                    ErrorHandler::Server,
-                ),
+                ) => public_error_from_diesel(e.into(), ErrorHandler::Server),
 
                 _ => {
                     Error::internal_error(&format!("Transaction error: {}", e))
@@ -799,8 +803,9 @@ impl DataStore {
         //   data from original volume_id.
         // - Put the new temp VCR into the temp volume.data, update the
         //   temp_volume in the database.
-        self.pool()
-            .transaction(move |conn| {
+        self.pool_connection_unauthorized()
+            .await?
+            .transaction_async(|conn| async move {
                 // Grab the volume in question. If the volume record was already
                 // deleted then we can just return.
                 let volume = {
@@ -809,7 +814,8 @@ impl DataStore {
                     let volume = dsl::volume
                         .filter(dsl::id.eq(volume_id))
                         .select(Volume::as_select())
-                        .get_result(conn)
+                        .get_result_async(&conn)
+                        .await
                         .optional()?;
 
                     let volume = if let Some(v) = volume {
@@ -882,7 +888,8 @@ impl DataStore {
                             let num_updated = diesel::update(volume_dsl::volume)
                                 .filter(volume_dsl::id.eq(volume_id))
                                 .set(volume_dsl::data.eq(new_volume_data))
-                                .execute(conn)?;
+                                .execute_async(&conn)
+                                .await?;
 
                             // This should update just one row.  If it does
                             // not, then something is terribly wrong in the
@@ -920,7 +927,8 @@ impl DataStore {
                                     .filter(volume_dsl::id.eq(temp_volume_id))
                                     .filter(volume_dsl::time_deleted.is_null())
                                     .set(volume_dsl::data.eq(rop_volume_data))
-                                    .execute(conn)?;
+                                    .execute_async(&conn)
+                                    .await?;
                             if num_updated != 1 {
                                 return Err(TxnError::CustomError(
                                     RemoveReadOnlyParentError::UnexpectedDatabaseUpdate(num_updated, 1),
@@ -946,7 +954,7 @@ impl DataStore {
             .map_err(|e| match e {
                 TxnError::CustomError(
                     RemoveReadOnlyParentError::DieselError(e),
-                ) => public_error_from_diesel_pool(
+                ) => public_error_from_diesel(
                     e.into(),
                     ErrorHandler::Server,
                 ),
@@ -960,7 +968,7 @@ impl DataStore {
 
 #[derive(Default, Debug, Serialize, Deserialize)]
 pub struct CrucibleTargets {
-    read_only_targets: Vec<String>,
+    pub read_only_targets: Vec<String>,
 }
 
 // Serialize this enum into the `resources_to_clean_up` column to handle
@@ -968,12 +976,19 @@ pub struct CrucibleTargets {
 #[derive(Debug, Serialize, Deserialize)]
 pub enum CrucibleResources {
     V1(CrucibleResourcesV1),
+    V2(CrucibleResourcesV2),
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct CrucibleResourcesV1 {
     pub datasets_and_regions: Vec<(Dataset, Region)>,
     pub datasets_and_snapshots: Vec<(Dataset, RegionSnapshot)>,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct CrucibleResourcesV2 {
+    pub datasets_and_regions: Vec<(Dataset, Region)>,
+    pub snapshots_to_delete: Vec<RegionSnapshot>,
 }
 
 /// Return the targets from a VolumeConstructionRequest.

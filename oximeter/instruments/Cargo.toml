@@ -12,6 +12,7 @@ oximeter.workspace = true
 tokio.workspace = true
 http = { workspace = true, optional = true }
 uuid.workspace = true
+omicron-workspace-hack.workspace = true
 
 [features]
 default = ["http-instruments"]
