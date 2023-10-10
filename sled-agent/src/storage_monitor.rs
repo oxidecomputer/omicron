@@ -123,7 +123,31 @@ impl StorageMonitor {
         }
     }
 
-    async fn handle_monitor_msg(&mut self, msg: StorageMonitorMsg) {}
+    async fn handle_monitor_msg(&mut self, msg: StorageMonitorMsg) {
+        match msg {
+            StorageMonitorMsg::UnderlayAvailable(underlay) => {
+                let sled_id = underlay.sled_id;
+                self.underlay = Some(underlay);
+                self.notify_nexus_about_existing_resources(sled_id).await;
+            }
+        }
+    }
+
+    /// When the underlay becomes available, we need to notify nexus about any
+    /// discovered disks and pools, since we don't attempt to notify until there
+    /// is an underlay available.
+    async fn notify_nexus_about_existing_resources(&mut self, sled_id: Uuid) {
+        let current = StorageResources::default();
+        let updated = &self.storage_resources;
+        let nexus_updates =
+            compute_resource_diffs(&self.log, &sled_id, &current, updated);
+        for put in nexus_updates.disk_puts {
+            self.physical_disk_notify(put.into()).await;
+        }
+        for (pool, put) in nexus_updates.zpool_puts {
+            self.add_zpool_notify(pool, put).await;
+        }
+    }
 
     async fn handle_resource_update(
         &mut self,
