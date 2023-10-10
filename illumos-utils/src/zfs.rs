@@ -19,12 +19,6 @@ use std::fmt;
 pub const ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT: &str = "/zone";
 pub const ZONE_ZFS_RAMDISK_DATASET: &str = "rpool/zone";
 
-/// The name of a dataset used for creating zone bundles.
-///
-/// See `sled_agent/src/zone_bundle.rs` for details on the purpose and use of
-/// this dataset.
-pub const ZONE_BUNDLE_ZFS_DATASET: &str = "rpool/oxide-sled-agent-zone-bundle";
-
 pub const ZFS: &str = "/usr/sbin/zfs";
 pub const KEYPATH_ROOT: &str = "/var/run/oxide/";
 
@@ -128,15 +122,6 @@ pub struct CreateSnapshotError {
 pub struct DestroySnapshotError {
     filesystem: String,
     snap_name: String,
-    err: crate::ExecutionError,
-}
-
-#[derive(Debug, thiserror::Error)]
-#[error("Failed to create clone '{clone_name}' from snapshot '{filesystem}@{snap_name}': {err}")]
-pub struct CloneSnapshotError {
-    filesystem: String,
-    snap_name: String,
-    clone_name: String,
     err: crate::ExecutionError,
 }
 
@@ -484,13 +469,20 @@ impl Zfs {
     }
 
     /// Create a snapshot of a filesystem.
-    pub fn create_snapshot(
-        filesystem: &str,
-        snap_name: &str,
+    ///
+    /// A list of properties, as name-value tuples, may be passed to this
+    /// method, for creating properties directly on the snapshots.
+    pub fn create_snapshot<'a>(
+        filesystem: &'a str,
+        snap_name: &'a str,
+        properties: &'a [(&'a str, &'a str)],
     ) -> Result<(), CreateSnapshotError> {
         let mut command = std::process::Command::new(ZFS);
-        let path = format!("{filesystem}@{snap_name}");
-        let cmd = command.args(&["snapshot", &path]);
+        let mut cmd = command.arg("snapshot");
+        for (name, value) in properties.iter() {
+            cmd = cmd.arg("-o").arg(&format!("{name}={value}"));
+        }
+        cmd.arg(&format!("{filesystem}@{snap_name}"));
         execute(cmd).map(|_| ()).map_err(|err| CreateSnapshotError {
             filesystem: filesystem.to_string(),
             snap_name: snap_name.to_string(),
@@ -512,23 +504,6 @@ impl Zfs {
             err,
         })
     }
-
-    /// Create a clone of a snapshot.
-    pub fn clone_snapshot(
-        filesystem: &str,
-        snap_name: &str,
-        clone_name: &str,
-    ) -> Result<(), CloneSnapshotError> {
-        let mut command = std::process::Command::new(ZFS);
-        let snap_path = format!("{filesystem}@{snap_name}");
-        let cmd = command.args(&["clone", &snap_path, clone_name]);
-        execute(cmd).map(|_| ()).map_err(|err| CloneSnapshotError {
-            filesystem: filesystem.to_string(),
-            snap_name: snap_name.to_string(),
-            clone_name: clone_name.to_string(),
-            err,
-        })
-    }
 }
 
 /// A read-only snapshot of a ZFS filesystem.
@@ -538,17 +513,19 @@ pub struct Snapshot {
     pub snap_name: String,
 }
 
+impl Snapshot {
+    /// Return the full path to the snapshot directory within the filesystem.
+    pub fn full_path(&self) -> Result<Utf8PathBuf, GetValueError> {
+        let mountpoint = Zfs::get_value(&self.filesystem, "mountpoint")?;
+        Ok(Utf8PathBuf::from(mountpoint)
+            .join(format!(".zfs/snapshot/{}", self.snap_name)))
+    }
+}
+
 impl fmt::Display for Snapshot {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}@{}", self.filesystem, self.snap_name)
     }
-}
-
-/// A clone of a ZFS snapshot.
-#[derive(Clone, Debug)]
-pub struct ZfsClone {
-    pub snapshot: Snapshot,
-    pub clone_name: String,
 }
 
 /// Returns all datasets managed by Omicron
@@ -584,11 +561,6 @@ pub fn get_all_omicron_datasets_for_delete() -> anyhow::Result<Vec<String>> {
             datasets.push(format!("{}/{dataset}", ZONE_ZFS_RAMDISK_DATASET));
         }
     };
-
-    // Delete the zone-bundle dataset, if it exists.
-    if let Ok(zb_dataset) = Zfs::get_dataset_name(&ZONE_BUNDLE_ZFS_DATASET) {
-        datasets.push(zb_dataset);
-    }
 
     Ok(datasets)
 }
