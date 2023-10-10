@@ -1513,6 +1513,9 @@ impl ServiceManager {
                         .open(&config_path)
                         .await
                         .map_err(|err| Error::io_path(&config_path, err))?;
+                    file.write_all(b"\n\n")
+                        .await
+                        .map_err(|err| Error::io_path(&config_path, err))?;
                     file.write_all(config_str.as_bytes())
                         .await
                         .map_err(|err| Error::io_path(&config_path, err))?;

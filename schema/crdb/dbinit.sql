@@ -505,6 +505,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.region_snapshot (
     /* How many volumes reference this? */
     volume_references INT8 NOT NULL,
 
+    /* Is this currently part of some resources_to_delete? */
+    deleting BOOL NOT NULL,
+
     PRIMARY KEY (dataset_id, region_id, snapshot_id)
 );
 
@@ -2574,7 +2577,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '5.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '6.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

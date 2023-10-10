@@ -77,10 +77,11 @@ done
 mkdir /work/package
 pushd /work/package
 tar xf /input/package/work/package.tar.gz out package-manifest.toml target/release/omicron-package
-target/release/omicron-package -t default target create -i standard -m gimlet -s asic
+target/release/omicron-package -t default target create -i standard -m gimlet -s asic -r multi-sled
 ln -s /input/package/work/zones/* out/
 rm out/switch-softnpu.tar.gz  # not used when target switch=asic
 rm out/omicron-gateway-softnpu.tar.gz  # not used when target switch=asic
+rm out/omicron-nexus-single-sled.tar.gz # only used for deploy tests
 for zone in out/*.tar.gz; do
     target/release/omicron-package stamp "$(basename "${zone%.tar.gz}")" "$VERSION"
 done
@@ -218,7 +219,7 @@ EOF
     done
 }
 # usage:              SERIES           ROT_DIR      ROT_VERSION              BOARDS...
-add_hubris_artifacts  rot-staging-dev  staging/dev  cert-staging-dev-v1.0.0  "${ALL_BOARDS[@]}"
+add_hubris_artifacts  rot-staging-dev  staging/dev  cert-staging-dev-v1.0.2  "${ALL_BOARDS[@]}"
 add_hubris_artifacts  rot-prod-rel     prod/rel     cert-prod-rel-v1.0.0     "${ALL_BOARDS[@]}"
 
 for series in "${SERIES_LIST[@]}"; do
