@@ -574,9 +574,7 @@ impl DataStore {
         // multiple times, and that is done by soft-deleting the volume during
         // the transaction, and returning the previously serialized list of
         // resources to clean up if a soft-delete has already occurred.
-        //
-        // TODO it would be nice to make this transaction_async, but I couldn't
-        // get the async optional extension to work.
+
         self.pool_connection_unauthorized()
             .await?
             .transaction_async(|conn| async move {
