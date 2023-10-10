@@ -10,7 +10,8 @@
 use dropshot::HttpErrorResponseBody;
 use http::method::Method;
 use http::StatusCode;
-use nexus_types::external_api::{params, views::Project};
+use nexus_types::external_api::params;
+use nexus_types::external_api::views::{self, Project};
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Name;
@@ -545,4 +546,14 @@ async fn test_projects_list(cptestctx: &ControlPlaneTestContext) {
             .map(|v| v.identity.id)
             .collect::<Vec<Uuid>>()
     );
+}
+
+#[nexus_test]
+async fn test_ping(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+
+    let health = NexusRequest::object_get(client, "/v1/ping")
+        .execute_and_parse_unwrap::<views::Ping>()
+        .await;
+    assert_eq!(health.status, views::PingStatus::Ok);
 }

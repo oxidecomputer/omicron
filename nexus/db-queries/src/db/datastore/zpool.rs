@@ -8,7 +8,7 @@ use super::DataStore;
 use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
-use crate::db::error::public_error_from_diesel_pool;
+use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Asset;
 use crate::db::model::Sled;
@@ -39,22 +39,22 @@ impl DataStore {
                     dsl::total_size.eq(excluded(dsl::total_size)),
                 )),
         )
-        .insert_and_get_result_async(self.pool())
+        .insert_and_get_result_async(
+            &*self.pool_connection_unauthorized().await?,
+        )
         .await
         .map_err(|e| match e {
             AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
                 type_name: ResourceType::Sled,
                 lookup_type: LookupType::ById(sled_id),
             },
-            AsyncInsertError::DatabaseError(e) => {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::Conflict(
-                        ResourceType::Zpool,
-                        &zpool.id().to_string(),
-                    ),
-                )
-            }
+            AsyncInsertError::DatabaseError(e) => public_error_from_diesel(
+                e,
+                ErrorHandler::Conflict(
+                    ResourceType::Zpool,
+                    &zpool.id().to_string(),
+                ),
+            ),
         })
     }
 }

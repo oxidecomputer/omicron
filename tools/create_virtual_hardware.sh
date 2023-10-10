@@ -37,7 +37,7 @@ function ensure_simulated_links {
             dladm create-simnet -t "net$I"
             dladm create-simnet -t "sc${I}_0"
             dladm modify-simnet -t -p "net$I" "sc${I}_0"
-            dladm set-linkprop -p mtu=1600 "sc${I}_0" # encap headroom
+            dladm set-linkprop -p mtu=9000 "sc${I}_0" # match emulated devices
         fi
         success "Simnet net$I/sc${I}_0 exists"
     done

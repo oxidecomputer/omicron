@@ -6,7 +6,7 @@
 
 use super::DataStore;
 use crate::db;
-use crate::db::error::public_error_from_diesel_pool;
+use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::TransactionError;
 use async_bb8_diesel::{
@@ -270,11 +270,9 @@ impl DataStore {
         let version: String = dsl::db_metadata
             .filter(dsl::singleton.eq(true))
             .select(dsl::version)
-            .get_result_async(self.pool())
+            .get_result_async(&*self.pool_connection_unauthorized().await?)
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
-            })?;
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         SemverVersion::from_str(&version).map_err(|e| {
             Error::internal_error(&format!("Invalid schema version: {e}"))
@@ -312,9 +310,9 @@ impl DataStore {
             dsl::time_modified.eq(Utc::now()),
             dsl::target_version.eq(Some(to_version.to_string())),
         ))
-        .execute_async(self.pool())
+        .execute_async(&*self.pool_connection_unauthorized().await?)
         .await
-        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         if rows_updated != 1 {
             return Err(Error::internal_error(
@@ -332,7 +330,7 @@ impl DataStore {
         target: &SemverVersion,
         sql: &String,
     ) -> Result<(), Error> {
-        let result = self.pool().transaction_async(|conn| async move {
+        let result = self.pool_connection_unauthorized().await?.transaction_async(|conn| async move {
             if target.to_string() != EARLIEST_SUPPORTED_VERSION {
                 let validate_version_query = format!("SELECT CAST(\
                         IF(\
@@ -353,8 +351,8 @@ impl DataStore {
         match result {
             Ok(()) => Ok(()),
             Err(TransactionError::CustomError(())) => panic!("No custom error"),
-            Err(TransactionError::Pool(e)) => {
-                Err(public_error_from_diesel_pool(e, ErrorHandler::Server))
+            Err(TransactionError::Connection(e)) => {
+                Err(public_error_from_diesel(e, ErrorHandler::Server))
             }
         }
     }
@@ -378,9 +376,9 @@ impl DataStore {
             dsl::version.eq(to_version.to_string()),
             dsl::target_version.eq(None as Option<String>),
         ))
-        .execute_async(self.pool())
+        .execute_async(&*self.pool_connection_unauthorized().await?)
         .await
-        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         if rows_updated != 1 {
             return Err(Error::internal_error(
@@ -432,6 +430,7 @@ mod test {
 
         let cfg = db::Config { url: crdb.pg_config().clone() };
         let pool = Arc::new(db::Pool::new(&logctx.log, &cfg));
+        let conn = pool.pool().get().await.unwrap();
 
         // Mimic the layout of "schema/crdb".
         let config_dir = tempfile::TempDir::new().unwrap();
@@ -457,7 +456,7 @@ mod test {
         use db::schema::db_metadata::dsl;
         diesel::update(dsl::db_metadata.filter(dsl::singleton.eq(true)))
             .set(dsl::version.eq(v0.to_string()))
-            .execute_async(pool.pool())
+            .execute_async(&*conn)
             .await
             .expect("Failed to set version back to 0.0.0");
 
@@ -507,7 +506,7 @@ mod test {
                             "EXISTS (SELECT * FROM pg_tables WHERE tablename = 'widget')"
                         )
                     )
-                    .get_result_async::<bool>(datastore.pool())
+                    .get_result_async::<bool>(&*datastore.pool_connection_for_tests().await.unwrap())
                     .await
                     .expect("Failed to query for table");
                 assert_eq!(result, false, "The 'widget' table should have been deleted, but it exists.\

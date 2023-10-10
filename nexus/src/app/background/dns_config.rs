@@ -220,7 +220,9 @@ mod test {
         {
             use nexus_db_queries::db::schema::dns_version::dsl;
             diesel::delete(dsl::dns_version.filter(dsl::version.eq(2)))
-                .execute_async(datastore.pool_for_tests().await.unwrap())
+                .execute_async(
+                    &*datastore.pool_connection_for_tests().await.unwrap(),
+                )
                 .await
                 .unwrap();
         }
@@ -236,7 +238,7 @@ mod test {
 
         // Similarly, wipe all of the state and verify that we handle that okay.
         datastore
-            .pool_for_tests()
+            .pool_connection_for_tests()
             .await
             .unwrap()
             .transaction_async(|conn| async move {

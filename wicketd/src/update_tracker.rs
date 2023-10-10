@@ -219,11 +219,6 @@ impl UpdateTracker {
 
         let mut errors = Vec::new();
 
-        let plan = update_data.artifact_store.current_plan();
-        if plan.is_none() {
-            errors.push(StartUpdateError::TufRepositoryUnavailable);
-        }
-
         // Check that we're not already updating any of these SPs.
         let update_in_progress: Vec<_> = sps
             .iter()
@@ -244,12 +239,19 @@ impl UpdateTracker {
             errors.push(StartUpdateError::UpdateInProgress(update_in_progress));
         }
 
+        let plan = update_data.artifact_store.current_plan();
+        if plan.is_none() {
+            // (1), referred to below.
+            errors.push(StartUpdateError::TufRepositoryUnavailable);
+        }
+
         // If there are any errors, return now.
         if !errors.is_empty() {
             return Err(errors);
         }
 
-        let plan = plan.expect("we'd have returned an error if plan was None");
+        let plan =
+            plan.expect("we'd have returned an error at (1) if plan was None");
 
         // Call the setup method now.
         if let Some(mut spawn_update_driver) = spawn_update_driver {

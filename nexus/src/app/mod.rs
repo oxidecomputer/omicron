@@ -23,6 +23,7 @@ use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::shared::SwitchLocation;
+use omicron_common::nexus_config::RegionAllocationStrategy;
 use slog::Logger;
 use std::collections::HashMap;
 use std::net::Ipv6Addr;
@@ -153,6 +154,9 @@ pub struct Nexus {
 
     /// Background tasks
     background_tasks: background::BackgroundTasks,
+
+    /// Default Crucible region allocation strategy
+    default_region_allocation_strategy: RegionAllocationStrategy,
 }
 
 impl Nexus {
@@ -325,6 +329,10 @@ impl Nexus {
             external_resolver,
             dpd_clients,
             background_tasks,
+            default_region_allocation_strategy: config
+                .pkg
+                .default_region_allocation_strategy
+                .clone(),
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong

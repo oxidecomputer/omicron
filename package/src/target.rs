@@ -48,12 +48,27 @@ pub enum Switch {
     SoftNpu,
 }
 
+/// Topology of the sleds within the rack.
+#[derive(Clone, Debug, strum::EnumString, strum::Display, ValueEnum)]
+#[strum(serialize_all = "kebab-case")]
+#[clap(rename_all = "kebab-case")]
+pub enum RackTopology {
+    /// Use configurations suitable for a multi-sled deployment, such as dogfood
+    /// and production racks.
+    MultiSled,
+
+    /// Use configurations suitable for a single-sled deployment, such as CI and
+    /// dev machines.
+    SingleSled,
+}
+
 /// A strongly-typed variant of [Target].
 #[derive(Clone, Debug)]
 pub struct KnownTarget {
     image: Image,
     machine: Option<Machine>,
     switch: Option<Switch>,
+    rack_topology: RackTopology,
 }
 
 impl KnownTarget {
@@ -61,6 +76,7 @@ impl KnownTarget {
         image: Image,
         machine: Option<Machine>,
         switch: Option<Switch>,
+        rack_topology: RackTopology,
     ) -> Result<Self> {
         if matches!(image, Image::Trampoline) {
             if machine.is_some() {
@@ -77,7 +93,7 @@ impl KnownTarget {
             bail!("'switch=asic' is only valid with 'machine=gimlet'");
         }
 
-        Ok(Self { image, machine, switch })
+        Ok(Self { image, machine, switch, rack_topology })
     }
 }
 
@@ -87,6 +103,7 @@ impl Default for KnownTarget {
             image: Image::Standard,
             machine: Some(Machine::NonGimlet),
             switch: Some(Switch::Stub),
+            rack_topology: RackTopology::MultiSled,
         }
     }
 }
@@ -101,6 +118,7 @@ impl From<KnownTarget> for Target {
         if let Some(switch) = kt.switch {
             map.insert("switch".to_string(), switch.to_string());
         }
+        map.insert("rack-topology".to_string(), kt.rack_topology.to_string());
         Target(map)
     }
 }
@@ -121,6 +139,7 @@ impl std::str::FromStr for KnownTarget {
         let mut image = Self::default().image;
         let mut machine = None;
         let mut switch = None;
+        let mut rack_topology = None;
 
         for (k, v) in target.0.into_iter() {
             match k.as_str() {
@@ -132,6 +151,9 @@ impl std::str::FromStr for KnownTarget {
                 }
                 "switch" => {
                     switch = Some(v.parse()?);
+                }
+                "rack-topology" => {
+                    rack_topology = Some(v.parse()?);
                 }
                 _ => {
                     bail!(
@@ -146,6 +168,11 @@ impl std::str::FromStr for KnownTarget {
                 }
             }
         }
-        KnownTarget::new(image, machine, switch)
+        KnownTarget::new(
+            image,
+            machine,
+            switch,
+            rack_topology.unwrap_or(RackTopology::MultiSled),
+        )
     }
 }
