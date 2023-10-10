@@ -332,16 +332,16 @@ pub(crate) fn timeseries_key(sample: &Sample) -> TimeseriesKey {
 }
 
 pub(crate) fn timeseries_key_for<'a>(
-    target_fields: impl Iterator<Item = &'a Field>,
-    metric_fields: impl Iterator<Item = &'a Field>,
+    target_fields: impl Iterator<Item = &'a Field> + std::fmt::Debug,
+    metric_fields: impl Iterator<Item = &'a Field> + std::fmt::Debug,
 ) -> TimeseriesKey {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
     let mut hasher = DefaultHasher::new();
-    for field in target_fields.chain(metric_fields) {
+    for field in dbg!(target_fields).chain(dbg!(metric_fields)) {
         field.hash(&mut hasher);
     }
-    hasher.finish()
+    dbg!(hasher.finish())
 }
 
 // Timestamp format in the database
