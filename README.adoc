@@ -152,30 +152,17 @@ Many of these components themselves are made up of other packages (e.g., `nexus-
 
 Use Cargo's `-p PACKAGE` to check/build/test only the package you're working on.  Since people are usually only working on one or two components at a time, you can usually iterate faster this way.
 
-=== Why is Cargo rebuilding stuff all the time?
+=== Workspace management
 
-People are often surprised to find Cargo rebuilding stuff that it seems like it's just built, even when the relevant source files haven't changed.
+Omicron uses `cargo-hakari` to ensure that all workspace dependencies enable the same set of features. This dramatically improves compilation time when switching between different subsets of packages (e.g. `-p wicket` or `-p nexus-db-model`), because the sets of enabled features remain consistent.
 
-* Say you're iterating on code, running `cargo build -p nexus-db-model` to build just that package.  Great, it works.  Let's run tests: `cargo nextest run -p nexus-db-model`.  Now it's rebuilding some _dependency_ of `nexus-db-model` again?!
-* Say you've just run `cargo nextest run -p nexus-db-model`.  Now you go run `cargo nextest run -p omicron-nexus`, which uses `nexus-db-model`.  You see Cargo building `nexus-db-model` again?!
+`cargo hakari` status is checked in CI; if the CI check fails, then update the configuration locally with
 
-This usually has to do with the way Cargo selects package https://doc.rust-lang.org/cargo/reference/features.html[features].  These are essentially tags that are used at build time to include specific code or dependencies.  For example, the https://docs.rs/serde/latest/serde/[serde] crate defines a feature called https://docs.rs/crate/serde/latest/features["derive"] that controls whether the `Serialize`/`Deserialize` derive macros will be included.  Let's look at how this affects builds.
-
-TIP: You can use `cargo tree` to inspect a package's dependencies, including features.  This is useful for debugging feature-related build issues.
-
-==== Feature selection differs when building tests
-
-When you run `cargo build -p nexus-db-model`, Cargo looks at all the packages in the depencency tree of `nexus-db-model` and figures out what features it needs for each one.  Let's take the `uuid` package as an example.  Cargo takes https://doc.rust-lang.org/cargo/reference/features.html#feature-unification[union of the features required by any of the packages that depend on `uuid` in the whole dependency tree of `nexus-db-model`].  Let's say that's just the "v4" feature.  Simple enough.
-
-When you then run `cargo nextest run -p nexus-db-model`, it does the same thing.  Only this time, it's looking at the `dev-dependencies` tree.  `nexus-db-model` 's dev-dependencies might include some other package that depends on `uuid` and requires the "v5" feature.  Now, Cargo has to rebuild `uuid` -- and anything else that depends on it.
-
-This is why when using Cargo's check/build/clippy commands, we suggest using `--all-targets`.  When you use `cargo build --all-targets`, it builds the tests as well.  It's usually not much more time and avoids extra rebuilds when switching back and forth between the default targets and the targets with tests included.
-
-==== Feature selection differs when building different packages
-
-People run into a similar problem when switching packages within Omicron.  Once you've got `cargo nextest run -p nexus-db-model` working, you may run `cargo nextest run -p omicron-nexus`, which uses `nexus-db-model`.  And you may be surprised to see Cargo rebuilding some common dependency like `uuid`.  It's the same as above: we're building a different package now.  It has a different (larger) dependency tree.  That may result in some crate deep in the dependency tree needing some new feature, causing it and all of its dependents to be rebuilt.
-
-NOTE: https://github.com/rust-lang/cargo/issues/4463[There is interest in changing the way feature selection works in workspaces like Omicron for exactly this reason.]  It's been suggested to have an option for Cargo to always look at the features required for all packages in the workspace, rather than just the one you've selected.  This could eliminate this particular problem.  In the meantime, we mitigate this with heavy use of https://doc.rust-lang.org/cargo/reference/workspaces.html#the-dependencies-table[workspace dependencies], which helps make sure that different packages _within_ Omicron depend on the same set of features for a given dependency.
+```
+cargo install cargo-hakari --locked # only needed on the first run
+cargo hakari generate
+cargo hakari manage-deps
+```
 
 === Why am I getting compile errors after I thought I'd already built everything?
 

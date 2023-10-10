@@ -77,11 +77,10 @@ where
 /// Returns one of the sentinels if it matches the expected value from
 /// a [`TrueOrCastError`].
 pub fn matches_sentinel(
-    e: &async_bb8_diesel::PoolError,
+    e: &async_bb8_diesel::ConnectionError,
     sentinels: &[&'static str],
 ) -> Option<&'static str> {
     use async_bb8_diesel::ConnectionError;
-    use async_bb8_diesel::PoolError;
     use diesel::result::DatabaseErrorKind;
     use diesel::result::Error;
 
@@ -94,8 +93,9 @@ pub fn matches_sentinel(
     match e {
         // Catch the specific errors designed to communicate the failures we
         // want to distinguish.
-        PoolError::Connection(ConnectionError::Query(
-            Error::DatabaseError(DatabaseErrorKind::Unknown, ref info),
+        ConnectionError::Query(Error::DatabaseError(
+            DatabaseErrorKind::Unknown,
+            ref info,
         )) => {
             for sentinel in sentinels {
                 if info.message() == bool_parse_error(sentinel) {

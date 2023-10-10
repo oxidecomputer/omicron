@@ -175,7 +175,7 @@ pub(crate) fn api_to_dpd_port_settings(
                         .to_string(),
                     RouteSettingsV4 {
                         link_id: link_id.0,
-                        nexthop: Some(gw),
+                        nexthop: gw,
                         vid: r.vid.map(Into::into),
                     },
                 );
@@ -194,7 +194,7 @@ pub(crate) fn api_to_dpd_port_settings(
                         .to_string(),
                     RouteSettingsV6 {
                         link_id: link_id.0,
-                        nexthop: Some(gw),
+                        nexthop: gw,
                         vid: r.vid.map(Into::into),
                     },
                 );

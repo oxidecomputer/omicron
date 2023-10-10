@@ -869,7 +869,7 @@ async fn post_start_update(
         ));
     }
 
-    // Can we update the target SPs? We refuse to update if:
+    // Can we update the target SPs? We refuse to update if, for any target SP:
     //
     // 1. We haven't pulled its state in our inventory (most likely cause: the
     //    cubby is empty; less likely cause: the SP is misbehaving, which will

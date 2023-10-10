@@ -1467,7 +1467,9 @@ pub mod test {
         dsl::instance
             .filter(dsl::time_deleted.is_null())
             .select(Instance::as_select())
-            .first_async::<Instance>(datastore.pool_for_tests().await.unwrap())
+            .first_async::<Instance>(
+                &*datastore.pool_connection_for_tests().await.unwrap(),
+            )
             .await
             .optional()
             .unwrap()
@@ -1484,7 +1486,7 @@ pub mod test {
             .filter(dsl::kind.eq(NetworkInterfaceKind::Instance))
             .select(NetworkInterface::as_select())
             .first_async::<NetworkInterface>(
-                datastore.pool_for_tests().await.unwrap(),
+                &*datastore.pool_connection_for_tests().await.unwrap(),
             )
             .await
             .optional()
@@ -1501,7 +1503,7 @@ pub mod test {
             .filter(dsl::is_service.eq(false))
             .select(ExternalIp::as_select())
             .first_async::<ExternalIp>(
-                datastore.pool_for_tests().await.unwrap(),
+                &*datastore.pool_connection_for_tests().await.unwrap(),
             )
             .await
             .optional()
@@ -1516,7 +1518,7 @@ pub mod test {
         use nexus_db_queries::db::schema::sled_resource::dsl;
 
         datastore
-            .pool_for_tests()
+            .pool_connection_for_tests()
             .await
             .unwrap()
             .transaction_async(|conn| async move {
@@ -1550,7 +1552,7 @@ pub mod test {
         use nexus_db_queries::db::model::VirtualProvisioningResource;
         use nexus_db_queries::db::schema::virtual_provisioning_resource::dsl;
 
-        datastore.pool_for_tests()
+        datastore.pool_connection_for_tests()
             .await
             .unwrap()
             .transaction_async(|conn| async move {
@@ -1578,7 +1580,7 @@ pub mod test {
         use nexus_db_queries::db::schema::virtual_provisioning_collection::dsl;
 
         datastore
-            .pool_for_tests()
+            .pool_connection_for_tests()
             .await
             .unwrap()
             .transaction_async(|conn| async move {
@@ -1615,7 +1617,9 @@ pub mod test {
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::name.eq(DISK_NAME))
             .select(Disk::as_select())
-            .first_async::<Disk>(datastore.pool_for_tests().await.unwrap())
+            .first_async::<Disk>(
+                &*datastore.pool_connection_for_tests().await.unwrap(),
+            )
             .await
             .unwrap()
             .runtime_state
