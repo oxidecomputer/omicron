@@ -207,7 +207,7 @@ impl Zfs {
     /// will be resolved to the _mounted_ ZFS dataset containing that path.
     pub fn get_dataset_name(object: &str) -> Result<String, ListDatasetsError> {
         let mut command = std::process::Command::new(ZFS);
-        let cmd = command.args(&["get", "-Hpo", "name", "name", object]);
+        let cmd = command.args(&["get", "-Hpo", "value", "name", object]);
         execute(cmd)
             .map(|output| {
                 String::from_utf8_lossy(&output.stdout).trim().to_string()

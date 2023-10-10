@@ -793,12 +793,12 @@ fn create_zfs_snapshots(
                     };
 
                     // These datasets are named like `<pool_name>/...`. Since
-                    // we're snapshoting zero or more of them, we disambiguate
+                    // we're snapshotting zero or more of them, we disambiguate
                     // with the pool name.
                     let pool_name = dataset
                         .components()
                         .next()
-                        .expect("Zone archive datasets must have be non-empty");
+                        .expect("Zone archive datasets must be non-empty");
                     let snap_name =
                         format!("{}{}", ARCHIVE_SNAPSHOT_PREFIX, pool_name);
                     match create_snapshot(log, dataset.as_str(), &snap_name) {
