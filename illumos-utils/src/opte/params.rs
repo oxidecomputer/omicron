@@ -50,3 +50,26 @@ pub struct DeleteVirtualNetworkInterfaceHost {
     /// be deleted.
     pub vni: external::Vni,
 }
+
+/// DHCP configuration for a port
+///
+/// Not present here: Hostname (DHCPv4 option 12; used in DHCPv6 option 39); we
+/// use `InstanceRuntimeState::hostname` for this value.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct DhcpConfig {
+    /// DNS servers to send to the instance
+    ///
+    /// (DHCPv4 option 6; DHCPv6 option 23)
+    pub dns_servers: Vec<IpAddr>,
+
+    /// DNS zone this instance's hostname belongs to (e.g. the `project.example`
+    /// part of `instance1.project.example`)
+    ///
+    /// (DHCPv4 option 15; used in DHCPv6 option 39)
+    pub host_domain: Option<String>,
+
+    /// DNS search domains
+    ///
+    /// (DHCPv4 option 119; DHCPv6 option 24)
+    pub search_domains: Vec<String>,
+}

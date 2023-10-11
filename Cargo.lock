@@ -5302,7 +5302,6 @@ dependencies = [
  "openapi-lint",
  "openapiv3",
  "opte-ioctl",
- "oxide-vpc",
  "oximeter 0.1.0",
  "oximeter-producer 0.1.0",
  "percent-encoding",

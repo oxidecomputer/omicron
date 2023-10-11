@@ -19,6 +19,7 @@ use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::api::internal::shared::SourceNatConfig;
 use oxide_vpc::api::AddRouterEntryReq;
+use oxide_vpc::api::DhcpCfg;
 use oxide_vpc::api::IpCfg;
 use oxide_vpc::api::IpCidr;
 use oxide_vpc::api::Ipv4Cfg;
@@ -100,6 +101,7 @@ impl PortManager {
         source_nat: Option<SourceNatConfig>,
         external_ips: &[IpAddr],
         firewall_rules: &[VpcFirewallRule],
+        dhcp_config: DhcpCfg,
     ) -> Result<(Port, PortTicket), Error> {
         let mac = *nic.mac;
         let vni = Vni::new(nic.vni).unwrap();
@@ -205,8 +207,6 @@ impl PortManager {
             vni,
             phys_ip: self.inner.underlay_ip.into(),
             boundary_services,
-            // TODO-completeness (#2153): Plumb domain search list
-            domain_list: vec![],
         };
 
         // Create the xde device.
@@ -234,6 +234,19 @@ impl PortManager {
             hdl.create_xde(&port_name, vpc_cfg, /* passthru = */ false)?;
             hdl
         };
+
+        // Configure the DHCP parameters for this interface.
+        debug!(
+            self.inner.log,
+            "Set DHCP parameters";
+            "port_name" => &port_name,
+            "dhcp_config" => ?&dhcp_config,
+        );
+        #[cfg(target_os = "illumos")]
+        hdl.set_dhcp_params(&oxide_vpc::api::SetDhcpParamsReq {
+            port_name: port_name.clone(),
+            data: dhcp_config,
+        })?;
 
         // Initialize firewall rules for the new port.
         let rules = opte_firewall_rules(firewall_rules, &vni, &mac);
