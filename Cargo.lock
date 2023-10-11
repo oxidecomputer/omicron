@@ -5423,7 +5423,7 @@ dependencies = [
  "indexmap 2.0.0",
  "inout",
  "ipnetwork",
- "itertools 0.10.5",
+ "itertools 0.11.0",
  "lalrpop-util",
  "lazy_static",
  "libc",
