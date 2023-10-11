@@ -6,17 +6,16 @@
 //! and dispatches them to other parst of the bootstrap agent and sled agent
 //! code.
 
+use crate::dump_setup::DumpSetup;
 use crate::nexus::NexusClientWithResolver;
 use derive_more::From;
 use futures::stream::FuturesOrdered;
 use futures::FutureExt;
 use nexus_client::types::PhysicalDiskDeleteRequest;
-use nexus_client::types::PhysicalDiskKind;
 use nexus_client::types::PhysicalDiskPutRequest;
 use nexus_client::types::ZpoolPutRequest;
 use omicron_common::api::external::ByteCount;
 use omicron_common::backoff;
-use sled_storage::disk::Disk;
 use sled_storage::manager::StorageHandle;
 use sled_storage::pool::Pool;
 use sled_storage::resources::StorageResources;
@@ -74,6 +73,9 @@ pub struct StorageMonitor {
 
     // A queue for sending nexus notifications in order
     nexus_notifications: FuturesOrdered<NotifyFut>,
+
+    // Invokes dumpadm(8) and savecore(8) when new disks are encountered
+    dump_setup: DumpSetup,
 }
 
 impl StorageMonitor {
@@ -83,6 +85,7 @@ impl StorageMonitor {
     ) -> (StorageMonitor, StorageMonitorHandle) {
         let (handle_tx, handle_rx) = mpsc::channel(QUEUE_SIZE);
         let storage_resources = StorageResources::default();
+        let dump_setup = DumpSetup::new(&log);
         let log = log.new(o!("component" => "StorageMonitor"));
         (
             StorageMonitor {
@@ -92,6 +95,7 @@ impl StorageMonitor {
                 storage_resources,
                 underlay: None,
                 nexus_notifications: FuturesOrdered::new(),
+                dump_setup,
             },
             StorageMonitorHandle { tx: handle_tx },
         )
@@ -129,6 +133,9 @@ impl StorageMonitor {
                 let sled_id = underlay.sled_id;
                 self.underlay = Some(underlay);
                 self.notify_nexus_about_existing_resources(sled_id).await;
+                self.dump_setup
+                    .update_dumpdev_setup(&self.storage_resources.disks)
+                    .await;
             }
         }
     }
@@ -162,6 +169,12 @@ impl StorageMonitor {
                 &self.storage_resources,
                 &updated_resources,
             );
+            if nexus_updates.has_disk_updates() {
+                self.dump_setup
+                    .update_dumpdev_setup(&self.storage_resources.disks)
+                    .await;
+            }
+
             for put in nexus_updates.disk_puts {
                 self.physical_disk_notify(put.into()).await;
             }
@@ -171,8 +184,6 @@ impl StorageMonitor {
             for (pool, put) in nexus_updates.zpool_puts {
                 self.add_zpool_notify(pool, put).await;
             }
-
-            // TODO: Update Dump Setup if any diffs
         }
         // Save the updated `StorageResources`
         self.storage_resources = updated_resources;
@@ -289,6 +300,12 @@ struct NexusUpdates {
     disk_puts: Vec<PhysicalDiskPutRequest>,
     disk_deletes: Vec<PhysicalDiskDeleteRequest>,
     zpool_puts: Vec<(Pool, ZpoolPutRequest)>,
+}
+
+impl NexusUpdates {
+    fn has_disk_updates(&self) -> bool {
+        !self.disk_puts.is_empty() || !self.disk_deletes.is_empty()
+    }
 }
 
 fn compute_resource_diffs(

@@ -7,13 +7,13 @@ use omicron_common::disk::DiskIdentity;
 use sled_hardware::DiskVariant;
 use sled_storage::dataset::{CRASH_DATASET, DUMP_DATASET};
 use sled_storage::disk::Disk;
+use sled_storage::pool::Pool;
 use slog::Logger;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Weak};
 use std::time::{Duration, SystemTime, SystemTimeError, UNIX_EPOCH};
-use tokio::sync::MutexGuard;
 
 pub struct DumpSetup {
     worker: Arc<std::sync::Mutex<DumpSetupWorker>>,
@@ -100,13 +100,13 @@ const ARCHIVAL_INTERVAL: Duration = Duration::from_secs(300);
 impl DumpSetup {
     pub(crate) async fn update_dumpdev_setup(
         &self,
-        disks: &mut MutexGuard<'_, HashMap<DiskIdentity, Disk>>,
+        disks: &Arc<BTreeMap<DiskIdentity, (Disk, Pool)>>,
     ) {
         let log = &self.log;
         let mut m2_dump_slices = Vec::new();
         let mut u2_debug_datasets = Vec::new();
         let mut m2_core_datasets = Vec::new();
-        for (_id, disk) in disks.iter() {
+        for (_id, (disk, _)) in disks.iter() {
             if disk.is_synthetic() {
                 // We only setup dump devices on real disks
                 continue;

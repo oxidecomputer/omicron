@@ -5,7 +5,7 @@
 //! Sled-local service management.
 //!
 //! For controlling zone-based storage services, refer to
-//! [sled_hardware:manager::StorageManager].
+//! [sled_storage:manager::StorageManager].
 //!
 //! For controlling virtual machine instances, refer to
 //! [crate::instance_manager::InstanceManager].
@@ -2935,8 +2935,8 @@ impl ServiceManager {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::bootstrap::secret_retriever::HardcodedSecretRetriever;
     use crate::params::{ServiceZoneService, ZoneType};
-    use async_trait::async_trait;
     use illumos_utils::{
         dladm::{
             Etherstub, MockDladm, BOOTSTRAP_ETHERSTUB_NAME,
@@ -2945,10 +2945,9 @@ mod test {
         svc,
         zone::MockZones,
     };
-    use key_manager::{
-        SecretRetriever, SecretRetrieverError, SecretState, VersionedIkm,
-    };
+    use key_manager::KeyManager;
     use omicron_common::address::OXIMETER_PORT;
+    use sled_storage::manager::{StorageHandle, StorageManager};
     use std::net::{Ipv6Addr, SocketAddrV6};
     use std::os::unix::process::ExitStatusExt;
     use uuid::Uuid;
@@ -3141,29 +3140,28 @@ mod test {
         }
     }
 
-    pub struct TestSecretRetriever {}
+    // Spawn storage related tasks and return a handle to pass to both the `ServiceManager`
+    // and `ZoneBundler`. However, it is expected that this handle is not actually used
+    // as there are no provisioned zones or datasets. This is consistent with the use of
+    // `test_config.override_paths` below.
+    async fn setup_storage(log: &Logger) -> StorageHandle {
+        let (mut key_manager, key_requester) =
+            KeyManager::new(log, HardcodedSecretRetriever {});
+        let (mut manager, handle) = StorageManager::new(log, key_requester);
 
-    #[async_trait]
-    impl SecretRetriever for TestSecretRetriever {
-        async fn get_latest(
-            &self,
-        ) -> Result<VersionedIkm, SecretRetrieverError> {
-            let epoch = 0;
-            let salt = [0u8; 32];
-            let secret = [0x1d; 32];
+        // Spawn the key_manager so that it will respond to requests for encryption keys
+        tokio::spawn(async move { key_manager.run().await });
 
-            Ok(VersionedIkm::new(epoch, salt, &secret))
-        }
+        // Spawn the storage manager as done by sled-agent
+        tokio::spawn(async move {
+            manager.run().await;
+        });
 
-        async fn get(
-            &self,
-            epoch: u64,
-        ) -> Result<SecretState, SecretRetrieverError> {
-            if epoch != 0 {
-                return Err(SecretRetrieverError::NoSuchEpoch(epoch));
-            }
-            Ok(SecretState::Current(self.get_latest().await?))
-        }
+        // Inform the storage manager that the secret retriever is ready We
+        // are using the HardcodedSecretRetriever, so no need to wait for RSS
+        // or anything to setup the LRTQ
+        handle.key_manager_ready().await;
+        handle
     }
 
     #[tokio::test]
@@ -3174,10 +3172,10 @@ mod test {
         let log = logctx.log.clone();
         let test_config = TestConfig::new().await;
 
-        let resources = StorageResources::new_for_test();
+        let storage_handle = setup_storage(&log).await;
         let zone_bundler = ZoneBundler::new(
             log.clone(),
-            resources.clone(),
+            storage_handle.clone(),
             Default::default(),
         );
         let mgr = ServiceManager::new(
@@ -3188,7 +3186,7 @@ mod test {
             Some(true),
             SidecarRevision::Physical("rev-test".to_string()),
             vec![],
-            resources,
+            storage_handle,
             zone_bundler,
         );
         test_config.override_paths(&mgr);
@@ -3222,10 +3220,10 @@ mod test {
         let log = logctx.log.clone();
         let test_config = TestConfig::new().await;
 
-        let resources = StorageResources::new_for_test();
+        let storage_handle = setup_storage(&log).await;
         let zone_bundler = ZoneBundler::new(
             log.clone(),
-            resources.clone(),
+            storage_handle.clone(),
             Default::default(),
         );
         let mgr = ServiceManager::new(
@@ -3236,7 +3234,7 @@ mod test {
             Some(true),
             SidecarRevision::Physical("rev-test".to_string()),
             vec![],
-            resources,
+            storage_handle,
             zone_bundler,
         );
         test_config.override_paths(&mgr);
@@ -3275,10 +3273,10 @@ mod test {
 
         // First, spin up a ServiceManager, create a new service, and tear it
         // down.
-        let resources = StorageResources::new_for_test();
+        let storage_handle = setup_storage(&log).await;
         let zone_bundler = ZoneBundler::new(
             log.clone(),
-            resources.clone(),
+            storage_handle.clone(),
             Default::default(),
         );
         let mgr = ServiceManager::new(
@@ -3289,7 +3287,7 @@ mod test {
             Some(true),
             SidecarRevision::Physical("rev-test".to_string()),
             vec![],
-            resources.clone(),
+            storage_handle.clone(),
             zone_bundler.clone(),
         );
         test_config.override_paths(&mgr);
@@ -3322,7 +3320,7 @@ mod test {
             Some(true),
             SidecarRevision::Physical("rev-test".to_string()),
             vec![],
-            resources.clone(),
+            storage_handle.clone(),
             zone_bundler.clone(),
         );
         test_config.override_paths(&mgr);
@@ -3358,10 +3356,10 @@ mod test {
 
         // First, spin up a ServiceManager, create a new service, and tear it
         // down.
-        let resources = StorageResources::new_for_test();
+        let storage_handle = setup_storage(&log).await;
         let zone_bundler = ZoneBundler::new(
             log.clone(),
-            resources.clone(),
+            storage_handle.clone(),
             Default::default(),
         );
         let mgr = ServiceManager::new(
@@ -3372,7 +3370,7 @@ mod test {
             Some(true),
             SidecarRevision::Physical("rev-test".to_string()),
             vec![],
-            resources.clone(),
+            storage_handle.clone(),
             zone_bundler.clone(),
         );
         test_config.override_paths(&mgr);
@@ -3410,7 +3408,7 @@ mod test {
             Some(true),
             SidecarRevision::Physical("rev-test".to_string()),
             vec![],
-            resources.clone(),
+            storage_handle,
             zone_bundler.clone(),
         );
         test_config.override_paths(&mgr);

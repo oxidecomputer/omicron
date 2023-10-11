@@ -17,6 +17,7 @@ use crate::bootstrap::bootstore::{
 };
 use crate::bootstrap::secret_retriever::LrtqOrHardcodedSecretRetriever;
 use crate::hardware_monitor::{HardwareMonitor, HardwareMonitorHandle};
+use crate::storage_monitor::{StorageMonitor, StorageMonitorHandle};
 use crate::zone_bundle::{CleanupContext, ZoneBundler};
 use bootstore::schemes::v0 as bootstore;
 use key_manager::{KeyManager, StorageKeyRequester};
@@ -38,6 +39,11 @@ pub struct LongRunningTaskHandles {
     /// A mechanism for talking to the [`StorageManager`] which is responsible
     /// for establishing zpools on disks and managing their datasets.
     pub storage_manager: StorageHandle,
+
+    /// A task which monitors for updates from the `StorageManager` and takes
+    /// actions based on those updates, such as informing Nexus and setting
+    /// up dump locations.
+    pub storage_monitor: StorageMonitorHandle,
 
     /// A mechanism for interacting with the hardware device tree
     pub hardware_manager: HardwareManager,
@@ -63,6 +69,8 @@ pub async fn spawn_all_longrunning_tasks(
     let mut storage_manager =
         spawn_storage_manager(log, storage_key_requester.clone());
 
+    let storage_monitor = spawn_storage_monitor(log, storage_manager.clone());
+
     // TODO: Does this need to run inside tokio::task::spawn_blocking?
     let hardware_manager = spawn_hardware_manager(log, sled_mode);
 
@@ -87,6 +95,7 @@ pub async fn spawn_all_longrunning_tasks(
     LongRunningTaskHandles {
         storage_key_requester,
         storage_manager,
+        storage_monitor,
         hardware_manager,
         hardware_monitor,
         bootstore,
@@ -111,6 +120,19 @@ fn spawn_storage_manager(
     let (mut manager, handle) = StorageManager::new(log, key_requester);
     tokio::spawn(async move {
         manager.run().await;
+    });
+    handle
+}
+
+fn spawn_storage_monitor(
+    log: &Logger,
+    storage_handle: StorageHandle,
+) -> StorageMonitorHandle {
+    info!(log, "Starting StorageMonitor");
+    let (mut storage_monitor, handle) =
+        StorageMonitor::new(log, storage_handle);
+    tokio::spawn(async move {
+        storage_monitor.run().await;
     });
     handle
 }

@@ -46,7 +46,9 @@ impl StorageResources {
     /// Insert a disk and its zpool
     ///
     /// Return true, if data was changed, false otherwise
-    pub(crate) fn insert_disk(&mut self, disk: Disk) -> Result<bool, Error> {
+    ///
+    /// This really should not be used outside this crate, except for testing
+    pub fn insert_disk(&mut self, disk: Disk) -> Result<bool, Error> {
         let disk_id = disk.identity().clone();
         let zpool_name = disk.zpool_name().clone();
         let zpool = Pool::new(zpool_name, disk_id.clone())?;
