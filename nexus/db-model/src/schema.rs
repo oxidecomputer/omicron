@@ -867,6 +867,7 @@ table! {
         snapshot_id -> Uuid,
         snapshot_addr -> Text,
         volume_references -> Int8,
+        deleting -> Bool,
     }
 }
 
