@@ -741,6 +741,7 @@ pub struct IpPoolUpdate {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 pub enum IpPoolResourceType {
     Fleet,
     Silo,

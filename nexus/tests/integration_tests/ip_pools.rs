@@ -28,7 +28,7 @@ use nexus_types::external_api::shared::Ipv6Range;
 use nexus_types::external_api::views::IpPool;
 use nexus_types::external_api::views::IpPoolRange;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
-use omicron_common::api::external::NameOrId;
+// use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::{IdentityMetadataCreateParams, Name};
 use omicron_nexus::TestInterfaces;
 use sled_agent_client::TestInterfaces as SledTestInterfaces;
@@ -61,8 +61,8 @@ async fn test_ip_pool_basic_crud(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(ip_pools.len(), 1, "Expected to see default IP pool");
 
     assert_eq!(ip_pools[0].identity.name, "default",);
-    assert_eq!(ip_pools[0].silo_id, None);
-    assert!(ip_pools[0].is_default);
+    // assert_eq!(ip_pools[0].silo_id, None);
+    // assert!(ip_pools[0].is_default);
 
     // Verify 404 if the pool doesn't exist yet, both for creating or deleting
     let error: HttpErrorResponseBody = NexusRequest::expect_failure(
@@ -105,8 +105,8 @@ async fn test_ip_pool_basic_crud(cptestctx: &ControlPlaneTestContext) {
             name: String::from(pool_name).parse().unwrap(),
             description: String::from(description),
         },
-        silo: None,
-        is_default: false,
+        // silo: None,
+        // is_default: false,
     };
     let created_pool: IpPool =
         NexusRequest::objects_post(client, ip_pools_url, &params)
@@ -118,7 +118,7 @@ async fn test_ip_pool_basic_crud(cptestctx: &ControlPlaneTestContext) {
             .unwrap();
     assert_eq!(created_pool.identity.name, pool_name);
     assert_eq!(created_pool.identity.description, description);
-    assert_eq!(created_pool.silo_id, None);
+    // assert_eq!(created_pool.silo_id, None);
 
     let list = NexusRequest::iter_collection_authn::<IpPool>(
         client,
@@ -288,11 +288,10 @@ async fn test_ip_pool_with_silo(cptestctx: &ControlPlaneTestContext) {
         // silo: Some(NameOrId::Name(cptestctx.silo_name.clone())),
         // is_default: false,
     };
-    let created_pool = create_pool(client, &params).await;
-    assert_eq!(created_pool.identity.name, "p0");
+    let _created_pool = create_pool(client, &params).await;
 
-    let silo_id =
-        created_pool.silo_id.expect("Expected pool to have a silo_id");
+    // let silo_id =
+    //     created_pool.silo_id.expect("Expected pool to have a silo_id");
 
     // now we'll create another IP pool using that silo ID
     let params = IpPoolCreate {
@@ -300,12 +299,11 @@ async fn test_ip_pool_with_silo(cptestctx: &ControlPlaneTestContext) {
             name: String::from("p1").parse().unwrap(),
             description: String::from(""),
         },
-        silo: Some(NameOrId::Id(silo_id)),
-        is_default: false,
+        // silo: Some(NameOrId::Id(silo_id)),
+        // is_default: false,
     };
-    let created_pool = create_pool(client, &params).await;
-    assert_eq!(created_pool.identity.name, "p1");
-    assert_eq!(created_pool.silo_id.unwrap(), silo_id);
+    let _created_pool = create_pool(client, &params).await;
+    // assert_eq!(created_pool.silo_id.unwrap(), silo_id);
 
     // expect 404 if the specified silo doesn't exist
     let bad_silo_params = IpPoolCreate {
@@ -313,10 +311,10 @@ async fn test_ip_pool_with_silo(cptestctx: &ControlPlaneTestContext) {
             name: String::from("p2").parse().unwrap(),
             description: String::from(""),
         },
-        silo: Some(NameOrId::Name(
-            String::from("not-a-thing").parse().unwrap(),
-        )),
-        is_default: false,
+        // silo: Some(NameOrId::Name(
+        //     String::from("not-a-thing").parse().unwrap(),
+        // )),
+        // is_default: false,
     };
     let error: HttpErrorResponseBody = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, "/v1/system/ip-pools")
@@ -374,8 +372,8 @@ async fn test_ip_pool_range_overlapping_ranges_fails(
             name: String::from(pool_name).parse().unwrap(),
             description: String::from(description),
         },
-        silo: None,
-        is_default: false,
+        // silo: None,
+        // is_default: false,
     };
     let created_pool: IpPool =
         NexusRequest::objects_post(client, ip_pools_url, &params)
@@ -557,8 +555,6 @@ async fn test_ip_pool_range_pagination(cptestctx: &ControlPlaneTestContext) {
             name: String::from(pool_name).parse().unwrap(),
             description: String::from(description),
         },
-        silo: None,
-        is_default: false,
     };
     let created_pool: IpPool =
         NexusRequest::objects_post(client, ip_pools_url, &params)
@@ -695,8 +691,8 @@ async fn test_ip_pool_list_usable_by_project(
             name: String::from(mypool_name).parse().unwrap(),
             description: String::from("right on cue"),
         },
-        silo: None,
-        is_default: false,
+        // silo: None,
+        // is_default: false,
     };
     NexusRequest::objects_post(client, ip_pools_url, &params)
         .authn_as(AuthnMode::PrivilegedUser)

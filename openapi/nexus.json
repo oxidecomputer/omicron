@@ -4577,6 +4577,47 @@
         }
       }
     },
+    "/v1/system/ip-pools/{pool}/associate": {
+      "post": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Associate an IP Pool with a silo or project",
+        "operationId": "ip_pool_associate",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool",
+            "description": "Name or ID of the IP pool",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IpPoolResource"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/ip-pools/{pool}/ranges": {
       "get": {
         "tags": [
@@ -11512,9 +11553,6 @@
             "type": "string",
             "format": "uuid"
           },
-          "is_default": {
-            "type": "boolean"
-          },
           "name": {
             "description": "unique, mutable, user-controlled identifier for each resource",
             "allOf": [
@@ -11522,11 +11560,6 @@
                 "$ref": "#/components/schemas/Name"
               }
             ]
-          },
-          "silo_id": {
-            "nullable": true,
-            "type": "string",
-            "format": "uuid"
           },
           "time_created": {
             "description": "timestamp when this resource was created",
@@ -11542,7 +11575,6 @@
         "required": [
           "description",
           "id",
-          "is_default",
           "name",
           "time_created",
           "time_modified"
@@ -11555,22 +11587,8 @@
           "description": {
             "type": "string"
           },
-          "is_default": {
-            "description": "Whether the IP pool is considered a default pool for its scope (fleet or silo). If a pool is marked default and is associated with a silo, instances created in that silo will draw IPs from that pool unless another pool is specified at instance create time.",
-            "default": false,
-            "type": "boolean"
-          },
           "name": {
             "$ref": "#/components/schemas/Name"
-          },
-          "silo": {
-            "nullable": true,
-            "description": "If an IP pool is associated with a silo, instance IP allocations in that silo can draw from that pool.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/NameOrId"
-              }
-            ]
           }
         },
         "required": [
@@ -11623,6 +11641,34 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "IpPoolResource": {
+        "description": "Parameters for associating an IP pool with a resource (fleet, silo)",
+        "type": "object",
+        "properties": {
+          "is_default": {
+            "type": "boolean"
+          },
+          "resource_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "resource_type": {
+            "$ref": "#/components/schemas/IpPoolResourceType"
+          }
+        },
+        "required": [
+          "is_default",
+          "resource_id",
+          "resource_type"
+        ]
+      },
+      "IpPoolResourceType": {
+        "type": "string",
+        "enum": [
+          "fleet",
+          "silo"
         ]
       },
       "IpPoolResultsPage": {

@@ -12,6 +12,7 @@ use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use dropshot::Method;
 use http::StatusCode;
+use nexus_db_queries::db::fixed_data::FLEET_ID;
 use nexus_test_interface::NexusServer;
 use nexus_types::external_api::params;
 use nexus_types::external_api::params::PhysicalDiskKind;
@@ -143,6 +144,19 @@ pub async fn create_ip_pool(
         },
     )
     .await;
+
+    // match previous behavior, makes pool available for use anywhere in fleet
+    let _: () = object_create(
+        client,
+        &format!("/v1/system/ip-pools/{pool_name}/associate"),
+        &params::IpPoolResource {
+            resource_id: *FLEET_ID,
+            resource_type: params::IpPoolResourceType::Fleet,
+            is_default: false,
+        },
+    )
+    .await;
+
     // TODO: associate with fleet as a non-default like before?
     let range = populate_ip_pool(client, pool_name, ip_range).await;
     (pool, range)

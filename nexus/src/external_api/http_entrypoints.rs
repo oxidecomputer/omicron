@@ -116,6 +116,7 @@ pub(crate) fn external_api() -> NexusApiDescription {
         // Operator-Accessible IP Pools API
         api.register(ip_pool_list)?;
         api.register(ip_pool_create)?;
+        api.register(ip_pool_associate)?;
         api.register(ip_pool_view)?;
         api.register(ip_pool_delete)?;
         api.register(ip_pool_update)?;
@@ -1296,6 +1297,36 @@ async fn ip_pool_update(
         let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
         let pool = nexus.ip_pool_update(&opctx, &pool_lookup, &updates).await?;
         Ok(HttpResponseOk(pool.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+// TODO: associate just seems like the wrong word and I'd like to change it
+// across the board. What I really mean is "make available to" or "make availale
+// for use in"
+/// Associate an IP Pool with a silo or project
+#[endpoint {
+    method = POST,
+    path = "/v1/system/ip-pools/{pool}/associate",
+    tags = ["system/networking"],
+}]
+async fn ip_pool_associate(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::IpPoolPath>,
+    resource_assoc: TypedBody<params::IpPoolResource>,
+    // TODO: what does this return? Returning the association record seems silly
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let resource_assoc = resource_assoc.into_inner();
+        let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
+        nexus
+            .ip_pool_associate_resource(&opctx, &pool_lookup, &resource_assoc)
+            .await?;
+        Ok(HttpResponseUpdatedNoContent())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

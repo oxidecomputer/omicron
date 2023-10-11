@@ -3416,8 +3416,8 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
                 name: pool_name.parse().unwrap(),
                 description: String::from("an ip pool"),
             },
-            silo: Some(NameOrId::Id(DEFAULT_SILO.id())),
-            is_default: true,
+            // silo: Some(NameOrId::Id(DEFAULT_SILO.id())),
+            // is_default: true,
         },
     )
     .await;
