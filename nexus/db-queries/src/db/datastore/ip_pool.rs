@@ -65,7 +65,8 @@ impl DataStore {
             ),
         }
         // != excludes nulls so we explicitly include them
-        .filter(dsl::silo_id.ne(*INTERNAL_SILO_ID).or(dsl::silo_id.is_null()))
+        // TODO: join to join table to exclude internal
+        // .filter(dsl::silo_id.ne(*INTERNAL_SILO_ID).or(dsl::silo_id.is_null()))
         .filter(dsl::time_deleted.is_null())
         .select(db::model::IpPool::as_select())
         .get_results_async(&*self.pool_connection_authorized(opctx).await?)
@@ -233,9 +234,10 @@ impl DataStore {
         let now = Utc::now();
         let updated_rows = diesel::update(dsl::ip_pool)
             // != excludes nulls so we explicitly include them
-            .filter(
-                dsl::silo_id.ne(*INTERNAL_SILO_ID).or(dsl::silo_id.is_null()),
-            )
+            // TODO:
+            // .filter(
+            //     dsl::silo_id.ne(*INTERNAL_SILO_ID).or(dsl::silo_id.is_null()),
+            // )
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(authz_pool.id()))
             .filter(dsl::rcgen.eq(db_pool.rcgen))
@@ -268,9 +270,10 @@ impl DataStore {
         opctx.authorize(authz::Action::Modify, authz_pool).await?;
         diesel::update(dsl::ip_pool)
             // != excludes nulls so we explicitly include them
-            .filter(
-                dsl::silo_id.ne(*INTERNAL_SILO_ID).or(dsl::silo_id.is_null()),
-            )
+            // TODO: exclude internal pool the right way
+            // .filter(
+            //     dsl::silo_id.ne(*INTERNAL_SILO_ID).or(dsl::silo_id.is_null()),
+            // )
             .filter(dsl::id.eq(authz_pool.id()))
             .filter(dsl::time_deleted.is_null())
             .set(updates)

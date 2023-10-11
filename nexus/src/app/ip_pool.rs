@@ -28,7 +28,9 @@ use omicron_common::api::external::UpdateResult;
 use ref_cast::RefCast;
 
 fn is_internal(pool: &IpPool) -> bool {
-    pool.silo_id == Some(*INTERNAL_SILO_ID)
+    // pool.silo_id == Some(*INTERNAL_SILO_ID)
+    // TODO: this is no longer a simple function of the pool itself
+    false
 }
 
 impl super::Nexus {

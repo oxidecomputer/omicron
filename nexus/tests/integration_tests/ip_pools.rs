@@ -285,8 +285,8 @@ async fn test_ip_pool_with_silo(cptestctx: &ControlPlaneTestContext) {
             name: String::from("p0").parse().unwrap(),
             description: String::from(""),
         },
-        silo: Some(NameOrId::Name(cptestctx.silo_name.clone())),
-        is_default: false,
+        // silo: Some(NameOrId::Name(cptestctx.silo_name.clone())),
+        // is_default: false,
     };
     let created_pool = create_pool(client, &params).await;
     assert_eq!(created_pool.identity.name, "p0");

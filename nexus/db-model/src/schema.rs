@@ -453,8 +453,6 @@ table! {
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
         rcgen -> Int8,
-        silo_id -> Nullable<Uuid>,
-        is_default -> Bool,
     }
 }
 

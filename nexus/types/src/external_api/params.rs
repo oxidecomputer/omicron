@@ -731,17 +731,6 @@ impl std::fmt::Debug for CertificateCreate {
 pub struct IpPoolCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
-
-    /// If an IP pool is associated with a silo, instance IP allocations in that
-    /// silo can draw from that pool.
-    pub silo: Option<NameOrId>,
-
-    /// Whether the IP pool is considered a default pool for its scope (fleet
-    /// or silo). If a pool is marked default and is associated with a silo,
-    /// instances created in that silo will draw IPs from that pool unless
-    /// another pool is specified at instance create time.
-    #[serde(default)]
-    pub is_default: bool,
 }
 
 /// Parameters for updating an IP Pool

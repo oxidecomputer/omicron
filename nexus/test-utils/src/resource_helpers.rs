@@ -140,11 +140,10 @@ pub async fn create_ip_pool(
                 name: pool_name.parse().unwrap(),
                 description: String::from("an ip pool"),
             },
-            silo: None,
-            is_default: false,
         },
     )
     .await;
+    // TODO: associate with fleet as a non-default like before?
     let range = populate_ip_pool(client, pool_name, ip_range).await;
     (pool, range)
 }
