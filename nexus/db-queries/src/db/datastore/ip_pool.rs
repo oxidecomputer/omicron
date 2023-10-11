@@ -53,6 +53,7 @@ impl DataStore {
         opctx
             .authorize(authz::Action::ListChildren, &authz::IP_POOL_LIST)
             .await?;
+        // TODO: boy I hope we can paginate a join without too much trouble
         match pagparams {
             PaginatedBy::Id(pagparams) => {
                 paginated(dsl::ip_pool, dsl::id, pagparams)
@@ -130,16 +131,27 @@ impl DataStore {
         &self,
         opctx: &OpContext,
     ) -> LookupResult<(authz::IpPool, IpPool)> {
-        use db::schema::ip_pool::dsl;
+        use db::schema::ip_pool;
+        use db::schema::ip_pool_resource;
 
         opctx
             .authorize(authz::Action::ListChildren, &authz::IP_POOL_LIST)
             .await?;
 
-        // Look up this IP pool by rack ID.
-        let (authz_pool, pool) = dsl::ip_pool
-            .filter(dsl::silo_id.eq(*INTERNAL_SILO_ID))
-            .filter(dsl::time_deleted.is_null())
+        // Look up IP pool by its association with the internal silo.
+        // We assume there is only one pool for that silo, or at least,
+        // if there is more than one, it doesn't matter which one we pick.
+        let (authz_pool, pool) = ip_pool::table
+            .inner_join(
+                ip_pool_resource::table
+                    .on(ip_pool::id.eq(ip_pool_resource::ip_pool_id)),
+            )
+            .filter(ip_pool::time_deleted.is_null())
+            .filter(
+                ip_pool_resource::resource_type
+                    .eq(IpPoolResourceType::Silo)
+                    .and(ip_pool_resource::resource_id.eq(*INTERNAL_SILO_ID)),
+            )
             .select(IpPool::as_select())
             .get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await
