@@ -22,6 +22,8 @@ use nexus_db_model::HwRotSlot;
 use nexus_db_model::HwRotSlotEnum;
 use nexus_db_model::InvCollection;
 use nexus_db_model::InvCollectionError;
+use nexus_db_model::SpType;
+use nexus_db_model::SpTypeEnum;
 use nexus_db_model::SwCaboose;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::Error;
@@ -39,9 +41,10 @@ impl DataStore {
         // the database a little tidier because we won't have half-inserted
         // collections in there.
         //
-        // Even better would be a large hunk of SQL sent over at once.  None of
-        // this needs to be interactive.  But we don't yet have support for
-        // this.  See oxidecomputer/omicron#973.
+        // Even better would be a large hunk of SQL sent over at once.  That is
+        // in principle easy to do because none of this needs to be interactive.
+        // But we don't yet have support for this.  See
+        // oxidecomputer/omicron#973.
         let pool = self.pool_connection_authorized(opctx).await?;
         pool.transaction_async(|conn| async move {
             let row_collection = InvCollection::from(collection);
@@ -147,6 +150,9 @@ impl DataStore {
                             sp.source
                                 .clone()
                                 .into_sql::<diesel::sql_types::Text>(),
+                            SpType::from(sp.sp_type).into_sql::<SpTypeEnum>(),
+                            i32::from(sp.sp_slot)
+                                .into_sql::<diesel::sql_types::Int4>(),
                             i64::from(sp.baseboard_revision)
                                 .into_sql::<diesel::sql_types::Int8>(),
                             sp.hubris_archive
@@ -173,6 +179,8 @@ impl DataStore {
                         sp_dsl::hw_baseboard_id,
                         sp_dsl::time_collected,
                         sp_dsl::source,
+                        sp_dsl::sp_type,
+                        sp_dsl::sp_slot,
                         sp_dsl::baseboard_revision,
                         sp_dsl::hubris_archive_id,
                         sp_dsl::power_state,

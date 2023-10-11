@@ -97,6 +97,31 @@ impl From<nexus_types::inventory::CabooseWhich> for CabooseWhich {
     }
 }
 
+impl_enum_type!(
+    #[derive(SqlType, Debug, QueryId)]
+    #[diesel(postgres_type(name = "sp_type"))]
+    pub struct SpTypeEnum;
+
+    #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
+    #[diesel(sql_type = SpTypeEnum)]
+    pub enum SpType;
+
+    // Enum values
+    Sled => b"sled"
+    Switch =>  b"switch"
+    Power => b"power"
+);
+
+impl From<nexus_types::inventory::SpType> for SpType {
+    fn from(value: nexus_types::inventory::SpType) -> Self {
+        match value {
+            nexus_types::inventory::SpType::Sled => SpType::Sled,
+            nexus_types::inventory::SpType::Power => SpType::Power,
+            nexus_types::inventory::SpType::Switch => SpType::Switch,
+        }
+    }
+}
+
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
 #[diesel(table_name = inv_collection)]
 pub struct InvCollection {

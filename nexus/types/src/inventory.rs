@@ -11,6 +11,7 @@
 
 use chrono::DateTime;
 use chrono::Utc;
+pub use gateway_client::types::SpType;
 pub use gateway_client::types::PowerState;
 pub use gateway_client::types::RotSlot;
 use std::collections::BTreeMap;
@@ -79,6 +80,9 @@ pub struct CabooseFound {
 pub struct ServiceProcessor {
     pub time_collected: DateTime<Utc>,
     pub source: String,
+
+    pub sp_type: SpType,
+    pub sp_slot: u16,
 
     pub baseboard_revision: u32,
     pub hubris_archive: String,

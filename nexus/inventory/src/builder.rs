@@ -14,6 +14,7 @@ use chrono::DateTime;
 use chrono::Utc;
 use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpState;
+use gateway_client::types::SpType;
 use nexus_types::inventory::CabooseFound;
 use nexus_types::inventory::CabooseWhich;
 use std::collections::BTreeMap;
@@ -69,8 +70,27 @@ impl CollectionBuilder {
     pub fn found_sp_state(
         &mut self,
         source: &str,
+        sp_type: SpType,
+        slot: u32,
         sp_state: SpState,
-    ) -> Arc<BaseboardId> {
+    ) -> Option<Arc<BaseboardId>> {
+        // Much ado about very little: MGS reports that "slot" is a u32, though
+        // in practice this seems very unlikely to be bigger than a u8.  (How
+        // many slots can there be within one rack?)  The database only supports
+        // signed integers, so if we assumed this really could span the range of
+        // a u32, we'd need to store it in an i64.  Instead, assume here that we
+        // can stick it into a u16 (which still seems generous).  This will
+        // allow us to store it into an Int32 in the database.
+        let Ok(sp_slot) = u16::try_from(slot) else {
+            self.found_error(anyhow!(
+                "MGS {:?}: SP {:?} slot {}: slot number did not fit into u16",
+                source,
+                sp_type,
+                slot
+            ));
+            return None;
+        };
+
         let baseboard = Self::enum_item(
             &mut self.baseboards,
             BaseboardId {
@@ -84,6 +104,10 @@ impl CollectionBuilder {
             ServiceProcessor {
                 time_collected: now,
                 source: source.to_owned(),
+
+                sp_type,
+                sp_slot,
+
                 baseboard_revision: sp_state.revision,
                 hubris_archive: sp_state.hubris_archive_id,
                 power_state: sp_state.power_state,
@@ -125,7 +149,7 @@ impl CollectionBuilder {
             }
         }
 
-        baseboard
+        Some(baseboard)
     }
 
     pub fn sp_found_caboose_already(

@@ -7,9 +7,9 @@
 use crate::builder::CollectionBuilder;
 use crate::Collection;
 use anyhow::Context;
+use nexus_types::inventory::CabooseWhich;
 use std::sync::Arc;
 use strum::IntoEnumIterator;
-use nexus_types::inventory::CabooseWhich;
 
 // XXX-dap rename to Enumerator?
 pub struct Collector {
@@ -99,8 +99,15 @@ impl Collector {
                 Ok(response) => response.into_inner(),
             };
 
-            let baseboard_id =
-                self.in_progress.found_sp_state(client.baseurl(), sp_state);
+            let Some(baseboard_id) = self.in_progress.found_sp_state(
+                client.baseurl(),
+                sp.type_,
+                sp.slot,
+                sp_state,
+            ) else {
+                // We failed to parse this SP for some reason.  Move on.
+                continue;
+            };
 
             // For each caboose that we care about, if it hasn't been fetched
             // already, fetch it.  Generally, we'd only get here for the first

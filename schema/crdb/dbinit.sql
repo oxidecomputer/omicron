@@ -2606,6 +2606,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_collection_error (
 CREATE INDEX IF NOT EXISTS errors_by_collection
     ON omicron.public.inv_collection_error (inv_collection_id, index);
 
+/* what kind of slot MGS reported a device in */
+CREATE TYPE IF NOT EXISTS omicron.public.sp_type AS ENUM (
+    'sled',
+    'switch',
+    'power'
+);
+
 -- observations from and about service processors
 -- also see inv_root_of_trust
 CREATE TABLE IF NOT EXISTS omicron.public.inv_service_processor (
@@ -2619,6 +2626,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_service_processor (
     time_collected TIMESTAMPTZ NOT NULL,
     -- which MGS instance reported this data
     source TEXT NOT NULL,
+
+    -- identity of this device according to MGS
+    sp_type omicron.public.sp_type NOT NULL,
+    sp_slot INT4 NOT NULL,
 
     -- Data from MGS "Get SP Info" API.  See MGS API documentation.
     baseboard_revision INT8 NOT NULL,
