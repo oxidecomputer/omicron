@@ -1149,6 +1149,7 @@ joinable!(system_update_component_update -> component_update (component_update_i
 
 allow_tables_to_appear_in_same_query!(ip_pool_range, ip_pool, ip_pool_resource);
 joinable!(ip_pool_range -> ip_pool (ip_pool_id));
+joinable!(ip_pool_resource -> ip_pool (ip_pool_id));
 
 allow_tables_to_appear_in_same_query!(
     dataset,

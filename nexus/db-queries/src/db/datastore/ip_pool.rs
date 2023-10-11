@@ -100,10 +100,7 @@ impl DataStore {
         // join ip_pool to ip_pool_resource and filter
 
         ip_pool::table
-            .inner_join(
-                ip_pool_resource::table
-                    .on(ip_pool::id.eq(ip_pool_resource::ip_pool_id)),
-            )
+            .inner_join(ip_pool_resource::table)
             .filter(
                 (ip_pool_resource::resource_type
                     .eq(IpPoolResourceType::Silo)
@@ -143,10 +140,7 @@ impl DataStore {
         // We assume there is only one pool for that silo, or at least,
         // if there is more than one, it doesn't matter which one we pick.
         let (authz_pool, pool) = ip_pool::table
-            .inner_join(
-                ip_pool_resource::table
-                    .on(ip_pool::id.eq(ip_pool_resource::ip_pool_id)),
-            )
+            .inner_join(ip_pool_resource::table)
             .filter(ip_pool::time_deleted.is_null())
             .filter(
                 ip_pool_resource::resource_type
