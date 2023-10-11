@@ -335,11 +335,13 @@ pub(crate) fn timeseries_key_for<'a>(
     target_fields: impl Iterator<Item = &'a Field>,
     metric_fields: impl Iterator<Item = &'a Field>,
 ) -> TimeseriesKey {
-    use std::collections::hash_map::DefaultHasher;
+    use highway::HighwayHasher;
     use std::hash::{Hash, Hasher};
-    let mut hasher = DefaultHasher::new();
+    let mut hasher = HighwayHasher::default();
     for field in target_fields.chain(metric_fields) {
-        field.hash(&mut hasher);
+        bcs::to_bytes(&field)
+            .expect("Failed to serialized field to bytes")
+            .hash(&mut hasher);
     }
     hasher.finish()
 }
@@ -392,5 +394,91 @@ mod tests {
         assert!(TimeseriesName::try_from(":b").is_err());
         assert!(TimeseriesName::try_from("a:").is_err());
         assert!(TimeseriesName::try_from("123").is_err());
+    }
+
+    #[test]
+    fn test_timeseries_key_generation_hashes_fields_sequentially() {
+        use super::timeseries_key_for;
+        use oximeter::{Field, FieldValue};
+
+        let f = |name: &str, value| Field { name: name.to_string(), value };
+
+        // Confirm that "targets" and "metrics" are interchangeable,
+        // we just hash everything sequentially.
+        assert_eq!(
+            timeseries_key_for(
+                [&f("a", FieldValue::String("a".to_string()))].into_iter(),
+                [&f("b", FieldValue::String("b".to_string()))].into_iter(),
+            ),
+            timeseries_key_for(
+                [
+                    &f("a", FieldValue::String("a".to_string())),
+                    &f("b", FieldValue::String("b".to_string())),
+                ]
+                .into_iter(),
+                [].into_iter(),
+            ),
+        );
+
+        // However, order still matters ("a, b" != "b, a")
+        assert_ne!(
+            timeseries_key_for(
+                [&f("a", FieldValue::String("a".to_string()))].into_iter(),
+                [&f("b", FieldValue::String("b".to_string()))].into_iter(),
+            ),
+            timeseries_key_for(
+                [&f("b", FieldValue::String("b".to_string()))].into_iter(),
+                [&f("a", FieldValue::String("a".to_string()))].into_iter(),
+            ),
+        );
+    }
+
+    #[test]
+    fn test_timeseries_key_stability() {
+        use super::timeseries_key_for;
+        use oximeter::{Field, FieldValue};
+        use strum::EnumCount;
+
+        let values = [
+            ("string", FieldValue::String(String::default())),
+            ("i8", FieldValue::I8(-0x0A)),
+            ("u8", FieldValue::U8(0x0A)),
+            ("i16", FieldValue::I16(-0x0ABC)),
+            ("u16", FieldValue::U16(0x0ABC)),
+            ("i32", FieldValue::I32(-0x0ABC_0000)),
+            ("u32", FieldValue::U32(0x0ABC_0000)),
+            ("i64", FieldValue::I64(-0x0ABC_0000_0000_0000)),
+            ("u64", FieldValue::U64(0x0ABC_0000_0000_0000)),
+            (
+                "ipaddr",
+                FieldValue::IpAddr(std::net::IpAddr::V4(
+                    std::net::Ipv4Addr::LOCALHOST,
+                )),
+            ),
+            ("uuid", FieldValue::Uuid(uuid::Uuid::nil())),
+            ("bool", FieldValue::Bool(true)),
+        ];
+
+        // Exhaustively testing enums is a bit tricky. Although it's easy to
+        // check "all variants of an enum are matched", it harder to test "all
+        // variants of an enum have been supplied".
+        //
+        // We use this as a proxy, confirming that each variant is represented
+        // here for the purposes of tracking stability.
+        assert_eq!(values.len(), FieldValue::COUNT);
+
+        let mut output = vec![];
+        for (name, value) in values {
+            let key = timeseries_key_for(
+                [&Field { name: name.to_string(), value }].into_iter(),
+                [].into_iter(),
+            );
+            output.push(format!("{name} -> {key}"));
+        }
+
+        expectorate::assert_contents(
+            "test-output/timeseries-keys.txt",
+            &output.join("\n"),
+        );
     }
 }
