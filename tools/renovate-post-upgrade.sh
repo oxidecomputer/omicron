@@ -22,6 +22,13 @@ function retry_command {
     done
 }
 
+# If cargo isn't present, skip this -- it implies that a non-Rust dependency was
+# updated.
+if ! command -v cargo &> /dev/null; then
+    echo "Skipping cargo-hakari update because cargo is not present."
+    exit 0
+fi
+
 # Download and install cargo-hakari if it is not already installed.
 if ! command -v cargo-hakari &> /dev/null; then
     # Need cargo-binstall to install cargo-hakari.
