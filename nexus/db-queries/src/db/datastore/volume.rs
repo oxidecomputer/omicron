@@ -119,6 +119,7 @@ impl DataStore {
                         .filter(
                             rs_dsl::snapshot_addr.eq(read_only_target.clone()),
                         )
+                        .filter(rs_dsl::deleting.eq(false))
                         .set(
                             rs_dsl::volume_references
                                 .eq(rs_dsl::volume_references + 1),
@@ -573,9 +574,7 @@ impl DataStore {
         // multiple times, and that is done by soft-deleting the volume during
         // the transaction, and returning the previously serialized list of
         // resources to clean up if a soft-delete has already occurred.
-        //
-        // TODO it would be nice to make this transaction_async, but I couldn't
-        // get the async optional extension to work.
+
         self.pool_connection_unauthorized()
             .await?
             .transaction_async(|conn| async move {
@@ -639,7 +638,9 @@ impl DataStore {
                     }
                 };
 
-                // Decrease the number of uses for each referenced region snapshot.
+                // Decrease the number of uses for each non-deleted referenced
+                // region snapshot.
+
                 use db::schema::region_snapshot::dsl;
 
                 diesel::update(dsl::region_snapshot)
@@ -647,12 +648,40 @@ impl DataStore {
                         dsl::snapshot_addr
                             .eq_any(crucible_targets.read_only_targets.clone()),
                     )
+                    .filter(dsl::volume_references.gt(0))
+                    .filter(dsl::deleting.eq(false))
                     .set(dsl::volume_references.eq(dsl::volume_references - 1))
                     .execute_async(&conn)
                     .await?;
 
+                // Then, note anything that was set to zero from the above
+                // UPDATE, and then mark all those as deleted.
+                let snapshots_to_delete: Vec<RegionSnapshot> =
+                    dsl::region_snapshot
+                        .filter(
+                            dsl::snapshot_addr.eq_any(
+                                crucible_targets.read_only_targets.clone(),
+                            ),
+                        )
+                        .filter(dsl::volume_references.eq(0))
+                        .filter(dsl::deleting.eq(false))
+                        .select(RegionSnapshot::as_select())
+                        .load_async(&conn)
+                        .await?;
+
+                diesel::update(dsl::region_snapshot)
+                    .filter(
+                        dsl::snapshot_addr
+                            .eq_any(crucible_targets.read_only_targets.clone()),
+                    )
+                    .filter(dsl::volume_references.eq(0))
+                    .filter(dsl::deleting.eq(false))
+                    .set(dsl::deleting.eq(true))
+                    .execute_async(&conn)
+                    .await?;
+
                 // Return what results can be cleaned up
-                let result = CrucibleResources::V1(CrucibleResourcesV1 {
+                let result = CrucibleResources::V2(CrucibleResourcesV2 {
                     // The only use of a read-write region will be at the top level of a
                     // Volume. These are not shared, but if any snapshots are taken this
                     // will prevent deletion of the region. Filter out any regions that
@@ -681,6 +710,7 @@ impl DataStore {
                                     .eq(0)
                                     // Despite the SQL specifying that this column is NOT NULL,
                                     // this null check is required for this function to work!
+                                    // The left join of region_snapshot might cause a null here.
                                     .or(dsl::volume_references.is_null()),
                             )
                             .select((Dataset::as_select(), Region::as_select()))
@@ -688,46 +718,17 @@ impl DataStore {
                             .await?
                     },
 
-                    // A volume (for a disk or snapshot) may reference another nested
-                    // volume as a read-only parent, and this may be arbitrarily deep.
-                    // After decrementing volume_references above, get the region
-                    // snapshot records for these read_only_targets where the
-                    // volume_references has gone to 0. Consumers of this struct will
-                    // be responsible for deleting the read-only downstairs running
-                    // for the snapshot and the snapshot itself.
-                    datasets_and_snapshots: {
-                        use db::schema::dataset::dsl as dataset_dsl;
-
-                        dsl::region_snapshot
-                            // Only return region_snapshot records related to
-                            // this volume that have zero references. This will
-                            // only happen one time, on the last decrease of a
-                            // volume containing these read-only targets.
-                            //
-                            // It's important to not return *every* region
-                            // snapshot with zero references: multiple volume
-                            // delete sub-sagas will then be issues duplicate
-                            // DELETE calls to Crucible agents, and a request to
-                            // delete a read-only downstairs running for a
-                            // snapshot that doesn't exist will return a 404,
-                            // causing the saga to error and unwind.
-                            .filter(dsl::snapshot_addr.eq_any(
-                                crucible_targets.read_only_targets.clone(),
-                            ))
-                            .filter(dsl::volume_references.eq(0))
-                            .inner_join(
-                                dataset_dsl::dataset
-                                    .on(dsl::dataset_id.eq(dataset_dsl::id)),
-                            )
-                            .select((
-                                Dataset::as_select(),
-                                RegionSnapshot::as_select(),
-                            ))
-                            .get_results_async::<(Dataset, RegionSnapshot)>(
-                                &conn,
-                            )
-                            .await?
-                    },
+                    // Consumers of this struct will be responsible for deleting
+                    // the read-only downstairs running for the snapshot and the
+                    // snapshot itself.
+                    //
+                    // It's important to not return *every* region snapshot with
+                    // zero references: multiple volume delete sub-sagas will
+                    // then be issues duplicate DELETE calls to Crucible agents,
+                    // and a request to delete a read-only downstairs running
+                    // for a snapshot that doesn't exist will return a 404,
+                    // causing the saga to error and unwind.
+                    snapshots_to_delete,
                 });
 
                 // Soft delete this volume, and serialize the resources that are to
@@ -967,7 +968,7 @@ impl DataStore {
 
 #[derive(Default, Debug, Serialize, Deserialize)]
 pub struct CrucibleTargets {
-    read_only_targets: Vec<String>,
+    pub read_only_targets: Vec<String>,
 }
 
 // Serialize this enum into the `resources_to_clean_up` column to handle
@@ -975,12 +976,19 @@ pub struct CrucibleTargets {
 #[derive(Debug, Serialize, Deserialize)]
 pub enum CrucibleResources {
     V1(CrucibleResourcesV1),
+    V2(CrucibleResourcesV2),
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct CrucibleResourcesV1 {
     pub datasets_and_regions: Vec<(Dataset, Region)>,
     pub datasets_and_snapshots: Vec<(Dataset, RegionSnapshot)>,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct CrucibleResourcesV2 {
+    pub datasets_and_regions: Vec<(Dataset, Region)>,
+    pub snapshots_to_delete: Vec<RegionSnapshot>,
 }
 
 /// Return the targets from a VolumeConstructionRequest.

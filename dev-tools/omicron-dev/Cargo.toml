@@ -13,8 +13,10 @@ camino.workspace = true
 clap.workspace = true
 dropshot.workspace = true
 futures.workspace = true
+gateway-messages.workspace = true
+gateway-test-utils.workspace = true
 libc.workspace = true
-nexus-test-utils.workspace = true
+nexus-test-utils = { workspace = true, features = ["omicron-dev"] }
 nexus-test-interface.workspace = true
 omicron-common.workspace = true
 omicron-nexus.workspace = true

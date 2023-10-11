@@ -59,8 +59,14 @@ use illumos_utils::{dladm::MockDladm as Dladm, zone::MockZones as Zones};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
+    #[error("Could not find boot disk")]
+    BootDiskNotFound,
+
     #[error("Configuration error: {0}")]
     Config(#[from] crate::config::ConfigError),
+
+    #[error("Error setting up backing filesystems: {0}")]
+    BackingFs(#[from] crate::backing_fs::BackingFsError),
 
     #[error("Error setting up swap device: {0}")]
     SwapDevice(#[from] crate::swap_device::SwapDeviceError),
@@ -268,14 +274,17 @@ impl SledAgent {
         ));
         info!(&log, "SledAgent::new(..) starting");
 
-        // Configure a swap device of the configured size before other system setup.
+        let boot_disk = storage
+            .resources()
+            .boot_disk()
+            .await
+            .ok_or_else(|| Error::BootDiskNotFound)?;
+
+        // Configure a swap device of the configured size before other system
+        // setup.
         match config.swap_device_size_gb {
             Some(sz) if sz > 0 => {
                 info!(log, "Requested swap device of size {} GiB", sz);
-                let boot_disk =
-                    storage.resources().boot_disk().await.ok_or_else(|| {
-                        crate::swap_device::SwapDeviceError::BootDiskNotFound
-                    })?;
                 crate::swap_device::ensure_swap_device(
                     &parent_log,
                     &boot_disk.1,
@@ -289,6 +298,9 @@ impl SledAgent {
                 info!(log, "Not setting up swap device: not configured");
             }
         }
+
+        info!(log, "Mounting backing filesystems");
+        crate::backing_fs::ensure_backing_fs(&parent_log, &boot_disk.1)?;
 
         // Ensure we have a thread that automatically reaps process contracts
         // when they become empty. See the comments in

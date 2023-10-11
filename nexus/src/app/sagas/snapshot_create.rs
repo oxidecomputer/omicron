@@ -1280,6 +1280,7 @@ async fn ssc_start_running_snapshot(
                 snapshot_id,
                 snapshot_addr,
                 volume_references: 0, // to be filled later
+                deleting: false,
             })
             .await
             .map_err(ActionError::action_failed)?;
