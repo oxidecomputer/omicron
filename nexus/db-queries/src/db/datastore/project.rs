@@ -28,6 +28,7 @@ use crate::db::pagination::paginated;
 use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl};
 use chrono::Utc;
 use diesel::prelude::*;
+use nexus_db_model::IpPoolResourceType;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
@@ -337,24 +338,32 @@ impl DataStore {
         authz_project: &authz::Project,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::IpPool> {
-        use db::schema::ip_pool::dsl;
+        use db::schema::ip_pool;
+        use db::schema::ip_pool_resource;
+
         opctx.authorize(authz::Action::ListChildren, authz_project).await?;
+
+        let silo_id = opctx.authn.silo_required().unwrap().id();
+
         match pagparams {
             PaginatedBy::Id(pagparams) => {
-                paginated(dsl::ip_pool, dsl::id, pagparams)
+                paginated(ip_pool::table, ip_pool::id, pagparams)
             }
             PaginatedBy::Name(pagparams) => paginated(
-                dsl::ip_pool,
-                dsl::name,
+                ip_pool::table,
+                ip_pool::name,
                 &pagparams.map_name(|n| Name::ref_cast(n)),
             ),
         }
-        // TODO(2148, 2056): filter only pools accessible by the given
-        // project, once specific projects for pools are implemented
-        // != excludes nulls so we explicitly include them
-        // TODO: filter out internal the right way
-        // .filter(dsl::silo_id.ne(*INTERNAL_SILO_ID).or(dsl::silo_id.is_null()))
-        .filter(dsl::time_deleted.is_null())
+        // TODO: make sure this join is compatible with pagination logic
+        .inner_join(ip_pool_resource::table)
+        .filter(
+            (ip_pool_resource::resource_type
+                .eq(IpPoolResourceType::Silo)
+                .and(ip_pool_resource::resource_id.eq(silo_id)))
+            .or(ip_pool_resource::resource_type.eq(IpPoolResourceType::Fleet)),
+        )
+        .filter(ip_pool::time_deleted.is_null())
         .select(db::model::IpPool::as_select())
         .get_results_async(&*self.pool_connection_authorized(opctx).await?)
         .await

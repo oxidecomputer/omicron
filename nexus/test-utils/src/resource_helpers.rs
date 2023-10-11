@@ -145,7 +145,7 @@ pub async fn create_ip_pool(
     )
     .await;
 
-    // match previous behavior, makes pool available for use anywhere in fleet
+    // make pool available for use anywhere in fleet
     let _: () = object_create(
         client,
         &format!("/v1/system/ip-pools/{pool_name}/associate"),

@@ -49,26 +49,36 @@ impl DataStore {
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<IpPool> {
-        use db::schema::ip_pool::dsl;
+        use db::schema::ip_pool;
+        use db::schema::ip_pool_resource;
+
         opctx
             .authorize(authz::Action::ListChildren, &authz::IP_POOL_LIST)
             .await?;
-        // TODO: boy I hope we can paginate a join without too much trouble
         match pagparams {
             PaginatedBy::Id(pagparams) => {
-                paginated(dsl::ip_pool, dsl::id, pagparams)
+                paginated(ip_pool::table, ip_pool::id, pagparams)
             }
             PaginatedBy::Name(pagparams) => paginated(
-                dsl::ip_pool,
-                dsl::name,
+                ip_pool::table,
+                ip_pool::name,
                 &pagparams.map_name(|n| Name::ref_cast(n)),
             ),
         }
-        // != excludes nulls so we explicitly include them
-        // TODO: join to join table to exclude internal
-        // .filter(dsl::silo_id.ne(*INTERNAL_SILO_ID).or(dsl::silo_id.is_null()))
-        .filter(dsl::time_deleted.is_null())
-        .select(db::model::IpPool::as_select())
+        // TODO: make sure this join is compatible with pagination logic
+        .left_outer_join(ip_pool_resource::table)
+        // TODO: this filter is so unwieldy and confusing (see all the checks
+        // at the nexus layer too)  that it makes me want to just put a boolean
+        // internal column on the ip_pool table
+        .filter(
+            ip_pool_resource::resource_id
+                .ne(*INTERNAL_SILO_ID)
+                // resource_id is not nullable -- null here means the
+                // pool has no entry in the join table
+                .or(ip_pool_resource::resource_id.is_null()),
+        )
+        .filter(ip_pool::time_deleted.is_null())
+        .select(IpPool::as_select())
         .get_results_async(&*self.pool_connection_authorized(opctx).await?)
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))

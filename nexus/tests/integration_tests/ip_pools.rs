@@ -8,6 +8,7 @@ use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use http::method::Method;
 use http::StatusCode;
+use nexus_db_queries::db::fixed_data::FLEET_ID;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
@@ -17,6 +18,7 @@ use nexus_test_utils::resource_helpers::{
     create_instance, create_instance_with,
 };
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::params;
 use nexus_types::external_api::params::ExternalIpCreate;
 use nexus_types::external_api::params::InstanceDiskAttachment;
 use nexus_types::external_api::params::InstanceNetworkInterfaceAttachment;
@@ -33,6 +35,7 @@ use omicron_common::api::external::{IdentityMetadataCreateParams, Name};
 use omicron_nexus::TestInterfaces;
 use sled_agent_client::TestInterfaces as SledTestInterfaces;
 use std::collections::HashSet;
+use uuid::Uuid;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -59,8 +62,7 @@ async fn test_ip_pool_basic_crud(cptestctx: &ControlPlaneTestContext) {
     .expect("Failed to list IP Pools")
     .all_items;
     assert_eq!(ip_pools.len(), 1, "Expected to see default IP pool");
-
-    assert_eq!(ip_pools[0].identity.name, "default",);
+    assert_eq!(ip_pools[0].identity.name, "default");
     // assert_eq!(ip_pools[0].silo_id, None);
     // assert!(ip_pools[0].is_default);
 
@@ -305,30 +307,33 @@ async fn test_ip_pool_with_silo(cptestctx: &ControlPlaneTestContext) {
     let _created_pool = create_pool(client, &params).await;
     // assert_eq!(created_pool.silo_id.unwrap(), silo_id);
 
-    // expect 404 if the specified silo doesn't exist
-    let bad_silo_params = IpPoolCreate {
-        identity: IdentityMetadataCreateParams {
-            name: String::from("p2").parse().unwrap(),
-            description: String::from(""),
-        },
-        // silo: Some(NameOrId::Name(
-        //     String::from("not-a-thing").parse().unwrap(),
-        // )),
-        // is_default: false,
+    let nonexistent_silo_id = Uuid::new_v4();
+    // expect 404 on association if the specified silo doesn't exist
+    let params = params::IpPoolResource {
+        resource_id: nonexistent_silo_id,
+        resource_type: params::IpPoolResourceType::Silo,
+        is_default: false,
     };
-    let error: HttpErrorResponseBody = NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, "/v1/system/ip-pools")
-            .body(Some(&bad_silo_params))
-            .expect_status(Some(StatusCode::NOT_FOUND)),
+    let error = NexusRequest::new(
+        RequestBuilder::new(
+            client,
+            Method::POST,
+            "/v1/system/ip-pools/p1/associate",
+        )
+        .body(Some(&params))
+        .expect_status(Some(StatusCode::NOT_FOUND)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
     .unwrap()
-    .parsed_body()
+    .parsed_body::<HttpErrorResponseBody>()
     .unwrap();
 
-    assert_eq!(error.message, "not found: silo with name \"not-a-thing\"");
+    assert_eq!(
+        error.message,
+        format!("not found: silo with id \"{nonexistent_silo_id}\"")
+    );
 }
 
 async fn create_pool(
@@ -691,14 +696,28 @@ async fn test_ip_pool_list_usable_by_project(
             name: String::from(mypool_name).parse().unwrap(),
             description: String::from("right on cue"),
         },
-        // silo: None,
-        // is_default: false,
     };
     NexusRequest::objects_post(client, ip_pools_url, &params)
         .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .unwrap();
+        .execute_and_parse_unwrap::<IpPool>()
+        .await;
+
+    // add to fleet since we can't add to project yet
+    // TODO: could do silo, might as well? need the ID, though. at least
+    // until I make it so you can specify the resource by name
+    let params = params::IpPoolResource {
+        resource_id: *FLEET_ID,
+        resource_type: params::IpPoolResourceType::Fleet,
+        is_default: false,
+    };
+    let _ = NexusRequest::objects_post(
+        client,
+        &format!("/v1/system/ip-pools/{mypool_name}/associate"),
+        &params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await;
 
     // Add an IP range to mypool
     let mypool_range = IpRange::V4(

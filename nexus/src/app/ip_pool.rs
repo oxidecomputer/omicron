@@ -11,7 +11,7 @@ use nexus_db_model::IpPool;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
-use nexus_db_queries::db::fixed_data::silo::INTERNAL_SILO_ID;
+// use nexus_db_queries::db::fixed_data::silo::INTERNAL_SILO_ID;
 use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::model::Name;
@@ -27,7 +27,7 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use ref_cast::RefCast;
 
-fn is_internal(pool: &IpPool) -> bool {
+fn is_internal(_pool: &IpPool) -> bool {
     // pool.silo_id == Some(*INTERNAL_SILO_ID)
     // TODO: this is no longer a simple function of the pool itself
     false
@@ -71,6 +71,19 @@ impl super::Nexus {
         // TODO: check for perms on specified resource
         let (.., authz_pool) =
             pool_lookup.lookup_for(authz::Action::Modify).await?;
+        match ip_pool_resource.resource_type {
+            params::IpPoolResourceType::Silo => {
+                self.silo_lookup(
+                    &opctx,
+                    NameOrId::Id(ip_pool_resource.resource_id),
+                )?
+                .lookup_for(authz::Action::Read)
+                .await?;
+            }
+            params::IpPoolResourceType::Fleet => {
+                // hope we don't need to be assured of the fleet's existence
+            }
+        };
         self.db_datastore
             .ip_pool_associate_resource(
                 opctx,
