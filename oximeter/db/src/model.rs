@@ -35,6 +35,9 @@ use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use uuid::Uuid;
 
+/// Describes the version of the Oximeter database.
+pub const OXIMETER_VERSION: u64 = 1;
+
 // Wrapper type to represent a boolean in the database.
 //
 // ClickHouse's type system lacks a boolean, and using `u8` to represent them. This a safe wrapper

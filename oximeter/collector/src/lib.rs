@@ -455,11 +455,7 @@ impl OximeterAgent {
         };
         let client = Client::new(db_address, &log);
         let replicated = client.is_oximeter_cluster().await?;
-        if !replicated {
-            client.init_single_node_db().await?;
-        } else {
-            client.init_replicated_db().await?;
-        }
+        client.initialize_db_with_latest_version(replicated).await?;
 
         // Spawn the task for aggregating and inserting all metrics
         tokio::spawn(async move {

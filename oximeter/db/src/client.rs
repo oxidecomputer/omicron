@@ -25,7 +25,9 @@ use dropshot::WhichPage;
 use oximeter::types::Sample;
 use slog::debug;
 use slog::error;
+use slog::info;
 use slog::trace;
+use slog::warn;
 use slog::Logger;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
@@ -269,7 +271,96 @@ impl Client {
         .map_err(|e| Error::Database(e.to_string()))
     }
 
-    // Verifies if instance is part of oximeter_cluster
+    /// Validates that the schema used by the DB matches the version used by
+    /// the executable using it.
+    ///
+    /// This function will wipe metrics data if the version stored within
+    /// the DB does not match the schema version of Oximeter.
+    ///
+    /// NOTE: This function is not safe for concurrent usage!
+    pub async fn initialize_db_with_latest_version(
+        &self,
+        replicated: bool,
+    ) -> Result<(), Error> {
+        info!(self.log, "reading db version");
+
+        // Read the version from the DB
+        let version = self.read_latest_version().await?;
+        info!(self.log, "read oximeter database version"; "version" => version);
+
+        // Decide how to conform the on-disk version with this version of
+        // Oximeter.
+        if version < model::OXIMETER_VERSION {
+            info!(self.log, "wiping and re-initializing oximeter schema");
+            // If the on-storage version is less than the constant embedded into
+            // this binary, the DB is out-of-date. Drop it, and re-populate it
+            // later.
+            if !replicated {
+                self.wipe_single_node_db().await?;
+                self.init_single_node_db().await?;
+            } else {
+                self.wipe_replicated_db().await?;
+                self.init_replicated_db().await?;
+            }
+        } else if version > model::OXIMETER_VERSION {
+            // If the on-storage version is greater than the constant embedded
+            // into this binary, we may have downgraded.
+            return Err(Error::Database(
+                format!(
+                    "Expected version {}, saw version {}. Downgrading is not supported.",
+                    model::OXIMETER_VERSION,
+                    version
+                )
+            ));
+        } else {
+            // If the version matches, we don't need to update the DB
+            return Ok(());
+        }
+
+        info!(self.log, "inserting current version"; "version" => model::OXIMETER_VERSION);
+        self.insert_version(model::OXIMETER_VERSION).await?;
+        Ok(())
+    }
+
+    async fn read_latest_version(&self) -> Result<u64, Error> {
+        let sql = format!(
+            "SELECT MAX(value) FROM {db_name}.version;",
+            db_name = crate::DATABASE_NAME,
+        );
+
+        let version = match self.execute_with_body(sql).await {
+            Ok(body) if body.is_empty() => {
+                warn!(
+                    self.log,
+                    "no version in database (treated as 'version 0')"
+                );
+                0
+            }
+            Ok(body) => body.trim().parse::<u64>().map_err(|err| {
+                Error::Database(format!("Cannot read version: {err}"))
+            })?,
+            Err(Error::Database(err))
+                if err.contains("Database oximeter doesn't exist") =>
+            {
+                0
+            }
+            Err(err) => {
+                return Err(err);
+            }
+        };
+        Ok(version)
+    }
+
+    async fn insert_version(&self, version: u64) -> Result<(), Error> {
+        let sql = format!(
+            "INSERT INTO {db_name}.version (*) VALUES ({version}, now());",
+            db_name = crate::DATABASE_NAME,
+        );
+        self.execute_with_body(sql).await?;
+        Ok(())
+    }
+
+    /// Verifies if instance is part of oximeter_cluster
     pub async fn is_oximeter_cluster(&self) -> Result<bool, Error> {
         let sql = String::from("SHOW CLUSTERS FORMAT JSONEachRow;");
         let res = self.execute_with_body(sql).await?;
@@ -1336,6 +1427,139 @@ mod tests {
         let sample = Sample::new(&bad_name, &metric).unwrap();
         let result = client.verify_sample_schema(&sample).await;
         assert!(matches!(result, Err(Error::SchemaMismatch { .. })));
+        db.cleanup().await.expect("Failed to cleanup ClickHouse server");
+    }
+
+    // Returns the number of timeseries schemas being used.
+    async fn get_schema_count(client: &Client) -> usize {
+        client
+            .execute_with_body(
+                "SELECT * FROM oximeter.timeseries_schema FORMAT JSONEachRow;",
+            )
+            .await
+            .expect("Failed to SELECT from database")
+            .lines()
+            .count()
+    }
+
+    #[tokio::test]
+    async fn test_database_version_update_idempotent() {
+        let log = slog::Logger::root(slog::Discard, o!());
+        let mut db = ClickHouseInstance::new_single_node(0)
+            .await
+            .expect("Failed to start ClickHouse");
+        let address = SocketAddr::new("::1".parse().unwrap(), db.port());
+
+        let replicated = false;
+
+        // Initialize the database...
+        let client = Client::new(address, &log);
+        client
+            .initialize_db_with_latest_version(replicated)
+            .await
+            .expect("Failed to initialize timeseries database");
+
+        // Insert data here, verify it still exists after second init.
+        //
+        // The values here don't matter much, we just want to check that
+        // the database data hasn't been dropped.
+        assert_eq!(0, get_schema_count(&client).await);
+        let sample = test_util::make_sample();
+        client.insert_samples(&[sample.clone()]).await.unwrap();
+        assert_eq!(1, get_schema_count(&client).await);
+
+        // Re-initialize the database, see that our data still exists
+        client
+            .initialize_db_with_latest_version(replicated)
+            .await
+            .expect("Failed to initialize timeseries database");
+
+        assert_eq!(1, get_schema_count(&client).await);
+
+        db.cleanup().await.expect("Failed to cleanup ClickHouse server");
+    }
+
+    #[tokio::test]
+    async fn test_database_version_will_not_downgrade() {
+        let log = slog::Logger::root(slog::Discard, o!());
+        let mut db = ClickHouseInstance::new_single_node(0)
+            .await
+            .expect("Failed to start ClickHouse");
+        let address = SocketAddr::new("::1".parse().unwrap(), db.port());
+
+        let replicated = false;
+
+        // Initialize the database
+        let client = Client::new(address, &log);
+        client
+            .initialize_db_with_latest_version(replicated)
+            .await
+            .expect("Failed to initialize timeseries database");
+
+        // Bump the version of the database to a "too new" version
+        client
+            .insert_version(model::OXIMETER_VERSION + 1)
+            .await
+            .expect("Failed to insert very new DB version");
+
+        // Expect a failure re-initializing the client.
+        //
+        // This will attempt to initialize the client with "version =
+        // model::OXIMETER_VERSION", which is "too old".
+        client
+            .initialize_db_with_latest_version(replicated)
+            .await
+            .expect_err("Should have failed, downgrades are not supported");
+
+        db.cleanup().await.expect("Failed to cleanup ClickHouse server");
+    }
+
+    #[tokio::test]
+    async fn test_database_version_wipes_old_version() {
+        let log = slog::Logger::root(slog::Discard, o!());
+        let mut db = ClickHouseInstance::new_single_node(0)
+            .await
+            .expect("Failed to start ClickHouse");
+        let address = SocketAddr::new("::1".parse().unwrap(), db.port());
+
+        let replicated = false;
+
+        // Initialize the Client
+        let client = Client::new(address, &log);
+        client
+            .initialize_db_with_latest_version(replicated)
+            .await
+            .expect("Failed to initialize timeseries database");
+
+        // Insert data here, verify it still exists after second init.
+        //
+        // The values here don't matter much, we just want to check that
+        // the database data gets dropped later.
+        assert_eq!(0, get_schema_count(&client).await);
+        let sample = test_util::make_sample();
+        client.insert_samples(&[sample.clone()]).await.unwrap();
+        assert_eq!(1, get_schema_count(&client).await);
+
+        // Remove the "current" version, insert a "too old" version of the DB schema
+        client
+            .execute_with_body(format!(
+                "ALTER TABLE oximeter.version DELETE WHERE value = {}",
+                model::OXIMETER_VERSION
+            ))
+            .await
+            .expect("Failed to delete old versions");
+        client
+            .insert_version(model::OXIMETER_VERSION - 1)
+            .await
+            .expect("Failed to insert very new DB version");
+
+        // Expect a failure re-initializing the client
+        client
+            .initialize_db_with_latest_version(replicated)
+            .await
+            .expect("Should have initialized database successfully");
+        assert_eq!(0, get_schema_count(&client).await);
+
         db.cleanup().await.expect("Failed to cleanup ClickHouse server");
     }
 
