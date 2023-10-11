@@ -918,6 +918,8 @@ mod tests {
         k3.cleanup().await.expect("Failed to cleanup ClickHouse keeper 3");
         db_1.cleanup().await.expect("Failed to cleanup ClickHouse server 1");
         db_2.cleanup().await.expect("Failed to cleanup ClickHouse server 2");
+
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -945,6 +947,7 @@ mod tests {
         };
         client.insert_samples(&samples).await.unwrap();
         db.cleanup().await.expect("Failed to cleanup ClickHouse server");
+        logctx.cleanup_successful();
     }
 
     // This is a target with the same name as that in `lib.rs` used for other tests, but with a
@@ -1438,6 +1441,7 @@ mod tests {
         let result = client.verify_sample_schema(&sample).await;
         assert!(matches!(result, Err(Error::SchemaMismatch { .. })));
         db.cleanup().await.expect("Failed to cleanup ClickHouse server");
+        logctx.cleanup_successful();
     }
 
     // Returns the number of timeseries schemas being used.
@@ -1489,6 +1493,7 @@ mod tests {
         assert_eq!(1, get_schema_count(&client).await);
 
         db.cleanup().await.expect("Failed to cleanup ClickHouse server");
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -1526,6 +1531,7 @@ mod tests {
             .expect_err("Should have failed, downgrades are not supported");
 
         db.cleanup().await.expect("Failed to cleanup ClickHouse server");
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -1563,6 +1569,7 @@ mod tests {
         assert_eq!(0, get_schema_count(&client).await);
 
         db.cleanup().await.expect("Failed to cleanup ClickHouse server");
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -1642,6 +1649,7 @@ mod tests {
         assert_eq!(expected_schema, schema[0]);
 
         db.cleanup().await.expect("Failed to cleanup ClickHouse server");
+        logctx.cleanup_successful();
     }
 
     async fn setup_filter_testcase() -> (ClickHouseInstance, Client, Vec<Sample>)
@@ -1823,6 +1831,7 @@ mod tests {
             client.ping().await,
             Err(Error::DatabaseUnavailable(_))
         ));
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -1894,6 +1903,7 @@ mod tests {
         );
         assert_eq!(timeseries.target.name, "my_target");
         assert_eq!(timeseries.metric.name, "second_metric");
+        logctx.cleanup_successful();
     }
 
     #[derive(Debug, Clone, oximeter::Target)]
@@ -2245,6 +2255,7 @@ mod tests {
             }
         }
         db.cleanup().await.expect("Failed to cleanup database");
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -2364,6 +2375,7 @@ mod tests {
         );
 
         db.cleanup().await.expect("Failed to cleanup database");
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -2466,6 +2478,7 @@ mod tests {
         );
 
         db.cleanup().await.expect("Failed to cleanup database");
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
