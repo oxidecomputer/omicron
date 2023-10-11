@@ -281,6 +281,7 @@ impl Client {
     pub async fn initialize_db_with_latest_version(
         &self,
         replicated: bool,
+        expected: u64,
     ) -> Result<(), Error> {
         info!(self.log, "reading db version");
 
@@ -290,7 +291,7 @@ impl Client {
 
         // Decide how to conform the on-disk version with this version of
         // Oximeter.
-        if version < model::OXIMETER_VERSION {
+        if version < expected {
             info!(self.log, "wiping and re-initializing oximeter schema");
             // If the on-storage version is less than the constant embedded into
             // this binary, the DB is out-of-date. Drop it, and re-populate it
@@ -302,14 +303,12 @@ impl Client {
                 self.wipe_replicated_db().await?;
                 self.init_replicated_db().await?;
             }
-        } else if version > model::OXIMETER_VERSION {
+        } else if version > expected {
             // If the on-storage version is greater than the constant embedded
             // into this binary, we may have downgraded.
             return Err(Error::Database(
                 format!(
-                    "Expected version {}, saw version {}. Downgrading is not supported.",
-                    model::OXIMETER_VERSION,
-                    version
+                    "Expected version {expected}, saw {version}. Downgrading is not supported.",
                 )
             ));
         } else {
@@ -317,8 +316,8 @@ impl Client {
             return Ok(());
         }
 
-        info!(self.log, "inserting current version"; "version" => model::OXIMETER_VERSION);
-        self.insert_version(model::OXIMETER_VERSION).await?;
+        info!(self.log, "inserting current version"; "version" => expected);
+        self.insert_version(expected).await?;
         Ok(())
     }
 
@@ -1455,11 +1454,14 @@ mod tests {
         // Initialize the database...
         let client = Client::new(address, &log);
         client
-            .initialize_db_with_latest_version(replicated)
+            .initialize_db_with_latest_version(
+                replicated,
+                model::OXIMETER_VERSION,
+            )
             .await
             .expect("Failed to initialize timeseries database");
 
-        // Insert data here, verify it still exists after second init.
+        // Insert data here so we can verify it still exists later.
         //
         // The values here don't matter much, we just want to check that
         // the database data hasn't been dropped.
@@ -1470,7 +1472,10 @@ mod tests {
 
         // Re-initialize the database, see that our data still exists
         client
-            .initialize_db_with_latest_version(replicated)
+            .initialize_db_with_latest_version(
+                replicated,
+                model::OXIMETER_VERSION,
+            )
             .await
             .expect("Failed to initialize timeseries database");
 
@@ -1492,7 +1497,10 @@ mod tests {
         // Initialize the database
         let client = Client::new(address, &log);
         client
-            .initialize_db_with_latest_version(replicated)
+            .initialize_db_with_latest_version(
+                replicated,
+                model::OXIMETER_VERSION,
+            )
             .await
             .expect("Failed to initialize timeseries database");
 
@@ -1507,7 +1515,10 @@ mod tests {
         // This will attempt to initialize the client with "version =
         // model::OXIMETER_VERSION", which is "too old".
         client
-            .initialize_db_with_latest_version(replicated)
+            .initialize_db_with_latest_version(
+                replicated,
+                model::OXIMETER_VERSION,
+            )
             .await
             .expect_err("Should have failed, downgrades are not supported");
 
@@ -1527,11 +1538,14 @@ mod tests {
         // Initialize the Client
         let client = Client::new(address, &log);
         client
-            .initialize_db_with_latest_version(replicated)
+            .initialize_db_with_latest_version(
+                replicated,
+                model::OXIMETER_VERSION,
+            )
             .await
             .expect("Failed to initialize timeseries database");
 
-        // Insert data here, verify it still exists after second init.
+        // Insert data here so we can remove it later.
         //
         // The values here don't matter much, we just want to check that
         // the database data gets dropped later.
@@ -1540,22 +1554,12 @@ mod tests {
         client.insert_samples(&[sample.clone()]).await.unwrap();
         assert_eq!(1, get_schema_count(&client).await);
 
-        // Remove the "current" version, insert a "too old" version of the DB schema
+        // If we try to upgrade to a newer version, we'll drop old data.
         client
-            .execute_with_body(format!(
-                "ALTER TABLE oximeter.version DELETE WHERE value = {}",
-                model::OXIMETER_VERSION
-            ))
-            .await
-            .expect("Failed to delete old versions");
-        client
-            .insert_version(model::OXIMETER_VERSION - 1)
-            .await
-            .expect("Failed to insert very new DB version");
-
-        // Expect a failure re-initializing the client
-        client
-            .initialize_db_with_latest_version(replicated)
+            .initialize_db_with_latest_version(
+                replicated,
+                model::OXIMETER_VERSION + 1,
+            )
             .await
             .expect("Should have initialized database successfully");
         assert_eq!(0, get_schema_count(&client).await);
