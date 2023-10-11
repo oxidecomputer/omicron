@@ -20,6 +20,7 @@ use nexus_types::inventory::CabooseWhich;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::sync::Arc;
+use uuid::Uuid;
 
 // XXX-dap add rack id
 
@@ -54,6 +55,7 @@ impl CollectionBuilder {
 
     pub fn build(self) -> Collection {
         Collection {
+            id: Uuid::new_v4(),
             errors: self.errors,
             time_started: self.time_started,
             time_done: Utc::now(),

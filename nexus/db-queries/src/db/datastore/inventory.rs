@@ -484,18 +484,6 @@ impl diesel::query_builder::QueryFragment<diesel::pg::Pg> for InvCabooseInsert {
         use db::schema::hw_baseboard_id::dsl as dsl_baseboard_id;
         use db::schema::inv_caboose::dsl as dsl_inv_caboose;
         use db::schema::sw_caboose::dsl as dsl_sw_caboose;
-        // XXX-dap TODO-cleanup we ought to be able to use
-        // `db::schema::hw_baseboard_id::table.from_clause()` in the spot where
-        // this is used.  For reasons I don't understand, using `walk_ast()`
-        // with that requires it to be borrowed for the *caller*'s lifetime.
-        // The only way to do that is to make this 'static.  We do that by
-        // making it a global `const`...but that also means (1) we have to write
-        // out the type, which is this ugly internal type, and (2) we can't use
-        // `from_clause()` directly.
-        // const FROM_HW_BASEBOARD_ID:
-        //     diesel::internal::table_macro::StaticQueryFragmentInstance<
-        //         db::schema::hw_baseboard_id::table,
-        //     > = db::schema::hw_baseboard_id::table.from_clause();
 
         pass.unsafe_to_cache_prepared();
         pass.push_sql("WITH my_new_row AS (");
@@ -504,8 +492,12 @@ impl diesel::query_builder::QueryFragment<diesel::pg::Pg> for InvCabooseInsert {
 
         // Emit the values that we're going to insert into `inv_caboose`.
         // First, emit the looked-up foreign keys.
+        self.from_hw_baseboard_id.walk_ast(pass.reborrow())?;
+        pass.push_sql(".");
         pass.push_identifier(dsl_baseboard_id::id::NAME)?;
         pass.push_sql(", ");
+        self.from_sw_caboose.walk_ast(pass.reborrow())?;
+        pass.push_sql(".");
         pass.push_identifier(dsl_sw_caboose::id::NAME)?;
         pass.push_sql(", ");
         // Next, emit the literal values used for the rest of the columns.
@@ -521,37 +513,49 @@ impl diesel::query_builder::QueryFragment<diesel::pg::Pg> for InvCabooseInsert {
 
         // Finish the SELECT by adding the list of tables and the WHERE to pick
         // out only the relevant row from each tables.
-        pass.push_sql(") FROM ");
+        pass.push_sql(" FROM ");
 
         self.from_hw_baseboard_id.walk_ast(pass.reborrow())?;
         pass.push_sql(", ");
         self.from_sw_caboose.walk_ast(pass.reborrow())?;
 
         pass.push_sql(" WHERE ");
+        self.from_hw_baseboard_id.walk_ast(pass.reborrow())?;
+        pass.push_sql(".");
         pass.push_identifier(dsl_baseboard_id::part_number::NAME)?;
         pass.push_sql(" = ");
         pass.push_bind_param::<sql_types::Text, _>(
             &self.baseboard_part_number,
         )?;
         pass.push_sql(" AND ");
+        self.from_hw_baseboard_id.walk_ast(pass.reborrow())?;
+        pass.push_sql(".");
         pass.push_identifier(dsl_baseboard_id::serial_number::NAME)?;
         pass.push_sql(" = ");
         pass.push_bind_param::<sql_types::Text, _>(
             &self.baseboard_serial_number,
         )?;
         pass.push_sql(" AND ");
+        self.from_sw_caboose.walk_ast(pass.reborrow())?;
+        pass.push_sql(".");
         pass.push_identifier(dsl_sw_caboose::board::NAME)?;
         pass.push_sql(" = ");
         pass.push_bind_param::<sql_types::Text, _>(&self.caboose_board)?;
         pass.push_sql(" AND ");
+        self.from_sw_caboose.walk_ast(pass.reborrow())?;
+        pass.push_sql(".");
         pass.push_identifier(dsl_sw_caboose::git_commit::NAME)?;
         pass.push_sql(" = ");
         pass.push_bind_param::<sql_types::Text, _>(&self.caboose_git_commit)?;
         pass.push_sql(" AND ");
+        self.from_sw_caboose.walk_ast(pass.reborrow())?;
+        pass.push_sql(".");
         pass.push_identifier(dsl_sw_caboose::name::NAME)?;
         pass.push_sql(" = ");
         pass.push_bind_param::<sql_types::Text, _>(&self.caboose_name)?;
         pass.push_sql(" AND ");
+        self.from_sw_caboose.walk_ast(pass.reborrow())?;
+        pass.push_sql(".");
         pass.push_identifier(dsl_sw_caboose::version::NAME)?;
         pass.push_sql(" = ");
         pass.push_bind_param::<sql_types::Text, _>(&self.caboose_version)?;

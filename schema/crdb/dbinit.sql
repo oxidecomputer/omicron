@@ -2589,7 +2589,7 @@ CREATE TABLE IF NOT EXISTS inv_collection (
     id UUID PRIMARY KEY,
     time_started TIMESTAMPTZ NOT NULL,
     time_done TIMESTAMPTZ,
-    collector UUID NOT NULL,
+    collector TEXT NOT NULL,
     comment TEXT NOT NULL
 );
 -- Supports: finding latest collection to use, finding oldest collection to
@@ -2600,11 +2600,11 @@ CREATE INDEX IF NOT EXISTS inv_collection_by_time
 -- list of errors generated during a collection
 CREATE TABLE IF NOT EXISTS omicron.public.inv_collection_error (
     inv_collection_id UUID NOT NULL,
-    index INT4 NOT NULL,
+    idx INT4 NOT NULL,
     message TEXT
 );
 CREATE INDEX IF NOT EXISTS errors_by_collection
-    ON omicron.public.inv_collection_error (inv_collection_id, index);
+    ON omicron.public.inv_collection_error (inv_collection_id, idx);
 
 /* what kind of slot MGS reported a device in */
 CREATE TYPE IF NOT EXISTS omicron.public.sp_type AS ENUM (

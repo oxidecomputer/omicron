@@ -46,7 +46,7 @@ impl Collector {
         Ok(self.in_progress.build())
     }
 
-    pub async fn enumerate_client(
+    async fn enumerate_client(
         &mut self,
         client: &gateway_client::Client,
     ) -> Result<(), anyhow::Error> {

@@ -11,17 +11,20 @@
 
 use chrono::DateTime;
 use chrono::Utc;
-pub use gateway_client::types::SpType;
 pub use gateway_client::types::PowerState;
 pub use gateway_client::types::RotSlot;
+pub use gateway_client::types::SpType;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use strum::EnumIter;
+use uuid::Uuid;
 
 /// Results of collecting inventory from various Omicron components
 #[derive(Debug)]
 pub struct Collection {
+    /// unique identifier for this collection
+    pub id: Uuid,
     /// errors encountered during collection
     pub errors: Vec<anyhow::Error>,
     /// time the collection started

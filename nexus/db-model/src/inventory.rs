@@ -135,7 +135,7 @@ pub struct InvCollection {
 impl<'a> From<&'a Collection> for InvCollection {
     fn from(c: &'a Collection) -> Self {
         InvCollection {
-            id: Uuid::new_v4(),
+            id: c.id,
             time_started: c.time_started,
             time_done: c.time_done,
             collector: c.collector.clone(),
@@ -188,12 +188,12 @@ impl<'a> From<&'a Caboose> for SwCaboose {
 #[diesel(table_name = inv_collection_error)]
 pub struct InvCollectionError {
     pub inv_collection_id: Uuid,
-    pub index: i32,
+    pub idx: i32,
     pub message: String,
 }
 
 impl InvCollectionError {
-    pub fn new(inv_collection_id: Uuid, index: i32, message: String) -> Self {
-        InvCollectionError { inv_collection_id, index, message }
+    pub fn new(inv_collection_id: Uuid, idx: i32, message: String) -> Self {
+        InvCollectionError { inv_collection_id, idx, message }
     }
 }
