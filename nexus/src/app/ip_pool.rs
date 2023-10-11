@@ -56,21 +56,7 @@ impl super::Nexus {
         opctx: &OpContext,
         pool_params: &params::IpPoolCreate,
     ) -> CreateResult<db::model::IpPool> {
-        let silo_id = match pool_params.clone().silo {
-            Some(silo) => {
-                let (.., authz_silo) = self
-                    .silo_lookup(&opctx, silo)?
-                    .lookup_for(authz::Action::Read)
-                    .await?;
-                Some(authz_silo.id())
-            }
-            _ => None,
-        };
-        let pool = db::model::IpPool::new(
-            &pool_params.identity,
-            silo_id,
-            pool_params.is_default,
-        );
+        let pool = db::model::IpPool::new(&pool_params.identity);
         self.db_datastore.ip_pool_create(opctx, pool).await
     }
 

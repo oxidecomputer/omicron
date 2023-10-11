@@ -865,17 +865,12 @@ mod tests {
             &self,
             name: &str,
             range: IpRange,
-            is_default: bool,
+            _is_default: bool,
         ) {
-            let silo_id = self.opctx.authn.silo_required().unwrap().id();
-            let pool = IpPool::new(
-                &IdentityMetadataCreateParams {
-                    name: String::from(name).parse().unwrap(),
-                    description: format!("ip pool {}", name),
-                },
-                Some(silo_id),
-                is_default,
-            );
+            let pool = IpPool::new(&IdentityMetadataCreateParams {
+                name: String::from(name).parse().unwrap(),
+                description: format!("ip pool {}", name),
+            });
 
             let conn = self
                 .db_datastore
@@ -889,6 +884,9 @@ mod tests {
                 .execute_async(&*conn)
                 .await
                 .expect("Failed to create IP Pool");
+
+            let _silo_id = self.opctx.authn.silo_required().unwrap().id();
+            // TODO: associate with silo here to match previous behavior
 
             self.initialize_ip_pool(name, range).await;
         }

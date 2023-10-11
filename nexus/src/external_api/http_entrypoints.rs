@@ -41,9 +41,6 @@ use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup::ImageLookup;
 use nexus_db_queries::db::lookup::ImageParentLookup;
 use nexus_db_queries::db::model::Name;
-use nexus_db_queries::{
-    authz::ApiResource, db::fixed_data::silo::INTERNAL_SILO_ID,
-};
 use nexus_types::external_api::params::ProjectSelector;
 use nexus_types::{
     external_api::views::{SledInstance, Switch},
@@ -1161,15 +1158,16 @@ async fn project_ip_pool_view(
         } else {
             None
         };
-        let (authz_pool, pool) = nexus
+        let (_authz_pool, pool) = nexus
             .project_ip_pool_lookup(&opctx, &pool_selector, &project_lookup)?
             .fetch()
             .await?;
         // TODO(2148): once we've actualy implemented filtering to pools belonging to
         // the specified project, we can remove this internal check.
-        if pool.silo_id == Some(*INTERNAL_SILO_ID) {
-            return Err(authz_pool.not_found().into());
-        }
+        // TODO: do this? forget about it?
+        // if pool.silo_id == Some(*INTERNAL_SILO_ID) {
+        //     return Err(authz_pool.not_found().into());
+        // }
         Ok(HttpResponseOk(IpPool::from(pool)))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await

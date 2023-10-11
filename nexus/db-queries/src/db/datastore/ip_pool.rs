@@ -110,7 +110,7 @@ impl DataStore {
                 .or(ip_pool_resource::resource_type
                     .eq(IpPoolResourceType::Fleet)),
             )
-            .filter(ip_pool::is_default.eq(true))
+            .filter(ip_pool_resource::is_default.eq(true))
             .filter(ip_pool::time_deleted.is_null())
             // TODO: order by most specific first so we get the most specific
             // when we select the first one. alphabetical desc technically
@@ -480,6 +480,7 @@ impl DataStore {
 #[cfg(test)]
 mod test {
     use crate::db::datastore::datastore_test;
+    use crate::db::fixed_data::FLEET_ID;
     use crate::db::model::{IpPool, IpPoolResource, IpPoolResourceType};
     use assert_matches::assert_matches;
     use nexus_test_utils::db::test_setup_database;
@@ -499,8 +500,6 @@ mod test {
             datastore.ip_pools_fetch_default(&opctx).await.unwrap();
 
         assert_eq!(fleet_default_pool.identity.name.as_str(), "default");
-        assert!(fleet_default_pool.is_default);
-        assert_eq!(fleet_default_pool.silo_id, None);
 
         // unique index prevents second fleet-level default
         // TODO: create the pool, and then the failure is on the attempt to
@@ -509,13 +508,22 @@ mod test {
             name: "another-fleet-default".parse().unwrap(),
             description: "".to_string(),
         };
+        let second_default = datastore
+            .ip_pool_create(&opctx, IpPool::new(&identity))
+            .await
+            .expect("Failed to create pool");
         let err = datastore
-            .ip_pool_create(
+            .ip_pool_associate_resource(
                 &opctx,
-                IpPool::new(&identity, None, /*default= */ true),
+                IpPoolResource {
+                    ip_pool_id: second_default.id(),
+                    resource_type: IpPoolResourceType::Fleet,
+                    resource_id: *FLEET_ID,
+                    is_default: true,
+                },
             )
             .await
-            .expect_err("Failed to fail to create a second default fleet pool");
+            .expect_err("Failed to fail to make IP pool fleet default");
         assert_matches!(err, Error::ObjectAlreadyExists { .. });
 
         // when we fetch the default pool for a silo, if those scopes do not
@@ -528,13 +536,22 @@ mod test {
             name: "non-default-for-silo".parse().unwrap(),
             description: "".to_string(),
         };
-        datastore
-            .ip_pool_create(
-                &opctx,
-                IpPool::new(&identity, Some(silo_id), /*default= */ false),
-            )
+        let default_for_silo = datastore
+            .ip_pool_create(&opctx, IpPool::new(&identity))
             .await
             .expect("Failed to create silo non-default IP pool");
+        datastore
+            .ip_pool_associate_resource(
+                &opctx,
+                IpPoolResource {
+                    ip_pool_id: default_for_silo.id(),
+                    resource_type: IpPoolResourceType::Silo,
+                    resource_id: silo_id,
+                    is_default: false,
+                },
+            )
+            .await
+            .expect("Failed to associate IP pool with silo");
 
         // because that one was not a default, when we ask for the silo default
         // pool, we still get the fleet default
@@ -544,13 +561,16 @@ mod test {
             .expect("Failed to get silo default IP pool");
         assert_eq!(ip_pool.id(), fleet_default_pool.id());
 
+        // TODO: instead of a separate pool, this could now be done by
+        // associating the same pool? Would be nice to test both
+
         // now create a default pool for the silo
         let identity = IdentityMetadataCreateParams {
             name: "default-for-silo".parse().unwrap(),
             description: "".to_string(),
         };
         let default_for_silo = datastore
-            .ip_pool_create(&opctx, IpPool::new(&identity, Some(silo_id), true))
+            .ip_pool_create(&opctx, IpPool::new(&identity))
             .await
             .expect("Failed to create silo default IP pool");
         datastore
@@ -578,10 +598,22 @@ mod test {
             name: "second-default-for-silo".parse().unwrap(),
             description: "".to_string(),
         };
-        let err = datastore
-            .ip_pool_create(&opctx, IpPool::new(&identity, Some(silo_id), true))
+        let second_silo_default = datastore
+            .ip_pool_create(&opctx, IpPool::new(&identity))
             .await
-            .expect_err("Failed to fail to create second default pool");
+            .expect("Failed to create pool");
+        let err = datastore
+            .ip_pool_associate_resource(
+                &opctx,
+                IpPoolResource {
+                    ip_pool_id: second_silo_default.id(),
+                    resource_type: IpPoolResourceType::Silo,
+                    resource_id: silo_id,
+                    is_default: true,
+                },
+            )
+            .await
+            .expect_err("Failed to fail to set a second default pool for silo");
         assert_matches!(err, Error::ObjectAlreadyExists { .. });
 
         db.cleanup().await.unwrap();
