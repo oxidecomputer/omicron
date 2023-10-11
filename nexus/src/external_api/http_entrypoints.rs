@@ -1315,7 +1315,7 @@ async fn ip_pool_associate(
     path_params: Path<params::IpPoolPath>,
     resource_assoc: TypedBody<params::IpPoolResource>,
     // TODO: what does this return? Returning the association record seems silly
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+) -> Result<HttpResponseCreated<views::IpPoolResource>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
@@ -1326,7 +1326,7 @@ async fn ip_pool_associate(
         nexus
             .ip_pool_associate_resource(&opctx, &pool_lookup, &resource_assoc)
             .await?;
-        Ok(HttpResponseUpdatedNoContent())
+        Ok(HttpResponseCreated(views::IpPoolResource {}))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

@@ -246,6 +246,10 @@ pub struct IpPool {
     pub identity: IdentityMetadata,
 }
 
+// TODO: placeholder response for IP pool associate POST
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct IpPoolResource {}
+
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct IpPoolRange {
     pub id: Uuid,

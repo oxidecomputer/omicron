@@ -4606,8 +4606,15 @@
           "required": true
         },
         "responses": {
-          "204": {
-            "description": "resource updated"
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPoolResource"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"

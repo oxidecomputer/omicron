@@ -146,7 +146,7 @@ pub async fn create_ip_pool(
     .await;
 
     // make pool available for use anywhere in fleet
-    let _: () = object_create(
+    let _assoc: views::IpPoolResource = object_create(
         client,
         &format!("/v1/system/ip-pools/{pool_name}/associate"),
         &params::IpPoolResource {
