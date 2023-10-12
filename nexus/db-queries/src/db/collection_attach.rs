@@ -17,7 +17,7 @@ use super::cte_utils::{
     QueryFromClause, QuerySqlType, TableDefaultWhereClause,
 };
 use super::pool::DbConnection;
-use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionError};
+use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::associations::HasTable;
 use diesel::expression::{AsExpression, Expression};
 use diesel::helper_types::*;
@@ -26,6 +26,7 @@ use diesel::prelude::*;
 use diesel::query_builder::*;
 use diesel::query_dsl::methods as query_methods;
 use diesel::query_source::Table;
+use diesel::result::Error as DieselError;
 use diesel::sql_types::{BigInt, Nullable, SingleValue};
 use nexus_db_model::DatastoreAttachTargetConfig;
 use std::fmt::Debug;
@@ -299,7 +300,7 @@ where
 
 /// Result of [`AttachToCollectionStatement`] when executed asynchronously
 pub type AsyncAttachToCollectionResult<ResourceType, C> =
-    Result<(C, ResourceType), AttachError<ResourceType, C, ConnectionError>>;
+    Result<(C, ResourceType), AttachError<ResourceType, C, DieselError>>;
 
 /// Errors returned by [`AttachToCollectionStatement`].
 #[derive(Debug)]
@@ -998,9 +999,8 @@ mod test {
                 .set(resource::dsl::collection_id.eq(collection_id)),
         );
 
-        type TxnError = TransactionError<
-            AttachError<Resource, Collection, ConnectionError>,
-        >;
+        type TxnError =
+            TransactionError<AttachError<Resource, Collection, DieselError>>;
         let result = conn
             .transaction_async(|conn| async move {
                 attach_query.attach_and_get_result_async(&conn).await.map_err(
