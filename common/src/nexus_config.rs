@@ -311,6 +311,8 @@ pub struct BackgroundTaskConfig {
     pub dns_external: DnsTasksConfig,
     /// configuration for external endpoint list watcher
     pub external_endpoints: ExternalEndpointsConfig,
+    /// configuration for inventory tasks
+    pub inventory: InventoryConfig,
 }
 
 #[serde_as]
@@ -343,6 +345,14 @@ pub struct ExternalEndpointsConfig {
     pub period_secs: Duration,
     // Other policy around the TLS certificates could go here (e.g.,
     // allow/disallow wildcard certs, don't serve expired certs, etc.)
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct InventoryConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
 }
 
 /// Configuration for a nexus server
@@ -440,18 +450,15 @@ impl std::fmt::Display for SchemeName {
 
 #[cfg(test)]
 mod test {
-    use super::Tunables;
     use super::{
-        AuthnConfig, Config, ConsoleConfig, LoadError, PackageConfig,
-        SchemeName, TimeseriesDbConfig, UpdatesConfig,
+        AuthnConfig, BackgroundTaskConfig, Config, ConfigDropshotWithTls,
+        ConsoleConfig, Database, DeploymentConfig, DnsTasksConfig, DpdConfig,
+        ExternalEndpointsConfig, InternalDns, InventoryConfig, LoadError,
+        LoadErrorKind, PackageConfig, SchemeName, TimeseriesDbConfig, Tunables,
+        UpdatesConfig,
     };
     use crate::address::{Ipv6Subnet, RACK_PREFIX};
     use crate::api::internal::shared::SwitchLocation;
-    use crate::nexus_config::{
-        BackgroundTaskConfig, ConfigDropshotWithTls, Database,
-        DeploymentConfig, DnsTasksConfig, DpdConfig, ExternalEndpointsConfig,
-        InternalDns, LoadErrorKind,
-    };
     use dropshot::ConfigDropshot;
     use dropshot::ConfigLogging;
     use dropshot::ConfigLoggingIfExists;
@@ -680,6 +687,9 @@ mod test {
                         },
                         external_endpoints: ExternalEndpointsConfig {
                             period_secs: Duration::from_secs(9),
+                        },
+                        inventory: InventoryConfig {
+                            period_secs: Duration::from_secs(10),
                         }
                     },
                     default_region_allocation_strategy:
@@ -733,6 +743,7 @@ mod test {
             dns_external.period_secs_propagation = 7
             dns_external.max_concurrent_server_updates = 8
             external_endpoints.period_secs = 9
+            inventory.period_secs = 10
             [default_region_allocation_strategy]
             type = "random"
             "##,

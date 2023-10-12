@@ -9,6 +9,7 @@ use super::dns_config;
 use super::dns_propagation;
 use super::dns_servers;
 use super::external_endpoints;
+use super::inventory_collection;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
@@ -16,6 +17,7 @@ use omicron_common::nexus_config::BackgroundTaskConfig;
 use omicron_common::nexus_config::DnsTasksConfig;
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use uuid::Uuid;
 
 /// Describes ongoing background tasks and provides interfaces for working with
 /// them
@@ -42,6 +44,12 @@ pub struct BackgroundTasks {
     pub external_endpoints: tokio::sync::watch::Receiver<
         Option<external_endpoints::ExternalEndpoints>,
     >,
+
+    /// task handle for the task that collects inventory
+    pub task_inventory_collection: common::TaskHandle,
+    pub inventory: tokio::sync::watch::Receiver<
+        Option<nexus_types::inventory::Collection>,
+    >,
 }
 
 impl BackgroundTasks {
@@ -50,6 +58,8 @@ impl BackgroundTasks {
         opctx: &OpContext,
         datastore: Arc<DataStore>,
         config: &BackgroundTaskConfig,
+        nexus_id: Uuid,
+        resolver: internal_dns::resolver::Resolver,
     ) -> BackgroundTasks {
         let mut driver = common::Driver::new();
 
@@ -88,6 +98,28 @@ impl BackgroundTasks {
             (task, watcher_channel)
         };
 
+        // Background task: inventory collector
+        let (task_inventory_collection, inventory) = {
+            let watcher = inventory_collection::InventoryCollector::new(
+                resolver,
+                &nexus_id.to_string(),
+            );
+            let watcher_channel = watcher.watcher();
+            let task = driver.register(
+                String::from("inventory_collection"),
+                String::from(
+                    "collects hardware and software inventory data from the \
+                    whole system",
+                ),
+                config.inventory.period_secs,
+                Box::new(watcher),
+                opctx.child(BTreeMap::new()),
+                vec![],
+            );
+
+            (task, watcher_channel)
+        };
+
         BackgroundTasks {
             driver,
             task_internal_dns_config,
@@ -96,6 +128,8 @@ impl BackgroundTasks {
             task_external_dns_servers,
             task_external_endpoints,
             external_endpoints,
+            task_inventory_collection,
+            inventory,
         }
     }
 

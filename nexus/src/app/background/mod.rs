@@ -10,6 +10,8 @@ mod dns_propagation;
 mod dns_servers;
 mod external_endpoints;
 mod init;
+mod inventory_collection;
+// mod inventory_write;
 mod status;
 
 pub use common::Driver;
