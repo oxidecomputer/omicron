@@ -2557,7 +2557,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '7.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '8.0.1', NULL)
 ON CONFLICT DO NOTHING;
 
 CREATE TYPE IF NOT EXISTS omicron.public.ip_pool_resource_type AS ENUM (
