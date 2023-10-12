@@ -39,9 +39,8 @@ use uuid::Uuid;
 ///
 /// See: [crate::Client::initialize_db_with_version] for usage.
 ///
-/// TODO(https://github.com/oxidecomputer/omicron/issues/4271): The current
-/// implementation of versioning will wipe the metrics database if this number
-/// is incremented.
+/// TODO(#4271): The current implementation of versioning will wipe the metrics
+/// database if this number is incremented.
 pub const OXIMETER_VERSION: u64 = 1;
 
 // Wrapper type to represent a boolean in the database.
