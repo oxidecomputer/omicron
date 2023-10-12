@@ -1548,8 +1548,10 @@ mod test {
     use crate::app::saga::create_saga_dag;
     use crate::app::sagas::test_helpers;
     use crate::external_api::shared::IpRange;
-    use async_bb8_diesel::{AsyncRunQueryDsl, OptionalExtension};
-    use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
+    use async_bb8_diesel::AsyncRunQueryDsl;
+    use diesel::{
+        ExpressionMethods, OptionalExtension, QueryDsl, SelectableHelper,
+    };
     use dropshot::test_util::ClientTestContext;
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db::datastore::InstanceAndActiveVmm;

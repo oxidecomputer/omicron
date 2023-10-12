@@ -194,7 +194,7 @@ impl DataStore {
                         "No sleds can fit the requested instance",
                     )
                 }
-                TxnError::Connection(e) => {
+                TxnError::Database(e) => {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 }
             })

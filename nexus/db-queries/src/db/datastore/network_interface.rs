@@ -29,6 +29,7 @@ use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use diesel::result::Error as DieselError;
 use omicron_common::api::external;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::DeleteResult;
@@ -463,7 +464,7 @@ impl DataStore {
         #[derive(Debug)]
         enum NetworkInterfaceUpdateError {
             InstanceNotStopped,
-            FailedToUnsetPrimary(async_bb8_diesel::ConnectionError),
+            FailedToUnsetPrimary(DieselError),
         }
         type TxnError = TransactionError<NetworkInterfaceUpdateError>;
 

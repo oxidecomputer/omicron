@@ -35,8 +35,10 @@ if ! command -v cargo-hakari &> /dev/null; then
     if ! command -v cargo-binstall &> /dev/null; then
         # Fetch cargo binstall.
         echo "Installing cargo-binstall..."
-        curl --retry 3 -L --proto '=https' --tlsv1.2 -sSfO https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh
-        retry_command bash install-from-binstall-release.sh
+        tempdir=$(mktemp -d)
+        curl --retry 3 -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh -o "$tempdir"/install-from-binstall-release.sh
+        retry_command bash "$tempdir"/install-from-binstall-release.sh
+        rm -rf "$tempdir"
     fi
 
     # Install cargo-hakari.

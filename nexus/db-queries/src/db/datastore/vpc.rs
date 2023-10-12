@@ -10,7 +10,6 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
-use crate::db::error::diesel_result_optional;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
@@ -389,19 +388,18 @@ impl DataStore {
         // but we can't have NICs be a child of both tables at this point, and
         // we need to prevent VPC Subnets from being deleted while they have
         // NICs in them as well.
-        if diesel_result_optional(
-            vpc_subnet::dsl::vpc_subnet
-                .filter(vpc_subnet::dsl::vpc_id.eq(authz_vpc.id()))
-                .filter(vpc_subnet::dsl::time_deleted.is_null())
-                .select(vpc_subnet::dsl::id)
-                .limit(1)
-                .first_async::<Uuid>(
-                    &*self.pool_connection_authorized(opctx).await?,
-                )
-                .await,
-        )
-        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
-        .is_some()
+        if vpc_subnet::dsl::vpc_subnet
+            .filter(vpc_subnet::dsl::vpc_id.eq(authz_vpc.id()))
+            .filter(vpc_subnet::dsl::time_deleted.is_null())
+            .select(vpc_subnet::dsl::id)
+            .limit(1)
+            .first_async::<Uuid>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
+            .is_some()
         {
             return Err(Error::InvalidRequest {
                 message: String::from(
@@ -556,7 +554,7 @@ impl DataStore {
                 TxnError::CustomError(
                     FirewallUpdateError::CollectionNotFound,
                 ) => Error::not_found_by_id(ResourceType::Vpc, &authz_vpc.id()),
-                TxnError::Connection(e) => public_error_from_diesel(
+                TxnError::Database(e) => public_error_from_diesel(
                     e,
                     ErrorHandler::NotFoundByResource(authz_vpc),
                 ),
@@ -705,17 +703,16 @@ impl DataStore {
         let conn = self.pool_connection_authorized(opctx).await?;
 
         // Verify there are no child network interfaces in this VPC Subnet
-        if diesel_result_optional(
-            network_interface::dsl::network_interface
-                .filter(network_interface::dsl::subnet_id.eq(authz_subnet.id()))
-                .filter(network_interface::dsl::time_deleted.is_null())
-                .select(network_interface::dsl::id)
-                .limit(1)
-                .first_async::<Uuid>(&*conn)
-                .await,
-        )
-        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
-        .is_some()
+        if network_interface::dsl::network_interface
+            .filter(network_interface::dsl::subnet_id.eq(authz_subnet.id()))
+            .filter(network_interface::dsl::time_deleted.is_null())
+            .select(network_interface::dsl::id)
+            .limit(1)
+            .first_async::<Uuid>(&*conn)
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
+            .is_some()
         {
             return Err(Error::InvalidRequest {
                 message: String::from(

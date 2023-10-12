@@ -15,8 +15,8 @@ use crate::db::error::TransactionError;
 use crate::db::model::SiloGroup;
 use crate::db::model::SiloGroupMembership;
 use crate::db::pagination::paginated;
+use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
-use async_bb8_diesel::{AsyncConnection, OptionalExtension};
 use chrono::Utc;
 use diesel::prelude::*;
 use omicron_common::api::external::CreateResult;
@@ -237,8 +237,7 @@ impl DataStore {
                     "group {0} still has memberships",
                     id
                 )),
-
-                TxnError::Connection(error) => {
+                TxnError::Database(error) => {
                     public_error_from_diesel(error, ErrorHandler::Server)
                 }
             })
