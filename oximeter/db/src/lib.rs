@@ -329,23 +329,45 @@ pub(crate) type TimeseriesKey = u64;
 
 pub(crate) fn timeseries_key(sample: &Sample) -> TimeseriesKey {
     timeseries_key_for(
+        &sample.timeseries_name,
         sample.sorted_target_fields(),
         sample.sorted_metric_fields(),
+        sample.measurement.datum_type(),
     )
 }
 
-fn timeseries_key_for<'a>(
+// It's critical that values used for derivation of the timeseries_key are stable.
+// We use "bcs" to ensure stability of the derivation across hardware and rust toolchain revisions.
+fn canonicalize<T: Serialize + ?Sized>(what: &str, value: &T) -> Vec<u8> {
+    bcs::to_bytes(value)
+        .unwrap_or_else(|_| panic!("Failed to serialize {what}"))
+}
+
+fn timeseries_key_for(
+    timeseries_name: &str,
     target_fields: &BTreeMap<String, Field>,
     metric_fields: &BTreeMap<String, Field>,
+    datum_type: DatumType,
 ) -> TimeseriesKey {
+    // We use HighwayHasher primarily for stability - it should provide a stable
+    // hash for the values used to derive the timeseries_key.
     use highway::HighwayHasher;
     use std::hash::{Hash, Hasher};
+
+    // NOTE: The order of these ".hash" calls matters, changing them will change
+    // the derivation of the "timeseries_key". We have change-detector tests for
+    // modifications like this, but be cautious, making such a change will
+    // impact all currently-provisioned databases.
     let mut hasher = HighwayHasher::default();
-    for field in target_fields.values().chain(metric_fields.values()) {
-        bcs::to_bytes(&field)
-            .expect("Failed to serialized field to bytes")
-            .hash(&mut hasher);
+    canonicalize("timeseries name", timeseries_name).hash(&mut hasher);
+    for field in target_fields.values() {
+        canonicalize("target field", &field).hash(&mut hasher);
     }
+    for field in metric_fields.values() {
+        canonicalize("metric field", &field).hash(&mut hasher);
+    }
+    canonicalize("datum type", &datum_type).hash(&mut hasher);
+
     hasher.finish()
 }
 
@@ -468,7 +490,13 @@ mod tests {
                 Field { name: name.to_string(), value },
             )]);
             let metric_fields = BTreeMap::new();
-            let key = timeseries_key_for(&target_fields, &metric_fields);
+            let key = timeseries_key_for(
+                "timeseries name",
+                &target_fields,
+                &metric_fields,
+                // ... Not actually, but we are only trying to compare fields here.
+                DatumType::Bool,
+            );
             output.push(format!("{name} -> {key}"));
         }
 
