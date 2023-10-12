@@ -96,7 +96,8 @@ subprocess.workspace = true
 slog-async.workspace = true
 slog-term.workspace = true
 
-illumos-utils = { workspace = true, features = ["testing"] }
+illumos-utils = { workspace = true, features = ["testing", "tmp_keypath"] }
+sled-storage = { workspace = true, features = ["testing"] }
 
 #
 # Disable doc builds by default for our binaries to work around issue

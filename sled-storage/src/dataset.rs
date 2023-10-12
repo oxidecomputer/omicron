@@ -6,6 +6,7 @@
 
 use crate::keyfile::KeyFile;
 use camino::Utf8PathBuf;
+use cfg_if::cfg_if;
 use illumos_utils::zfs::{
     self, DestroyDatasetErrorVariant, EncryptionDetails, Keypath, Mountpoint,
     SizeDetails, Zfs,
@@ -26,10 +27,19 @@ pub const CRASH_DATASET: &'static str = "crash";
 pub const CLUSTER_DATASET: &'static str = "cluster";
 pub const CONFIG_DATASET: &'static str = "config";
 pub const M2_DEBUG_DATASET: &'static str = "debug";
+
+cfg_if! {
+    if #[cfg(any(test, feature = "testing"))] {
+        // Tuned for zone_bundle tests
+        pub const DEBUG_DATASET_QUOTA: usize = 100 * (1 << 10);
+    } else {
+        // TODO-correctness: This value of 100GiB is a pretty wild guess, and should be
+        // tuned as needed.
+        pub const DEBUG_DATASET_QUOTA: usize = 100 * (1 << 30);
+    }
+}
 // TODO-correctness: This value of 100GiB is a pretty wild guess, and should be
 // tuned as needed.
-pub const DEBUG_DATASET_QUOTA: usize = 100 * (1 << 30);
-// ditto.
 pub const DUMP_DATASET_QUOTA: usize = 100 * (1 << 30);
 // passed to zfs create -o compression=
 pub const DUMP_DATASET_COMPRESSION: &'static str = "gzip-9";

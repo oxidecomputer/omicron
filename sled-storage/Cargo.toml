@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 async-trait.workspace = true
 camino.workspace = true
+cfg-if.workspace = true
 derive_more.workspace = true
 glob.workspace = true
 illumos-utils.workspace = true
@@ -31,3 +32,7 @@ uuid.workspace = true
 illumos-utils = { workspace = true, features = ["tmp_keypath"] }
 omicron-test-utils.workspace = true
 camino-tempfile.workspace = true
+
+[features]
+# Quotas and the like can be shrunk via this feature
+testing = []

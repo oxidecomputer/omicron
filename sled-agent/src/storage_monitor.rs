@@ -60,6 +60,15 @@ pub struct StorageMonitorHandle {
     tx: mpsc::Sender<StorageMonitorMsg>,
 }
 
+impl StorageMonitorHandle {
+    pub async fn underlay_available(&self, underlay_access: UnderlayAccess) {
+        self.tx
+            .send(StorageMonitorMsg::UnderlayAvailable(underlay_access))
+            .await
+            .unwrap();
+    }
+}
+
 pub struct StorageMonitor {
     log: Logger,
     storage_manager: StorageHandle,
@@ -133,9 +142,6 @@ impl StorageMonitor {
                 let sled_id = underlay.sled_id;
                 self.underlay = Some(underlay);
                 self.notify_nexus_about_existing_resources(sled_id).await;
-                self.dump_setup
-                    .update_dumpdev_setup(&self.storage_resources.disks)
-                    .await;
             }
         }
     }
@@ -169,11 +175,6 @@ impl StorageMonitor {
                 &self.storage_resources,
                 &updated_resources,
             );
-            if nexus_updates.has_disk_updates() {
-                self.dump_setup
-                    .update_dumpdev_setup(&self.storage_resources.disks)
-                    .await;
-            }
 
             for put in nexus_updates.disk_puts {
                 self.physical_disk_notify(put.into()).await;
@@ -185,6 +186,8 @@ impl StorageMonitor {
                 self.add_zpool_notify(pool, put).await;
             }
         }
+        self.dump_setup.update_dumpdev_setup(&updated_resources.disks).await;
+
         // Save the updated `StorageResources`
         self.storage_resources = updated_resources;
     }
@@ -302,12 +305,6 @@ struct NexusUpdates {
     zpool_puts: Vec<(Pool, ZpoolPutRequest)>,
 }
 
-impl NexusUpdates {
-    fn has_disk_updates(&self) -> bool {
-        !self.disk_puts.is_empty() || !self.disk_deletes.is_empty()
-    }
-}
-
 fn compute_resource_diffs(
     log: &Logger,
     sled_id: &Uuid,
@@ -362,7 +359,7 @@ fn compute_resource_diffs(
 
     // Diff the existing resources with the update to see what has changed
     // This loop finds new disks and pools
-    for (disk_id, (updated_disk, updated_pool)) in updated.disks.iter() {
+    for (disk_id, (updated_disk, _)) in updated.disks.iter() {
         if !current.disks.contains_key(disk_id) {
             disk_puts.push(PhysicalDiskPutRequest {
                 sled_id: *sled_id,

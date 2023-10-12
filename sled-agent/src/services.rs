@@ -2937,6 +2937,7 @@ mod test {
     use super::*;
     use crate::bootstrap::secret_retriever::HardcodedSecretRetriever;
     use crate::params::{ServiceZoneService, ZoneType};
+    use illumos_utils::zpool::ZpoolName;
     use illumos_utils::{
         dladm::{
             Etherstub, MockDladm, BOOTSTRAP_ETHERSTUB_NAME,
@@ -2947,6 +2948,8 @@ mod test {
     };
     use key_manager::KeyManager;
     use omicron_common::address::OXIMETER_PORT;
+    use sled_storage::disk::{RawDisk, SyntheticDisk};
+
     use sled_storage::manager::{StorageHandle, StorageManager};
     use std::net::{Ipv6Addr, SocketAddrV6};
     use std::os::unix::process::ExitStatusExt;
@@ -3017,7 +3020,6 @@ mod test {
         let wait_ctx = svc::wait_for_service_context();
         wait_ctx.expect().return_once(|_, _| Ok(()));
 
-        // Import the manifest, enable the service
         let execute_ctx = illumos_utils::execute_context();
         execute_ctx.expect().times(..).returning(|_| {
             Ok(std::process::Output {
@@ -3161,6 +3163,22 @@ mod test {
         // are using the HardcodedSecretRetriever, so no need to wait for RSS
         // or anything to setup the LRTQ
         handle.key_manager_ready().await;
+
+        // Create some backing disks
+        let tempdir = camino_tempfile::Utf8TempDir::new().unwrap();
+
+        // These must be internal zpools
+        //let mut zpool_names = vec![];
+        let internal_zpool_name = ZpoolName::new_internal(Uuid::new_v4());
+        let internal_disk: RawDisk =
+            SyntheticDisk::new(internal_zpool_name).into();
+        handle.upsert_disk(internal_disk).await;
+        let external_zpool_name = ZpoolName::new_external(Uuid::new_v4());
+        let external_disk: RawDisk =
+            SyntheticDisk::new(external_zpool_name).into();
+        handle.upsert_disk(external_disk).await;
+
+        //zpool_names.push(internal_zpool_name);
         handle
     }
 

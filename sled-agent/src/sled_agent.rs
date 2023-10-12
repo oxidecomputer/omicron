@@ -19,6 +19,7 @@ use crate::params::{
     VpcFirewallRule, ZoneBundleMetadata, Zpool,
 };
 use crate::services::{self, ServiceManager};
+use crate::storage_monitor::UnderlayAccess;
 use crate::updates::{ConfigUpdates, UpdateManager};
 use crate::zone_bundle;
 use crate::zone_bundle::BundleError;
@@ -328,6 +329,16 @@ impl SledAgent {
             parent_log.new(o!("component" => "PortManager")),
             *sled_address.ip(),
         );
+
+        // Inform the `StorageMonitor` that the underlay is available so that
+        // it can try to contact nexus.
+        long_running_task_handles
+            .storage_monitor
+            .underlay_available(UnderlayAccess {
+                nexus_client: nexus_client.clone(),
+                sled_id: request.id,
+            })
+            .await;
 
         let instances = InstanceManager::new(
             parent_log.clone(),

@@ -7963,6 +7963,7 @@ dependencies = [
  "async-trait",
  "camino",
  "camino-tempfile",
+ "cfg-if 1.0.0",
  "derive_more",
  "glob",
  "illumos-utils",

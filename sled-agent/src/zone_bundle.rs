@@ -184,6 +184,7 @@ impl Inner {
     async fn bundle_directories(&self) -> Vec<Utf8PathBuf> {
         let resources = self.storage_handle.get_latest_resources().await;
         let expected = resources.all_zone_bundle_directories();
+        println!("dirs = {:?}", expected);
         let mut out = Vec::with_capacity(expected.len());
         for each in expected.into_iter() {
             if tokio::fs::create_dir_all(&each).await.is_ok() {
@@ -1772,7 +1773,6 @@ mod illumos_tests {
     use super::ZoneBundleInfo;
     use super::ZoneBundleMetadata;
     use super::ZoneBundler;
-    use super::ZFS;
     use crate::bootstrap::secret_retriever::HardcodedSecretRetriever;
     use anyhow::Context;
     use chrono::TimeZone;
@@ -1784,7 +1784,6 @@ mod illumos_tests {
     use sled_storage::manager::{StorageHandle, StorageManager};
     use slog::Drain;
     use slog::Logger;
-    use tokio::process::Command;
 
     #[tokio::test]
     async fn test_zfs_quota() {
@@ -1846,20 +1845,21 @@ mod illumos_tests {
         // or anything to setup the LRTQ
         handle.key_manager_ready().await;
 
-        // Put the zpools under /rpool
-        let dir =
-            camino::Utf8PathBuf::from(format!("/rpool/{}", Uuid::new_v4()));
+        let tempdir = camino_tempfile::Utf8TempDir::new().unwrap();
 
-        let internal_zpool_name = ZpoolName::new_internal(Uuid::new_v4());
-        let internal_disk: RawDisk =
-            SyntheticDisk::create_zpool(&dir, &internal_zpool_name).into();
-        let external_zpool_name = ZpoolName::new_external(Uuid::new_v4());
-        let external_disk: RawDisk =
-            SyntheticDisk::create_zpool(&dir, &external_zpool_name).into();
-        handle.upsert_disk(internal_disk).await;
-        handle.upsert_disk(external_disk).await;
-
-        (handle, vec![internal_zpool_name, external_zpool_name])
+        // These must be internal zpools
+        let mut zpool_names = vec![];
+        for _ in 0..2 {
+            let internal_zpool_name = ZpoolName::new_internal(Uuid::new_v4());
+            let internal_disk: RawDisk = SyntheticDisk::create_zpool(
+                tempdir.path(),
+                &internal_zpool_name,
+            )
+            .into();
+            handle.upsert_disk(internal_disk).await;
+            zpool_names.push(internal_zpool_name);
+        }
+        (handle, zpool_names)
     }
 
     impl ResourceWrapper {
@@ -1871,6 +1871,7 @@ mod illumos_tests {
             let (storage_handle, zpool_names) = setup_storage(&log).await;
             let resources = storage_handle.get_latest_resources().await;
             let dirs = resources.all_zone_bundle_directories();
+            info!(log, "Initial dirs = {:?}", dirs);
             Self { storage_handle, zpool_names, dirs }
         }
     }
@@ -1929,6 +1930,12 @@ mod illumos_tests {
         let context = ctx.bundler.cleanup_context().await;
         assert_eq!(context, new_context, "failed to update context");
     }
+
+    // Quota applied to test datasets.
+    //
+    // This needs to be at least this big lest we get "out of space" errors when
+    // creating. Not sure where those come from, but could be ZFS overhead.
+    const TEST_QUOTA: u64 = sled_storage::dataset::DEBUG_DATASET_QUOTA as u64;
 
     async fn run_test_with_zfs_dataset<T, Fut>(test: T)
     where
