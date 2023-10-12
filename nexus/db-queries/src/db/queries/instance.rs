@@ -7,6 +7,7 @@
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::QueryResult;
 use diesel::query_builder::{Query, QueryFragment, QueryId};
+use diesel::result::Error as DieselError;
 use diesel::sql_types::{Nullable, Uuid as SqlUuid};
 use diesel::{pg::Pg, query_builder::AstPass};
 use diesel::{Column, ExpressionMethods, QueryDsl, RunQueryDsl};
@@ -167,14 +168,10 @@ impl InstanceAndVmmUpdate {
         Self { instance_find, vmm_find, instance_update, vmm_update }
     }
 
-    pub async fn execute_and_check<ConnErr>(
+    pub async fn execute_and_check(
         self,
-        conn: &(impl async_bb8_diesel::AsyncConnection<DbConnection, ConnErr>
-              + Sync),
-    ) -> Result<InstanceAndVmmUpdateResult, ConnErr>
-    where
-        ConnErr: From<diesel::result::Error> + Send + 'static,
-    {
+        conn: &(impl async_bb8_diesel::AsyncConnection<DbConnection> + Sync),
+    ) -> Result<InstanceAndVmmUpdateResult, DieselError> {
         let (vmm_found, vmm_updated, instance_found, instance_updated) =
             self.get_result_async::<(Option<Uuid>,
                                      Option<Uuid>,
