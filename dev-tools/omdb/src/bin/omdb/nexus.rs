@@ -6,6 +6,7 @@
 
 use crate::Omdb;
 use anyhow::Context;
+use chrono::DateTime;
 use chrono::SecondsFormat;
 use chrono::Utc;
 use clap::Args;
@@ -478,6 +479,34 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 }
             }
         }
+    } else if name == "inventory_collection" {
+        #[derive(Deserialize)]
+        struct InventorySuccess {
+            collection_id: Uuid,
+            time_started: DateTime<Utc>,
+            time_done: DateTime<Utc>,
+        }
+
+        match serde_json::from_value::<InventorySuccess>(details.clone()) {
+            Err(error) => eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            ),
+            Ok(found_inventory) => {
+                println!(
+                    "    last collection id:      {}",
+                    found_inventory.collection_id
+                );
+                println!(
+                    "    last collection started: {}",
+                    found_inventory.time_started
+                );
+                println!(
+                    "    last collection done:    {}",
+                    found_inventory.time_done
+                );
+            }
+        };
     } else {
         println!(
             "warning: unknown background task: {:?} \

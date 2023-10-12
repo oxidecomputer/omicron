@@ -11,7 +11,6 @@ use futures::FutureExt;
 use internal_dns::ServiceName;
 use nexus_db_queries::context::OpContext;
 use nexus_types::inventory::Collection;
-use omicron_common::address::MGS_PORT;
 use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::watch;
@@ -87,20 +86,12 @@ async fn do_collect(
     log: &slog::Logger,
 ) -> Result<Collection, anyhow::Error> {
     // Find MGS clients.
-    // XXX-dap separate background task?
-    // XXX-dap definitely not a great way to do this.
-    let switch_zone_ips = resolver
-        .lookup_all_ipv6(ServiceName::Dendrite)
+    let mgs_clients = resolver
+        .lookup_all_socket_v6(ServiceName::ManagementGatewayService)
         .await
-        .context("looking up switch zone addresses")?;
-
-    // XXX-dap doubly bad (hardcoding port)
-    let mgs_clients = switch_zone_ips
+        .context("looking up MGS addresses")?
         .into_iter()
-        .map(|ip| {
-            let sockaddr = std::net::SocketAddr::V6(
-                std::net::SocketAddrV6::new(ip, MGS_PORT, 0, 0),
-            );
+        .map(|sockaddr| {
             let url = format!("http://{}", sockaddr);
             let log = log.new(o!("gateway_url" => url.clone()));
             Arc::new(gateway_client::Client::new(&url, log))
