@@ -2013,7 +2013,7 @@ mod tests {
                 ensure!(
                     data_index < root_event_index,
                     "last_root_event_index should *not* have been updated \
-                     but wasn't (current: {data_index}, new: {root_event_index}) \
+                     but was (current: {data_index}, new: {root_event_index}) \
                      for step {step_key:?} (event: {event:?})",
                 );
             }
