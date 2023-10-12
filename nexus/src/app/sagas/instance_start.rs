@@ -323,6 +323,8 @@ async fn sis_dpd_ensure(
     );
     let datastore = osagactx.datastore();
 
+    // Querying sleds requires fleet access; use the instance allocator context
+    // for this.
     let sled_uuid = sagactx.lookup::<Uuid>("sled_id")?;
     let (.., sled) = LookupPath::new(&osagactx.nexus().opctx_alloc, &datastore)
         .sled_id(sled_uuid)
@@ -330,9 +332,11 @@ async fn sis_dpd_ensure(
         .await
         .map_err(ActionError::action_failed)?;
 
+    // Querying boundary switches also requires fleet access and the use of the
+    // instance allocator context.
     let boundary_switches = osagactx
         .nexus()
-        .boundary_switches(&opctx)
+        .boundary_switches(&osagactx.nexus().opctx_alloc)
         .await
         .map_err(ActionError::action_failed)?;
 
