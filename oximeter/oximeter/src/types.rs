@@ -90,7 +90,15 @@ impl_field_type_from! { bool, FieldType::Bool }
 
 /// The `FieldValue` contains the value of a target or metric field.
 #[derive(
-    Clone, Debug, Hash, PartialEq, Eq, JsonSchema, Serialize, Deserialize,
+    Clone,
+    Debug,
+    Hash,
+    PartialEq,
+    Eq,
+    JsonSchema,
+    Serialize,
+    Deserialize,
+    strum::EnumCount,
 )]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum FieldValue {
@@ -761,6 +769,11 @@ impl Sample {
         self.target.fields.values()
     }
 
+    /// Return the sorted fields of this sample's target.
+    pub fn sorted_target_fields(&self) -> &BTreeMap<String, Field> {
+        &self.target.fields
+    }
+
     /// Return the name of this sample's metric.
     pub fn metric_name(&self) -> &str {
         &self.metric.name
@@ -769,6 +782,11 @@ impl Sample {
     /// Return the fields of this sample's metric.
     pub fn metric_fields(&self) -> impl Iterator<Item = &Field> {
         self.metric.fields.values()
+    }
+
+    /// Return the sorted fields of this sample's metric
+    pub fn sorted_metric_fields(&self) -> &BTreeMap<String, Field> {
+        &self.metric.fields
     }
 
     // Check validity of field names for the target and metric. Currently this

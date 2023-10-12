@@ -10,7 +10,6 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::datastore::RunnableQuery;
-use crate::db::error::diesel_result_optional;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
@@ -261,7 +260,7 @@ impl DataStore {
         .await
         .map_err(|e| match e {
             TransactionError::CustomError(e) => e,
-            TransactionError::Connection(e) => {
+            TransactionError::Database(e) => {
                 public_error_from_diesel(e, ErrorHandler::Server)
             }
         })
@@ -338,16 +337,15 @@ impl DataStore {
         // Make sure there are no projects present within this silo.
         let id = authz_silo.id();
         let rcgen = db_silo.rcgen;
-        let project_found = diesel_result_optional(
-            project::dsl::project
-                .filter(project::dsl::silo_id.eq(id))
-                .filter(project::dsl::time_deleted.is_null())
-                .select(project::dsl::id)
-                .limit(1)
-                .first_async::<Uuid>(&*conn)
-                .await,
-        )
-        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        let project_found = project::dsl::project
+            .filter(project::dsl::silo_id.eq(id))
+            .filter(project::dsl::time_deleted.is_null())
+            .select(project::dsl::id)
+            .limit(1)
+            .first_async::<Uuid>(&*conn)
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         if project_found.is_some() {
             return Err(Error::InvalidRequest {
@@ -395,7 +393,7 @@ impl DataStore {
         .await
         .map_err(|e| match e {
             TxnError::CustomError(e) => e,
-            TxnError::Connection(e) => {
+            TxnError::Database(e) => {
                 public_error_from_diesel(e, ErrorHandler::Server)
             }
         })?;
