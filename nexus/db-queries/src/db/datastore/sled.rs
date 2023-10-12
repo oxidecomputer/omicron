@@ -115,6 +115,7 @@ impl DataStore {
                         resource_dsl::hardware_threads::NAME
                     )) + resources.hardware_threads)
                         .le(sled_dsl::usable_hardware_threads);
+
                 // This answers the boolean question:
                 // "Does the SUM of all RAM usage, plus the one we're trying
                 // to allocate, consume less RAM than exists on the sled?"
@@ -125,6 +126,15 @@ impl DataStore {
                     )) + resources.rss_ram)
                         .le(sled_dsl::usable_physical_ram);
 
+                // Determine whether adding this service's reservoir allocation
+                // to what's allocated on the sled would avoid going over quota.
+                let sled_has_space_in_reservoir =
+                    (diesel::dsl::sql::<diesel::sql_types::BigInt>(&format!(
+                        "COALESCE(SUM(CAST({} as INT8)), 0)",
+                        resource_dsl::reservoir_ram::NAME
+                    )) + resources.reservoir_ram)
+                        .le(sled_dsl::reservoir_size);
+
                 // Generate a query describing all of the sleds that have space
                 // for this reservation.
                 let mut sled_targets = sled_dsl::sled
@@ -134,8 +144,9 @@ impl DataStore {
                     )
                     .group_by(sled_dsl::id)
                     .having(
-                        sled_has_space_for_threads.and(sled_has_space_for_rss),
-                        // TODO: We should also validate the reservoir space, when it exists.
+                        sled_has_space_for_threads
+                            .and(sled_has_space_for_rss)
+                            .and(sled_has_space_in_reservoir),
                     )
                     .filter(sled_dsl::time_deleted.is_null())
                     .select(sled_dsl::id)
@@ -183,7 +194,7 @@ impl DataStore {
                         "No sleds can fit the requested instance",
                     )
                 }
-                TxnError::Connection(e) => {
+                TxnError::Database(e) => {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 }
             })

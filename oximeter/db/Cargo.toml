@@ -8,10 +8,12 @@ license = "MPL-2.0"
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true
+bcs.workspace = true
 bytes = { workspace = true, features = [ "serde" ] }
 chrono.workspace = true
 clap.workspace = true
 dropshot.workspace = true
+highway.workspace = true
 oximeter.workspace = true
 regex.workspace = true
 reqwest = { workspace = true, features = [ "json" ] }
@@ -28,9 +30,11 @@ uuid.workspace = true
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
+expectorate.workspace = true
 itertools.workspace = true
 omicron-test-utils.workspace = true
 slog-dtrace.workspace = true
+strum.workspace = true
 
 [[bin]]
 name = "oxdb"

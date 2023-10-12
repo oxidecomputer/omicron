@@ -328,19 +328,46 @@ pub struct TimeseriesPageSelector {
 pub(crate) type TimeseriesKey = u64;
 
 pub(crate) fn timeseries_key(sample: &Sample) -> TimeseriesKey {
-    timeseries_key_for(sample.target_fields(), sample.metric_fields())
+    timeseries_key_for(
+        &sample.timeseries_name,
+        sample.sorted_target_fields(),
+        sample.sorted_metric_fields(),
+        sample.measurement.datum_type(),
+    )
 }
 
-pub(crate) fn timeseries_key_for<'a>(
-    target_fields: impl Iterator<Item = &'a Field>,
-    metric_fields: impl Iterator<Item = &'a Field>,
+// It's critical that values used for derivation of the timeseries_key are stable.
+// We use "bcs" to ensure stability of the derivation across hardware and rust toolchain revisions.
+fn canonicalize<T: Serialize + ?Sized>(what: &str, value: &T) -> Vec<u8> {
+    bcs::to_bytes(value)
+        .unwrap_or_else(|_| panic!("Failed to serialize {what}"))
+}
+
+fn timeseries_key_for(
+    timeseries_name: &str,
+    target_fields: &BTreeMap<String, Field>,
+    metric_fields: &BTreeMap<String, Field>,
+    datum_type: DatumType,
 ) -> TimeseriesKey {
-    use std::collections::hash_map::DefaultHasher;
+    // We use HighwayHasher primarily for stability - it should provide a stable
+    // hash for the values used to derive the timeseries_key.
+    use highway::HighwayHasher;
     use std::hash::{Hash, Hasher};
-    let mut hasher = DefaultHasher::new();
-    for field in target_fields.chain(metric_fields) {
-        field.hash(&mut hasher);
+
+    // NOTE: The order of these ".hash" calls matters, changing them will change
+    // the derivation of the "timeseries_key". We have change-detector tests for
+    // modifications like this, but be cautious, making such a change will
+    // impact all currently-provisioned databases.
+    let mut hasher = HighwayHasher::default();
+    canonicalize("timeseries name", timeseries_name).hash(&mut hasher);
+    for field in target_fields.values() {
+        canonicalize("target field", &field).hash(&mut hasher);
     }
+    for field in metric_fields.values() {
+        canonicalize("metric field", &field).hash(&mut hasher);
+    }
+    canonicalize("datum type", &datum_type).hash(&mut hasher);
+
     hasher.finish()
 }
 
@@ -370,8 +397,9 @@ const TIMESERIES_NAME_REGEX: &str =
 
 #[cfg(test)]
 mod tests {
-    use super::TimeseriesName;
+    use super::*;
     use std::convert::TryFrom;
+    use uuid::Uuid;
 
     #[test]
     fn test_timeseries_name() {
@@ -392,5 +420,89 @@ mod tests {
         assert!(TimeseriesName::try_from(":b").is_err());
         assert!(TimeseriesName::try_from("a:").is_err());
         assert!(TimeseriesName::try_from("123").is_err());
+    }
+
+    // Validates that the timeseries_key stability for a sample is stable.
+    #[test]
+    fn test_timeseries_key_sample_stability() {
+        #[derive(oximeter::Target)]
+        pub struct TestTarget {
+            pub name: String,
+            pub num: i64,
+        }
+
+        #[derive(oximeter::Metric)]
+        pub struct TestMetric {
+            pub id: Uuid,
+            pub datum: i64,
+        }
+
+        let target = TestTarget { name: String::from("Hello"), num: 1337 };
+        let metric = TestMetric { id: Uuid::nil(), datum: 0x1de };
+        let sample = Sample::new(&target, &metric).unwrap();
+        let key = super::timeseries_key(&sample);
+
+        expectorate::assert_contents(
+            "test-output/sample-timeseries-key.txt",
+            &format!("{key}"),
+        );
+    }
+
+    // Validates that the timeseries_key stability for specific fields is
+    // stable.
+    #[test]
+    fn test_timeseries_key_field_stability() {
+        use oximeter::{Field, FieldValue};
+        use strum::EnumCount;
+
+        let values = [
+            ("string", FieldValue::String(String::default())),
+            ("i8", FieldValue::I8(-0x0A)),
+            ("u8", FieldValue::U8(0x0A)),
+            ("i16", FieldValue::I16(-0x0ABC)),
+            ("u16", FieldValue::U16(0x0ABC)),
+            ("i32", FieldValue::I32(-0x0ABC_0000)),
+            ("u32", FieldValue::U32(0x0ABC_0000)),
+            ("i64", FieldValue::I64(-0x0ABC_0000_0000_0000)),
+            ("u64", FieldValue::U64(0x0ABC_0000_0000_0000)),
+            (
+                "ipaddr",
+                FieldValue::IpAddr(std::net::IpAddr::V4(
+                    std::net::Ipv4Addr::LOCALHOST,
+                )),
+            ),
+            ("uuid", FieldValue::Uuid(uuid::Uuid::nil())),
+            ("bool", FieldValue::Bool(true)),
+        ];
+
+        // Exhaustively testing enums is a bit tricky. Although it's easy to
+        // check "all variants of an enum are matched", it harder to test "all
+        // variants of an enum have been supplied".
+        //
+        // We use this as a proxy, confirming that each variant is represented
+        // here for the purposes of tracking stability.
+        assert_eq!(values.len(), FieldValue::COUNT);
+
+        let mut output = vec![];
+        for (name, value) in values {
+            let target_fields = BTreeMap::from([(
+                "field".to_string(),
+                Field { name: name.to_string(), value },
+            )]);
+            let metric_fields = BTreeMap::new();
+            let key = timeseries_key_for(
+                "timeseries name",
+                &target_fields,
+                &metric_fields,
+                // ... Not actually, but we are only trying to compare fields here.
+                DatumType::Bool,
+            );
+            output.push(format!("{name} -> {key}"));
+        }
+
+        expectorate::assert_contents(
+            "test-output/field-timeseries-keys.txt",
+            &output.join("\n"),
+        );
     }
 }

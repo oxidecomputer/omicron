@@ -22,14 +22,23 @@ function retry_command {
     done
 }
 
+# If cargo isn't present, skip this -- it implies that a non-Rust dependency was
+# updated.
+if ! command -v cargo &> /dev/null; then
+    echo "Skipping cargo-hakari update because cargo is not present."
+    exit 0
+fi
+
 # Download and install cargo-hakari if it is not already installed.
 if ! command -v cargo-hakari &> /dev/null; then
     # Need cargo-binstall to install cargo-hakari.
     if ! command -v cargo-binstall &> /dev/null; then
         # Fetch cargo binstall.
         echo "Installing cargo-binstall..."
-        curl --retry 3 -L --proto '=https' --tlsv1.2 -sSfO https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh
-        retry_command bash install-from-binstall-release.sh
+        tempdir=$(mktemp -d)
+        curl --retry 3 -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh -o "$tempdir"/install-from-binstall-release.sh
+        retry_command bash "$tempdir"/install-from-binstall-release.sh
+        rm -rf "$tempdir"
     fi
 
     # Install cargo-hakari.
