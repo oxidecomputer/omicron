@@ -769,6 +769,11 @@ impl Sample {
         self.target.fields.values()
     }
 
+    /// Return the sorted fields of this sample's target.
+    pub fn sorted_target_fields(&self) -> &BTreeMap<String, Field> {
+        &self.target.fields
+    }
+
     /// Return the name of this sample's metric.
     pub fn metric_name(&self) -> &str {
         &self.metric.name
@@ -777,6 +782,11 @@ impl Sample {
     /// Return the fields of this sample's metric.
     pub fn metric_fields(&self) -> impl Iterator<Item = &Field> {
         self.metric.fields.values()
+    }
+
+    /// Return the sorted fields of this sample's metric
+    pub fn sorted_metric_fields(&self) -> &BTreeMap<String, Field> {
+        &self.metric.fields
     }
 
     // Check validity of field names for the target and metric. Currently this

@@ -328,17 +328,20 @@ pub struct TimeseriesPageSelector {
 pub(crate) type TimeseriesKey = u64;
 
 pub(crate) fn timeseries_key(sample: &Sample) -> TimeseriesKey {
-    timeseries_key_for(sample.target_fields(), sample.metric_fields())
+    timeseries_key_for(
+        sample.sorted_target_fields(),
+        sample.sorted_metric_fields(),
+    )
 }
 
-pub(crate) fn timeseries_key_for<'a>(
-    target_fields: impl Iterator<Item = &'a Field>,
-    metric_fields: impl Iterator<Item = &'a Field>,
+fn timeseries_key_for<'a>(
+    target_fields: &BTreeMap<String, Field>,
+    metric_fields: &BTreeMap<String, Field>,
 ) -> TimeseriesKey {
     use highway::HighwayHasher;
     use std::hash::{Hash, Hasher};
     let mut hasher = HighwayHasher::default();
-    for field in target_fields.chain(metric_fields) {
+    for field in target_fields.values().chain(metric_fields.values()) {
         bcs::to_bytes(&field)
             .expect("Failed to serialized field to bytes")
             .hash(&mut hasher);
@@ -460,10 +463,12 @@ mod tests {
 
         let mut output = vec![];
         for (name, value) in values {
-            let key = timeseries_key_for(
-                [&Field { name: name.to_string(), value }].into_iter(),
-                [].into_iter(),
-            );
+            let target_fields = BTreeMap::from([(
+                "field".to_string(),
+                Field { name: name.to_string(), value },
+            )]);
+            let metric_fields = BTreeMap::new();
+            let key = timeseries_key_for(&target_fields, &metric_fields);
             output.push(format!("{name} -> {key}"));
         }
 
