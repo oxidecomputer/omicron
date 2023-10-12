@@ -372,8 +372,9 @@ const TIMESERIES_NAME_REGEX: &str =
 
 #[cfg(test)]
 mod tests {
-    use super::TimeseriesName;
+    use super::*;
     use std::convert::TryFrom;
+    use uuid::Uuid;
 
     #[test]
     fn test_timeseries_name() {
@@ -396,46 +397,36 @@ mod tests {
         assert!(TimeseriesName::try_from("123").is_err());
     }
 
+    // Validates that the timeseries_key stability for a sample is stable.
     #[test]
-    fn test_timeseries_key_generation_hashes_fields_sequentially() {
-        use super::timeseries_key_for;
-        use oximeter::{Field, FieldValue};
+    fn test_timeseries_key_sample_stability() {
+        #[derive(oximeter::Target)]
+        pub struct TestTarget {
+            pub name: String,
+            pub num: i64,
+        }
 
-        let f = |name: &str, value| Field { name: name.to_string(), value };
+        #[derive(oximeter::Metric)]
+        pub struct TestMetric {
+            pub id: Uuid,
+            pub datum: i64,
+        }
 
-        // Confirm that "targets" and "metrics" are interchangeable,
-        // we just hash everything sequentially.
-        assert_eq!(
-            timeseries_key_for(
-                [&f("a", FieldValue::String("a".to_string()))].into_iter(),
-                [&f("b", FieldValue::String("b".to_string()))].into_iter(),
-            ),
-            timeseries_key_for(
-                [
-                    &f("a", FieldValue::String("a".to_string())),
-                    &f("b", FieldValue::String("b".to_string())),
-                ]
-                .into_iter(),
-                [].into_iter(),
-            ),
-        );
+        let target = TestTarget { name: String::from("Hello"), num: 1337 };
+        let metric = TestMetric { id: Uuid::nil(), datum: 0x1de };
+        let sample = Sample::new(&target, &metric).unwrap();
+        let key = super::timeseries_key(&sample);
 
-        // However, order still matters ("a, b" != "b, a")
-        assert_ne!(
-            timeseries_key_for(
-                [&f("a", FieldValue::String("a".to_string()))].into_iter(),
-                [&f("b", FieldValue::String("b".to_string()))].into_iter(),
-            ),
-            timeseries_key_for(
-                [&f("b", FieldValue::String("b".to_string()))].into_iter(),
-                [&f("a", FieldValue::String("a".to_string()))].into_iter(),
-            ),
+        expectorate::assert_contents(
+            "test-output/sample-timeseries-key.txt",
+            &format!("{key}"),
         );
     }
 
+    // Validates that the timeseries_key stability for specific fields is
+    // stable.
     #[test]
-    fn test_timeseries_key_stability() {
-        use super::timeseries_key_for;
+    fn test_timeseries_key_field_stability() {
         use oximeter::{Field, FieldValue};
         use strum::EnumCount;
 
@@ -477,7 +468,7 @@ mod tests {
         }
 
         expectorate::assert_contents(
-            "test-output/timeseries-keys.txt",
+            "test-output/field-timeseries-keys.txt",
             &output.join("\n"),
         );
     }
