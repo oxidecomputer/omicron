@@ -42,6 +42,11 @@ declare_saga_actions! {
         + sis_alloc_propolis_ip
     }
 
+    ADD_VIRTUAL_RESOURCES -> "virtual_resources" {
+        + sis_account_virtual_resources
+        - sis_account_virtual_resources_undo
+    }
+
     CREATE_VMM_RECORD -> "vmm_record" {
         + sis_create_vmm_record
         - sis_destroy_vmm_record
@@ -96,6 +101,7 @@ impl NexusSaga for SagaInstanceStart {
 
         builder.append(alloc_server_action());
         builder.append(alloc_propolis_ip_action());
+        builder.append(add_virtual_resources_action());
         builder.append(create_vmm_record_action());
         builder.append(mark_as_starting_action());
         builder.append(dpd_ensure_action());
@@ -147,6 +153,56 @@ async fn sis_alloc_propolis_ip(
     );
     let sled_uuid = sagactx.lookup::<Uuid>("sled_id")?;
     allocate_sled_ipv6(&opctx, sagactx.user_data().datastore(), sled_uuid).await
+}
+
+async fn sis_account_virtual_resources(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let instance_id = params.db_instance.id();
+
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+    osagactx
+        .datastore()
+        .virtual_provisioning_collection_insert_instance(
+            &opctx,
+            instance_id,
+            params.db_instance.project_id,
+            i64::from(params.db_instance.ncpus.0 .0),
+            nexus_db_model::ByteCount(*params.db_instance.memory),
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
+    Ok(())
+}
+
+async fn sis_account_virtual_resources_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let instance_id = params.db_instance.id();
+
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+    osagactx
+        .datastore()
+        .virtual_provisioning_collection_delete_instance(
+            &opctx,
+            instance_id,
+            params.db_instance.project_id,
+            i64::from(params.db_instance.ncpus.0 .0),
+            nexus_db_model::ByteCount(*params.db_instance.memory),
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
+    Ok(())
 }
 
 async fn sis_create_vmm_record(

@@ -942,7 +942,7 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
 
     assert_metrics(cptestctx, project_id, 0, 0, 0).await;
 
-    // Create an instance.
+    // Create and start an instance.
     let instance_name = "just-rainsticks";
     create_instance(client, PROJECT_NAME, instance_name).await;
     let virtual_provisioning_collection = datastore
@@ -955,27 +955,22 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
         ByteCount::from_gibibytes_u32(1),
     );
 
-    // Stop the instance
+    // Stop the instance. This should cause the relevant resources to be
+    // deprovisioned.
     let instance =
         instance_post(&client, instance_name, InstanceOp::Stop).await;
     instance_simulate(nexus, &instance.identity.id).await;
     let instance =
         instance_get(&client, &get_instance_url(&instance_name)).await;
     assert_eq!(instance.runtime.run_state, InstanceState::Stopped);
-    // NOTE: I think it's arguably "more correct" to identify that the
-    // number of CPUs being used by guests at this point is actually "0",
-    // not "4", because the instance is stopped (same re: RAM usage).
-    //
-    // However, for implementation reasons, this is complicated (we have a
-    // tendency to update the runtime without checking the prior state, which
-    // makes edge-triggered behavior trickier to notice).
+
     let virtual_provisioning_collection = datastore
         .virtual_provisioning_collection_get(&opctx, project_id)
         .await
         .unwrap();
-    let expected_cpus = 4;
+    let expected_cpus = 0;
     let expected_ram =
-        i64::try_from(ByteCount::from_gibibytes_u32(1).to_bytes()).unwrap();
+        i64::try_from(ByteCount::from_gibibytes_u32(0).to_bytes()).unwrap();
     assert_eq!(virtual_provisioning_collection.cpus_provisioned, expected_cpus);
     assert_eq!(
         i64::from(virtual_provisioning_collection.ram_provisioned.0),
@@ -983,7 +978,7 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
     );
     assert_metrics(cptestctx, project_id, 0, expected_cpus, expected_ram).await;
 
-    // Stop the instance
+    // Delete the instance.
     NexusRequest::object_delete(client, &get_instance_url(&instance_name))
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
@@ -997,6 +992,130 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(virtual_provisioning_collection.cpus_provisioned, 0);
     assert_eq!(virtual_provisioning_collection.ram_provisioned.to_bytes(), 0);
     assert_metrics(cptestctx, project_id, 0, 0, 0).await;
+}
+
+#[nexus_test]
+async fn test_instance_metrics_with_migration(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let apictx = &cptestctx.server.apictx();
+    let nexus = &apictx.nexus;
+    let instance_name = "bird-ecology";
+
+    // Create a second sled to migrate to/from.
+    let default_sled_id: Uuid =
+        nexus_test_utils::SLED_AGENT_UUID.parse().unwrap();
+    let update_dir = Utf8Path::new("/should/be/unused");
+    let other_sled_id = Uuid::new_v4();
+    let _other_sa = nexus_test_utils::start_sled_agent(
+        cptestctx.logctx.log.new(o!("sled_id" => other_sled_id.to_string())),
+        cptestctx.server.get_http_server_internal_address().await,
+        other_sled_id,
+        &update_dir,
+        sim::SimMode::Explicit,
+    )
+    .await
+    .unwrap();
+
+    let project_id = create_org_and_project(&client).await;
+    let instance_url = get_instance_url(instance_name);
+
+    // Explicitly create an instance with no disks. Simulated sled agent assumes
+    // that disks are co-located with their instances.
+    let instance = nexus_test_utils::resource_helpers::create_instance_with(
+        client,
+        PROJECT_NAME,
+        instance_name,
+        &params::InstanceNetworkInterfaceAttachment::Default,
+        Vec::<params::InstanceDiskAttachment>::new(),
+        Vec::<params::ExternalIpCreate>::new(),
+    )
+    .await;
+    let instance_id = instance.identity.id;
+
+    // Poke the instance into an active state.
+    instance_simulate(nexus, &instance_id).await;
+    let instance_next = instance_get(&client, &instance_url).await;
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
+
+    // The instance should be provisioned while it's in the running state.
+    let nexus = &apictx.nexus;
+    let datastore = nexus.datastore();
+    let check_provisioning_state = |cpus: i64, mem_gib: u32| async move {
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.new(o!()),
+            datastore.clone(),
+        );
+        let virtual_provisioning_collection = datastore
+            .virtual_provisioning_collection_get(&opctx, project_id)
+            .await
+            .unwrap();
+        assert_eq!(
+            virtual_provisioning_collection.cpus_provisioned,
+            cpus.clone()
+        );
+        assert_eq!(
+            virtual_provisioning_collection.ram_provisioned.0,
+            ByteCount::from_gibibytes_u32(mem_gib)
+        );
+    };
+
+    check_provisioning_state(4, 1).await;
+
+    // Request migration to the other sled. This reserves resources on the
+    // target sled, but shouldn't change the virtual provisioning counters.
+    let original_sled = nexus
+        .instance_sled_id(&instance_id)
+        .await
+        .unwrap()
+        .expect("running instance should have a sled");
+
+    let dst_sled_id = if original_sled == default_sled_id {
+        other_sled_id
+    } else {
+        default_sled_id
+    };
+
+    let migrate_url =
+        format!("/v1/instances/{}/migrate", &instance_id.to_string());
+    let _ = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &migrate_url)
+            .body(Some(&params::InstanceMigrate { dst_sled_id }))
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<Instance>()
+    .unwrap();
+
+    check_provisioning_state(4, 1).await;
+
+    // Complete migration on the target. Simulated migrations always succeed.
+    // After this the instance should be running and should continue to appear
+    // to be provisioned.
+    instance_simulate_on_sled(cptestctx, nexus, dst_sled_id, instance_id).await;
+    let instance = instance_get(&client, &instance_url).await;
+    assert_eq!(instance.runtime.run_state, InstanceState::Running);
+
+    check_provisioning_state(4, 1).await;
+
+    // Now stop the instance. This should retire the instance's active Propolis
+    // and cause the virtual provisioning charges to be released. Note that
+    // the source sled still has an active resource charge for the source
+    // instance (whose demise wasn't simulated here), but this is intentionally
+    // not reflected in the virtual provisioning counters (which reflect the
+    // logical states of instances ignoring migration).
+    let instance =
+        instance_post(&client, instance_name, InstanceOp::Stop).await;
+    instance_simulate(nexus, &instance.identity.id).await;
+    let instance =
+        instance_get(&client, &get_instance_url(&instance_name)).await;
+    assert_eq!(instance.runtime.run_state, InstanceState::Stopped);
+
+    check_provisioning_state(0, 0).await;
 }
 
 #[nexus_test]
