@@ -4,7 +4,8 @@
 
 use crate::impl_enum_type;
 use crate::schema::{
-    hw_baseboard_id, inv_collection, inv_collection_error, sw_caboose,
+    hw_baseboard_id, inv_caboose, inv_collection, inv_collection_error,
+    inv_root_of_trust, inv_service_processor, sw_caboose,
 };
 use chrono::DateTime;
 use chrono::Utc;
@@ -127,7 +128,7 @@ impl From<nexus_types::inventory::SpType> for SpType {
 pub struct InvCollection {
     pub id: Uuid,
     pub time_started: DateTime<Utc>,
-    pub time_done: DateTime<Utc>,
+    pub time_done: Option<DateTime<Utc>>,
     pub collector: String,
     pub comment: String,
 }
@@ -137,7 +138,7 @@ impl<'a> From<&'a Collection> for InvCollection {
         InvCollection {
             id: c.id,
             time_started: c.time_started,
-            time_done: c.time_done,
+            time_done: Some(c.time_done),
             collector: c.collector.clone(),
             comment: c.comment.clone(),
         }
@@ -162,7 +163,17 @@ impl<'a> From<&'a BaseboardId> for HwBaseboardId {
     }
 }
 
-#[derive(Queryable, Insertable, Clone, Debug, Selectable)]
+#[derive(
+    Queryable,
+    Insertable,
+    Clone,
+    Debug,
+    Selectable,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+)]
 #[diesel(table_name = sw_caboose)]
 pub struct SwCaboose {
     pub id: Uuid,
@@ -196,4 +207,51 @@ impl InvCollectionError {
     pub fn new(inv_collection_id: Uuid, idx: i32, message: String) -> Self {
         InvCollectionError { inv_collection_id, idx, message }
     }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable)]
+#[diesel(table_name = inv_service_processor)]
+pub struct InvServiceProcessor {
+    pub inv_collection_id: Uuid,
+    pub hw_baseboard_id: Uuid,
+    pub time_collected: DateTime<Utc>,
+    pub source: String,
+
+    pub sp_type: SpType,
+    // XXX-dap newtype all around
+    pub sp_slot: i32,
+
+    // XXX-dap newtype all around
+    // XXX-dap numeric types?
+    pub baseboard_revision: i64,
+    pub hubris_archive_id: String,
+    pub power_state: HwPowerState,
+}
+
+#[derive(Queryable, Clone, Debug, Selectable)]
+#[diesel(table_name = inv_root_of_trust)]
+pub struct InvRootOfTrust {
+    pub inv_collection_id: Uuid,
+    pub hw_baseboard_id: Uuid,
+    pub time_collected: DateTime<Utc>,
+    pub source: String,
+
+    pub rot_slot_active: HwRotSlot,
+    pub rot_slot_boot_pref_transient: Option<HwRotSlot>,
+    pub rot_slot_boot_pref_persistent: HwRotSlot,
+    pub rot_slot_boot_pref_persistent_pending: Option<HwRotSlot>,
+    pub rot_slot_a_sha3_256: Option<String>,
+    pub rot_slot_b_sha3_256: Option<String>,
+}
+
+#[derive(Queryable, Clone, Debug, Selectable)]
+#[diesel(table_name = inv_caboose)]
+pub struct InvCaboose {
+    pub inv_collection_id: Uuid,
+    pub hw_baseboard_id: Uuid,
+    pub time_collected: DateTime<Utc>,
+    pub source: String,
+
+    pub which: CabooseWhich,
+    pub sw_caboose_id: Uuid,
 }

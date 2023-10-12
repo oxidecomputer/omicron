@@ -2592,10 +2592,12 @@ CREATE TABLE IF NOT EXISTS inv_collection (
     collector TEXT NOT NULL,
     comment TEXT NOT NULL
 );
--- Supports: finding latest collection to use, finding oldest collection to
--- clean up
-CREATE INDEX IF NOT EXISTS inv_collection_by_time
+-- Supports finding latest collection to use
+CREATE INDEX IF NOT EXISTS inv_collection_by_time_done
     ON omicron.public.inv_collection (time_done) WHERE time_done IS NOT NULL;
+-- Supports finding the oldest collections (to clean up)
+CREATE INDEX IF NOT EXISTS inv_collection_by_time_started
+    ON omicron.public.inv_collection (time_started);
 
 -- list of errors generated during a collection
 CREATE TABLE IF NOT EXISTS omicron.public.inv_collection_error (

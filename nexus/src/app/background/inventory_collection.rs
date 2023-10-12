@@ -10,34 +10,25 @@ use futures::future::BoxFuture;
 use futures::FutureExt;
 use internal_dns::ServiceName;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::DataStore;
 use nexus_types::inventory::Collection;
 use serde_json::json;
 use std::sync::Arc;
-use tokio::sync::watch;
 
 /// Background task that reads inventory for the rack
 pub struct InventoryCollector {
+    datastore: Arc<DataStore>,
     resolver: internal_dns::resolver::Resolver,
     creator: String,
-    tx: watch::Sender<Option<Collection>>,
-    rx: watch::Receiver<Option<Collection>>,
 }
 
 impl InventoryCollector {
     pub fn new(
+        datastore: Arc<DataStore>,
         resolver: internal_dns::resolver::Resolver,
         creator: &str,
     ) -> InventoryCollector {
-        let (tx, rx) = watch::channel(None);
-        InventoryCollector { resolver, creator: creator.to_owned(), tx, rx }
-    }
-
-    /// Exposes the latest inventory collection
-    ///
-    /// You can use the returned [`watch::Receiver`] to look at the latest
-    /// configuration or to be notified when it changes.
-    pub fn watcher(&self) -> watch::Receiver<Option<Collection>> {
-        self.rx.clone()
+        InventoryCollector { datastore, resolver, creator: creator.to_owned() }
     }
 }
 
@@ -51,9 +42,15 @@ impl BackgroundTask for InventoryCollector {
         'b: 'c,
     {
         async {
-            match do_collect(&self.resolver, &self.creator, &opctx.log)
-                .await
-                .context("failed to collect inventory")
+            match do_collect(
+                opctx,
+                &self.datastore,
+                &self.resolver,
+                &self.creator,
+                &opctx.log,
+            )
+            .await
+            .context("failed to collect inventory")
             {
                 Err(error) => {
                     let message = format!("{:#}", error);
@@ -66,13 +63,11 @@ impl BackgroundTask for InventoryCollector {
                         "collection_id" => collection.id.to_string(),
                         "time_started" => collection.time_started.to_string(),
                     );
-                    let result = json!({
+                    json!({
                         "collection_id": collection.id.to_string(),
                         "time_started": collection.time_started.to_string(),
                         "time_done": collection.time_done.to_string()
-                    });
-                    self.tx.send_replace(Some(collection));
-                    result
+                    })
                 }
             }
         }
@@ -81,6 +76,8 @@ impl BackgroundTask for InventoryCollector {
 }
 
 async fn do_collect(
+    opctx: &OpContext,
+    datastore: &DataStore,
     resolver: &internal_dns::resolver::Resolver,
     creator: &str,
     log: &slog::Logger,
@@ -104,5 +101,14 @@ async fn do_collect(
         "activation", // TODO-dap useless
         &mgs_clients,
     );
-    inventory.enumerate().await.context("collecting inventory")
+    let collection =
+        inventory.enumerate().await.context("collecting inventory")?;
+
+    // Write it to the database.
+    datastore
+        .inventory_insert_collection(opctx, &collection)
+        .await
+        .context("saving inventory to database")?;
+
+    Ok(collection)
 }

@@ -47,9 +47,6 @@ pub struct BackgroundTasks {
 
     /// task handle for the task that collects inventory
     pub task_inventory_collection: common::TaskHandle,
-    pub inventory: tokio::sync::watch::Receiver<
-        Option<nexus_types::inventory::Collection>,
-    >,
 }
 
 impl BackgroundTasks {
@@ -80,8 +77,9 @@ impl BackgroundTasks {
 
         // Background task: External endpoints list watcher
         let (task_external_endpoints, external_endpoints) = {
-            let watcher =
-                external_endpoints::ExternalEndpointsWatcher::new(datastore);
+            let watcher = external_endpoints::ExternalEndpointsWatcher::new(
+                datastore.clone(),
+            );
             let watcher_channel = watcher.watcher();
             let task = driver.register(
                 String::from("external_endpoints"),
@@ -99,12 +97,12 @@ impl BackgroundTasks {
         };
 
         // Background task: inventory collector
-        let (task_inventory_collection, inventory) = {
+        let task_inventory_collection = {
             let watcher = inventory_collection::InventoryCollector::new(
+                datastore,
                 resolver,
                 &nexus_id.to_string(),
             );
-            let watcher_channel = watcher.watcher();
             let task = driver.register(
                 String::from("inventory_collection"),
                 String::from(
@@ -117,7 +115,7 @@ impl BackgroundTasks {
                 vec![],
             );
 
-            (task, watcher_channel)
+            task
         };
 
         BackgroundTasks {
@@ -129,7 +127,6 @@ impl BackgroundTasks {
             task_external_endpoints,
             external_endpoints,
             task_inventory_collection,
-            inventory,
         }
     }
 

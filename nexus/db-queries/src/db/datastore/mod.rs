@@ -134,6 +134,9 @@ impl<U, T> RunnableQuery<U> for T where
 {
 }
 
+pub type DataStoreConnection<'a> =
+    bb8::PooledConnection<'a, ConnectionManager<DbConnection>>;
+
 pub struct DataStore {
     pool: Arc<Pool>,
     virtual_provisioning_collection_producer: crate::provisioning::Producer,
@@ -205,8 +208,7 @@ impl DataStore {
     pub(super) async fn pool_connection_authorized(
         &self,
         opctx: &OpContext,
-    ) -> Result<bb8::PooledConnection<ConnectionManager<DbConnection>>, Error>
-    {
+    ) -> Result<DataStoreConnection, Error> {
         opctx.authorize(authz::Action::Query, &authz::DATABASE).await?;
         let pool = self.pool.pool();
         let connection = pool.get().await.map_err(|err| {
@@ -222,8 +224,7 @@ impl DataStore {
     /// "pool_connection_authorized".
     pub(super) async fn pool_connection_unauthorized(
         &self,
-    ) -> Result<bb8::PooledConnection<ConnectionManager<DbConnection>>, Error>
-    {
+    ) -> Result<DataStoreConnection, Error> {
         let connection = self.pool.pool().get().await.map_err(|err| {
             Error::unavail(&format!("Failed to access DB connection: {err}"))
         })?;
@@ -234,8 +235,7 @@ impl DataStore {
     #[doc(hidden)]
     pub async fn pool_connection_for_tests(
         &self,
-    ) -> Result<bb8::PooledConnection<ConnectionManager<DbConnection>>, Error>
-    {
+    ) -> Result<DataStoreConnection, Error> {
         self.pool_connection_unauthorized().await
     }
 

@@ -1225,6 +1225,8 @@ joinable!(system_update_component_update -> component_update (component_update_i
 allow_tables_to_appear_in_same_query!(ip_pool_range, ip_pool);
 joinable!(ip_pool_range -> ip_pool (ip_pool_id));
 
+allow_tables_to_appear_in_same_query!(sw_caboose, inv_caboose);
+
 allow_tables_to_appear_in_same_query!(
     dataset,
     disk,
