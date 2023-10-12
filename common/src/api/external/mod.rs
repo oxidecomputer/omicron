@@ -739,6 +739,7 @@ pub enum ResourceType {
     UpdateableComponent,
     UserBuiltin,
     Zpool,
+    Vmm,
 }
 
 // IDENTITY METADATA
@@ -866,25 +867,6 @@ impl InstanceState {
             InstanceState::Destroyed => "destroyed",
         }
     }
-
-    /// Returns true if the given state represents a fully stopped Instance.
-    /// This means that a transition from an !is_stopped() state must go
-    /// through Stopping.
-    pub fn is_stopped(&self) -> bool {
-        match self {
-            InstanceState::Starting => false,
-            InstanceState::Running => false,
-            InstanceState::Stopping => false,
-            InstanceState::Rebooting => false,
-            InstanceState::Migrating => false,
-
-            InstanceState::Creating => true,
-            InstanceState::Stopped => true,
-            InstanceState::Repairing => true,
-            InstanceState::Failed => true,
-            InstanceState::Destroyed => true,
-        }
-    }
 }
 
 /// The number of CPUs in an Instance
@@ -910,17 +892,6 @@ impl From<&InstanceCpuCount> for i64 {
 pub struct InstanceRuntimeState {
     pub run_state: InstanceState,
     pub time_run_state_updated: DateTime<Utc>,
-}
-
-impl From<crate::api::internal::nexus::InstanceRuntimeState>
-    for InstanceRuntimeState
-{
-    fn from(state: crate::api::internal::nexus::InstanceRuntimeState) -> Self {
-        InstanceRuntimeState {
-            run_state: state.run_state,
-            time_run_state_updated: state.time_updated,
-        }
-    }
 }
 
 /// View of an Instance

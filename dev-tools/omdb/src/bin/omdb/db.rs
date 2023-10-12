@@ -26,7 +26,10 @@ use clap::Subcommand;
 use clap::ValueEnum;
 use diesel::expression::SelectableHelper;
 use diesel::query_dsl::QueryDsl;
+use diesel::BoolExpressionMethods;
 use diesel::ExpressionMethods;
+use diesel::JoinOnDsl;
+use diesel::NullableExpressionMethods;
 use nexus_db_model::Dataset;
 use nexus_db_model::Disk;
 use nexus_db_model::DnsGroup;
@@ -38,9 +41,11 @@ use nexus_db_model::Instance;
 use nexus_db_model::Project;
 use nexus_db_model::Region;
 use nexus_db_model::Sled;
+use nexus_db_model::Vmm;
 use nexus_db_model::Zpool;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
+use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::model::ServiceKind;
@@ -60,6 +65,44 @@ use std::sync::Arc;
 use strum::IntoEnumIterator;
 use tabled::Tabled;
 use uuid::Uuid;
+
+const NO_ACTIVE_PROPOLIS_MSG: &str = "<no active Propolis>";
+const NOT_ON_SLED_MSG: &str = "<not on any sled>";
+
+struct MaybePropolisId(Option<Uuid>);
+struct MaybeSledId(Option<Uuid>);
+
+impl From<&InstanceAndActiveVmm> for MaybePropolisId {
+    fn from(value: &InstanceAndActiveVmm) -> Self {
+        Self(value.instance().runtime().propolis_id)
+    }
+}
+
+impl Display for MaybePropolisId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(id) = self.0 {
+            write!(f, "{}", id)
+        } else {
+            write!(f, "{}", NO_ACTIVE_PROPOLIS_MSG)
+        }
+    }
+}
+
+impl From<&InstanceAndActiveVmm> for MaybeSledId {
+    fn from(value: &InstanceAndActiveVmm) -> Self {
+        Self(value.sled_id())
+    }
+}
+
+impl Display for MaybeSledId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(id) = self.0 {
+            write!(f, "{}", id)
+        } else {
+            write!(f, "{}", NOT_ON_SLED_MSG)
+        }
+    }
+}
 
 #[derive(Debug, Args)]
 pub struct DbArgs {
@@ -473,33 +516,54 @@ async fn cmd_db_disk_info(
     if let Some(instance_uuid) = disk.runtime().attach_instance_id {
         // Get the instance this disk is attached to
         use db::schema::instance::dsl as instance_dsl;
-        let instance = instance_dsl::instance
+        use db::schema::vmm::dsl as vmm_dsl;
+        let instances: Vec<InstanceAndActiveVmm> = instance_dsl::instance
             .filter(instance_dsl::id.eq(instance_uuid))
+            .left_join(
+                vmm_dsl::vmm.on(vmm_dsl::id
+                    .nullable()
+                    .eq(instance_dsl::active_propolis_id)
+                    .and(vmm_dsl::time_deleted.is_null())),
+            )
             .limit(1)
-            .select(Instance::as_select())
+            .select((Instance::as_select(), Option::<Vmm>::as_select()))
             .load_async(&*conn)
             .await
-            .context("loading requested instance")?;
+            .context("loading requested instance")?
+            .into_iter()
+            .map(|i: (Instance, Option<Vmm>)| i.into())
+            .collect();
 
-        let Some(instance) = instance.into_iter().next() else {
+        let Some(instance) = instances.into_iter().next() else {
             bail!("no instance: {} found", instance_uuid);
         };
 
-        let instance_name = instance.name().to_string();
-        let propolis_id = instance.runtime().propolis_id.to_string();
-        let my_sled_id = instance.runtime().sled_id;
+        let instance_name = instance.instance().name().to_string();
+        let disk_name = disk.name().to_string();
+        let usr = if instance.vmm().is_some() {
+            let propolis_id =
+                instance.instance().runtime().propolis_id.unwrap();
+            let my_sled_id = instance.sled_id().unwrap();
 
-        let (_, my_sled) = LookupPath::new(opctx, datastore)
-            .sled_id(my_sled_id)
-            .fetch()
-            .await
-            .context("failed to look up sled")?;
+            let (_, my_sled) = LookupPath::new(opctx, datastore)
+                .sled_id(my_sled_id)
+                .fetch()
+                .await
+                .context("failed to look up sled")?;
 
-        let usr = UpstairsRow {
-            host_serial: my_sled.serial_number().to_string(),
-            disk_name: disk.name().to_string(),
-            instance_name,
-            propolis_zone: format!("oxz_propolis-server_{}", propolis_id),
+            UpstairsRow {
+                host_serial: my_sled.serial_number().to_string(),
+                disk_name,
+                instance_name,
+                propolis_zone: format!("oxz_propolis-server_{}", propolis_id),
+            }
+        } else {
+            UpstairsRow {
+                host_serial: NOT_ON_SLED_MSG.to_string(),
+                propolis_zone: NO_ACTIVE_PROPOLIS_MSG.to_string(),
+                disk_name,
+                instance_name,
+            }
         };
         rows.push(usr);
     } else {
@@ -691,7 +755,7 @@ async fn cmd_db_disk_physical(
             name: disk.name().to_string(),
             id: disk.id().to_string(),
             state: disk.runtime().disk_state,
-            instance_name: instance_name,
+            instance_name,
         });
     }
 
@@ -885,17 +949,17 @@ async fn cmd_db_sleds(
 struct CustomerInstanceRow {
     id: Uuid,
     state: String,
-    propolis_id: Uuid,
-    sled_id: Uuid,
+    propolis_id: MaybePropolisId,
+    sled_id: MaybeSledId,
 }
 
-impl From<Instance> for CustomerInstanceRow {
-    fn from(i: Instance) -> Self {
+impl From<InstanceAndActiveVmm> for CustomerInstanceRow {
+    fn from(i: InstanceAndActiveVmm) -> Self {
         CustomerInstanceRow {
-            id: i.id(),
-            state: format!("{:?}", i.runtime_state.state.0),
-            propolis_id: i.runtime_state.propolis_id,
-            sled_id: i.runtime_state.sled_id,
+            id: i.instance().id(),
+            state: format!("{:?}", i.effective_state()),
+            propolis_id: (&i).into(),
+            sled_id: (&i).into(),
         }
     }
 }
@@ -906,12 +970,22 @@ async fn cmd_db_instances(
     limit: NonZeroU32,
 ) -> Result<(), anyhow::Error> {
     use db::schema::instance::dsl;
-    let instances = dsl::instance
+    use db::schema::vmm::dsl as vmm_dsl;
+    let instances: Vec<InstanceAndActiveVmm> = dsl::instance
+        .left_join(
+            vmm_dsl::vmm.on(vmm_dsl::id
+                .nullable()
+                .eq(dsl::active_propolis_id)
+                .and(vmm_dsl::time_deleted.is_null())),
+        )
         .limit(i64::from(u32::from(limit)))
-        .select(Instance::as_select())
+        .select((Instance::as_select(), Option::<Vmm>::as_select()))
         .load_async(&*datastore.pool_connection_for_tests().await?)
         .await
-        .context("loading instances")?;
+        .context("loading instances")?
+        .into_iter()
+        .map(|i: (Instance, Option<Vmm>)| i.into())
+        .collect();
 
     let ctx = || "listing instances".to_string();
     check_limit(&instances, limit, ctx);

@@ -82,6 +82,7 @@ mod switch_interface;
 mod switch_port;
 mod update;
 mod virtual_provisioning_collection;
+mod vmm;
 mod volume;
 mod vpc;
 mod zpool;
@@ -91,6 +92,7 @@ pub use db_metadata::{
     all_sql_for_version_migration, EARLIEST_SUPPORTED_VERSION,
 };
 pub use dns::DnsVersionUpdateBuilder;
+pub use instance::InstanceAndActiveVmm;
 pub use rack::RackInit;
 pub use silo::Discoverability;
 pub use switch_port::SwitchPortSettingsCombinedResult;
