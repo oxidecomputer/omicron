@@ -421,11 +421,13 @@ struct InvCabooseInsert {
     source: String,
     which: CabooseWhich,
 
-    // XXX-dap TODO-cleanup
-    // These need to be here because they seem to need to outlive a call to
-    // `walk_ast()`, so we can't create them *in* the impl of `walk_ast()`.
-    // It seems like there's probably a better way to do this?  Especially since
-    // we have this ugly internal Diesel type.
+    // These are Diesel structures representing table names in the "from" or
+    // "into" parts of queries (e.g., "SELECT FROM tablename" or "INSERT INTO
+    // tablename").  We need this in `walk_ast()` below, but they must outlive
+    // `walk_ast()`, so they need to be created ahead of time.
+    //
+    // TODO-cleanup These Diesel-internal types are nasty.  It's not clear how
+    // else to do this.
     from_hw_baseboard_id:
         diesel::internal::table_macro::StaticQueryFragmentInstance<
             db::schema::hw_baseboard_id::table,
@@ -468,12 +470,6 @@ impl InvCabooseInsert {
             into_inv_caboose: db::schema::inv_caboose::table.from_clause(),
         }
     }
-}
-
-// XXX-dap do we need this?
-impl diesel::query_builder::QueryId for InvCabooseInsert {
-    type QueryId = ();
-    const HAS_STATIC_QUERY_ID: bool = false;
 }
 
 impl diesel::query_builder::QueryFragment<diesel::pg::Pg> for InvCabooseInsert {
@@ -586,5 +582,11 @@ impl diesel::query_builder::QueryFragment<diesel::pg::Pg> for InvCabooseInsert {
     }
 }
 
-// XXX-dap Why do we need this?
+// This is required to be able to call `inv_caboose_insert.execute_async()`.
 impl diesel::RunQueryDsl<db::pool::DbConnection> for InvCabooseInsert {}
+
+// This is required to be able to call `inv_caboose_insert.execute_async()`.
+impl diesel::query_builder::QueryId for InvCabooseInsert {
+    type QueryId = ();
+    const HAS_STATIC_QUERY_ID: bool = false;
+}
