@@ -11,7 +11,6 @@ use nexus_types::inventory::CabooseWhich;
 use std::sync::Arc;
 use strum::IntoEnumIterator;
 
-// XXX-dap rename to Enumerator?
 pub struct Collector {
     mgs_clients: Vec<Arc<gateway_client::Client>>,
     in_progress: CollectionBuilder,

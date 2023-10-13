@@ -1488,30 +1488,66 @@ async fn cmd_db_inventory_collections_list(
     struct CollectionRow {
         id: Uuid,
         started: String,
-        done: String,
+        took: String,
+        nsps: i64,
+        nerrors: i64,
     }
 
-    use db::schema::inv_collection::dsl;
-    let collections = dsl::inv_collection
-        .order_by(dsl::time_started)
-        .limit(i64::from(u32::from(limit)))
-        .select(InvCollection::as_select())
-        .load_async(&**conn)
-        .await
-        .context("loading collections")?;
+    let collections = {
+        use db::schema::inv_collection::dsl;
+        dsl::inv_collection
+            .order_by(dsl::time_started)
+            .limit(i64::from(u32::from(limit)))
+            .select(InvCollection::as_select())
+            .load_async(&**conn)
+            .await
+            .context("loading collections")?
+    };
     check_limit(&collections, limit, || "loading collections");
 
-    let rows = collections.into_iter().map(|collection| CollectionRow {
-        id: collection.id,
-        started: humantime::format_rfc3339_seconds(
-            collection.time_started.into(),
-        )
-        .to_string(),
-        done: collection
+    let mut rows = Vec::new();
+    for collection in collections {
+        let nerrors = {
+            use db::schema::inv_collection_error::dsl;
+            dsl::inv_collection_error
+                .filter(dsl::inv_collection_id.eq(collection.id))
+                .select(diesel::dsl::count_star())
+                .first_async(&**conn)
+                .await
+                .context("counting errors")?
+        };
+
+        let nsps = {
+            use db::schema::inv_service_processor::dsl;
+            dsl::inv_service_processor
+                .filter(dsl::inv_collection_id.eq(collection.id))
+                .select(diesel::dsl::count_star())
+                .first_async(&**conn)
+                .await
+                .context("counting SPs")?
+        };
+
+        let took = collection
             .time_done
-            .map(|t| humantime::format_rfc3339_seconds(t.into()).to_string())
-            .unwrap_or_else(|| String::from("-")),
-    });
+            .map(|t| {
+                format!(
+                    "{} ms",
+                    t.signed_duration_since(&collection.time_started)
+                        .num_milliseconds()
+                )
+            })
+            .unwrap_or_else(|| format!("-"));
+        rows.push(CollectionRow {
+            id: collection.id,
+            started: humantime::format_rfc3339_seconds(
+                collection.time_started.into(),
+            )
+            .to_string(),
+            took,
+            nsps,
+            nerrors,
+        });
+    }
 
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())
@@ -1546,8 +1582,6 @@ async fn cmd_db_inventory_collections_show(
         check_limit(&baseboard_ids, limit, || "loading baseboard ids");
         baseboard_ids.into_iter().map(|b| (b.id, b)).collect::<BTreeMap<_, _>>()
     };
-    let mut unused_baseboard_ids =
-        baseboard_ids.keys().cloned().collect::<BTreeSet<_>>();
 
     // Similarly, load cabooses that are referenced by this collection.
     let cabooses = {
@@ -1568,22 +1602,14 @@ async fn cmd_db_inventory_collections_show(
         cabooses.into_iter().map(|c| (c.id, c)).collect::<BTreeMap<_, _>>()
     };
 
-    inv_collection_print_devices(
-        conn,
-        id,
-        limit,
-        &baseboard_ids,
-        &cabooses,
-        &mut unused_baseboard_ids,
-    )
-    .await?;
-
-    // XXX-dap print unreferenced baseboards
+    inv_collection_print_devices(conn, id, limit, &baseboard_ids, &cabooses)
+        .await?;
 
     if nerrors > 0 {
         eprintln!(
-            "warning: {} error{} were reported above",
+            "warning: {} collection error{} {} reported above",
             nerrors,
+            if nerrors == 1 { "was" } else { "were" },
             if nerrors == 1 { "" } else { "s" }
         );
     }
@@ -1667,7 +1693,6 @@ async fn inv_collection_print_devices(
     limit: NonZeroU32,
     baseboard_ids: &BTreeMap<Uuid, HwBaseboardId>,
     sw_cabooses: &BTreeMap<Uuid, SwCaboose>,
-    unused_baseboard_ids: &mut BTreeSet<Uuid>,
 ) -> Result<(), anyhow::Error> {
     // Load the service processors, grouped by baseboard id.
     let sps: BTreeMap<Uuid, InvServiceProcessor> = {
@@ -1729,17 +1754,12 @@ async fn inv_collection_print_devices(
         sp1.sp_type.cmp(&sp2.sp_type).then(sp1.sp_slot.cmp(&sp2.sp_slot))
     });
 
-    // XXX-dap
-    // Create sets of SPs and RoTs that we used so that we can tell if any went
-    // unused.
-
     // Now print them.
     for baseboard_id in &sorted_baseboard_ids {
         // This unwrap should not fail because the collection we're iterating
         // over came from the one we're looking into now.
         let sp = sps.get(baseboard_id).unwrap();
         let baseboard = baseboard_ids.get(baseboard_id);
-        unused_baseboard_ids.remove(baseboard_id);
         let rot = rots.get(baseboard_id);
 
         println!("");
@@ -1859,6 +1879,53 @@ async fn inv_collection_print_devices(
         } else {
             println!("    RoT: no information found");
         }
+    }
+
+    println!("");
+    for unused_baseboard in baseboard_ids
+        .keys()
+        .collect::<BTreeSet<_>>()
+        .difference(&sps.keys().collect::<BTreeSet<_>>())
+    {
+        // It's not a bug in either omdb or the inventory system to find a
+        // baseboard not referenced in the collection.  It might just mean a
+        // sled was removed from the system.  But at this point it's uncommon
+        // enough to call out.
+        let b = baseboard_ids.get(unused_baseboard).unwrap();
+        eprintln!(
+            "note: baseboard previously found, but not in this \
+            collection: part {} serial {}",
+            b.part_number, b.serial_number
+        );
+    }
+    for sp_missing_rot in sps
+        .keys()
+        .collect::<BTreeSet<_>>()
+        .difference(&rots.keys().collect::<BTreeSet<_>>())
+    {
+        // It's not a bug in either omdb or the inventory system to find an SP
+        // with no RoT.  It just means that when we collected inventory from the
+        // SP, it couldn't communicate with its RoT.
+        let sp = sps.get(sp_missing_rot).unwrap();
+        println!(
+            "warning: found SP with no RoT: {:?} slot {}",
+            sp.sp_type, sp.sp_slot
+        );
+    }
+    for rot_missing_sp in rots
+        .keys()
+        .collect::<BTreeSet<_>>()
+        .difference(&sps.keys().collect::<BTreeSet<_>>())
+    {
+        // It *is* a bug in the inventory system (or omdb) to find an RoT with
+        // no SP, since we get the RoT information from the SP in the first
+        // place.
+        let rot = rots.get(rot_missing_sp).unwrap();
+        println!(
+            "error: found RoT with no SP: \
+            hw_baseboard_id {:?} -- this is a bug",
+            rot.hw_baseboard_id
+        );
     }
 
     Ok(())
