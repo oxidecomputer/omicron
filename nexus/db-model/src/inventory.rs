@@ -103,7 +103,17 @@ impl_enum_type!(
     #[diesel(postgres_type(name = "sp_type"))]
     pub struct SpTypeEnum;
 
-    #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
+    #[derive(
+        Copy,
+        Clone,
+        Debug,
+        AsExpression,
+        FromSqlRow,
+        PartialOrd,
+        Ord,
+        PartialEq,
+        Eq
+    )]
     #[diesel(sql_type = SpTypeEnum)]
     pub enum SpType;
 

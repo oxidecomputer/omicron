@@ -1568,7 +1568,7 @@ async fn cmd_db_inventory_collections_show(
         cabooses.into_iter().map(|c| (c.id, c)).collect::<BTreeMap<_, _>>()
     };
 
-    inv_collection_print_sleds(
+    inv_collection_print_devices(
         conn,
         id,
         limit,
@@ -1661,12 +1661,12 @@ async fn inv_collection_print_errors(
         .expect("could not convert error count into u32 (yikes)"))
 }
 
-async fn inv_collection_print_sleds(
+async fn inv_collection_print_devices(
     conn: &DataStoreConnection<'_>,
     id: Uuid,
     limit: NonZeroU32,
     baseboard_ids: &BTreeMap<Uuid, HwBaseboardId>,
-    cabooses: &BTreeMap<Uuid, SwCaboose>,
+    sw_cabooses: &BTreeMap<Uuid, SwCaboose>,
     unused_baseboard_ids: &mut BTreeSet<Uuid>,
 ) -> Result<(), anyhow::Error> {
     // Load the service processors, grouped by baseboard id.
@@ -1697,8 +1697,8 @@ async fn inv_collection_print_sleds(
         rots.into_iter().map(|s| (s.hw_baseboard_id, s)).collect()
     };
 
-    // Load cabooses found.  We group these first by SP/RoT, then by baseboard.
-    let (sp_cabooses, rot_cabooses) = {
+    // Load cabooses found, grouped by baseboard id.
+    let inv_cabooses = {
         use db::schema::inv_caboose::dsl;
         let cabooses_found = dsl::inv_caboose
             .filter(dsl::inv_collection_id.eq(id))
@@ -1709,42 +1709,24 @@ async fn inv_collection_print_sleds(
             .context("loading cabooses found")?;
         check_limit(&cabooses_found, limit, || "loading cabooses found");
 
-        let (sp_cabooses, rot_cabooses): (BTreeMap<_, _>, BTreeMap<_, _>) =
-            cabooses_found
-                .into_iter()
-                .map(|c| (c.hw_baseboard_id, c))
-                .partition(|(_, ic)| match ic.which {
-                    CabooseWhich::SpSlot0 | CabooseWhich::SpSlot1 => true,
-                    CabooseWhich::RotSlotA | CabooseWhich::RotSlotB => false,
-                });
-        (sp_cabooses, rot_cabooses)
+        let mut cabooses: BTreeMap<Uuid, Vec<InvCaboose>> = BTreeMap::new();
+        for ic in cabooses_found {
+            cabooses
+                .entry(ic.hw_baseboard_id)
+                .or_insert_with(Vec::new)
+                .push(ic);
+        }
+        cabooses
     };
 
-    // Find the list of sled baseboard ids.  The canonical way for us to tell if
-    // something is a sled is by looking at what kind of slot MGS found it in.
-    let mut sled_baseboard_ids: Vec<_> =
-        sps.iter()
-            .filter_map(|(id, sp)| match sp.sp_type {
-                nexus_db_model::SpType::Sled => Some(id),
-                nexus_db_model::SpType::Switch
-                | nexus_db_model::SpType::Power => None,
-            })
-            .collect();
-
-    // Sort them by part number (which should all the same at this point) and
-    // then serial number.
-    sled_baseboard_ids.sort_by(|s1, s2| {
-        let b1 = baseboard_ids.get(s1);
-        let b2 = baseboard_ids.get(s2);
-        match (b1, b2) {
-            (Some(b1), Some(b2)) => b1
-                .part_number
-                .cmp(&b2.part_number)
-                .then(b1.serial_number.cmp(&b2.serial_number)),
-            (Some(_), None) => std::cmp::Ordering::Less,
-            (None, Some(_)) => std::cmp::Ordering::Greater,
-            (None, None) => std::cmp::Ordering::Equal,
-        }
+    // Assemble a list of baseboard ids, sorted first by device type (sled,
+    // switch, power), then by slot number.  This is the order in which we will
+    // print everything out.
+    let mut sorted_baseboard_ids: Vec<_> = sps.keys().cloned().collect();
+    sorted_baseboard_ids.sort_by(|s1, s2| {
+        let sp1 = sps.get(s1).unwrap();
+        let sp2 = sps.get(s2).unwrap();
+        sp1.sp_type.cmp(&sp2.sp_type).then(sp1.sp_slot.cmp(&sp2.sp_slot))
     });
 
     // XXX-dap
@@ -1752,7 +1734,7 @@ async fn inv_collection_print_sleds(
     // unused.
 
     // Now print them.
-    for baseboard_id in sled_baseboard_ids {
+    for baseboard_id in &sorted_baseboard_ids {
         // This unwrap should not fail because the collection we're iterating
         // over came from the one we're looking into now.
         let sp = sps.get(baseboard_id).unwrap();
@@ -1768,19 +1750,79 @@ async fn inv_collection_print_sleds(
                 // in this tool (for failing to fetch or find the right
                 // baseboard information) or the inventory system (for failing
                 // to insert a record into the hw_baseboard_id table).
-                println!("SLED (serial number unknown -- this is a bug)");
+                println!(
+                    "{:?} (serial number unknown -- this is a bug)",
+                    sp.sp_type
+                );
                 println!("    part number: unknown");
             }
             Some(baseboard) => {
-                println!("SLED {}", baseboard.serial_number);
+                println!("{:?} {}", sp.sp_type, baseboard.serial_number);
                 println!("    part number: {}", baseboard.part_number);
             }
         };
 
         println!("    power:    {:?}", sp.power_state);
         println!("    revision: {}", sp.baseboard_revision);
-        println!("    MGS slot: {}", sp.sp_slot); // XXX-dap which cubby?
+        // XXX-dap which cubby?
+        println!("    MGS slot: {:?} {}", sp.sp_type, sp.sp_slot);
         println!("    found at: {} from {}", sp.time_collected, sp.source);
+
+        println!("    cabooses:");
+        if let Some(my_inv_cabooses) = inv_cabooses.get(baseboard_id) {
+            #[derive(Tabled)]
+            #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+            struct CabooseRow<'a> {
+                slot: &'static str,
+                board: &'a str,
+                name: &'a str,
+                version: &'a str,
+                git_commit: &'a str,
+            }
+            let mut nbugs = 0;
+            let rows = my_inv_cabooses.iter().map(|ic| {
+                let slot = match ic.which {
+                    CabooseWhich::SpSlot0 => " SP slot 0",
+                    CabooseWhich::SpSlot1 => " SP slot 1",
+                    CabooseWhich::RotSlotA => "RoT slot A",
+                    CabooseWhich::RotSlotB => "RoT slot B",
+                };
+
+                let (board, name, version, git_commit) =
+                    match sw_cabooses.get(&ic.sw_caboose_id) {
+                        None => {
+                            nbugs += 1;
+                            ("-", "-", "-", "-")
+                        }
+                        Some(c) => (
+                            c.board.as_str(),
+                            c.name.as_str(),
+                            c.version.as_str(),
+                            c.git_commit.as_str(),
+                        ),
+                    };
+
+                CabooseRow { slot, board, name, version, git_commit }
+            });
+
+            let table = tabled::Table::new(rows)
+                .with(tabled::settings::Style::empty())
+                .with(tabled::settings::Padding::new(0, 1, 0, 0))
+                .to_string();
+
+            println!("{}", textwrap::indent(&table.to_string(), "        "));
+
+            if nbugs > 0 {
+                // Similar to above, if we don't have the sw_caboose for some
+                // inv_caboose, then it's a bug in either this tool (if we
+                // failed to fetch it) or the inventory system (if it failed to
+                // insert it).
+                println!(
+                    "error: at least one caboose above was missing data \
+                    -- this is a bug"
+                );
+            }
+        }
 
         if let Some(rot) = rot {
             println!("    RoT: active slot: slot {:?}", rot.rot_slot_active);
@@ -1817,12 +1859,7 @@ async fn inv_collection_print_sleds(
         } else {
             println!("    RoT: no information found");
         }
-
-        // XXX-dap cabooses
     }
-
-    // XXX-dap switches
-    // XXX-dap PSCs
 
     Ok(())
 }
