@@ -20,6 +20,7 @@ pub struct InventoryCollector {
     datastore: Arc<DataStore>,
     resolver: internal_dns::resolver::Resolver,
     creator: String,
+    nkeep: u32,
 }
 
 impl InventoryCollector {
@@ -27,8 +28,14 @@ impl InventoryCollector {
         datastore: Arc<DataStore>,
         resolver: internal_dns::resolver::Resolver,
         creator: &str,
+        nkeep: u32,
     ) -> InventoryCollector {
-        InventoryCollector { datastore, resolver, creator: creator.to_owned() }
+        InventoryCollector {
+            datastore,
+            resolver,
+            creator: creator.to_owned(),
+            nkeep,
+        }
     }
 }
 
@@ -42,11 +49,12 @@ impl BackgroundTask for InventoryCollector {
         'b: 'c,
     {
         async {
-            match do_collect(
+            match inventory_activate(
                 opctx,
                 &self.datastore,
                 &self.resolver,
                 &self.creator,
+                self.nkeep,
                 &opctx.log,
             )
             .await
@@ -75,13 +83,19 @@ impl BackgroundTask for InventoryCollector {
     }
 }
 
-async fn do_collect(
+async fn inventory_activate(
     opctx: &OpContext,
     datastore: &DataStore,
     resolver: &internal_dns::resolver::Resolver,
     creator: &str,
+    nkeep: u32,
     log: &slog::Logger,
 ) -> Result<Collection, anyhow::Error> {
+    datastore
+        .inventory_prune_collections(opctx, nkeep, log)
+        .await
+        .context("pruning old collections")?;
+
     // Find MGS clients.
     let mgs_clients = resolver
         .lookup_all_socket_v6(ServiceName::ManagementGatewayService)

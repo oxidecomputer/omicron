@@ -351,8 +351,18 @@ pub struct ExternalEndpointsConfig {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct InventoryConfig {
     /// period (in seconds) for periodic activations of this background task
+    ///
+    /// Each activation fetches information about all harware and software in
+    /// the system and inserts it into the database.  This generates a moderate
+    /// amount of data.
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
+
+    /// maximum number of past collections to keep in the database
+    ///
+    /// This is a very coarse mechanism to keep the system from overwhelming
+    /// itself with inventory data.
+    pub nkeep: u32,
 }
 
 /// Configuration for a nexus server
@@ -690,6 +700,7 @@ mod test {
                         },
                         inventory: InventoryConfig {
                             period_secs: Duration::from_secs(10),
+                            nkeep: 3,
                         }
                     },
                     default_region_allocation_strategy:
@@ -744,6 +755,7 @@ mod test {
             dns_external.max_concurrent_server_updates = 8
             external_endpoints.period_secs = 9
             inventory.period_secs = 10
+            inventory.nkeep = 3
             [default_region_allocation_strategy]
             type = "random"
             "##,
