@@ -7565,22 +7565,6 @@
           "address_lot"
         ]
       },
-      "AddressConfig": {
-        "description": "A set of addresses associated with a port configuration.",
-        "type": "object",
-        "properties": {
-          "addresses": {
-            "description": "The set of addresses assigned to the port configuration.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Address"
-            }
-          }
-        },
-        "required": [
-          "addresses"
-        ]
-      },
       "AddressLot": {
         "description": "Represents an address lot object, containing the id of the lot that can be used in other API calls.",
         "type": "object",
@@ -7814,43 +7798,6 @@
           "part",
           "revision",
           "serial"
-        ]
-      },
-      "BgpPeerConfig": {
-        "description": "A BGP peer configuration for an interface. Includes the set of announcements that will be advertised to the peer identified by `addr`. The `bgp_config` parameter is a reference to global BGP parameters. The `interface_name` indicates what interface the peer should be contacted on.",
-        "type": "object",
-        "properties": {
-          "addr": {
-            "description": "The address of the host to peer with.",
-            "type": "string",
-            "format": "ip"
-          },
-          "bgp_announce_set": {
-            "description": "The set of announcements advertised by the peer.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/NameOrId"
-              }
-            ]
-          },
-          "bgp_config": {
-            "description": "The global BGP configuration used for establishing a session with this peer.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/NameOrId"
-              }
-            ]
-          },
-          "interface_name": {
-            "description": "The name of interface to peer on. This is relative to the port configuration this BGP peer configuration is a part of. For example this value could be phy0 to refer to a primary physical interface. Or it could be vlan47 to refer to a VLAN interface.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "addr",
-          "bgp_announce_set",
-          "bgp_config",
-          "interface_name"
         ]
       },
       "BinRangedouble": {
@@ -11751,7 +11698,7 @@
             "description": "The link-layer discovery protocol (LLDP) configuration for the link.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/LldpServiceConfig"
+                "$ref": "#/components/schemas/LldpServiceConfigCreate"
               }
             ]
           },
@@ -11768,6 +11715,31 @@
         ]
       },
       "LldpServiceConfig": {
+        "description": "A link layer discovery protocol (LLDP) service configuration.",
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "description": "Whether or not the LLDP service is enabled.",
+            "type": "boolean"
+          },
+          "id": {
+            "description": "The id of this LLDP service instance.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "lldp_config_id": {
+            "nullable": true,
+            "description": "The link-layer discovery protocol configuration for this service.",
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "enabled",
+          "id"
+        ]
+      },
+      "LldpServiceConfigCreate": {
         "description": "The LLDP configuration associated with a port. LLDP may be either enabled or disabled, if enabled, an LLDP configuration must be provided by name or id.",
         "type": "object",
         "properties": {
@@ -12329,7 +12301,7 @@
             "type": "string",
             "format": "ip"
           },
-          "vid": {
+          "vlan_id": {
             "nullable": true,
             "description": "VLAN id the gateway is reachable over.",
             "type": "integer",
@@ -12340,22 +12312,6 @@
         "required": [
           "dst",
           "gw"
-        ]
-      },
-      "RouteConfig": {
-        "description": "Route configuration data associated with a switch port configuration.",
-        "type": "object",
-        "properties": {
-          "routes": {
-            "description": "The set of routes assigned to a switch port.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Route"
-            }
-          }
-        },
-        "required": [
-          "routes"
         ]
       },
       "RouteDestination": {
@@ -13461,6 +13417,45 @@
         ]
       },
       "SwitchInterfaceConfig": {
+        "description": "A switch port interface configuration for a port settings object.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "A unique identifier for this switch interface.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "interface_name": {
+            "description": "The name of this switch interface.",
+            "type": "string"
+          },
+          "kind": {
+            "description": "The switch interface kind.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SwitchInterfaceKind"
+              }
+            ]
+          },
+          "port_settings_id": {
+            "description": "The port settings object this switch interface configuration belongs to.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "v6_enabled": {
+            "description": "Whether or not IPv6 is enabled on this interface.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "interface_name",
+          "kind",
+          "port_settings_id",
+          "v6_enabled"
+        ]
+      },
+      "SwitchInterfaceConfigCreate": {
         "description": "A layer-3 switch interface configuration. When IPv6 is enabled, a link local address will be created for the interface.",
         "type": "object",
         "properties": {
@@ -13468,7 +13463,7 @@
             "description": "What kind of switch interface this configuration represents.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/SwitchInterfaceKind"
+                "$ref": "#/components/schemas/SwitchInterfaceKindCreate"
               }
             ]
           },
@@ -13483,6 +13478,32 @@
         ]
       },
       "SwitchInterfaceKind": {
+        "description": "Describes the kind of an switch interface.",
+        "oneOf": [
+          {
+            "description": "Primary interfaces are associated with physical links. There is exactly one primary interface per physical link.",
+            "type": "string",
+            "enum": [
+              "primary"
+            ]
+          },
+          {
+            "description": "VLAN interfaces allow physical interfaces to be multiplexed onto multiple logical links, each distinguished by a 12-bit 802.1Q Ethernet tag.",
+            "type": "string",
+            "enum": [
+              "vlan"
+            ]
+          },
+          {
+            "description": "Loopback interfaces are anchors for IP addresses that are not specific to any particular port.",
+            "type": "string",
+            "enum": [
+              "loopback"
+            ]
+          }
+        ]
+      },
+      "SwitchInterfaceKindCreate": {
         "description": "Indicates the kind for a switch interface.",
         "oneOf": [
           {
@@ -13609,6 +13630,22 @@
           "port_settings_id"
         ]
       },
+      "SwitchPortAddressConfigCreate": {
+        "description": "A set of addresses associated with a port configuration.",
+        "type": "object",
+        "properties": {
+          "addresses": {
+            "description": "The set of addresses assigned to the port configuration.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Address"
+            }
+          }
+        },
+        "required": [
+          "addresses"
+        ]
+      },
       "SwitchPortApplySettings": {
         "description": "Parameters for applying settings to switch ports.",
         "type": "object",
@@ -13661,6 +13698,43 @@
           "bgp_config_id",
           "interface_name",
           "port_settings_id"
+        ]
+      },
+      "SwitchPortBgpPeerConfigCreate": {
+        "description": "A BGP peer configuration for an interface. Includes the set of announcements that will be advertised to the peer identified by `addr`. The `bgp_config` parameter is a reference to global BGP parameters. The `interface_name` indicates what interface the peer should be contacted on.",
+        "type": "object",
+        "properties": {
+          "addr": {
+            "description": "The address of the host to peer with.",
+            "type": "string",
+            "format": "ip"
+          },
+          "bgp_announce_set": {
+            "description": "The set of announcements advertised by the peer.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NameOrId"
+              }
+            ]
+          },
+          "bgp_config": {
+            "description": "The global BGP configuration used for establishing a session with this peer.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NameOrId"
+              }
+            ]
+          },
+          "interface_name": {
+            "description": "The name of interface to peer on. This is relative to the port configuration this BGP peer configuration is a part of. For example this value could be phy0 to refer to a primary physical interface. Or it could be vlan47 to refer to a VLAN interface.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "addr",
+          "bgp_announce_set",
+          "bgp_config",
+          "interface_name"
         ]
       },
       "SwitchPortConfig": {
@@ -13803,6 +13877,22 @@
           "port_settings_id"
         ]
       },
+      "SwitchPortRouteConfigCreate": {
+        "description": "Route configuration data associated with a switch port configuration.",
+        "type": "object",
+        "properties": {
+          "routes": {
+            "description": "The set of routes assigned to a switch port.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Route"
+            }
+          }
+        },
+        "required": [
+          "routes"
+        ]
+      },
       "SwitchPortSettings": {
         "description": "A switch port settings identity whose id may be used to view additional details.",
         "type": "object",
@@ -13851,14 +13941,14 @@
             "description": "Addresses indexed by interface name.",
             "type": "object",
             "additionalProperties": {
-              "$ref": "#/components/schemas/AddressConfig"
+              "$ref": "#/components/schemas/SwitchPortAddressConfigCreate"
             }
           },
           "bgp_peers": {
             "description": "BGP peers indexed by interface name.",
             "type": "object",
             "additionalProperties": {
-              "$ref": "#/components/schemas/BgpPeerConfig"
+              "$ref": "#/components/schemas/SwitchPortBgpPeerConfigCreate"
             }
           },
           "description": {
@@ -13874,7 +13964,7 @@
             "description": "Interfaces indexed by link name.",
             "type": "object",
             "additionalProperties": {
-              "$ref": "#/components/schemas/SwitchInterfaceConfig"
+              "$ref": "#/components/schemas/SwitchInterfaceConfigCreate"
             }
           },
           "links": {
@@ -13894,7 +13984,7 @@
             "description": "Routes indexed by interface name.",
             "type": "object",
             "additionalProperties": {
-              "$ref": "#/components/schemas/RouteConfig"
+              "$ref": "#/components/schemas/SwitchPortRouteConfigCreate"
             }
           }
         },
