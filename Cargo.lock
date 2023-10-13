@@ -368,11 +368,11 @@ checksum = "1181e1e0d1fce796a03db1ae795d67167da795f9cf4a39c37589e85ef57f26d3"
 
 [[package]]
 name = "atomicwrites"
-version = "0.4.1"
+version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c1163d9d7c51de51a2b79d6df5e8888d11e9df17c752ce4a285fb6ca1580734e"
+checksum = "f4d45f362125ed144544e57b0ec6de8fd6a296d41a6252fc4a20c0cf12e9ed3a"
 dependencies = [
- "rustix 0.37.23",
+ "rustix 0.38.9",
  "tempfile",
  "windows-sys 0.48.0",
 ]
@@ -5466,7 +5466,6 @@ dependencies = [
  "regex-syntax 0.7.5",
  "reqwest",
  "ring",
- "rustix 0.37.23",
  "rustix 0.38.9",
  "schemars",
  "semver 1.0.18",
