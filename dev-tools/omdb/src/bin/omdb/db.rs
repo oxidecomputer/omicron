@@ -45,6 +45,7 @@ use nexus_db_model::InvServiceProcessor;
 use nexus_db_model::Project;
 use nexus_db_model::Region;
 use nexus_db_model::Sled;
+use nexus_db_model::SpType;
 use nexus_db_model::SwCaboose;
 use nexus_db_model::Zpool;
 use nexus_db_queries::context::OpContext;
@@ -1784,8 +1785,11 @@ async fn inv_collection_print_devices(
 
         println!("    power:    {:?}", sp.power_state);
         println!("    revision: {}", sp.baseboard_revision);
-        // XXX-dap which cubby?
-        println!("    MGS slot: {:?} {}", sp.sp_type, sp.sp_slot);
+        print!("    MGS slot: {:?} {}", sp.sp_type, sp.sp_slot);
+        if let SpType::Sled = sp.sp_type {
+            print!(" (cubby {})", sp.sp_slot);
+        }
+        println!("");
         println!("    found at: {} from {}", sp.time_collected, sp.source);
 
         println!("    cabooses:");
