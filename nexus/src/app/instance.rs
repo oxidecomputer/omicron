@@ -1313,20 +1313,15 @@ impl super::Nexus {
         )
         .await?;
 
-        // If the supplied instance state is at least as new as what's currently
-        // in the database, and it indicates the instance has no active VMM, the
-        // instance has been stopped and should have its virtual provisioning
-        // charges released.
+        // If the supplied instance state indicates that the instance no longer
+        // has an active VMM, attempt to delete the virtual provisioning record
         //
         // As with updating networking state, this must be done before
         // committing the new runtime state to the database: once the DB is
         // written, a new start saga can arrive and start the instance, which
         // will try to create its own virtual provisioning charges, which will
         // race with this operation.
-        if new_runtime_state.instance_state.propolis_id.is_none()
-            && new_runtime_state.instance_state.gen
-                >= db_instance.runtime().gen.0
-        {
+        if new_runtime_state.instance_state.propolis_id.is_none() {
             self.db_datastore
                 .virtual_provisioning_collection_delete_instance(
                     opctx,
@@ -1334,6 +1329,7 @@ impl super::Nexus {
                     db_instance.project_id,
                     i64::from(db_instance.ncpus.0 .0),
                     db_instance.memory,
+                    (&new_runtime_state.instance_state.gen).into(),
                 )
                 .await?;
         }
