@@ -164,7 +164,7 @@ const ARCHIVE_SNAPSHOT_PREFIX: &'static str = "zone-archives-";
 //
 // This is used to ensure that we are not accidentally deleting ZFS objects that
 // a user has created, but which happen to be named the same thing.
-const ZONE_BUNDLE_ZFS_PROPERTY_NAME: &'static str = "for-zone-bundle";
+const ZONE_BUNDLE_ZFS_PROPERTY_NAME: &'static str = "oxide:for-zone-bundle";
 const ZONE_BUNDLE_ZFS_PROPERTY_VALUE: &'static str = "true";
 
 // Initialize the ZFS resources we need for zone bundling.
@@ -436,7 +436,6 @@ impl ZoneBundler {
             .all_u2_mountpoints(sled_hardware::disk::U2_DEBUG_DATASET)
             .await
             .into_iter()
-            .map(|p| p.join(zone.name()))
             .collect();
         let context = ZoneBundleContext { cause, storage_dirs, extra_log_dirs };
         info!(
@@ -524,7 +523,7 @@ struct ZoneBundleContext {
     storage_dirs: Vec<Utf8PathBuf>,
     // The reason or cause for creating a zone bundle.
     cause: ZoneBundleCause,
-    // Extra directories searched for logfiles for the name zone.
+    // Extra directories searched for logfiles for the named zone.
     //
     // Logs are periodically archived out of their original location, and onto
     // one or more U.2 drives. This field is used to specify that archive
@@ -914,26 +913,33 @@ async fn find_service_log_files(
     // archiving to one location, but move to another if a quota is hit. We'll
     // iterate over all the extra log directories and try to find any log files
     // in those filesystem snapshots.
-    for snapshot in snapshots.iter().skip(1) {
-        let snapped_extra_log_dirs = extra_log_dirs
-            .iter()
-            .map(|d| snapshot.full_path().map(|p| p.join(d)))
-            .collect::<Result<Vec<_>, _>>()?;
-        debug!(
+    let snapped_extra_log_dirs = snapshots
+        .iter()
+        .skip(1)
+        .flat_map(|snapshot| {
+            extra_log_dirs.iter().map(|d| {
+                // Join the snapshot path with both the log directory and the
+                // zone name, to arrive at something like:
+                // /path/to/dataset/.zfs/snapshot/<snap_name>/path/to/extra/<zone_name>
+                snapshot.full_path().map(|p| p.join(d).join(zone_name))
+            })
+        })
+        .collect::<Result<BTreeSet<_>, _>>()?;
+    debug!(
+        log,
+        "looking for extra log files in filesystem snapshots";
+        "extra_dirs" => ?&snapped_extra_log_dirs,
+    );
+    log_files.extend(
+        find_archived_log_files(
             log,
-            "looking for extra log files in filesystem snapshots";
-            "extra_dirs" => ?&snapped_extra_log_dirs,
-        );
-        log_files.extend(
-            find_archived_log_files(
-                log,
-                zone_name,
-                &svc.service_name,
-                &snapped_extra_log_dirs,
-            )
-            .await,
-        );
-    }
+            zone_name,
+            &svc.service_name,
+            svc.log_file.file_name().unwrap(),
+            snapped_extra_log_dirs.iter(),
+        )
+        .await,
+    );
     debug!(
         log,
         "found log files";
@@ -1092,8 +1098,19 @@ async fn create(
     // log messages, we'll create ZFS snapshots of each of these relevant
     // filesystems, and insert those (now-static) files into the zone-bundle
     // tarballs.
-    let snapshots = create_zfs_snapshots(log, zone, &context.extra_log_dirs)
-        .context("failed to create zone bundle ZFS snapshots")?;
+    let snapshots =
+        match create_zfs_snapshots(log, zone, &context.extra_log_dirs) {
+            Ok(snapshots) => snapshots,
+            Err(e) => {
+                error!(
+                    log,
+                    "failed to create ZFS snapshots";
+                    "zone_name" => zone.name(),
+                    "error" => ?e,
+                );
+                return Err(e);
+            }
+        };
 
     // Debugging commands run on the specific processes this zone defines.
     const ZONE_PROCESS_COMMANDS: [&str; 3] = [
@@ -1223,11 +1240,12 @@ async fn create(
 //
 // Note that errors are logged, rather than failing the whole function, so that
 // one failed listing does not prevent collecting any other log files.
-async fn find_archived_log_files(
+async fn find_archived_log_files<'a, T: Iterator<Item = &'a Utf8PathBuf>>(
     log: &Logger,
     zone_name: &str,
     svc_name: &str,
-    dirs: &[Utf8PathBuf],
+    log_file_prefix: &str,
+    dirs: T,
 ) -> Vec<Utf8PathBuf> {
     // The `dirs` should be things like
     // `/pool/ext/<ZPOOL_UUID>/crypt/debug/<ZONE_NAME>`, but it's really up to
@@ -1236,7 +1254,7 @@ async fn find_archived_log_files(
     // Within that, we'll just look for things that appear to be Oxide-managed
     // SMF service log files.
     let mut files = Vec::new();
-    for dir in dirs.iter() {
+    for dir in dirs {
         if dir.exists() {
             let mut rd = match tokio::fs::read_dir(&dir).await {
                 Ok(rd) => rd,
@@ -1266,8 +1284,9 @@ async fn find_archived_log_files(
                         };
                         let fname = path.file_name().unwrap();
                         let is_oxide = is_oxide_smf_log_file(fname);
-                        let contains = fname.contains(svc_name);
-                        if is_oxide && contains {
+                        let matches_log_file =
+                            fname.starts_with(log_file_prefix);
+                        if is_oxide && matches_log_file {
                             debug!(
                                 log,
                                 "found archived log file";
@@ -1277,12 +1296,14 @@ async fn find_archived_log_files(
                             );
                             files.push(path);
                         } else {
-                            debug!(
+                            trace!(
                                 log,
                                 "skipping non-matching log file";
+                                "zone_name" => zone_name,
+                                "service_name" => svc_name,
                                 "filename" => fname,
                                 "is_oxide_smf_log_file" => is_oxide,
-                                "contains_svc_name" => contains,
+                                "matches_log_file" => matches_log_file,
                             );
                         }
                     }
@@ -2665,44 +2686,44 @@ mod illumos_tests {
         let log = test_logger();
         let tmpdir = tempfile::tempdir().expect("Failed to make tempdir");
 
-        let mut should_match = [
-            "oxide-foo:default.log",
-            "oxide-foo:default.log.1000",
-            "system-illumos-foo:default.log",
-            "system-illumos-foo:default.log.100",
-        ];
-        let should_not_match = [
-            "oxide-foo:default",
-            "not-oxide-foo:default.log.1000",
-            "system-illumos-foo",
-            "not-system-illumos-foo:default.log.100",
-        ];
-        for name in should_match.iter().chain(should_not_match.iter()) {
-            let path = tmpdir.path().join(name);
-            tokio::fs::File::create(path)
-                .await
-                .expect("failed to create dummy file");
+        for prefix in ["oxide", "system-illumos"] {
+            let mut should_match = [
+                format!("{prefix}-foo:default.log"),
+                format!("{prefix}-foo:default.log.1000"),
+            ];
+            let should_not_match = [
+                format!("{prefix}-foo:default"),
+                format!("not-{prefix}-foo:default.log.1000"),
+            ];
+            for name in should_match.iter().chain(should_not_match.iter()) {
+                let path = tmpdir.path().join(name);
+                tokio::fs::File::create(path)
+                    .await
+                    .expect("failed to create dummy file");
+            }
+
+            let path = Utf8PathBuf::try_from(
+                tmpdir.path().as_os_str().to_str().unwrap(),
+            )
+            .unwrap();
+            let mut files = find_archived_log_files(
+                &log,
+                "zone-name", // unused here, for logging only
+                "svc:/oxide/foo:default",
+                &format!("{prefix}-foo:default.log"),
+                std::iter::once(&path),
+            )
+            .await;
+
+            // Sort everything to compare correctly.
+            should_match.sort();
+            files.sort();
+            assert_eq!(files.len(), should_match.len());
+            assert!(files
+                .iter()
+                .zip(should_match.iter())
+                .all(|(file, name)| { file.file_name().unwrap() == *name }));
         }
-
-        let path =
-            Utf8PathBuf::try_from(tmpdir.path().as_os_str().to_str().unwrap())
-                .unwrap();
-        let mut files = find_archived_log_files(
-            &log,
-            "zone-name", // unused here, for logging only
-            "foo",
-            &[path],
-        )
-        .await;
-
-        // Sort everything to compare correctly.
-        should_match.sort();
-        files.sort();
-        assert_eq!(files.len(), should_match.len());
-        assert!(files
-            .iter()
-            .zip(should_match.iter())
-            .all(|(file, name)| { file.file_name().unwrap() == *name }));
     }
 
     #[test]
