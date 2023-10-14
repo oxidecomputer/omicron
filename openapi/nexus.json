@@ -8420,16 +8420,51 @@
               }
             ]
           },
+          "connect_retry": {
+            "description": "How long to to wait between TCP connection retries (seconds).",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "delay_open": {
+            "description": "How long to delay sending an open request after establishing a TCP session (seconds).",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "hold_time": {
+            "description": "How long to hold peer connections between keppalives (seconds).",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "idle_hold_time": {
+            "description": "How long to hold a peer in idle before attempting a new session (seconds).",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
           "interface_name": {
             "description": "The name of interface to peer on. This is relative to the port configuration this BGP peer configuration is a part of. For example this value could be phy0 to refer to a primary physical interface. Or it could be vlan47 to refer to a VLAN interface.",
             "type": "string"
+          },
+          "keepalive": {
+            "description": "How often to send keepalive requests (seconds).",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
           }
         },
         "required": [
           "addr",
           "bgp_announce_set",
           "bgp_config",
-          "interface_name"
+          "connect_retry",
+          "delay_open",
+          "hold_time",
+          "idle_hold_time",
+          "interface_name",
+          "keepalive"
         ]
       },
       "BgpPeerState": {
@@ -12433,6 +12468,14 @@
         "description": "Switch link configuration.",
         "type": "object",
         "properties": {
+          "fec": {
+            "description": "The forward error correction mode of the link.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LinkFec"
+              }
+            ]
+          },
           "lldp": {
             "description": "The link-layer discovery protocol (LLDP) configuration for the link.",
             "allOf": [
@@ -12446,11 +12489,115 @@
             "type": "integer",
             "format": "uint16",
             "minimum": 0
+          },
+          "speed": {
+            "description": "The speed of the link.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LinkSpeed"
+              }
+            ]
           }
         },
         "required": [
+          "fec",
           "lldp",
-          "mtu"
+          "mtu",
+          "speed"
+        ]
+      },
+      "LinkFec": {
+        "description": "The forward error correction mode of a link.",
+        "oneOf": [
+          {
+            "description": "Firecode foward error correction.",
+            "type": "string",
+            "enum": [
+              "firecode"
+            ]
+          },
+          {
+            "description": "No forward error correction.",
+            "type": "string",
+            "enum": [
+              "none"
+            ]
+          },
+          {
+            "description": "Reed-Solomon forward error correction.",
+            "type": "string",
+            "enum": [
+              "rs"
+            ]
+          }
+        ]
+      },
+      "LinkSpeed": {
+        "description": "The speed of a link.",
+        "oneOf": [
+          {
+            "description": "Zero gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed0_g"
+            ]
+          },
+          {
+            "description": "1 gigabit per second.",
+            "type": "string",
+            "enum": [
+              "speed1_g"
+            ]
+          },
+          {
+            "description": "10 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed10_g"
+            ]
+          },
+          {
+            "description": "25 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed25_g"
+            ]
+          },
+          {
+            "description": "40 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed40_g"
+            ]
+          },
+          {
+            "description": "50 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed50_g"
+            ]
+          },
+          {
+            "description": "100 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed100_g"
+            ]
+          },
+          {
+            "description": "200 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed200_g"
+            ]
+          },
+          {
+            "description": "400 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed400_g"
+            ]
+          }
         ]
       },
       "LldpServiceConfig": {

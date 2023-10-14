@@ -11,9 +11,9 @@ use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params::{
     Address, AddressConfig, AddressLotBlockCreate, AddressLotCreate,
     BgpAnnounceSetCreate, BgpAnnouncementCreate, BgpConfigCreate,
-    BgpPeerConfig, LinkConfig, LldpServiceConfig, Route, RouteConfig,
-    SwitchInterfaceConfig, SwitchInterfaceKind, SwitchPortApplySettings,
-    SwitchPortSettingsCreate,
+    BgpPeerConfig, LinkConfig, LinkFec, LinkSpeed, LldpServiceConfig, Route,
+    RouteConfig, SwitchInterfaceConfig, SwitchInterfaceKind,
+    SwitchPortApplySettings, SwitchPortSettingsCreate,
 };
 use nexus_types::external_api::views::Rack;
 use omicron_common::api::external::{
@@ -112,6 +112,8 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
         LinkConfig {
             mtu: 4700,
             lldp: LldpServiceConfig { enabled: false, lldp_config: None },
+            fec: LinkFec::None,
+            speed: LinkSpeed::Speed100G,
         },
     );
     // interfaces
@@ -250,6 +252,11 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
             bgp_announce_set: NameOrId::Name("instances".parse().unwrap()), //TODO
             interface_name: "phy0".to_string(),
             addr: "1.2.3.4".parse().unwrap(),
+            hold_time: 6,
+            idle_hold_time: 6,
+            delay_open: 0,
+            connect_retry: 3,
+            keepalive: 2,
         },
     );
     let _created: SwitchPortSettingsView = NexusRequest::objects_post(

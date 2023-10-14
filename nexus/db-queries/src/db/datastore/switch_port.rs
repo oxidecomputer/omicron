@@ -227,6 +227,8 @@ impl DataStore {
                     lldp_svc_config.id,
                     link_name.clone(),
                     c.mtu,
+                    c.fec.into(),
+                    c.speed.into(),
                 ));
             }
             result.link_lldp =
@@ -298,28 +300,6 @@ impl DataStore {
 
             let mut bgp_peer_config = Vec::new();
             for (interface_name, p) in &params.bgp_peers {
-                /* XXX ANNOUNCE
-                use db::schema::bgp_announce_set;
-                let announce_set_id = match &p.bgp_announce_set {
-                    NameOrId::Id(id) => *id,
-                    NameOrId::Name(name) => {
-                        let name = name.to_string();
-                        bgp_announce_set_dsl::bgp_announce_set
-                            .filter(bgp_announce_set::time_deleted.is_null())
-                            .filter(bgp_announce_set::name.eq(name))
-                            .select(bgp_announce_set::id)
-                            .limit(1)
-                            .first_async::<Uuid>(&conn)
-                            .await
-                            .map_err(|_| {
-                                TxnError::CustomError(
-                                    SwitchPortSettingsCreateError::BgpAnnounceSetNotFound,
-                                )
-                            })?
-                    }
-                };
-                */
-
                 use db::schema::bgp_config;
                 let bgp_config_id = match &p.bgp_config {
                     NameOrId::Id(id) => *id,
@@ -345,6 +325,11 @@ impl DataStore {
                     bgp_config_id,
                     interface_name.clone(),
                     p.addr.into(),
+                    p.hold_time.into(),
+                    p.idle_hold_time.into(),
+                    p.delay_open.into(),
+                    p.connect_retry.into(),
+                    p.keepalive.into(),
                 ));
 
             }

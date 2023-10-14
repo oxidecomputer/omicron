@@ -19,14 +19,14 @@ use internal_dns::ServiceName;
 use ipnetwork::IpNetwork;
 use mg_admin_client::types::Prefix4;
 use mg_admin_client::types::{ApplyRequest, BgpPeerConfig, BgpRoute};
+use nexus_db_model::{SwitchLinkFec, SwitchLinkSpeed};
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::UpdatePrecondition;
 use nexus_db_queries::{authn, db};
 use nexus_types::external_api::params;
 use omicron_common::api::external::{self, NameOrId};
 use omicron_common::api::internal::shared::{
-    ParseSwitchLocationError, PortFec as OmicronPortFec,
-    PortSpeed as OmicronPortSpeed, SwitchLocation,
+    ParseSwitchLocationError, SwitchLocation,
 };
 use serde::{Deserialize, Serialize};
 use sled_agent_client::types::PortConfigV1;
@@ -42,6 +42,11 @@ use std::str::FromStr;
 use std::sync::Arc;
 use steno::ActionError;
 use uuid::Uuid;
+
+// This is more of an implementation detail of the BGP implementation. It
+// defines the maximum time the peering engine will wait for external messages
+// before breaking to check for shutdown conditions.
+const BGP_SESSION_RESOLUTION: u64 = 100;
 
 // switch port settings apply saga: input parameters
 
@@ -418,14 +423,14 @@ pub(crate) async fn ensure_switch_port_bgp_settings(
 
         let bpc = BgpPeerConfig {
             asn: *config.asn,
-            name: format!("{}", peer.addr.ip()), //TODO(ry)(user defined name)
+            name: format!("{}", peer.addr.ip()), //TODO user defined name?
             host: format!("{}:179", peer.addr.ip()),
-            hold_time: 6,      //TODO(ry)(hardocde)
-            idle_hold_time: 6, //TODO(ry)(hardocde)
-            delay_open: 0,     //TODO(ry)(hardocde)
-            connect_retry: 0,  //TODO(ry)(hardcode)
-            keepalive: 3,      //TODO(ry)(hardcode)
-            resolution: 100,   //TODO(ry)(hardcode)
+            hold_time: peer.hold_time.0.into(),
+            idle_hold_time: peer.idle_hold_time.0.into(),
+            delay_open: peer.delay_open.0.into(),
+            connect_retry: peer.connect_retry.0.into(),
+            keepalive: peer.keepalive.0.into(),
+            resolution: BGP_SESSION_RESOLUTION,
             routes: vec![BgpRoute { nexthop, prefixes }],
         };
 
@@ -888,8 +893,18 @@ pub(crate) async fn bootstore_update(
             addresses: settings.addresses.iter().map(|a| a.address).collect(),
             switch: switch_location,
             port: switch_port_name.into(),
-            uplink_port_fec: OmicronPortFec::None, //TODO hardcode
-            uplink_port_speed: OmicronPortSpeed::Speed100G, //TODO hardcode
+            uplink_port_fec: settings
+                .links
+                .get(0)
+                .map(|l| l.fec)
+                .unwrap_or(SwitchLinkFec::None)
+                .into(),
+            uplink_port_speed: settings
+                .links
+                .get(0)
+                .map(|l| l.speed)
+                .unwrap_or(SwitchLinkSpeed::Speed100G)
+                .into(),
             bgp_peers: peer_info
                 .iter()
                 .filter_map(|(p, asn)| {

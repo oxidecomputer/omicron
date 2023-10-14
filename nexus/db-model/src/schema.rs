@@ -144,6 +144,8 @@ table! {
         lldp_service_config_id -> Uuid,
         link_name -> Text,
         mtu -> Int4,
+        fec -> crate::SwitchLinkFecEnum,
+        speed -> crate::SwitchLinkSpeedEnum,
     }
 }
 
@@ -203,6 +205,11 @@ table! {
         bgp_config_id -> Uuid,
         interface_name -> Text,
         addr -> Inet,
+        hold_time -> Int8,
+        idle_hold_time -> Int8,
+        delay_open -> Int8,
+        connect_retry -> Int8,
+        keepalive -> Int8,
     }
 }
 

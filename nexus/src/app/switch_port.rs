@@ -6,6 +6,7 @@ use crate::app::sagas;
 use crate::external_api::params;
 use db::datastore::SwitchPortSettingsCombinedResult;
 use ipnetwork::IpNetwork;
+use nexus_db_model::{SwitchLinkFec, SwitchLinkSpeed};
 use nexus_db_queries::authn;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
@@ -394,12 +395,18 @@ impl super::Nexus {
                     .collect(),
                 switch: port.switch_location.parse().unwrap(),
                 port: port.port_name.clone(),
-                //TODO hardcode
-                uplink_port_fec:
-                    omicron_common::api::internal::shared::PortFec::None,
-                //TODO hardcode
-                uplink_port_speed:
-                    omicron_common::api::internal::shared::PortSpeed::Speed100G,
+                uplink_port_fec: info
+                    .links
+                    .get(0) //TODO breakout support
+                    .map(|l| l.fec)
+                    .unwrap_or(SwitchLinkFec::None)
+                    .into(),
+                uplink_port_speed: info
+                    .links
+                    .get(0) //TODO breakout support
+                    .map(|l| l.speed)
+                    .unwrap_or(SwitchLinkSpeed::Speed100G)
+                    .into(),
             };
 
             rack_net_config.ports.push(p);

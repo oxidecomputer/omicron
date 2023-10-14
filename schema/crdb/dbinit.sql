@@ -2445,6 +2445,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config (
     bgp_config_id UUID NOT NULL,
     interface_name TEXT,
     addr INET,
+    hold_time INT8,
+    idle_hold_time INT8,
+    delay_open INT8,
+    connect_retry INT8,
+    keepalive INT8,
 
     /* TODO https://github.com/oxidecomputer/omicron/issues/3013 */
     PRIMARY KEY (port_settings_id, interface_name, addr)
@@ -2590,5 +2595,26 @@ FROM
             instance.active_propolis_id = vmm.id
 WHERE
     instance.time_deleted IS NULL AND vmm.time_deleted IS NULL;
+
+CREATE TYPE IF NOT EXISTS omicron.public.switch_link_fec AS ENUM (
+    'Firecode',
+    'None',
+    'Rs'
+);
+
+CREATE TYPE IF NOT EXISTS omicron.public.switch_link_speed AS ENUM (
+    '0G',
+    '1G',
+    '10G',
+    '25G',
+    '40G',
+    '50G',
+    '100G',
+    '200G',
+    '400G'
+);
+
+ALTER TABLE omicron.public.switch_port_settings_link_config ADD COLUMN IF NOT EXISTS fec omicron.public.switch_link_fec;
+ALTER TABLE omicron.public.switch_port_settings_link_config ADD COLUMN IF NOT EXISTS speed omicron.public.switch_link_speed;
 
 COMMIT;

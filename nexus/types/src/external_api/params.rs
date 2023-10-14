@@ -1325,6 +1325,42 @@ pub enum SwitchPortGeometry {
     Sfp28x4,
 }
 
+/// The forward error correction mode of a link.
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LinkFec {
+    /// Firecode foward error correction.
+    Firecode,
+    /// No forward error correction.
+    None,
+    /// Reed-Solomon forward error correction.
+    Rs,
+}
+
+/// The speed of a link.
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LinkSpeed {
+    /// Zero gigabits per second.
+    Speed0G,
+    /// 1 gigabit per second.
+    Speed1G,
+    /// 10 gigabits per second.
+    Speed10G,
+    /// 25 gigabits per second.
+    Speed25G,
+    /// 40 gigabits per second.
+    Speed40G,
+    /// 50 gigabits per second.
+    Speed50G,
+    /// 100 gigabits per second.
+    Speed100G,
+    /// 200 gigabits per second.
+    Speed200G,
+    /// 400 gigabits per second.
+    Speed400G,
+}
+
 /// Switch link configuration.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct LinkConfig {
@@ -1333,6 +1369,12 @@ pub struct LinkConfig {
 
     /// The link-layer discovery protocol (LLDP) configuration for the link.
     pub lldp: LldpServiceConfig,
+
+    /// The forward error correction mode of the link.
+    pub fec: LinkFec,
+
+    /// The speed of the link.
+    pub speed: LinkSpeed,
 }
 
 /// The LLDP configuration associated with a port. LLDP may be either enabled or
@@ -1441,6 +1483,23 @@ pub struct BgpPeerConfig {
 
     /// The address of the host to peer with.
     pub addr: IpAddr,
+
+    /// How long to hold peer connections between keppalives (seconds).
+    pub hold_time: u32,
+
+    /// How long to hold a peer in idle before attempting a new session
+    /// (seconds).
+    pub idle_hold_time: u32,
+
+    /// How long to delay sending an open request after establishing a TCP
+    /// session (seconds).
+    pub delay_open: u32,
+
+    /// How long to to wait between TCP connection retries (seconds).
+    pub connect_retry: u32,
+
+    /// How often to send keepalive requests (seconds).
+    pub keepalive: u32,
 }
 
 /// Parameters for creating a named set of BGP announcements.
