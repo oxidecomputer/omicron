@@ -18,6 +18,7 @@ use diesel::sql_types::Nullable;
 use diesel::Column;
 use diesel::ExpressionMethods;
 use diesel::IntoSql;
+use diesel::NullableExpressionMethods;
 use diesel::QueryDsl;
 use diesel::QuerySource;
 use nexus_db_model::CabooseWhich;
@@ -426,22 +427,75 @@ impl DataStore {
     ) -> Result<Option<Uuid>, Error> {
         // The caller of this (non-pub) function is responsible for authz.
 
-        // XXX-dap this is running afoul of a table scan.  I don't think it
-        // should.  But I don't think it's worth debugging, either.  I could
-        // instead just select the most recent "nkeep+1" along with the error
-        // count for each one and figure this out in Rust.
         let conn = self.pool_connection_authorized(opctx).await?;
-        let candidates: Vec<(Uuid, i64)> = db::schema::inv_collection::table
-            .inner_join(db::schema::inv_collection_error::table)
-            .group_by(db::schema::inv_collection::id)
+        // Diesel requires us to use aliases in order to refer to the
+        // `inv_collection` table twice in the same query.
+        let (inv_collection1, inv_collection2) = diesel::alias!(
+            db::schema::inv_collection as inv_collection1,
+            db::schema::inv_collection as inv_collection2
+        );
+
+        // This subquery essentially generates:
+        //
+        //    SELECT id FROM inv_collection ORDER BY time_started" ASC LIMIT $1
+        //
+        // where $1 becomes `nkeep + 1`.  This just lists the N oldest
+        // collections.
+        let subquery = inv_collection1
+            .select(inv_collection1.field(db::schema::inv_collection::id))
+            .order_by(
+                inv_collection1
+                    .field(db::schema::inv_collection::time_started)
+                    .asc(),
+            )
+            .limit(i64::from(nkeep) + 1);
+
+        // This essentially generates:
+        //
+        //     SELECT
+        //         inv_collection.id,
+        //         count(inv_collection_error.inv_collection_id)
+        //     FROM (
+        //             inv_collection
+        //         LEFT OUTER JOIN
+        //             inv_collection_error
+        //         ON (
+        //             inv_collection_error.inv_collection_id = inv_collection.id
+        //         )
+        //     ) WHERE (
+        //         inv_collection.id = ANY( <<subquery above>> )
+        //     )
+        //     GROUP BY inv_collection.id
+        //     ORDER BY inv_collection.time_started ASC
+        //
+        // This looks a lot scarier than it is.  The goal is to produce a
+        // two-column table that looks like this:
+        //
+        //     collection_id1     count of errors from collection_id1
+        //     collection_id2     count of errors from collection_id2
+        //     collection_id3     count of errors from collection_id3
+        //     ...
+        //
+        let candidates: Vec<(Uuid, i64)> = inv_collection2
+            .left_outer_join(db::schema::inv_collection_error::table)
+            .filter(
+                inv_collection2
+                    .field(db::schema::inv_collection::id)
+                    .eq_any(subquery),
+            )
+            .group_by(inv_collection2.field(db::schema::inv_collection::id))
             .select((
-                db::schema::inv_collection::id,
+                inv_collection2.field(db::schema::inv_collection::id),
                 diesel::dsl::count(
-                    db::schema::inv_collection_error::inv_collection_id,
+                    db::schema::inv_collection_error::inv_collection_id
+                        .nullable(),
                 ),
             ))
-            .order_by(db::schema::inv_collection::time_started.desc())
-            .limit(i64::from(nkeep) + 1)
+            .order_by(
+                inv_collection2
+                    .field(db::schema::inv_collection::time_started)
+                    .asc(),
+            )
             .load_async(&*conn)
             .await
             .map_err(|e| {
@@ -449,7 +503,16 @@ impl DataStore {
             })
             .internal_context("listing oldest collections")?;
 
-        // We've now got the "nkeep + 1" oldest collections, starting with the
+        if u32::try_from(candidates.len()).unwrap() <= nkeep {
+            debug!(
+                log,
+                "inventory_prune_one: nothing eligible for removal (too few)";
+                "candidates" => ?candidates,
+            );
+            return Ok(None);
+        }
+
+        // We've now got up to "nkeep + 1" oldest collections, starting with the
         // very oldest.  We can get rid of the oldest one unless it's the only
         // complete one.  Another way to think about it: find the _last_
         // complete one.  Remove it from the list of candidates.  Now mark the
