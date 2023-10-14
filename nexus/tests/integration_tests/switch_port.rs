@@ -57,26 +57,6 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     .await
     .unwrap();
 
-    // Create BGP config
-    let bgp_config = BgpConfigCreate {
-        identity: IdentityMetadataCreateParams {
-            name: "as47".parse().unwrap(),
-            description: "autonomous system 47".into(),
-        },
-        asn: 47,
-        vrf: None,
-    };
-
-    NexusRequest::objects_post(
-        client,
-        "/v1/system/networking/bgp",
-        &bgp_config,
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap();
-
     // Create BGP announce set
     let announce_set = BgpAnnounceSetCreate {
         identity: IdentityMetadataCreateParams {
@@ -93,6 +73,27 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
         client,
         "/v1/system/networking/bgp-announce",
         &announce_set,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Create BGP config
+    let bgp_config = BgpConfigCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "as47".parse().unwrap(),
+            description: "autonomous system 47".into(),
+        },
+        bgp_announce_set_id: NameOrId::Name("instances".parse().unwrap()),
+        asn: 47,
+        vrf: None,
+    };
+
+    NexusRequest::objects_post(
+        client,
+        "/v1/system/networking/bgp",
+        &bgp_config,
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()

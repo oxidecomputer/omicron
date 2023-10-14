@@ -2442,7 +2442,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_route_config (
 
 CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config (
     port_settings_id UUID,
-    bgp_announce_set_id UUID NOT NULL,
     bgp_config_id UUID NOT NULL,
     interface_name TEXT,
     addr INET,
@@ -2459,7 +2458,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.bgp_config (
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
     asn INT8 NOT NULL,
-    vrf TEXT
+    vrf TEXT,
+    bgp_announce_set_id UUID NOT NULL
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_bgp_config_by_name ON omicron.public.bgp_config (

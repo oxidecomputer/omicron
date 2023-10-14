@@ -439,11 +439,6 @@ impl Into<external::SwitchPortRouteConfig> for SwitchPortRouteConfig {
 #[diesel(table_name = switch_port_settings_bgp_peer_config)]
 pub struct SwitchPortBgpPeerConfig {
     pub port_settings_id: Uuid,
-
-    //TODO(ry) this should be associated with the BGP configuration
-    //     not an individual peer.
-    pub bgp_announce_set_id: Uuid,
-
     pub bgp_config_id: Uuid,
     pub interface_name: String,
     pub addr: IpNetwork,
@@ -452,18 +447,11 @@ pub struct SwitchPortBgpPeerConfig {
 impl SwitchPortBgpPeerConfig {
     pub fn new(
         port_settings_id: Uuid,
-        bgp_announce_set_id: Uuid,
         bgp_config_id: Uuid,
         interface_name: String,
         addr: IpNetwork,
     ) -> Self {
-        Self {
-            port_settings_id,
-            bgp_announce_set_id,
-            bgp_config_id,
-            interface_name,
-            addr,
-        }
+        Self { port_settings_id, bgp_config_id, interface_name, addr }
     }
 }
 
@@ -471,7 +459,6 @@ impl Into<external::SwitchPortBgpPeerConfig> for SwitchPortBgpPeerConfig {
     fn into(self) -> external::SwitchPortBgpPeerConfig {
         external::SwitchPortBgpPeerConfig {
             port_settings_id: self.port_settings_id,
-            bgp_announce_set_id: self.bgp_announce_set_id,
             bgp_config_id: self.bgp_config_id,
             interface_name: self.interface_name.clone(),
             addr: self.addr.ip(),

@@ -352,7 +352,7 @@ impl super::Nexus {
                     .bgp_announce_list(
                         &opctx,
                         &params::BgpAnnounceSetSelector {
-                            name_or_id: p.bgp_announce_set_id.into(),
+                            name_or_id: bgp_config.bgp_announce_set_id.into(),
                         },
                     )
                     .await?;

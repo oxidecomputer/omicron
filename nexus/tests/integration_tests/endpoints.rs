@@ -429,6 +429,7 @@ lazy_static! {
                 name: "as47".parse().unwrap(),
                 description: "BGP config for AS47".into(),
             },
+            bgp_announce_set_id: NameOrId::Name("instances".parse().unwrap()),
             asn: 47,
             vrf: None,
         };

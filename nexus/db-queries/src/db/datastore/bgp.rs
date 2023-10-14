@@ -27,26 +27,45 @@ impl DataStore {
         config: &params::BgpConfigCreate,
     ) -> CreateResult<BgpConfig> {
         use db::schema::bgp_config::dsl;
+        use db::schema::{
+            bgp_announce_set, bgp_announce_set::dsl as announce_set_dsl,
+        };
         let pool = self.pool_connection_authorized(opctx).await?;
 
-        let config: BgpConfig = config.clone().into();
+        /*
 
-        let result = diesel::insert_into(dsl::bgp_config)
-            .values(config.clone())
-            .returning(BgpConfig::as_returning())
-            .get_result_async(&*pool)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::Conflict(
-                        ResourceType::BgpConfig,
-                        &config.id().to_string(),
-                    ),
-                )
-            })?;
+        #[derive(Debug)]
+        enum BgpConfigSetError {
+            AnnounceSetNotFound,
+        }
+        type TxnError = TransactionError<BgpConfigSetError>;
+        */
 
-        Ok(result)
+        pool.transaction_async(|conn| async move {
+            let id: Uuid = match &config.bgp_announce_set_id {
+                NameOrId::Name(name) => {
+                    announce_set_dsl::bgp_announce_set
+                        .filter(bgp_announce_set::time_deleted.is_null())
+                        .filter(bgp_announce_set::name.eq(name.to_string()))
+                        .select(bgp_announce_set::id)
+                        .limit(1)
+                        .first_async::<Uuid>(&conn)
+                        .await?
+                }
+                NameOrId::Id(id) => *id,
+            };
+
+            let config = BgpConfig::from_config_create(config, id);
+
+            let result = diesel::insert_into(dsl::bgp_config)
+                .values(config.clone())
+                .returning(BgpConfig::as_returning())
+                .get_result_async(&conn)
+                .await?;
+            Ok(result)
+        })
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     pub async fn bgp_config_delete(
@@ -278,8 +297,8 @@ impl DataStore {
         use db::schema::bgp_announce_set::dsl as announce_set_dsl;
         use db::schema::bgp_announcement::dsl as bgp_announcement_dsl;
 
-        use db::schema::switch_port_settings_bgp_peer_config as sps_bgp_peer_config;
-        use db::schema::switch_port_settings_bgp_peer_config::dsl as sps_bgp_peer_config_dsl;
+        use db::schema::bgp_config;
+        use db::schema::bgp_config::dsl as bgp_config_dsl;
 
         #[derive(Debug)]
         enum BgpAnnounceSetDeleteError {
@@ -303,12 +322,11 @@ impl DataStore {
                 NameOrId::Id(id) => id,
             };
 
-            let count =
-                sps_bgp_peer_config_dsl::switch_port_settings_bgp_peer_config
-                    .filter(sps_bgp_peer_config::bgp_announce_set_id.eq(id))
-                    .count()
-                    .execute_async(&conn)
-                    .await?;
+            let count = bgp_config_dsl::bgp_config
+                .filter(bgp_config::bgp_announce_set_id.eq(id))
+                .count()
+                .execute_async(&conn)
+                .await?;
 
             if count > 0 {
                 return Err(TxnError::CustomError(

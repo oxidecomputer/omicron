@@ -379,7 +379,7 @@ pub(crate) async fn ensure_switch_port_bgp_settings(
             .bgp_announce_list(
                 &opctx,
                 &params::BgpAnnounceSetSelector {
-                    name_or_id: NameOrId::Id(peer.bgp_announce_set_id),
+                    name_or_id: NameOrId::Id(config.bgp_announce_set_id),
                 },
             )
             .await
@@ -854,7 +854,7 @@ pub(crate) async fn bootstore_update(
             .bgp_announce_list(
                 &opctx,
                 &params::BgpAnnounceSetSelector {
-                    name_or_id: NameOrId::Id(p.bgp_announce_set_id),
+                    name_or_id: NameOrId::Id(bgp_config.bgp_announce_set_id),
                 },
             )
             .await

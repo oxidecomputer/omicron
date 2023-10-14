@@ -28,6 +28,7 @@ pub struct BgpConfig {
     #[diesel(embed)]
     pub identity: BgpConfigIdentity,
     pub asn: SqlU32,
+    pub bgp_announce_set_id: Uuid,
     pub vrf: Option<String>,
 }
 
@@ -41,8 +42,11 @@ impl Into<external::BgpConfig> for BgpConfig {
     }
 }
 
-impl From<params::BgpConfigCreate> for BgpConfig {
-    fn from(c: params::BgpConfigCreate) -> BgpConfig {
+impl BgpConfig {
+    pub fn from_config_create(
+        c: &params::BgpConfigCreate,
+        bgp_announce_set_id: Uuid,
+    ) -> BgpConfig {
         BgpConfig {
             identity: BgpConfigIdentity::new(
                 Uuid::new_v4(),
@@ -52,7 +56,8 @@ impl From<params::BgpConfigCreate> for BgpConfig {
                 },
             ),
             asn: c.asn.into(),
-            vrf: c.vrf.map(|x| x.to_string()),
+            bgp_announce_set_id,
+            vrf: c.vrf.as_ref().map(|x| x.to_string()),
         }
     }
 }

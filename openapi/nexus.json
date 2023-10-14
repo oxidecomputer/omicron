@@ -8309,6 +8309,9 @@
             "format": "uint32",
             "minimum": 0
           },
+          "bgp_announce_set_id": {
+            "$ref": "#/components/schemas/NameOrId"
+          },
           "description": {
             "type": "string"
           },
@@ -8327,6 +8330,7 @@
         },
         "required": [
           "asn",
+          "bgp_announce_set_id",
           "description",
           "name"
         ]
@@ -14336,11 +14340,6 @@
             "type": "string",
             "format": "ip"
           },
-          "bgp_announce_set_id": {
-            "description": "The id for the set of prefixes announced in this peer configuration.",
-            "type": "string",
-            "format": "uuid"
-          },
           "bgp_config_id": {
             "description": "The id of the global BGP configuration referenced by this peer configuration.",
             "type": "string",
@@ -14358,7 +14357,6 @@
         },
         "required": [
           "addr",
-          "bgp_announce_set_id",
           "bgp_config_id",
           "interface_name",
           "port_settings_id"

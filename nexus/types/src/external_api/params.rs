@@ -1494,6 +1494,8 @@ pub struct BgpConfigCreate {
     /// The autonomous system number of this BGP configuration.
     pub asn: u32,
 
+    pub bgp_announce_set_id: NameOrId,
+
     /// Optional virtual routing and forwarding identifier for this BGP
     /// configuration.
     pub vrf: Option<Name>,

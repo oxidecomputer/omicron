@@ -2469,9 +2469,6 @@ pub struct SwitchPortBgpPeerConfig {
     /// The port settings object this BGP configuration belongs to.
     pub port_settings_id: Uuid,
 
-    /// The id for the set of prefixes announced in this peer configuration.
-    pub bgp_announce_set_id: Uuid,
-
     /// The id of the global BGP configuration referenced by this peer
     /// configuration.
     pub bgp_config_id: Uuid,

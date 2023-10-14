@@ -200,7 +200,6 @@ table! {
 table! {
     switch_port_settings_bgp_peer_config (port_settings_id, interface_name, addr) {
         port_settings_id -> Uuid,
-        bgp_announce_set_id -> Uuid,
         bgp_config_id -> Uuid,
         interface_name -> Text,
         addr -> Inet,
@@ -216,6 +215,7 @@ table! {
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
         asn -> Int8,
+        bgp_announce_set_id -> Uuid,
         vrf -> Nullable<Text>,
     }
 }
