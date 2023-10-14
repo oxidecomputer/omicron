@@ -22,8 +22,6 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 use uuid::Uuid;
 
-// XXX-dap add rack id
-
 #[derive(Debug)]
 pub struct CollectionBuilder {
     errors: Vec<anyhow::Error>,

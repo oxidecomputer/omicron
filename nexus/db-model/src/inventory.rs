@@ -138,7 +138,7 @@ impl From<nexus_types::inventory::SpType> for SpType {
 pub struct InvCollection {
     pub id: Uuid,
     pub time_started: DateTime<Utc>,
-    pub time_done: Option<DateTime<Utc>>,
+    pub time_done: DateTime<Utc>,
     pub collector: String,
     pub comment: String,
 }
@@ -148,7 +148,7 @@ impl<'a> From<&'a Collection> for InvCollection {
         InvCollection {
             id: c.id,
             time_started: c.time_started,
-            time_done: Some(c.time_done),
+            time_done: c.time_done,
             collector: c.collector.clone(),
             comment: c.comment.clone(),
         }

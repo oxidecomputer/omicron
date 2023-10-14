@@ -1528,16 +1528,13 @@ async fn cmd_db_inventory_collections_list(
                 .context("counting SPs")?
         };
 
-        let took = collection
-            .time_done
-            .map(|t| {
-                format!(
-                    "{} ms",
-                    t.signed_duration_since(&collection.time_started)
-                        .num_milliseconds()
-                )
-            })
-            .unwrap_or_else(|| format!("-"));
+        let took = format!(
+            "{} ms",
+            collection
+                .time_done
+                .signed_duration_since(&collection.time_started)
+                .num_milliseconds()
+        );
         rows.push(CollectionRow {
             id: collection.id,
             started: humantime::format_rfc3339_seconds(
@@ -1654,9 +1651,7 @@ async fn inv_collection_print(
     );
     println!(
         "done:       {}",
-        c.time_done
-            .map(|t| humantime::format_rfc3339_millis(t.into()).to_string())
-            .unwrap_or_else(|| String::from("-"))
+        humantime::format_rfc3339_millis(c.time_done.into()).to_string()
     );
 
     Ok(())

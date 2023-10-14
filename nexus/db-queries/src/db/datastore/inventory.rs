@@ -11,7 +11,6 @@ use crate::db::error::ErrorHandler;
 use crate::db::TransactionError;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
-use async_bb8_diesel::OptionalExtension;
 use chrono::DateTime;
 use chrono::Utc;
 use diesel::sql_types;
@@ -427,70 +426,59 @@ impl DataStore {
     ) -> Result<Option<Uuid>, Error> {
         // The caller of this (non-pub) function is responsible for authz.
 
-        use db::schema::inv_collection::dsl as cdsl;
-        use db::schema::inv_collection_error::dsl as edsl;
-
+        // XXX-dap this is running afoul of a table scan.  I don't think it
+        // should.  But I don't think it's worth debugging, either.  I could
+        // instead just select the most recent "nkeep+1" along with the error
+        // count for each one and figure this out in Rust.
         let conn = self.pool_connection_authorized(opctx).await?;
-        let errors_subquery = edsl::inv_collection_error
-            .select(edsl::inv_collection_id)
-            .filter(edsl::inv_collection_id.eq(cdsl::id));
-
-        let latest_complete: Option<Uuid> = cdsl::inv_collection
-            .select(cdsl::id)
-            .filter(cdsl::time_done.is_not_null())
-            .filter(diesel::dsl::not(diesel::dsl::exists(errors_subquery)))
-            .order_by(cdsl::time_started.desc())
-            .limit(1)
-            .first_async(&*conn)
-            .await
-            .optional()
-            .map_err(|e| {
-                public_error_from_diesel(e.into(), ErrorHandler::Server)
-            })
-            .internal_context("finding latest successful collection")?;
-
-        debug!(
-            log,
-            "inventory_prune_one: latest";
-            "latest_complete" => ?latest_complete
-        );
-
-        // If we ever start truly supporting inserting collections that are not
-        // yet finished, we'll have to figure out how to tell if somebody's
-        // still trying to update them when we go to clean them.
-        // XXX-dap should we just make that illegal now?
-        let mut candidates_query = cdsl::inv_collection
-            .select(cdsl::id)
-            .filter(cdsl::time_done.is_not_null())
-            .into_boxed();
-
-        if let Some(latest) = latest_complete {
-            candidates_query = candidates_query.filter(cdsl::id.ne(latest));
-        }
-
-        let candidates: Vec<Uuid> = candidates_query
-            .order_by(cdsl::time_started.asc())
+        let candidates: Vec<(Uuid, i64)> = db::schema::inv_collection::table
+            .inner_join(db::schema::inv_collection_error::table)
+            .group_by(db::schema::inv_collection::id)
+            .select((
+                db::schema::inv_collection::id,
+                diesel::dsl::count(
+                    db::schema::inv_collection_error::inv_collection_id,
+                ),
+            ))
+            .order_by(db::schema::inv_collection::time_started.desc())
             .limit(i64::from(nkeep) + 1)
             .load_async(&*conn)
             .await
             .map_err(|e| {
                 public_error_from_diesel(e.into(), ErrorHandler::Server)
             })
-            .internal_context("finding oldest collections")?;
+            .internal_context("listing oldest collections")?;
 
-        if u32::try_from(candidates.len()).unwrap() <= nkeep {
-            debug!(log, "inventory_prune_one: found nothing to prune");
-            return Ok(None);
+        // We've now got the "nkeep + 1" oldest collections, starting with the
+        // very oldest.  We can get rid of the oldest one unless it's the only
+        // complete one.  Another way to think about it: find the _last_
+        // complete one.  Remove it from the list of candidates.  Now mark the
+        // first item in the remaining list for deletion.
+        let last_completed_idx = candidates
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(_i, (_collection_id, nerrors))| *nerrors == 0);
+        let candidate = match last_completed_idx {
+            Some((i, _)) if i == 0 => candidates.iter().skip(1).next(),
+            _ => candidates.iter().next(),
         }
-
-        let oldest = candidates[0];
-        debug!(
-            log,
-            "inventory_prune_one: eligible for removal";
-            "collection_id" => oldest.to_string()
-        );
-
-        Ok(Some(oldest))
+        .map(|(collection_id, _nerrors)| *collection_id);
+        if let Some(c) = candidate {
+            debug!(
+                log,
+                "inventory_prune_one: eligible for removal";
+                "collection_id" => c.to_string(),
+                "candidates" => ?candidates,
+            );
+        } else {
+            debug!(
+                log,
+                "inventory_prune_one: nothing eligible for removal";
+                "candidates" => ?candidates,
+            );
+        }
+        Ok(candidate)
     }
 
     async fn inventory_delete_collection(

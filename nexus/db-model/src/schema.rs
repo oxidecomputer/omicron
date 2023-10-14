@@ -1140,7 +1140,7 @@ table! {
     inv_collection (id) {
         id -> Uuid,
         time_started -> Timestamptz,
-        time_done -> Nullable<Timestamptz>,
+        time_done -> Timestamptz,
         collector -> Text,
         comment -> Text,
     }
@@ -1226,6 +1226,7 @@ allow_tables_to_appear_in_same_query!(ip_pool_range, ip_pool);
 joinable!(ip_pool_range -> ip_pool (ip_pool_id));
 
 allow_tables_to_appear_in_same_query!(inv_collection, inv_collection_error);
+joinable!(inv_collection_error -> inv_collection (inv_collection_id));
 allow_tables_to_appear_in_same_query!(sw_caboose, inv_caboose);
 
 allow_tables_to_appear_in_same_query!(

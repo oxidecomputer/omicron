@@ -2588,7 +2588,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS caboose_properties
 CREATE TABLE IF NOT EXISTS inv_collection (
     id UUID PRIMARY KEY,
     time_started TIMESTAMPTZ NOT NULL,
-    time_done TIMESTAMPTZ,
+    time_done TIMESTAMPTZ NOT NULL,
     collector TEXT NOT NULL,
     comment TEXT NOT NULL
 );
