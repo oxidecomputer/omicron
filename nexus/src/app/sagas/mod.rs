@@ -23,6 +23,7 @@ pub mod disk_create;
 pub mod disk_delete;
 pub mod finalize_disk;
 pub mod import_blocks_from_url;
+mod instance_common;
 pub mod instance_create;
 pub mod instance_delete;
 pub mod instance_migrate;
@@ -369,7 +370,7 @@ where
                                 ))
                             }
 
-                            // Anything elses is a permanent error
+                            // Anything else is a permanent error
                             _ => Err(backoff::BackoffError::Permanent(
                                 progenitor_client::Error::ErrorResponse(
                                     response_value,

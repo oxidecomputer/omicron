@@ -34,8 +34,8 @@ use omicron_common::api::external::http_pagination::PaginatedById;
 use omicron_common::api::external::http_pagination::ScanById;
 use omicron_common::api::external::http_pagination::ScanParams;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
-use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
+use omicron_common::api::internal::nexus::SledInstanceState;
 use omicron_common::api::internal::nexus::UpdateArtifactId;
 use oximeter::types::ProducerResults;
 use oximeter_producer::{collect, ProducerIdPathParams};
@@ -250,7 +250,7 @@ struct InstancePathParam {
 async fn cpapi_instances_put(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<InstancePathParam>,
-    new_runtime_state: TypedBody<InstanceRuntimeState>,
+    new_runtime_state: TypedBody<SledInstanceState>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;

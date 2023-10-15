@@ -7,10 +7,12 @@
 use crate::app::sagas::retry_until_known_result;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
 use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::lookup::LookupPath;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
+use omicron_common::api::internal::nexus;
 use omicron_common::api::internal::shared::SwitchLocation;
 use sled_agent_client::types::DeleteVirtualNetworkInterfaceHost;
 use sled_agent_client::types::SetVirtualNetworkInterfaceHost;
@@ -470,6 +472,214 @@ impl super::Nexus {
 
         if let Some(e) = errors.into_iter().nth(0) {
             return Err(e);
+        }
+
+        Ok(())
+    }
+
+    /// Deletes an instance's OPTE V2P mappings and the boundary switch NAT
+    /// entries for its external IPs.
+    ///
+    /// This routine returns immediately upon encountering any errors (and will
+    /// not try to destroy any more objects after the point of failure).
+    async fn clear_instance_networking_state(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+    ) -> Result<(), Error> {
+        self.delete_instance_v2p_mappings(opctx, authz_instance.id()).await?;
+
+        let external_ips = self
+            .datastore()
+            .instance_lookup_external_ips(opctx, authz_instance.id())
+            .await?;
+
+        let boundary_switches = self.boundary_switches(opctx).await?;
+        for external_ip in external_ips {
+            for switch in &boundary_switches {
+                debug!(&self.log, "deleting instance nat mapping";
+                       "instance_id" => %authz_instance.id(),
+                       "switch" => switch.to_string(),
+                       "entry" => #?external_ip);
+
+                let dpd_client =
+                    self.dpd_clients.get(switch).ok_or_else(|| {
+                        Error::internal_error(&format!(
+                            "unable to find dendrite client for {switch}"
+                        ))
+                    })?;
+
+                dpd_client
+                    .ensure_nat_entry_deleted(
+                        &self.log,
+                        external_ip.ip,
+                        *external_ip.first_port,
+                    )
+                    .await
+                    .map_err(|e| {
+                        Error::internal_error(&format!(
+                            "failed to delete nat entry via dpd: {e}"
+                        ))
+                    })?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Given old and new instance runtime states, determines the desired
+    /// networking configuration for a given instance and ensures it has been
+    /// propagated to all relevant sleds.
+    ///
+    /// # Arguments
+    ///
+    /// - opctx: An operation context for this operation.
+    /// - authz_instance: A resolved authorization context for the instance of
+    ///   interest.
+    /// - prev_instance_state: The most-recently-recorded instance runtime
+    ///   state for this instance.
+    /// - new_instance_state: The instance state that the caller of this routine
+    ///   has observed and that should be used to set up this instance's
+    ///   networking state.
+    ///
+    /// # Return value
+    ///
+    /// `Ok(())` if this routine completed all the operations it wanted to
+    /// complete, or an appropriate `Err` otherwise.
+    pub(crate) async fn ensure_updated_instance_network_config(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+        prev_instance_state: &db::model::InstanceRuntimeState,
+        new_instance_state: &nexus::InstanceRuntimeState,
+    ) -> Result<(), Error> {
+        let log = &self.log;
+        let instance_id = authz_instance.id();
+
+        // If this instance update is stale, do nothing, since the superseding
+        // update may have allowed the instance's location to change further.
+        if prev_instance_state.gen >= new_instance_state.gen.into() {
+            debug!(log,
+                   "instance state generation already advanced, \
+                   won't touch network config";
+                   "instance_id" => %instance_id);
+
+            return Ok(());
+        }
+
+        // If this update will retire the instance's active VMM, delete its
+        // networking state. It will be re-established the next time the
+        // instance starts.
+        if new_instance_state.propolis_id.is_none() {
+            info!(log,
+                  "instance cleared its Propolis ID, cleaning network config";
+                  "instance_id" => %instance_id,
+                  "propolis_id" => ?prev_instance_state.propolis_id);
+
+            self.clear_instance_networking_state(opctx, authz_instance).await?;
+            return Ok(());
+        }
+
+        // If the instance still has a migration in progress, don't change
+        // any networking state until an update arrives that retires that
+        // migration.
+        //
+        // This is needed to avoid the following race:
+        //
+        // 1. Migration from S to T completes.
+        // 2. Migration source sends an update that changes the instance's
+        //    active VMM but leaves the migration ID in place.
+        // 3. Meanwhile, migration target sends an update that changes the
+        //    instance's active VMM and clears the migration ID.
+        // 4. The migration target's call updates networking state and commits
+        //    the new instance record.
+        // 5. The instance migrates from T to T' and Nexus applies networking
+        //    configuration reflecting that the instance is on T'.
+        // 6. The update in step 2 applies configuration saying the instance
+        //    is on sled T.
+        if new_instance_state.migration_id.is_some() {
+            debug!(log,
+                   "instance still has a migration in progress, won't touch \
+                   network config";
+                   "instance_id" => %instance_id,
+                   "migration_id" => ?new_instance_state.migration_id);
+
+            return Ok(());
+        }
+
+        let new_propolis_id = new_instance_state.propolis_id.unwrap();
+
+        // Updates that end live migration need to push OPTE V2P state even if
+        // the instance's active sled did not change (see below).
+        let migration_retired = prev_instance_state.migration_id.is_some()
+            && new_instance_state.migration_id.is_none();
+
+        if (prev_instance_state.propolis_id == new_instance_state.propolis_id)
+            && !migration_retired
+        {
+            debug!(log, "instance didn't move, won't touch network config";
+                   "instance_id" => %instance_id);
+
+            return Ok(());
+        }
+
+        // Either the instance moved from one sled to another, or it attempted
+        // to migrate and failed. Ensure the correct networking configuration
+        // exists for its current home.
+        //
+        // TODO(#3107) This is necessary even if the instance didn't move,
+        // because registering a migration target on a sled creates OPTE ports
+        // for its VNICs, and that creates new V2P mappings on that sled that
+        // place the relevant virtual IPs on the local sled. Once OPTE stops
+        // creating these mappings, this path only needs to be taken if an
+        // instance has changed sleds.
+        let new_sled_id = match self
+            .db_datastore
+            .vmm_fetch(&opctx, authz_instance, &new_propolis_id)
+            .await
+        {
+            Ok(vmm) => vmm.sled_id,
+
+            // A VMM in the active position should never be destroyed. If the
+            // sled sending this message is the owner of the instance's last
+            // active VMM and is destroying it, it should also have retired that
+            // VMM.
+            Err(Error::ObjectNotFound { .. }) => {
+                error!(log, "instance's active vmm unexpectedly not found";
+                       "instance_id" => %instance_id,
+                       "propolis_id" => %new_propolis_id);
+
+                return Ok(());
+            }
+
+            Err(e) => return Err(e),
+        };
+
+        self.create_instance_v2p_mappings(opctx, instance_id, new_sled_id)
+            .await?;
+
+        let (.., sled) = LookupPath::new(opctx, &self.db_datastore)
+            .sled_id(new_sled_id)
+            .fetch()
+            .await?;
+
+        let boundary_switches =
+            self.boundary_switches(&self.opctx_alloc).await?;
+
+        for switch in &boundary_switches {
+            let dpd_client = self.dpd_clients.get(switch).ok_or_else(|| {
+                Error::internal_error(&format!(
+                    "could not find dpd client for {switch}"
+                ))
+            })?;
+            self.instance_ensure_dpd_config(
+                opctx,
+                instance_id,
+                &sled.address(),
+                None,
+                dpd_client,
+            )
+            .await?;
         }
 
         Ok(())
