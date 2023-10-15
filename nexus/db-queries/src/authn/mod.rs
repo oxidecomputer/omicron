@@ -228,8 +228,8 @@ impl Context {
         )
     }
 
-    /// Returns an authenticated context for the specific Silo user.
-    #[cfg(test)]
+    /// Returns an authenticated context for the specific Silo user. Not marked
+    /// as #[cfg(test)] so that this is available in integration tests.
     pub fn for_test_user(
         silo_user_id: Uuid,
         silo_id: Uuid,

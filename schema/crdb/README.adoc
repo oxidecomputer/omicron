@@ -62,7 +62,7 @@ Process:
   after your update is applied. Don't forget to update the version field of
   `db_metadata` at the bottom of the file!
 ** If necessary, do the same thing for `schema/crdb/dbwipe.sql`.
-* Update Nexus's idea of the latest schema, by updating it's `SCHEMA_VERSION` to
+* Update Nexus's idea of the latest schema, by updating its `SCHEMA_VERSION` to
   `NEW_VERSION` within `nexus/db-model/src/schema.rs`.
 
 SQL Validation, via Automated Tests:
@@ -70,3 +70,65 @@ SQL Validation, via Automated Tests:
 * The `SCHEMA_VERSION` matches the version used in `dbinit.sql`
 * The combination of all `up.sql` files results in the same schema as `dbinit.sql`
 * All `up.sql` files can be applied twice without error
+
+==== Handling common schema changes
+
+CockroachDB's schema includes a description of all of the database's CHECK
+constraints. If a CHECK constraint is anonymous (i.e. it is written simply as
+`CHECK <expression>` and not `CONSTRAINT <name> CHECK expression`), CRDB
+assigns it a name based on the table and column to which the constraint applies.
+The challenge is that CRDB identifies tables and columns using opaque
+identifiers whose values depend on the order in which tables and views were
+defined in the current database. This means that adding, removing, or renaming
+objects needs to be done carefully to preserve the relative ordering of objects
+in new databases created by `dbinit.sql` and upgraded databases created by
+applying `up.sql` transformations.
+
+===== Adding new columns with constraints
+
+Strongly consider naming new constraints (`CONSTRAINT <name> <expression>`) to
+avoid the problems with anonymous constraints described above.
+
+===== Adding tables and views
+
+New tables and views must be added to the end of `dbinit.sql` so that the order
+of preceding `CREATE` statements is left unchanged. If your changes fail the
+`CHECK` constraints test and you get a constraint name diff like this...
+
+```
+NamedSqlValue {
+    column: "constraint_name",
+    value: Some(
+        String(
+<           "4101115737_149_10_not_null",
+>           "4101115737_148_10_not_null",
+```
+
+...then you've probably inadvertently added a table or view in the wrong place.
+
+==== Adding new source tables to an existing view
+
+An upgrade can add a new table and then use a `CREATE OR REPLACE VIEW` statement
+to make an existing view depend on that table. To do this in `dbinit.sql` while
+maintaining table and view ordering, use `CREATE VIEW` to create a "placeholder"
+view in the correct position, then add the table to the bottom of `dbinit.sql`
+and use `CREATE OR REPLACE VIEW` to "fill out" the placeholder definition to
+refer to the new table. (You may need to do the `CREATE OR REPLACE VIEW` in a
+separate transaction from the original `CREATE VIEW`.)
+
+Note that `CREATE OR REPLACE VIEW` requires that the new view maintain all of
+the columns of the old view with the same type and same order (though the query
+used to populate them can change. See
+https://www.postgresql.org/docs/15/sql-createview.html.
+
+==== Renaming columns
+
+Idempotently renaming existing columns is unfortunately not possible in our
+current database configuration. (Postgres doesn't support the use of an `IF
+EXISTS` qualifier on an `ALTER TABLE RENAME COLUMN` statement, and the version
+of CockroachDB we use at this writing doesn't support the use of user-defined
+functions as a workaround.)
+
+An (imperfect) workaround is to use the `#[diesel(column_name = foo)]` attribute
+in Rust code to preserve the existing name of a column in the database while
+giving its corresponding struct field a different, more meaningful name.

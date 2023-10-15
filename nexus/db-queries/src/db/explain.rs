@@ -5,11 +5,12 @@
 //! Utility allowing Diesel to EXPLAIN queries.
 
 use super::pool::DbConnection;
-use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionError};
+use async_bb8_diesel::AsyncRunQueryDsl;
 use async_trait::async_trait;
 use diesel::pg::Pg;
 use diesel::prelude::*;
 use diesel::query_builder::*;
+use diesel::result::Error as DieselError;
 
 /// A wrapper around a runnable Diesel query, which EXPLAINs what it is doing.
 ///
@@ -49,7 +50,7 @@ pub trait ExplainableAsync<Q> {
     async fn explain_async(
         self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
-    ) -> Result<String, ConnectionError>;
+    ) -> Result<String, DieselError>;
 }
 
 #[async_trait]
@@ -65,7 +66,7 @@ where
     async fn explain_async(
         self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
-    ) -> Result<String, ConnectionError> {
+    ) -> Result<String, DieselError> {
         Ok(ExplainStatement { query: self }
             .get_results_async::<String>(conn)
             .await?

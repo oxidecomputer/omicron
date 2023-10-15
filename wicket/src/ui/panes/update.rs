@@ -29,7 +29,7 @@ use ratatui::widgets::{
 use slog::{info, o, Logger};
 use tui_tree_widget::{Tree, TreeItem, TreeState};
 use update_engine::{
-    AbortReason, ExecutionStatus, StepKey, WillNotBeRunReason,
+    AbortReason, ExecutionStatus, FailureReason, StepKey, WillNotBeRunReason,
 };
 use wicket_common::update_events::{
     EventBuffer, EventReport, ProgressEvent, StepOutcome, StepStatus,
@@ -340,7 +340,7 @@ impl UpdatePane {
                     Span::styled("Completed", style::successful_update_bold()),
                 ]));
             }
-            StepStatus::Failed { info: Some(info) } => {
+            StepStatus::Failed { reason: FailureReason::StepFailed(info) } => {
                 let mut spans = vec![
                     Span::styled("Status: ", style::selected()),
                     Span::styled("Failed", style::failed_update_bold()),
@@ -381,13 +381,23 @@ impl UpdatePane {
                     }
                 }
             }
-            StepStatus::Failed { info: None } => {
-                // No information is available, so all we can do is say that
-                // this step failed.
-                let spans = vec![
+            StepStatus::Failed {
+                reason: FailureReason::ParentFailed { parent_step },
+            } => {
+                let mut spans = vec![
                     Span::styled("Status: ", style::selected()),
                     Span::styled("Failed", style::failed_update_bold()),
                 ];
+                if let Some(value) = id_state.event_buffer.get(parent_step) {
+                    spans.push(Span::styled(
+                        " at parent step ",
+                        style::plain_text(),
+                    ));
+                    spans.push(Span::styled(
+                        value.step_info().description.as_ref(),
+                        style::selected(),
+                    ));
+                }
                 body.lines.push(Line::from(spans));
             }
             StepStatus::Aborted {
