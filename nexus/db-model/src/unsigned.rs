@@ -83,6 +83,7 @@ pub struct SqlU16(pub u16);
 
 NewtypeFrom! { () pub struct SqlU16(u16); }
 NewtypeDeref! { () pub struct SqlU16(u16); }
+NewtypeDisplay! { () pub struct SqlU16(u16); }
 
 impl SqlU16 {
     pub fn new(value: u16) -> Self {
@@ -134,6 +135,7 @@ pub struct SqlU32(pub u32);
 
 NewtypeFrom! { () pub struct SqlU32(u32); }
 NewtypeDeref! { () pub struct SqlU32(u32); }
+NewtypeDisplay! { () pub struct SqlU32(u32); }
 
 impl SqlU32 {
     pub fn new(value: u32) -> Self {

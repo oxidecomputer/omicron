@@ -2,14 +2,19 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::impl_enum_type;
 use crate::schema::{
     hw_baseboard_id, inv_caboose, inv_collection, inv_collection_error,
     inv_root_of_trust, inv_service_processor, sw_caboose,
 };
+use crate::{impl_enum_type, SqlU16, SqlU32};
 use chrono::DateTime;
 use chrono::Utc;
+use diesel::backend::Backend;
+use diesel::deserialize::{self, FromSql};
 use diesel::expression::AsExpression;
+use diesel::pg::Pg;
+use diesel::serialize::ToSql;
+use diesel::{serialize, sql_types};
 use nexus_types::inventory::{
     BaseboardId, Caboose, Collection, PowerState, RotSlot,
 };
@@ -209,13 +214,17 @@ impl<'a> From<&'a Caboose> for SwCaboose {
 #[diesel(table_name = inv_collection_error)]
 pub struct InvCollectionError {
     pub inv_collection_id: Uuid,
-    pub idx: i32,
+    pub idx: SqlU16,
     pub message: String,
 }
 
 impl InvCollectionError {
-    pub fn new(inv_collection_id: Uuid, idx: i32, message: String) -> Self {
-        InvCollectionError { inv_collection_id, idx, message }
+    pub fn new(inv_collection_id: Uuid, idx: u16, message: String) -> Self {
+        InvCollectionError {
+            inv_collection_id,
+            idx: SqlU16::from(idx),
+            message,
+        }
     }
 }
 
@@ -228,14 +237,71 @@ pub struct InvServiceProcessor {
     pub source: String,
 
     pub sp_type: SpType,
-    // XXX-dap newtype all around
-    pub sp_slot: i32,
+    pub sp_slot: SpMgsSlot,
 
-    // XXX-dap newtype all around
-    // XXX-dap numeric types?
-    pub baseboard_revision: i64,
+    pub baseboard_revision: BaseboardRevision,
     pub hubris_archive_id: String,
     pub power_state: HwPowerState,
+}
+
+#[derive(Copy, Clone, Debug, AsExpression, FromSqlRow)]
+#[diesel(sql_type = sql_types::Int4)]
+pub struct SpMgsSlot(SqlU16);
+
+NewtypeFrom! { () pub struct SpMgsSlot(SqlU16); }
+NewtypeDeref! { () pub struct SpMgsSlot(SqlU16); }
+NewtypeDisplay! { () pub struct SpMgsSlot(SqlU16); }
+
+impl ToSql<sql_types::Int4, Pg> for SpMgsSlot {
+    fn to_sql<'a>(
+        &'a self,
+        out: &mut serialize::Output<'a, '_, Pg>,
+    ) -> serialize::Result {
+        <SqlU16 as ToSql<sql_types::Int4, Pg>>::to_sql(
+            &self.0,
+            &mut out.reborrow(),
+        )
+    }
+}
+
+impl<DB> FromSql<sql_types::Int4, DB> for SpMgsSlot
+where
+    DB: Backend,
+    SqlU16: FromSql<sql_types::Int4, DB>,
+{
+    fn from_sql(bytes: DB::RawValue<'_>) -> deserialize::Result<Self> {
+        Ok(SpMgsSlot(SqlU16::from_sql(bytes)?))
+    }
+}
+
+#[derive(Copy, Clone, Debug, AsExpression, FromSqlRow)]
+#[diesel(sql_type = sql_types::Int8)]
+pub struct BaseboardRevision(SqlU32);
+
+NewtypeFrom! { () pub struct BaseboardRevision(SqlU32); }
+NewtypeDeref! { () pub struct BaseboardRevision(SqlU32); }
+NewtypeDisplay! { () pub struct BaseboardRevision(SqlU32); }
+
+impl ToSql<sql_types::Int8, Pg> for BaseboardRevision {
+    fn to_sql<'a>(
+        &'a self,
+        out: &mut serialize::Output<'a, '_, Pg>,
+    ) -> serialize::Result {
+        <SqlU32 as ToSql<sql_types::Int8, Pg>>::to_sql(
+            &self.0,
+            &mut out.reborrow(),
+        )
+    }
+}
+
+impl<DB> FromSql<sql_types::Int8, DB> for BaseboardRevision
+where
+    DB: Backend,
+    SqlU32: FromSql<sql_types::Int8, DB>,
+{
+    fn from_sql(bytes: DB::RawValue<'_>) -> deserialize::Result<Self> {
+        Ok(BaseboardRevision(SqlU32::from_sql(bytes)?))
+    }
 }
 
 #[derive(Queryable, Clone, Debug, Selectable)]

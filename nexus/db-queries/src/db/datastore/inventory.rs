@@ -21,6 +21,7 @@ use diesel::IntoSql;
 use diesel::NullableExpressionMethods;
 use diesel::QueryDsl;
 use diesel::QuerySource;
+use diesel::Table;
 use nexus_db_model::CabooseWhich;
 use nexus_db_model::CabooseWhichEnum;
 use nexus_db_model::HwBaseboardId;
@@ -208,6 +209,32 @@ impl DataStore {
                             .internal_context("inserting service processor"),
                         )
                     })?;
+
+                    // This statement is just here to force a compilation error
+                    // if the set of columns in `inv_service_processor` changes.
+                    // The code above attempts to insert a row into
+                    // `inv_service_processor` using an explicit list of columns
+                    // and values.  Without the following statement, If a new
+                    // required column were added, this would fail at runtime.
+                    //
+                    // If you're here because of a compile error, you might be
+                    // changing the `inv_service_processor` table.  Update the
+                    // statement below and be sure to update the code above,
+                    // too!
+                    //
+                    // See also similar comments in blocks below, near other
+                    // uses of `all_columns().
+                    let (
+                        _inv_collection_id,
+                        _hw_baseboard_id,
+                        _time_collected,
+                        _source,
+                        _sp_type,
+                        _sp_slot,
+                        _baseboard_revision,
+                        _hubris_archive_id,
+                        _power_state,
+                    ) = sp_dsl::inv_service_processor::all_columns();
                 }
             }
 
@@ -217,9 +244,6 @@ impl DataStore {
                 use db::schema::hw_baseboard_id::dsl as baseboard_dsl;
                 use db::schema::inv_root_of_trust::dsl as rot_dsl;
 
-                // XXX-dap is there some way to make this fail to column if,
-                // say, we add another column to one of these tables?  Maybe a
-                // match on a struct and make sure we get all the fields?
                 for (baseboard_id, rot) in &collection.rots {
                     let selection = db::schema::hw_baseboard_id::table
                         .select((
@@ -285,6 +309,22 @@ impl DataStore {
                             .internal_context("inserting service processor"),
                         )
                     })?;
+
+                    // See the comment in the previous block (where we use
+                    // `inv_service_processor::all_columns()`).  The same
+                    // applies here.
+                    let (
+                        _inv_collection_id,
+                        _hw_baseboard_id,
+                        _time_collected,
+                        _source,
+                        _rot_slot_active,
+                        _rot_slot_boot_pref_persistent,
+                        _rot_slot_boot_pref_persistent_pending,
+                        _rot_slot_boot_pref_transient,
+                        _rot_slot_a_sha3_256,
+                        _rot_slot_b_sha3_256,
+                    ) = rot_dsl::inv_root_of_trust::all_columns();
                 }
             }
 
@@ -323,12 +363,20 @@ impl DataStore {
                     .iter()
                     .enumerate()
                     .map(|(i, error)| {
-                        // XXX-dap unwrap
-                        let index = i32::try_from(i).unwrap();
+                        let index =
+                            u16::try_from(i).map_err(|e| {
+                                Error::internal_error(&format!(
+                                "failed to convert error index to u16 (too \
+                                many errors in inventory collection?): {}", e))
+                            })?;
                         let message = format!("{:#}", error);
-                        InvCollectionError::new(collection_id, index, message)
+                        Ok(InvCollectionError::new(
+                            collection_id,
+                            index,
+                            message,
+                        ))
                     })
-                    .collect::<Vec<_>>();
+                    .collect::<Result<Vec<_>, Error>>()?;
                 let _ = diesel::insert_into(errors_dsl::inv_collection_error)
                     .values(error_values)
                     .execute_async(&conn)
@@ -370,8 +418,6 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         nkeep: u32,
-        // XXX-dap can we not just update the log inside the opctx?
-        log: &slog::Logger,
     ) -> Result<(), Error> {
         // There could be any number of collections in the database: 0, 1, ...,
         // nkeep, nkeep + 1, ..., up to a very large number.  Of these, some of
@@ -407,10 +453,10 @@ impl DataStore {
         opctx.authorize(authz::Action::Modify, &authz::INVENTORY).await?;
 
         loop {
-            match self.inventory_find_pruneable(opctx, nkeep, log).await? {
+            match self.inventory_find_pruneable(opctx, nkeep).await? {
                 None => break,
                 Some(collection_id) => {
-                    self.inventory_delete_collection(opctx, log, collection_id)
+                    self.inventory_delete_collection(opctx, collection_id)
                         .await?
                 }
             }
@@ -423,7 +469,6 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         nkeep: u32,
-        log: &slog::Logger,
     ) -> Result<Option<Uuid>, Error> {
         // The caller of this (non-pub) function is responsible for authz.
 
@@ -505,7 +550,7 @@ impl DataStore {
 
         if u32::try_from(candidates.len()).unwrap() <= nkeep {
             debug!(
-                log,
+                &opctx.log,
                 "inventory_prune_one: nothing eligible for removal (too few)";
                 "candidates" => ?candidates,
             );
@@ -529,14 +574,14 @@ impl DataStore {
         .map(|(collection_id, _nerrors)| *collection_id);
         if let Some(c) = candidate {
             debug!(
-                log,
+                &opctx.log,
                 "inventory_prune_one: eligible for removal";
                 "collection_id" => c.to_string(),
                 "candidates" => ?candidates,
             );
         } else {
             debug!(
-                log,
+                &opctx.log,
                 "inventory_prune_one: nothing eligible for removal";
                 "candidates" => ?candidates,
             );
@@ -547,7 +592,6 @@ impl DataStore {
     async fn inventory_delete_collection(
         &self,
         opctx: &OpContext,
-        log: &slog::Logger,
         collection_id: Uuid,
     ) -> Result<(), Error> {
         // The caller of this (non-pub) function is responsible for authz.
@@ -677,7 +721,7 @@ impl DataStore {
                 }
             })?;
 
-        info!(log, "removed inventory collection";
+        info!(&opctx.log, "removed inventory collection";
             "collection_id" => collection_id.to_string(),
             "ncollections" => ncollections,
             "nsps" => nsps,
@@ -898,8 +942,6 @@ impl diesel::query_builder::QueryFragment<diesel::pg::Pg> for InvCabooseInsert {
         self.into_inv_caboose.walk_ast(pass.reborrow())?;
 
         pass.push_sql("(");
-        // XXX-dap want a way for this to fail at compile time if columns or
-        // types are wrong?
         pass.push_identifier(dsl_inv_caboose::hw_baseboard_id::NAME)?;
         pass.push_sql(", ");
         pass.push_identifier(dsl_inv_caboose::sw_caboose_id::NAME)?;
@@ -913,6 +955,19 @@ impl diesel::query_builder::QueryFragment<diesel::pg::Pg> for InvCabooseInsert {
         pass.push_identifier(dsl_inv_caboose::which::NAME)?;
         pass.push_sql(")\n");
         pass.push_sql("SELECT * FROM my_new_row");
+
+        // See the comment in inventory_insert_collection() where we use
+        // `inv_service_processor::all_columns()`.  The same applies here.
+        // If you update the statement below because the schema for
+        // `inv_caboose` has changed, be sure to update the code above, too!
+        let (
+            _hw_baseboard_id,
+            _sw_caboose_id,
+            _inv_collection_id,
+            _time_collected,
+            _source,
+            _which,
+        ) = dsl_inv_caboose::inv_caboose::all_columns();
 
         Ok(())
     }

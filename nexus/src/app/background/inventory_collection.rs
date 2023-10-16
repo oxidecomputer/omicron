@@ -55,7 +55,6 @@ impl BackgroundTask for InventoryCollector {
                 &self.resolver,
                 &self.creator,
                 self.nkeep,
-                &opctx.log,
             )
             .await
             .context("failed to collect inventory")
@@ -89,10 +88,9 @@ async fn inventory_activate(
     resolver: &internal_dns::resolver::Resolver,
     creator: &str,
     nkeep: u32,
-    log: &slog::Logger,
 ) -> Result<Collection, anyhow::Error> {
     datastore
-        .inventory_prune_collections(opctx, nkeep, log)
+        .inventory_prune_collections(opctx, nkeep)
         .await
         .context("pruning old collections")?;
 
@@ -104,7 +102,7 @@ async fn inventory_activate(
         .into_iter()
         .map(|sockaddr| {
             let url = format!("http://{}", sockaddr);
-            let log = log.new(o!("gateway_url" => url.clone()));
+            let log = opctx.log.new(o!("gateway_url" => url.clone()));
             Arc::new(gateway_client::Client::new(&url, log))
         })
         .collect::<Vec<_>>();
@@ -112,7 +110,7 @@ async fn inventory_activate(
     // Run a collection.
     let inventory = nexus_inventory::Collector::new(
         creator,
-        "activation", // TODO-dap useless
+        "activation", // XXX-dap useless
         &mgs_clients,
     );
     let collection =
