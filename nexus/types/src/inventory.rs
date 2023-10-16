@@ -33,8 +33,6 @@ pub struct Collection {
     pub time_done: DateTime<Utc>,
     /// name of the agent doing the collecting (generally, this Nexus's uuid)
     pub collector: String,
-    /// reason for triggering this collection
-    pub comment: String,
 
     pub baseboards: BTreeSet<Arc<BaseboardId>>,
     pub cabooses: BTreeSet<Arc<Caboose>>,

@@ -1142,7 +1142,6 @@ table! {
         time_started -> Timestamptz,
         time_done -> Timestamptz,
         collector -> Text,
-        comment -> Text,
     }
 }
 

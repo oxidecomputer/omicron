@@ -27,7 +27,6 @@ pub struct CollectionBuilder {
     errors: Vec<anyhow::Error>,
     time_started: DateTime<Utc>,
     collector: String,
-    comment: String,
     baseboards: BTreeSet<Arc<BaseboardId>>,
     cabooses: BTreeSet<Arc<Caboose>>,
     sps: BTreeMap<Arc<BaseboardId>, ServiceProcessor>,
@@ -37,12 +36,11 @@ pub struct CollectionBuilder {
 }
 
 impl CollectionBuilder {
-    pub fn new(collector: &str, comment: &str) -> Self {
+    pub fn new(collector: &str) -> Self {
         CollectionBuilder {
             errors: vec![],
             time_started: Utc::now(),
             collector: collector.to_owned(),
-            comment: comment.to_owned(),
             baseboards: BTreeSet::new(),
             cabooses: BTreeSet::new(),
             sps: BTreeMap::new(),
@@ -58,7 +56,6 @@ impl CollectionBuilder {
             time_started: self.time_started,
             time_done: Utc::now(),
             collector: self.collector,
-            comment: self.comment,
             baseboards: self.baseboards,
             cabooses: self.cabooses,
             sps: self.sps,

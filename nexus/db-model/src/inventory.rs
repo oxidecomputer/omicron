@@ -145,7 +145,6 @@ pub struct InvCollection {
     pub time_started: DateTime<Utc>,
     pub time_done: DateTime<Utc>,
     pub collector: String,
-    pub comment: String,
 }
 
 impl<'a> From<&'a Collection> for InvCollection {
@@ -155,7 +154,6 @@ impl<'a> From<&'a Collection> for InvCollection {
             time_started: c.time_started,
             time_done: c.time_done,
             collector: c.collector.clone(),
-            comment: c.comment.clone(),
         }
     }
 }

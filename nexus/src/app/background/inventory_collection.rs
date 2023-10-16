@@ -110,7 +110,6 @@ async fn inventory_activate(
     // Run a collection.
     let inventory = nexus_inventory::Collector::new(
         creator,
-        "activation", // XXX-dap useless
         &mgs_clients,
     );
     let collection =
