@@ -5,9 +5,9 @@
 //! Collection of inventory from Omicron components
 
 use crate::builder::CollectionBuilder;
-use crate::Collection;
 use anyhow::Context;
 use nexus_types::inventory::CabooseWhich;
+use nexus_types::inventory::Collection;
 use std::sync::Arc;
 use strum::IntoEnumIterator;
 

@@ -13,5 +13,3 @@ mod builder;
 mod collector;
 
 pub use collector::Collector;
-// XXX-remove this
-pub use nexus_types::inventory::*;

@@ -4,19 +4,19 @@
 
 //! Interface for building [`Collection`] dynamically
 
-use crate::BaseboardId;
-use crate::Caboose;
-use crate::Collection;
-use crate::RotState;
-use crate::ServiceProcessor;
 use anyhow::anyhow;
 use chrono::DateTime;
 use chrono::Utc;
 use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpState;
 use gateway_client::types::SpType;
+use nexus_types::inventory::BaseboardId;
+use nexus_types::inventory::Caboose;
 use nexus_types::inventory::CabooseFound;
 use nexus_types::inventory::CabooseWhich;
+use nexus_types::inventory::Collection;
+use nexus_types::inventory::RotState;
+use nexus_types::inventory::ServiceProcessor;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::sync::Arc;
