@@ -108,6 +108,26 @@ pub struct GetValueError {
     err: GetValueErrorRaw,
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("Failed to list snapshots: {0}")]
+pub struct ListSnapshotsError(#[from] crate::ExecutionError);
+
+#[derive(Debug, thiserror::Error)]
+#[error("Failed to create snapshot '{snap_name}' from filesystem '{filesystem}': {err}")]
+pub struct CreateSnapshotError {
+    filesystem: String,
+    snap_name: String,
+    err: crate::ExecutionError,
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("Failed to delete snapshot '{filesystem}@{snap_name}': {err}")]
+pub struct DestroySnapshotError {
+    filesystem: String,
+    snap_name: String,
+    err: crate::ExecutionError,
+}
+
 /// Wraps commands for interacting with ZFS.
 pub struct Zfs {}
 
@@ -182,6 +202,20 @@ impl Zfs {
             })
             .collect();
         Ok(filesystems)
+    }
+
+    /// Return the name of a dataset for a ZFS object.
+    ///
+    /// The object can either be a dataset name, or a path, in which case it
+    /// will be resolved to the _mounted_ ZFS dataset containing that path.
+    pub fn get_dataset_name(object: &str) -> Result<String, ListDatasetsError> {
+        let mut command = std::process::Command::new(ZFS);
+        let cmd = command.args(&["get", "-Hpo", "value", "name", object]);
+        execute(cmd)
+            .map(|output| {
+                String::from_utf8_lossy(&output.stdout).trim().to_string()
+            })
+            .map_err(|err| ListDatasetsError { name: object.to_string(), err })
     }
 
     /// Destroys a dataset.
@@ -379,6 +413,7 @@ impl Zfs {
         }
     }
 
+    /// Set the value of an Oxide-managed ZFS property.
     pub fn set_oxide_value(
         filesystem_name: &str,
         name: &str,
@@ -404,6 +439,7 @@ impl Zfs {
         Ok(())
     }
 
+    /// Get the value of an Oxide-managed ZFS property.
     pub fn get_oxide_value(
         filesystem_name: &str,
         name: &str,
@@ -433,6 +469,88 @@ impl Zfs {
             });
         }
         Ok(value.to_string())
+    }
+
+    /// List all extant snapshots.
+    pub fn list_snapshots() -> Result<Vec<Snapshot>, ListSnapshotsError> {
+        let mut command = std::process::Command::new(ZFS);
+        let cmd = command.args(&["list", "-H", "-o", "name", "-t", "snapshot"]);
+        execute(cmd)
+            .map(|output| {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                stdout
+                    .trim()
+                    .lines()
+                    .map(|line| {
+                        let (filesystem, snap_name) =
+                            line.split_once('@').unwrap();
+                        Snapshot {
+                            filesystem: filesystem.to_string(),
+                            snap_name: snap_name.to_string(),
+                        }
+                    })
+                    .collect()
+            })
+            .map_err(ListSnapshotsError::from)
+    }
+
+    /// Create a snapshot of a filesystem.
+    ///
+    /// A list of properties, as name-value tuples, may be passed to this
+    /// method, for creating properties directly on the snapshots.
+    pub fn create_snapshot<'a>(
+        filesystem: &'a str,
+        snap_name: &'a str,
+        properties: &'a [(&'a str, &'a str)],
+    ) -> Result<(), CreateSnapshotError> {
+        let mut command = std::process::Command::new(ZFS);
+        let mut cmd = command.arg("snapshot");
+        for (name, value) in properties.iter() {
+            cmd = cmd.arg("-o").arg(&format!("{name}={value}"));
+        }
+        cmd.arg(&format!("{filesystem}@{snap_name}"));
+        execute(cmd).map(|_| ()).map_err(|err| CreateSnapshotError {
+            filesystem: filesystem.to_string(),
+            snap_name: snap_name.to_string(),
+            err,
+        })
+    }
+
+    /// Destroy a named snapshot of a filesystem.
+    pub fn destroy_snapshot(
+        filesystem: &str,
+        snap_name: &str,
+    ) -> Result<(), DestroySnapshotError> {
+        let mut command = std::process::Command::new(ZFS);
+        let path = format!("{filesystem}@{snap_name}");
+        let cmd = command.args(&["destroy", &path]);
+        execute(cmd).map(|_| ()).map_err(|err| DestroySnapshotError {
+            filesystem: filesystem.to_string(),
+            snap_name: snap_name.to_string(),
+            err,
+        })
+    }
+}
+
+/// A read-only snapshot of a ZFS filesystem.
+#[derive(Clone, Debug)]
+pub struct Snapshot {
+    pub filesystem: String,
+    pub snap_name: String,
+}
+
+impl Snapshot {
+    /// Return the full path to the snapshot directory within the filesystem.
+    pub fn full_path(&self) -> Result<Utf8PathBuf, GetValueError> {
+        let mountpoint = Zfs::get_value(&self.filesystem, "mountpoint")?;
+        Ok(Utf8PathBuf::from(mountpoint)
+            .join(format!(".zfs/snapshot/{}", self.snap_name)))
+    }
+}
+
+impl fmt::Display for Snapshot {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}@{}", self.filesystem, self.snap_name)
     }
 }
 
