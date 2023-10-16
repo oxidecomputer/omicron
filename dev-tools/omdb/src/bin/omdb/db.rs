@@ -996,7 +996,6 @@ async fn cmd_db_dns_show(
         #[tabled(rename = "ver")]
         version: String,
         updated: String,
-        reason: String,
     }
 
     let mut rows = Vec::with_capacity(2);
@@ -1021,7 +1020,6 @@ async fn cmd_db_dns_show(
             version: version.version.0.to_string(),
             updated:
                 version.time_created.to_rfc3339_opts(SecondsFormat::Secs, true),
-            reason: version.comment.clone(),
         }));
     }
 
@@ -1644,7 +1642,6 @@ async fn inv_collection_print(
             ""
         }
     );
-    println!("reason:     {}", c.comment);
     println!(
         "started:    {}",
         humantime::format_rfc3339_millis(c.time_started.into())

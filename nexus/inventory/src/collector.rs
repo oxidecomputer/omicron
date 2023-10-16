@@ -19,12 +19,11 @@ pub struct Collector {
 impl Collector {
     pub fn new(
         creator: &str,
-        comment: &str,
         mgs_clients: &[Arc<gateway_client::Client>],
     ) -> Self {
         Collector {
             mgs_clients: mgs_clients.to_vec(),
-            in_progress: CollectionBuilder::new(creator, comment),
+            in_progress: CollectionBuilder::new(creator),
         }
     }
 
