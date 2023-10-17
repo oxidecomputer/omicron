@@ -66,13 +66,6 @@ pub struct Collection {
     ///
     /// In practice, these will be inserted into the `inv_root_of_trust` table.
     pub rots: BTreeMap<Arc<BaseboardId>, RotState>,
-    /// all caboose contents found, keyed first by the kind of caboose
-    /// (`CabooseWhich`), then the baseboard id of the sled where they were
-    /// found
-    ///
-    /// In practice, these will be inserted into the `inv_caboose` table.
-    pub cabooses_found:
-        BTreeMap<CabooseWhich, BTreeMap<Arc<BaseboardId>, CabooseFound>>,
 }
 
 /// A unique baseboard id found during a collection
@@ -122,15 +115,6 @@ impl From<gateway_client::types::SpComponentCaboose> for Caboose {
     }
 }
 
-/// Indicates that a particular `Caboose` was found (at a particular time from a
-/// particular source, but these are only for debugging)
-#[derive(Clone, Debug, Ord, Eq, PartialOrd, PartialEq)]
-pub struct CabooseFound {
-    pub time_collected: DateTime<Utc>,
-    pub source: String,
-    pub caboose: Arc<Caboose>,
-}
-
 /// Describes a service processor found during collection
 #[derive(Clone, Debug, Ord, Eq, PartialOrd, PartialEq)]
 pub struct ServiceProcessor {
@@ -143,6 +127,9 @@ pub struct ServiceProcessor {
     pub baseboard_revision: u32,
     pub hubris_archive: String,
     pub power_state: PowerState,
+
+    pub slot0_sw_caboose: Option<Arc<Caboose>>,
+    pub slot1_sw_caboose: Option<Arc<Caboose>>,
 }
 
 /// Describes the root of trust state found (from a service processor) during
@@ -158,13 +145,7 @@ pub struct RotState {
     pub transient_boot_preference: Option<RotSlot>,
     pub slot_a_sha3_256_digest: Option<String>,
     pub slot_b_sha3_256_digest: Option<String>,
-}
 
-/// Describes which caboose this is (which component, which slot)
-#[derive(Clone, Copy, Debug, EnumIter, PartialEq, Eq, PartialOrd, Ord)]
-pub enum CabooseWhich {
-    SpSlot0,
-    SpSlot1,
-    RotSlotA,
-    RotSlotB,
+    pub slot_a_sw_caboose: Option<Arc<Caboose>>,
+    pub slot_b_sw_caboose: Option<Arc<Caboose>>,
 }
