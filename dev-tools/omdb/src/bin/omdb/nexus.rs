@@ -499,11 +499,15 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 );
                 println!(
                     "    last collection started: {}",
-                    found_inventory.time_started
+                    found_inventory
+                        .time_started
+                        .to_rfc3339_opts(SecondsFormat::Secs, true),
                 );
                 println!(
                     "    last collection done:    {}",
-                    found_inventory.time_done
+                    found_inventory
+                        .time_done
+                        .to_rfc3339_opts(SecondsFormat::Secs, true),
                 );
             }
         };

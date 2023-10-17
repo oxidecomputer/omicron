@@ -613,6 +613,8 @@ mod test {
             dns_external.period_secs_propagation = 7
             dns_external.max_concurrent_server_updates = 8
             external_endpoints.period_secs = 9
+            inventory.period_secs = 10
+            inventory.nkeep = 11
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -700,7 +702,7 @@ mod test {
                         },
                         inventory: InventoryConfig {
                             period_secs: Duration::from_secs(10),
-                            nkeep: 3,
+                            nkeep: 11,
                         }
                     },
                     default_region_allocation_strategy:
