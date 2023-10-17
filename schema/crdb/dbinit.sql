@@ -2736,7 +2736,6 @@ CREATE TYPE IF NOT EXISTS omicron.public.caboose_which AS ENUM (
 );
 
 -- cabooses found
--- XXX-dap this could as well be nullable columns in inv_sp/inv_rot?
 CREATE TABLE IF NOT EXISTS omicron.public.inv_caboose (
     -- where this observation came from
     -- (foreign key into `inv_collection` table)
