@@ -1654,15 +1654,14 @@ impl UpdateContext {
                 .map_err(|error| {
                     UpdateTerminalError::FailedFindingSignedRotImage { error }
                 })?;
-            let archive =
-                RawHubrisArchive::from_vec(image).map_err(|err| {
-                    UpdateTerminalError::FailedFindingSignedRotImage {
-                        error: anyhow::Error::new(err).context(format!(
-                            "failed to read hubris archive for {:?}",
-                            artifact.id
-                        )),
-                    }
-                })?;
+            let archive = RawHubrisArchive::from_vec(image).map_err(|err| {
+                UpdateTerminalError::FailedFindingSignedRotImage {
+                    error: anyhow::Error::new(err).context(format!(
+                        "failed to read hubris archive for {:?}",
+                        artifact.id
+                    )),
+                }
+            })?;
             match archive.verify(&cmpa, &cfpa) {
                 Ok(()) => {
                     artifact_to_apply = Some(artifact.clone());
