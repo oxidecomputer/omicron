@@ -1843,34 +1843,34 @@ async fn inv_collection_print_devices(
         }
 
         if let Some(rot) = rot {
-            println!("    RoT: active slot: slot {:?}", rot.rot_slot_active);
+            println!("    RoT: active slot: slot {:?}", rot.slot_active);
             println!(
                 "    RoT: persistent boot preference: slot {:?}",
-                rot.rot_slot_active
+                rot.slot_active
             );
             println!(
                 "    RoT: pending persistent boot preference: {}",
-                rot.rot_slot_boot_pref_persistent_pending
+                rot.slot_boot_pref_persistent_pending
                     .map(|s| format!("slot {:?}", s))
                     .unwrap_or_else(|| String::from("-"))
             );
             println!(
                 "    RoT: transient boot preference: {}",
-                rot.rot_slot_boot_pref_transient
+                rot.slot_boot_pref_transient
                     .map(|s| format!("slot {:?}", s))
                     .unwrap_or_else(|| String::from("-"))
             );
 
             println!(
                 "    RoT: slot A SHA3-256: {}",
-                rot.rot_slot_a_sha3_256
+                rot.slot_a_sha3_256
                     .clone()
                     .unwrap_or_else(|| String::from("-"))
             );
 
             println!(
                 "    RoT: slot B SHA3-256: {}",
-                rot.rot_slot_b_sha3_256
+                rot.slot_b_sha3_256
                     .clone()
                     .unwrap_or_else(|| String::from("-"))
             );

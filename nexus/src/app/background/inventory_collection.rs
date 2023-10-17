@@ -89,6 +89,12 @@ async fn inventory_activate(
     creator: &str,
     nkeep: u32,
 ) -> Result<Collection, anyhow::Error> {
+    // Prune old collections.  We do this first, here, to ensure that we never
+    // develop an unbounded backlog of collections.  (If this process were done
+    // by a separate task, it would be possible for the backlog to grow
+    // unbounded if that task were simply slower than the collection process,
+    // let alone if there were some kind of extended operational issue
+    // blocking deletion.)
     datastore
         .inventory_prune_collections(opctx, nkeep)
         .await
@@ -111,9 +117,10 @@ async fn inventory_activate(
     let inventory = nexus_inventory::Collector::new(
         creator,
         &mgs_clients,
+        opctx.log.clone(),
     );
     let collection =
-        inventory.enumerate().await.context("collecting inventory")?;
+        inventory.collect_all().await.context("collecting inventory")?;
 
     // Write it to the database.
     datastore

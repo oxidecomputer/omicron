@@ -2,7 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Interface for building [`Collection`] dynamically
+//! Interface for building inventory [`Collection`] dynamically
+//!
+//! This separates the concerns of _collection_ (literally just fetching data
+//! from sources like MGS) from assembling a representation of what was
+//! collected.
 
 use anyhow::anyhow;
 use chrono::DateTime;
@@ -22,8 +26,14 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 use uuid::Uuid;
 
+/// Build an inventory [`Collection`]
+///
+/// This interface is oriented around the interfaces used by an actual
+/// collector.  Where possible, it accepts types directly provided by the data
+/// sources (e.g., `gateway_client`).
 #[derive(Debug)]
 pub struct CollectionBuilder {
+    // For field documentation, see the corresponding fields in `Collection`.
     errors: Vec<anyhow::Error>,
     time_started: DateTime<Utc>,
     collector: String,
@@ -36,6 +46,11 @@ pub struct CollectionBuilder {
 }
 
 impl CollectionBuilder {
+    /// Start building a new `Collection`
+    ///
+    /// `collector` is an arbitrary string describing the agent that collected
+    /// this data.  It's generally a Nexus instance uuid but it can be anything.
+    /// It's just for debugging.
     pub fn new(collector: &str) -> Self {
         CollectionBuilder {
             errors: vec![],
@@ -49,6 +64,7 @@ impl CollectionBuilder {
         }
     }
 
+    /// Assemble a complete `Collection` representation
     pub fn build(self) -> Collection {
         Collection {
             id: Uuid::new_v4(),
@@ -64,6 +80,12 @@ impl CollectionBuilder {
         }
     }
 
+    /// Record service processor state `sp_state` reported by MGS
+    ///
+    /// `sp_type` and `slot` identify which SP this was.
+    ///
+    /// `source` is an arbitrary string for debugging that describes the MGS
+    /// that reported this data (generally a URL string).
     pub fn found_sp_state(
         &mut self,
         source: &str,
@@ -88,6 +110,8 @@ impl CollectionBuilder {
             return None;
         };
 
+        // Normalize the baseboard id: i.e., if we've seen this baseboard
+        // before, use the same baseboard id record.  Otherwise, make a new one.
         let baseboard = Self::enum_item(
             &mut self.baseboards,
             BaseboardId {
@@ -96,6 +120,8 @@ impl CollectionBuilder {
             },
         );
 
+        // Separate the SP state into the SP-specific state and the RoT state,
+        // if any.
         let now = Utc::now();
         let _ = self.sps.entry(baseboard.clone()).or_insert_with(|| {
             ServiceProcessor {
@@ -149,6 +175,11 @@ impl CollectionBuilder {
         Some(baseboard)
     }
 
+    /// Returns true if we already found the caboose for `which` for baseboard
+    /// `baseboard`
+    ///
+    /// This is used to avoid requesting it multiple times (from multiple MGS
+    /// instances).
     pub fn sp_found_caboose_already(
         &self,
         baseboard: &BaseboardId,
@@ -160,6 +191,13 @@ impl CollectionBuilder {
             .unwrap_or(false)
     }
 
+    /// Record the given caboose information found for the given baseboard
+    ///
+    /// The baseboard must previously have been reported using
+    /// `found_sp_state()`.
+    ///
+    /// `source` is an arbitrary string for debugging that describes the MGS
+    /// that reported this data (generally a URL string).
     pub fn found_sp_caboose(
         &mut self,
         baseboard: &BaseboardId,
@@ -167,13 +205,17 @@ impl CollectionBuilder {
         source: &str,
         caboose: SpComponentCaboose,
     ) -> Result<(), anyhow::Error> {
+        // Normalize the caboose contents: i.e., if we've seen this exact caboose
+        // contents before, use the same record from before.  Otherwise, make a
+        // new one.
         let sw_caboose =
             Self::enum_item(&mut self.cabooses, Caboose::from(caboose));
         let (baseboard, _) =
             self.sps.get_key_value(baseboard).ok_or_else(|| {
                 anyhow!(
-                    "reporting caboose for unknown baseboard: {:?}",
-                    baseboard
+                    "reporting caboose for unknown baseboard: {:?} ({:?})",
+                    baseboard,
+                    sw_caboose
                 )
             })?;
         let by_id =
@@ -205,6 +247,11 @@ impl CollectionBuilder {
         }
     }
 
+    /// Helper function for normalizing items
+    ///
+    /// If `item` (or its equivalent) is not already in `items`, insert it.
+    /// Either way, return the item from `items`.  (This will either be `item`
+    /// itself or whatever was already in `items`.)
     fn enum_item<T: Clone + Ord>(
         items: &mut BTreeSet<Arc<T>>,
         item: T,
@@ -219,6 +266,12 @@ impl CollectionBuilder {
         }
     }
 
+    /// Record a collection error
+    ///
+    /// This is used for operational errors encountered during the collection
+    /// process (e.g., a down MGS instance).  It's not intended for mis-uses of
+    /// this API, which are conveyed instead through returned errors (and should
+    /// probably cause the caller to stop collection altogether).
     pub fn found_error(&mut self, error: anyhow::Error) {
         self.errors.push(error);
     }

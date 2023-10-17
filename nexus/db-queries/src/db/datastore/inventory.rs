@@ -50,18 +50,84 @@ impl DataStore {
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, &authz::INVENTORY).await?;
 
-        // It's not critical that this be done in one transaction.  But it keeps
-        // the database a little tidier because we won't have half-inserted
-        // collections in there.
+        // In the database, the collection is represented essentially as a tree
+        // rooted at an `inv_collection` row.  Other nodes in the tree point
+        // back at the `inv_collection` via `inv_collection_id`.
         //
-        // Even better would be a large hunk of SQL sent over at once.  That is
-        // in principle easy to do because none of this needs to be interactive.
-        // But we don't yet have support for this.  See
-        // oxidecomputer/omicron#973.
+        // It's helpful to assemble some values before entering the transaction
+        // so that we can produce the `Error` type that we want here.
+        let row_collection = InvCollection::from(collection);
+        let collection_id = row_collection.id;
+        let baseboards = collection
+            .baseboards
+            .iter()
+            .map(|b| HwBaseboardId::from(b.as_ref()))
+            .collect::<Vec<_>>();
+        let cabooses = collection
+            .cabooses
+            .iter()
+            .map(|s| SwCaboose::from(s.as_ref()))
+            .collect::<Vec<_>>();
+        let error_values = collection
+            .errors
+            .iter()
+            .enumerate()
+            .map(|(i, error)| {
+                let index = u16::try_from(i).map_err(|e| {
+                    Error::internal_error(&format!(
+                        "failed to convert error index to u16 (too \
+                                many errors in inventory collection?): {}",
+                        e
+                    ))
+                })?;
+                let message = format!("{:#}", error);
+                Ok(InvCollectionError::new(collection_id, index, message))
+            })
+            .collect::<Result<Vec<_>, Error>>()?;
+
+        // This implementation inserts all records associated with the
+        // collection in one transaction.  This is primarily for simplicity.  It
+        // means we don't have to worry about other readers seeing a
+        // half-inserted collection, nor leaving detritus around if we start
+        // inserting records and then crash.  However, it does mean this is
+        // likely to be a big transaction and if that becomes a problem we could
+        // break this up as long as we address those problems.
+        //
+        // The SQL here is written so that it doesn't have to be an
+        // *interactive* transaction.  That is, it should in principle be
+        // possible to generate all this SQL up front and send it as one big
+        // batch rather than making a bunch of round-trips to the database.
+        // We'd do that if we had an interface for doing that with bound
+        // parameters, etc.  See oxidecomputer/omicron#973.
         let pool = self.pool_connection_authorized(opctx).await?;
         pool.transaction_async(|conn| async move {
-            let row_collection = InvCollection::from(collection);
-            let collection_id = row_collection.id;
+            // Insert records (and generate ids) for any baseboards that do not
+            // already exist in the database.  These rows are not scoped to a
+            // particular collection.  They contain only immutable data --
+            // they're just a mapping between hardware-provided baseboard
+            // identifiers (part number and model number) and an
+            // Omicron-specific primary key (a UUID).
+            {
+                use db::schema::hw_baseboard_id::dsl;
+                let _ = diesel::insert_into(dsl::hw_baseboard_id)
+                    .values(baseboards)
+                    .on_conflict_do_nothing()
+                    .execute_async(&conn)
+                    .await?;
+            }
+
+            // Insert records (and generate ids) for each distinct caboose that
+            // we've found.  Like baseboards, these might already be present and
+            // rows in this table are not scoped to a particular collection
+            // because they only map (immutable) identifiers to UUIDs.
+           {
+                use db::schema::sw_caboose::dsl;
+                let _ = diesel::insert_into(dsl::sw_caboose)
+                    .values(cabooses)
+                    .on_conflict_do_nothing()
+                    .execute_async(&conn)
+                    .await?;
+            }
 
             // Insert a record describing the collection itself.
             {
@@ -69,74 +135,13 @@ impl DataStore {
                 let _ = diesel::insert_into(dsl::inv_collection)
                     .values(row_collection)
                     .execute_async(&conn)
-                    .await
-                    .map_err(|e| {
-                        TransactionError::CustomError(
-                            public_error_from_diesel(
-                                e.into(),
-                                ErrorHandler::Server,
-                            )
-                            .internal_context(
-                                "inserting new inventory collection",
-                            ),
-                        )
-                    })?;
+                    .await?;
             }
 
-            // Insert records (and generate ids) for any baseboards that do not
-            // already exist in the database.
-            {
-                use db::schema::hw_baseboard_id::dsl;
-                let baseboards = collection
-                    .baseboards
-                    .iter()
-                    .map(|b| HwBaseboardId::from(b.as_ref()))
-                    .collect::<Vec<_>>();
-                let _ = diesel::insert_into(dsl::hw_baseboard_id)
-                    .values(baseboards)
-                    .on_conflict_do_nothing()
-                    .execute_async(&conn)
-                    .await
-                    .map_err(|e| {
-                        TransactionError::CustomError(
-                            public_error_from_diesel(
-                                e.into(),
-                                ErrorHandler::Server,
-                            )
-                            .internal_context("inserting baseboards"),
-                        )
-                    })?;
-            }
-
-            // Insert records (and generate ids) for each distinct caboose that
-            // we've found.  Like baseboards, these might already be present.
-            {
-                use db::schema::sw_caboose::dsl;
-                let cabooses = collection
-                    .cabooses
-                    .iter()
-                    .map(|s| SwCaboose::from(s.as_ref()))
-                    .collect::<Vec<_>>();
-                let _ = diesel::insert_into(dsl::sw_caboose)
-                    .values(cabooses)
-                    .on_conflict_do_nothing()
-                    .execute_async(&conn)
-                    .await
-                    .map_err(|e| {
-                        TransactionError::CustomError(
-                            public_error_from_diesel(
-                                e.into(),
-                                ErrorHandler::Server,
-                            )
-                            .internal_context("inserting cabooses"),
-                        )
-                    })?;
-            }
-
-            // Now insert rows for the service processors we found.  These have
-            // a foreign key into the hw_baseboard_id table.  We don't have
-            // those values.  We may have just inserted them, or maybe not (if
-            // they previously existed).  To avoid dozens of unnecessary
+            // Insert rows for the service processors we found.  These have a
+            // foreign key into the hw_baseboard_id table.  We don't have those
+            // id values, though.  We may have just inserted them, or maybe not
+            // (if they previously existed).  To avoid dozens of unnecessary
             // round-trips, we use INSERT INTO ... SELECT, which looks like
             // this:
             //
@@ -199,23 +204,15 @@ impl DataStore {
                         sp_dsl::power_state,
                     ))
                     .execute_async(&conn)
-                    .await
-                    .map_err(|e| {
-                        TransactionError::CustomError(
-                            public_error_from_diesel(
-                                e.into(),
-                                ErrorHandler::Server,
-                            )
-                            .internal_context("inserting service processor"),
-                        )
-                    })?;
+                    .await?;
 
                     // This statement is just here to force a compilation error
                     // if the set of columns in `inv_service_processor` changes.
                     // The code above attempts to insert a row into
                     // `inv_service_processor` using an explicit list of columns
                     // and values.  Without the following statement, If a new
-                    // required column were added, this would fail at runtime.
+                    // required column were added, this would only fail at
+                    // runtime.
                     //
                     // If you're here because of a compile error, you might be
                     // changing the `inv_service_processor` table.  Update the
@@ -299,16 +296,7 @@ impl DataStore {
                         rot_dsl::slot_b_sha3_256,
                     ))
                     .execute_async(&conn)
-                    .await
-                    .map_err(|e| {
-                        TransactionError::CustomError(
-                            public_error_from_diesel(
-                                e.into(),
-                                ErrorHandler::Server,
-                            )
-                            .internal_context("inserting service processor"),
-                        )
-                    })?;
+                    .await?;
 
                     // See the comment in the previous block (where we use
                     // `inv_service_processor::all_columns()`).  The same
@@ -342,65 +330,23 @@ impl DataStore {
                         db_which,
                     )
                     .execute_async(&conn)
-                    .await
-                    .map_err(|e| {
-                        TransactionError::CustomError(
-                            public_error_from_diesel(
-                                e.into(),
-                                ErrorHandler::Server,
-                            )
-                            .internal_context("inserting found caboose"),
-                        )
-                    })?;
+                    .await?;
                 }
             }
 
             // Finally, insert the list of errors.
             {
                 use db::schema::inv_collection_error::dsl as errors_dsl;
-                let error_values = collection
-                    .errors
-                    .iter()
-                    .enumerate()
-                    .map(|(i, error)| {
-                        let index =
-                            u16::try_from(i).map_err(|e| {
-                                Error::internal_error(&format!(
-                                "failed to convert error index to u16 (too \
-                                many errors in inventory collection?): {}", e))
-                            })?;
-                        let message = format!("{:#}", error);
-                        Ok(InvCollectionError::new(
-                            collection_id,
-                            index,
-                            message,
-                        ))
-                    })
-                    .collect::<Result<Vec<_>, Error>>()?;
                 let _ = diesel::insert_into(errors_dsl::inv_collection_error)
                     .values(error_values)
                     .execute_async(&conn)
-                    .await
-                    .map_err(|e| {
-                        TransactionError::CustomError(
-                            public_error_from_diesel(
-                                e.into(),
-                                ErrorHandler::Server,
-                            )
-                            .internal_context("inserting errors"),
-                        )
-                    })?;
+                    .await?;
             }
 
             Ok(())
         })
         .await
-        .map_err(|error| match error {
-            TransactionError::CustomError(e) => e,
-            TransactionError::Connection(e) => {
-                public_error_from_diesel(e, ErrorHandler::Server)
-            }
-        })?;
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         info!(
             &opctx.log,
@@ -411,35 +357,71 @@ impl DataStore {
         Ok(())
     }
 
-    // XXX-dap TODO-doc
-    // This seems like a high-level function, but we want to push some of the
-    // logic into the SQL.
+    /// Prune inventory collections stored in the database, keeping at least
+    /// `nkeep`.
+    ///
+    /// This function removes as many collections as possible while preserving
+    /// the last `nkeep`.  This will also preserve at least one "complete"
+    /// collection (i.e., one having zero errors).
+    // It might seem surprising that such a high-level application policy is
+    // embedded in the DataStore.  The reason is that we want to push a bunch of
+    // the logic into the SQL to avoid interactive queries.
     pub async fn inventory_prune_collections(
         &self,
         opctx: &OpContext,
         nkeep: u32,
     ) -> Result<(), Error> {
-        // There could be any number of collections in the database: 0, 1, ...,
-        // nkeep, nkeep + 1, ..., up to a very large number.  Of these, some of
-        // these are potentially incomplete.  We use a non-zero error count as a
-        // proxy for that.  We never want to remove the last successful
-        // collection, even if there have been a lot of more recent (incomplete)
-        // collections.
+        // Assumptions:
         //
-        // Here's how we'll do it:
+        // - Most of the time, there will be about `nkeep + 1` collections in
+        //   the database.  That's because the normal expected case is: we had
+        //   `nkeep`, we created another one, and now we're pruning the oldest
+        //   one.
         //
-        // - From the database, select the latest-started collection that has no
-        //   errors associated with it.  We're going to hang onto this one.
-        // - Select the oldest `nkeep` collections that *aren't* the one we want
-        //   to hang onto.
-        // - Remove the oldest collection in the returned set.
-        // - Repeat until the returned set is empty.
+        // - There could be fewer collections in the database, early in the
+        //   system's lifetime (before we've accumulated `nkeep` of them).
         //
-        // This admittedly feels overcomplicated.  If we were willing to start
-        // by pruning the *latest* collection eligible for removal, we could
-        // simply select collections most recent collections and use `OFFSET` to
-        // skip the last "nkeep".  But if for some reason we're falling behind,
-        // it seems much better to prune from the oldest first.
+        // - There could be many more collections in the database, if something
+        //   has gone wrong and we've fallen behind in our cleanup.
+        //
+        // - Due to transient errors during the collection process, it's
+        //   possible that a collection is known to be potentially incomplete.
+        //   We can tell this because it has rows in `inv_collection_errors`.
+        //   (It's possible that a collection can be incomplete with zero
+        //   errors, but we can't know that here and so we can't do anything
+        //   about it.)
+        //
+        // Goals:
+        //
+        // - When this function returns without error, there were at most
+        //   `nkeep` collections in the database.
+        //
+        // - If we have to remove any collections, we want to start from the
+        //   oldest ones.  (We want to maintain a window of the last `nkeep`,
+        //   not the first `nkeep - 1` from the beginning of time plus the most
+        //   recent one.)
+        //
+        // - We want to avoid removing the last collection that had zero errors.
+        //   (If we weren't careful, we might do this if there were `nkeep`
+        //   collections with errors that were newer than the last complete
+        //   collection.)
+        //
+        // Here's the plan:
+        //
+        // - Select from the database the `nkeep + 1` oldest collections and the
+        //   number of errors associated with each one.
+        //
+        // - If we got fewer than `nkeep + 1` back, we're done.  We shouldn't
+        //   prune anything.
+        //
+        // - Otherwise, if the oldest collection is the only complete one,
+        //   remove the next-oldest collection and go back to the top (repeat).
+        //
+        // - Otherwise, remove the oldest collection and go back to the top
+        //   (repeat).
+        //
+        // This seems surprisingly complicated.  It's designed to meet the above
+        // goals.
         //
         // Is this going to work if multiple Nexuses are doing it concurrently?
         // This cannot remove the last complete collection because a given Nexus
@@ -465,13 +447,15 @@ impl DataStore {
         Ok(())
     }
 
+    /// Return the oldest inventory collection that's eligible for pruning,
+    /// if any
+    ///
+    /// The caller of this (non-pub) function is responsible for authz.
     async fn inventory_find_pruneable(
         &self,
         opctx: &OpContext,
         nkeep: u32,
     ) -> Result<Option<Uuid>, Error> {
-        // The caller of this (non-pub) function is responsible for authz.
-
         let conn = self.pool_connection_authorized(opctx).await?;
         // Diesel requires us to use aliases in order to refer to the
         // `inv_collection` table twice in the same query.
@@ -484,7 +468,7 @@ impl DataStore {
         //
         //    SELECT id FROM inv_collection ORDER BY time_started" ASC LIMIT $1
         //
-        // where $1 becomes `nkeep + 1`.  This just lists the N oldest
+        // where $1 becomes `nkeep + 1`.  This just lists the `nkeep + 1` oldest
         // collections.
         let subquery = inv_collection1
             .select(inv_collection1.field(db::schema::inv_collection::id))
@@ -589,18 +573,20 @@ impl DataStore {
         Ok(candidate)
     }
 
+    /// Removes an inventory collection from the database
+    ///
+    /// The caller of this (non-pub) function is responsible for authz.
     async fn inventory_delete_collection(
         &self,
         opctx: &OpContext,
         collection_id: Uuid,
     ) -> Result<(), Error> {
-        // The caller of this (non-pub) function is responsible for authz.
-
-        // We do this in a transaction for simplicity.  If these transactions
-        // got too big, we could break it up, but we'd need a way to update the
-        // collection to say it's being deleted.  (We can't delete it first
-        // because then we'd have no efficient way to identify records in the
-        // other tables that need to be deleted.)
+        // As with inserting a whole collection, we remove it in one big
+        // transaction for simplicity.  Similar considerations apply.  We could
+        // break it up if these transactions become too big.  But we'd need a
+        // way to stop other clients from discovering a collection after we
+        // start removing it and we'd also need to make sure we didn't leak a
+        // collection if we crash while deleting it.
         let conn = self.pool_connection_authorized(opctx).await?;
         let (ncollections, nsps, nrots, ncabooses, nerrors) = conn
             .transaction_async(|conn| async move {
@@ -611,18 +597,7 @@ impl DataStore {
                         dsl::inv_collection.filter(dsl::id.eq(collection_id)),
                     )
                     .execute_async(&conn)
-                    .await
-                    .map_err(|e| {
-                        TransactionError::CustomError(
-                            public_error_from_diesel(
-                                e.into(),
-                                ErrorHandler::Server,
-                            )
-                            .internal_context(
-                                "removing inventory collection record",
-                            ),
-                        )
-                    })?;
+                    .await?;
                 };
 
                 // Remove rows for service processors.
@@ -633,18 +608,7 @@ impl DataStore {
                             .filter(dsl::inv_collection_id.eq(collection_id)),
                     )
                     .execute_async(&conn)
-                    .await
-                    .map_err(|e| {
-                        TransactionError::CustomError(
-                            public_error_from_diesel(
-                                e.into(),
-                                ErrorHandler::Server,
-                            )
-                            .internal_context(
-                                "removing service processor records",
-                            ),
-                        )
-                    })?;
+                    .await?;
                 };
 
                 // Remove rows for service processors.
@@ -655,16 +619,7 @@ impl DataStore {
                             .filter(dsl::inv_collection_id.eq(collection_id)),
                     )
                     .execute_async(&conn)
-                    .await
-                    .map_err(|e| {
-                        TransactionError::CustomError(
-                            public_error_from_diesel(
-                                e.into(),
-                                ErrorHandler::Server,
-                            )
-                            .internal_context("removing root of trust records"),
-                        )
-                    })?;
+                    .await?;
                 };
 
                 // Remove rows for cabooses found.
@@ -675,18 +630,7 @@ impl DataStore {
                             .filter(dsl::inv_collection_id.eq(collection_id)),
                     )
                     .execute_async(&conn)
-                    .await
-                    .map_err(|e| {
-                        TransactionError::CustomError(
-                            public_error_from_diesel(
-                                e.into(),
-                                ErrorHandler::Server,
-                            )
-                            .internal_context(
-                                "removing cabooses-found records",
-                            ),
-                        )
-                    })?;
+                    .await?;
                 };
 
                 // Remove rows for errors encountered.
@@ -697,18 +641,7 @@ impl DataStore {
                             .filter(dsl::inv_collection_id.eq(collection_id)),
                     )
                     .execute_async(&conn)
-                    .await
-                    .map_err(|e| {
-                        // XXX-dap do we really have to do this mapping in every
-                        // one of these?
-                        TransactionError::CustomError(
-                            public_error_from_diesel(
-                                e.into(),
-                                ErrorHandler::Server,
-                            )
-                            .internal_context("removing error records"),
-                        )
-                    })?;
+                    .await?;
                 };
 
                 Ok((ncollections, nsps, nrots, ncabooses, nerrors))
@@ -734,7 +667,7 @@ impl DataStore {
     }
 }
 
-/// A CTE used to insert into `inv_caboose`
+/// A SQL common table expression (CTE) used to insert into `inv_caboose`
 ///
 /// Concretely, we have these three tables:
 ///

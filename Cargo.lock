@@ -4464,9 +4464,8 @@ dependencies = [
  "futures",
  "gateway-client",
  "gateway-messages",
- "nexus-db-model",
- "nexus-db-queries",
  "nexus-types",
+ "slog",
  "strum",
  "uuid",
 ]

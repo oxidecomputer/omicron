@@ -20,7 +20,21 @@ use std::sync::Arc;
 use strum::EnumIter;
 use uuid::Uuid;
 
-/// Results of collecting inventory from various Omicron components
+/// Results of collecting hardware/software inventory from various Omicron
+/// components
+///
+/// This type is structured so that it's both easy to collect and easy to insert
+/// into the database.  This means items that are represented with separate
+/// database tables (like service processors and roots of trust) are represented
+/// with separate records, even though they might come from the same source
+/// (in this case, a single MGS request).
+///
+/// We make heavy use of maps, sets, and Arcs here because many of these things
+/// point to each other and this approach to representing relationships ensures
+/// clear ownership.  (It also reflects how things will wind up in the
+/// database.)
+///
+/// See the documentation in the database schema for more background.
 #[derive(Debug)]
 pub struct Collection {
     /// unique identifier for this collection
@@ -34,20 +48,58 @@ pub struct Collection {
     /// name of the agent doing the collecting (generally, this Nexus's uuid)
     pub collector: String,
 
+    /// unique baseboard ids that were found in this collection
+    ///
+    /// In practice, these will be inserted into the `hw_baseboard_id` table.
     pub baseboards: BTreeSet<Arc<BaseboardId>>,
+    /// unique caboose contents that were found in this collection
+    ///
+    /// In practice, these will be inserted into the `sw_caboose` table.
     pub cabooses: BTreeSet<Arc<Caboose>>,
+
+    /// all service processors, keyed by baseboard id
+    ///
+    /// In practice, these will be inserted into the `inv_service_processor`
+    /// table.
     pub sps: BTreeMap<Arc<BaseboardId>, ServiceProcessor>,
+    /// all roots of trust, keyed by baseboard id
+    ///
+    /// In practice, these will be inserted into the `inv_root_of_trust` table.
     pub rots: BTreeMap<Arc<BaseboardId>, RotState>,
+    /// all caboose contents found, keyed first by the kind of caboose
+    /// (`CabooseWhich`), then the baseboard id of the sled where they were
+    /// found
+    ///
+    /// In practice, these will be inserted into the `inv_caboose` table.
     pub cabooses_found:
         BTreeMap<CabooseWhich, BTreeMap<Arc<BaseboardId>, CabooseFound>>,
 }
 
+/// A unique baseboard id found during a collection
+///
+/// Baseboard ids are the keys used to link up information from disparate
+/// sources (like a service processor and a sled agent).
+///
+/// These are normalized in the database.  Each distinct baseboard id is
+/// assigned a uuid and shared across the many possible collections that
+/// reference it.
+///
+/// Usually, the part number and serial number are combined with a revision
+/// number.  We do not include that here.  If we ever did find a baseboard with
+/// the same part number and serial number but a new revision number, we'd want
+/// to treat that as the same baseboard as one with a different revision number.
 #[derive(Clone, Debug, Ord, Eq, PartialOrd, PartialEq)]
 pub struct BaseboardId {
+    /// Oxide Part Number
     pub part_number: String,
+    /// Serial number (unique for a given part number)
     pub serial_number: String,
 }
 
+/// Caboose contents found during a collection
+///
+/// These are normalized in the database.  Each distinct `Caboose` is assigned a
+/// uuid and shared across many possible collections that reference it.
 #[derive(Clone, Debug, Ord, Eq, PartialOrd, PartialEq)]
 pub struct Caboose {
     pub board: String,
@@ -70,6 +122,8 @@ impl From<gateway_client::types::SpComponentCaboose> for Caboose {
     }
 }
 
+/// Indicates that a particular `Caboose` was found (at a particular time from a
+/// particular source, but these are only for debugging)
 #[derive(Clone, Debug, Ord, Eq, PartialOrd, PartialEq)]
 pub struct CabooseFound {
     pub time_collected: DateTime<Utc>,
@@ -77,6 +131,7 @@ pub struct CabooseFound {
     pub caboose: Arc<Caboose>,
 }
 
+/// Describes a service processor found during collection
 #[derive(Clone, Debug, Ord, Eq, PartialOrd, PartialEq)]
 pub struct ServiceProcessor {
     pub time_collected: DateTime<Utc>,
@@ -90,6 +145,8 @@ pub struct ServiceProcessor {
     pub power_state: PowerState,
 }
 
+/// Describes the root of trust state found (from a service processor) during
+/// collection
 #[derive(Clone, Debug, Ord, Eq, PartialOrd, PartialEq)]
 pub struct RotState {
     pub time_collected: DateTime<Utc>,
@@ -103,6 +160,7 @@ pub struct RotState {
     pub slot_b_sha3_256_digest: Option<String>,
 }
 
+/// Describes which caboose this is (which component, which slot)
 #[derive(Clone, Copy, Debug, EnumIter, PartialEq, Eq, PartialOrd, Ord)]
 pub enum CabooseWhich {
     SpSlot0,
