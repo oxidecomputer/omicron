@@ -1733,15 +1733,10 @@
                 "$ref": "#/components/schemas/RackNetworkConfigV1"
               }
             ]
-          },
-          "rack_subnet": {
-            "type": "string",
-            "format": "ipv6"
           }
         },
         "required": [
-          "ntp_servers",
-          "rack_subnet"
+          "ntp_servers"
         ]
       },
       "Error": {
@@ -2610,13 +2605,17 @@
             "items": {
               "$ref": "#/components/schemas/PortConfigV1"
             }
+          },
+          "rack_subnet": {
+            "$ref": "#/components/schemas/Ipv6Network"
           }
         },
         "required": [
           "bgp",
           "infra_ip_first",
           "infra_ip_last",
-          "ports"
+          "ports",
+          "rack_subnet"
         ]
       },
       "RouteConfig": {

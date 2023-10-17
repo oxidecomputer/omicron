@@ -27,8 +27,8 @@ type ControlPlaneTestContext =
 async fn test_address_lot_basic_crud(ctx: &ControlPlaneTestContext) {
     let client = &ctx.external_client;
 
-    // Verify there are no lots
-    let lots = NexusRequest::iter_collection_authn::<AddressLotCreateResponse>(
+    // Verify there is only one system lot
+    let lots = NexusRequest::iter_collection_authn::<AddressLot>(
         client,
         "/v1/system/networking/address-lot",
         "",
@@ -37,7 +37,7 @@ async fn test_address_lot_basic_crud(ctx: &ControlPlaneTestContext) {
     .await
     .expect("Failed to list address lots")
     .all_items;
-    assert_eq!(lots.len(), 0, "Expected no lots");
+    assert_eq!(lots.len(), 1, "Expected one lot");
 
     // Create a lot
     let params = AddressLotCreate {
@@ -111,8 +111,8 @@ async fn test_address_lot_basic_crud(ctx: &ControlPlaneTestContext) {
     .expect("Failed to list address lots")
     .all_items;
 
-    assert_eq!(lots.len(), 1, "Expected 1 lot");
-    assert_eq!(lots[0], address_lot);
+    assert_eq!(lots.len(), 2, "Expected 2 lots");
+    assert_eq!(lots[1], address_lot);
 
     // Verify there are lot blocks
     let blist = NexusRequest::iter_collection_authn::<AddressLotBlock>(

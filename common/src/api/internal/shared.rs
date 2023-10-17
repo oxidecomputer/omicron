@@ -5,7 +5,7 @@
 //! Types shared between Nexus and Sled Agent.
 
 use crate::api::external::{self, Name};
-use ipnetwork::{IpNetwork, Ipv4Network};
+use ipnetwork::{IpNetwork, Ipv4Network, Ipv6Network};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -75,6 +75,7 @@ pub type RackNetworkConfig = RackNetworkConfigV1;
 /// Initial network configuration
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
 pub struct RackNetworkConfigV1 {
+    pub rack_subnet: Ipv6Network,
     // TODO: #3591 Consider making infra-ip ranges implicit for uplinks
     /// First ip address to be used for configuring network infrastructure
     pub infra_ip_first: Ipv4Addr,

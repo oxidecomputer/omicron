@@ -16,8 +16,8 @@ use futures::future;
 use gateway_client::Client as MgsClient;
 use internal_dns::resolver::{ResolveError, Resolver as DnsResolver};
 use internal_dns::ServiceName;
-use ipnetwork::IpNetwork;
-use omicron_common::address::{Ipv6Subnet, AZ_PREFIX, MGS_PORT};
+use ipnetwork::{IpNetwork, Ipv6Network};
+use omicron_common::address::{Ipv6Subnet, MGS_PORT};
 use omicron_common::address::{DDMD_PORT, DENDRITE_PORT};
 use omicron_common::api::internal::shared::{
     PortConfigV1, PortFec, PortSpeed, RackNetworkConfig, RackNetworkConfigV1,
@@ -564,6 +564,31 @@ fn retry_policy_switch_mapping() -> ExponentialBackoff {
         .build()
 }
 
+// The first production version of the `EarlyNetworkConfig`.
+//
+// If this version is in the bootstore than we need to convert it to
+// `EarlyNetworkConfigV1`.
+//
+// Once we do this for all customers that have initialized racks with the
+// old version we can go ahead and remove this type and its conversion code
+// altogether.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+struct EarlyNetworkConfigV0 {
+    // The current generation number of data as stored in CRDB.
+    // The initial generation is set during RSS time and then only mutated
+    // by Nexus.
+    pub generation: u64,
+
+    pub rack_subnet: Ipv6Addr,
+
+    /// The external NTP server addresses.
+    pub ntp_servers: Vec<String>,
+
+    // Rack network configuration as delivered from RSS and only existing at
+    // generation 1
+    pub rack_network_config: Option<RackNetworkConfigV0>,
+}
+
 /// Network configuration required to bring up the control plane
 ///
 /// The fields in this structure are those from
@@ -594,44 +619,11 @@ pub struct EarlyNetworkConfig {
 /// future (post-v1) deserialization paths.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct EarlyNetworkConfigBody {
-    pub rack_subnet: Ipv6Addr,
-
     /// The external NTP server addresses.
     pub ntp_servers: Vec<String>,
 
     // Rack network configuration as delivered from RSS or Nexus
     pub rack_network_config: Option<RackNetworkConfig>,
-}
-
-// The first production version of the `EarlyNetworkConfig`.
-//
-// If this version is in the bootstore than we need to convert it to
-// `EarlyNetworkConfigV1`.
-//
-// Once we do this for all customers that have initialized racks with the
-// old version we can go ahead and remove this type and its conversion code
-// altogether.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-struct EarlyNetworkConfigV0 {
-    // The current generation number of data as stored in CRDB.
-    // The initial generation is set during RSS time and then only mutated
-    // by Nexus.
-    pub generation: u64,
-
-    pub rack_subnet: Ipv6Addr,
-
-    /// The external NTP server addresses.
-    pub ntp_servers: Vec<String>,
-
-    // Rack network configuration as delivered from RSS and only existing at
-    // generation 1
-    pub rack_network_config: Option<RackNetworkConfigV0>,
-}
-
-impl EarlyNetworkConfig {
-    pub fn az_subnet(&self) -> Ipv6Subnet<AZ_PREFIX> {
-        Ipv6Subnet::<AZ_PREFIX>::new(self.body.rack_subnet)
-    }
 }
 
 impl From<EarlyNetworkConfig> for bootstore::NetworkConfig {
@@ -671,11 +663,10 @@ impl TryFrom<bootstore::NetworkConfig> for EarlyNetworkConfig {
             generation: v0.generation,
             schema_version: 1,
             body: EarlyNetworkConfigBody {
-                rack_subnet: v0.rack_subnet,
                 ntp_servers: v0.ntp_servers,
-                rack_network_config: v0
-                    .rack_network_config
-                    .map(|v0_config| RackNetworkConfigV1::from(v0_config)),
+                rack_network_config: v0.rack_network_config.map(|v0_config| {
+                    RackNetworkConfigV0::to_v1(v0.rack_subnet, v0_config)
+                }),
             },
         })
     }
@@ -697,12 +688,22 @@ pub struct RackNetworkConfigV0 {
     pub uplinks: Vec<UplinkConfig>,
 }
 
-impl From<RackNetworkConfigV0> for RackNetworkConfigV1 {
-    fn from(value: RackNetworkConfigV0) -> Self {
+impl RackNetworkConfigV0 {
+    /// Convert from `RackNetworkConfigV0` to `RackNetworkConfigV1`
+    ///
+    /// We cannot use `From<RackNetworkConfigV0> for `RackNetworkConfigV1`
+    /// because the `rack_network` field does not exist in `RackNetworkConfigV0`
+    /// and must be passed in from the `EarlyNetworkConfigV0` struct which
+    /// contains the `RackNetworkConfivV0` struct.
+    pub fn to_v1(
+        rack_subnet: Ipv6Addr,
+        v0: RackNetworkConfigV0,
+    ) -> RackNetworkConfigV1 {
         RackNetworkConfigV1 {
-            infra_ip_first: value.infra_ip_first,
-            infra_ip_last: value.infra_ip_last,
-            ports: value
+            rack_subnet: Ipv6Network::new(rack_subnet, 56).unwrap(),
+            infra_ip_first: v0.infra_ip_first,
+            infra_ip_last: v0.infra_ip_last,
+            ports: v0
                 .uplinks
                 .into_iter()
                 .map(|uplink| PortConfigV1::from(uplink))
