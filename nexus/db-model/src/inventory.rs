@@ -2,6 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+//! Types for representing the hardware/software inventory in the database
+
 use crate::schema::{
     hw_baseboard_id, inv_caboose, inv_collection, inv_collection_error,
     inv_root_of_trust, inv_service_processor, sw_caboose,
@@ -20,6 +22,7 @@ use nexus_types::inventory::{
 };
 use uuid::Uuid;
 
+// See [`nexus_types::inventory::PowerState`].
 impl_enum_type!(
     #[derive(SqlType, Debug, QueryId)]
     #[diesel(postgres_type(name = "hw_power_state"))]
@@ -45,6 +48,7 @@ impl From<PowerState> for HwPowerState {
     }
 }
 
+// See [`nexus_types::inventory::RotSlot`].
 impl_enum_type!(
     #[derive(SqlType, Debug, QueryId)]
     #[diesel(postgres_type(name = "hw_rot_slot"))]
@@ -68,6 +72,7 @@ impl From<RotSlot> for HwRotSlot {
     }
 }
 
+// See [`nexus_types::inventory::CabooseWhich`].
 impl_enum_type!(
     #[derive(SqlType, Debug, QueryId)]
     #[diesel(postgres_type(name = "caboose_which"))]
@@ -103,6 +108,7 @@ impl From<nexus_types::inventory::CabooseWhich> for CabooseWhich {
     }
 }
 
+// See [`nexus_types::inventory::SpType`].
 impl_enum_type!(
     #[derive(SqlType, Debug, QueryId)]
     #[diesel(postgres_type(name = "sp_type"))]
@@ -138,6 +144,7 @@ impl From<nexus_types::inventory::SpType> for SpType {
     }
 }
 
+/// See [`nexus_types::inventory::Collection`].
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
 #[diesel(table_name = inv_collection)]
 pub struct InvCollection {
@@ -158,6 +165,7 @@ impl<'a> From<&'a Collection> for InvCollection {
     }
 }
 
+/// See [`nexus_types::inventory::HwBaseboardId`].
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
 #[diesel(table_name = hw_baseboard_id)]
 pub struct HwBaseboardId {
@@ -176,6 +184,7 @@ impl<'a> From<&'a BaseboardId> for HwBaseboardId {
     }
 }
 
+/// See [`nexus_types::inventory::SwCaboose`].
 #[derive(
     Queryable,
     Insertable,
@@ -208,6 +217,7 @@ impl<'a> From<&'a Caboose> for SwCaboose {
     }
 }
 
+/// See [`nexus_types::inventory::Collection`].
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
 #[diesel(table_name = inv_collection_error)]
 pub struct InvCollectionError {
@@ -226,6 +236,7 @@ impl InvCollectionError {
     }
 }
 
+/// See [`nexus_types::inventory::ServiceProcessor`].
 #[derive(Queryable, Clone, Debug, Selectable)]
 #[diesel(table_name = inv_service_processor)]
 pub struct InvServiceProcessor {
@@ -242,6 +253,12 @@ pub struct InvServiceProcessor {
     pub power_state: HwPowerState,
 }
 
+/// Newtype wrapping the MGS-reported slot number for an SP
+///
+/// Current racks only have 32 slots for any given SP type.  MGS represents the
+/// slot number with a u32.  We truncate it to a u16 (which still requires
+/// storing it as an i32 in the database, since the database doesn't natively
+/// support signed integers).
 #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow)]
 #[diesel(sql_type = sql_types::Int4)]
 pub struct SpMgsSlot(SqlU16);
@@ -272,6 +289,10 @@ where
     }
 }
 
+/// Newtype wrapping the revision number for a particular baseboard
+///
+/// MGS reports this as a u32 and we represent it the same way, though that
+/// would be quite a lot of hardware revisions to go through!
 #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow)]
 #[diesel(sql_type = sql_types::Int8)]
 pub struct BaseboardRevision(SqlU32);
@@ -302,6 +323,7 @@ where
     }
 }
 
+/// See [`nexus_types::inventory::RootOfTrust`].
 #[derive(Queryable, Clone, Debug, Selectable)]
 #[diesel(table_name = inv_root_of_trust)]
 pub struct InvRootOfTrust {
@@ -318,6 +340,7 @@ pub struct InvRootOfTrust {
     pub rot_slot_b_sha3_256: Option<String>,
 }
 
+/// See [`nexus_types::inventory::Caboose`].
 #[derive(Queryable, Clone, Debug, Selectable)]
 #[diesel(table_name = inv_caboose)]
 pub struct InvCaboose {
