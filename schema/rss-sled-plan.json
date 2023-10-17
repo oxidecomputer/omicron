@@ -472,7 +472,7 @@
           "description": "Initial rack network configuration",
           "anyOf": [
             {
-              "$ref": "#/definitions/RackNetworkConfig"
+              "$ref": "#/definitions/RackNetworkConfigV1"
             },
             {
               "type": "null"
@@ -503,8 +503,8 @@
         }
       }
     },
-    "RackNetworkConfig": {
-      "description": "Initial network configuration",
+    "RackNetworkConfigV1": {
+      "description": "Initial network configuration\n\nTODO(AJS): It's unclear if this should be serde renamed to `RackNetworkConfig` I *think* it's useful to have the version be explicit in the name, but I'm open to discussion.",
       "type": "object",
       "required": [
         "bgp",

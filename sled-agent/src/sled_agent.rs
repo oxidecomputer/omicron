@@ -412,7 +412,7 @@ impl SledAgent {
                 EarlyNetworkConfig::try_from(serialized_config)
                     .map_err(|err| BackoffError::transient(err.to_string()))?;
 
-            Ok(early_network_config.rack_network_config)
+            Ok(early_network_config.body.rack_network_config)
         };
         let rack_network_config: Option<RackNetworkConfig> =
             retry_notify::<_, String, _, _, _, _>(

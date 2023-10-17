@@ -20,7 +20,8 @@ use ipnetwork::IpNetwork;
 use omicron_common::address::{Ipv6Subnet, AZ_PREFIX, MGS_PORT};
 use omicron_common::address::{DDMD_PORT, DENDRITE_PORT};
 use omicron_common::api::internal::shared::{
-    PortConfigV1, PortFec, PortSpeed, RackNetworkConfig, SwitchLocation,
+    PortConfigV1, PortFec, PortSpeed, RackNetworkConfig, RackNetworkConfigV0,
+    RackNetworkConfigV1, SwitchLocation,
 };
 use omicron_common::backoff::{
     retry_notify, retry_policy_local, BackoffError, ExponentialBackoff,
@@ -568,10 +569,52 @@ fn retry_policy_switch_mapping() -> ExponentialBackoff {
 /// The fields in this structure are those from
 /// [`super::params::RackInitializeRequest`] necessary for use beyond RSS. This
 /// is just for the initial rack configuration and cold boot purposes. Updates
-/// will come from Nexus in the future.
+/// come from Nexus.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct EarlyNetworkConfig {
-    // The version of data.
+    // The current generation number of data as stored in CRDB.
+    // The initial generation is set during RSS time and then only mutated
+    // by Nexus.
+    pub generation: u64,
+
+    // Which version of the data structure do we have. This is to help with
+    // deserialization and conversion in future updates.
+    pub schema_version: u32,
+
+    // The actual configuration details
+    pub body: EarlyNetworkConfigBody,
+}
+
+/// This is the actual configuration of EarlyNetworking.
+///
+/// We nest it below the "header" of `generation` and `schema_version` so that
+/// we can perform partial deserialization of `EarlyNetworkConfig` to only read
+/// the header and defer deserialization of the body once we know the schema
+/// version. This is possible via the use of [`serde_json::value::RawValue`] in
+/// future (post-v1) deserialization paths.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct EarlyNetworkConfigBody {
+    pub rack_subnet: Ipv6Addr,
+
+    /// The external NTP server addresses.
+    pub ntp_servers: Vec<String>,
+
+    // Rack network configuration as delivered from RSS or Nexus
+    pub rack_network_config: Option<RackNetworkConfig>,
+}
+
+// The first production version of the EarlyNetworkConfig.
+//
+// If this version is in the bootstore than we need to convert it to
+// `EarlyNetworkConfig`. We intend to convert this data on
+//
+// Once we do this for all customers that have initialized racks with the old version we
+// can go ahead and remove this type and its conversion code altogether.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+struct EarlyNetworkConfigV0 {
+    // The current generation number of data as stored in CRDB.
+    // The initial generation is set during RSS time and then only mutated
+    // by Nexus.
     pub generation: u64,
 
     pub rack_subnet: Ipv6Addr,
@@ -579,14 +622,14 @@ pub struct EarlyNetworkConfig {
     /// The external NTP server addresses.
     pub ntp_servers: Vec<String>,
 
-    /// A copy of the initial rack network configuration when we are in
-    /// generation `1`.
-    pub rack_network_config: Option<RackNetworkConfig>,
+    // Rack network configuration as delivered from RSS and only existing at
+    // generation 1
+    pub rack_network_config: Option<RackNetworkConfigV0>,
 }
 
 impl EarlyNetworkConfig {
     pub fn az_subnet(&self) -> Ipv6Subnet<AZ_PREFIX> {
-        Ipv6Subnet::<AZ_PREFIX>::new(self.rack_subnet)
+        Ipv6Subnet::<AZ_PREFIX>::new(self.body.rack_subnet)
     }
 }
 
@@ -603,13 +646,37 @@ impl From<EarlyNetworkConfig> for bootstore::NetworkConfig {
     }
 }
 
+// Note: This currently only converts between v0 and v1 or deserializes v1 of
+// `EarlyNetworkConfig`.
 impl TryFrom<bootstore::NetworkConfig> for EarlyNetworkConfig {
     type Error = serde_json::Error;
 
     fn try_from(
         value: bootstore::NetworkConfig,
     ) -> std::result::Result<Self, Self::Error> {
-        serde_json::from_slice(&value.blob)
+        // Try to deserialize the latest version of the data structure (v1). If
+        // that succeeds we are done.
+        if let Ok(val) =
+            serde_json::from_slice::<EarlyNetworkConfig>(&value.blob)
+        {
+            return Ok(val);
+        }
+
+        // We don't have the latest version. Try to deserialize v0 and then
+        // convert it to the latest version.
+        let v0 = serde_json::from_slice::<EarlyNetworkConfigV0>(&value.blob)?;
+
+        Ok(EarlyNetworkConfig {
+            generation: v0.generation,
+            schema_version: 1,
+            body: EarlyNetworkConfigBody {
+                rack_subnet: v0.rack_subnet,
+                ntp_servers: v0.ntp_servers,
+                rack_network_config: v0
+                    .rack_network_config
+                    .map(|v0_config| RackNetworkConfigV1::from(v0_config)),
+            },
+        })
     }
 }
 

@@ -57,7 +57,8 @@
 use super::config::SetupServiceConfig as Config;
 use crate::bootstrap::config::BOOTSTRAP_AGENT_HTTP_PORT;
 use crate::bootstrap::early_networking::{
-    EarlyNetworkConfig, EarlyNetworkSetup, EarlyNetworkSetupError,
+    EarlyNetworkConfig, EarlyNetworkConfigBody, EarlyNetworkSetup,
+    EarlyNetworkSetupError,
 };
 use crate::bootstrap::params::BootstrapAddressDiscovery;
 use crate::bootstrap::params::StartSledAgentRequest;
@@ -895,9 +896,12 @@ impl ServiceInner {
         // from the bootstore".
         let early_network_config = EarlyNetworkConfig {
             generation: 1,
-            rack_subnet: config.rack_subnet,
-            ntp_servers: config.ntp_servers.clone(),
-            rack_network_config: config.rack_network_config.clone(),
+            schema_version: 1,
+            body: EarlyNetworkConfigBody {
+                rack_subnet: config.rack_subnet,
+                ntp_servers: config.ntp_servers.clone(),
+                rack_network_config: config.rack_network_config.clone(),
+            },
         };
         info!(self.log, "Writing Rack Network Configuration to bootstore");
         //NOTE(ry) this is where the early network config gets saved.

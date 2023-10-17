@@ -68,9 +68,17 @@ pub struct SourceNatConfig {
     pub last_port: u16,
 }
 
+// We alias [`RackNetworkConfig`] to the current version of the protocol, so
+// that we can convert between versions as necessary.
+pub type RackNetworkConfig = RackNetworkConfigV1;
+
 /// Initial network configuration
+///
+/// TODO(AJS): It's unclear if this should be serde renamed to `RackNetworkConfig`
+/// I *think* it's useful to have the version be explicit in the name, but I'm open
+/// to discussion.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
-pub struct RackNetworkConfig {
+pub struct RackNetworkConfigV1 {
     // TODO: #3591 Consider making infra-ip ranges implicit for uplinks
     /// First ip address to be used for configuring network infrastructure
     pub infra_ip_first: Ipv4Addr,
@@ -80,6 +88,41 @@ pub struct RackNetworkConfig {
     pub ports: Vec<PortConfigV1>,
     /// BGP configurations for connecting the rack to external networks
     pub bgp: Vec<BgpConfig>,
+}
+
+/// Deprecated, use `RackNetworkConfig` instead. Cannot actually deprecate due to
+/// <https://github.com/serde-rs/serde/issues/2195>
+///
+/// Our first version of `RackNetworkConfig`. If this exists in the bootstore, we
+/// upgrade out of it into `RackNetworkConfigV1` or later versions if possible.
+/// Initial network configuration
+///
+// TODO(AJS): Should this actually exist in the OpenAPI spec or should we just
+// hide the old version inside sled-agent/src/bootstrap/early_networking.rs
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+pub struct RackNetworkConfigV0 {
+    // TODO: #3591 Consider making infra-ip ranges implicit for uplinks
+    /// First ip address to be used for configuring network infrastructure
+    pub infra_ip_first: Ipv4Addr,
+    /// Last ip address to be used for configuring network infrastructure
+    pub infra_ip_last: Ipv4Addr,
+    /// Uplinks for connecting the rack to external networks
+    pub uplinks: Vec<UplinkConfig>,
+}
+
+impl From<RackNetworkConfigV0> for RackNetworkConfigV1 {
+    fn from(value: RackNetworkConfigV0) -> Self {
+        RackNetworkConfigV1 {
+            infra_ip_first: value.infra_ip_first,
+            infra_ip_last: value.infra_ip_last,
+            ports: value
+                .uplinks
+                .into_iter()
+                .map(|uplink| PortConfigV1::from(uplink))
+                .collect(),
+            bgp: vec![],
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
@@ -124,6 +167,23 @@ pub struct PortConfigV1 {
     pub uplink_port_fec: PortFec,
     /// BGP peers on this port
     pub bgp_peers: Vec<BgpPeerConfig>,
+}
+
+impl From<UplinkConfig> for PortConfigV1 {
+    fn from(value: UplinkConfig) -> Self {
+        PortConfigV1 {
+            routes: vec![RouteConfig {
+                destination: "0.0.0.0/0".parse().unwrap(),
+                nexthop: value.gateway_ip.into(),
+            }],
+            addresses: vec![value.uplink_cidr.into()],
+            switch: value.switch,
+            port: value.uplink_port,
+            uplink_port_speed: value.uplink_port_speed,
+            uplink_port_fec: value.uplink_port_fec,
+            bgp_peers: vec![],
+        }
+    }
 }
 
 /// Deprecated, use PortConfigV1 instead. Cannot actually deprecate due to
