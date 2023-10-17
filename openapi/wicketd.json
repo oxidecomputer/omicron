@@ -1054,7 +1054,7 @@
             "nullable": true,
             "allOf": [
               {
-                "$ref": "#/components/schemas/RackNetworkConfig"
+                "$ref": "#/components/schemas/RackNetworkConfigV1"
               }
             ]
           }
@@ -2089,7 +2089,7 @@
             }
           },
           "rack_network_config": {
-            "$ref": "#/components/schemas/RackNetworkConfig"
+            "$ref": "#/components/schemas/RackNetworkConfigV1"
           }
         },
         "required": [
@@ -2106,7 +2106,7 @@
         "type": "string",
         "format": "uuid"
       },
-      "RackNetworkConfig": {
+      "RackNetworkConfigV1": {
         "description": "Initial network configuration",
         "type": "object",
         "properties": {
