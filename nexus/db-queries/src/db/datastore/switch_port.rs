@@ -20,7 +20,7 @@ use crate::db::model::{
     SwitchVlanInterfaceConfig,
 };
 use crate::db::pagination::paginated;
-use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl, ConnectionError};
+use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl};
 use diesel::result::Error as DieselError;
 use diesel::{
     ExpressionMethods, JoinOnDsl, NullableExpressionMethods, QueryDsl,
@@ -279,11 +279,10 @@ impl DataStore {
                             .limit(1)
                             .first_async::<Uuid>(&conn)
                             .await
-                            .map_err(|e| match e {
-                                ConnectionError::Query(_) => TxnError::CustomError(
+                            .map_err(|_| {
+                                TxnError::CustomError(
                                     SwitchPortSettingsCreateError::BgpAnnounceSetNotFound,
-                                ),
-                                e => e.into(),
+                                )
                             })?
                     }
                 };
@@ -300,12 +299,11 @@ impl DataStore {
                             .limit(1)
                             .first_async::<Uuid>(&conn)
                             .await
-                            .map_err(|e| match e {
-                                ConnectionError::Query(_) => TxnError::CustomError(
+                            .map_err(|_|
+                                TxnError::CustomError(
                                     SwitchPortSettingsCreateError::BgpConfigNotFound,
-                                ),
-                                e => e.into(),
-                            })?
+                                )
+                            )?
                     }
                 };
 
@@ -341,14 +339,11 @@ impl DataStore {
                             .limit(1)
                             .first_async::<Uuid>(&conn)
                             .await
-                            .map_err(|e| match e {
-                                ConnectionError::Query(_) => {
-                                    TxnError::CustomError(
-                                        SwitchPortSettingsCreateError::AddressLotNotFound,
-                                    )
-                                }
-                                e => e.into()
-                            })?
+                            .map_err(|_|
+                                TxnError::CustomError(
+                                    SwitchPortSettingsCreateError::AddressLotNotFound,
+                                )
+                            )?
                         }
                     };
                     // TODO: Reduce DB round trips needed for reserving ip blocks
@@ -369,7 +364,7 @@ impl DataStore {
                                     SwitchPortSettingsCreateError::ReserveBlock(err)
                                 )
                             }
-                            ReserveBlockTxnError::Connection(err) => TxnError::Connection(err),
+                            ReserveBlockTxnError::Database(err) => TxnError::Database(err),
                         })?;
 
                     address_config.push(SwitchPortAddressConfig::new(
@@ -416,10 +411,8 @@ impl DataStore {
                     ReserveBlockError::AddressNotInLot
                 )
             ) => Error::invalid_request("address not in lot"),
-            TxnError::Connection(e) => match e {
-                ConnectionError::Query(
-                    DieselError::DatabaseError(_, _),
-                ) => public_error_from_diesel(
+            TxnError::Database(e) => match e {
+                DieselError::DatabaseError(_, _) => public_error_from_diesel(
                     e,
                     ErrorHandler::Conflict(
                         ResourceType::SwitchPortSettings,
@@ -467,12 +460,11 @@ impl DataStore {
                         .limit(1)
                         .first_async::<Uuid>(&conn)
                         .await
-                        .map_err(|e| match e {
-                            ConnectionError::Query(_) => TxnError::CustomError(
+                        .map_err(|_|
+                            TxnError::CustomError(
                                 SwitchPortSettingsDeleteError::SwitchPortSettingsNotFound,
-                            ),
-                            e => e.into()
-                        })?
+                            )
+                        )?
                 }
             };
 
@@ -599,10 +591,8 @@ impl DataStore {
                 SwitchPortSettingsDeleteError::SwitchPortSettingsNotFound) => {
                 Error::invalid_request("port settings not found")
             }
-            TxnError::Connection(e) => match e {
-                ConnectionError::Query(
-                    DieselError::DatabaseError(_, _),
-                ) => {
+            TxnError::Database(e) => match e {
+                DieselError::DatabaseError(_, _) => {
                     let name = match &params.port_settings {
                         Some(name_or_id) => name_or_id.to_string(),
                         None => String::new(),
@@ -676,11 +666,10 @@ impl DataStore {
                         .limit(1)
                         .first_async::<Uuid>(&conn)
                         .await
-                        .map_err(|e| match e {
-                            ConnectionError::Query(_) => TxnError::CustomError(
+                        .map_err(|_| {
+                            TxnError::CustomError(
                                 SwitchPortSettingsGetError::NotFound(name.clone())
-                            ),
-                            e => e.into()
+                            )
                         })?
                 }
             };
@@ -804,10 +793,8 @@ impl DataStore {
                 SwitchPortSettingsGetError::NotFound(name)) => {
                 Error::not_found_by_name(ResourceType::SwitchPortSettings, &name)
             }
-            TxnError::Connection(e) => match e {
-                ConnectionError::Query(
-                    DieselError::DatabaseError(_, _),
-                ) => {
+            TxnError::Database(e) => match e {
+                DieselError::DatabaseError(_, _) => {
                     let name = name_or_id.to_string();
                     public_error_from_diesel(
                         e,
@@ -855,11 +842,8 @@ impl DataStore {
                 .limit(1)
                 .first_async::<Uuid>(&conn)
                 .await
-                .map_err(|e| match e {
-                    ConnectionError::Query(_) => TxnError::CustomError(
-                        SwitchPortCreateError::RackNotFound,
-                    ),
-                    e => e.into(),
+                .map_err(|_| {
+                    TxnError::CustomError(SwitchPortCreateError::RackNotFound)
                 })?;
 
             // insert switch port
@@ -878,19 +862,14 @@ impl DataStore {
             TxnError::CustomError(SwitchPortCreateError::RackNotFound) => {
                 Error::invalid_request("rack not found")
             }
-            TxnError::Connection(e) => match e {
-                ConnectionError::Query(DieselError::DatabaseError(_, _)) => {
-                    public_error_from_diesel(
-                        e,
-                        ErrorHandler::Conflict(
-                            ResourceType::SwitchPort,
-                            &format!(
-                                "{}/{}/{}",
-                                rack_id, &switch_location, &port,
-                            ),
-                        ),
-                    )
-                }
+            TxnError::Database(e) => match e {
+                DieselError::DatabaseError(_, _) => public_error_from_diesel(
+                    e,
+                    ErrorHandler::Conflict(
+                        ResourceType::SwitchPort,
+                        &format!("{}/{}/{}", rack_id, &switch_location, &port,),
+                    ),
+                ),
                 _ => public_error_from_diesel(e, ErrorHandler::Server),
             },
         })
@@ -929,11 +908,8 @@ impl DataStore {
                 .limit(1)
                 .first_async::<SwitchPort>(&conn)
                 .await
-                .map_err(|e| match e {
-                    ConnectionError::Query(_) => {
-                        TxnError::CustomError(SwitchPortDeleteError::NotFound)
-                    }
-                    e => e.into(),
+                .map_err(|_| {
+                    TxnError::CustomError(SwitchPortDeleteError::NotFound)
                 })?;
 
             if port.port_settings_id.is_some() {
@@ -958,7 +934,7 @@ impl DataStore {
             TxnError::CustomError(SwitchPortDeleteError::ActiveSettings) => {
                 Error::invalid_request("must clear port settings first")
             }
-            TxnError::Connection(e) => {
+            TxnError::Database(e) => {
                 public_error_from_diesel(e, ErrorHandler::Server)
             }
         })

@@ -647,7 +647,7 @@ impl DataStore {
             .await
             .map_err(|error| match error {
                 TransactionError::CustomError(e) => e,
-                TransactionError::Connection(e) => {
+                TransactionError::Database(e) => {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 }
             })?;

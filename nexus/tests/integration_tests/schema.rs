@@ -569,7 +569,13 @@ impl InformationSchema {
     fn pretty_assert_eq(&self, other: &Self) {
         // similar_asserts gets us nice diff that only includes the relevant context.
         // the columns diff especially needs this: it can be 20k lines otherwise
+        similar_asserts::assert_eq!(self.tables, other.tables);
         similar_asserts::assert_eq!(self.columns, other.columns);
+        similar_asserts::assert_eq!(self.views, other.views);
+        similar_asserts::assert_eq!(
+            self.table_constraints,
+            other.table_constraints
+        );
         similar_asserts::assert_eq!(
             self.check_constraints,
             other.check_constraints
@@ -586,15 +592,9 @@ impl InformationSchema {
             self.referential_constraints,
             other.referential_constraints
         );
-        similar_asserts::assert_eq!(self.views, other.views);
         similar_asserts::assert_eq!(self.statistics, other.statistics);
         similar_asserts::assert_eq!(self.sequences, other.sequences);
         similar_asserts::assert_eq!(self.pg_indexes, other.pg_indexes);
-        similar_asserts::assert_eq!(self.tables, other.tables);
-        similar_asserts::assert_eq!(
-            self.table_constraints,
-            other.table_constraints
-        );
     }
 
     async fn new(crdb: &CockroachInstance) -> Self {

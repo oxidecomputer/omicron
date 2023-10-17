@@ -25,6 +25,7 @@ use diesel::prelude::*;
 use diesel::query_builder::*;
 use diesel::query_dsl::methods as query_methods;
 use diesel::query_source::Table;
+use diesel::result::Error as DieselError;
 use diesel::sql_types::{Nullable, SingleValue};
 use nexus_db_model::DatastoreAttachTargetConfig;
 use std::fmt::Debug;
@@ -241,7 +242,7 @@ where
 
 /// Result of [`DetachManyFromCollectionStatement`] when executed asynchronously
 pub type AsyncDetachManyFromCollectionResult<C> =
-    Result<C, DetachManyError<C, async_bb8_diesel::ConnectionError>>;
+    Result<C, DetachManyError<C, DieselError>>;
 
 /// Errors returned by [`DetachManyFromCollectionStatement`].
 #[derive(Debug)]
@@ -918,9 +919,8 @@ mod test {
                 .set(resource::dsl::collection_id.eq(Option::<Uuid>::None)),
         );
 
-        type TxnError = TransactionError<
-            DetachManyError<Collection, async_bb8_diesel::ConnectionError>,
-        >;
+        type TxnError =
+            TransactionError<DetachManyError<Collection, DieselError>>;
         let result = conn
             .transaction_async(|conn| async move {
                 detach_query.detach_and_get_result_async(&conn).await.map_err(

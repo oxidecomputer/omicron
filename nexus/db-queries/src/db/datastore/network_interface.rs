@@ -29,6 +29,7 @@ use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use diesel::result::Error as DieselError;
 use omicron_common::api::external;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::DeleteResult;
@@ -463,19 +464,18 @@ impl DataStore {
         #[derive(Debug)]
         enum NetworkInterfaceUpdateError {
             InstanceNotStopped,
-            FailedToUnsetPrimary(async_bb8_diesel::ConnectionError),
+            FailedToUnsetPrimary(DieselError),
         }
         type TxnError = TransactionError<NetworkInterfaceUpdateError>;
 
         let conn = self.pool_connection_authorized(opctx).await?;
         if primary {
             conn.transaction_async(|conn| async move {
-                let instance_state = instance_query
-                    .get_result_async(&conn)
-                    .await?
-                    .runtime_state
-                    .state;
-                if instance_state != stopped {
+                let instance_runtime =
+                    instance_query.get_result_async(&conn).await?.runtime_state;
+                if instance_runtime.propolis_id.is_some()
+                    || instance_runtime.nexus_state != stopped
+                {
                     return Err(TxnError::CustomError(
                         NetworkInterfaceUpdateError::InstanceNotStopped,
                     ));
@@ -514,12 +514,11 @@ impl DataStore {
             // we're only hitting a single row. Note that we still need to
             // verify the instance is stopped.
             conn.transaction_async(|conn| async move {
-                let instance_state = instance_query
-                    .get_result_async(&conn)
-                    .await?
-                    .runtime_state
-                    .state;
-                if instance_state != stopped {
+                let instance_state =
+                    instance_query.get_result_async(&conn).await?.runtime_state;
+                if instance_state.propolis_id.is_some()
+                    || instance_state.nexus_state != stopped
+                {
                     return Err(TxnError::CustomError(
                         NetworkInterfaceUpdateError::InstanceNotStopped,
                     ));

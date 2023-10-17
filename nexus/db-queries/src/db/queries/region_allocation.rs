@@ -14,6 +14,7 @@ use crate::db::true_or_cast_error::{matches_sentinel, TrueOrCastError};
 use db_macros::Subquery;
 use diesel::pg::Pg;
 use diesel::query_builder::{AstPass, Query, QueryFragment, QueryId};
+use diesel::result::Error as DieselError;
 use diesel::PgBinaryExpressionMethods;
 use diesel::{
     sql_types, BoolExpressionMethods, Column, CombineDsl, ExpressionMethods,
@@ -36,7 +37,7 @@ const NOT_ENOUGH_UNIQUE_ZPOOLS_SENTINEL: &'static str =
 
 /// Translates a generic pool error to an external error based
 /// on messages which may be emitted during region provisioning.
-pub fn from_diesel(e: async_bb8_diesel::ConnectionError) -> external::Error {
+pub fn from_diesel(e: DieselError) -> external::Error {
     use crate::db::error;
 
     let sentinels = [
