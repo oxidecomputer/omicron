@@ -527,9 +527,7 @@ impl DataStore {
             )
             .load_async(&*conn)
             .await
-            .map_err(|e| {
-                public_error_from_diesel(e.into(), ErrorHandler::Server)
-            })
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
             .internal_context("listing oldest collections")?;
 
         if u32::try_from(candidates.len()).unwrap() <= nkeep {

@@ -1650,7 +1650,7 @@ async fn inv_collection_print(
     );
     println!(
         "done:       {}",
-        humantime::format_rfc3339_millis(c.time_done.into()).to_string()
+        humantime::format_rfc3339_millis(c.time_done.into())
     );
 
     Ok(())
