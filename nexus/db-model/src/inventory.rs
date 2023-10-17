@@ -5,8 +5,8 @@
 //! Types for representing the hardware/software inventory in the database
 
 use crate::schema::{
-    hw_baseboard_id, inv_collection, inv_collection_error, inv_root_of_trust,
-    inv_service_processor, sw_caboose,
+    hw_baseboard_id, inv_caboose, inv_collection, inv_collection_error,
+    inv_root_of_trust, inv_service_processor, sw_caboose,
 };
 use crate::{impl_enum_type, SqlU16, SqlU32};
 use chrono::DateTime;
@@ -68,6 +68,42 @@ impl From<RotSlot> for HwRotSlot {
         match value {
             RotSlot::A => HwRotSlot::A,
             RotSlot::B => HwRotSlot::B,
+        }
+    }
+}
+
+// See [`nexus_types::inventory::CabooseWhich`].
+impl_enum_type!(
+    #[derive(SqlType, Debug, QueryId)]
+    #[diesel(postgres_type(name = "caboose_which"))]
+    pub struct CabooseWhichEnum;
+
+    #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
+    #[diesel(sql_type = CabooseWhichEnum)]
+    pub enum CabooseWhich;
+
+    // Enum values
+    SpSlot0 => b"sp_slot_0"
+    SpSlot1 => b"sp_slot_1"
+    RotSlotA => b"rot_slot_A"
+    RotSlotB => b"rot_slot_B"
+);
+
+impl From<nexus_types::inventory::CabooseWhich> for CabooseWhich {
+    fn from(c: nexus_types::inventory::CabooseWhich) -> Self {
+        match c {
+            nexus_types::inventory::CabooseWhich::SpSlot0 => {
+                CabooseWhich::SpSlot0
+            }
+            nexus_types::inventory::CabooseWhich::SpSlot1 => {
+                CabooseWhich::SpSlot1
+            }
+            nexus_types::inventory::CabooseWhich::RotSlotA => {
+                CabooseWhich::RotSlotA
+            }
+            nexus_types::inventory::CabooseWhich::RotSlotB => {
+                CabooseWhich::RotSlotB
+            }
         }
     }
 }
@@ -215,9 +251,6 @@ pub struct InvServiceProcessor {
     pub baseboard_revision: BaseboardRevision,
     pub hubris_archive_id: String,
     pub power_state: HwPowerState,
-
-    pub slot0_sw_caboose_id: Option<Uuid>,
-    pub slot1_sw_caboose_id: Option<Uuid>,
 }
 
 /// Newtype wrapping the MGS-reported slot number for an SP
@@ -305,7 +338,17 @@ pub struct InvRootOfTrust {
     pub slot_boot_pref_persistent_pending: Option<HwRotSlot>,
     pub slot_a_sha3_256: Option<String>,
     pub slot_b_sha3_256: Option<String>,
+}
 
-    pub slot_a_sw_caboose_id: Option<Uuid>,
-    pub slot_b_sw_caboose_id: Option<Uuid>,
+/// See [`nexus_types::inventory::Caboose`].
+#[derive(Queryable, Clone, Debug, Selectable)]
+#[diesel(table_name = inv_caboose)]
+pub struct InvCaboose {
+    pub inv_collection_id: Uuid,
+    pub hw_baseboard_id: Uuid,
+    pub time_collected: DateTime<Utc>,
+    pub source: String,
+
+    pub which: CabooseWhich,
+    pub sw_caboose_id: Uuid,
 }

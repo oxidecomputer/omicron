@@ -2700,11 +2700,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_service_processor (
     hubris_archive_id TEXT NOT NULL,
     power_state omicron.public.hw_power_state NOT NULL,
 
-    -- Caboose information.  The requests to fetch this information can
-    -- individually fail so these fields can be NULL.
-    slot0_sw_caboose_id UUID,
-    slot1_sw_caboose_id UUID,
-
     PRIMARY KEY (inv_collection_id, hw_baseboard_id)
 );
 
@@ -2730,13 +2725,36 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_root_of_trust (
     slot_a_sha3_256 TEXT, -- nullable
     slot_b_sha3_256 TEXT, -- nullable
 
-    -- Caboose information.  The requests to fetch this information can
-    -- individually fail so these fields can be NULL.
-    slot_a_sw_caboose_id UUID,
-    slot_b_sw_caboose_id UUID,
-
     PRIMARY KEY (inv_collection_id, hw_baseboard_id)
 );
+
+CREATE TYPE IF NOT EXISTS omicron.public.caboose_which AS ENUM (
+    'sp_slot_0',
+    'sp_slot_1',
+    'rot_slot_A',
+    'rot_slot_B'
+);
+
+-- cabooses found
+-- XXX-dap this could as well be nullable columns in inv_sp/inv_rot?
+CREATE TABLE IF NOT EXISTS omicron.public.inv_caboose (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+    -- which system this SP reports it is part of
+    -- (foreign key into `hw_baseboard_id` table)
+    hw_baseboard_id UUID NOT NULL,
+    -- when this observation was made
+    time_collected TIMESTAMPTZ NOT NULL,
+    -- which MGS instance reported this data
+    source TEXT NOT NULL,
+
+    which omicron.public.caboose_which NOT NULL,
+    sw_caboose_id UUID NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, hw_baseboard_id, which)
+);
+
 
 /*******************************************************************/
 
