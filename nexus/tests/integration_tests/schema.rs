@@ -1016,3 +1016,44 @@ async fn compare_table_differing_constraint() {
     assert_ne!(schema1.check_constraints, schema2.check_constraints);
     logctx.cleanup_successful();
 }
+
+#[tokio::test]
+async fn compare_table_differing_not_null_order() {
+    let config = load_test_config();
+    let logctx = LogContext::new(
+        "compare_table_differing_not_null_order",
+        &config.pkg.log,
+    );
+    let log = &logctx.log;
+
+    let schema1 = get_information_schema(
+        log,
+        "
+        CREATE DATABASE omicron;
+        CREATE TABLE omicron.public.pet ( id UUID PRIMARY KEY );
+        CREATE TABLE omicron.public.employee (
+            id UUID PRIMARY KEY,
+            name TEXT NOT NULL,
+            hobbies TEXT
+        );
+        ",
+    )
+    .await;
+
+    let schema2 = get_information_schema(
+        log,
+        "
+        CREATE DATABASE omicron;
+        CREATE TABLE omicron.public.employee (
+            id UUID PRIMARY KEY,
+            name TEXT NOT NULL,
+            hobbies TEXT
+        );
+        CREATE TABLE omicron.public.pet ( id UUID PRIMARY KEY );
+        ",
+    )
+    .await;
+
+    schema1.pretty_assert_eq(&schema2);
+    logctx.cleanup_successful();
+}
