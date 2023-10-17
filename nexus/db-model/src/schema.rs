@@ -1176,12 +1176,12 @@ table! {
         time_collected -> Timestamptz,
         source -> Text,
 
-        rot_slot_active -> crate::HwRotSlotEnum,
-        rot_slot_boot_pref_transient -> Nullable<crate::HwRotSlotEnum>,
-        rot_slot_boot_pref_persistent -> crate::HwRotSlotEnum,
-        rot_slot_boot_pref_persistent_pending -> Nullable<crate::HwRotSlotEnum>,
-        rot_slot_a_sha3_256 -> Nullable<Text>,
-        rot_slot_b_sha3_256 -> Nullable<Text>,
+        slot_active -> crate::HwRotSlotEnum,
+        slot_boot_pref_transient -> Nullable<crate::HwRotSlotEnum>,
+        slot_boot_pref_persistent -> crate::HwRotSlotEnum,
+        slot_boot_pref_persistent_pending -> Nullable<crate::HwRotSlotEnum>,
+        slot_a_sha3_256 -> Nullable<Text>,
+        slot_b_sha3_256 -> Nullable<Text>,
     }
 }
 

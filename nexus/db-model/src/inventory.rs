@@ -332,12 +332,12 @@ pub struct InvRootOfTrust {
     pub time_collected: DateTime<Utc>,
     pub source: String,
 
-    pub rot_slot_active: HwRotSlot,
-    pub rot_slot_boot_pref_transient: Option<HwRotSlot>,
-    pub rot_slot_boot_pref_persistent: HwRotSlot,
-    pub rot_slot_boot_pref_persistent_pending: Option<HwRotSlot>,
-    pub rot_slot_a_sha3_256: Option<String>,
-    pub rot_slot_b_sha3_256: Option<String>,
+    pub slot_active: HwRotSlot,
+    pub slot_boot_pref_transient: Option<HwRotSlot>,
+    pub slot_boot_pref_persistent: HwRotSlot,
+    pub slot_boot_pref_persistent_pending: Option<HwRotSlot>,
+    pub slot_a_sha3_256: Option<String>,
+    pub slot_b_sha3_256: Option<String>,
 }
 
 /// See [`nexus_types::inventory::Caboose`].

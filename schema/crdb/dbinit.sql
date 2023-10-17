@@ -2653,12 +2653,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_root_of_trust (
     -- which MGS instance reported this data
     source TEXT NOT NULL,
 
-    rot_slot_active omicron.public.hw_rot_slot NOT NULL,
-    rot_slot_boot_pref_transient omicron.public.hw_rot_slot, -- nullable
-    rot_slot_boot_pref_persistent omicron.public.hw_rot_slot NOT NULL,
-    rot_slot_boot_pref_persistent_pending omicron.public.hw_rot_slot, -- nullable
-    rot_slot_a_sha3_256 TEXT, -- nullable
-    rot_slot_b_sha3_256 TEXT, -- nullable
+    slot_active omicron.public.hw_rot_slot NOT NULL,
+    slot_boot_pref_transient omicron.public.hw_rot_slot, -- nullable
+    slot_boot_pref_persistent omicron.public.hw_rot_slot NOT NULL,
+    slot_boot_pref_persistent_pending omicron.public.hw_rot_slot, -- nullable
+    slot_a_sha3_256 TEXT, -- nullable
+    slot_b_sha3_256 TEXT, -- nullable
 
     PRIMARY KEY (inv_collection_id, hw_baseboard_id)
 );
@@ -2671,6 +2671,7 @@ CREATE TYPE IF NOT EXISTS omicron.public.caboose_which AS ENUM (
 );
 
 -- cabooses found
+-- XXX-dap this could as well be nullable columns in inv_sp/inv_rot?
 CREATE TABLE IF NOT EXISTS omicron.public.inv_caboose (
     -- where this observation came from
     -- (foreign key into `inv_collection` table)

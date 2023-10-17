@@ -291,12 +291,12 @@ impl DataStore {
                         rot_dsl::hw_baseboard_id,
                         rot_dsl::time_collected,
                         rot_dsl::source,
-                        rot_dsl::rot_slot_active,
-                        rot_dsl::rot_slot_boot_pref_persistent,
-                        rot_dsl::rot_slot_boot_pref_persistent_pending,
-                        rot_dsl::rot_slot_boot_pref_transient,
-                        rot_dsl::rot_slot_a_sha3_256,
-                        rot_dsl::rot_slot_b_sha3_256,
+                        rot_dsl::slot_active,
+                        rot_dsl::slot_boot_pref_persistent,
+                        rot_dsl::slot_boot_pref_persistent_pending,
+                        rot_dsl::slot_boot_pref_transient,
+                        rot_dsl::slot_a_sha3_256,
+                        rot_dsl::slot_b_sha3_256,
                     ))
                     .execute_async(&conn)
                     .await
@@ -318,12 +318,12 @@ impl DataStore {
                         _hw_baseboard_id,
                         _time_collected,
                         _source,
-                        _rot_slot_active,
-                        _rot_slot_boot_pref_persistent,
-                        _rot_slot_boot_pref_persistent_pending,
-                        _rot_slot_boot_pref_transient,
-                        _rot_slot_a_sha3_256,
-                        _rot_slot_b_sha3_256,
+                        _slot_active,
+                        _slot_boot_pref_persistent,
+                        _slot_boot_pref_persistent_pending,
+                        _slot_boot_pref_transient,
+                        _slot_a_sha3_256,
+                        _slot_b_sha3_256,
                     ) = rot_dsl::inv_root_of_trust::all_columns();
                 }
             }
