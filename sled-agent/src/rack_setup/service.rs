@@ -576,6 +576,7 @@ impl ServiceInner {
         let rack_network_config = match &config.rack_network_config {
             Some(config) => {
                 let value = NexusTypes::RackNetworkConfig {
+                    rack_subnet: config.rack_subnet,
                     infra_ip_first: config.infra_ip_first,
                     infra_ip_last: config.infra_ip_last,
                     ports: config
@@ -895,7 +896,6 @@ impl ServiceInner {
         // from the bootstore".
         let early_network_config = EarlyNetworkConfig {
             generation: 1,
-            rack_subnet: config.rack_subnet,
             ntp_servers: config.ntp_servers.clone(),
             rack_network_config: config.rack_network_config.clone(),
         };

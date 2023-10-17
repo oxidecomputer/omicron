@@ -32,6 +32,7 @@ use chrono::Utc;
 use diesel::prelude::*;
 use diesel::result::Error as DieselError;
 use diesel::upsert::excluded;
+use ipnetwork::IpNetwork;
 use nexus_db_model::DnsGroup;
 use nexus_db_model::DnsZone;
 use nexus_db_model::ExternalIp;
@@ -61,6 +62,7 @@ use uuid::Uuid;
 #[derive(Clone)]
 pub struct RackInit {
     pub rack_id: Uuid,
+    pub rack_subnet: IpNetwork,
     pub services: Vec<internal_params::ServicePutRequest>,
     pub datasets: Vec<Dataset>,
     pub service_ip_pool_ranges: Vec<IpRange>,
@@ -681,6 +683,7 @@ mod test {
         fn default() -> Self {
             RackInit {
                 rack_id: Uuid::parse_str(nexus_test_utils::RACK_UUID).unwrap(),
+                rack_subnet: nexus_test_utils::RACK_SUBNET.parse().unwrap(),
                 services: vec![],
                 datasets: vec![],
                 service_ip_pool_ranges: vec![],

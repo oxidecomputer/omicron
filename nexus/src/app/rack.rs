@@ -5,11 +5,15 @@
 //! Rack management
 
 use super::silo::silo_dns_name;
+use crate::external_api::params;
 use crate::external_api::params::CertificateCreate;
 use crate::external_api::shared::ServiceUsingCertificate;
 use crate::internal_api::params::RackInitializationRequest;
+use internal_dns::ServiceName;
+use ipnetwork::IpNetwork;
 use nexus_db_model::DnsGroup;
 use nexus_db_model::InitialDnsGroup;
+use nexus_db_model::{SwitchLinkFec, SwitchLinkSpeed};
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
@@ -37,11 +41,17 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
+use omicron_common::api::external::SwitchLocation;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
+use sled_agent_client::types::{
+    BgpConfig, BgpPeerConfig, EarlyNetworkConfig, PortConfigV1,
+    RackNetworkConfig, RouteConfig as SledRouteConfig,
+};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::net::IpAddr;
+use std::net::Ipv4Addr;
 use std::str::FromStr;
 use uuid::Uuid;
 
@@ -186,10 +196,18 @@ impl super::Nexus {
             mapped_fleet_roles,
         };
 
+        let rack_network_config = request.rack_network_config.as_ref().ok_or(
+            Error::InvalidRequest {
+                message: "cannot initialize a rack without a network config"
+                    .into(),
+            },
+        )?;
+
         self.db_datastore
             .rack_set_initialized(
                 opctx,
                 RackInit {
+                    rack_subnet: rack_network_config.rack_subnet.into(),
                     rack_id,
                     services: request.services,
                     datasets,
@@ -544,5 +562,151 @@ impl super::Nexus {
             }
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         }
+    }
+
+    pub(crate) async fn initial_bootstore_sync(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<(), Error> {
+        let mut rack = self.rack_lookup(opctx, &self.rack_id).await?;
+        if rack.rack_subnet.is_some() {
+            return Ok(());
+        }
+        let addr = self
+            .resolver()
+            .await
+            .lookup_socket_v6(ServiceName::Scrimlet(SwitchLocation::Switch0))
+            .await
+            .map_err(|e| Error::InternalError {
+                internal_message: e.to_string(),
+            })?;
+
+        let sa = sled_agent_client::Client::new(
+            &format!("http://{}", addr),
+            self.log.clone(),
+        );
+
+        let result = sa
+            .read_network_bootstore_config()
+            .await
+            .map_err(|e| Error::InternalError {
+                internal_message: format!("read bootstore network config: {e}"),
+            })?
+            .into_inner();
+
+        rack.rack_subnet =
+            result.rack_network_config.map(|x| x.rack_subnet.into());
+
+        self.datastore().rack_insert(opctx, &rack).await?;
+
+        Ok(())
+    }
+
+    pub(crate) async fn bootstore_network_config(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<EarlyNetworkConfig, Error> {
+        let rack = self.rack_lookup(opctx, &self.rack_id).await?;
+
+        let subnet = match rack.rack_subnet {
+            Some(IpNetwork::V6(subnet)) => subnet,
+            Some(IpNetwork::V4(_)) => {
+                return Err(Error::InternalError {
+                    internal_message: "rack subnet not IPv6".into(),
+                })
+            }
+            None => {
+                return Err(Error::InternalError {
+                    internal_message: "rack subnet not set".into(),
+                })
+            }
+        };
+
+        let db_ports = self.active_port_settings(opctx).await?;
+        let mut ports = Vec::new();
+        let mut bgp = Vec::new();
+        for (port, info) in &db_ports {
+            let mut peer_info = Vec::new();
+            for p in &info.bgp_peers {
+                let bgp_config =
+                    self.bgp_config_get(&opctx, p.bgp_config_id.into()).await?;
+                let announcements = self
+                    .bgp_announce_list(
+                        &opctx,
+                        &params::BgpAnnounceSetSelector {
+                            name_or_id: bgp_config.bgp_announce_set_id.into(),
+                        },
+                    )
+                    .await?;
+                let addr = match p.addr {
+                    ipnetwork::IpNetwork::V4(addr) => addr,
+                    ipnetwork::IpNetwork::V6(_) => continue, //TODO v6
+                };
+                peer_info.push((p, bgp_config.asn.0, addr.ip()));
+                bgp.push(BgpConfig {
+                    asn: bgp_config.asn.0,
+                    originate: announcements
+                        .iter()
+                        .filter_map(|a| match a.network {
+                            IpNetwork::V4(net) => Some(net.into()),
+                            //TODO v6
+                            _ => None,
+                        })
+                        .collect(),
+                });
+            }
+
+            let p = PortConfigV1 {
+                routes: info
+                    .routes
+                    .iter()
+                    .map(|r| SledRouteConfig {
+                        destination: r.dst,
+                        nexthop: r.gw.ip(),
+                    })
+                    .collect(),
+                addresses: info.addresses.iter().map(|a| a.address).collect(),
+                bgp_peers: peer_info
+                    .iter()
+                    .map(|(_p, asn, addr)| BgpPeerConfig {
+                        addr: *addr,
+                        asn: *asn,
+                        port: port.port_name.clone(),
+                    })
+                    .collect(),
+                switch: port.switch_location.parse().unwrap(),
+                port: port.port_name.clone(),
+                uplink_port_fec: info
+                    .links
+                    .get(0) //TODO breakout support
+                    .map(|l| l.fec)
+                    .unwrap_or(SwitchLinkFec::None)
+                    .into(),
+                uplink_port_speed: info
+                    .links
+                    .get(0) //TODO breakout support
+                    .map(|l| l.speed)
+                    .unwrap_or(SwitchLinkSpeed::Speed100G)
+                    .into(),
+            };
+
+            ports.push(p);
+        }
+
+        let result = EarlyNetworkConfig {
+            generation: 0,
+            ntp_servers: Vec::new(), //TODO
+            rack_network_config: Some(RackNetworkConfig {
+                rack_subnet: subnet,
+                //TODO(ry) you are here. We need to remove these too. They are
+                // inconsistent with a generic set of addresses on ports.
+                infra_ip_first: Ipv4Addr::UNSPECIFIED,
+                infra_ip_last: Ipv4Addr::UNSPECIFIED,
+                ports,
+                bgp,
+            }),
+        };
+
+        Ok(result)
     }
 }

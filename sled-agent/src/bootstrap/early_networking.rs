@@ -17,7 +17,7 @@ use gateway_client::Client as MgsClient;
 use internal_dns::resolver::{ResolveError, Resolver as DnsResolver};
 use internal_dns::ServiceName;
 use ipnetwork::IpNetwork;
-use omicron_common::address::{Ipv6Subnet, AZ_PREFIX, MGS_PORT};
+use omicron_common::address::{Ipv6Subnet, MGS_PORT};
 use omicron_common::address::{DDMD_PORT, DENDRITE_PORT};
 use omicron_common::api::internal::shared::{
     PortConfigV1, PortFec, PortSpeed, RackNetworkConfig, SwitchLocation,
@@ -574,20 +574,12 @@ pub struct EarlyNetworkConfig {
     // The version of data.
     pub generation: u64,
 
-    pub rack_subnet: Ipv6Addr,
-
     /// The external NTP server addresses.
     pub ntp_servers: Vec<String>,
 
     /// A copy of the initial rack network configuration when we are in
     /// generation `1`.
     pub rack_network_config: Option<RackNetworkConfig>,
-}
-
-impl EarlyNetworkConfig {
-    pub fn az_subnet(&self) -> Ipv6Subnet<AZ_PREFIX> {
-        Ipv6Subnet::<AZ_PREFIX>::new(self.rack_subnet)
-    }
 }
 
 impl From<EarlyNetworkConfig> for bootstore::NetworkConfig {

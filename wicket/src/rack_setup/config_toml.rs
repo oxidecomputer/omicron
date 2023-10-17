@@ -365,6 +365,7 @@ mod tests {
             external_dns_ips: value.external_dns_ips,
             ntp_servers: value.ntp_servers,
             rack_network_config: InternalRackNetworkConfig {
+                rack_subnet: rnc.rack_subnet,
                 infra_ip_first: rnc.infra_ip_first,
                 infra_ip_last: rnc.infra_ip_last,
                 ports: rnc
@@ -471,6 +472,7 @@ mod tests {
             external_dns_ips: vec!["10.0.0.1".parse().unwrap()],
             ntp_servers: vec!["ntp1.com".into(), "ntp2.com".into()],
             rack_network_config: Some(RackNetworkConfig {
+                rack_subnet: "fd00:1122:3344:01/56".parse().unwrap(),
                 infra_ip_first: "172.30.0.1".parse().unwrap(),
                 infra_ip_last: "172.30.0.10".parse().unwrap(),
                 ports: vec![PortConfigV1 {

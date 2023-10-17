@@ -2,6 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+//XXX
+#![allow(unused_imports)]
+
 use crate::app::sagas;
 use crate::external_api::params;
 use db::datastore::SwitchPortSettingsCombinedResult;
@@ -315,110 +318,5 @@ impl super::Nexus {
         }
 
         LookupResult::Ok(ports)
-    }
-
-    pub(crate) async fn compute_bootstore_network_config(
-        &self,
-        opctx: &OpContext,
-        current: &EarlyNetworkConfig,
-    ) -> LookupResult<EarlyNetworkConfig> {
-        let mut rack_net_config = match &current.rack_network_config {
-            Some(cfg) => {
-                RackNetworkConfig {
-                    infra_ip_first: cfg.infra_ip_first,
-                    infra_ip_last: cfg.infra_ip_last,
-                    ports: Vec::new(), // To be filled in from db
-                    bgp: Vec::new(),   // To be filled in from db
-                }
-            }
-            None => {
-                return LookupResult::Err(
-                    external::Error::ServiceUnavailable {
-                        internal_message:
-                            "bootstore network config not initialized yet"
-                                .to_string(),
-                    },
-                );
-            }
-        };
-
-        let db_ports = self.active_port_settings(opctx).await?;
-
-        for (port, info) in &db_ports {
-            let mut peer_info = Vec::new();
-            for p in &info.bgp_peers {
-                let bgp_config =
-                    self.bgp_config_get(&opctx, p.bgp_config_id.into()).await?;
-                let announcements = self
-                    .bgp_announce_list(
-                        &opctx,
-                        &params::BgpAnnounceSetSelector {
-                            name_or_id: bgp_config.bgp_announce_set_id.into(),
-                        },
-                    )
-                    .await?;
-                let addr = match p.addr {
-                    ipnetwork::IpNetwork::V4(addr) => addr,
-                    ipnetwork::IpNetwork::V6(_) => continue, //TODO v6
-                };
-                peer_info.push((p, bgp_config.asn.0, addr.ip()));
-                rack_net_config.bgp.push(BgpConfig {
-                    asn: bgp_config.asn.0,
-                    originate: announcements
-                        .iter()
-                        .filter_map(|a| match a.network {
-                            IpNetwork::V4(net) => Some(net.into()),
-                            //TODO v6
-                            _ => None,
-                        })
-                        .collect(),
-                });
-            }
-
-            let p = PortConfigV1 {
-                routes: info
-                    .routes
-                    .iter()
-                    .map(|r| RouteConfig {
-                        destination: r.dst,
-                        nexthop: r.gw.ip(),
-                    })
-                    .collect(),
-                addresses: info.addresses.iter().map(|a| a.address).collect(),
-                bgp_peers: peer_info
-                    .iter()
-                    .map(|(_p, asn, addr)| BgpPeerConfig {
-                        addr: *addr,
-                        asn: *asn,
-                        port: port.port_name.clone(),
-                    })
-                    .collect(),
-                switch: port.switch_location.parse().unwrap(),
-                port: port.port_name.clone(),
-                uplink_port_fec: info
-                    .links
-                    .get(0) //TODO breakout support
-                    .map(|l| l.fec)
-                    .unwrap_or(SwitchLinkFec::None)
-                    .into(),
-                uplink_port_speed: info
-                    .links
-                    .get(0) //TODO breakout support
-                    .map(|l| l.speed)
-                    .unwrap_or(SwitchLinkSpeed::Speed100G)
-                    .into(),
-            };
-
-            rack_net_config.ports.push(p);
-        }
-
-        let result = EarlyNetworkConfig {
-            generation: current.generation,
-            rack_subnet: current.rack_subnet,
-            ntp_servers: current.ntp_servers.clone(), //TODO update from db
-            rack_network_config: Some(rack_net_config),
-        };
-
-        LookupResult::Ok(result)
     }
 }

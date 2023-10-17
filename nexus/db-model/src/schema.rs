@@ -680,6 +680,7 @@ table! {
         time_modified -> Timestamptz,
         initialized -> Bool,
         tuf_base_url -> Nullable<Text>,
+        rack_subnet -> Nullable<Inet>,
     }
 }
 

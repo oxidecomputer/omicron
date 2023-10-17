@@ -20,6 +20,7 @@ use dropshot::RequestContext;
 use dropshot::TypedBody;
 use illumos_utils::opte::params::DeleteVirtualNetworkInterfaceHost;
 use illumos_utils::opte::params::SetVirtualNetworkInterfaceHost;
+use ipnetwork::Ipv6Network;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::SledInstanceState;
 use omicron_common::api::internal::nexus::UpdateArtifactId;
@@ -355,9 +356,9 @@ async fn read_network_bootstore_config(
 ) -> Result<HttpResponseOk<EarlyNetworkConfig>, HttpError> {
     let config = EarlyNetworkConfig {
         generation: 0,
-        rack_subnet: Ipv6Addr::UNSPECIFIED,
         ntp_servers: Vec::new(),
         rack_network_config: Some(RackNetworkConfig {
+            rack_subnet: Ipv6Network::new(Ipv6Addr::UNSPECIFIED, 56).unwrap(),
             infra_ip_first: Ipv4Addr::UNSPECIFIED,
             infra_ip_last: Ipv4Addr::UNSPECIFIED,
             ports: Vec::new(),

@@ -392,6 +392,12 @@ impl Nexus {
             authn::Context::internal_saga_recovery(),
             Arc::clone(&db_datastore),
         );
+        let opctx_for_bootstore_sync = OpContext::for_background(
+            log.new(o!("component" => "BootstoreSync")),
+            Arc::clone(&authz),
+            authn::Context::internal_saga_recovery(),
+            Arc::clone(&db_datastore),
+        );
         let saga_logger = nexus.log.new(o!("saga_type" => "recovery"));
         let recovery_task = db::recover(
             opctx,
@@ -431,6 +437,10 @@ impl Nexus {
                 }
             }
         });
+        nexus
+            .initial_bootstore_sync(&opctx_for_bootstore_sync)
+            .await
+            .map_err(|e| e.to_string())?;
 
         Ok(nexus)
     }

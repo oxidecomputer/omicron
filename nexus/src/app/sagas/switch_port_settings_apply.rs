@@ -559,22 +559,8 @@ async fn spa_undo_ensure_switch_port_bootstore_network_settings(
     // Just choosing the sled agent associated with switch0 for no reason.
     let sa = switch_sled_agent(SwitchLocation::Switch0, &sagactx).await?;
 
-    // Read the current bootstore network config.
-    let bs_config = read_bootstore_config(&sa).await?;
-
-    // Compute the total network config from the nexus database.
-    let mut nexus_config = nexus
-        .compute_bootstore_network_config(&opctx, &bs_config)
-        .await
-        .map_err(|e| {
-            ActionError::action_failed(format!(
-                "read nexus bootstore network config: {e}"
-            ))
-        })?;
-
-    // Set the correct generation number and send the update.
-    nexus_config.generation = bs_config.generation;
-    write_bootstore_config(&sa, &nexus_config).await?;
+    let config = nexus.bootstore_network_config(&opctx).await?;
+    write_bootstore_config(&sa, &config).await?;
 
     Ok(())
 }

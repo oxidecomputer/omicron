@@ -63,7 +63,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.rack (
     initialized BOOL NOT NULL,
 
     /* Used to configure the updates service URL */
-    tuf_base_url STRING(512)
+    tuf_base_url STRING(512),
+
+    /* The IPv6 underlay /56 prefix for the rack */
+    rack_subnet INET
 );
 
 /*

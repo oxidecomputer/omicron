@@ -4460,13 +4460,17 @@
             "items": {
               "$ref": "#/components/schemas/PortConfigV1"
             }
+          },
+          "rack_subnet": {
+            "$ref": "#/components/schemas/Ipv6Network"
           }
         },
         "required": [
           "bgp",
           "infra_ip_first",
           "infra_ip_last",
-          "ports"
+          "ports",
+          "rack_subnet"
         ]
       },
       "RecoverySiloConfig": {
