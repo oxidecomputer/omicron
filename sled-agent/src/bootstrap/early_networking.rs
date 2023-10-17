@@ -595,7 +595,7 @@ struct EarlyNetworkConfigV0 {
 /// [`super::params::RackInitializeRequest`] necessary for use beyond RSS. This
 /// is just for the initial rack configuration and cold boot purposes. Updates
 /// come from Nexus.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct EarlyNetworkConfig {
     // The current generation number of data as stored in CRDB.
     // The initial generation is set during RSS time and then only mutated
@@ -617,7 +617,7 @@ pub struct EarlyNetworkConfig {
 /// the header and defer deserialization of the body once we know the schema
 /// version. This is possible via the use of [`serde_json::value::RawValue`] in
 /// future (post-v1) deserialization paths.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct EarlyNetworkConfigBody {
     /// The external NTP server addresses.
     pub ntp_servers: Vec<String>,
@@ -742,6 +742,7 @@ fn convert_fec(fec: &PortFec) -> dpd_client::types::PortFec {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use omicron_common::api::internal::shared::RouteConfig;
 
     #[test]
     fn serialized_early_network_config_v0_to_v1_conversion() {
@@ -752,8 +753,51 @@ mod tests {
             rack_network_config: Some(RackNetworkConfigV0 {
                 infra_ip_first: Ipv4Addr::UNSPECIFIED,
                 infra_ip_last: Ipv4Addr::UNSPECIFIED,
-                uplinks: vec![],
+                uplinks: vec![UplinkConfig {
+                    gateway_ip: Ipv4Addr::UNSPECIFIED,
+                    switch: SwitchLocation::Switch0,
+                    uplink_port: "Port0".to_string(),
+                    uplink_port_speed: PortSpeed::Speed100G,
+                    uplink_port_fec: PortFec::None,
+                    uplink_cidr: "192.168.0.1/16".parse().unwrap(),
+                    uplink_vid: None,
+                }],
             }),
         };
+
+        let v0_serialized = serde_json::to_vec(&v0).unwrap();
+        let bootstore_conf =
+            bootstore::NetworkConfig { generation: 1, blob: v0_serialized };
+
+        let v1 = EarlyNetworkConfig::try_from(bootstore_conf).unwrap();
+        let v0_rack_network_config = v0.rack_network_config.unwrap();
+        let uplink = v0_rack_network_config.uplinks[0].clone();
+        let expected = EarlyNetworkConfig {
+            generation: 1,
+            schema_version: 1,
+            body: EarlyNetworkConfigBody {
+                ntp_servers: v0.ntp_servers.clone(),
+                rack_network_config: Some(RackNetworkConfigV1 {
+                    rack_subnet: Ipv6Network::new(v0.rack_subnet, 56).unwrap(),
+                    infra_ip_first: v0_rack_network_config.infra_ip_first,
+                    infra_ip_last: v0_rack_network_config.infra_ip_last,
+                    ports: vec![PortConfigV1 {
+                        routes: vec![RouteConfig {
+                            destination: "0.0.0.0/0".parse().unwrap(),
+                            nexthop: uplink.gateway_ip.into(),
+                        }],
+                        addresses: vec![uplink.uplink_cidr.into()],
+                        switch: uplink.switch,
+                        port: uplink.uplink_port,
+                        uplink_port_speed: uplink.uplink_port_speed,
+                        uplink_port_fec: uplink.uplink_port_fec,
+                        bgp_peers: vec![],
+                    }],
+                    bgp: vec![],
+                }),
+            },
+        };
+
+        assert_eq!(expected, v1);
     }
 }
