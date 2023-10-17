@@ -453,12 +453,13 @@ async fn versions_have_idempotent_up() {
     logctx.cleanup_successful();
 }
 
-const COLUMNS: [&'static str; 6] = [
+const COLUMNS: [&'static str; 7] = [
     "table_catalog",
     "table_schema",
     "table_name",
     "column_name",
     "column_default",
+    "is_nullable",
     "data_type",
 ];
 
@@ -614,7 +615,7 @@ impl InformationSchema {
             crdb,
             CHECK_CONSTRAINTS.as_slice().into(),
             "information_schema.check_constraints",
-            None,
+            Some("constraint_name NOT LIKE '%_not_null'"),
         )
         .await;
 
@@ -686,7 +687,7 @@ impl InformationSchema {
             crdb,
             TABLE_CONSTRAINTS.as_slice().into(),
             "information_schema.table_constraints",
-            Some("table_schema = 'public'"),
+            Some("table_schema = 'public' AND constraint_name NOT LIKE '%_not_null'"),
         )
         .await;
 
