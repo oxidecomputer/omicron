@@ -173,7 +173,7 @@ impl Server {
                     tls_config.map(dropshot::ConfigTls::Dynamic),
                 )
                 .map_err(|error| {
-                    format!("initializing external server: {}", error)
+                    format!("initializing external techport server: {}", error)
                 })?;
             server_starter_external_techport.start()
         };

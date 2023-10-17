@@ -112,13 +112,7 @@ async fn do_run() -> Result<(), CmdError> {
                 Some(addr) => Some(Ipv6Subnet::new(addr)),
                 None if read_smf_config => {
                     let smf_values = SmfConfigValues::read_current()
-                        .map_err(|e| CmdError::Failure(e.to_string()))?
-                        .ok_or_else(|| {
-                            CmdError::Failure(
-                                "--read-smf-config only available on illumos"
-                                    .to_string(),
-                            )
-                        })?;
+                        .map_err(|e| CmdError::Failure(e.to_string()))?;
                     smf_values.rack_subnet
                 }
                 None => None,

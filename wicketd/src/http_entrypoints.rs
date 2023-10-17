@@ -1259,14 +1259,16 @@ async fn post_reload_config(
         )
     })?;
 
-    let Some(smf_values) = smf_values else {
+    let rqctx = rqctx.context();
+
+    // We do not allow a config reload to change our bound address; return an
+    // error if the caller is attempting to do so.
+    if rqctx.bind_address != smf_values.address {
         return Err(HttpError::for_bad_request(
             None,
-            "reloading config from SMF only available on illumos".to_string(),
+            "listening address cannot be reconfigured".to_string(),
         ));
-    };
-
-    let rqctx = rqctx.context();
+    }
 
     if let Some(rack_subnet) = smf_values.rack_subnet {
         let resolver = Resolver::new_from_subnet(

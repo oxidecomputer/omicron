@@ -24,6 +24,7 @@ use std::sync::OnceLock;
 
 /// Shared state used by API handlers
 pub struct ServerContext {
+    pub(crate) bind_address: SocketAddrV6,
     pub mgs_handle: MgsHandle,
     pub mgs_client: gateway_client::Client,
     pub(crate) log: slog::Logger,

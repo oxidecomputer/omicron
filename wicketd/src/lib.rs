@@ -16,7 +16,7 @@ mod preflight_check;
 mod rss_config;
 mod update_tracker;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use artifacts::{WicketdArtifactServer, WicketdArtifactStore};
 use bootstrap_addrs::BootstrapPeers;
 pub use config::Config;
@@ -63,17 +63,19 @@ pub struct Args {
 }
 
 pub struct SmfConfigValues {
+    pub address: SocketAddrV6,
     pub rack_subnet: Option<Ipv6Subnet<AZ_PREFIX>>,
 }
 
 impl SmfConfigValues {
     #[cfg(target_os = "illumos")]
-    pub fn read_current() -> Result<Option<Self>> {
+    pub fn read_current() -> Result<Self> {
         use anyhow::Context;
         use illumos_utils::scf::ScfHandle;
 
         const CONFIG_PG: &str = "config";
         const PROP_RACK_SUBNET: &str = "rack-subnet";
+        const PROP_ADDRESS: &str = "address";
 
         let scf = ScfHandle::new()?;
         let instance = scf.self_instance()?;
@@ -94,12 +96,22 @@ impl SmfConfigValues {
             Some(Ipv6Subnet::new(addr))
         };
 
-        Ok(Some(Self { rack_subnet }))
+        let address = {
+            let address = config.value_as_string(PROP_ADDRESS)?;
+            address.parse().with_context(|| {
+                format!(
+                    "failed to parse {CONFIG_PG}/{PROP_ADDRESS} \
+                     value {address:?} as a socket address"
+                )
+            })?
+        };
+
+        Ok(Some(Self { address, rack_subnet }))
     }
 
     #[cfg(not(target_os = "illumos"))]
-    pub fn read_current() -> Result<Option<Self>> {
-        Ok(None)
+    pub fn read_current() -> Result<Self> {
+        bail!("reading SMF config only available on illumos")
     }
 }
 
@@ -182,6 +194,7 @@ impl Server {
                 &dropshot_config,
                 http_entrypoints::api(),
                 ServerContext {
+                    bind_address: args.address,
                     mgs_handle,
                     mgs_client,
                     log: log.clone(),

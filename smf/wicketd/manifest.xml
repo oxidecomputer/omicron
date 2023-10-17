@@ -25,7 +25,11 @@
         for TLS
 
     both of which are fine for our standard wicketd deployment, which only
-    listens on a `::1` (IPv6 localhost) address without TLS.
+    listens on a `::1` (IPv6 localhost) address without TLS. If any of the
+    above assumptions are violated, the `reload-config` endpoint we hit
+    here will return an error (either directly, if we attempt to change
+    `config/address`, or indirectly because we tried to post via http but
+    it expected https).
   -->
   <exec_method type='method' name='refresh'
       exec='curl -X POST http://%{config/address}/reload-config'
