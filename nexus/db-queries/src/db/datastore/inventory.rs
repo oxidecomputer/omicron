@@ -120,7 +120,7 @@ impl DataStore {
             // we've found.  Like baseboards, these might already be present and
             // rows in this table are not scoped to a particular collection
             // because they only map (immutable) identifiers to UUIDs.
-           {
+            {
                 use db::schema::sw_caboose::dsl;
                 let _ = diesel::insert_into(dsl::sw_caboose)
                     .values(cabooses)

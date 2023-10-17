@@ -397,11 +397,14 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             .internal_dns_config
             .host_zone(fake_mgs_zone_id, *v6addr.ip())
             .expect("Failed to add DNS for MGS zone");
-        self.rack_init_builder.internal_dns_config.service_backend_zone(
-            internal_dns::ServiceName::ManagementGatewayService,
-            &zone,
-            v6addr.port(),
-        ).expect("Failed to add DNS for MGS service");
+        self.rack_init_builder
+            .internal_dns_config
+            .service_backend_zone(
+                internal_dns::ServiceName::ManagementGatewayService,
+                &zone,
+                v6addr.port(),
+            )
+            .expect("Failed to add DNS for MGS service");
         self.gateway = Some(gateway);
     }
 
