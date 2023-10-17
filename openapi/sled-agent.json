@@ -2584,7 +2584,7 @@
         "maxItems": 2
       },
       "RackNetworkConfigV1": {
-        "description": "Initial network configuration\n\nTODO(AJS): It's unclear if this should be serde renamed to `RackNetworkConfig` I *think* it's useful to have the version be explicit in the name, but I'm open to discussion.",
+        "description": "Initial network configuration",
         "type": "object",
         "properties": {
           "bgp": {

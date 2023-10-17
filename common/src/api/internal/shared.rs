@@ -73,10 +73,6 @@ pub struct SourceNatConfig {
 pub type RackNetworkConfig = RackNetworkConfigV1;
 
 /// Initial network configuration
-///
-/// TODO(AJS): It's unclear if this should be serde renamed to `RackNetworkConfig`
-/// I *think* it's useful to have the version be explicit in the name, but I'm open
-/// to discussion.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
 pub struct RackNetworkConfigV1 {
     // TODO: #3591 Consider making infra-ip ranges implicit for uplinks
@@ -88,41 +84,6 @@ pub struct RackNetworkConfigV1 {
     pub ports: Vec<PortConfigV1>,
     /// BGP configurations for connecting the rack to external networks
     pub bgp: Vec<BgpConfig>,
-}
-
-/// Deprecated, use `RackNetworkConfig` instead. Cannot actually deprecate due to
-/// <https://github.com/serde-rs/serde/issues/2195>
-///
-/// Our first version of `RackNetworkConfig`. If this exists in the bootstore, we
-/// upgrade out of it into `RackNetworkConfigV1` or later versions if possible.
-/// Initial network configuration
-///
-// TODO(AJS): Should this actually exist in the OpenAPI spec or should we just
-// hide the old version inside sled-agent/src/bootstrap/early_networking.rs
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
-pub struct RackNetworkConfigV0 {
-    // TODO: #3591 Consider making infra-ip ranges implicit for uplinks
-    /// First ip address to be used for configuring network infrastructure
-    pub infra_ip_first: Ipv4Addr,
-    /// Last ip address to be used for configuring network infrastructure
-    pub infra_ip_last: Ipv4Addr,
-    /// Uplinks for connecting the rack to external networks
-    pub uplinks: Vec<UplinkConfig>,
-}
-
-impl From<RackNetworkConfigV0> for RackNetworkConfigV1 {
-    fn from(value: RackNetworkConfigV0) -> Self {
-        RackNetworkConfigV1 {
-            infra_ip_first: value.infra_ip_first,
-            infra_ip_last: value.infra_ip_last,
-            ports: value
-                .uplinks
-                .into_iter()
-                .map(|uplink| PortConfigV1::from(uplink))
-                .collect(),
-            bgp: vec![],
-        }
-    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]

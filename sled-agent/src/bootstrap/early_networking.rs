@@ -20,8 +20,8 @@ use ipnetwork::IpNetwork;
 use omicron_common::address::{Ipv6Subnet, AZ_PREFIX, MGS_PORT};
 use omicron_common::address::{DDMD_PORT, DENDRITE_PORT};
 use omicron_common::api::internal::shared::{
-    PortConfigV1, PortFec, PortSpeed, RackNetworkConfig, RackNetworkConfigV0,
-    RackNetworkConfigV1, SwitchLocation,
+    PortConfigV1, PortFec, PortSpeed, RackNetworkConfig, RackNetworkConfigV1,
+    SwitchLocation, UplinkConfig,
 };
 use omicron_common::backoff::{
     retry_notify, retry_policy_local, BackoffError, ExponentialBackoff,
@@ -31,7 +31,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use slog::Logger;
 use std::collections::{HashMap, HashSet};
-use std::net::{IpAddr, Ipv6Addr, SocketAddrV6};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
 use std::time::{Duration, Instant};
 use thiserror::Error;
 
@@ -603,13 +603,14 @@ pub struct EarlyNetworkConfigBody {
     pub rack_network_config: Option<RackNetworkConfig>,
 }
 
-// The first production version of the EarlyNetworkConfig.
+// The first production version of the `EarlyNetworkConfig`.
 //
 // If this version is in the bootstore than we need to convert it to
-// `EarlyNetworkConfig`. We intend to convert this data on
+// `EarlyNetworkConfigV1`.
 //
-// Once we do this for all customers that have initialized racks with the old version we
-// can go ahead and remove this type and its conversion code altogether.
+// Once we do this for all customers that have initialized racks with the
+// old version we can go ahead and remove this type and its conversion code
+// altogether.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 struct EarlyNetworkConfigV0 {
     // The current generation number of data as stored in CRDB.
@@ -677,6 +678,37 @@ impl TryFrom<bootstore::NetworkConfig> for EarlyNetworkConfig {
                     .map(|v0_config| RackNetworkConfigV1::from(v0_config)),
             },
         })
+    }
+}
+
+/// Deprecated, use `RackNetworkConfig` instead. Cannot actually deprecate due to
+/// <https://github.com/serde-rs/serde/issues/2195>
+///
+/// Our first version of `RackNetworkConfig`. If this exists in the bootstore, we
+/// upgrade out of it into `RackNetworkConfigV1` or later versions if possible.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+pub struct RackNetworkConfigV0 {
+    // TODO: #3591 Consider making infra-ip ranges implicit for uplinks
+    /// First ip address to be used for configuring network infrastructure
+    pub infra_ip_first: Ipv4Addr,
+    /// Last ip address to be used for configuring network infrastructure
+    pub infra_ip_last: Ipv4Addr,
+    /// Uplinks for connecting the rack to external networks
+    pub uplinks: Vec<UplinkConfig>,
+}
+
+impl From<RackNetworkConfigV0> for RackNetworkConfigV1 {
+    fn from(value: RackNetworkConfigV0) -> Self {
+        RackNetworkConfigV1 {
+            infra_ip_first: value.infra_ip_first,
+            infra_ip_last: value.infra_ip_last,
+            ports: value
+                .uplinks
+                .into_iter()
+                .map(|uplink| PortConfigV1::from(uplink))
+                .collect(),
+            bgp: vec![],
+        }
     }
 }
 
