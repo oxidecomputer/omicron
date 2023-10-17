@@ -6,6 +6,7 @@
 
 use std::{
     collections::{HashMap, VecDeque},
+    fmt,
     time::Duration,
 };
 
@@ -96,7 +97,7 @@ impl<S: StepSpec> EventBuffer<S> {
     ///
     /// This might cause older low-priority events to fall off the list.
     pub fn add_step_event(&mut self, event: StepEvent<S>) {
-        self.event_store.handle_step_event(event, self.max_low_priority);
+        self.event_store.handle_root_step_event(event, self.max_low_priority);
     }
 
     /// Returns the root execution ID, if this event buffer is aware of any
@@ -132,7 +133,8 @@ impl<S: StepSpec> EventBuffer<S> {
         let mut step_events = Vec::new();
         let mut progress_events = Vec::new();
         for (_, step_data) in self.steps().as_slice() {
-            step_events.extend(step_data.step_events_since(last_seen).cloned());
+            step_events
+                .extend(step_data.step_events_since_impl(last_seen).cloned());
             progress_events
                 .extend(step_data.step_status.progress_event().cloned());
         }
@@ -161,7 +163,7 @@ impl<S: StepSpec> EventBuffer<S> {
     /// have been reported before a sender shuts down.
     pub fn has_pending_events_since(&self, last_seen: Option<usize>) -> bool {
         for (_, step_data) in self.steps().as_slice() {
-            if step_data.step_events_since(last_seen).next().is_some() {
+            if step_data.step_events_since_impl(last_seen).next().is_some() {
                 return true;
             }
         }
@@ -223,8 +225,8 @@ impl<S: StepSpec> EventStore<S> {
         })
     }
 
-    /// Handles a step event.
-    fn handle_step_event(
+    /// Handles a non-nested step event.
+    fn handle_root_step_event(
         &mut self,
         event: StepEvent<S>,
         max_low_priority: usize,
@@ -234,12 +236,17 @@ impl<S: StepSpec> EventStore<S> {
             return;
         }
 
+        // This is a non-nested step event so the event index is a root event
+        // index.
+        let root_event_index = RootEventIndex(event.event_index);
+
         let actions =
-            self.recurse_for_step_event(&event, 0, None, event.event_index);
+            self.recurse_for_step_event(&event, 0, None, root_event_index);
         if let Some(new_execution) = actions.new_execution {
             if new_execution.nest_level == 0 {
                 self.root_execution_id = Some(new_execution.execution_id);
             }
+            let total_steps = new_execution.steps_to_add.len();
             for (new_step_key, new_step, sort_key) in new_execution.steps_to_add
             {
                 // These are brand new steps so their keys shouldn't exist in the
@@ -249,6 +256,8 @@ impl<S: StepSpec> EventStore<S> {
                         new_step,
                         sort_key,
                         new_execution.nest_level,
+                        total_steps,
+                        root_event_index,
                     )
                 });
             }
@@ -302,7 +311,7 @@ impl<S: StepSpec> EventStore<S> {
         event: &StepEvent<S2>,
         nest_level: usize,
         parent_sort_key: Option<&StepSortKey>,
-        root_event_index: usize,
+        root_event_index: RootEventIndex,
     ) -> RecurseActions {
         let mut new_execution = None;
         let (step_key, progress_key) = match &event.kind {
@@ -318,7 +327,7 @@ impl<S: StepSpec> EventStore<S> {
                     };
                     let sort_key = StepSortKey::new(
                         parent_sort_key,
-                        root_event_index,
+                        root_event_index.0,
                         step.index,
                     );
                     let step_node = self.add_step_node(step_key);
@@ -360,7 +369,7 @@ impl<S: StepSpec> EventStore<S> {
                     attempt_elapsed: *attempt_elapsed,
                 };
                 // Mark this key and all child keys completed.
-                self.mark_step_key_completed(key, info);
+                self.mark_step_key_completed(key, info, root_event_index);
 
                 // Register the next step in the event map.
                 let next_key = StepKey {
@@ -400,7 +409,7 @@ impl<S: StepSpec> EventStore<S> {
                     attempt_elapsed: *attempt_elapsed,
                 };
                 // Mark this key and all child keys completed.
-                self.mark_execution_id_completed(key, info);
+                self.mark_execution_id_completed(key, info, root_event_index);
 
                 (Some(key), Some(key))
             }
@@ -426,7 +435,7 @@ impl<S: StepSpec> EventStore<S> {
                     step_elapsed: *step_elapsed,
                     attempt_elapsed: *attempt_elapsed,
                 };
-                self.mark_step_failed(key, info);
+                self.mark_step_failed(key, info, root_event_index);
 
                 (Some(key), Some(key))
             }
@@ -450,7 +459,7 @@ impl<S: StepSpec> EventStore<S> {
                     step_elapsed: *step_elapsed,
                     attempt_elapsed: *attempt_elapsed,
                 };
-                self.mark_step_aborted(key, info);
+                self.mark_step_aborted(key, info, root_event_index);
 
                 (Some(key), Some(key))
             }
@@ -524,11 +533,12 @@ impl<S: StepSpec> EventStore<S> {
         &mut self,
         root_key: StepKey,
         info: CompletionInfo,
+        root_event_index: RootEventIndex,
     ) {
         if let Some(value) = self.map.get_mut(&root_key) {
             // Completion status only applies to the root key. Nodes reachable
             // from this node are still marked as complete, but without status.
-            value.mark_completed(Some(info));
+            value.mark_completed(Some(info), root_event_index);
         }
 
         // Mark anything reachable from this node as completed.
@@ -538,7 +548,7 @@ impl<S: StepSpec> EventStore<S> {
             if let EventTreeNode::Step(key) = key {
                 if key != root_key {
                     if let Some(value) = self.map.get_mut(&key) {
-                        value.mark_completed(None);
+                        value.mark_completed(None, root_event_index);
                     }
                 }
             }
@@ -549,10 +559,11 @@ impl<S: StepSpec> EventStore<S> {
         &mut self,
         root_key: StepKey,
         info: CompletionInfo,
+        root_event_index: RootEventIndex,
     ) {
         if let Some(value) = self.map.get_mut(&root_key) {
             // Completion status only applies to the root key.
-            value.mark_completed(Some(info));
+            value.mark_completed(Some(info), root_event_index);
         }
 
         let mut dfs = DfsPostOrder::new(
@@ -563,58 +574,87 @@ impl<S: StepSpec> EventStore<S> {
             if let EventTreeNode::Step(key) = key {
                 if key != root_key {
                     if let Some(value) = self.map.get_mut(&key) {
-                        value.mark_completed(None);
+                        value.mark_completed(None, root_event_index);
                     }
                 }
             }
         }
     }
 
-    fn mark_step_failed(&mut self, root_key: StepKey, info: FailureInfo) {
-        self.mark_step_failed_impl(root_key, |value, kind| {
+    fn mark_step_failed(
+        &mut self,
+        root_key: StepKey,
+        info: FailureInfo,
+        root_event_index: RootEventIndex,
+    ) {
+        self.mark_step_failed_impl(root_key, root_event_index, |value, kind| {
             match kind {
                 MarkStepFailedImplKind::Root => {
-                    value.mark_failed(Some(info.clone()));
+                    value.mark_failed(
+                        FailureReason::StepFailed(info.clone()),
+                        root_event_index,
+                    );
                 }
                 MarkStepFailedImplKind::Descendant => {
-                    value.mark_failed(None);
+                    value.mark_failed(
+                        FailureReason::ParentFailed { parent_step: root_key },
+                        root_event_index,
+                    );
                 }
                 MarkStepFailedImplKind::Future => {
                     value.mark_will_not_be_run(
                         WillNotBeRunReason::PreviousStepFailed {
                             step: root_key,
                         },
+                        root_event_index,
                     );
                 }
             };
         })
     }
 
-    fn mark_step_aborted(&mut self, root_key: StepKey, info: AbortInfo) {
-        self.mark_step_failed_impl(root_key, |value, kind| {
-            match kind {
-                MarkStepFailedImplKind::Root => {
-                    value.mark_aborted(AbortReason::StepAborted(info.clone()));
-                }
-                MarkStepFailedImplKind::Descendant => {
-                    value.mark_aborted(AbortReason::ParentAborted {
-                        parent_step: root_key,
-                    });
-                }
-                MarkStepFailedImplKind::Future => {
-                    value.mark_will_not_be_run(
-                        WillNotBeRunReason::PreviousStepAborted {
-                            step: root_key,
-                        },
-                    );
-                }
-            };
-        });
+    fn mark_step_aborted(
+        &mut self,
+        root_key: StepKey,
+        info: AbortInfo,
+        root_event_index: RootEventIndex,
+    ) {
+        self.mark_step_failed_impl(
+            root_key,
+            root_event_index,
+            |value, kind| {
+                match kind {
+                    MarkStepFailedImplKind::Root => {
+                        value.mark_aborted(
+                            AbortReason::StepAborted(info.clone()),
+                            root_event_index,
+                        );
+                    }
+                    MarkStepFailedImplKind::Descendant => {
+                        value.mark_aborted(
+                            AbortReason::ParentAborted {
+                                parent_step: root_key,
+                            },
+                            root_event_index,
+                        );
+                    }
+                    MarkStepFailedImplKind::Future => {
+                        value.mark_will_not_be_run(
+                            WillNotBeRunReason::PreviousStepAborted {
+                                step: root_key,
+                            },
+                            root_event_index,
+                        );
+                    }
+                };
+            },
+        );
     }
 
     fn mark_step_failed_impl(
         &mut self,
         root_key: StepKey,
+        root_event_index: RootEventIndex,
         mut cb: impl FnMut(&mut EventBufferStepData<S>, MarkStepFailedImplKind),
     ) {
         if let Some(value) = self.map.get_mut(&root_key) {
@@ -627,7 +667,7 @@ impl<S: StepSpec> EventStore<S> {
         for index in 0..root_key.index {
             let key = StepKey { execution_id: root_key.execution_id, index };
             if let Some(value) = self.map.get_mut(&key) {
-                value.mark_completed(None);
+                value.mark_completed(None, root_event_index);
             }
         }
 
@@ -744,10 +784,17 @@ impl<'buf, S: StepSpec> EventBufferSteps<'buf, S> {
 pub struct EventBufferStepData<S: StepSpec> {
     step_info: StepInfo<NestedSpec>,
     sort_key: StepSortKey,
+    // XXX: nest_level and total_steps are common to each execution, but are
+    // stored separately here. Should we store them in a separate map
+    // indexed by execution ID?
     nest_level: usize,
-    // Invariant: stored in order sorted by event_index.
+    total_steps: usize,
+    // Invariant: stored in order sorted by leaf event index.
     high_priority: Vec<StepEvent<S>>,
     step_status: StepStatus<S>,
+    // The last root event index that caused the data within this step to be
+    // updated.
+    last_root_event_index: RootEventIndex,
 }
 
 impl<S: StepSpec> EventBufferStepData<S> {
@@ -755,36 +802,65 @@ impl<S: StepSpec> EventBufferStepData<S> {
         step_info: StepInfo<NestedSpec>,
         sort_key: StepSortKey,
         nest_level: usize,
+        total_steps: usize,
+        root_event_index: RootEventIndex,
     ) -> Self {
         Self {
             step_info,
             sort_key,
             nest_level,
+            total_steps,
             high_priority: Vec::new(),
             step_status: StepStatus::NotStarted,
+            last_root_event_index: root_event_index,
         }
     }
 
+    #[inline]
     pub fn step_info(&self) -> &StepInfo<NestedSpec> {
         &self.step_info
     }
 
+    #[inline]
     pub fn nest_level(&self) -> usize {
         self.nest_level
     }
 
+    #[inline]
+    pub fn total_steps(&self) -> usize {
+        self.total_steps
+    }
+
+    #[inline]
     pub fn step_status(&self) -> &StepStatus<S> {
         &self.step_status
     }
 
+    #[inline]
+    pub fn last_root_event_index(&self) -> RootEventIndex {
+        self.last_root_event_index
+    }
+
+    #[inline]
     fn sort_key(&self) -> &StepSortKey {
         &self.sort_key
+    }
+
+    /// Returns step events since the provided event index.
+    pub fn step_events_since(
+        &self,
+        last_seen: Option<usize>,
+    ) -> Vec<&StepEvent<S>> {
+        let mut events: Vec<_> =
+            self.step_events_since_impl(last_seen).collect();
+        events.sort_unstable_by_key(|event| event.event_index);
+        events
     }
 
     // Returns step events since the provided event index.
     //
     // Does not necessarily return results in sorted order.
-    fn step_events_since(
+    fn step_events_since_impl(
         &self,
         last_seen: Option<usize>,
     ) -> impl Iterator<Item = &StepEvent<S>> {
@@ -799,11 +875,12 @@ impl<S: StepSpec> EventBufferStepData<S> {
         iter.chain(iter2)
     }
 
-    fn add_high_priority_step_event(&mut self, event: StepEvent<S>) {
+    fn add_high_priority_step_event(&mut self, root_event: StepEvent<S>) {
+        let root_event_index = RootEventIndex(root_event.event_index);
         // Dedup by the *leaf index* in case nested reports aren't deduped
         // coming in.
         match self.high_priority.binary_search_by(|probe| {
-            probe.leaf_event_index().cmp(&event.leaf_event_index())
+            probe.leaf_event_index().cmp(&root_event.leaf_event_index())
         }) {
             Ok(_) => {
                 // This is a duplicate.
@@ -811,16 +888,19 @@ impl<S: StepSpec> EventBufferStepData<S> {
             Err(index) => {
                 // index is typically the last element, so this should be quite
                 // efficient.
-                self.high_priority.insert(index, event);
+                self.update_root_event_index(root_event_index);
+                self.high_priority.insert(index, root_event);
             }
         }
     }
 
     fn add_low_priority_step_event(
         &mut self,
-        event: StepEvent<S>,
+        root_event: StepEvent<S>,
         max_low_priority: usize,
     ) {
+        let root_event_index = RootEventIndex(root_event.event_index);
+        let mut updated = false;
         match &mut self.step_status {
             StepStatus::NotStarted => {
                 unreachable!(
@@ -831,7 +911,7 @@ impl<S: StepSpec> EventBufferStepData<S> {
                 // Dedup by the *leaf index* in case nested reports aren't
                 // deduped coming in.
                 match low_priority.binary_search_by(|probe| {
-                    probe.leaf_event_index().cmp(&event.leaf_event_index())
+                    probe.leaf_event_index().cmp(&root_event.leaf_event_index())
                 }) {
                     Ok(_) => {
                         // This is a duplicate.
@@ -839,7 +919,8 @@ impl<S: StepSpec> EventBufferStepData<S> {
                     Err(index) => {
                         // The index is almost always at the end, so this is
                         // efficient enough.
-                        low_priority.insert(index, event);
+                        low_priority.insert(index, root_event);
+                        updated = true;
                     }
                 }
 
@@ -857,12 +938,21 @@ impl<S: StepSpec> EventBufferStepData<S> {
                 // likely duplicate events.
             }
         }
+
+        if updated {
+            self.update_root_event_index(root_event_index);
+        }
     }
 
-    fn mark_completed(&mut self, status: Option<CompletionInfo>) {
+    fn mark_completed(
+        &mut self,
+        status: Option<CompletionInfo>,
+        root_event_index: RootEventIndex,
+    ) {
         match self.step_status {
             StepStatus::NotStarted | StepStatus::Running { .. } => {
                 self.step_status = StepStatus::Completed { info: status };
+                self.update_root_event_index(root_event_index);
             }
             StepStatus::Completed { .. }
             | StepStatus::Failed { .. }
@@ -874,10 +964,15 @@ impl<S: StepSpec> EventBufferStepData<S> {
         }
     }
 
-    fn mark_failed(&mut self, info: Option<FailureInfo>) {
+    fn mark_failed(
+        &mut self,
+        reason: FailureReason,
+        root_event_index: RootEventIndex,
+    ) {
         match self.step_status {
             StepStatus::NotStarted | StepStatus::Running { .. } => {
-                self.step_status = StepStatus::Failed { info };
+                self.step_status = StepStatus::Failed { reason };
+                self.update_root_event_index(root_event_index);
             }
             StepStatus::Completed { .. }
             | StepStatus::Failed { .. }
@@ -889,7 +984,11 @@ impl<S: StepSpec> EventBufferStepData<S> {
         }
     }
 
-    fn mark_aborted(&mut self, reason: AbortReason) {
+    fn mark_aborted(
+        &mut self,
+        reason: AbortReason,
+        root_event_index: RootEventIndex,
+    ) {
         match &mut self.step_status {
             StepStatus::NotStarted => {
                 match reason {
@@ -909,12 +1008,14 @@ impl<S: StepSpec> EventBufferStepData<S> {
                         };
                     }
                 }
+                self.update_root_event_index(root_event_index);
             }
             StepStatus::Running { progress_event, .. } => {
                 self.step_status = StepStatus::Aborted {
                     reason,
                     last_progress: Some(progress_event.clone()),
                 };
+                self.update_root_event_index(root_event_index);
             }
             StepStatus::Completed { .. }
             | StepStatus::Failed { .. }
@@ -926,10 +1027,15 @@ impl<S: StepSpec> EventBufferStepData<S> {
         }
     }
 
-    fn mark_will_not_be_run(&mut self, reason: WillNotBeRunReason) {
+    fn mark_will_not_be_run(
+        &mut self,
+        reason: WillNotBeRunReason,
+        root_event_index: RootEventIndex,
+    ) {
         match self.step_status {
             StepStatus::NotStarted => {
                 self.step_status = StepStatus::WillNotBeRun { reason };
+                self.update_root_event_index(root_event_index);
             }
             StepStatus::Running { .. } => {
                 // This is a weird situation. We should never encounter it in
@@ -966,6 +1072,15 @@ impl<S: StepSpec> EventBufferStepData<S> {
             }
         }
     }
+
+    fn update_root_event_index(&mut self, root_event_index: RootEventIndex) {
+        debug_assert!(
+            root_event_index >= self.last_root_event_index,
+            "event index must be monotonically increasing"
+        );
+        self.last_root_event_index =
+            self.last_root_event_index.max(root_event_index);
+    }
 }
 
 /// The step status as last seen by events.
@@ -990,8 +1105,8 @@ pub enum StepStatus<S: StepSpec> {
 
     /// The step has failed.
     Failed {
-        /// Failure information.
-        info: Option<FailureInfo>,
+        /// The reason for the failure.
+        reason: FailureReason,
     },
 
     /// Execution was aborted while this step was running.
@@ -1051,6 +1166,17 @@ pub struct CompletionInfo {
     pub outcome: StepOutcome<NestedSpec>,
     pub step_elapsed: Duration,
     pub attempt_elapsed: Duration,
+}
+
+#[derive(Clone, Debug)]
+pub enum FailureReason {
+    /// This step failed.
+    StepFailed(FailureInfo),
+    /// A parent step failed.
+    ParentFailed {
+        /// The parent step that failed.
+        parent_step: StepKey,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -1230,12 +1356,24 @@ pub struct StepKey {
     pub index: usize,
 }
 
+/// A newtype to track root event indexes within [`EventBuffer`]s, to ensure
+/// that we aren't mixing them with leaf event indexes in this code.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord, Hash)]
+pub struct RootEventIndex(pub usize);
+
+impl fmt::Display for RootEventIndex {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
 
     use anyhow::{bail, ensure, Context};
     use futures::StreamExt;
+    use indexmap::IndexSet;
     use omicron_test_utils::dev::test_setup_log;
     use serde::{de::IntoDeserializer, Deserialize};
     use tokio::sync::mpsc;
@@ -1389,7 +1527,10 @@ mod tests {
         test_cx
             .run_filtered_test(
                 "all events passed in",
-                |buffer, event| buffer.add_event(event.clone()),
+                |buffer, event| {
+                    buffer.add_event(event.clone());
+                    true
+                },
                 WithDeltas::No,
             )
             .unwrap();
@@ -1397,10 +1538,12 @@ mod tests {
         test_cx
             .run_filtered_test(
                 "progress events skipped",
-                |buffer, event| {
-                    if let Event::Step(event) = event {
+                |buffer, event| match event {
+                    Event::Step(event) => {
                         buffer.add_step_event(event.clone());
+                        true
                     }
+                    Event::Progress(_) => false,
                 },
                 WithDeltas::Both,
             )
@@ -1410,13 +1553,16 @@ mod tests {
             .run_filtered_test(
                 "low-priority events skipped",
                 |buffer, event| match event {
-                    Event::Step(event) => {
-                        if event.kind.priority() == StepEventPriority::Low {
+                    Event::Step(event) => match event.kind.priority() {
+                        StepEventPriority::High => {
                             buffer.add_step_event(event.clone());
+                            true
                         }
-                    }
+                        StepEventPriority::Low => false,
+                    },
                     Event::Progress(event) => {
                         buffer.add_progress_event(event.clone());
+                        true
                     }
                 },
                 WithDeltas::Both,
@@ -1427,13 +1573,16 @@ mod tests {
             .run_filtered_test(
                 "low-priority and progress events skipped",
                 |buffer, event| match event {
-                    Event::Step(event) => {
-                        if event.kind.priority() == StepEventPriority::Low {
+                    Event::Step(event) => match event.kind.priority() {
+                        StepEventPriority::High => {
                             buffer.add_step_event(event.clone());
+                            true
                         }
-                    }
+                        StepEventPriority::Low => false,
+                    },
                     Event::Progress(_) => {
-                        // Don't add progress events either.
+                        // Don't add progress events.
+                        false
                     }
                 },
                 WithDeltas::Both,
@@ -1535,6 +1684,18 @@ mod tests {
                     reported_step_events.extend(report.step_events);
                     last_seen = report.last_seen;
 
+                    // Ensure that the last root index was updated for this
+                    // event's corresponding steps, but not for any others.
+                    if let Event::Step(event) = event {
+                        check_last_root_event_index(event, &buffer)
+                            .with_context(|| {
+                                format!(
+                                    "{description}, at index {i} (time {time}):\
+                                     error with last root event index"
+                                )
+                            })?;
+                    }
+
                     // Call last_seen without feeding a new event in to ensure that
                     // a report with no step events is produced.
                     let report = buffer.generate_report_since(last_seen);
@@ -1565,7 +1726,10 @@ mod tests {
         fn run_filtered_test(
             &self,
             event_fn_description: &str,
-            mut event_fn: impl FnMut(&mut EventBuffer<TestSpec>, &Event<TestSpec>),
+            mut event_fn: impl FnMut(
+                &mut EventBuffer<TestSpec>,
+                &Event<TestSpec>,
+            ) -> bool,
             with_deltas: WithDeltas,
         ) -> anyhow::Result<()> {
             match with_deltas {
@@ -1590,7 +1754,10 @@ mod tests {
 
         fn run_filtered_test_inner(
             &self,
-            mut event_fn: impl FnMut(&mut EventBuffer<TestSpec>, &Event<TestSpec>),
+            mut event_fn: impl FnMut(
+                &mut EventBuffer<TestSpec>,
+                &Event<TestSpec>,
+            ) -> bool,
             with_deltas: bool,
         ) -> anyhow::Result<()> {
             let description = format!("with deltas = {with_deltas}");
@@ -1608,8 +1775,8 @@ mod tests {
             let mut last_seen_opt = with_deltas.then_some(None);
 
             for (i, event) in self.generated_events.iter().enumerate() {
-                (event_fn)(&mut buffer, event);
-                buffer.add_event(event.clone());
+                let event_added = (event_fn)(&mut buffer, event);
+
                 let report = match last_seen_opt {
                     Some(last_seen) => buffer.generate_report_since(last_seen),
                     None => buffer.generate_report(),
@@ -1627,6 +1794,18 @@ mod tests {
                         )
                     })
                     .unwrap();
+
+                if let Event::Step(event) = event {
+                    if event_added {
+                        check_last_root_event_index(event, &buffer)
+                            .with_context(|| {
+                                format!(
+                                    "{description}, at index {i}: \
+                                    error with last root event index"
+                                )
+                            })?;
+                    }
+                }
 
                 receive_buffer.add_event_report(report.clone());
                 let this_step_events =
@@ -1811,6 +1990,78 @@ mod tests {
             }
 
             Ok(())
+        }
+    }
+
+    fn check_last_root_event_index(
+        event: &StepEvent<TestSpec>,
+        buffer: &EventBuffer<TestSpec>,
+    ) -> anyhow::Result<()> {
+        let root_event_index = RootEventIndex(event.event_index);
+        let event_step_keys = step_keys(event);
+        let steps = buffer.steps();
+        for (step_key, data) in steps.as_slice() {
+            let data_index = data.last_root_event_index();
+            if event_step_keys.contains(step_key) {
+                ensure!(
+                    data_index == root_event_index,
+                    "last_root_event_index should have been updated \
+                     but wasn't (actual: {data_index}, expected: {root_event_index}) \
+                     for step {step_key:?} (event: {event:?})",
+                );
+            } else {
+                ensure!(
+                    data_index < root_event_index,
+                    "last_root_event_index should *not* have been updated \
+                     but was (current: {data_index}, new: {root_event_index}) \
+                     for step {step_key:?} (event: {event:?})",
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Returns the step keys that this step event would cause updates against,
+    /// in order from root to leaf.
+    fn step_keys<S: StepSpec>(event: &StepEvent<S>) -> IndexSet<StepKey> {
+        let mut out = IndexSet::new();
+        step_keys_impl(event, &mut out);
+        out
+    }
+
+    fn step_keys_impl<S: StepSpec>(
+        event: &StepEvent<S>,
+        out: &mut IndexSet<StepKey>,
+    ) {
+        match &event.kind {
+            StepEventKind::NoStepsDefined | StepEventKind::Unknown => {}
+            StepEventKind::ExecutionStarted { steps, .. } => {
+                for step in steps {
+                    out.insert(StepKey {
+                        execution_id: event.execution_id,
+                        index: step.index,
+                    });
+                }
+            }
+            StepEventKind::ProgressReset { step, .. }
+            | StepEventKind::AttemptRetry { step, .. }
+            | StepEventKind::StepCompleted { step, .. }
+            | StepEventKind::ExecutionCompleted { last_step: step, .. }
+            | StepEventKind::ExecutionFailed { failed_step: step, .. }
+            | StepEventKind::ExecutionAborted { aborted_step: step, .. } => {
+                out.insert(StepKey {
+                    execution_id: event.execution_id,
+                    index: step.info.index,
+                });
+            }
+            StepEventKind::Nested { step, event, .. } => {
+                out.insert(StepKey {
+                    execution_id: event.execution_id,
+                    index: step.info.index,
+                });
+                step_keys_impl(event, out);
+            }
         }
     }
 

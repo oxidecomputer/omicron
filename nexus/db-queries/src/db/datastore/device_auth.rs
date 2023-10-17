@@ -103,7 +103,7 @@ impl DataStore {
                 TxnError::CustomError(TokenGrantError::TooManyRequests) => {
                     Error::internal_error("unexpectedly found multiple device auth requests for the same user code")
                 }
-                TxnError::Connection(e) => {
+                TxnError::Database(e) => {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 }
             })
