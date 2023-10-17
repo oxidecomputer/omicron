@@ -191,8 +191,8 @@ foreign-types = "0.3.2"
 fs-err = "2.9.0"
 futures = "0.3.28"
 gateway-client = { path = "clients/gateway-client" }
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "2bab5d707a10e6ef40d988b2ee3c85701cb49f75", default-features = false, features = ["std"] }
-gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "2bab5d707a10e6ef40d988b2ee3c85701cb49f75" }
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "2739c18e80697aa6bc235c935176d14b4d757ee9", default-features = false, features = ["std"] }
+gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "2739c18e80697aa6bc235c935176d14b4d757ee9" }
 gateway-test-utils = { path = "gateway-test-utils" }
 glob = "0.3.1"
 headers = "0.3.9"

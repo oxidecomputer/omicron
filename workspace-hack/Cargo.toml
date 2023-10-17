@@ -43,7 +43,7 @@ futures-io = { version = "0.3.28", default-features = false, features = ["std"] 
 futures-sink = { version = "0.3.28" }
 futures-task = { version = "0.3.28", default-features = false, features = ["std"] }
 futures-util = { version = "0.3.28", features = ["channel", "io", "sink"] }
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "1e180ae55e56bd17af35cb868ffbd18ce487351d", features = ["std"] }
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "2739c18e80697aa6bc235c935176d14b4d757ee9", features = ["std"] }
 generic-array = { version = "0.14.7", default-features = false, features = ["more_lengths", "zeroize"] }
 getrandom = { version = "0.2.10", default-features = false, features = ["js", "rdrand", "std"] }
 hashbrown-582f2526e08bb6a0 = { package = "hashbrown", version = "0.14.0", features = ["raw"] }
@@ -135,7 +135,7 @@ futures-io = { version = "0.3.28", default-features = false, features = ["std"] 
 futures-sink = { version = "0.3.28" }
 futures-task = { version = "0.3.28", default-features = false, features = ["std"] }
 futures-util = { version = "0.3.28", features = ["channel", "io", "sink"] }
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "1e180ae55e56bd17af35cb868ffbd18ce487351d", features = ["std"] }
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "2739c18e80697aa6bc235c935176d14b4d757ee9", features = ["std"] }
 generic-array = { version = "0.14.7", default-features = false, features = ["more_lengths", "zeroize"] }
 getrandom = { version = "0.2.10", default-features = false, features = ["js", "rdrand", "std"] }
 hashbrown-582f2526e08bb6a0 = { package = "hashbrown", version = "0.14.0", features = ["raw"] }
