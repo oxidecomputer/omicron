@@ -250,7 +250,7 @@ EOF
 
         cat >>"$manifest_rot_all" <<EOF
 [[artifact.${tufaceous_board}_rot]]
-name = "$rot_caboose_board-$rot_dir"
+name = "$rot_caboose_board-${rot_dir//\//-}"
 version = "$rot_caboose_version"
 [artifact.${tufaceous_board}_rot.source]
 kind = "composite-rot"
