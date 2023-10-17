@@ -16,7 +16,7 @@ mod preflight_check;
 mod rss_config;
 mod update_tracker;
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, Result};
 use artifacts::{WicketdArtifactServer, WicketdArtifactStore};
 use bootstrap_addrs::BootstrapPeers;
 pub use config::Config;
@@ -106,12 +106,12 @@ impl SmfConfigValues {
             })?
         };
 
-        Ok(Some(Self { address, rack_subnet }))
+        Ok(Self { address, rack_subnet })
     }
 
     #[cfg(not(target_os = "illumos"))]
     pub fn read_current() -> Result<Self> {
-        bail!("reading SMF config only available on illumos")
+        Err(anyhow!("reading SMF config only available on illumos"))
     }
 }
 
