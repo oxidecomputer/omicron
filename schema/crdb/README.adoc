@@ -73,38 +73,15 @@ SQL Validation, via Automated Tests:
 
 ==== Handling common schema changes
 
-CockroachDB's schema includes a description of all of the database's CHECK
-constraints. If a CHECK constraint is anonymous (i.e. it is written simply as
-`CHECK <expression>` and not `CONSTRAINT <name> CHECK expression`), CRDB
-assigns it a name based on the table and column to which the constraint applies.
-The challenge is that CRDB identifies tables and columns using opaque
-identifiers whose values depend on the order in which tables and views were
-defined in the current database. This means that adding, removing, or renaming
-objects needs to be done carefully to preserve the relative ordering of objects
-in new databases created by `dbinit.sql` and upgraded databases created by
-applying `up.sql` transformations.
+Although CockroachDB's schema includes some opaque internally-generated fields
+that are order dependent - such as the names of anonymous CHECK constraints -
+our schema comparison tools intentionally ignore these values. As a result,
+when performing schema changes, the order of new tables and constraints should
+generally not be important.
 
-===== Adding new columns with constraints
-
-Strongly consider naming new constraints (`CONSTRAINT <name> <expression>`) to
-avoid the problems with anonymous constraints described above.
-
-===== Adding tables and views
-
-New tables and views must be added to the end of `dbinit.sql` so that the order
-of preceding `CREATE` statements is left unchanged. If your changes fail the
-`CHECK` constraints test and you get a constraint name diff like this...
-
-```
-NamedSqlValue {
-    column: "constraint_name",
-    value: Some(
-        String(
-<           "4101115737_149_10_not_null",
->           "4101115737_148_10_not_null",
-```
-
-...then you've probably inadvertently added a table or view in the wrong place.
+As convention, however, we recommend keeping the `db_metadata` file at the end of
+`dbinit.sql`, so that the database does not contain a version until it is fully
+populated.
 
 ==== Adding new source tables to an existing view
 
