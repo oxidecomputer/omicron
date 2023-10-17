@@ -195,6 +195,7 @@ fn populate_network_table(
     };
 
     for (property, value) in [
+        ("rack_subnet", config.rack_subnet.to_string()),
         ("infra_ip_first", config.infra_ip_first.to_string()),
         ("infra_ip_last", config.infra_ip_last.to_string()),
     ] {
@@ -472,7 +473,7 @@ mod tests {
             external_dns_ips: vec!["10.0.0.1".parse().unwrap()],
             ntp_servers: vec!["ntp1.com".into(), "ntp2.com".into()],
             rack_network_config: Some(RackNetworkConfig {
-                rack_subnet: "fd00:1122:3344:01/56".parse().unwrap(),
+                rack_subnet: "fd00:1122:3344:01::/56".parse().unwrap(),
                 infra_ip_first: "172.30.0.1".parse().unwrap(),
                 infra_ip_last: "172.30.0.10".parse().unwrap(),
                 ports: vec![PortConfigV1 {

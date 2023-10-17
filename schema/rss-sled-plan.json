@@ -510,7 +510,8 @@
         "bgp",
         "infra_ip_first",
         "infra_ip_last",
-        "ports"
+        "ports",
+        "rack_subnet"
       ],
       "properties": {
         "bgp": {
@@ -536,6 +537,9 @@
           "items": {
             "$ref": "#/definitions/PortConfigV1"
           }
+        },
+        "rack_subnet": {
+          "$ref": "#/definitions/Ipv6Network"
         }
       }
     },

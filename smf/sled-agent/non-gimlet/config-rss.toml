@@ -88,6 +88,7 @@ last = "192.168.1.29"
 # Configuration to bring up Boundary Services and make Nexus reachable from the
 # outside.  See docs/how-to-run.adoc for more on what to put here.
 [rack_network_config]
+rack_subnet = "fd00:1122:3344:01::/56"
 # A range of IP addresses used by Boundary Services on the external network.  In
 # a real system, these would be addresses of the uplink ports on the Sidecar.
 # With softnpu, only one address is used.

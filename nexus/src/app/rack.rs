@@ -530,6 +530,7 @@ impl super::Nexus {
             } // TODO - https://github.com/oxidecomputer/omicron/issues/3277
               // record port speed
         };
+        self.initial_bootstore_sync(&opctx).await?;
 
         Ok(())
     }
