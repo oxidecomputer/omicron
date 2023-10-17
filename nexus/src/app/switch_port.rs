@@ -25,7 +25,7 @@ use omicron_common::api::external::{
 use sled_agent_client::types::BgpConfig;
 use sled_agent_client::types::BgpPeerConfig;
 use sled_agent_client::types::{
-    EarlyNetworkConfig, PortConfigV1, RackNetworkConfig, RouteConfig,
+    EarlyNetworkConfig, PortConfigV1, RackNetworkConfigV1, RouteConfig,
 };
 use std::sync::Arc;
 use uuid::Uuid;

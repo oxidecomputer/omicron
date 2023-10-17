@@ -738,3 +738,22 @@ fn convert_fec(fec: &PortFec) -> dpd_client::types::PortFec {
         PortFec::Rs => dpd_client::types::PortFec::Rs,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serialized_early_network_config_v0_to_v1_conversion() {
+        let v0 = EarlyNetworkConfigV0 {
+            generation: 1,
+            rack_subnet: Ipv6Addr::UNSPECIFIED,
+            ntp_servers: Vec::new(),
+            rack_network_config: Some(RackNetworkConfigV0 {
+                infra_ip_first: Ipv4Addr::UNSPECIFIED,
+                infra_ip_last: Ipv4Addr::UNSPECIFIED,
+                uplinks: vec![],
+            }),
+        };
+    }
+}

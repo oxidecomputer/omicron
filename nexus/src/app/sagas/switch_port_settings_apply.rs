@@ -952,7 +952,7 @@ pub(crate) fn apply_bootstore_update(
 ) -> Result<BootstoreNetworkPortChange, ActionError> {
     let mut change = BootstoreNetworkPortChange::default();
 
-    let rack_net_config = match &mut config.rack_network_config {
+    let rack_net_config = match &mut config.body.rack_network_config {
         Some(cfg) => cfg,
         None => {
             return Err(ActionError::action_failed(
