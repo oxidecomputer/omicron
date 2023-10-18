@@ -467,6 +467,13 @@ lazy_static! {
                 description: Some(String::from("a new IP pool")),
             },
         };
+    pub static ref DEMO_IP_POOL_ASSOC_URL: String = format!("{}/associate", *DEMO_IP_POOL_URL);
+    pub static ref DEMO_IP_POOL_ASSOC_BODY: params::IpPoolResource =
+        params::IpPoolResource {
+            resource_id:  DEFAULT_SILO.identity().id,
+            resource_type: params::IpPoolResourceType::Silo,
+            is_default: false,
+        };
     pub static ref DEMO_IP_POOL_RANGE: IpRange = IpRange::V4(Ipv4Range::new(
         std::net::Ipv4Addr::new(10, 0, 0, 0),
         std::net::Ipv4Addr::new(10, 0, 0, 255),
@@ -764,6 +771,16 @@ lazy_static! {
             unprivileged_access: UnprivilegedAccess::ReadOnly,
             allowed_methods: vec![
                 AllowedMethod::Get
+            ],
+        },
+
+        // IP pool resource association endpoint
+        VerifyEndpoint {
+            url: &DEMO_IP_POOL_ASSOC_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Post(serde_json::to_value(&*DEMO_IP_POOL_ASSOC_BODY).unwrap())
             ],
         },
 
