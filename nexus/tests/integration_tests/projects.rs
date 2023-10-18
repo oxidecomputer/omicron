@@ -252,6 +252,16 @@ async fn test_project_deletion_with_image(cptestctx: &ControlPlaneTestContext) {
         .await
         .expect("failed to delete image");
 
+    // Expect that trying to GET the image results in a 404
+    NexusRequest::new(
+        RequestBuilder::new(&client, http::Method::GET, &image_url)
+            .expect_status(Some(http::StatusCode::NOT_FOUND)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("GET of a deleted image did not return 404");
+
     delete_project(&url, &client).await;
 }
 

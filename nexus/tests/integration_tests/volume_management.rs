@@ -1240,6 +1240,9 @@ async fn delete_image_test(
     assert!(disk_test.crucible_resources_deleted().await);
 }
 
+// Make sure that whatever order disks, images, and snapshots are deleted, the
+// Crucible resource accounting that Nexus does is correct.
+
 #[nexus_test]
 async fn test_delete_image_order_1(cptestctx: &ControlPlaneTestContext) {
     delete_image_test(
