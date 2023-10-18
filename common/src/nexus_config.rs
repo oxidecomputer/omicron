@@ -5,6 +5,7 @@
 //! Configuration parameters to Nexus that are usually only known
 //! at deployment time.
 
+use crate::address::NEXUS_TECHPORT_EXTERNAL_PORT;
 use crate::api::internal::shared::SwitchLocation;
 
 use super::address::{Ipv6Subnet, RACK_PREFIX};
@@ -132,6 +133,19 @@ pub struct DeploymentConfig {
     pub id: Uuid,
     /// Uuid of the Rack where Nexus is executing.
     pub rack_id: Uuid,
+    /// Port on which the "techport external" dropshot server should listen.
+    /// This dropshot server copies _most_ of its config from
+    /// `dropshot_external` (so that it matches TLS, etc.), but builds its
+    /// listening address by combining `dropshot_internal`'s IP address with
+    /// this port.
+    ///
+    /// We use `serde(default = ...)` to ensure we don't break any serialized
+    /// configs that were created before this field was added. In production we
+    /// always expect this port to be constant, but we need to be able to
+    /// override it when running tests.
+    #[schemars(skip)]
+    #[serde(default = "default_techport_external_server_port")]
+    pub techport_external_server_port: u16,
     /// Dropshot configuration for the external API server.
     #[schemars(skip)] // TODO we're protected against dropshot changes
     pub dropshot_external: ConfigDropshotWithTls,
@@ -145,6 +159,10 @@ pub struct DeploymentConfig {
     pub database: Database,
     /// External DNS servers Nexus can use to resolve external hosts.
     pub external_dns_servers: Vec<IpAddr>,
+}
+
+fn default_techport_external_server_port() -> u16 {
+    NEXUS_TECHPORT_EXTERNAL_PORT
 }
 
 impl DeploymentConfig {
@@ -442,8 +460,9 @@ impl std::fmt::Display for SchemeName {
 mod test {
     use super::Tunables;
     use super::{
-        AuthnConfig, Config, ConsoleConfig, LoadError, PackageConfig,
-        SchemeName, TimeseriesDbConfig, UpdatesConfig,
+        default_techport_external_server_port, AuthnConfig, Config,
+        ConsoleConfig, LoadError, PackageConfig, SchemeName,
+        TimeseriesDbConfig, UpdatesConfig,
     };
     use crate::address::{Ipv6Subnet, RACK_PREFIX};
     use crate::api::internal::shared::SwitchLocation;
@@ -611,6 +630,8 @@ mod test {
                     rack_id: "38b90dc4-c22a-65ba-f49a-f051fe01208f"
                         .parse()
                         .unwrap(),
+                    techport_external_server_port:
+                        default_techport_external_server_port(),
                     dropshot_external: ConfigDropshotWithTls {
                         tls: false,
                         dropshot: ConfigDropshot {
@@ -709,6 +730,7 @@ mod test {
             [deployment]
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
+            techport_external_server_port = 12345
             external_dns_servers = [ "1.1.1.1", "9.9.9.9" ]
             [deployment.dropshot_external]
             bind_address = "10.1.2.3:4567"
@@ -743,6 +765,7 @@ mod test {
             config.pkg.authn.schemes_external,
             vec![SchemeName::Spoof, SchemeName::SessionCookie],
         );
+        assert_eq!(config.deployment.techport_external_server_port, 12345);
     }
 
     #[test]
