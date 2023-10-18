@@ -696,7 +696,7 @@ fn rss_config_text<'a>(
 
     if let Some(cfg) = insensitive.rack_network_config.as_ref() {
         for (i, uplink) in cfg.ports.iter().enumerate() {
-            let /*mut*/ items = vec![
+            let items = vec![
                 vec![
                     Span::styled("  • Switch           : ", label_style),
                     Span::styled(uplink.switch.to_string(), ok_style),

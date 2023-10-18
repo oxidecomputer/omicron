@@ -895,14 +895,16 @@ pub(crate) async fn bootstore_update(
                 .iter()
                 .filter_map(|(p, asn)| {
                     //TODO v6
-                    if let IpAddr::V4(addr) = p.addr.ip() {
-                        Some(OmicronBgpPeerConfig {
+                    match p.addr.ip() {
+                        IpAddr::V4(addr) => Some(OmicronBgpPeerConfig {
                             asn: *asn,
                             port: switch_port_name.into(),
                             addr,
-                        })
-                    } else {
-                        None
+                        }),
+                        IpAddr::V6(_) => {
+                            warn!(opctx.log, "IPv6 peers not yet supported");
+                            None
+                        }
                     }
                 })
                 .collect(),
@@ -917,7 +919,7 @@ pub(crate) async fn read_bootstore_config(
     sa: &sled_agent_client::Client,
 ) -> Result<EarlyNetworkConfig, ActionError> {
     Ok(sa
-        .read_network_bootstore_config()
+        .read_network_bootstore_config_cache()
         .await
         .map_err(|e| {
             ActionError::action_failed(format!(

@@ -589,7 +589,7 @@ impl super::Nexus {
         );
 
         let result = sa
-            .read_network_bootstore_config()
+            .read_network_bootstore_config_cache()
             .await
             .map_err(|e| Error::InternalError {
                 internal_message: format!("read bootstore network config: {e}"),

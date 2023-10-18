@@ -291,7 +291,9 @@
     },
     "/network-bootstore-config": {
       "get": {
-        "operationId": "read_network_bootstore_config",
+        "summary": "This API endpoint is only reading the local sled agent's view of the",
+        "description": "bootstore. The boostore is a distributed data store that is eventually consistent. Reads from individual nodes may not represent the latest state.",
+        "operationId": "read_network_bootstore_config_cache",
         "responses": {
           "200": {
             "description": "successful operation",
@@ -967,7 +969,7 @@
             "format": "ipv4"
           },
           "asn": {
-            "description": "Switch port the peer is reachable on.",
+            "description": "The autonomous sysetm number of the router the peer belongs to.",
             "type": "integer",
             "format": "uint32",
             "minimum": 0

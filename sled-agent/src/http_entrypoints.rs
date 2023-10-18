@@ -66,7 +66,7 @@ pub fn api() -> SledApiDescription {
         api.register(vpc_firewall_rules_put)?;
         api.register(zpools_get)?;
         api.register(uplink_ensure)?;
-        api.register(read_network_bootstore_config)?;
+        api.register(read_network_bootstore_config_cache)?;
         api.register(write_network_bootstore_config)?;
 
         Ok(())
@@ -650,11 +650,14 @@ async fn uplink_ensure(
     Ok(HttpResponseUpdatedNoContent())
 }
 
+/// This API endpoint is only reading the local sled agent's view of the
+/// bootstore. The boostore is a distributed data store that is eventually
+/// consistent. Reads from individual nodes may not represent the latest state.
 #[endpoint {
     method = GET,
     path = "/network-bootstore-config",
 }]
-async fn read_network_bootstore_config(
+async fn read_network_bootstore_config_cache(
     rqctx: RequestContext<SledAgent>,
 ) -> Result<HttpResponseOk<EarlyNetworkConfig>, HttpError> {
     let sa = rqctx.context();

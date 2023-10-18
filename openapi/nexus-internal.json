@@ -798,7 +798,7 @@
             "format": "ipv4"
           },
           "asn": {
-            "description": "Switch port the peer is reachable on.",
+            "description": "The autonomous sysetm number of the router the peer belongs to.",
             "type": "integer",
             "format": "uint32",
             "minimum": 0

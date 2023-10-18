@@ -97,7 +97,7 @@ pub struct BgpConfig {
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
 pub struct BgpPeerConfig {
-    /// Switch port the peer is reachable on.
+    /// The autonomous sysetm number of the router the peer belongs to.
     pub asn: u32,
     /// Switch port the peer is reachable on.
     pub port: String,

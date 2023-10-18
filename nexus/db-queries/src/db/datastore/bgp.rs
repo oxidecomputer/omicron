@@ -32,15 +32,6 @@ impl DataStore {
         };
         let pool = self.pool_connection_authorized(opctx).await?;
 
-        /*
-
-        #[derive(Debug)]
-        enum BgpConfigSetError {
-            AnnounceSetNotFound,
-        }
-        type TxnError = TransactionError<BgpConfigSetError>;
-        */
-
         pool.transaction_async(|conn| async move {
             let id: Uuid = match &config.bgp_announce_set_id {
                 NameOrId::Name(name) => {
