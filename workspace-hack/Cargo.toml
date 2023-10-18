@@ -203,49 +203,49 @@ bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.4.0", default-f
 hyper-rustls = { version = "0.24.1" }
 mio = { version = "0.8.8", features = ["net", "os-ext"] }
 once_cell = { version = "1.18.0", features = ["unstable"] }
-rustix = { version = "0.38.9", features = ["fs", "termios"] }
+rustix = { version = "0.38.19", features = ["fs", "termios"] }
 
 [target.x86_64-unknown-linux-gnu.build-dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.4.0", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.24.1" }
 mio = { version = "0.8.8", features = ["net", "os-ext"] }
 once_cell = { version = "1.18.0", features = ["unstable"] }
-rustix = { version = "0.38.9", features = ["fs", "termios"] }
+rustix = { version = "0.38.19", features = ["fs", "termios"] }
 
 [target.x86_64-apple-darwin.dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.4.0", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.24.1" }
 mio = { version = "0.8.8", features = ["net", "os-ext"] }
 once_cell = { version = "1.18.0", features = ["unstable"] }
-rustix = { version = "0.38.9", features = ["fs", "termios"] }
+rustix = { version = "0.38.19", features = ["fs", "termios"] }
 
 [target.x86_64-apple-darwin.build-dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.4.0", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.24.1" }
 mio = { version = "0.8.8", features = ["net", "os-ext"] }
 once_cell = { version = "1.18.0", features = ["unstable"] }
-rustix = { version = "0.38.9", features = ["fs", "termios"] }
+rustix = { version = "0.38.19", features = ["fs", "termios"] }
 
 [target.aarch64-apple-darwin.dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.4.0", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.24.1" }
 mio = { version = "0.8.8", features = ["net", "os-ext"] }
 once_cell = { version = "1.18.0", features = ["unstable"] }
-rustix = { version = "0.38.9", features = ["fs", "termios"] }
+rustix = { version = "0.38.19", features = ["fs", "termios"] }
 
 [target.aarch64-apple-darwin.build-dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.4.0", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.24.1" }
 mio = { version = "0.8.8", features = ["net", "os-ext"] }
 once_cell = { version = "1.18.0", features = ["unstable"] }
-rustix = { version = "0.38.9", features = ["fs", "termios"] }
+rustix = { version = "0.38.19", features = ["fs", "termios"] }
 
 [target.x86_64-unknown-illumos.dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.4.0", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.24.1" }
 mio = { version = "0.8.8", features = ["net", "os-ext"] }
 once_cell = { version = "1.18.0", features = ["unstable"] }
-rustix = { version = "0.38.9", features = ["fs", "termios"] }
+rustix = { version = "0.38.19", features = ["fs", "termios"] }
 toml_datetime = { version = "0.6.3", default-features = false, features = ["serde"] }
 toml_edit = { version = "0.19.15", features = ["serde"] }
 
@@ -254,7 +254,7 @@ bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.4.0", default-f
 hyper-rustls = { version = "0.24.1" }
 mio = { version = "0.8.8", features = ["net", "os-ext"] }
 once_cell = { version = "1.18.0", features = ["unstable"] }
-rustix = { version = "0.38.9", features = ["fs", "termios"] }
+rustix = { version = "0.38.19", features = ["fs", "termios"] }
 toml_datetime = { version = "0.6.3", default-features = false, features = ["serde"] }
 toml_edit = { version = "0.19.15", features = ["serde"] }
 
