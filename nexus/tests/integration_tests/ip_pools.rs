@@ -286,7 +286,7 @@ async fn test_ip_pool_service_no_cud(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     let internal_pool_name_url =
-        format!("/v1/system/ip-pools/{}", (*SERVICE_IP_POOL_NAME).to_string());
+        format!("/v1/system/ip-pools/{}", SERVICE_IP_POOL_NAME);
 
     // we can fetch the service pool by name or ID
     let pool = NexusRequest::object_get(client, &internal_pool_name_url)
@@ -385,6 +385,11 @@ async fn test_ip_pool_with_silo(cptestctx: &ControlPlaneTestContext) {
         error.message,
         format!("not found: silo with id \"{nonexistent_silo_id}\"")
     );
+
+    // TODO: associating a resource that is already associated should be a noop
+    // and return a success message
+
+    // TODO: trying to set a second default for a resource should fail
 }
 
 // IP pool list fetch logic includes a join to ip_pool_resource, which is

@@ -322,9 +322,12 @@ impl DataStore {
             .authorize(authz::Action::CreateChild, &authz::IP_POOL_LIST)
             .await?;
 
+        // TODO: make sure on_conflict_do_nothing doesn't suppress the error for
+        // trying to give a silo two default pools
         diesel::insert_into(dsl::ip_pool_resource)
             .values(ip_pool_resource.clone())
             .returning(IpPoolResource::as_returning())
+            .on_conflict_do_nothing()
             .get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {

@@ -556,7 +556,9 @@ impl DataStore {
     ) -> Result<(), Error> {
         use omicron_common::api::external::Name;
 
+        dbg!("a");
         self.rack_insert(opctx, &db::model::Rack::new(rack_id)).await?;
+        dbg!("b");
 
         let internal_pool =
             db::model::IpPool::new(&IdentityMetadataCreateParams {
@@ -564,25 +566,31 @@ impl DataStore {
                 description: String::from("IP Pool for Oxide Services"),
             });
 
-        self.ip_pool_create(opctx, internal_pool.clone())
+        let internal_pool_id = internal_pool.id();
+
+        let internal_created = self
+            .ip_pool_create(opctx, internal_pool)
             .await
-            .map(|_| ())
+            .map(|_| true)
             .or_else(|e| match e {
-                Error::ObjectAlreadyExists { .. } => Ok(()),
+                Error::ObjectAlreadyExists { .. } => Ok(false),
                 _ => Err(e),
             })?;
 
-        // make default for the internal silo
-        self.ip_pool_associate_resource(
-            opctx,
-            db::model::IpPoolResource {
-                ip_pool_id: internal_pool.id(),
-                resource_type: db::model::IpPoolResourceType::Silo,
-                resource_id: *INTERNAL_SILO_ID,
-                is_default: true,
-            },
-        )
-        .await?;
+        // make default for the internal silo. only need to do this if
+        // the create went through, i.e., if it wasn't already there
+        if internal_created {
+            self.ip_pool_associate_resource(
+                opctx,
+                db::model::IpPoolResource {
+                    ip_pool_id: internal_pool_id,
+                    resource_type: db::model::IpPoolResourceType::Silo,
+                    resource_id: *INTERNAL_SILO_ID,
+                    is_default: true,
+                },
+            )
+            .await?;
+        }
 
         let default_pool =
             db::model::IpPool::new(&IdentityMetadataCreateParams {
@@ -590,24 +598,31 @@ impl DataStore {
                 description: String::from("default IP pool"),
             });
 
-        // make pool default for fleet
-        self.ip_pool_associate_resource(
-            opctx,
-            db::model::IpPoolResource {
-                ip_pool_id: default_pool.id(),
-                resource_type: db::model::IpPoolResourceType::Fleet,
-                resource_id: *FLEET_ID,
-                is_default: true,
-            },
-        )
-        .await?;
+        let default_pool_id = default_pool.id();
 
-        self.ip_pool_create(opctx, default_pool).await.map(|_| ()).or_else(
-            |e| match e {
-                Error::ObjectAlreadyExists { .. } => Ok(()),
+        let default_created = self
+            .ip_pool_create(opctx, default_pool)
+            .await
+            .map(|_| true)
+            .or_else(|e| match e {
+                Error::ObjectAlreadyExists { .. } => Ok(false),
                 _ => Err(e),
-            },
-        )?;
+            })?;
+
+        // make pool default for fleet. only need to do this if the create went
+        // through, i.e., if it wasn't already there
+        if default_created {
+            self.ip_pool_associate_resource(
+                opctx,
+                db::model::IpPoolResource {
+                    ip_pool_id: default_pool_id,
+                    resource_type: db::model::IpPoolResourceType::Fleet,
+                    resource_id: *FLEET_ID,
+                    is_default: true,
+                },
+            )
+            .await?;
+        }
 
         Ok(())
     }
