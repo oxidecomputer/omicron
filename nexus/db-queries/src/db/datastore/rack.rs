@@ -192,6 +192,28 @@ impl DataStore {
             })
     }
 
+    pub async fn update_rack_subnet(
+        &self,
+        opctx: &OpContext,
+        rack: &Rack,
+    ) -> Result<(), Error> {
+        debug!(
+            opctx.log,
+            "updating rack subnet for rack {} to {:#?}",
+            rack.id(),
+            rack.rack_subnet
+        );
+        use db::schema::rack::dsl;
+        diesel::update(dsl::rack)
+            .filter(dsl::id.eq(rack.id()))
+            .set(dsl::rack_subnet.eq(rack.rack_subnet))
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(())
+    }
+
     // The following methods which return a `TxnError` take a `conn` parameter
     // which comes from the transaction created in `rack_set_initialized`.
 

@@ -598,7 +598,7 @@ impl super::Nexus {
         rack.rack_subnet =
             result.rack_network_config.map(|x| x.rack_subnet.into());
 
-        self.datastore().rack_insert(opctx, &rack).await?;
+        self.datastore().update_rack_subnet(opctx, &rack).await?;
 
         Ok(())
     }
