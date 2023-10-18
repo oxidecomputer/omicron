@@ -22,6 +22,7 @@ use uuid::Uuid;
 pub mod disk_create;
 pub mod disk_delete;
 pub mod finalize_disk;
+pub mod image_delete;
 pub mod import_blocks_from_url;
 mod instance_common;
 pub mod instance_create;
@@ -167,6 +168,9 @@ fn make_action_registry() -> ActionRegistry {
         &mut registry,
     );
     <vpc_create::SagaVpcCreate as NexusSaga>::register_actions(&mut registry);
+    <image_delete::SagaImageDelete as NexusSaga>::register_actions(
+        &mut registry,
+    );
 
     #[cfg(test)]
     <test_saga::SagaTest as NexusSaga>::register_actions(&mut registry);

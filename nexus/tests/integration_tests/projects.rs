@@ -245,32 +245,14 @@ async fn test_project_deletion_with_image(cptestctx: &ControlPlaneTestContext) {
         delete_project_expect_fail(&url, &client).await,
     );
 
-    // TODO: finish test once image delete is implemented. Image create works
-    // and project delete with image fails as expected, but image delete is not
-    // implemented yet, so we can't show that project delete works after image
-    // delete.
     let image_url = format!("/v1/images/{}", image.identity.id);
-    NexusRequest::expect_failure_with_body(
-        client,
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Method::DELETE,
-        &image_url,
-        &image_create_params,
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap();
+    NexusRequest::object_delete(&client, &image_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to delete image");
 
-    // TODO: delete the image
-    // NexusRequest::object_delete(&client, &image_url)
-    //     .authn_as(AuthnMode::PrivilegedUser)
-    //     .execute()
-    //     .await
-    //     .expect("failed to delete image");
-
-    // TODO: now delete project works
-    // delete_project(&url, &client).await;
+    delete_project(&url, &client).await;
 }
 
 #[nexus_test]
