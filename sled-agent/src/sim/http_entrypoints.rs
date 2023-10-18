@@ -20,7 +20,7 @@ use dropshot::TypedBody;
 use illumos_utils::opte::params::DeleteVirtualNetworkInterfaceHost;
 use illumos_utils::opte::params::SetVirtualNetworkInterfaceHost;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
-use omicron_common::api::internal::nexus::InstanceRuntimeState;
+use omicron_common::api::internal::nexus::SledInstanceState;
 use omicron_common::api::internal::nexus::UpdateArtifactId;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -71,12 +71,19 @@ async fn instance_register(
     rqctx: RequestContext<Arc<SledAgent>>,
     path_params: Path<InstancePathParam>,
     body: TypedBody<InstanceEnsureBody>,
-) -> Result<HttpResponseOk<InstanceRuntimeState>, HttpError> {
+) -> Result<HttpResponseOk<SledInstanceState>, HttpError> {
     let sa = rqctx.context();
     let instance_id = path_params.into_inner().instance_id;
     let body_args = body.into_inner();
     Ok(HttpResponseOk(
-        sa.instance_register(instance_id, body_args.initial).await?,
+        sa.instance_register(
+            instance_id,
+            body_args.propolis_id,
+            body_args.hardware,
+            body_args.instance_runtime,
+            body_args.vmm_runtime,
+        )
+        .await?,
     ))
 }
 
@@ -118,7 +125,7 @@ async fn instance_put_migration_ids(
     rqctx: RequestContext<Arc<SledAgent>>,
     path_params: Path<InstancePathParam>,
     body: TypedBody<InstancePutMigrationIdsBody>,
-) -> Result<HttpResponseOk<InstanceRuntimeState>, HttpError> {
+) -> Result<HttpResponseOk<SledInstanceState>, HttpError> {
     let sa = rqctx.context();
     let instance_id = path_params.into_inner().instance_id;
     let body_args = body.into_inner();

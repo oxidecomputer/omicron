@@ -69,17 +69,6 @@ dependencies = [
 
 [[package]]
 name = "ahash"
-version = "0.7.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fcb51a0695d8f838b1ee009b3fbf66bda078cd64590202a864a8f3e8c4315c47"
-dependencies = [
- "getrandom 0.2.10",
- "once_cell",
- "version_check",
-]
-
-[[package]]
-name = "ahash"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2c99f64d1e06488f620f932677e24bc6e2897582980441ae90a671415bd7ec2f"
@@ -283,7 +272,7 @@ dependencies = [
  "anstyle",
  "bstr 1.6.0",
  "doc-comment",
- "predicates 3.0.3",
+ "predicates 3.0.4",
  "predicates-core",
  "predicates-tree",
  "wait-timeout",
@@ -298,7 +287,7 @@ checksum = "9b34d609dfbaf33d6889b2b7106d3ca345eacad44200913df5ba02bfd31d2ba9"
 [[package]]
 name = "async-bb8-diesel"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/async-bb8-diesel?rev=da04c087f835a51e0441addb19c5ef4986e1fcf2#da04c087f835a51e0441addb19c5ef4986e1fcf2"
+source = "git+https://github.com/oxidecomputer/async-bb8-diesel?rev=1446f7e0c1f05f33a0581abd51fa873c7652ab61#1446f7e0c1f05f33a0581abd51fa873c7652ab61"
 dependencies = [
  "async-trait",
  "bb8",
@@ -368,11 +357,11 @@ checksum = "1181e1e0d1fce796a03db1ae795d67167da795f9cf4a39c37589e85ef57f26d3"
 
 [[package]]
 name = "atomicwrites"
-version = "0.4.1"
+version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c1163d9d7c51de51a2b79d6df5e8888d11e9df17c752ce4a285fb6ca1580734e"
+checksum = "f4d45f362125ed144544e57b0ec6de8fd6a296d41a6252fc4a20c0cf12e9ed3a"
 dependencies = [
- "rustix 0.37.23",
+ "rustix 0.38.9",
  "tempfile",
  "windows-sys 0.48.0",
 ]
@@ -494,9 +483,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "bcs"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4bd3ffe8b19a604421a5d461d4a70346223e535903fbc3067138bddbebddcf77"
+dependencies = [
+ "serde",
+ "thiserror",
+]
+
+[[package]]
 name = "bhyve_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=901b710b6e5bd05a94a323693c2b971e7e7b240e#901b710b6e5bd05a94a323693c2b971e7e7b240e"
+source = "git+https://github.com/oxidecomputer/propolis?rev=334df299a56cd0d33e1227ed4ce4d2fe7478d541#334df299a56cd0d33e1227ed4ce4d2fe7478d541"
 dependencies = [
  "bhyve_api_sys",
  "libc",
@@ -506,7 +505,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=901b710b6e5bd05a94a323693c2b971e7e7b240e#901b710b6e5bd05a94a323693c2b971e7e7b240e"
+source = "git+https://github.com/oxidecomputer/propolis?rev=334df299a56cd0d33e1227ed4ce4d2fe7478d541#334df299a56cd0d33e1227ed4ce4d2fe7478d541"
 dependencies = [
  "libc",
  "strum",
@@ -1236,7 +1235,7 @@ dependencies = [
 [[package]]
 name = "cpuid_profile_config"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=901b710b6e5bd05a94a323693c2b971e7e7b240e#901b710b6e5bd05a94a323693c2b971e7e7b240e"
+source = "git+https://github.com/oxidecomputer/propolis?rev=334df299a56cd0d33e1227ed4ce4d2fe7478d541#334df299a56cd0d33e1227ed4ce4d2fe7478d541"
 dependencies = [
  "propolis",
  "serde",
@@ -1444,7 +1443,7 @@ dependencies = [
 [[package]]
 name = "crucible"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=20273bcca1fd5834ebc3e67dfa7020f0e99ad681#20273bcca1fd5834ebc3e67dfa7020f0e99ad681"
+source = "git+https://github.com/oxidecomputer/crucible?rev=657d985247b41e38aac2e271c7ce8bc9ea81f4b6#657d985247b41e38aac2e271c7ce8bc9ea81f4b6"
 dependencies = [
  "aes-gcm-siv",
  "anyhow",
@@ -1456,6 +1455,7 @@ dependencies = [
  "crucible-client-types",
  "crucible-common",
  "crucible-protocol",
+ "crucible-workspace-hack",
  "dropshot",
  "futures",
  "futures-core",
@@ -1483,45 +1483,45 @@ dependencies = [
  "usdt",
  "uuid",
  "version_check",
- "workspace-hack",
 ]
 
 [[package]]
 name = "crucible-agent-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=20273bcca1fd5834ebc3e67dfa7020f0e99ad681#20273bcca1fd5834ebc3e67dfa7020f0e99ad681"
+source = "git+https://github.com/oxidecomputer/crucible?rev=657d985247b41e38aac2e271c7ce8bc9ea81f4b6#657d985247b41e38aac2e271c7ce8bc9ea81f4b6"
 dependencies = [
  "anyhow",
  "chrono",
+ "crucible-workspace-hack",
  "percent-encoding",
  "progenitor",
  "reqwest",
  "schemars",
  "serde",
  "serde_json",
- "workspace-hack",
 ]
 
 [[package]]
 name = "crucible-client-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=20273bcca1fd5834ebc3e67dfa7020f0e99ad681#20273bcca1fd5834ebc3e67dfa7020f0e99ad681"
+source = "git+https://github.com/oxidecomputer/crucible?rev=657d985247b41e38aac2e271c7ce8bc9ea81f4b6#657d985247b41e38aac2e271c7ce8bc9ea81f4b6"
 dependencies = [
  "base64 0.21.4",
+ "crucible-workspace-hack",
  "schemars",
  "serde",
  "serde_json",
  "uuid",
- "workspace-hack",
 ]
 
 [[package]]
 name = "crucible-common"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=20273bcca1fd5834ebc3e67dfa7020f0e99ad681#20273bcca1fd5834ebc3e67dfa7020f0e99ad681"
+source = "git+https://github.com/oxidecomputer/crucible?rev=657d985247b41e38aac2e271c7ce8bc9ea81f4b6#657d985247b41e38aac2e271c7ce8bc9ea81f4b6"
 dependencies = [
  "anyhow",
  "atty",
+ "crucible-workspace-hack",
  "nix 0.26.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "rusqlite",
  "rustls-pemfile",
@@ -1540,16 +1540,16 @@ dependencies = [
  "twox-hash",
  "uuid",
  "vergen",
- "workspace-hack",
 ]
 
 [[package]]
 name = "crucible-pantry-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=20273bcca1fd5834ebc3e67dfa7020f0e99ad681#20273bcca1fd5834ebc3e67dfa7020f0e99ad681"
+source = "git+https://github.com/oxidecomputer/crucible?rev=657d985247b41e38aac2e271c7ce8bc9ea81f4b6#657d985247b41e38aac2e271c7ce8bc9ea81f4b6"
 dependencies = [
  "anyhow",
  "chrono",
+ "crucible-workspace-hack",
  "percent-encoding",
  "progenitor",
  "reqwest",
@@ -1557,37 +1557,42 @@ dependencies = [
  "serde",
  "serde_json",
  "uuid",
- "workspace-hack",
 ]
 
 [[package]]
 name = "crucible-protocol"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=20273bcca1fd5834ebc3e67dfa7020f0e99ad681#20273bcca1fd5834ebc3e67dfa7020f0e99ad681"
+source = "git+https://github.com/oxidecomputer/crucible?rev=657d985247b41e38aac2e271c7ce8bc9ea81f4b6#657d985247b41e38aac2e271c7ce8bc9ea81f4b6"
 dependencies = [
  "anyhow",
  "bincode",
  "bytes",
  "crucible-common",
+ "crucible-workspace-hack",
  "num_enum 0.7.0",
  "schemars",
  "serde",
  "tokio-util",
  "uuid",
- "workspace-hack",
 ]
 
 [[package]]
 name = "crucible-smf"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=20273bcca1fd5834ebc3e67dfa7020f0e99ad681#20273bcca1fd5834ebc3e67dfa7020f0e99ad681"
+source = "git+https://github.com/oxidecomputer/crucible?rev=657d985247b41e38aac2e271c7ce8bc9ea81f4b6#657d985247b41e38aac2e271c7ce8bc9ea81f4b6"
 dependencies = [
+ "crucible-workspace-hack",
  "libc",
  "num-derive",
  "num-traits",
  "thiserror",
- "workspace-hack",
 ]
+
+[[package]]
+name = "crucible-workspace-hack"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fbd293370c6cb9c334123675263de33fc9e53bbdfc8bdd5e329237cf0205fdc7"
 
 [[package]]
 name = "crunchy"
@@ -2024,7 +2029,7 @@ checksum = "7e1a8646b2c125eeb9a84ef0faa6d2d102ea0d5da60b824ade2743263117b848"
 [[package]]
 name = "dladm"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=901b710b6e5bd05a94a323693c2b971e7e7b240e#901b710b6e5bd05a94a323693c2b971e7e7b240e"
+source = "git+https://github.com/oxidecomputer/propolis?rev=334df299a56cd0d33e1227ed4ce4d2fe7478d541#334df299a56cd0d33e1227ed4ce4d2fe7478d541"
 dependencies = [
  "libc",
  "strum",
@@ -2984,9 +2989,6 @@ name = "hashbrown"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a9ee70c43aaf417c914396645a0fa852624801b24ebb7ae78fe8272889ac888"
-dependencies = [
- "ahash 0.7.6",
-]
 
 [[package]]
 name = "hashbrown"
@@ -2994,7 +2996,7 @@ version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "43a3c133739dddd0d2990f9a4bdf8eb4b21ef50e4851ca85ab661199821d510e"
 dependencies = [
- "ahash 0.8.3",
+ "ahash",
 ]
 
 [[package]]
@@ -3003,7 +3005,7 @@ version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2c6201b9ff9fd90a5a3bac2e56a830d0caa509576f0e503818ee82c181b3437a"
 dependencies = [
- "ahash 0.8.3",
+ "ahash",
  "allocator-api2",
 ]
 
@@ -3097,6 +3099,12 @@ name = "hex-literal"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6fe2267d4ed49bc07b63801559be28c718ea06c4738b7a03c94df7386d2cde46"
+
+[[package]]
+name = "highway"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b4ba82c000837f4e74df01a5520f0dc48735d4aed955a99eae4428bab7cf3acd"
 
 [[package]]
 name = "hkdf"
@@ -3410,6 +3418,7 @@ dependencies = [
  "byteorder",
  "camino",
  "cfg-if 1.0.0",
+ "crucible-smf",
  "futures",
  "ipnetwork",
  "libc",
@@ -3467,9 +3476,9 @@ dependencies = [
 
 [[package]]
 name = "indicatif"
-version = "0.17.6"
+version = "0.17.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b297dc40733f23a0e52728a58fa9489a5b7638a324932de16b41adc3ef80730"
+checksum = "fb28741c9db9a713d93deb3bb9515c20788cef5815265bee4980e87bde7e0f25"
 dependencies = [
  "console",
  "instant",
@@ -3870,9 +3879,9 @@ checksum = "830d08ce1d1d941e6b30645f1a0eb5643013d835ce3779a5fc208261dbe10f55"
 
 [[package]]
 name = "libc"
-version = "0.2.148"
+version = "0.2.149"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9cdc71e17332e86d2e1d38c1f99edcb6288ee11b815fb1a4b049eaa2114d369b"
+checksum = "a08173bc88b7955d1b3145aa561539096c421ac8debde8cbc3612ec635fee29b"
 
 [[package]]
 name = "libdlpi-sys"
@@ -4990,7 +4999,6 @@ dependencies = [
  "async-trait",
  "ciborium",
  "clap 4.4.3",
- "crucible-smf",
  "dropshot",
  "expectorate",
  "futures",
@@ -5000,6 +5008,7 @@ dependencies = [
  "hex",
  "http",
  "hyper",
+ "illumos-utils",
  "ipcc-key-value",
  "omicron-common 0.1.0",
  "omicron-test-utils",
@@ -5405,7 +5414,6 @@ dependencies = [
  "futures",
  "futures-channel",
  "futures-core",
- "futures-executor",
  "futures-io",
  "futures-sink",
  "futures-task",
@@ -5413,13 +5421,11 @@ dependencies = [
  "gateway-messages",
  "generic-array",
  "getrandom 0.2.10",
- "hashbrown 0.12.3",
  "hashbrown 0.13.2",
  "hashbrown 0.14.0",
  "hex",
  "hyper",
  "hyper-rustls",
- "indexmap 1.9.3",
  "indexmap 2.0.0",
  "inout",
  "ipnetwork",
@@ -5437,12 +5443,10 @@ dependencies = [
  "num-traits",
  "once_cell",
  "openapiv3",
- "parking_lot 0.12.1",
  "petgraph",
- "phf_shared 0.11.2",
  "postgres-types",
  "ppv-lite86",
- "predicates 3.0.3",
+ "predicates 3.0.4",
  "rand 0.8.5",
  "rand_chacha 0.3.1",
  "regex",
@@ -5450,7 +5454,6 @@ dependencies = [
  "regex-syntax 0.7.5",
  "reqwest",
  "ring",
- "rustix 0.37.23",
  "rustix 0.38.9",
  "schemars",
  "semver 1.0.18",
@@ -5474,7 +5477,6 @@ dependencies = [
  "toml_datetime",
  "toml_edit 0.19.15",
  "tracing",
- "tracing-core",
  "trust-dns-proto",
  "unicode-bidi",
  "unicode-normalization",
@@ -5732,6 +5734,7 @@ dependencies = [
  "rstest",
  "schemars",
  "serde",
+ "strum",
  "thiserror",
  "trybuild",
  "uuid",
@@ -5810,10 +5813,13 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "bcs",
  "bytes",
  "chrono",
  "clap 4.4.3",
  "dropshot",
+ "expectorate",
+ "highway",
  "itertools 0.11.0",
  "omicron-test-utils",
  "omicron-workspace-hack",
@@ -5827,6 +5833,7 @@ dependencies = [
  "slog-async",
  "slog-dtrace",
  "slog-term",
+ "strum",
  "thiserror",
  "tokio",
  "usdt",
@@ -6437,14 +6444,14 @@ dependencies = [
 
 [[package]]
 name = "predicates"
-version = "3.0.3"
+version = "3.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09963355b9f467184c04017ced4a2ba2d75cbcb4e7462690d388233253d4b1a9"
+checksum = "6dfc28575c2e3f19cb3c73b93af36460ae898d426eba6fc15b9bd2a5220758a0"
 dependencies = [
  "anstyle",
  "difflib",
  "float-cmp",
- "itertools 0.10.5",
+ "itertools 0.11.0",
  "normalize-line-endings",
  "predicates-core",
  "regex",
@@ -6608,7 +6615,7 @@ dependencies = [
 [[package]]
 name = "propolis"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=901b710b6e5bd05a94a323693c2b971e7e7b240e#901b710b6e5bd05a94a323693c2b971e7e7b240e"
+source = "git+https://github.com/oxidecomputer/propolis?rev=334df299a56cd0d33e1227ed4ce4d2fe7478d541#334df299a56cd0d33e1227ed4ce4d2fe7478d541"
 dependencies = [
  "anyhow",
  "bhyve_api",
@@ -6641,7 +6648,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=901b710b6e5bd05a94a323693c2b971e7e7b240e#901b710b6e5bd05a94a323693c2b971e7e7b240e"
+source = "git+https://github.com/oxidecomputer/propolis?rev=334df299a56cd0d33e1227ed4ce4d2fe7478d541#334df299a56cd0d33e1227ed4ce4d2fe7478d541"
 dependencies = [
  "async-trait",
  "base64 0.21.4",
@@ -6665,7 +6672,7 @@ dependencies = [
 [[package]]
 name = "propolis-server"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=901b710b6e5bd05a94a323693c2b971e7e7b240e#901b710b6e5bd05a94a323693c2b971e7e7b240e"
+source = "git+https://github.com/oxidecomputer/propolis?rev=334df299a56cd0d33e1227ed4ce4d2fe7478d541#334df299a56cd0d33e1227ed4ce4d2fe7478d541"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6717,7 +6724,7 @@ dependencies = [
 [[package]]
 name = "propolis-server-config"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=901b710b6e5bd05a94a323693c2b971e7e7b240e#901b710b6e5bd05a94a323693c2b971e7e7b240e"
+source = "git+https://github.com/oxidecomputer/propolis?rev=334df299a56cd0d33e1227ed4ce4d2fe7478d541#334df299a56cd0d33e1227ed4ce4d2fe7478d541"
 dependencies = [
  "cpuid_profile_config",
  "serde",
@@ -6729,7 +6736,7 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=901b710b6e5bd05a94a323693c2b971e7e7b240e#901b710b6e5bd05a94a323693c2b971e7e7b240e"
+source = "git+https://github.com/oxidecomputer/propolis?rev=334df299a56cd0d33e1227ed4ce4d2fe7478d541#334df299a56cd0d33e1227ed4ce4d2fe7478d541"
 dependencies = [
  "schemars",
  "serde",
@@ -6737,19 +6744,19 @@ dependencies = [
 
 [[package]]
 name = "proptest"
-version = "1.2.0"
+version = "1.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4e35c06b98bf36aba164cc17cb25f7e232f5c4aeea73baa14b8a9f0d92dbfa65"
+checksum = "7c003ac8c77cb07bb74f5f198bce836a689bcd5a42574612bf14d17bfd08c20e"
 dependencies = [
  "bit-set",
- "bitflags 1.3.2",
- "byteorder",
+ "bit-vec",
+ "bitflags 2.4.0",
  "lazy_static",
  "num-traits",
  "rand 0.8.5",
  "rand_chacha 0.3.1",
  "rand_xorshift",
- "regex-syntax 0.6.29",
+ "regex-syntax 0.7.5",
  "rusty-fork",
  "tempfile",
  "unarray",
@@ -9247,7 +9254,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0955b8137a1df6f1a2e9a37d8a6656291ff0297c1a97c24e0d8425fe2312f79a"
 dependencies = [
  "once_cell",
- "valuable",
 ]
 
 [[package]]
@@ -9374,7 +9380,7 @@ dependencies = [
  "omicron-common 0.1.0",
  "omicron-test-utils",
  "omicron-workspace-hack",
- "predicates 3.0.3",
+ "predicates 3.0.4",
  "slog",
  "slog-async",
  "slog-envlogger",
@@ -9737,12 +9743,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "valuable"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "830b7e5d4d90034032940e4ace0d9a9a057e7a45cd94e6c007832e39edb82f6d"
-
-[[package]]
 name = "vcpkg"
 version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9776,7 +9776,7 @@ checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
 [[package]]
 name = "viona_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=901b710b6e5bd05a94a323693c2b971e7e7b240e#901b710b6e5bd05a94a323693c2b971e7e7b240e"
+source = "git+https://github.com/oxidecomputer/propolis?rev=334df299a56cd0d33e1227ed4ce4d2fe7478d541#334df299a56cd0d33e1227ed4ce4d2fe7478d541"
 dependencies = [
  "libc",
  "viona_api_sys",
@@ -9785,7 +9785,7 @@ dependencies = [
 [[package]]
 name = "viona_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=901b710b6e5bd05a94a323693c2b971e7e7b240e#901b710b6e5bd05a94a323693c2b971e7e7b240e"
+source = "git+https://github.com/oxidecomputer/propolis?rev=334df299a56cd0d33e1227ed4ce4d2fe7478d541#334df299a56cd0d33e1227ed4ce4d2fe7478d541"
 dependencies = [
  "libc",
 ]
@@ -10112,6 +10112,7 @@ dependencies = [
  "installinator-artifact-client",
  "installinator-artifactd",
  "installinator-common",
+ "internal-dns 0.1.0",
  "itertools 0.11.0",
  "omicron-certificates",
  "omicron-common 0.1.0",
@@ -10362,61 +10363,6 @@ checksum = "524e57b2c537c0f9b1e69f1965311ec12182b4122e45035b1508cd24d2adadb1"
 dependencies = [
  "cfg-if 1.0.0",
  "windows-sys 0.48.0",
-]
-
-[[package]]
-name = "workspace-hack"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=20273bcca1fd5834ebc3e67dfa7020f0e99ad681#20273bcca1fd5834ebc3e67dfa7020f0e99ad681"
-dependencies = [
- "bitflags 2.4.0",
- "bytes",
- "cc",
- "chrono",
- "console",
- "crossbeam-utils",
- "crypto-common",
- "digest",
- "either",
- "futures-channel",
- "futures-core",
- "futures-executor",
- "futures-sink",
- "futures-util",
- "getrandom 0.2.10",
- "hashbrown 0.12.3",
- "hex",
- "hyper",
- "indexmap 1.9.3",
- "libc",
- "log",
- "mio",
- "num-traits",
- "once_cell",
- "openapiv3",
- "parking_lot 0.12.1",
- "phf_shared 0.11.2",
- "rand 0.8.5",
- "rand_chacha 0.3.1",
- "rand_core 0.6.4",
- "reqwest",
- "rustls",
- "schemars",
- "semver 1.0.18",
- "serde",
- "slog",
- "syn 1.0.109",
- "syn 2.0.32",
- "time",
- "time-macros",
- "tokio",
- "tokio-util",
- "toml_datetime",
- "toml_edit 0.19.15",
- "tracing",
- "tracing-core",
- "usdt",
- "uuid",
 ]
 
 [[package]]

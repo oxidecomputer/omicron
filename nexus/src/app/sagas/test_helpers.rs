@@ -15,7 +15,11 @@ use async_bb8_diesel::{
 };
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use futures::future::BoxFuture;
-use nexus_db_queries::{context::OpContext, db::DataStore};
+use nexus_db_queries::{
+    authz,
+    context::OpContext,
+    db::{datastore::InstanceAndActiveVmm, lookup::LookupPath, DataStore},
+};
 use nexus_types::identity::Resource;
 use omicron_common::api::external::NameOrId;
 use sled_agent_client::TestInterfaces as _;
@@ -123,7 +127,12 @@ pub(crate) async fn instance_simulate(
     info!(&cptestctx.logctx.log, "Poking simulated instance";
           "instance_id" => %instance_id);
     let nexus = &cptestctx.server.apictx().nexus;
-    let sa = nexus.instance_sled_by_id(instance_id).await.unwrap();
+    let sa = nexus
+        .instance_sled_by_id(instance_id)
+        .await
+        .unwrap()
+        .expect("instance must be on a sled to simulate a state change");
+
     sa.instance_finish_transition(*instance_id).await;
 }
 
@@ -147,8 +156,36 @@ pub(crate) async fn instance_simulate_by_name(
     let instance_lookup =
         nexus.instance_lookup(&opctx, instance_selector).unwrap();
     let (.., instance) = instance_lookup.fetch().await.unwrap();
-    let sa = nexus.instance_sled_by_id(&instance.id()).await.unwrap();
+    let sa = nexus
+        .instance_sled_by_id(&instance.id())
+        .await
+        .unwrap()
+        .expect("instance must be on a sled to simulate a state change");
     sa.instance_finish_transition(instance.id()).await;
+}
+
+pub async fn instance_fetch(
+    cptestctx: &ControlPlaneTestContext,
+    instance_id: Uuid,
+) -> InstanceAndActiveVmm {
+    let datastore = cptestctx.server.apictx().nexus.datastore().clone();
+    let opctx = test_opctx(&cptestctx);
+    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+        .instance_id(instance_id)
+        .lookup_for(authz::Action::Read)
+        .await
+        .expect("test instance should be present in datastore");
+
+    let db_state = datastore
+        .instance_fetch_with_vmm(&opctx, &authz_instance)
+        .await
+        .expect("test instance's info should be fetchable");
+
+    info!(&cptestctx.logctx.log, "refetched instance info from db";
+              "instance_id" => %instance_id,
+              "instance_and_vmm" => ?db_state);
+
+    db_state
 }
 
 /// Tests that the saga described by `dag` succeeds if each of its nodes is

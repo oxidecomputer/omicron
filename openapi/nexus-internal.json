@@ -211,7 +211,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/InstanceRuntimeState"
+                "$ref": "#/components/schemas/SledInstanceState"
               }
             }
           },
@@ -3537,102 +3537,44 @@
           "start_time"
         ]
       },
-      "InstanceCpuCount": {
-        "description": "The number of CPUs in an Instance",
-        "type": "integer",
-        "format": "uint16",
-        "minimum": 0
-      },
       "InstanceRuntimeState": {
-        "description": "Runtime state of the Instance, including the actual running state and minimal metadata\n\nThis state is owned by the sled agent running that Instance.",
+        "description": "The dynamic runtime properties of an instance: its current VMM ID (if any), migration information (if any), and the instance state to report if there is no active VMM.",
         "type": "object",
         "properties": {
           "dst_propolis_id": {
             "nullable": true,
-            "description": "the target propolis-server during a migration of this Instance",
+            "description": "If a migration is active, the ID of the target VMM.",
             "type": "string",
             "format": "uuid"
           },
           "gen": {
-            "description": "generation number for this state",
+            "description": "Generation number for this state.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Generation"
-              }
-            ]
-          },
-          "hostname": {
-            "description": "RFC1035-compliant hostname for the Instance.",
-            "type": "string"
-          },
-          "memory": {
-            "description": "memory allocated for this Instance",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ByteCount"
               }
             ]
           },
           "migration_id": {
             "nullable": true,
-            "description": "migration id (if one in process)",
+            "description": "If a migration is active, the ID of that migration.",
             "type": "string",
             "format": "uuid"
-          },
-          "ncpus": {
-            "description": "number of CPUs allocated for this Instance",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/InstanceCpuCount"
-              }
-            ]
-          },
-          "propolis_addr": {
-            "nullable": true,
-            "description": "address of propolis-server running this Instance",
-            "type": "string"
-          },
-          "propolis_gen": {
-            "description": "The generation number for the Propolis and sled identifiers for this instance.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Generation"
-              }
-            ]
           },
           "propolis_id": {
-            "description": "which propolis-server is running this Instance",
-            "type": "string",
-            "format": "uuid"
-          },
-          "run_state": {
-            "description": "runtime state of the Instance",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/InstanceState"
-              }
-            ]
-          },
-          "sled_id": {
-            "description": "which sled is running this Instance",
+            "nullable": true,
+            "description": "The instance's currently active VMM ID.",
             "type": "string",
             "format": "uuid"
           },
           "time_updated": {
-            "description": "timestamp for this information",
+            "description": "Timestamp for this information.",
             "type": "string",
             "format": "date-time"
           }
         },
         "required": [
           "gen",
-          "hostname",
-          "memory",
-          "ncpus",
-          "propolis_gen",
-          "propolis_id",
-          "run_state",
-          "sled_id",
           "time_updated"
         ]
       },
@@ -5002,6 +4944,38 @@
           "usable_physical_ram"
         ]
       },
+      "SledInstanceState": {
+        "description": "A wrapper type containing a sled's total knowledge of the state of a specific VMM and the instance it incarnates.",
+        "type": "object",
+        "properties": {
+          "instance_state": {
+            "description": "The sled's conception of the state of the instance.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceRuntimeState"
+              }
+            ]
+          },
+          "propolis_id": {
+            "description": "The ID of the VMM whose state is being reported.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "vmm_state": {
+            "description": "The most recent state of the sled's VMM process.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VmmRuntimeState"
+              }
+            ]
+          }
+        },
+        "required": [
+          "instance_state",
+          "propolis_id",
+          "vmm_state"
+        ]
+      },
       "SledRole": {
         "description": "Describes the role of the sled within the rack.\n\nNote that this may change if the sled is physically moved within the rack.",
         "oneOf": [
@@ -5184,6 +5158,38 @@
         "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z][a-z0-9-]*[a-zA-Z0-9]*$",
         "minLength": 1,
         "maxLength": 63
+      },
+      "VmmRuntimeState": {
+        "description": "The dynamic runtime properties of an individual VMM process.",
+        "type": "object",
+        "properties": {
+          "gen": {
+            "description": "The generation number for this VMM's state.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          },
+          "state": {
+            "description": "The last state reported by this VMM.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceState"
+              }
+            ]
+          },
+          "time_updated": {
+            "description": "Timestamp for the VMM's state.",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "gen",
+          "state",
+          "time_updated"
+        ]
       },
       "ZpoolPutRequest": {
         "description": "Sent by a sled agent on startup to Nexus to request further instruction",

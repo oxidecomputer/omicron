@@ -13,9 +13,7 @@ use crate::db::error::TransactionError;
 use crate::db::model::Name;
 use crate::db::model::{AddressLot, AddressLotBlock, AddressLotReservedBlock};
 use crate::db::pagination::paginated;
-use async_bb8_diesel::{
-    AsyncConnection, AsyncRunQueryDsl, Connection, ConnectionError,
-};
+use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl, Connection};
 use chrono::Utc;
 use diesel::result::Error as DieselError;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
@@ -84,15 +82,13 @@ impl DataStore {
             })
             .await
             .map_err(|e| match e {
-                ConnectionError::Query(DieselError::DatabaseError(_, _)) => {
-                    public_error_from_diesel(
-                        e,
-                        ErrorHandler::Conflict(
-                            ResourceType::AddressLot,
-                            &params.identity.name.as_str(),
-                        ),
-                    )
-                }
+                DieselError::DatabaseError(_, _) => public_error_from_diesel(
+                    e,
+                    ErrorHandler::Conflict(
+                        ResourceType::AddressLot,
+                        &params.identity.name.as_str(),
+                    ),
+                ),
                 _ => public_error_from_diesel(e, ErrorHandler::Server),
             })
     }
@@ -151,7 +147,7 @@ impl DataStore {
         })
         .await
         .map_err(|e| match e {
-            TxnError::Connection(e) => {
+            TxnError::Database(e) => {
                 public_error_from_diesel(e, ErrorHandler::Server)
             }
             TxnError::CustomError(AddressLotDeleteError::LotInUse) => {
@@ -252,11 +248,10 @@ pub(crate) async fn try_reserve_block(
         .limit(1)
         .first_async::<AddressLotBlock>(conn)
         .await
-        .map_err(|e| match e {
-            ConnectionError::Query(_) => ReserveBlockTxnError::CustomError(
+        .map_err(|_e| {
+            ReserveBlockTxnError::CustomError(
                 ReserveBlockError::AddressNotInLot,
-            ),
-            e => e.into(),
+            )
         })?;
 
     // Ensure the address is not already taken.

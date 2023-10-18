@@ -395,7 +395,7 @@ impl DataStore {
         match result {
             Ok(()) => Ok(()),
             Err(TransactionError::CustomError(e)) => Err(e),
-            Err(TransactionError::Connection(e)) => {
+            Err(TransactionError::Database(e)) => {
                 Err(public_error_from_diesel(e, ErrorHandler::Server))
             }
         }

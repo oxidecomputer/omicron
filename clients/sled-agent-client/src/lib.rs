@@ -24,16 +24,9 @@ impl From<omicron_common::api::internal::nexus::InstanceRuntimeState>
         s: omicron_common::api::internal::nexus::InstanceRuntimeState,
     ) -> Self {
         Self {
-            run_state: s.run_state.into(),
-            sled_id: s.sled_id,
             propolis_id: s.propolis_id,
             dst_propolis_id: s.dst_propolis_id,
-            propolis_addr: s.propolis_addr.map(|addr| addr.to_string()),
             migration_id: s.migration_id,
-            propolis_gen: s.propolis_gen.into(),
-            ncpus: s.ncpus.into(),
-            memory: s.memory.into(),
-            hostname: s.hostname,
             gen: s.gen.into(),
             time_updated: s.time_updated,
         }
@@ -85,18 +78,35 @@ impl From<types::InstanceRuntimeState>
 {
     fn from(s: types::InstanceRuntimeState) -> Self {
         Self {
-            run_state: s.run_state.into(),
-            sled_id: s.sled_id,
             propolis_id: s.propolis_id,
             dst_propolis_id: s.dst_propolis_id,
-            propolis_addr: s.propolis_addr.map(|addr| addr.parse().unwrap()),
             migration_id: s.migration_id,
-            propolis_gen: s.propolis_gen.into(),
-            ncpus: s.ncpus.into(),
-            memory: s.memory.into(),
-            hostname: s.hostname,
             gen: s.gen.into(),
             time_updated: s.time_updated,
+        }
+    }
+}
+
+impl From<types::VmmRuntimeState>
+    for omicron_common::api::internal::nexus::VmmRuntimeState
+{
+    fn from(s: types::VmmRuntimeState) -> Self {
+        Self {
+            state: s.state.into(),
+            gen: s.gen.into(),
+            time_updated: s.time_updated,
+        }
+    }
+}
+
+impl From<types::SledInstanceState>
+    for omicron_common::api::internal::nexus::SledInstanceState
+{
+    fn from(s: types::SledInstanceState) -> Self {
+        Self {
+            instance_state: s.instance_state.into(),
+            propolis_id: s.propolis_id,
+            vmm_state: s.vmm_state.into(),
         }
     }
 }

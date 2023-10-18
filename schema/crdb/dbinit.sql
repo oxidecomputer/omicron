@@ -834,43 +834,19 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
     /* user data for instance initialization systems (e.g. cloud-init) */
     user_data BYTES NOT NULL,
 
-    /*
-     * TODO Would it make sense for the runtime state to live in a separate
-     * table?
-     */
-    /* Runtime state */
+    /* The state of the instance when it has no active VMM. */
     state omicron.public.instance_state NOT NULL,
     time_state_updated TIMESTAMPTZ NOT NULL,
     state_generation INT NOT NULL,
-    /*
-     * Sled where the VM is currently running, if any.  Note that when we
-     * support live migration, there may be multiple sleds associated with
-     * this Instance, but only one will be truly active.  Still, consumers of
-     * this information should consider whether they also want to know the other
-     * sleds involved in the migration.
-     */
-    active_sled_id UUID,
 
-    /* Identifies the underlying propolis-server backing the instance. */
-    active_propolis_id UUID NOT NULL,
-    active_propolis_ip INET,
+    /* FK into `vmm` for the Propolis server that's backing this instance. */
+    active_propolis_id UUID,
 
-    /* Identifies the target propolis-server during a migration of the instance. */
+    /* FK into `vmm` for the migration target Propolis server, if one exists. */
     target_propolis_id UUID,
 
-    /*
-     * Identifies an ongoing migration for this instance.
-     */
+    /* Identifies any ongoing migration for this instance. */
     migration_id UUID,
-
-    /*
-     * A generation number protecting information about the "location" of a
-     * running instance: its active server ID, Propolis ID and IP, and migration
-     * information. This is used for mutual exclusion (to allow only one
-     * migration to proceed at a time) and to coordinate state changes when a
-     * migration finishes.
-     */
-    propolis_generation INT NOT NULL,
 
     /* Instance configuration */
     ncpus INT NOT NULL,
@@ -886,41 +862,22 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_instance_by_project ON omicron.public.i
 ) WHERE
     time_deleted IS NULL;
 
--- Allow looking up instances by server. This is particularly
--- useful for resource accounting within a sled.
-CREATE UNIQUE INDEX IF NOT EXISTS lookup_instance_by_sled ON omicron.public.instance (
-    active_sled_id,
-    id
-) WHERE
-    time_deleted IS NULL;
-
 /*
  * A special view of an instance provided to operators for insights into what's running 
  * on a sled.
+ *
+ * This view requires the VMM table, which doesn't exist yet, so create a
+ * "placeholder" view here and replace it with the full view once the table is
+ * defined. See the README for more context.
  */
 
-CREATE VIEW IF NOT EXISTS omicron.public.sled_instance 
+CREATE VIEW IF NOT EXISTS omicron.public.sled_instance
 AS SELECT
-   instance.id,
-   instance.name,
-   silo.name as silo_name,
-   project.name as project_name,
-   instance.active_sled_id,
-   instance.time_created,
-   instance.time_modified,
-   instance.migration_id,
-   instance.ncpus,
-   instance.memory,
-   instance.state
+    instance.id
 FROM
     omicron.public.instance AS instance
-    JOIN omicron.public.project AS project ON
-            instance.project_id = project.id
-    JOIN omicron.public.silo AS silo ON
-            project.silo_id = silo.id
 WHERE
     instance.time_deleted IS NULL;
-
 
 /*
  * Guest-Visible, Virtual Disks
@@ -2523,13 +2480,88 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_address_config (
     PRIMARY KEY (port_settings_id, address, interface_name)
 );
 
+/*
+ * The `sled_instance` view's definition needs to be modified in a separate
+ * transaction from the transaction that created it.
+ */
 
-/*******************************************************************/
+COMMIT;
+BEGIN;
 
 /*
  * Metadata for the schema itself. This version number isn't great, as there's
  * nothing to ensure it gets bumped when it should be, but it's a start.
  */
+
+-- Per-VMM state.
+CREATE TABLE IF NOT EXISTS omicron.public.vmm (
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    instance_id UUID NOT NULL,
+    state omicron.public.instance_state NOT NULL,
+    time_state_updated TIMESTAMPTZ NOT NULL,
+    state_generation INT NOT NULL,
+    sled_id UUID NOT NULL,
+    propolis_ip INET NOT NULL
+);
+
+/*
+ * A special view of an instance provided to operators for insights into what's
+ * running on a sled.
+ *
+ * This view replaces the placeholder `sled_instance` view defined above. Any
+ * columns in the placeholder must appear in the replacement in the same order
+ * and with the same types they had in the placeholder.
+ */
+
+CREATE OR REPLACE VIEW omicron.public.sled_instance
+AS SELECT
+   instance.id,
+   instance.name,
+   silo.name as silo_name,
+   project.name as project_name,
+   vmm.sled_id as active_sled_id,
+   instance.time_created,
+   instance.time_modified,
+   instance.migration_id,
+   instance.ncpus,
+   instance.memory,
+   vmm.state
+FROM
+    omicron.public.instance AS instance
+    JOIN omicron.public.project AS project ON
+            instance.project_id = project.id
+    JOIN omicron.public.silo AS silo ON
+            project.silo_id = silo.id
+    JOIN omicron.public.vmm AS vmm ON
+            instance.active_propolis_id = vmm.id
+WHERE
+    instance.time_deleted IS NULL AND vmm.time_deleted IS NULL;
+
+CREATE TYPE IF NOT EXISTS omicron.public.ip_pool_resource_type AS ENUM (
+    'fleet',
+    'silo'
+);
+
+-- join table associating IP pools with resources like fleet or silo
+CREATE TABLE IF NOT EXISTS omicron.public.ip_pool_resource (
+    ip_pool_id UUID NOT NULL,
+    resource_type ip_pool_resource_type NOT NULL,
+    resource_id UUID NOT NULL,
+    is_default BOOL NOT NULL,
+    -- TODO: timestamps for soft deletes?
+
+    -- resource_type is redundant because resource IDs are globally unique, but
+    -- logically it belongs here
+    PRIMARY KEY (ip_pool_id, resource_type, resource_id)
+);
+
+-- a given resource can only have one default ip pool
+CREATE UNIQUE INDEX IF NOT EXISTS one_default_ip_pool_per_resource ON omicron.public.ip_pool_resource (
+    resource_id
+) where
+    is_default = true;
 
 CREATE TABLE IF NOT EXISTS omicron.public.db_metadata (
     -- There should only be one row of this table for the whole DB.
@@ -2559,29 +2591,5 @@ INSERT INTO omicron.public.db_metadata (
 ) VALUES
     ( TRUE, NOW(), NOW(), '8.0.1', NULL)
 ON CONFLICT DO NOTHING;
-
-CREATE TYPE IF NOT EXISTS omicron.public.ip_pool_resource_type AS ENUM (
-    'fleet',
-    'silo'
-);
-
--- join table associating IP pools with resources like fleet or silo
-CREATE TABLE IF NOT EXISTS omicron.public.ip_pool_resource (
-    ip_pool_id UUID NOT NULL,
-    resource_type ip_pool_resource_type NOT NULL,
-    resource_id UUID NOT NULL,
-    is_default BOOL NOT NULL,
-    -- TODO: timestamps for soft deletes?
-
-    -- resource_type is redundant because resource IDs are globally unique, but
-    -- logically it belongs here
-    PRIMARY KEY (ip_pool_id, resource_type, resource_id)
-);
-
--- a given resource can only have one default ip pool
-CREATE UNIQUE INDEX IF NOT EXISTS one_default_ip_pool_per_resource ON omicron.public.ip_pool_resource (
-    resource_id
-) where
-    is_default = true;
 
 COMMIT;

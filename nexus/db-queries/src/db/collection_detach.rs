@@ -16,7 +16,7 @@ use super::cte_utils::{
     QueryFromClause, QuerySqlType,
 };
 use super::pool::DbConnection;
-use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionError};
+use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::associations::HasTable;
 use diesel::expression::{AsExpression, Expression};
 use diesel::helper_types::*;
@@ -25,6 +25,7 @@ use diesel::prelude::*;
 use diesel::query_builder::*;
 use diesel::query_dsl::methods as query_methods;
 use diesel::query_source::Table;
+use diesel::result::Error as DieselError;
 use diesel::sql_types::{Nullable, SingleValue};
 use nexus_db_model::DatastoreAttachTargetConfig;
 use std::fmt::Debug;
@@ -230,7 +231,7 @@ where
 
 /// Result of [`DetachFromCollectionStatement`] when executed asynchronously
 pub type AsyncDetachFromCollectionResult<ResourceType, C> =
-    Result<ResourceType, DetachError<ResourceType, C, ConnectionError>>;
+    Result<ResourceType, DetachError<ResourceType, C, DieselError>>;
 
 /// Errors returned by [`DetachFromCollectionStatement`].
 #[derive(Debug)]

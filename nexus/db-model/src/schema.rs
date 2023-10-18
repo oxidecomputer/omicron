@@ -344,19 +344,30 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         project_id -> Uuid,
         user_data -> Binary,
-        state -> crate::InstanceStateEnum,
-        time_state_updated -> Timestamptz,
-        state_generation -> Int8,
-        active_sled_id -> Uuid,
-        active_propolis_id -> Uuid,
-        active_propolis_ip -> Nullable<Inet>,
-        target_propolis_id -> Nullable<Uuid>,
-        migration_id -> Nullable<Uuid>,
-        propolis_generation -> Int8,
         ncpus -> Int8,
         memory -> Int8,
         hostname -> Text,
         boot_on_fault -> Bool,
+        state -> crate::InstanceStateEnum,
+        time_state_updated -> Timestamptz,
+        state_generation -> Int8,
+        active_propolis_id -> Nullable<Uuid>,
+        target_propolis_id -> Nullable<Uuid>,
+        migration_id -> Nullable<Uuid>,
+    }
+}
+
+table! {
+    vmm (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        instance_id -> Uuid,
+        sled_id -> Uuid,
+        propolis_ip -> Inet,
+        state -> crate::InstanceStateEnum,
+        time_state_updated -> Timestamptz,
+        state_generation -> Int8,
     }
 }
 
@@ -1176,6 +1187,7 @@ allow_tables_to_appear_in_same_query!(
     sled,
     sled_resource,
     router_route,
+    vmm,
     volume,
     vpc,
     vpc_subnet,

@@ -10,7 +10,6 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
-use crate::db::error::diesel_result_optional;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::fixed_data::silo::INTERNAL_SILO_ID;
@@ -212,18 +211,17 @@ impl DataStore {
         opctx.authorize(authz::Action::Delete, authz_pool).await?;
 
         // Verify there are no IP ranges still in this pool
-        let range = diesel_result_optional(
-            ip_pool_range::dsl::ip_pool_range
-                .filter(ip_pool_range::dsl::ip_pool_id.eq(authz_pool.id()))
-                .filter(ip_pool_range::dsl::time_deleted.is_null())
-                .select(ip_pool_range::dsl::id)
-                .limit(1)
-                .first_async::<Uuid>(
-                    &*self.pool_connection_authorized(opctx).await?,
-                )
-                .await,
-        )
-        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        let range = ip_pool_range::dsl::ip_pool_range
+            .filter(ip_pool_range::dsl::ip_pool_id.eq(authz_pool.id()))
+            .filter(ip_pool_range::dsl::time_deleted.is_null())
+            .select(ip_pool_range::dsl::id)
+            .limit(1)
+            .first_async::<Uuid>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
         if range.is_some() {
             return Err(Error::InvalidRequest {
                 message:
@@ -370,7 +368,6 @@ impl DataStore {
             .insert_and_get_result_async(conn)
             .await
             .map_err(|e| {
-                use async_bb8_diesel::ConnectionError::Query;
                 use diesel::result::Error::NotFound;
 
                 match e {
@@ -380,7 +377,7 @@ impl DataStore {
                             lookup_type: LookupType::ById(pool_id),
                         }
                     }
-                    AsyncInsertError::DatabaseError(Query(NotFound)) => {
+                    AsyncInsertError::DatabaseError(NotFound) => {
                         // We've filtered out the IP addresses the client provided,
                         // i.e., there's some overlap with existing addresses.
                         Error::invalid_request(
@@ -420,26 +417,25 @@ impl DataStore {
         // concurrent inserts of new external IPs from the target range by
         // comparing the rcgen.
         let conn = self.pool_connection_authorized(opctx).await?;
-        let range = diesel_result_optional(
-            dsl::ip_pool_range
-                .filter(dsl::ip_pool_id.eq(pool_id))
-                .filter(dsl::first_address.eq(first_net))
-                .filter(dsl::last_address.eq(last_net))
-                .filter(dsl::time_deleted.is_null())
-                .select(IpPoolRange::as_select())
-                .get_result_async::<IpPoolRange>(&*conn)
-                .await,
-        )
-        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
-        .ok_or_else(|| {
-            Error::invalid_request(
-                format!(
-                    "The provided range {}-{} does not exist",
-                    first_address, last_address,
+        let range = dsl::ip_pool_range
+            .filter(dsl::ip_pool_id.eq(pool_id))
+            .filter(dsl::first_address.eq(first_net))
+            .filter(dsl::last_address.eq(last_net))
+            .filter(dsl::time_deleted.is_null())
+            .select(IpPoolRange::as_select())
+            .get_result_async::<IpPoolRange>(&*conn)
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
+            .ok_or_else(|| {
+                Error::invalid_request(
+                    format!(
+                        "The provided range {}-{} does not exist",
+                        first_address, last_address,
+                    )
+                    .as_str(),
                 )
-                .as_str(),
-            )
-        })?;
+            })?;
 
         // Find external IPs allocated out of this pool and range.
         let range_id = range.id;

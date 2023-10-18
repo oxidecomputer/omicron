@@ -9,7 +9,8 @@ pub use crate::zone_bundle::ZoneBundleMetadata;
 pub use illumos_utils::opte::params::VpcFirewallRule;
 pub use illumos_utils::opte::params::VpcFirewallRulesEnsureBody;
 use omicron_common::api::internal::nexus::{
-    DiskRuntimeState, InstanceRuntimeState,
+    DiskRuntimeState, InstanceProperties, InstanceRuntimeState,
+    SledInstanceState, VmmRuntimeState,
 };
 use omicron_common::api::internal::shared::{
     NetworkInterface, SourceNatConfig,
@@ -60,7 +61,7 @@ pub struct DiskEnsureBody {
 /// Describes the instance hardware.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct InstanceHardware {
-    pub runtime: InstanceRuntimeState,
+    pub properties: InstanceProperties,
     pub nics: Vec<NetworkInterface>,
     pub source_nat: SourceNatConfig,
     /// Zero or more external IP addresses (either floating or ephemeral),
@@ -72,12 +73,27 @@ pub struct InstanceHardware {
     pub cloud_init_bytes: Option<String>,
 }
 
-/// The body of a request to ensure that an instance is known to a sled agent.
+/// The body of a request to ensure that a instance and VMM are known to a sled
+/// agent.
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct InstanceEnsureBody {
     /// A description of the instance's virtual hardware and the initial runtime
     /// state this sled agent should store for this incarnation of the instance.
-    pub initial: InstanceHardware,
+    pub hardware: InstanceHardware,
+
+    /// The instance runtime state for the instance being registered.
+    pub instance_runtime: InstanceRuntimeState,
+
+    /// The initial VMM runtime state for the VMM being registered.
+    pub vmm_runtime: VmmRuntimeState,
+
+    /// The ID of the VMM being registered. This may not be the active VMM ID in
+    /// the instance runtime state (e.g. if the new VMM is going to be a
+    /// migration target).
+    pub propolis_id: Uuid,
+
+    /// The address at which this VMM should serve a Propolis server API.
+    pub propolis_addr: SocketAddr,
 }
 
 /// The body of a request to move a previously-ensured instance into a specific
@@ -95,7 +111,7 @@ pub struct InstancePutStateResponse {
     /// The current runtime state of the instance after handling the request to
     /// change its state. If the instance's state did not change, this field is
     /// `None`.
-    pub updated_runtime: Option<InstanceRuntimeState>,
+    pub updated_runtime: Option<SledInstanceState>,
 }
 
 /// The response sent from a request to unregister an instance.
@@ -104,7 +120,7 @@ pub struct InstanceUnregisterResponse {
     /// The current state of the instance after handling the request to
     /// unregister it. If the instance's state did not change, this field is
     /// `None`.
-    pub updated_runtime: Option<InstanceRuntimeState>,
+    pub updated_runtime: Option<SledInstanceState>,
 }
 
 /// Parameters used when directing Propolis to initialize itself via live
@@ -175,8 +191,8 @@ pub struct InstanceMigrationSourceParams {
 /// sled agent's instance state records.
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct InstancePutMigrationIdsBody {
-    /// The last runtime state known to this requestor. This request will
-    /// succeed if either (a) the Propolis generation in the sled agent's
+    /// The last instance runtime state known to this requestor. This request
+    /// will succeed if either (a) the state generation in the sled agent's
     /// runtime state matches the generation in this record, or (b) the sled
     /// agent's runtime state matches what would result from applying this
     /// request to the caller's runtime state. This latter condition provides

@@ -445,8 +445,10 @@ pub(crate) mod test {
         app::saga::create_saga_dag, app::sagas::vpc_create::Params,
         app::sagas::vpc_create::SagaVpcCreate, external_api::params,
     };
-    use async_bb8_diesel::{AsyncRunQueryDsl, OptionalExtension};
-    use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
+    use async_bb8_diesel::AsyncRunQueryDsl;
+    use diesel::{
+        ExpressionMethods, OptionalExtension, QueryDsl, SelectableHelper,
+    };
     use dropshot::test_util::ClientTestContext;
     use nexus_db_queries::{
         authn::saga::Serialized, authz, context::OpContext,

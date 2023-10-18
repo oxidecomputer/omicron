@@ -31,6 +31,7 @@ use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use diesel::result::Error as DieselError;
 use diesel::upsert::excluded;
 use nexus_db_model::DnsGroup;
 use nexus_db_model::DnsZone;
@@ -80,7 +81,7 @@ enum RackInitError {
     AddingNic(Error),
     ServiceInsert(Error),
     DatasetInsert { err: AsyncInsertError, zpool_id: Uuid },
-    RackUpdate { err: async_bb8_diesel::ConnectionError, rack_id: Uuid },
+    RackUpdate { err: DieselError, rack_id: Uuid },
     DnsSerialization(Error),
     Silo(Error),
     RoleAssignment(Error),
@@ -138,7 +139,7 @@ impl From<TxnError> for Error {
                     err
                 ))
             }
-            TxnError::Connection(e) => {
+            TxnError::Database(e) => {
                 Error::internal_error(&format!("Transaction error: {}", e))
             }
         }
@@ -652,7 +653,7 @@ impl DataStore {
             .await
             .map_err(|error: TxnError| match error {
                 TransactionError::CustomError(err) => err,
-                TransactionError::Connection(e) => {
+                TransactionError::Database(e) => {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 }
             })
