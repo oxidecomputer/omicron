@@ -69,17 +69,6 @@ dependencies = [
 
 [[package]]
 name = "ahash"
-version = "0.7.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fcb51a0695d8f838b1ee009b3fbf66bda078cd64590202a864a8f3e8c4315c47"
-dependencies = [
- "getrandom 0.2.10",
- "once_cell",
- "version_check",
-]
-
-[[package]]
-name = "ahash"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2c99f64d1e06488f620f932677e24bc6e2897582980441ae90a671415bd7ec2f"
@@ -3000,9 +2989,6 @@ name = "hashbrown"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a9ee70c43aaf417c914396645a0fa852624801b24ebb7ae78fe8272889ac888"
-dependencies = [
- "ahash 0.7.6",
-]
 
 [[package]]
 name = "hashbrown"
@@ -3010,7 +2996,7 @@ version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "43a3c133739dddd0d2990f9a4bdf8eb4b21ef50e4851ca85ab661199821d510e"
 dependencies = [
- "ahash 0.8.3",
+ "ahash",
 ]
 
 [[package]]
@@ -3019,7 +3005,7 @@ version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2c6201b9ff9fd90a5a3bac2e56a830d0caa509576f0e503818ee82c181b3437a"
 dependencies = [
- "ahash 0.8.3",
+ "ahash",
  "allocator-api2",
 ]
 
@@ -5452,7 +5438,6 @@ dependencies = [
  "futures",
  "futures-channel",
  "futures-core",
- "futures-executor",
  "futures-io",
  "futures-sink",
  "futures-task",
@@ -5460,13 +5445,11 @@ dependencies = [
  "gateway-messages",
  "generic-array",
  "getrandom 0.2.10",
- "hashbrown 0.12.3",
  "hashbrown 0.13.2",
  "hashbrown 0.14.0",
  "hex",
  "hyper",
  "hyper-rustls",
- "indexmap 1.9.3",
  "indexmap 2.0.0",
  "inout",
  "ipnetwork",
@@ -5484,9 +5467,7 @@ dependencies = [
  "num-traits",
  "once_cell",
  "openapiv3",
- "parking_lot 0.12.1",
  "petgraph",
- "phf_shared 0.11.2",
  "postgres-types",
  "ppv-lite86",
  "predicates 3.0.4",
@@ -5497,7 +5478,6 @@ dependencies = [
  "regex-syntax 0.7.5",
  "reqwest",
  "ring",
- "rustix 0.37.23",
  "rustix 0.38.9",
  "schemars",
  "semver 1.0.18",
@@ -5522,7 +5502,6 @@ dependencies = [
  "toml_datetime",
  "toml_edit 0.19.15",
  "tracing",
- "tracing-core",
  "trust-dns-proto",
  "unicode-bidi",
  "unicode-normalization",
@@ -9300,7 +9279,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0955b8137a1df6f1a2e9a37d8a6656291ff0297c1a97c24e0d8425fe2312f79a"
 dependencies = [
  "once_cell",
- "valuable",
 ]
 
 [[package]]
@@ -9788,12 +9766,6 @@ dependencies = [
  "getrandom 0.2.10",
  "serde",
 ]
-
-[[package]]
-name = "valuable"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "830b7e5d4d90034032940e4ace0d9a9a057e7a45cd94e6c007832e39edb82f6d"
 
 [[package]]
 name = "vcpkg"
