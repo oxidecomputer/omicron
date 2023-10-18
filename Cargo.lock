@@ -4464,6 +4464,7 @@ dependencies = [
  "serde_with",
  "sled-agent-client",
  "slog",
+ "static_assertions",
  "steno",
  "strum",
  "subprocess",
