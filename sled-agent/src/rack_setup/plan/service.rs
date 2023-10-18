@@ -10,7 +10,7 @@ use crate::params::{
     ServiceZoneService, ZoneType,
 };
 use crate::rack_setup::config::SetupServiceConfig as Config;
-use crate::storage::dataset::DatasetName;
+use crate::storage::dataset::{DatasetArcPrimaryCache, DatasetName};
 use crate::storage_manager::StorageResources;
 use camino::Utf8PathBuf;
 use dns_service_client::types::DnsConfigParams;
@@ -342,6 +342,7 @@ impl Plan {
                     id,
                     name: dataset_name,
                     service_address: http_address,
+                    arc_primary_cache: DatasetArcPrimaryCache::Inherit,
                 }),
                 services: vec![ServiceZoneService {
                     id,
@@ -380,6 +381,7 @@ impl Plan {
                     id,
                     name: dataset_name,
                     service_address: address,
+                    arc_primary_cache: DatasetArcPrimaryCache::Inherit,
                 }),
                 services: vec![ServiceZoneService {
                     id,
@@ -427,6 +429,7 @@ impl Plan {
                     id,
                     name: dataset_name,
                     service_address: http_address,
+                    arc_primary_cache: DatasetArcPrimaryCache::Inherit,
                 }),
                 services: vec![ServiceZoneService {
                     id,
@@ -549,6 +552,7 @@ impl Plan {
                     id,
                     name: dataset_name,
                     service_address: address,
+                    arc_primary_cache: DatasetArcPrimaryCache::Inherit,
                 }),
                 services: vec![ServiceZoneService {
                     id,
@@ -589,6 +593,7 @@ impl Plan {
                     id,
                     name: dataset_name,
                     service_address: address,
+                    arc_primary_cache: DatasetArcPrimaryCache::Inherit,
                 }),
                 services: vec![ServiceZoneService {
                     id,
@@ -654,6 +659,7 @@ impl Plan {
                             DatasetKind::Crucible,
                         ),
                         service_address: address,
+                        arc_primary_cache: DatasetArcPrimaryCache::Metadata,
                     }),
                     services: vec![ServiceZoneService {
                         id,

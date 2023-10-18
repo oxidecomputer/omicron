@@ -530,6 +530,7 @@ impl Disk {
                 Some(encryption_details),
                 None,
                 None,
+                None,
             );
 
             keyfile.zero_and_unlink().await.map_err(|error| {
@@ -594,6 +595,7 @@ impl Disk {
                 do_format,
                 encryption_details,
                 size_details,
+                None,
                 None,
             )?;
 

@@ -736,7 +736,11 @@ impl SledAgent {
             // First, ensure the dataset exists
             self.inner
                 .storage
-                .upsert_filesystem(dataset.id, dataset.name.clone())
+                .upsert_filesystem(
+                    dataset.id,
+                    dataset.name.clone(),
+                    dataset.arc_primary_cache.clone(),
+                )
                 .await?;
         }
 

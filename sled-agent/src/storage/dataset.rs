@@ -48,6 +48,31 @@ impl From<DatasetName> for sled_agent_client::types::DatasetName {
     }
 }
 
+/// What data should be kept in the primary ARC cache?
+#[derive(
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum DatasetArcPrimaryCache {
+    Inherit,
+    All,
+    Metadata,
+    NoCache,
+}
+
+impl From<DatasetArcPrimaryCache>
+    for sled_agent_client::types::DatasetArcPrimaryCache
+{
+    fn from(d: DatasetArcPrimaryCache) -> Self {
+        match d {
+            DatasetArcPrimaryCache::Inherit => Self::Inherit,
+            DatasetArcPrimaryCache::All => Self::All,
+            DatasetArcPrimaryCache::Metadata => Self::Metadata,
+            DatasetArcPrimaryCache::NoCache => Self::NoCache,
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;

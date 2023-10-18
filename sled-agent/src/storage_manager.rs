@@ -5,6 +5,7 @@
 //! Management of sled-local storage.
 
 use crate::nexus::NexusClientWithResolver;
+use crate::storage::dataset::DatasetArcPrimaryCache;
 use crate::storage::dataset::DatasetName;
 use crate::storage::dump_setup::DumpSetup;
 use crate::zone_bundle::ZoneBundler;
@@ -13,6 +14,7 @@ use derive_more::From;
 use futures::stream::FuturesOrdered;
 use futures::FutureExt;
 use futures::StreamExt;
+use illumos_utils::zfs::ArcPrimaryCacheDetails;
 use illumos_utils::zpool::{ZpoolKind, ZpoolName};
 use illumos_utils::{zfs::Mountpoint, zpool::ZpoolInfo};
 use key_manager::StorageKeyRequester;
@@ -171,6 +173,7 @@ type NotifyFut =
 struct NewFilesystemRequest {
     dataset_id: Uuid,
     dataset_name: DatasetName,
+    dataset_arc_primary_cache: DatasetArcPrimaryCache,
     responder: oneshot::Sender<Result<DatasetName, Error>>,
 }
 
@@ -404,12 +407,21 @@ impl StorageWorker {
         &mut self,
         dataset_id: Uuid,
         dataset_name: &DatasetName,
+        dataset_arc_primary_cache: &DatasetArcPrimaryCache,
     ) -> Result<(), Error> {
         let zoned = true;
         let fs_name = &dataset_name.full();
         let do_format = true;
         let encryption_details = None;
         let size_details = None;
+        let arc_primary_cache_details = match dataset_arc_primary_cache {
+            DatasetArcPrimaryCache::Inherit => ArcPrimaryCacheDetails::Inherit,
+            DatasetArcPrimaryCache::All => ArcPrimaryCacheDetails::All,
+            DatasetArcPrimaryCache::Metadata => {
+                ArcPrimaryCacheDetails::Metadata
+            }
+            DatasetArcPrimaryCache::NoCache => ArcPrimaryCacheDetails::NoCache,
+        };
         Zfs::ensure_filesystem(
             &dataset_name.full(),
             Mountpoint::Path(Utf8PathBuf::from("/data")),
@@ -417,6 +429,7 @@ impl StorageWorker {
             do_format,
             encryption_details,
             size_details,
+            Some(arc_primary_cache_details),
             None,
         )?;
         // Ensure the dataset has a usable UUID.
@@ -1016,7 +1029,11 @@ impl StorageWorker {
             pool.name.clone(),
             request.dataset_name.dataset().clone(),
         );
-        self.ensure_dataset(request.dataset_id, &dataset_name)?;
+        self.ensure_dataset(
+            request.dataset_id,
+            &dataset_name,
+            &request.dataset_arc_primary_cache,
+        )?;
         Ok(dataset_name)
     }
 
@@ -1384,10 +1401,15 @@ impl StorageManager {
         &self,
         dataset_id: Uuid,
         dataset_name: DatasetName,
+        dataset_arc_primary_cache: DatasetArcPrimaryCache,
     ) -> Result<DatasetName, Error> {
         let (tx, rx) = oneshot::channel();
-        let request =
-            NewFilesystemRequest { dataset_id, dataset_name, responder: tx };
+        let request = NewFilesystemRequest {
+            dataset_id,
+            dataset_name,
+            dataset_arc_primary_cache,
+            responder: tx,
+        };
 
         self.inner
             .tx

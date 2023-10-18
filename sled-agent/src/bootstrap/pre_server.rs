@@ -382,6 +382,7 @@ fn ensure_zfs_ramdisk_dataset() -> Result<(), StartError> {
         encryption_details,
         quota,
         None,
+        None,
     )
     .map_err(StartError::EnsureZfsRamdiskDataset)
 }

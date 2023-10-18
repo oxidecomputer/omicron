@@ -595,6 +595,7 @@ pub struct DatasetRequest {
     pub id: Uuid,
     pub name: crate::storage::dataset::DatasetName,
     pub service_address: SocketAddrV6,
+    pub arc_primary_cache: crate::storage::dataset::DatasetArcPrimaryCache,
 }
 
 impl From<DatasetRequest> for sled_agent_client::types::DatasetRequest {
@@ -603,6 +604,7 @@ impl From<DatasetRequest> for sled_agent_client::types::DatasetRequest {
             id: d.id,
             name: d.name.into(),
             service_address: d.service_address.to_string(),
+            arc_primary_cache: d.arc_primary_cache.into(),
         }
     }
 }

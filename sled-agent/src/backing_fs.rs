@@ -133,6 +133,7 @@ pub(crate) fn ensure_backing_fs(
             true,  // do_format
             None,  // encryption_details,
             size_details,
+            None,
             Some(vec!["canmount=noauto".to_string()]), // options
         )?;
 

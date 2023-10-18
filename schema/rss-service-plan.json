@@ -18,6 +18,16 @@
     }
   },
   "definitions": {
+    "DatasetArcPrimaryCache": {
+      "description": "What data should be kept in the primary ARC cache?",
+      "type": "string",
+      "enum": [
+        "inherit",
+        "all",
+        "metadata",
+        "no_cache"
+      ]
+    },
     "DatasetKind": {
       "description": "The type of a dataset, and an auxiliary information necessary to successfully launch a zone managing the associated data.",
       "oneOf": [
@@ -126,11 +136,15 @@
       "description": "Describes a request to provision a specific dataset",
       "type": "object",
       "required": [
+        "arc_primary_cache",
         "id",
         "name",
         "service_address"
       ],
       "properties": {
+        "arc_primary_cache": {
+          "$ref": "#/definitions/DatasetArcPrimaryCache"
+        },
         "id": {
           "type": "string",
           "format": "uuid"

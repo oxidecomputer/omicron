@@ -1046,6 +1046,16 @@
           "target"
         ]
       },
+      "DatasetArcPrimaryCache": {
+        "description": "What data should be kept in the primary ARC cache?",
+        "type": "string",
+        "enum": [
+          "inherit",
+          "all",
+          "metadata",
+          "no_cache"
+        ]
+      },
       "DatasetKind": {
         "description": "The type of a dataset, and an auxiliary information necessary to successfully launch a zone managing the associated data.",
         "oneOf": [
@@ -1150,71 +1160,13 @@
           "pool_name"
         ]
       },
-      "DatasetArcPrimaryCache": {
-        "description": "What data the dataset should cache in ARC.",
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "default"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "all"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "metadata"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "none"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-        ]
-      },
       "DatasetRequest": {
         "description": "Describes a request to provision a specific dataset",
         "type": "object",
         "properties": {
+          "arc_primary_cache": {
+            "$ref": "#/components/schemas/DatasetArcPrimaryCache"
+          },
           "id": {
             "type": "string",
             "format": "uuid"
@@ -1224,12 +1176,10 @@
           },
           "service_address": {
             "type": "string"
-          },
-          "arc_primary_cache": {
-            "$ref": "#/components/schemas/DatasetArcPrimaryCache"
           }
         },
         "required": [
+          "arc_primary_cache",
           "id",
           "name",
           "service_address"

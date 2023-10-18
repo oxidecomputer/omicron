@@ -90,6 +90,15 @@ pub struct SetValueError {
     err: crate::ExecutionError,
 }
 
+/// Error returned by [`Zfs::inherit_oxide_value`]
+#[derive(thiserror::Error, Debug)]
+#[error("Failed to inherit value '{name}' on filesystem {filesystem}: {err}")]
+pub struct InheritValueError {
+    filesystem: String,
+    name: String,
+    err: crate::ExecutionError,
+}
+
 #[derive(thiserror::Error, Debug)]
 enum GetValueErrorRaw {
     #[error(transparent)]
@@ -183,6 +192,26 @@ pub struct SizeDetails {
     pub compression: Option<&'static str>,
 }
 
+#[derive(Debug, Default)]
+pub enum ArcPrimaryCacheDetails {
+    #[default]
+    Inherit,
+    All,
+    Metadata,
+    NoCache,
+}
+
+impl ArcPrimaryCacheDetails {
+    fn zfs_value(&self) -> Option<&'static str> {
+        match self {
+            ArcPrimaryCacheDetails::Inherit => None,
+            ArcPrimaryCacheDetails::All => Some("all"),
+            ArcPrimaryCacheDetails::Metadata => Some("metadata"),
+            ArcPrimaryCacheDetails::NoCache => Some("none"),
+        }
+    }
+}
+
 #[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
 impl Zfs {
     /// Lists all datasets within a pool or existing dataset.
@@ -247,6 +276,7 @@ impl Zfs {
         do_format: bool,
         encryption_details: Option<EncryptionDetails>,
         size_details: Option<SizeDetails>,
+        arc_primary_cache_details: Option<ArcPrimaryCacheDetails>,
         additional_options: Option<Vec<String>>,
     ) -> Result<(), EnsureFilesystemError> {
         let (exists, mounted) = Self::dataset_exists(name, &mountpoint)?;
@@ -255,6 +285,16 @@ impl Zfs {
                 // apply quota and compression mode (in case they've changed across
                 // sled-agent versions since creation)
                 Self::apply_properties(name, &mountpoint, quota, compression)?;
+            }
+
+            // Apply primary arc cache mode (in case they've changed across
+            // sled-agent versions since creation)
+            if let Some(arc_primary_cache_details) = arc_primary_cache_details {
+                Self::apply_arc_primary_cache(
+                    name,
+                    &mountpoint,
+                    arc_primary_cache_details,
+                )?;
             }
 
             if encryption_details.is_none() {
@@ -319,6 +359,14 @@ impl Zfs {
             Self::apply_properties(name, &mountpoint, quota, compression)?;
         }
 
+        if let Some(arc_primary_cache_details) = arc_primary_cache_details {
+            Self::apply_arc_primary_cache(
+                name,
+                &mountpoint,
+                arc_primary_cache_details,
+            )?;
+        }
+
         Ok(())
     }
 
@@ -352,6 +400,30 @@ impl Zfs {
             }
         }
         Ok(())
+    }
+
+    fn apply_arc_primary_cache(
+        name: &str,
+        mountpoint: &Mountpoint,
+        arc_primary_cache_details: ArcPrimaryCacheDetails,
+    ) -> Result<(), EnsureFilesystemError> {
+        if let Some(arc_val) = arc_primary_cache_details.zfs_value() {
+            Self::set_value(name, "primarycache", arc_val).map_err(|err| {
+                EnsureFilesystemError {
+                    name: name.to_string(),
+                    mountpoint: mountpoint.clone(),
+                    err: err.err.into(),
+                }
+            })
+        } else {
+            Self::inherit_value(name, "primarycache").map_err(|err| {
+                EnsureFilesystemError {
+                    name: name.to_string(),
+                    mountpoint: mountpoint.clone(),
+                    err: err.err.into(),
+                }
+            })
+        }
     }
 
     fn mount_encrypted_dataset(
@@ -434,6 +506,28 @@ impl Zfs {
             filesystem: filesystem_name.to_string(),
             name: name.to_string(),
             value: value.to_string(),
+            err,
+        })?;
+        Ok(())
+    }
+
+    /// Inherit the value of an Oxide-managed ZFS property from parent dataset
+    pub fn inherit_oxide_value(
+        filesystem_name: &str,
+        name: &str,
+    ) -> Result<(), InheritValueError> {
+        Zfs::inherit_value(filesystem_name, &format!("oxide:{}", name))
+    }
+
+    fn inherit_value(
+        filesystem_name: &str,
+        name: &str,
+    ) -> Result<(), InheritValueError> {
+        let mut command = std::process::Command::new(PFEXEC);
+        let cmd = command.args(&[ZFS, "inherit", &name, filesystem_name]);
+        execute(cmd).map_err(|err| InheritValueError {
+            filesystem: filesystem_name.to_string(),
+            name: name.to_string(),
             err,
         })?;
         Ok(())
