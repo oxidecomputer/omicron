@@ -282,33 +282,21 @@ async fn test_ip_pool_with_silo(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     // can create a pool with an existing silo by name
-    let params = IpPoolCreate {
-        identity: IdentityMetadataCreateParams {
-            name: String::from("p0").parse().unwrap(),
-            description: String::from(""),
-        },
-        // silo: Some(NameOrId::Name(cptestctx.silo_name.clone())),
-        // is_default: false,
-    };
-    let _created_pool = create_pool(client, &params).await;
+    // TODO: confirm association post works with existing silo ID
+    // silo: Some(NameOrId::Name(cptestctx.silo_name.clone())),
+    // is_default: false,
+    let _created_pool = create_pool(client, "p0").await;
 
     // let silo_id =
     //     created_pool.silo_id.expect("Expected pool to have a silo_id");
 
     // now we'll create another IP pool using that silo ID
-    let params = IpPoolCreate {
-        identity: IdentityMetadataCreateParams {
-            name: String::from("p1").parse().unwrap(),
-            description: String::from(""),
-        },
-        // silo: Some(NameOrId::Id(silo_id)),
-        // is_default: false,
-    };
-    let _created_pool = create_pool(client, &params).await;
+    let _created_pool = create_pool(client, "p1").await;
     // assert_eq!(created_pool.silo_id.unwrap(), silo_id);
+    // TODO: confirm a second pool can be assocatied with the same silo ID
 
-    let nonexistent_silo_id = Uuid::new_v4();
     // expect 404 on association if the specified silo doesn't exist
+    let nonexistent_silo_id = Uuid::new_v4();
     let params = params::IpPoolResource {
         resource_id: nonexistent_silo_id,
         resource_type: params::IpPoolResourceType::Silo,
@@ -336,11 +324,57 @@ async fn test_ip_pool_with_silo(cptestctx: &ControlPlaneTestContext) {
     );
 }
 
-async fn create_pool(
-    client: &ClientTestContext,
-    params: &IpPoolCreate,
-) -> IpPool {
-    NexusRequest::objects_post(client, "/v1/system/ip-pools", params)
+// IP pool list fetch logic includes a join to ip_pool_resource, which is
+// unusual, so we want to make sure pagination logic still works
+#[nexus_test]
+async fn test_ip_pool_pagination(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let base_url = "/v1/system/ip-pools";
+    let first_page = objects_list_page_authz::<IpPool>(client, &base_url).await;
+
+    // we start out with one pool, and it's the default pool
+    assert_eq!(first_page.items.len(), 1);
+    assert_eq!(first_page.items[0].identity.name, "default");
+
+    let mut pool_names = vec!["default".to_string()];
+
+    // create more pools to work with, adding their names to the list so we
+    // can use it to check order
+    for i in 1..=8 {
+        let name = format!("other-pool-{}", i);
+        pool_names.push(name.clone());
+        create_pool(client, &name).await;
+    }
+
+    let first_five_url = format!("{}?limit=5", base_url);
+    let first_five =
+        objects_list_page_authz::<IpPool>(client, &first_five_url).await;
+    assert!(first_five.next_page.is_some());
+    assert_eq!(get_names(first_five.items), &pool_names[0..5]);
+
+    let next_page_url = format!(
+        "{}?limit=5&page_token={}",
+        base_url,
+        first_five.next_page.unwrap()
+    );
+    let next_page =
+        objects_list_page_authz::<IpPool>(client, &next_page_url).await;
+    assert_eq!(get_names(next_page.items), &pool_names[5..9]);
+}
+
+/// helper to make tests less ugly
+fn get_names(pools: Vec<IpPool>) -> Vec<String> {
+    pools.iter().map(|p| p.identity.name.to_string()).collect()
+}
+
+async fn create_pool(client: &ClientTestContext, name: &str) -> IpPool {
+    let params = IpPoolCreate {
+        identity: IdentityMetadataCreateParams {
+            name: Name::try_from(name.to_string()).unwrap(),
+            description: "".to_string(),
+        },
+    };
+    NexusRequest::objects_post(client, "/v1/system/ip-pools", &params)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
