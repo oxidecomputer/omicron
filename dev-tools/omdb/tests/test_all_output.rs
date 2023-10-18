@@ -37,10 +37,13 @@ async fn test_omdb_usage_errors() {
         // Command help output
         &["db"],
         &["db", "--help"],
+        &["db", "disks"],
         &["db", "dns"],
         &["db", "dns", "diff"],
         &["db", "dns", "names"],
+        &["db", "instances"],
         &["db", "services"],
+        &["db", "snapshots"],
         &["db", "network"],
         &["mgs"],
         &["nexus"],
@@ -71,9 +74,11 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
     let mgs_url = format!("http://{}/", gwtestctx.client.bind_address);
     let mut output = String::new();
     let invocations: &[&[&'static str]] = &[
+        &["db", "disks", "list"],
         &["db", "dns", "show"],
         &["db", "dns", "diff", "external", "2"],
         &["db", "dns", "names", "external", "2"],
+        &["db", "instances"],
         &["db", "services", "list-instances"],
         &["db", "services", "list-by-sled"],
         &["db", "sleds"],

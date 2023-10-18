@@ -1,3 +1,13 @@
+EXECUTING COMMAND: omdb ["db", "disks", "list"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+NAME ID SIZE STATE ATTACHED_TO 
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (7.0.0)
+=============================================
 EXECUTING COMMAND: omdb ["db", "dns", "show"]
 termination: Exited(0)
 ---------------------------------------------
@@ -33,6 +43,16 @@ stdout:
 External zone: oxide-dev.test
   NAME                                               RECORDS
   test-suite-silo.sys                                A    127.0.0.1
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (7.0.0)
+=============================================
+EXECUTING COMMAND: omdb ["db", "instances"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+ID NAME STATE PROPOLIS_ID SLED_ID HOST_SERIAL 
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable

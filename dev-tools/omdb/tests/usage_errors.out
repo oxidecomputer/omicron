@@ -96,6 +96,7 @@ Commands:
   sleds      Print information about sleds
   instances  Print information about customer instances
   network    Print information about the network
+  snapshots  Print information about snapshots
   help       Print this message or the help of the given subcommand(s)
 
 Options:
@@ -118,6 +119,7 @@ Commands:
   sleds      Print information about sleds
   instances  Print information about customer instances
   network    Print information about the network
+  snapshots  Print information about snapshots
   help       Print this message or the help of the given subcommand(s)
 
 Options:
@@ -126,6 +128,25 @@ Options:
   -h, --help                       Print help
 ---------------------------------------------
 stderr:
+=============================================
+EXECUTING COMMAND: omdb ["db", "disks"]
+termination: Exited(2)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+Print information about disks
+
+Usage: omdb db disks <COMMAND>
+
+Commands:
+  info      Get info for a specific disk
+  list      Summarize current disks
+  physical  Determine what crucible resources are on the given physical disk
+  help      Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help
 =============================================
 EXECUTING COMMAND: omdb ["db", "dns"]
 termination: Exited(2)
@@ -174,6 +195,21 @@ Usage: omdb db dns names <GROUP> <VERSION>
 
 For more information, try '--help'.
 =============================================
+EXECUTING COMMAND: omdb ["db", "instances"]
+termination: Exited(1)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+note: database URL not specified.  Will search DNS.
+note: (override with --db-url or OMDB_DB_URL)
+note: using DNS server for subnet fd00:1122:3344::/48
+note: (if this is not right, use --dns-server to specify an alternate DNS server)
+Error: looking up Cockroach in DNS
+
+Caused by:
+    proto error: io error: No route to host (os error 148)
+=============================================
 EXECUTING COMMAND: omdb ["db", "services"]
 termination: Exited(2)
 ---------------------------------------------
@@ -188,6 +224,24 @@ Commands:
   list-instances  List service instances
   list-by-sled    List service instances, grouped by sled
   help            Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help
+=============================================
+EXECUTING COMMAND: omdb ["db", "snapshots"]
+termination: Exited(2)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+Print information about snapshots
+
+Usage: omdb db snapshots <COMMAND>
+
+Commands:
+  info  Get info for a specific snapshot
+  list  Summarize current snapshots
+  help  Print this message or the help of the given subcommand(s)
 
 Options:
   -h, --help  Print help
