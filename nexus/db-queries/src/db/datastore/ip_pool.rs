@@ -64,11 +64,7 @@ impl DataStore {
                 &pagparams.map_name(|n| Name::ref_cast(n)),
             ),
         }
-        // TODO: make sure this join is compatible with pagination logic
         .left_outer_join(ip_pool_resource::table)
-        // TODO: this filter is so unwieldy and confusing (see all the checks
-        // at the nexus layer too)  that it makes me want to just put a boolean
-        // internal column on the ip_pool table
         .filter(
             ip_pool_resource::resource_id
                 .ne(*INTERNAL_SILO_ID)
@@ -235,11 +231,6 @@ impl DataStore {
         // in between the above check for children and this query.
         let now = Utc::now();
         let updated_rows = diesel::update(dsl::ip_pool)
-            // != excludes nulls so we explicitly include them
-            // TODO:
-            // .filter(
-            //     dsl::silo_id.ne(*INTERNAL_SILO_ID).or(dsl::silo_id.is_null()),
-            // )
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(authz_pool.id()))
             .filter(dsl::rcgen.eq(db_pool.rcgen))
@@ -262,6 +253,41 @@ impl DataStore {
         Ok(())
     }
 
+    /// Check whether the pool is internal by checking that it exists and is
+    /// associated with the internal silo
+    pub async fn ip_pool_is_internal(
+        &self,
+        opctx: &OpContext,
+        authz_pool: &authz::IpPool,
+    ) -> LookupResult<bool> {
+        use db::schema::ip_pool;
+        use db::schema::ip_pool_resource;
+
+        let result = ip_pool::table
+            .inner_join(ip_pool_resource::table)
+            .filter(ip_pool::id.eq(authz_pool.id()))
+            .filter(
+                ip_pool_resource::resource_type
+                    .eq(IpPoolResourceType::Silo)
+                    .and(ip_pool_resource::resource_id.eq(*INTERNAL_SILO_ID)),
+            )
+            .filter(ip_pool::time_deleted.is_null())
+            // TODO: order by most specific first so we get the most specific
+            // when we select the first one. alphabetical desc technically
+            // works but come on. won't work when we have project association
+            .order(ip_pool_resource::resource_type.desc())
+            .select(IpPool::as_select())
+            .load_async::<IpPool>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        // if there is a result, the pool is associated with the internal silo,
+        // which makes it the internal pool
+        Ok(result.len() > 0)
+    }
+
     pub async fn ip_pool_update(
         &self,
         opctx: &OpContext,
@@ -270,12 +296,8 @@ impl DataStore {
     ) -> UpdateResult<IpPool> {
         use db::schema::ip_pool::dsl;
         opctx.authorize(authz::Action::Modify, authz_pool).await?;
+
         diesel::update(dsl::ip_pool)
-            // != excludes nulls so we explicitly include them
-            // TODO: exclude internal pool the right way
-            // .filter(
-            //     dsl::silo_id.ne(*INTERNAL_SILO_ID).or(dsl::silo_id.is_null()),
-            // )
             .filter(dsl::id.eq(authz_pool.id()))
             .filter(dsl::time_deleted.is_null())
             .set(updates)

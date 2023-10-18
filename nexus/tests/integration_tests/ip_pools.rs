@@ -8,6 +8,7 @@ use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use http::method::Method;
 use http::StatusCode;
+use nexus_db_queries::db::datastore::SERVICE_IP_POOL_NAME;
 use nexus_db_queries::db::fixed_data::FLEET_ID;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
@@ -275,6 +276,68 @@ async fn test_ip_pool_basic_crud(cptestctx: &ControlPlaneTestContext) {
         .execute()
         .await
         .expect("Expected to be able to delete an empty IP Pool");
+}
+
+/// The internal IP pool, defined by its association with the internal silo,
+/// cannot be interacted with through the operator API. CRUD operations should
+/// all 404 except fetch by name or ID.
+#[nexus_test]
+async fn test_ip_pool_service_no_cud(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+
+    let internal_pool_name_url =
+        format!("/v1/system/ip-pools/{}", (*SERVICE_IP_POOL_NAME).to_string());
+
+    // we can fetch the service pool by name or ID
+    let pool = NexusRequest::object_get(client, &internal_pool_name_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<IpPool>()
+        .await;
+
+    let internal_pool_id_url =
+        format!("/v1/system/ip-pools/{}", pool.identity.id);
+    let pool = NexusRequest::object_get(client, &internal_pool_id_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<IpPool>()
+        .await;
+
+    // but it does not come back in the list. there's one in there and it's the default
+    let pools =
+        objects_list_page_authz::<IpPool>(client, "/v1/system/ip-pools").await;
+    assert_eq!(pools.items.len(), 1);
+    assert_ne!(pools.items[0].identity.id, pool.identity.id);
+
+    // deletes fail
+
+    let error = NexusRequest::expect_failure(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::DELETE,
+        &internal_pool_name_url,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap::<HttpErrorResponseBody>()
+    .await;
+    assert_eq!(
+        error.message,
+        "not found: ip-pool with name \"oxide-service-pool\""
+    );
+
+    let error = NexusRequest::expect_failure(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::DELETE,
+        &internal_pool_id_url,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap::<HttpErrorResponseBody>()
+    .await;
+    assert_eq!(
+        error.message,
+        format!("not found: ip-pool with id \"{}\"", pool.identity.id)
+    );
+
+    // TODO: update, assoc, dissoc, add/remove range by name or ID should all fail
 }
 
 #[nexus_test]
@@ -832,13 +895,10 @@ async fn test_ip_pool_list_usable_by_project(
             "{}/{}?project={}",
             scoped_ip_pools_url, pool_name, PROJECT_NAME
         );
-        let pool: IpPool = NexusRequest::object_get(client, &view_pool_url)
+        let pool = NexusRequest::object_get(client, &view_pool_url)
             .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .unwrap()
-            .parsed_body()
-            .unwrap();
+            .execute_and_parse_unwrap::<IpPool>()
+            .await;
         assert_eq!(pool.identity.name.as_str(), pool_name.as_str());
     }
 

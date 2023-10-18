@@ -1248,6 +1248,8 @@ async fn ip_pool_view(
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let nexus = &apictx.nexus;
         let pool_selector = path_params.into_inner().pool;
+        // We do not prevent the service pool from being fetched by name or ID
+        // like we do for update, delete, associate.
         let (.., pool) =
             nexus.ip_pool_lookup(&opctx, &pool_selector)?.fetch().await?;
         Ok(HttpResponseOk(IpPool::from(pool)))
