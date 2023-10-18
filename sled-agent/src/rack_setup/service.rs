@@ -576,7 +576,7 @@ impl ServiceInner {
 
         let rack_network_config = match &config.rack_network_config {
             Some(config) => {
-                let value = NexusTypes::RackNetworkConfigV1 {
+                let value = NexusTypes::RackNetworkConfig {
                     rack_subnet: config.rack_subnet,
                     infra_ip_first: config.infra_ip_first,
                     infra_ip_last: config.infra_ip_last,
