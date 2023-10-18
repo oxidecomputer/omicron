@@ -48,6 +48,16 @@ pub const CRUCIBLE_PANTRY_PORT: u16 = 17000;
 
 pub const NEXUS_INTERNAL_PORT: u16 = 12221;
 
+/// The port on which Nexus exposes its external API on the underlay network.
+///
+/// This is used by the `wicketd` Nexus proxy to allow external API access via
+/// the rack's tech port.
+pub const NEXUS_TECHPORT_EXTERNAL_PORT: u16 = 12228;
+
+/// The port on which `wicketd` runs a Nexus external API proxy on the tech port
+/// interface(s).
+pub const WICKETD_NEXUS_PROXY_PORT: u16 = 12229;
+
 pub const NTP_PORT: u16 = 123;
 
 // The number of ports available to an SNAT IP.

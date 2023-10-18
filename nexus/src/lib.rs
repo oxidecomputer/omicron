@@ -26,6 +26,7 @@ pub use app::test_interfaces::TestInterfaces;
 pub use app::Nexus;
 pub use config::Config;
 use context::ServerContext;
+use dropshot::ConfigDropshot;
 use external_api::http_entrypoints::external_api;
 use internal_api::http_entrypoints::internal_api;
 use nexus_types::internal_api::params::ServiceKind;
@@ -131,6 +132,23 @@ impl Server {
             .nexus
             .external_tls_config(config.deployment.dropshot_external.tls)
             .await;
+
+        // We launch two dropshot servers providing the external API: one as
+        // configured (which is accessible from the customer network), and one
+        // that matches the configuration except listens on the same address
+        // (but a different port) as the `internal` server. The latter is
+        // available for proxied connections via the tech port in the event the
+        // rack has lost connectivity (see RFD 431).
+        let techport_server_bind_addr = {
+            let mut addr = http_server_internal.local_addr();
+            addr.set_port(config.deployment.techport_external_server_port);
+            addr
+        };
+        let techport_server_config = ConfigDropshot {
+            bind_address: techport_server_bind_addr,
+            ..config.deployment.dropshot_external.dropshot.clone()
+        };
+
         let http_server_external = {
             let server_starter_external =
                 dropshot::HttpServerStarter::new_with_tls(
@@ -138,16 +156,35 @@ impl Server {
                     external_api(),
                     Arc::clone(&apictx),
                     &log.new(o!("component" => "dropshot_external")),
-                    tls_config.map(dropshot::ConfigTls::Dynamic),
+                    tls_config.clone().map(dropshot::ConfigTls::Dynamic),
                 )
                 .map_err(|error| {
                     format!("initializing external server: {}", error)
                 })?;
             server_starter_external.start()
         };
+        let http_server_techport_external = {
+            let server_starter_external_techport =
+                dropshot::HttpServerStarter::new_with_tls(
+                    &techport_server_config,
+                    external_api(),
+                    Arc::clone(&apictx),
+                    &log.new(o!("component" => "dropshot_external_techport")),
+                    tls_config.map(dropshot::ConfigTls::Dynamic),
+                )
+                .map_err(|error| {
+                    format!("initializing external techport server: {}", error)
+                })?;
+            server_starter_external_techport.start()
+        };
+
         apictx
             .nexus
-            .set_servers(http_server_external, http_server_internal)
+            .set_servers(
+                http_server_external,
+                http_server_techport_external,
+                http_server_internal,
+            )
             .await;
         let server = Server { apictx: apictx.clone() };
         Ok(server)

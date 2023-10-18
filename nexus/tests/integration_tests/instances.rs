@@ -3611,10 +3611,11 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
 
     // Create an instance using the authorization granted to the collaborator
     // Silo User.
+    let instance_name = "collaborate-with-me";
     let instance_params = params::InstanceCreate {
         identity: IdentityMetadataCreateParams {
-            name: Name::try_from(String::from("ip-pool-test")).unwrap(),
-            description: String::from("instance to test IP Pool authz"),
+            name: Name::try_from(String::from(instance_name)).unwrap(),
+            description: String::from("instance to test creation in a silo"),
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_gibibytes_u32(4),
@@ -3635,6 +3636,34 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
         .expect("Failed to create instance")
         .parsed_body::<Instance>()
         .expect("Failed to parse instance");
+
+    // Make sure the instance can actually start even though a collaborator
+    // created it.
+    let apictx = &cptestctx.server.apictx();
+    let nexus = &apictx.nexus;
+    let authn = AuthnMode::SiloUser(user_id);
+    let instance_url = get_instance_url(instance_name);
+    let instance = instance_get_as(&client, &instance_url, authn.clone()).await;
+    info!(&cptestctx.logctx.log, "test got instance"; "instance" => ?instance);
+    assert_eq!(instance.runtime.run_state, InstanceState::Starting);
+
+    // The default instance simulation function uses a test user that, while
+    // privileged, only has access to the default silo. Synthesize an operation
+    // context that grants access to the silo under test.
+    let opctx = OpContext::for_background(
+        cptestctx.logctx.log.new(o!()),
+        Arc::new(nexus_db_queries::authz::Authz::new(&cptestctx.logctx.log)),
+        nexus_db_queries::authn::Context::for_test_user(
+            user_id,
+            silo.identity.id,
+            nexus_db_queries::authn::SiloAuthnPolicy::try_from(&*DEFAULT_SILO)
+                .unwrap(),
+        ),
+        nexus.datastore().clone(),
+    );
+    instance_simulate_with_opctx(nexus, &instance.identity.id, &opctx).await;
+    let instance = instance_get_as(&client, &instance_url, authn).await;
+    assert_eq!(instance.runtime.run_state, InstanceState::Running);
 }
 
 /// Test that appropriate OPTE V2P mappings are created and deleted.
@@ -3753,8 +3782,16 @@ async fn instance_get(
     client: &ClientTestContext,
     instance_url: &str,
 ) -> Instance {
+    instance_get_as(client, instance_url, AuthnMode::PrivilegedUser).await
+}
+
+async fn instance_get_as(
+    client: &ClientTestContext,
+    instance_url: &str,
+    authn_as: AuthnMode,
+) -> Instance {
     NexusRequest::object_get(client, instance_url)
-        .authn_as(AuthnMode::PrivilegedUser)
+        .authn_as(authn_as)
         .execute()
         .await
         .unwrap()
@@ -3851,6 +3888,19 @@ async fn assert_sled_v2p_mappings(
 pub async fn instance_simulate(nexus: &Arc<Nexus>, id: &Uuid) {
     let sa = nexus
         .instance_sled_by_id(id)
+        .await
+        .unwrap()
+        .expect("instance must be on a sled to simulate a state change");
+    sa.instance_finish_transition(*id).await;
+}
+
+pub async fn instance_simulate_with_opctx(
+    nexus: &Arc<Nexus>,
+    id: &Uuid,
+    opctx: &OpContext,
+) {
+    let sa = nexus
+        .instance_sled_by_id_with_opctx(id, opctx)
         .await
         .unwrap()
         .expect("instance must be on a sled to simulate a state change");

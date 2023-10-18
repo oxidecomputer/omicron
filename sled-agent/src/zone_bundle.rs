@@ -17,6 +17,17 @@ use chrono::Utc;
 use flate2::bufread::GzDecoder;
 use illumos_utils::running_zone::is_oxide_smf_log_file;
 use illumos_utils::running_zone::RunningZone;
+use illumos_utils::running_zone::ServiceProcess;
+use illumos_utils::zfs::CreateSnapshotError;
+use illumos_utils::zfs::DestroyDatasetError;
+use illumos_utils::zfs::DestroySnapshotError;
+use illumos_utils::zfs::EnsureFilesystemError;
+use illumos_utils::zfs::GetValueError;
+use illumos_utils::zfs::ListDatasetsError;
+use illumos_utils::zfs::ListSnapshotsError;
+use illumos_utils::zfs::SetValueError;
+use illumos_utils::zfs::Snapshot;
+use illumos_utils::zfs::Zfs;
 use illumos_utils::zfs::ZFS;
 use illumos_utils::zone::AdmError;
 use schemars::JsonSchema;
@@ -141,6 +152,68 @@ impl ZoneBundleMetadata {
     }
 }
 
+// The name of the snapshot created from the zone root filesystem.
+const ZONE_ROOT_SNAPSHOT_NAME: &'static str = "zone-root";
+
+// The prefix for all the snapshots for each filesystem containing archived
+// logs. Each debug data, such as `oxp_<UUID>/crypt/debug`, generates a snapshot
+// named `zone-archives-<UUID>`.
+const ARCHIVE_SNAPSHOT_PREFIX: &'static str = "zone-archives-";
+
+// An extra ZFS user property attached to all zone bundle snapshots.
+//
+// This is used to ensure that we are not accidentally deleting ZFS objects that
+// a user has created, but which happen to be named the same thing.
+const ZONE_BUNDLE_ZFS_PROPERTY_NAME: &'static str = "oxide:for-zone-bundle";
+const ZONE_BUNDLE_ZFS_PROPERTY_VALUE: &'static str = "true";
+
+// Initialize the ZFS resources we need for zone bundling.
+//
+// This deletes any snapshots matching the names we expect to create ourselves
+// during bundling.
+#[cfg(not(test))]
+fn initialize_zfs_resources(log: &Logger) -> Result<(), BundleError> {
+    let zb_snapshots =
+        Zfs::list_snapshots().unwrap().into_iter().filter(|snap| {
+            // Check for snapshots named how we expect to create them.
+            if snap.snap_name != ZONE_ROOT_SNAPSHOT_NAME
+                || !snap.snap_name.starts_with(ARCHIVE_SNAPSHOT_PREFIX)
+            {
+                return false;
+            }
+
+            // Additionally check for the zone-bundle-specific property.
+            //
+            // If we find a dataset that matches our names, but which _does not_
+            // have such a property, we'll panic rather than possibly deleting
+            // user data.
+            let name = snap.to_string();
+            let value =
+                Zfs::get_oxide_value(&name, ZONE_BUNDLE_ZFS_PROPERTY_NAME)
+                    .unwrap_or_else(|_| {
+                        panic!(
+                            "Found a ZFS snapshot with a name reserved for \
+                            zone bundling, but which does not have the \
+                            zone-bundle-specific property. Bailing out, \
+                            rather than risking deletion of user data. \
+                            snap_name = {}, property = {}",
+                            &name, ZONE_BUNDLE_ZFS_PROPERTY_NAME
+                        )
+                    });
+            assert_eq!(value, ZONE_BUNDLE_ZFS_PROPERTY_VALUE);
+            true
+        });
+    for snapshot in zb_snapshots {
+        Zfs::destroy_snapshot(&snapshot.filesystem, &snapshot.snap_name)?;
+        debug!(
+            log,
+            "destroyed pre-existing zone bundle snapshot";
+            "snapshot" => %snapshot,
+        );
+    }
+    Ok(())
+}
+
 /// A type managing zone bundle creation and automatic cleanup.
 #[derive(Clone)]
 pub struct ZoneBundler {
@@ -256,6 +329,11 @@ impl ZoneBundler {
         resources: StorageResources,
         cleanup_context: CleanupContext,
     ) -> Self {
+        // This is compiled out in tests because there's no way to set our
+        // expectations on the mockall object it uses internally. Not great.
+        #[cfg(not(test))]
+        initialize_zfs_resources(&log)
+            .expect("Failed to initialize existing ZFS resources");
         let notify_cleanup = Arc::new(Notify::new());
         let inner = Arc::new(Mutex::new(Inner {
             resources,
@@ -358,7 +436,6 @@ impl ZoneBundler {
             .all_u2_mountpoints(sled_hardware::disk::U2_DEBUG_DATASET)
             .await
             .into_iter()
-            .map(|p| p.join(zone.name()))
             .collect();
         let context = ZoneBundleContext { cause, storage_dirs, extra_log_dirs };
         info!(
@@ -446,7 +523,7 @@ struct ZoneBundleContext {
     storage_dirs: Vec<Utf8PathBuf>,
     // The reason or cause for creating a zone bundle.
     cause: ZoneBundleCause,
-    // Extra directories searched for logfiles for the name zone.
+    // Extra directories searched for logfiles for the named zone.
     //
     // Logs are periodically archived out of their original location, and onto
     // one or more U.2 drives. This field is used to specify that archive
@@ -572,6 +649,30 @@ pub enum BundleError {
 
     #[error("Cleanup failed")]
     Cleanup(#[source] anyhow::Error),
+
+    #[error("Failed to create ZFS snapshot")]
+    CreateSnapshot(#[from] CreateSnapshotError),
+
+    #[error("Failed to destroy ZFS snapshot")]
+    DestroySnapshot(#[from] DestroySnapshotError),
+
+    #[error("Failed to list ZFS snapshots")]
+    ListSnapshot(#[from] ListSnapshotsError),
+
+    #[error("Failed to ensure ZFS filesystem")]
+    EnsureFilesystem(#[from] EnsureFilesystemError),
+
+    #[error("Failed to destroy ZFS dataset")]
+    DestroyDataset(#[from] DestroyDatasetError),
+
+    #[error("Failed to list ZFS datasets")]
+    ListDatasets(#[from] ListDatasetsError),
+
+    #[error("Failed to set Oxide-specific ZFS property")]
+    SetProperty(#[from] SetValueError),
+
+    #[error("Failed to get ZFS property value")]
+    GetProperty(#[from] GetValueError),
 }
 
 // Helper function to write an array of bytes into the tar archive, with
@@ -595,6 +696,256 @@ fn insert_data<W: std::io::Write>(
     builder.append_data(&mut hdr, name, Cursor::new(contents)).map_err(|err| {
         BundleError::AddBundleData { tarball_path: name.into(), err }
     })
+}
+
+// Create a read-only snapshot from an existing filesystem.
+fn create_snapshot(
+    log: &Logger,
+    filesystem: &str,
+    snap_name: &str,
+) -> Result<Snapshot, BundleError> {
+    Zfs::create_snapshot(
+        filesystem,
+        snap_name,
+        &[(ZONE_BUNDLE_ZFS_PROPERTY_NAME, ZONE_BUNDLE_ZFS_PROPERTY_VALUE)],
+    )?;
+    debug!(
+        log,
+        "created snapshot";
+        "filesystem" => filesystem,
+        "snap_name" => snap_name,
+    );
+    Ok(Snapshot {
+        filesystem: filesystem.to_string(),
+        snap_name: snap_name.to_string(),
+    })
+}
+
+// Create snapshots for the filesystems we need to copy out all log files.
+//
+// A key feature of the zone-bundle process is that we pull all the log files
+// for a zone. This is tricky. The logs are both being written to by the
+// programs we're interested in, and also potentially being rotated by `logadm`,
+// and / or archived out to the U.2s through the code in `crate::dump_setup`.
+//
+// We need to capture all these logs, while avoiding inconsistent state (e.g., a
+// missing log message that existed when the bundle was created) and also
+// interrupting the rotation and archival processes. We do this by taking ZFS
+// snapshots of the relevant datasets when we want to create the bundle.
+//
+// When we receive a bundling request, we take a snapshot of a few datasets:
+//
+// - The zone filesystem itself, `oxz_<UUID>/crypt/zone/<ZONE_NAME>`.
+//
+// - All of the U.2 debug datasets, like `oxp_<UUID>/crypt/debug`, which we know
+// contain logs for the given zone. This is done by looking at all the service
+// processes in the zone, and mapping the locations of archived logs, such as
+// `/pool/ext/<UUID>/crypt/debug/<ZONE_NAME>` to the zpool name.
+//
+// This provides us with a consistent view of the log files at the time the
+// bundle was requested. Note that this ordering, taking the root FS snapshot
+// first followed by the archive datasets, ensures that we don't _miss_ log
+// messages that existed when the bundle was requested. It's possible that we
+// double-count them however: the archiver could run concurrently, and result in
+// a log file existing on the root snapshot when we create it, and also on the
+// achive snapshot by the time we get around to creating that.
+//
+// At this point, we operate entirely on those snapshots. We search for
+// "current" log files in the root snapshot, and archived log files in the
+// archive snapshots.
+fn create_zfs_snapshots(
+    log: &Logger,
+    zone: &RunningZone,
+    extra_log_dirs: &[Utf8PathBuf],
+) -> Result<Vec<Snapshot>, BundleError> {
+    // Snapshot the root filesystem.
+    let dataset = Zfs::get_dataset_name(zone.root().as_str())?;
+    let root_snapshot =
+        create_snapshot(log, &dataset, ZONE_ROOT_SNAPSHOT_NAME)?;
+    let mut snapshots = vec![root_snapshot];
+
+    // Look at all the provided extra log directories, and take a snapshot for
+    // any that have a directory with the zone name. These may not have any log
+    // file in them yet, but we'll snapshot now and then filter more judiciously
+    // when we actually find the files we want to bundle.
+    let mut maybe_err = None;
+    for dir in extra_log_dirs.iter() {
+        let zone_dir = dir.join(zone.name());
+        match std::fs::metadata(&zone_dir) {
+            Ok(d) => {
+                if d.is_dir() {
+                    let dataset = match Zfs::get_dataset_name(zone_dir.as_str())
+                    {
+                        Ok(ds) => Utf8PathBuf::from(ds),
+                        Err(e) => {
+                            error!(
+                                log,
+                                "failed to list datasets, will \
+                                unwind any previously created snapshots";
+                                "error" => ?e,
+                            );
+                            assert!(maybe_err
+                                .replace(BundleError::from(e))
+                                .is_none());
+                            break;
+                        }
+                    };
+
+                    // These datasets are named like `<pool_name>/...`. Since
+                    // we're snapshotting zero or more of them, we disambiguate
+                    // with the pool name.
+                    let pool_name = dataset
+                        .components()
+                        .next()
+                        .expect("Zone archive datasets must be non-empty");
+                    let snap_name =
+                        format!("{}{}", ARCHIVE_SNAPSHOT_PREFIX, pool_name);
+                    match create_snapshot(log, dataset.as_str(), &snap_name) {
+                        Ok(snapshot) => snapshots.push(snapshot),
+                        Err(e) => {
+                            error!(
+                                log,
+                                "failed to create snapshot, will \
+                                unwind any previously created";
+                                "error" => ?e,
+                            );
+                            assert!(maybe_err.replace(e).is_none());
+                            break;
+                        }
+                    }
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                trace!(
+                    log,
+                    "skipping non-existent zone-bundle directory";
+                    "dir" => %zone_dir,
+                );
+            }
+            Err(e) => {
+                error!(
+                    log,
+                    "failed to get metadata for potential zone directory";
+                    "zone_dir" => %zone_dir,
+                    "error" => ?e,
+                );
+            }
+        }
+    }
+    if let Some(err) = maybe_err {
+        cleanup_zfs_snapshots(log, &snapshots);
+        return Err(err);
+    };
+    Ok(snapshots)
+}
+
+// Destroy any created ZFS snapshots.
+fn cleanup_zfs_snapshots(log: &Logger, snapshots: &[Snapshot]) {
+    for snapshot in snapshots.iter() {
+        match Zfs::destroy_snapshot(&snapshot.filesystem, &snapshot.snap_name) {
+            Ok(_) => debug!(
+                log,
+                "destroyed zone bundle ZFS snapshot";
+                "snapshot" => %snapshot,
+            ),
+            Err(e) => error!(
+                log,
+                "failed to destroy zone bundle ZFS snapshot";
+                "snapshot" => %snapshot,
+                "error" => ?e,
+            ),
+        }
+    }
+}
+
+// List all log files (current, rotated, and archived) that should be part of
+// the zone bundle for a single service.
+async fn find_service_log_files(
+    log: &Logger,
+    zone_name: &str,
+    svc: &ServiceProcess,
+    extra_log_dirs: &[Utf8PathBuf],
+    snapshots: &[Snapshot],
+) -> Result<Vec<Utf8PathBuf>, BundleError> {
+    // The current and any rotated, but not archived, log files live in the zone
+    // root filesystem. Extract any which match.
+    //
+    // There are a few path tricks to keep in mind here. We've created a
+    // snapshot from the zone's filesystem, which is usually something like
+    // `<pool_name>/crypt/zone/<zone_name>`. That snapshot is placed in a hidden
+    // directory within the base dataset, something like
+    // `oxp_<pool_id>/crypt/zone/.zfs/snapshot/<snap_name>`.
+    //
+    // The log files themselves are things like `/var/svc/log/...`, but in the
+    // actual ZFS dataset comprising the root FS for the zone, there are
+    // additional directories, most notably `<zonepath>/root`. So the _cloned_
+    // log file will live at
+    // `/<pool_name>/crypt/zone/.zfs/snapshot/<snap_name>/root/var/svc/log/...`.
+    let mut current_log_file = snapshots[0].full_path()?;
+    current_log_file.push(RunningZone::ROOT_FS_PATH);
+    current_log_file.push(svc.log_file.as_str().trim_start_matches('/'));
+    let log_dir =
+        current_log_file.parent().expect("Current log file must have a parent");
+    let mut log_files = vec![current_log_file.clone()];
+    for entry in log_dir.read_dir_utf8().map_err(|err| {
+        BundleError::ReadDirectory { directory: log_dir.into(), err }
+    })? {
+        let entry = entry.map_err(|err| BundleError::ReadDirectory {
+            directory: log_dir.into(),
+            err,
+        })?;
+        let path = entry.path();
+
+        // Camino's Utf8Path only considers whole path components to match,
+        // so convert both paths into a &str and use that object's
+        // starts_with. See the `camino_starts_with_behaviour` test.
+        let path_ref: &str = path.as_ref();
+        let current_log_file_ref: &str = current_log_file.as_ref();
+        if path != current_log_file
+            && path_ref.starts_with(current_log_file_ref)
+        {
+            log_files.push(path.clone().into());
+        }
+    }
+
+    // The _archived_ log files are slightly trickier. They can technically live
+    // in many different datasets, because the archive process may need to start
+    // archiving to one location, but move to another if a quota is hit. We'll
+    // iterate over all the extra log directories and try to find any log files
+    // in those filesystem snapshots.
+    let snapped_extra_log_dirs = snapshots
+        .iter()
+        .skip(1)
+        .flat_map(|snapshot| {
+            extra_log_dirs.iter().map(|d| {
+                // Join the snapshot path with both the log directory and the
+                // zone name, to arrive at something like:
+                // /path/to/dataset/.zfs/snapshot/<snap_name>/path/to/extra/<zone_name>
+                snapshot.full_path().map(|p| p.join(d).join(zone_name))
+            })
+        })
+        .collect::<Result<BTreeSet<_>, _>>()?;
+    debug!(
+        log,
+        "looking for extra log files in filesystem snapshots";
+        "extra_dirs" => ?&snapped_extra_log_dirs,
+    );
+    log_files.extend(
+        find_archived_log_files(
+            log,
+            zone_name,
+            &svc.service_name,
+            svc.log_file.file_name().unwrap(),
+            snapped_extra_log_dirs.iter(),
+        )
+        .await,
+    );
+    debug!(
+        log,
+        "found log files";
+        "log_files" => ?&log_files,
+    );
+    Ok(log_files)
 }
 
 // Create a service bundle for the provided zone.
@@ -702,14 +1053,8 @@ async fn create(
         }
     }
 
-    // Debugging commands run on the specific processes this zone defines.
-    const ZONE_PROCESS_COMMANDS: [&str; 3] = [
-        "pfiles", "pstack",
-        "pargs",
-        // TODO-completeness: We may want `gcore`, since that encompasses
-        // the above commands and much more. It seems like overkill now,
-        // however.
-    ];
+    // Enumerate the list of Oxide-specific services inside the zone that we
+    // want to include in the bundling process.
     let procs = match zone
         .service_processes()
         .context("failed to enumerate zone service processes")
@@ -733,6 +1078,48 @@ async fn create(
             return Err(BundleError::from(e));
         }
     };
+
+    // Create ZFS snapshots of filesystems containing log files.
+    //
+    // We need to capture log files from two kinds of locations:
+    //
+    // - The zone root filesystem, where the current and rotated (but not
+    // archived) log files live.
+    // - Zero or more filesystems on the U.2s used for archiving older log
+    // files.
+    //
+    // Both of these are dynamic. The current log file is likely being written
+    // by the service itself, and `logadm` may also be rotating files. At the
+    // same time, the log-archival process in `dump_setup.rs` may be copying
+    // these out to the U.2s, after which it deletes those on the zone
+    // filesystem itself.
+    //
+    // To avoid various kinds of corruption, such as a bad tarball or missing
+    // log messages, we'll create ZFS snapshots of each of these relevant
+    // filesystems, and insert those (now-static) files into the zone-bundle
+    // tarballs.
+    let snapshots =
+        match create_zfs_snapshots(log, zone, &context.extra_log_dirs) {
+            Ok(snapshots) => snapshots,
+            Err(e) => {
+                error!(
+                    log,
+                    "failed to create ZFS snapshots";
+                    "zone_name" => zone.name(),
+                    "error" => ?e,
+                );
+                return Err(e);
+            }
+        };
+
+    // Debugging commands run on the specific processes this zone defines.
+    const ZONE_PROCESS_COMMANDS: [&str; 3] = [
+        "pfiles", "pstack",
+        "pargs",
+        // TODO-completeness: We may want `gcore`, since that encompasses
+        // the above commands and much more. It seems like overkill now,
+        // however.
+    ];
     for svc in procs.into_iter() {
         let pid_s = svc.pid.to_string();
         for cmd in ZONE_PROCESS_COMMANDS {
@@ -765,72 +1152,61 @@ async fn create(
             }
         }
 
-        // We may need to extract log files that have been archived out of the
-        // zone filesystem itself. See `crate::dump_setup` for the logic which
-        // does this.
-        let archived_log_files = find_archived_log_files(
+        // Collect and insert all log files.
+        //
+        // This takes files from the snapshot of either the zone root
+        // filesystem, or the filesystem containing the archived log files.
+        let all_log_files = match find_service_log_files(
             log,
             zone.name(),
-            &svc.service_name,
+            &svc,
             &context.extra_log_dirs,
+            &snapshots,
         )
-        .await;
-
-        // Copy any log files, current and rotated, into the tarball as
-        // well.
-        //
-        // Safety: This pathbuf was retrieved by locating an existing file
-        // on the filesystem, so we're sure it has a name and the unwrap is
-        // safe.
-        debug!(
-            log,
-            "appending current log file to zone bundle";
-            "zone" => zone.name(),
-            "log_file" => %svc.log_file,
-        );
-        if let Err(e) = builder.append_path_with_name(
-            &svc.log_file,
-            svc.log_file.file_name().unwrap(),
-        ) {
-            error!(
-                log,
-                "failed to append current log file to zone bundle";
-                "zone" => zone.name(),
-                "log_file" => %svc.log_file,
-                "error" => ?e,
-            );
-            return Err(BundleError::AddBundleData {
-                tarball_path: svc.log_file.file_name().unwrap().into(),
-                err: e,
-            });
-        }
-        for f in svc.rotated_log_files.iter().chain(archived_log_files.iter()) {
-            debug!(
-                log,
-                "appending rotated log file to zone bundle";
-                "zone" => zone.name(),
-                "log_file" => %f,
-            );
-            if let Err(e) =
-                builder.append_path_with_name(f, f.file_name().unwrap())
-            {
+        .await
+        {
+            Ok(f) => f,
+            Err(e) => {
                 error!(
                     log,
-                    "failed to append rotated log file to zone bundle";
+                    "failed to find service log files";
                     "zone" => zone.name(),
-                    "log_file" => %f,
                     "error" => ?e,
                 );
-                return Err(BundleError::AddBundleData {
-                    tarball_path: f.file_name().unwrap().into(),
-                    err: e,
-                });
+                cleanup_zfs_snapshots(&log, &snapshots);
+                return Err(e);
+            }
+        };
+        for log_file in all_log_files.into_iter() {
+            match builder
+                .append_path_with_name(&log_file, log_file.file_name().unwrap())
+            {
+                Ok(_) => {
+                    debug!(
+                        log,
+                        "appended log file to zone bundle";
+                        "zone" => zone.name(),
+                        "log_file" => %log_file,
+                    );
+                }
+                Err(e) => {
+                    error!(
+                        log,
+                        "failed to append log file to zone bundle";
+                        "zone" => zone.name(),
+                        "log_file" => %svc.log_file,
+                        "error" => ?e,
+                    );
+                }
             }
         }
     }
 
     // Finish writing out the tarball itself.
-    builder.into_inner().context("Failed to build bundle")?;
+    if let Err(e) = builder.into_inner().context("Failed to build bundle") {
+        cleanup_zfs_snapshots(&log, &snapshots);
+        return Err(BundleError::from(e));
+    }
 
     // Copy the bundle to the other locations. We really want the bundles to
     // be duplicates, not an additional, new bundle.
@@ -840,14 +1216,21 @@ async fn create(
     // the final locations should that last copy fail for any of them.
     //
     // See: https://github.com/oxidecomputer/omicron/issues/3876.
+    let mut copy_err = None;
     for other_dir in zone_bundle_dirs.iter().skip(1) {
         let to = other_dir.join(&filename);
         debug!(log, "copying bundle"; "from" => %full_path, "to" => %to);
-        tokio::fs::copy(&full_path, &to).await.map_err(|err| {
+        if let Err(e) = tokio::fs::copy(&full_path, &to).await.map_err(|err| {
             BundleError::CopyArchive { from: full_path.to_owned(), to, err }
-        })?;
+        }) {
+            copy_err = Some(e);
+            break;
+        }
     }
-
+    cleanup_zfs_snapshots(&log, &snapshots);
+    if let Some(err) = copy_err {
+        return Err(err);
+    }
     info!(log, "finished zone bundle"; "metadata" => ?zone_metadata);
     Ok(zone_metadata)
 }
@@ -857,11 +1240,12 @@ async fn create(
 //
 // Note that errors are logged, rather than failing the whole function, so that
 // one failed listing does not prevent collecting any other log files.
-async fn find_archived_log_files(
+async fn find_archived_log_files<'a, T: Iterator<Item = &'a Utf8PathBuf>>(
     log: &Logger,
     zone_name: &str,
     svc_name: &str,
-    dirs: &[Utf8PathBuf],
+    log_file_prefix: &str,
+    dirs: T,
 ) -> Vec<Utf8PathBuf> {
     // The `dirs` should be things like
     // `/pool/ext/<ZPOOL_UUID>/crypt/debug/<ZONE_NAME>`, but it's really up to
@@ -870,7 +1254,7 @@ async fn find_archived_log_files(
     // Within that, we'll just look for things that appear to be Oxide-managed
     // SMF service log files.
     let mut files = Vec::new();
-    for dir in dirs.iter() {
+    for dir in dirs {
         if dir.exists() {
             let mut rd = match tokio::fs::read_dir(&dir).await {
                 Ok(rd) => rd,
@@ -900,8 +1284,9 @@ async fn find_archived_log_files(
                         };
                         let fname = path.file_name().unwrap();
                         let is_oxide = is_oxide_smf_log_file(fname);
-                        let contains = fname.contains(svc_name);
-                        if is_oxide && contains {
+                        let matches_log_file =
+                            fname.starts_with(log_file_prefix);
+                        if is_oxide && matches_log_file {
                             debug!(
                                 log,
                                 "found archived log file";
@@ -911,12 +1296,14 @@ async fn find_archived_log_files(
                             );
                             files.push(path);
                         } else {
-                            debug!(
+                            trace!(
                                 log,
                                 "skipping non-matching log file";
+                                "zone_name" => zone_name,
+                                "service_name" => svc_name,
                                 "filename" => fname,
                                 "is_oxide_smf_log_file" => is_oxide,
-                                "contains_svc_name" => contains,
+                                "matches_log_file" => matches_log_file,
                             );
                         }
                     }
@@ -2299,43 +2686,61 @@ mod illumos_tests {
         let log = test_logger();
         let tmpdir = tempfile::tempdir().expect("Failed to make tempdir");
 
-        let mut should_match = [
-            "oxide-foo:default.log",
-            "oxide-foo:default.log.1000",
-            "system-illumos-foo:default.log",
-            "system-illumos-foo:default.log.100",
-        ];
-        let should_not_match = [
-            "oxide-foo:default",
-            "not-oxide-foo:default.log.1000",
-            "system-illumos-foo",
-            "not-system-illumos-foo:default.log.100",
-        ];
-        for name in should_match.iter().chain(should_not_match.iter()) {
-            let path = tmpdir.path().join(name);
-            tokio::fs::File::create(path)
-                .await
-                .expect("failed to create dummy file");
+        for prefix in ["oxide", "system-illumos"] {
+            let mut should_match = [
+                format!("{prefix}-foo:default.log"),
+                format!("{prefix}-foo:default.log.1000"),
+            ];
+            let should_not_match = [
+                format!("{prefix}-foo:default"),
+                format!("not-{prefix}-foo:default.log.1000"),
+            ];
+            for name in should_match.iter().chain(should_not_match.iter()) {
+                let path = tmpdir.path().join(name);
+                tokio::fs::File::create(path)
+                    .await
+                    .expect("failed to create dummy file");
+            }
+
+            let path = Utf8PathBuf::try_from(
+                tmpdir.path().as_os_str().to_str().unwrap(),
+            )
+            .unwrap();
+            let mut files = find_archived_log_files(
+                &log,
+                "zone-name", // unused here, for logging only
+                "svc:/oxide/foo:default",
+                &format!("{prefix}-foo:default.log"),
+                std::iter::once(&path),
+            )
+            .await;
+
+            // Sort everything to compare correctly.
+            should_match.sort();
+            files.sort();
+            assert_eq!(files.len(), should_match.len());
+            assert!(files
+                .iter()
+                .zip(should_match.iter())
+                .all(|(file, name)| { file.file_name().unwrap() == *name }));
         }
+    }
 
-        let path =
-            Utf8PathBuf::try_from(tmpdir.path().as_os_str().to_str().unwrap())
-                .unwrap();
-        let mut files = find_archived_log_files(
-            &log,
-            "zone-name", // unused here, for logging only
-            "foo",
-            &[path],
-        )
-        .await;
+    #[test]
+    fn camino_starts_with_behaviour() {
+        let logfile =
+            Utf8PathBuf::from("/zonepath/var/svc/log/oxide-nexus:default.log");
+        let rotated_logfile = Utf8PathBuf::from(
+            "/zonepath/var/svc/log/oxide-nexus:default.log.0",
+        );
 
-        // Sort everything to compare correctly.
-        should_match.sort();
-        files.sort();
-        assert_eq!(files.len(), should_match.len());
-        assert!(files
-            .iter()
-            .zip(should_match.iter())
-            .all(|(file, name)| { file.file_name().unwrap() == *name }));
+        let logfile_as_string: &str = logfile.as_ref();
+        let rotated_logfile_as_string: &str = rotated_logfile.as_ref();
+
+        assert!(logfile != rotated_logfile);
+        assert!(logfile_as_string != rotated_logfile_as_string);
+
+        assert!(!rotated_logfile.starts_with(&logfile));
+        assert!(rotated_logfile_as_string.starts_with(&logfile_as_string));
     }
 }

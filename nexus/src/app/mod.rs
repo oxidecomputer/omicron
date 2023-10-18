@@ -116,6 +116,10 @@ pub struct Nexus {
     /// External dropshot servers
     external_server: std::sync::Mutex<Option<DropshotServer>>,
 
+    /// External dropshot server that listens on the internal network to allow
+    /// connections from the tech port; see RFD 431.
+    techport_external_server: std::sync::Mutex<Option<DropshotServer>>,
+
     /// Internal dropshot server
     internal_server: std::sync::Mutex<Option<DropshotServer>>,
 
@@ -355,6 +359,7 @@ impl Nexus {
             sec_client: Arc::clone(&sec_client),
             recovery_task: std::sync::Mutex::new(None),
             external_server: std::sync::Mutex::new(None),
+            techport_external_server: std::sync::Mutex::new(None),
             internal_server: std::sync::Mutex::new(None),
             populate_status,
             timeseries_client,
@@ -488,6 +493,7 @@ impl Nexus {
     pub(crate) async fn set_servers(
         &self,
         external_server: DropshotServer,
+        techport_external_server: DropshotServer,
         internal_server: DropshotServer,
     ) {
         // If any servers already exist, close them.
@@ -495,12 +501,21 @@ impl Nexus {
 
         // Insert the new servers.
         self.external_server.lock().unwrap().replace(external_server);
+        self.techport_external_server
+            .lock()
+            .unwrap()
+            .replace(techport_external_server);
         self.internal_server.lock().unwrap().replace(internal_server);
     }
 
     pub(crate) async fn close_servers(&self) -> Result<(), String> {
         let external_server = self.external_server.lock().unwrap().take();
         if let Some(server) = external_server {
+            server.close().await?;
+        }
+        let techport_external_server =
+            self.techport_external_server.lock().unwrap().take();
+        if let Some(server) = techport_external_server {
             server.close().await?;
         }
         let internal_server = self.internal_server.lock().unwrap().take();
