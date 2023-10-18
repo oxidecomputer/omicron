@@ -165,7 +165,7 @@ impl<'a> From<&'a Collection> for InvCollection {
     }
 }
 
-/// See [`nexus_types::inventory::HwBaseboardId`].
+/// See [`nexus_types::inventory::BaseboardId`].
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
 #[diesel(table_name = hw_baseboard_id)]
 pub struct HwBaseboardId {
@@ -184,7 +184,7 @@ impl<'a> From<&'a BaseboardId> for HwBaseboardId {
     }
 }
 
-/// See [`nexus_types::inventory::SwCaboose`].
+/// See [`nexus_types::inventory::Caboose`].
 #[derive(
     Queryable,
     Insertable,
@@ -323,7 +323,7 @@ where
     }
 }
 
-/// See [`nexus_types::inventory::RootOfTrust`].
+/// See [`nexus_types::inventory::RotState`].
 #[derive(Queryable, Clone, Debug, Selectable)]
 #[diesel(table_name = inv_root_of_trust)]
 pub struct InvRootOfTrust {
@@ -340,7 +340,7 @@ pub struct InvRootOfTrust {
     pub slot_b_sha3_256: Option<String>,
 }
 
-/// See [`nexus_types::inventory::Caboose`].
+/// See [`nexus_types::inventory::CabooseFound`].
 #[derive(Queryable, Clone, Debug, Selectable)]
 #[diesel(table_name = inv_caboose)]
 pub struct InvCaboose {
