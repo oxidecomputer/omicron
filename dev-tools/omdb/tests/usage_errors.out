@@ -92,10 +92,11 @@ Usage: omdb db [OPTIONS] <COMMAND>
 Commands:
   disks      Print information about disks
   dns        Print information about internal and external DNS
+  instances  Print information about customer instances
+  inventory  Print information about collected hardware/software inventory
+  network    Print information about the network
   services   Print information about control plane services
   sleds      Print information about sleds
-  instances  Print information about customer instances
-  network    Print information about the network
   help       Print this message or the help of the given subcommand(s)
 
 Options:
@@ -114,10 +115,11 @@ Usage: omdb db [OPTIONS] <COMMAND>
 Commands:
   disks      Print information about disks
   dns        Print information about internal and external DNS
+  instances  Print information about customer instances
+  inventory  Print information about collected hardware/software inventory
+  network    Print information about the network
   services   Print information about control plane services
   sleds      Print information about sleds
-  instances  Print information about customer instances
-  network    Print information about the network
   help       Print this message or the help of the given subcommand(s)
 
 Options:
