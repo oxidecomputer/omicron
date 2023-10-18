@@ -18,7 +18,7 @@ use toml_edit::Value;
 use wicketd_client::types::BootstrapSledDescription;
 use wicketd_client::types::CurrentRssUserConfigInsensitive;
 use wicketd_client::types::IpRange;
-use wicketd_client::types::RackNetworkConfig;
+use wicketd_client::types::RackNetworkConfigV1;
 use wicketd_client::types::SpType;
 
 static TEMPLATE: &str = include_str!("config_template.toml");
@@ -176,7 +176,7 @@ fn build_sleds_array(sleds: &[BootstrapSledDescription]) -> Array {
 
 fn populate_network_table(
     table: &mut Table,
-    config: Option<&RackNetworkConfig>,
+    config: Option<&RackNetworkConfigV1>,
 ) {
     // Helper function to serialize enums into their appropriate string
     // representations.
@@ -314,7 +314,7 @@ fn populate_network_table(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use omicron_common::api::internal::shared::RackNetworkConfig as InternalRackNetworkConfig;
+    use omicron_common::api::internal::shared::RackNetworkConfigV1 as InternalRackNetworkConfig;
     use std::net::Ipv6Addr;
     use wicket_common::rack_setup::PutRssUserConfigInsensitive;
     use wicketd_client::types::Baseboard;
@@ -472,7 +472,7 @@ mod tests {
             )],
             external_dns_ips: vec!["10.0.0.1".parse().unwrap()],
             ntp_servers: vec!["ntp1.com".into(), "ntp2.com".into()],
-            rack_network_config: Some(RackNetworkConfig {
+            rack_network_config: Some(RackNetworkConfigV1 {
                 rack_subnet: "fd00:1122:3344:01::/56".parse().unwrap(),
                 infra_ip_first: "172.30.0.1".parse().unwrap(),
                 infra_ip_last: "172.30.0.10".parse().unwrap(),
