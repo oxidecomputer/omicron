@@ -904,8 +904,6 @@ impl ServiceInner {
             },
         };
         info!(self.log, "Writing Rack Network Configuration to bootstore");
-        //NOTE(ry) this is where the early network config gets saved.
-        //NOTE(ry) generation number must be bumped. Nexus owns generation number.
         bootstore.update_network_config(early_network_config.into()).await?;
 
         // Forward the sled initialization requests to our sled-agent.

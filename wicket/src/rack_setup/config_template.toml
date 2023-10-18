@@ -50,6 +50,7 @@ infra_ip_last = ""
 routes = []
 
 # Addresses associated with this port.
+# "1.2.3.4/24"
 addresses = []
 
 # Either `switch0` or `switch1`, matching the hardware.
@@ -65,7 +66,7 @@ uplink_port_speed = ""
 uplink_port_fec = ""
 
 # A list of bgp peers
-# { addr = "1.7.0.1", asn = "47", port = "qsfp0" }
+# { addr = "1.7.0.1", asn = 47, port = "qsfp0" }
 bgp_peers = []
 
 # Optional BGP configuration. Remove this section if not needed.

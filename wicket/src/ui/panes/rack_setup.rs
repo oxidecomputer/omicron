@@ -696,59 +696,60 @@ fn rss_config_text<'a>(
 
     if let Some(cfg) = insensitive.rack_network_config.as_ref() {
         for (i, uplink) in cfg.ports.iter().enumerate() {
-            let items = vec![
+            let mut items = vec![
                 vec![
-                    Span::styled("  • Switch           : ", label_style),
+                    Span::styled("  • Switch    : ", label_style),
                     Span::styled(uplink.switch.to_string(), ok_style),
                 ],
-                /* TODO(ry)
                 vec![
-                    Span::styled("  • Gateway IP       : ", label_style),
-                    Span::styled(uplink.gateway_ip.to_string(), ok_style),
-                ],
-                vec![
-                    Span::styled("  • Uplink CIDR      : ", label_style),
-                    Span::styled(uplink.uplink_cidr.to_string(), ok_style),
-                ],
-                vec![
-                    Span::styled("  • Uplink port      : ", label_style),
-                    Span::styled(uplink.uplink_port.clone(), ok_style),
-                ],
-                */
-                vec![
-                    Span::styled("  • Uplink port speed: ", label_style),
+                    Span::styled("  • Speed     : ", label_style),
                     Span::styled(
                         uplink.uplink_port_speed.to_string(),
                         ok_style,
                     ),
                 ],
                 vec![
-                    Span::styled("  • Uplink port FEC  : ", label_style),
+                    Span::styled("  • FEC       : ", label_style),
                     Span::styled(uplink.uplink_port_fec.to_string(), ok_style),
                 ],
             ];
-            /* TODO(ry)
-            if let Some(uplink_vid) = uplink.uplink_vid {
-                items.push(vec![
-                    Span::styled("  • Uplink VLAN id   : ", label_style),
-                    Span::styled(uplink_vid.to_string(), ok_style),
-                ]);
-            } else {
-                items.push(vec![
-                    Span::styled("  • Uplink VLAN id   : ", label_style),
-                    Span::styled("none", ok_style),
-                ]);
-            }
-            */
+
+            let routes = uplink.routes.iter().map(|r| {
+                vec![
+                    Span::styled("  • Route     : ", label_style),
+                    Span::styled(
+                        format!("{} -> {}", r.destination, r.nexthop),
+                        ok_style,
+                    ),
+                ]
+            });
+
+            let addresses = uplink.addresses.iter().map(|a| {
+                vec![
+                    Span::styled("  • Address   : ", label_style),
+                    Span::styled(a.to_string(), ok_style),
+                ]
+            });
+
+            let peers = uplink.bgp_peers.iter().map(|p| {
+                vec![
+                    Span::styled("  • BGP peer  : ", label_style),
+                    Span::styled(format!("{} ASN={}", p.addr, p.asn), ok_style),
+                ]
+            });
+
+            items.extend(routes);
+            items.extend(addresses);
+            items.extend(peers);
 
             append_list(
                 &mut spans,
-                Cow::from(format!("Uplink {}: ", i + 1)),
+                Cow::from(format!("Port {}: ", i + 1)),
                 items,
             );
         }
     } else {
-        append_list(&mut spans, "Uplinks: ".into(), vec![]);
+        append_list(&mut spans, "Ports: ".into(), vec![]);
     }
 
     append_list(
