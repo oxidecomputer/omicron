@@ -4,7 +4,9 @@
 
 //! HTTP entrypoint functions for the sled agent's exposed API
 
-use crate::bootstrap::early_networking::EarlyNetworkConfig;
+use crate::bootstrap::early_networking::{
+    EarlyNetworkConfig, EarlyNetworkConfigBody,
+};
 use crate::params::{
     DiskEnsureBody, InstanceEnsureBody, InstancePutMigrationIdsBody,
     InstancePutStateBody, InstancePutStateResponse, InstanceUnregisterResponse,
@@ -356,14 +358,18 @@ async fn read_network_bootstore_config(
 ) -> Result<HttpResponseOk<EarlyNetworkConfig>, HttpError> {
     let config = EarlyNetworkConfig {
         generation: 0,
-        ntp_servers: Vec::new(),
-        rack_network_config: Some(RackNetworkConfig {
-            rack_subnet: Ipv6Network::new(Ipv6Addr::UNSPECIFIED, 56).unwrap(),
-            infra_ip_first: Ipv4Addr::UNSPECIFIED,
-            infra_ip_last: Ipv4Addr::UNSPECIFIED,
-            ports: Vec::new(),
-            bgp: Vec::new(),
-        }),
+        schema_version: 1,
+        body: EarlyNetworkConfigBody {
+            ntp_servers: Vec::new(),
+            rack_network_config: Some(RackNetworkConfig {
+                rack_subnet: Ipv6Network::new(Ipv6Addr::UNSPECIFIED, 56)
+                    .unwrap(),
+                infra_ip_first: Ipv4Addr::UNSPECIFIED,
+                infra_ip_last: Ipv4Addr::UNSPECIFIED,
+                ports: Vec::new(),
+                bgp: Vec::new(),
+            }),
+        },
     };
     Ok(HttpResponseOk(config))
 }

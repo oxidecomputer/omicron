@@ -43,9 +43,10 @@ use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::SwitchLocation;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
+use sled_agent_client::types::EarlyNetworkConfigBody;
 use sled_agent_client::types::{
     BgpConfig, BgpPeerConfig, EarlyNetworkConfig, PortConfigV1,
-    RackNetworkConfig, RouteConfig as SledRouteConfig,
+    RackNetworkConfigV1, RouteConfig as SledRouteConfig,
 };
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -596,7 +597,7 @@ impl super::Nexus {
             .into_inner();
 
         rack.rack_subnet =
-            result.rack_network_config.map(|x| x.rack_subnet.into());
+            result.body.rack_network_config.map(|x| x.rack_subnet.into());
 
         self.datastore().update_rack_subnet(opctx, &rack).await?;
 
@@ -696,16 +697,19 @@ impl super::Nexus {
 
         let result = EarlyNetworkConfig {
             generation: 0,
-            ntp_servers: Vec::new(), //TODO
-            rack_network_config: Some(RackNetworkConfig {
-                rack_subnet: subnet,
-                //TODO(ry) you are here. We need to remove these too. They are
-                // inconsistent with a generic set of addresses on ports.
-                infra_ip_first: Ipv4Addr::UNSPECIFIED,
-                infra_ip_last: Ipv4Addr::UNSPECIFIED,
-                ports,
-                bgp,
-            }),
+            schema_version: 1,
+            body: EarlyNetworkConfigBody {
+                ntp_servers: Vec::new(), //TODO
+                rack_network_config: Some(RackNetworkConfigV1 {
+                    rack_subnet: subnet,
+                    //TODO(ry) you are here. We need to remove these too. They are
+                    // inconsistent with a generic set of addresses on ports.
+                    infra_ip_first: Ipv4Addr::UNSPECIFIED,
+                    infra_ip_last: Ipv4Addr::UNSPECIFIED,
+                    ports,
+                    bgp,
+                }),
+            },
         };
 
         Ok(result)

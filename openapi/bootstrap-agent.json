@@ -626,7 +626,7 @@
             "description": "Initial rack network configuration",
             "allOf": [
               {
-                "$ref": "#/components/schemas/RackNetworkConfig"
+                "$ref": "#/components/schemas/RackNetworkConfigV1"
               }
             ]
           },
@@ -663,7 +663,7 @@
           "recovery_silo"
         ]
       },
-      "RackNetworkConfig": {
+      "RackNetworkConfigV1": {
         "description": "Initial network configuration",
         "type": "object",
         "properties": {

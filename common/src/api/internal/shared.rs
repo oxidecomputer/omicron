@@ -68,9 +68,13 @@ pub struct SourceNatConfig {
     pub last_port: u16,
 }
 
+// We alias [`RackNetworkConfig`] to the current version of the protocol, so
+// that we can convert between versions as necessary.
+pub type RackNetworkConfig = RackNetworkConfigV1;
+
 /// Initial network configuration
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
-pub struct RackNetworkConfig {
+pub struct RackNetworkConfigV1 {
     pub rack_subnet: Ipv6Network,
     // TODO: #3591 Consider making infra-ip ranges implicit for uplinks
     /// First ip address to be used for configuring network infrastructure
@@ -125,6 +129,23 @@ pub struct PortConfigV1 {
     pub uplink_port_fec: PortFec,
     /// BGP peers on this port
     pub bgp_peers: Vec<BgpPeerConfig>,
+}
+
+impl From<UplinkConfig> for PortConfigV1 {
+    fn from(value: UplinkConfig) -> Self {
+        PortConfigV1 {
+            routes: vec![RouteConfig {
+                destination: "0.0.0.0/0".parse().unwrap(),
+                nexthop: value.gateway_ip.into(),
+            }],
+            addresses: vec![value.uplink_cidr.into()],
+            switch: value.switch,
+            port: value.uplink_port,
+            uplink_port_speed: value.uplink_port_speed,
+            uplink_port_fec: value.uplink_port_fec,
+            bgp_peers: vec![],
+        }
+    }
 }
 
 /// Deprecated, use PortConfigV1 instead. Cannot actually deprecate due to

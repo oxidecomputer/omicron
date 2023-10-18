@@ -472,7 +472,7 @@
           "description": "Initial rack network configuration",
           "anyOf": [
             {
-              "$ref": "#/definitions/RackNetworkConfig"
+              "$ref": "#/definitions/RackNetworkConfigV1"
             },
             {
               "type": "null"
@@ -503,7 +503,7 @@
         }
       }
     },
-    "RackNetworkConfig": {
+    "RackNetworkConfigV1": {
       "description": "Initial network configuration",
       "type": "object",
       "required": [

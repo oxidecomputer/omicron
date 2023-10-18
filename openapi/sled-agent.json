@@ -1692,14 +1692,33 @@
         ]
       },
       "EarlyNetworkConfig": {
-        "description": "Network configuration required to bring up the control plane\n\nThe fields in this structure are those from [`super::params::RackInitializeRequest`] necessary for use beyond RSS. This is just for the initial rack configuration and cold boot purposes. Updates will come from Nexus in the future.",
+        "description": "Network configuration required to bring up the control plane\n\nThe fields in this structure are those from [`super::params::RackInitializeRequest`] necessary for use beyond RSS. This is just for the initial rack configuration and cold boot purposes. Updates come from Nexus.",
         "type": "object",
         "properties": {
+          "body": {
+            "$ref": "#/components/schemas/EarlyNetworkConfigBody"
+          },
           "generation": {
             "type": "integer",
             "format": "uint64",
             "minimum": 0
           },
+          "schema_version": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "body",
+          "generation",
+          "schema_version"
+        ]
+      },
+      "EarlyNetworkConfigBody": {
+        "description": "This is the actual configuration of EarlyNetworking.\n\nWe nest it below the \"header\" of `generation` and `schema_version` so that we can perform partial deserialization of `EarlyNetworkConfig` to only read the header and defer deserialization of the body once we know the schema version. This is possible via the use of [`serde_json::value::RawValue`] in future (post-v1) deserialization paths.",
+        "type": "object",
+        "properties": {
           "ntp_servers": {
             "description": "The external NTP server addresses.",
             "type": "array",
@@ -1709,16 +1728,14 @@
           },
           "rack_network_config": {
             "nullable": true,
-            "description": "A copy of the initial rack network configuration when we are in generation `1`.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/RackNetworkConfig"
+                "$ref": "#/components/schemas/RackNetworkConfigV1"
               }
             ]
           }
         },
         "required": [
-          "generation",
           "ntp_servers"
         ]
       },
@@ -2561,7 +2578,7 @@
         "minItems": 2,
         "maxItems": 2
       },
-      "RackNetworkConfig": {
+      "RackNetworkConfigV1": {
         "description": "Initial network configuration",
         "type": "object",
         "properties": {

@@ -453,7 +453,7 @@ impl From<&'_ CurrentRssConfig> for CurrentRssUserConfig {
 
 fn validate_rack_network_config(
     config: &RackNetworkConfig,
-) -> Result<bootstrap_agent_client::types::RackNetworkConfig> {
+) -> Result<bootstrap_agent_client::types::RackNetworkConfigV1> {
     use bootstrap_agent_client::types::BgpConfig as BaBgpConfig;
     use bootstrap_agent_client::types::BgpPeerConfig as BaBgpPeerConfig;
     use bootstrap_agent_client::types::PortConfigV1 as BaPortConfigV1;
@@ -496,7 +496,7 @@ fn validate_rack_network_config(
     }
     // TODO Add more client side checks on `rack_network_config` contents?
 
-    Ok(bootstrap_agent_client::types::RackNetworkConfig {
+    Ok(bootstrap_agent_client::types::RackNetworkConfigV1 {
         rack_subnet: config.rack_subnet,
         infra_ip_first: config.infra_ip_first,
         infra_ip_last: config.infra_ip_last,
