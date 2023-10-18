@@ -42,7 +42,7 @@ progenitor::generate_api!(
         RackInitId = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
         RackResetId = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
         RackOperationStatus = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
-        RackNetworkConfig = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
+        RackNetworkConfigV1 = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
         UplinkConfig = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
         PortConfigV1 = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
         BgpPeerConfig = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
