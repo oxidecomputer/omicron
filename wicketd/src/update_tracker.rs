@@ -1584,17 +1584,28 @@ impl UpdateContext {
 
         // Read the CMPA and currently-active CFPA so we can find the
         // correctly-signed artifact.
-        let base64_decode_rot_page = |data| {
-            let mut page = [0; ROT_PAGE_SIZE];
+        let base64_decode_rot_page = |data: String| {
+            // Even though we know `data` should decode to exactly
+            // `ROT_PAGE_SIZE` bytes, the base64 crate requires an output buffer
+            // of at least `decoded_len_estimate`. Allocate such a buffer here,
+            // then we'll copy to the fixed-size array we need after confirming
+            // the number of decoded bytes;
+            let mut output_buf =
+                vec![0; base64::decoded_len_estimate(data.len())];
+
             let n = base64::engine::general_purpose::STANDARD
-                .decode_slice(&data, &mut page)
-                .context("failed to decode base64 string: {data:?}")?;
+                .decode_slice(&data, &mut output_buf)
+                .with_context(|| {
+                    format!("failed to decode base64 string: {data:?}")
+                })?;
             if n != ROT_PAGE_SIZE {
                 bail!(
                     "incorrect len ({n}, expected {ROT_PAGE_SIZE}) \
                      after decoding base64 string: {data:?}",
                 );
             }
+            let mut page = [0; ROT_PAGE_SIZE];
+            page.copy_from_slice(&output_buf[..n]);
             Ok(page)
         };
         let cmpa = self
