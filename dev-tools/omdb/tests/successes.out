@@ -296,6 +296,13 @@ task: "dns_propagation_external"
       [::1]:REDACTED_PORT     success     
 
 
+task: "nat_v4_garbage_collector"
+  configured period: every 30s
+  currently executing: no
+  last completed activation: iter 2, triggered by an explicit signal
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+warning: unknown background task: "nat_v4_garbage_collector" (don't know how to interpret details: Null)
+
 task: "external_endpoints"
   configured period: every 1m
   currently executing: no
@@ -312,13 +319,6 @@ task: "external_endpoints"
         warning: silo REDACTED_UUID_REDACTED_UUID_REDACTED with DNS name "test-suite-silo.sys.oxide-dev.test" has no usable certificates
 
     TLS certificates: 0
-
-task: "nat_v4_garbage_collector"
-  configured period: every 30s
-  currently executing: no
-  last completed activation: iter 2, triggered by an explicit signal
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-warning: unknown background task: "nat_v4_garbage_collector" (don't know how to interpret details: Null)
 
 ---------------------------------------------
 stderr:
