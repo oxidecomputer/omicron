@@ -1675,6 +1675,12 @@ impl UpdateContext {
             })?;
             match archive.verify(&cmpa, &cfpa) {
                 Ok(()) => {
+                    info!(
+                        self.log, "RoT archive verification success";
+                        "name" => artifact.id.name.as_str(),
+                        "version" => %artifact.id.version,
+                        "kind" => ?artifact.id.kind,
+                    );
                     artifact_to_apply = Some(artifact.clone());
                     break;
                 }
