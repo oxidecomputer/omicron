@@ -5495,6 +5495,7 @@ dependencies = [
  "schemars",
  "semver 1.0.18",
  "serde",
+ "serde_json",
  "sha2",
  "signature 2.1.0",
  "similar",
