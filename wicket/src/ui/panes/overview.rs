@@ -885,7 +885,6 @@ fn append_caboose(
     } = caboose;
     let label_style = style::text_label();
     let ok_style = style::text_success();
-    let bad_style = style::text_failure();
 
     spans.push(
         vec![
@@ -905,9 +904,5 @@ fn append_caboose(
     );
     let mut version_spans =
         vec![prefix.clone(), Span::styled("Version: ", label_style)];
-    if let Some(v) = version.as_ref() {
-        version_spans.push(Span::styled(v.clone(), ok_style));
-    } else {
-        version_spans.push(Span::styled("Unknown", bad_style));
-    }
+    version_spans.push(Span::styled(version, ok_style));
 }
