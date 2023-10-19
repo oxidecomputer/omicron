@@ -9,7 +9,6 @@ use crate::external_api::params;
 use crate::external_api::params::CertificateCreate;
 use crate::external_api::shared::ServiceUsingCertificate;
 use crate::internal_api::params::RackInitializationRequest;
-use internal_dns::ServiceName;
 use ipnetwork::IpNetwork;
 use nexus_db_model::DnsGroup;
 use nexus_db_model::InitialDnsGroup;
@@ -41,7 +40,6 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
-use omicron_common::api::external::SwitchLocation;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use sled_agent_client::types::EarlyNetworkConfigBody;
 use sled_agent_client::types::{
@@ -575,13 +573,13 @@ impl super::Nexus {
             return Ok(());
         }
         let addr = self
-            .resolver()
-            .await
-            .lookup_socket_v6(ServiceName::Scrimlet(SwitchLocation::Switch0))
-            .await
-            .map_err(|e| Error::InternalError {
-                internal_message: e.to_string(),
-            })?;
+            .sled_list(opctx, &DataPageParams::max_page())
+            .await?
+            .get(0)
+            .ok_or(Error::InternalError {
+                internal_message: "no sleds at time of bootstore sync".into(),
+            })?
+            .address();
 
         let sa = sled_agent_client::Client::new(
             &format!("http://{}", addr),

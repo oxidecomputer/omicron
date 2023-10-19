@@ -15,7 +15,6 @@ use dpd_client::types::{
     RouteSettingsV4, RouteSettingsV6,
 };
 use dpd_client::{Ipv4Cidr, Ipv6Cidr};
-use internal_dns::ServiceName;
 use ipnetwork::IpNetwork;
 use mg_admin_client::types::Prefix4;
 use mg_admin_client::types::{ApplyRequest, BgpPeerConfig, BgpRoute};
@@ -24,7 +23,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::UpdatePrecondition;
 use nexus_db_queries::{authn, db};
 use nexus_types::external_api::params;
-use omicron_common::api::external::{self, NameOrId};
+use omicron_common::api::external::{self, DataPageParams, NameOrId};
 use omicron_common::api::internal::shared::{
     ParseSwitchLocationError, SwitchLocation,
 };
@@ -786,9 +785,11 @@ pub(crate) async fn select_mg_client(
 }
 
 pub(crate) async fn get_scrimlet_address(
-    location: SwitchLocation,
+    _location: SwitchLocation,
     nexus: &Arc<Nexus>,
 ) -> Result<SocketAddrV6, ActionError> {
+    /* TODO this depends on DNS entries only coming from RSS, it's broken
+            on the upgrade path
     nexus
         .resolver()
         .await
@@ -800,6 +801,23 @@ pub(crate) async fn get_scrimlet_address(
                 "scrimlet dns lookup failed {e}",
             ))
         })
+    */
+    let opctx = &nexus.opctx_for_internal_api();
+    Ok(nexus
+        .sled_list(opctx, &DataPageParams::max_page())
+        .await
+        .map_err(|e| {
+            ActionError::action_failed(format!(
+                "get_scrimlet_address: failed to list sleds: {e}"
+            ))
+        })?
+        .into_iter()
+        .filter(|x| x.is_scrimlet())
+        .next()
+        .ok_or(ActionError::action_failed(
+            "get_scrimlet_address: no scrimlets found".to_string(),
+        ))?
+        .address())
 }
 
 #[derive(Clone, Debug)]

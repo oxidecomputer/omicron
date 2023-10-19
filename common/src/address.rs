@@ -173,6 +173,14 @@ impl<const N: u8> Ipv6Subnet<N> {
     }
 }
 
+impl<const N: u8> From<Ipv6Network> for Ipv6Subnet<N> {
+    fn from(net: Ipv6Network) -> Self {
+        // Ensure the address is set to within-prefix only components.
+        let net = Ipv6Network::new(net.network(), N).unwrap();
+        Self { net: Ipv6Net(net) }
+    }
+}
+
 // We need a custom Deserialize to ensure that the subnet is what we expect.
 impl<'de, const N: u8> Deserialize<'de> for Ipv6Subnet<N> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>

@@ -272,7 +272,11 @@ impl Nexus {
         if config.pkg.mgd.is_empty() {
             loop {
                 let result = resolver
-                    .lookup_all_ipv6(ServiceName::Mgd)
+                    // TODO this should be ServiceName::Mgd, but in the upgrade
+                    //      path, that does not exist because RSS has not
+                    //      created it. So we just piggyback on Dendrite's SRV
+                    //      record.
+                    .lookup_all_ipv6(ServiceName::Dendrite)
                     .await
                     .map_err(|e| format!("Cannot lookup mgd addresses: {e}"));
                 match result {
@@ -391,6 +395,12 @@ impl Nexus {
 
         // TODO-cleanup all the extra Arcs here seems wrong
         let nexus = Arc::new(nexus);
+        let bootstore_opctx = OpContext::for_background(
+            log.new(o!("component" => "Bootstore")),
+            Arc::clone(&authz),
+            authn::Context::internal_api(),
+            Arc::clone(&db_datastore),
+        );
         let opctx = OpContext::for_background(
             log.new(o!("component" => "SagaRecoverer")),
             Arc::clone(&authz),
@@ -429,6 +439,12 @@ impl Nexus {
                     );
                     for task in task_nexus.background_tasks.driver.tasks() {
                         task_nexus.background_tasks.driver.activate(task);
+                    }
+                    if let Err(e) = task_nexus
+                        .initial_bootstore_sync(&bootstore_opctx)
+                        .await
+                    {
+                        error!(task_log, "failed to run bootstore sync: {e}");
                     }
                 }
                 Err(_) => {

@@ -81,8 +81,8 @@ EXECUTING COMMAND: omdb ["db", "sleds"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
-SERIAL       IP          ROLE ID                                   
-sim-b6d65341 [::1]:REDACTED_PORT -    REDACTED_UUID_REDACTED_UUID_REDACTED 
+SERIAL       IP          ROLE     ID                                   
+sim-b6d65341 [::1]:REDACTED_PORT scrimlet REDACTED_UUID_REDACTED_UUID_REDACTED 
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
