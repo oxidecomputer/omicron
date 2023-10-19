@@ -26,7 +26,7 @@ use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_common::nexus_config::RegionAllocationStrategy;
 use slog::Logger;
 use std::collections::HashMap;
-use std::net::Ipv6Addr;
+use std::net::{IpAddr, Ipv6Addr};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -152,6 +152,12 @@ pub struct Nexus {
 
     /// DNS resolver Nexus uses to resolve an external host
     external_resolver: Arc<external_dns::Resolver>,
+
+    /// DNS servers used in `external_resolver`, used to provide DNS servers to
+    /// instances via DHCP
+    // TODO: This needs to be moved to the database.
+    // https://github.com/oxidecomputer/omicron/issues/3732
+    external_dns_servers: Vec<IpAddr>,
 
     /// Mapping of SwitchLocations to their respective Dendrite Clients
     dpd_clients: HashMap<SwitchLocation, Arc<dpd_client::Client>>,
@@ -332,6 +338,10 @@ impl Nexus {
             samael_max_issue_delay: std::sync::Mutex::new(None),
             internal_resolver: resolver,
             external_resolver,
+            external_dns_servers: config
+                .deployment
+                .external_dns_servers
+                .clone(),
             dpd_clients,
             background_tasks,
             default_region_allocation_strategy: config

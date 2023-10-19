@@ -52,7 +52,7 @@ use illumos_utils::dladm::{
     Dladm, Etherstub, EtherstubVnic, GetSimnetError, PhysicalLink,
 };
 use illumos_utils::link::{Link, VnicAllocator};
-use illumos_utils::opte::{Port, PortManager, PortTicket};
+use illumos_utils::opte::{DhcpCfg, Port, PortManager, PortTicket};
 use illumos_utils::running_zone::{
     InstalledZone, RunCommandError, RunningZone,
 };
@@ -863,11 +863,11 @@ impl ServiceManager {
             // config allows outbound access which is enough for
             // Boundary NTP which needs to come up before Nexus.
             let port = port_manager
-                .create_port(nic, snat, external_ips, &[])
+                .create_port(nic, snat, external_ips, &[], DhcpCfg::default())
                 .map_err(|err| Error::ServicePortCreation {
-                service: svc.details.to_string(),
-                err: Box::new(err),
-            })?;
+                    service: svc.details.to_string(),
+                    err: Box::new(err),
+                })?;
 
             // We also need to update the switch with the NAT mappings
             let (target_ip, first_port, last_port) = match snat {
