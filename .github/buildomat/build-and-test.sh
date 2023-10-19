@@ -69,7 +69,7 @@ ptime -m timeout 1h cargo test --doc --locked --verbose --no-fail-fast
 # We expect the seed CRDB to be placed here, so we explicitly remove it so the
 # rmdir check below doesn't get triggered. Nextest doesn't have support for
 # teardown scripts so this is the best we've got.
-rm -rf "$TEST_TMPDIR/crdb-base"
+rm -rf "$TEST_TMPDIR/crdb-base*"
 
 #
 # Make sure that we have left nothing around in $TEST_TMPDIR.  The easiest way
