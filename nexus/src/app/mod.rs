@@ -26,7 +26,7 @@ use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_common::nexus_config::RegionAllocationStrategy;
 use slog::Logger;
 use std::collections::HashMap;
-use std::net::Ipv6Addr;
+use std::net::{IpAddr, Ipv6Addr};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -114,6 +114,10 @@ pub struct Nexus {
     /// External dropshot servers
     external_server: std::sync::Mutex<Option<DropshotServer>>,
 
+    /// External dropshot server that listens on the internal network to allow
+    /// connections from the tech port; see RFD 431.
+    techport_external_server: std::sync::Mutex<Option<DropshotServer>>,
+
     /// Internal dropshot server
     internal_server: std::sync::Mutex<Option<DropshotServer>>,
 
@@ -148,6 +152,12 @@ pub struct Nexus {
 
     /// DNS resolver Nexus uses to resolve an external host
     external_resolver: Arc<external_dns::Resolver>,
+
+    /// DNS servers used in `external_resolver`, used to provide DNS servers to
+    /// instances via DHCP
+    // TODO: This needs to be moved to the database.
+    // https://github.com/oxidecomputer/omicron/issues/3732
+    external_dns_servers: Vec<IpAddr>,
 
     /// Mapping of SwitchLocations to their respective Dendrite Clients
     dpd_clients: HashMap<SwitchLocation, Arc<dpd_client::Client>>,
@@ -307,6 +317,7 @@ impl Nexus {
             sec_client: Arc::clone(&sec_client),
             recovery_task: std::sync::Mutex::new(None),
             external_server: std::sync::Mutex::new(None),
+            techport_external_server: std::sync::Mutex::new(None),
             internal_server: std::sync::Mutex::new(None),
             populate_status,
             timeseries_client,
@@ -327,6 +338,10 @@ impl Nexus {
             samael_max_issue_delay: std::sync::Mutex::new(None),
             internal_resolver: resolver,
             external_resolver,
+            external_dns_servers: config
+                .deployment
+                .external_dns_servers
+                .clone(),
             dpd_clients,
             background_tasks,
             default_region_allocation_strategy: config
@@ -439,6 +454,7 @@ impl Nexus {
     pub(crate) async fn set_servers(
         &self,
         external_server: DropshotServer,
+        techport_external_server: DropshotServer,
         internal_server: DropshotServer,
     ) {
         // If any servers already exist, close them.
@@ -446,12 +462,21 @@ impl Nexus {
 
         // Insert the new servers.
         self.external_server.lock().unwrap().replace(external_server);
+        self.techport_external_server
+            .lock()
+            .unwrap()
+            .replace(techport_external_server);
         self.internal_server.lock().unwrap().replace(internal_server);
     }
 
     pub(crate) async fn close_servers(&self) -> Result<(), String> {
         let external_server = self.external_server.lock().unwrap().take();
         if let Some(server) = external_server {
+            server.close().await?;
+        }
+        let techport_external_server =
+            self.techport_external_server.lock().unwrap().take();
+        if let Some(server) = techport_external_server {
             server.close().await?;
         }
         let internal_server = self.internal_server.lock().unwrap().take();
