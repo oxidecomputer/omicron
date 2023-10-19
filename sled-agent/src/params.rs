@@ -6,6 +6,7 @@ use crate::zone_bundle::PriorityOrder;
 pub use crate::zone_bundle::ZoneBundleCause;
 pub use crate::zone_bundle::ZoneBundleId;
 pub use crate::zone_bundle::ZoneBundleMetadata;
+pub use illumos_utils::opte::params::DhcpConfig;
 pub use illumos_utils::opte::params::VpcFirewallRule;
 pub use illumos_utils::opte::params::VpcFirewallRulesEnsureBody;
 use omicron_common::api::internal::nexus::{
@@ -68,6 +69,7 @@ pub struct InstanceHardware {
     /// provided to an instance to allow inbound connectivity.
     pub external_ips: Vec<IpAddr>,
     pub firewall_rules: Vec<VpcFirewallRule>,
+    pub dhcp_config: DhcpConfig,
     // TODO: replace `propolis_client::handmade::*` with locally-modeled request type
     pub disks: Vec<propolis_client::handmade::api::DiskRequest>,
     pub cloud_init_bytes: Option<String>,

@@ -2513,37 +2513,6 @@ BEGIN;
  * nothing to ensure it gets bumped when it should be, but it's a start.
  */
 
-CREATE TABLE IF NOT EXISTS omicron.public.db_metadata (
-    -- There should only be one row of this table for the whole DB.
-    -- It's a little goofy, but filter on "singleton = true" before querying
-    -- or applying updates, and you'll access the singleton row.
-    --
-    -- We also add a constraint on this table to ensure it's not possible to
-    -- access the version of this table with "singleton = false".
-    singleton BOOL NOT NULL PRIMARY KEY,
-    time_created TIMESTAMPTZ NOT NULL,
-    time_modified TIMESTAMPTZ NOT NULL,
-    -- Semver representation of the DB version
-    version STRING(64) NOT NULL,
-
-    -- (Optional) Semver representation of the DB version to which we're upgrading
-    target_version STRING(64),
-
-    CHECK (singleton = true)
-);
-
-INSERT INTO omicron.public.db_metadata (
-    singleton,
-    time_created,
-    time_modified,
-    version,
-    target_version
-) VALUES
-    ( TRUE, NOW(), NOW(), '7.0.0', NULL)
-ON CONFLICT DO NOTHING;
-
-
-
 -- Per-VMM state.
 CREATE TABLE IF NOT EXISTS omicron.public.vmm (
     id UUID PRIMARY KEY,
@@ -2589,5 +2558,34 @@ FROM
             instance.active_propolis_id = vmm.id
 WHERE
     instance.time_deleted IS NULL AND vmm.time_deleted IS NULL;
+
+CREATE TABLE IF NOT EXISTS omicron.public.db_metadata (
+    -- There should only be one row of this table for the whole DB.
+    -- It's a little goofy, but filter on "singleton = true" before querying
+    -- or applying updates, and you'll access the singleton row.
+    --
+    -- We also add a constraint on this table to ensure it's not possible to
+    -- access the version of this table with "singleton = false".
+    singleton BOOL NOT NULL PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    -- Semver representation of the DB version
+    version STRING(64) NOT NULL,
+
+    -- (Optional) Semver representation of the DB version to which we're upgrading
+    target_version STRING(64),
+
+    CHECK (singleton = true)
+);
+
+INSERT INTO omicron.public.db_metadata (
+    singleton,
+    time_created,
+    time_modified,
+    version,
+    target_version
+) VALUES
+    ( TRUE, NOW(), NOW(), '7.0.0', NULL)
+ON CONFLICT DO NOTHING;
 
 COMMIT;

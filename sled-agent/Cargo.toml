@@ -44,7 +44,6 @@ macaddr.workspace = true
 nexus-client.workspace = true
 omicron-common.workspace = true
 once_cell.workspace = true
-oxide-vpc.workspace = true
 oximeter.workspace = true
 oximeter-producer.workspace = true
 percent-encoding.workspace = true

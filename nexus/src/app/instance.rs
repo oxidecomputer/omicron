@@ -987,6 +987,12 @@ impl super::Nexus {
             source_nat,
             external_ips,
             firewall_rules,
+            dhcp_config: sled_agent_client::types::DhcpConfig {
+                dns_servers: self.external_dns_servers.clone(),
+                // TODO: finish designing instance DNS
+                host_domain: None,
+                search_domains: Vec::new(),
+            },
             disks: disk_reqs,
             cloud_init_bytes: Some(base64::Engine::encode(
                 &base64::engine::general_purpose::STANDARD,
