@@ -227,26 +227,19 @@ impl PortManager {
             "Creating xde device";
             "port_name" => &port_name,
             "vpc_cfg" => ?&vpc_cfg,
+            "dhcp_config" => ?&dhcp_config,
         );
         #[cfg(target_os = "illumos")]
         let hdl = {
             let hdl = opte_ioctl::OpteHdl::open(opte_ioctl::OpteHdl::XDE_CTL)?;
-            hdl.create_xde(&port_name, vpc_cfg, /* passthru = */ false)?;
+            hdl.create_xde(
+                &port_name,
+                vpc_cfg,
+                dhcp_config,
+                /* passthru = */ false,
+            )?;
             hdl
         };
-
-        // Configure the DHCP parameters for this interface.
-        debug!(
-            self.inner.log,
-            "Set DHCP parameters";
-            "port_name" => &port_name,
-            "dhcp_config" => ?&dhcp_config,
-        );
-        #[cfg(target_os = "illumos")]
-        hdl.set_dhcp_params(&oxide_vpc::api::SetDhcpParamsReq {
-            port_name: port_name.clone(),
-            data: dhcp_config,
-        })?;
 
         // Initialize firewall rules for the new port.
         let rules = opte_firewall_rules(firewall_rules, &vni, &mac);
