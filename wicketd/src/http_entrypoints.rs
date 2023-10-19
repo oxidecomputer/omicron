@@ -12,6 +12,7 @@ use crate::mgs::MgsHandle;
 use crate::mgs::ShutdownInProgress;
 use crate::preflight_check::UplinkEventReport;
 use crate::RackV1Inventory;
+use crate::SmfConfigValues;
 use bootstrap_agent_client::types::RackInitId;
 use bootstrap_agent_client::types::RackOperationStatus;
 use bootstrap_agent_client::types::RackResetId;
@@ -29,6 +30,7 @@ use gateway_client::types::IgnitionCommand;
 use gateway_client::types::SpIdentifier;
 use gateway_client::types::SpType;
 use http::StatusCode;
+use internal_dns::resolver::Resolver;
 use omicron_common::address;
 use omicron_common::api::external::SemverVersion;
 use omicron_common::api::internal::shared::RackNetworkConfig;
@@ -39,6 +41,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use sled_hardware::Baseboard;
+use slog::o;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::io;
@@ -80,6 +83,7 @@ pub fn api() -> WicketdApiDescription {
         api.register(post_ignition_command)?;
         api.register(post_start_preflight_uplink_check)?;
         api.register(get_preflight_uplink_report)?;
+        api.register(post_reload_config)?;
         Ok(())
     }
 
@@ -1235,6 +1239,53 @@ async fn get_preflight_uplink_report(
                 .to_string(),
         )),
     }
+}
+
+/// An endpoint instructing wicketd to reload its SMF config properties.
+///
+/// The only expected client of this endpoint is `curl` from wicketd's SMF
+/// `refresh` method, but other clients hitting it is harmless.
+#[endpoint {
+    method = POST,
+    path = "/reload-config",
+}]
+async fn post_reload_config(
+    rqctx: RequestContext<ServerContext>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let smf_values = SmfConfigValues::read_current().map_err(|err| {
+        HttpError::for_unavail(
+            None,
+            format!("failed to read SMF values: {err}"),
+        )
+    })?;
+
+    let rqctx = rqctx.context();
+
+    // We do not allow a config reload to change our bound address; return an
+    // error if the caller is attempting to do so.
+    if rqctx.bind_address != smf_values.address {
+        return Err(HttpError::for_bad_request(
+            None,
+            "listening address cannot be reconfigured".to_string(),
+        ));
+    }
+
+    if let Some(rack_subnet) = smf_values.rack_subnet {
+        let resolver = Resolver::new_from_subnet(
+            rqctx.log.new(o!("component" => "InternalDnsResolver")),
+            rack_subnet,
+        )
+        .map_err(|err| {
+            HttpError::for_unavail(
+                None,
+                format!("failed to create internal DNS resolver: {err}"),
+            )
+        })?;
+
+        *rqctx.internal_dns_resolver.lock().unwrap() = Some(resolver);
+    }
+
+    Ok(HttpResponseUpdatedNoContent())
 }
 
 fn http_error_from_client_error(

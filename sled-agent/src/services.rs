@@ -52,7 +52,7 @@ use illumos_utils::dladm::{
     Dladm, Etherstub, EtherstubVnic, GetSimnetError, PhysicalLink,
 };
 use illumos_utils::link::{Link, VnicAllocator};
-use illumos_utils::opte::{Port, PortManager, PortTicket};
+use illumos_utils::opte::{DhcpCfg, Port, PortManager, PortTicket};
 use illumos_utils::running_zone::{
     InstalledZone, RunCommandError, RunningZone,
 };
@@ -62,7 +62,6 @@ use illumos_utils::zone::Zones;
 use illumos_utils::{execute, PFEXEC};
 use internal_dns::resolver::Resolver;
 use itertools::Itertools;
-use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::AZ_PREFIX;
 use omicron_common::address::BOOTSTRAP_ARTIFACT_PORT;
 use omicron_common::address::CLICKHOUSE_KEEPER_PORT;
@@ -74,7 +73,9 @@ use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
+use omicron_common::address::WICKETD_NEXUS_PROXY_PORT;
 use omicron_common::address::WICKETD_PORT;
+use omicron_common::address::{Ipv6Subnet, NEXUS_TECHPORT_EXTERNAL_PORT};
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::RackNetworkConfig;
 use omicron_common::backoff::{
@@ -862,11 +863,11 @@ impl ServiceManager {
             // config allows outbound access which is enough for
             // Boundary NTP which needs to come up before Nexus.
             let port = port_manager
-                .create_port(nic, snat, external_ips, &[])
+                .create_port(nic, snat, external_ips, &[], DhcpCfg::default())
                 .map_err(|err| Error::ServicePortCreation {
-                service: svc.details.to_string(),
-                err: Box::new(err),
-            })?;
+                    service: svc.details.to_string(),
+                    err: Box::new(err),
+                })?;
 
             // We also need to update the switch with the NAT mappings
             let (target_ip, first_port, last_port) = match snat {
@@ -1448,6 +1449,8 @@ impl ServiceManager {
                     let deployment_config = NexusDeploymentConfig {
                         id: request.zone.id,
                         rack_id: sled_info.rack_id,
+                        techport_external_server_port:
+                            NEXUS_TECHPORT_EXTERNAL_PORT,
 
                         dropshot_external: ConfigDropshotWithTls {
                             tls: *external_tls,
@@ -1695,6 +1698,28 @@ impl ServiceManager {
                         "config/mgs-address",
                         &format!("[::1]:{MGS_PORT}"),
                     )?;
+
+                    // We intentionally bind `nexus-proxy-address` to `::` so
+                    // wicketd will serve this on all interfaces, particularly
+                    // the tech port interfaces, allowing external clients to
+                    // connect to this Nexus proxy.
+                    smfh.setprop(
+                        "config/nexus-proxy-address",
+                        &format!("[::]:{WICKETD_NEXUS_PROXY_PORT}"),
+                    )?;
+                    if let Some(underlay_address) = self
+                        .inner
+                        .sled_info
+                        .get()
+                        .map(|info| info.underlay_address)
+                    {
+                        let rack_subnet =
+                            Ipv6Subnet::<AZ_PREFIX>::new(underlay_address);
+                        smfh.setprop(
+                            "config/rack-subnet",
+                            &rack_subnet.net().ip().to_string(),
+                        )?;
+                    }
 
                     let serialized_baseboard =
                         serde_json::to_string_pretty(&baseboard)?;
@@ -2705,9 +2730,8 @@ impl ServiceManager {
                 );
                 *request = new_request;
 
-                let address = request
-                    .addresses
-                    .get(0)
+                let first_address = request.addresses.get(0);
+                let address = first_address
                     .map(|addr| addr.to_string())
                     .unwrap_or_else(|| "".to_string());
 
@@ -2812,6 +2836,29 @@ impl ServiceManager {
                                 }
                             }
                             smfh.refresh()?;
+                        }
+                        ServiceType::Wicketd { .. } => {
+                            if let Some(&address) = first_address {
+                                let rack_subnet =
+                                    Ipv6Subnet::<AZ_PREFIX>::new(address);
+
+                                info!(
+                                    self.inner.log, "configuring wicketd";
+                                    "rack_subnet" => %rack_subnet.net().ip(),
+                                );
+
+                                smfh.setprop(
+                                    "config/rack-subnet",
+                                    &rack_subnet.net().ip().to_string(),
+                                )?;
+
+                                smfh.refresh()?;
+                            } else {
+                                error!(
+                                    self.inner.log,
+                                    "underlay address unexpectedly missing",
+                                );
+                            }
                         }
                         ServiceType::Tfport { .. } => {
                             // Since tfport and dpd communicate using localhost,

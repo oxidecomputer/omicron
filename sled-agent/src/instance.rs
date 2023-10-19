@@ -26,7 +26,7 @@ use chrono::Utc;
 use futures::lock::{Mutex, MutexGuard};
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
-use illumos_utils::opte::PortManager;
+use illumos_utils::opte::{DhcpCfg, PortManager};
 use illumos_utils::running_zone::{InstalledZone, RunningZone};
 use illumos_utils::svc::wait_for_service;
 use illumos_utils::zone::Zones;
@@ -90,6 +90,10 @@ pub enum Error {
 
     #[error(transparent)]
     Opte(#[from] illumos_utils::opte::Error),
+
+    /// Issued by `impl TryFrom<&[u8]> for oxide_vpc::api::DomainName`
+    #[error("Invalid hostname: {0}")]
+    InvalidHostname(&'static str),
 
     #[error("Error resolving DNS name: {0}")]
     ResolveError(#[from] internal_dns::resolver::ResolveError),
@@ -207,6 +211,7 @@ struct InstanceInner {
     source_nat: SourceNatConfig,
     external_ips: Vec<IpAddr>,
     firewall_rules: Vec<VpcFirewallRule>,
+    dhcp_config: DhcpCfg,
 
     // Disk related properties
     // TODO: replace `propolis_client::handmade::*` with properly-modeled local types
@@ -610,6 +615,37 @@ impl Instance {
             zone_bundler,
         } = services;
 
+        let mut dhcp_config = DhcpCfg {
+            hostname: Some(
+                hardware
+                    .properties
+                    .hostname
+                    .parse()
+                    .map_err(Error::InvalidHostname)?,
+            ),
+            host_domain: hardware
+                .dhcp_config
+                .host_domain
+                .map(|domain| domain.parse())
+                .transpose()
+                .map_err(Error::InvalidHostname)?,
+            domain_search_list: hardware
+                .dhcp_config
+                .search_domains
+                .into_iter()
+                .map(|domain| domain.parse())
+                .collect::<Result<_, _>>()
+                .map_err(Error::InvalidHostname)?,
+            dns4_servers: Vec::new(),
+            dns6_servers: Vec::new(),
+        };
+        for ip in hardware.dhcp_config.dns_servers {
+            match ip {
+                IpAddr::V4(ip) => dhcp_config.dns4_servers.push(ip.into()),
+                IpAddr::V6(ip) => dhcp_config.dns6_servers.push(ip.into()),
+            }
+        }
+
         let instance = InstanceInner {
             log: log.new(o!("instance_id" => id.to_string())),
             // NOTE: Mostly lies.
@@ -633,6 +669,7 @@ impl Instance {
             source_nat: hardware.source_nat,
             external_ips: hardware.external_ips,
             firewall_rules: hardware.firewall_rules,
+            dhcp_config,
             requested_disks: hardware.disks,
             cloud_init_bytes: hardware.cloud_init_bytes,
             state: InstanceStates::new(
@@ -852,6 +889,7 @@ impl Instance {
                 snat,
                 external_ips,
                 &inner.firewall_rules,
+                inner.dhcp_config.clone(),
             )?;
             opte_ports.push(port);
         }

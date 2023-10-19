@@ -13,6 +13,7 @@ use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Result;
 use gateway_client::types::SpIdentifier;
+use internal_dns::resolver::Resolver;
 use sled_hardware::Baseboard;
 use slog::info;
 use std::net::Ipv6Addr;
@@ -23,6 +24,7 @@ use std::sync::OnceLock;
 
 /// Shared state used by API handlers
 pub struct ServerContext {
+    pub(crate) bind_address: SocketAddrV6,
     pub mgs_handle: MgsHandle,
     pub mgs_client: gateway_client::Client,
     pub(crate) log: slog::Logger,
@@ -36,6 +38,7 @@ pub struct ServerContext {
     pub(crate) baseboard: Option<Baseboard>,
     pub(crate) rss_config: Mutex<CurrentRssConfig>,
     pub(crate) preflight_checker: PreflightCheckerHandler,
+    pub(crate) internal_dns_resolver: Arc<Mutex<Option<Resolver>>>,
 }
 
 impl ServerContext {
