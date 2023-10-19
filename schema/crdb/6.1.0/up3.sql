@@ -1,5 +1,5 @@
-CREATE UNIQUE INDEX IF NOT EXISTS ipv4_nat_gen ON omicron.public.ipv4_nat_entry (
-    gen
+CREATE UNIQUE INDEX IF NOT EXISTS ipv4_nat_version_added ON omicron.public.ipv4_nat_entry (
+    version_added
 )
 STORING (
     external_address,

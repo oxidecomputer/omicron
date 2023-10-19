@@ -43,7 +43,7 @@ impl BackgroundTask for Ipv4NatGarbageCollector {
         async {
             let log = &opctx.log;
 
-            let result = self.datastore.ipv4_nat_current_gen(opctx).await;
+            let result = self.datastore.ipv4_nat_current_version(opctx).await;
 
             let mut min_gen = match result {
                 Ok(gen) => gen,

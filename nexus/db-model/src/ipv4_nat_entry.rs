@@ -2,7 +2,7 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 
 use super::MacAddr;
 use crate::{
-    schema::{ipv4_nat_entry, nat_gen},
+    schema::{ipv4_nat_entry, ipv4_nat_version},
     SqlU16, SqlU32, Vni,
 };
 use chrono::{DateTime, Utc};
@@ -44,7 +44,8 @@ pub struct Ipv4NatEntry {
     pub sled_address: ipnetwork::IpNetwork,
     pub vni: Vni,
     pub mac: MacAddr,
-    pub gen: SqlU32,
+    pub version_added: SqlU32,
+    pub version_removed: Option<SqlU32>,
     pub time_created: DateTime<Utc>,
     pub time_deleted: Option<DateTime<Utc>>,
 }
@@ -58,13 +59,17 @@ impl Ipv4NatEntry {
         self.last_port.into()
     }
 
-    pub fn gen(&self) -> u32 {
-        self.gen.into()
+    pub fn version_added(&self) -> u32 {
+        self.version_added.into()
+    }
+
+    pub fn version_removed(&self) -> Option<u32> {
+        self.version_removed.map(|i| i.into())
     }
 }
 
 #[derive(Queryable, Debug, Clone, Selectable)]
-#[diesel(table_name = nat_gen)]
+#[diesel(table_name = ipv4_nat_version)]
 pub struct Ipv4NatGen {
     pub last_value: SqlU32,
     pub log_cnt: SqlU32,
@@ -96,6 +101,11 @@ impl From<Ipv4NatEntry> for Ipv4NatEntryView {
             std::net::IpAddr::V6(a) => a,
         };
 
+        let (gen, deleted) = match value.version_removed {
+            Some(gen) => (*gen, true),
+            None => (*value.version_added, false),
+        };
+
         Self {
             external_address,
             first_port: value.first_port(),
@@ -103,8 +113,8 @@ impl From<Ipv4NatEntry> for Ipv4NatEntryView {
             sled_address,
             vni: value.vni.0,
             mac: *value.mac,
-            gen: value.gen(),
-            deleted: value.time_deleted.is_some(),
+            gen,
+            deleted,
         }
     }
 }

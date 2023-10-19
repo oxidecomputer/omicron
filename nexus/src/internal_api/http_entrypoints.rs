@@ -583,10 +583,11 @@ async fn ipv4_nat_changeset(
         let nexus = &apictx.nexus;
         let path = path_params.into_inner();
         let query = query_params.into_inner();
-        let changeset = nexus
+        let mut changeset = nexus
             .datastore()
             .ipv4_nat_changeset(&opctx, path.from_gen, query.limit)
             .await?;
+        changeset.sort_by_key(|e| e.gen);
         Ok(HttpResponseOk(changeset))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -613,7 +614,7 @@ async fn ipv4_nat_gen(
     let handler = async {
         let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         let nexus = &apictx.nexus;
-        let gen = nexus.datastore().ipv4_nat_current_gen(&opctx).await?;
+        let gen = nexus.datastore().ipv4_nat_current_version(&opctx).await?;
         let view = Ipv4NatGenView { gen };
         Ok(HttpResponseOk(view))
     };

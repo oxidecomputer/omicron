@@ -2532,23 +2532,24 @@ CREATE TABLE IF NOT EXISTS omicron.public.db_metadata (
     CHECK (singleton = true)
 );
 
-CREATE SEQUENCE IF NOT EXISTS omicron.public.nat_gen START 1 INCREMENT 1;
+CREATE SEQUENCE IF NOT EXISTS omicron.public.ipv4_nat_version START 1 INCREMENT 1;
 
 CREATE TABLE IF NOT EXISTS omicron.public.ipv4_nat_entry (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    external_address INET CONSTRAINT ext_addr_not_null NOT NULL,
-    first_port INT4 CONSTRAINT first_port_not_null NOT NULL,
-    last_port INT4 CONSTRAINT last_port_not_null NOT NULL,
-    sled_address INET CONSTRAINT sled_addr_not_null NOT NULL,
-    vni INT4 CONSTRAINT vni_not_null NOT NULL,
-    mac INT8 CONSTRAINT mac_not_null NOT NULL,
-    gen INT8 CONSTRAINT gen_not_null NOT NULL DEFAULT nextval('omicron.public.nat_gen') ON UPDATE nextval('omicron.public.nat_gen'),
-    time_created TIMESTAMPTZ CONSTRAINT tc_addr_not_null NOT NULL DEFAULT now(),
+    external_address INET NOT NULL,
+    first_port INT4 NOT NULL,
+    last_port INT4 NOT NULL,
+    sled_address INET NOT NULL,
+    vni INT4 NOT NULL,
+    mac INT8 NOT NULL,
+    version_added INT8 NOT NULL DEFAULT nextval('omicron.public.ipv4_nat_version'),
+    version_removed INT8,
+    time_created TIMESTAMPTZ NOT NULL DEFAULT now(),
     time_deleted TIMESTAMPTZ
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS ipv4_nat_gen ON omicron.public.ipv4_nat_entry (
-    gen
+CREATE UNIQUE INDEX IF NOT EXISTS ipv4_nat_version_added ON omicron.public.ipv4_nat_entry (
+    version_added
 )
 STORING (
     external_address,
@@ -2568,6 +2569,20 @@ CREATE UNIQUE INDEX IF NOT EXISTS overlapping_ipv4_nat_entry ON omicron.public.i
 ) WHERE time_deleted IS NULL;
 
 CREATE INDEX IF NOT EXISTS ipv4_nat_lookup ON omicron.public.ipv4_nat_entry (external_address, first_port, last_port, sled_address, vni, mac);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ipv4_nat_version_removed ON omicron.public.ipv4_nat_entry (
+    version_removed
+)
+STORING (
+    external_address,
+    first_port,
+    last_port,
+    sled_address,
+    vni,
+    mac,
+    time_created,
+    time_deleted
+);
 
 INSERT INTO omicron.public.db_metadata (
     singleton,
