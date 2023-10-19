@@ -812,8 +812,7 @@ pub(crate) async fn get_scrimlet_address(
             ))
         })?
         .into_iter()
-        .filter(|x| x.is_scrimlet())
-        .next()
+        .find(|x| x.is_scrimlet())
         .ok_or(ActionError::action_failed(
             "get_scrimlet_address: no scrimlets found".to_string(),
         ))?
