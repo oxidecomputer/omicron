@@ -27,8 +27,6 @@ use dropshot::UntypedBody;
 use dropshot::WebsocketEndpointResult;
 use dropshot::WebsocketUpgrade;
 use futures::TryFutureExt;
-use gateway_messages::SpError;
-use gateway_sp_comms::error::CommunicationError;
 use gateway_sp_comms::HostPhase2Provider;
 use omicron_common::update::ArtifactHash;
 use schemars::JsonSchema;
@@ -422,7 +420,7 @@ pub struct SpComponentCaboose {
     pub git_commit: String,
     pub board: String,
     pub name: String,
-    pub version: Option<String>,
+    pub version: String,
 }
 
 /// Identity of a host phase2 recovery image.
@@ -659,18 +657,15 @@ async fn sp_component_caboose_get(
         .read_component_caboose(component, firmware_slot, CABOOSE_KEY_NAME)
         .await
         .map_err(SpCommsError::from)?;
-    let version = match sp
+    let version = sp
         .read_component_caboose(component, firmware_slot, CABOOSE_KEY_VERSION)
         .await
-    {
-        Ok(value) => Some(from_utf8(&CABOOSE_KEY_VERSION, value)?),
-        Err(CommunicationError::SpError(SpError::NoSuchCabooseKey(_))) => None,
-        Err(err) => return Err(SpCommsError::from(err).into()),
-    };
+        .map_err(SpCommsError::from)?;
 
     let git_commit = from_utf8(&CABOOSE_KEY_GIT_COMMIT, git_commit)?;
     let board = from_utf8(&CABOOSE_KEY_BOARD, board)?;
     let name = from_utf8(&CABOOSE_KEY_NAME, name)?;
+    let version = from_utf8(&CABOOSE_KEY_VERSION, version)?;
 
     let caboose = SpComponentCaboose { git_commit, board, name, version };
 

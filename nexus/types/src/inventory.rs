@@ -28,10 +28,10 @@ use uuid::Uuid;
 /// with separate records, even though they might come from the same source
 /// (in this case, a single MGS request).
 ///
-/// We make heavy use of maps, sets, and Arcs here because many of these things
-/// point to each other and this approach to representing relationships ensures
-/// clear ownership.  (It also reflects how things will wind up in the
-/// database.)
+/// We make heavy use of maps, sets, and Arcs here because some of these objects
+/// are pointed-to by many other objects in the same Collection.  This approach
+/// ensures clear ownership.  It also reflects how things will wind up in the
+/// database.
 ///
 /// See the documentation in the database schema for more background.
 #[derive(Debug)]
@@ -106,10 +106,7 @@ impl From<gateway_client::types::SpComponentCaboose> for Caboose {
             board: c.board,
             git_commit: c.git_commit,
             name: c.name,
-            // The MGS API uses an `Option` here because old SP versions did not
-            // supply it.  But modern SP versions do.  So we should never hit
-            // this `unwrap_or()`.
-            version: c.version.unwrap_or(String::from("<unspecified>")),
+            version: c.version,
         }
     }
 }

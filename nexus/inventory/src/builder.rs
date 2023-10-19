@@ -117,7 +117,7 @@ impl CollectionBuilder {
 
         // Normalize the baseboard id: i.e., if we've seen this baseboard
         // before, use the same baseboard id record.  Otherwise, make a new one.
-        let baseboard = Self::enum_item(
+        let baseboard = Self::normalize_item(
             &mut self.baseboards,
             BaseboardId {
                 serial_number: sp_state.serial_number,
@@ -247,7 +247,7 @@ impl CollectionBuilder {
         // contents before, use the same record from before.  Otherwise, make a
         // new one.
         let sw_caboose =
-            Self::enum_item(&mut self.cabooses, Caboose::from(caboose));
+            Self::normalize_item(&mut self.cabooses, Caboose::from(caboose));
 
         // Find the SP.
         let sp = self.sps.get_mut(baseboard).ok_or_else(|| {
@@ -284,7 +284,7 @@ impl CollectionBuilder {
         // contents before, use the same record from before.  Otherwise, make a
         // new one.
         let sw_caboose =
-            Self::enum_item(&mut self.cabooses, Caboose::from(caboose));
+            Self::normalize_item(&mut self.cabooses, Caboose::from(caboose));
 
         // Find the RoT state.  Note that it's possible that we _do_ have
         // caboose information for an RoT that we have no information about
@@ -337,7 +337,7 @@ impl CollectionBuilder {
     /// If `item` (or its equivalent) is not already in `items`, insert it.
     /// Either way, return the item from `items`.  (This will either be `item`
     /// itself or whatever was already in `items`.)
-    fn enum_item<T: Clone + Ord>(
+    fn normalize_item<T: Clone + Ord>(
         items: &mut BTreeSet<Arc<T>>,
         item: T,
     ) -> Arc<T> {
