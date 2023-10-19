@@ -692,7 +692,7 @@ impl RackNetworkConfigV0 {
     /// Convert from `RackNetworkConfigV0` to `RackNetworkConfigV1`
     ///
     /// We cannot use `From<RackNetworkConfigV0> for `RackNetworkConfigV1`
-    /// because the `rack_network` field does not exist in `RackNetworkConfigV0`
+    /// because the `rack_subnet` field does not exist in `RackNetworkConfigV0`
     /// and must be passed in from the `EarlyNetworkConfigV0` struct which
     /// contains the `RackNetworkConfivV0` struct.
     pub fn to_v1(
