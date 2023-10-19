@@ -4,9 +4,9 @@
 
 //! Collection of inventory from Omicron components
 
-use crate::builder::CollectionBuilder;
+use crate::builder::{CollectionBuilder, SpSlot};
 use anyhow::Context;
-use nexus_types::inventory::CabooseWhich;
+use gateway_client::types::RotSlot;
 use nexus_types::inventory::Collection;
 use slog::{debug, error};
 use std::sync::Arc;
@@ -146,32 +146,28 @@ impl Collector {
             // fetched already, fetch it and record it.  Generally, we'd only
             // get here for the first MGS client.  Assuming that one succeeds,
             // the other(s) will skip this loop.
-            for which in CabooseWhich::iter() {
+            for sp_slot in SpSlot::iter() {
                 if self
                     .in_progress
-                    .sp_found_caboose_already(&baseboard_id, which)
+                    .found_sp_caboose_already(&baseboard_id, sp_slot)
                 {
                     continue;
                 }
 
-                let (component, slot) = match which {
-                    CabooseWhich::SpSlot0 => ("sp", 0),
-                    CabooseWhich::SpSlot1 => ("sp", 1),
-                    CabooseWhich::RotSlotA => ("rot", 0),
-                    CabooseWhich::RotSlotB => ("rot", 1),
+                let slot_num = match sp_slot {
+                    SpSlot::Slot0 => 0,
+                    SpSlot::Slot1 => 1,
                 };
 
                 let result = client
-                    .sp_component_caboose_get(
-                        sp.type_, sp.slot, component, slot,
-                    )
+                    .sp_component_caboose_get(sp.type_, sp.slot, "sp", slot_num)
                     .await
                     .with_context(|| {
                         format!(
-                            "MGS {:?}: SP {:?}: caboose {:?}",
+                            "MGS {:?}: SP {:?}: SP caboose {:?}",
                             client.baseurl(),
                             sp,
-                            which
+                            sp_slot
                         )
                     });
                 let caboose = match result {
@@ -183,15 +179,65 @@ impl Collector {
                 };
                 if let Err(error) = self.in_progress.found_sp_caboose(
                     &baseboard_id,
-                    which,
+                    sp_slot,
                     client.baseurl(),
                     caboose,
                 ) {
                     error!(
                         &self.log,
-                        "error reporting caboose: {:?} {:?} {:?}: {:#}",
+                        "error reporting caboose: {:?} SP {:?} {:?}: {:#}",
                         baseboard_id,
-                        which,
+                        sp_slot,
+                        client.baseurl(),
+                        error
+                    );
+                }
+            }
+
+            for rot_slot in RotSlot::iter() {
+                if self
+                    .in_progress
+                    .found_rot_caboose_already(&baseboard_id, rot_slot)
+                {
+                    continue;
+                }
+
+                let slot_num = match rot_slot {
+                    RotSlot::A => 0,
+                    RotSlot::B => 1,
+                };
+
+                let result = client
+                    .sp_component_caboose_get(
+                        sp.type_, sp.slot, "rot", slot_num,
+                    )
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "MGS {:?}: SP {:?}: RoT caboose {:?}",
+                            client.baseurl(),
+                            sp,
+                            rot_slot
+                        )
+                    });
+                let caboose = match result {
+                    Err(error) => {
+                        self.in_progress.found_error(error);
+                        continue;
+                    }
+                    Ok(response) => response.into_inner(),
+                };
+                if let Err(error) = self.in_progress.found_rot_caboose(
+                    &baseboard_id,
+                    rot_slot,
+                    client.baseurl(),
+                    caboose,
+                ) {
+                    error!(
+                        &self.log,
+                        "error reporting caboose: {:?} RoT {:?} {:?}: {:#}",
+                        baseboard_id,
+                        rot_slot,
                         client.baseurl(),
                         error
                     );

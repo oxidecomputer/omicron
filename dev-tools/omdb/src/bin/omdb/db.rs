@@ -12,7 +12,7 @@
 //! would be the only consumer -- and in that case it's okay to query the
 //! database directly.
 
-// NOTE: eminates from Tabled macros
+// NOTE: emanates from Tabled macros
 #![allow(clippy::useless_vec)]
 
 use crate::Omdb;
@@ -30,7 +30,6 @@ use diesel::BoolExpressionMethods;
 use diesel::ExpressionMethods;
 use diesel::JoinOnDsl;
 use diesel::NullableExpressionMethods;
-use nexus_db_model::CabooseWhich;
 use nexus_db_model::Dataset;
 use nexus_db_model::Disk;
 use nexus_db_model::DnsGroup;
@@ -1791,7 +1790,7 @@ async fn inv_collection_print_devices(
         rots.into_iter().map(|s| (s.hw_baseboard_id, s)).collect()
     };
 
-    // Load cabooses found, grouped by baseboard id.
+    // Load cabooses found, grouped by id.
     let inv_cabooses = {
         use db::schema::inv_caboose::dsl;
         let cabooses_found = dsl::inv_caboose
@@ -1802,15 +1801,7 @@ async fn inv_collection_print_devices(
             .await
             .context("loading cabooses found")?;
         check_limit(&cabooses_found, limit, || "loading cabooses found");
-
-        let mut cabooses: BTreeMap<Uuid, Vec<InvCaboose>> = BTreeMap::new();
-        for ic in cabooses_found {
-            cabooses
-                .entry(ic.hw_baseboard_id)
-                .or_insert_with(Vec::new)
-                .push(ic);
-        }
-        cabooses
+        cabooses_found.into_iter().map(|c| (c.id, c)).collect()
     };
 
     // Assemble a list of baseboard ids, sorted first by device type (sled,
@@ -1860,61 +1851,11 @@ async fn inv_collection_print_devices(
         println!("");
         println!("    found at: {} from {}", sp.time_collected, sp.source);
 
-        println!("    cabooses:");
-        if let Some(my_inv_cabooses) = inv_cabooses.get(baseboard_id) {
-            #[derive(Tabled)]
-            #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
-            struct CabooseRow<'a> {
-                slot: &'static str,
-                board: &'a str,
-                name: &'a str,
-                version: &'a str,
-                git_commit: &'a str,
-            }
-            let mut nbugs = 0;
-            let rows = my_inv_cabooses.iter().map(|ic| {
-                let slot = match ic.which {
-                    CabooseWhich::SpSlot0 => " SP slot 0",
-                    CabooseWhich::SpSlot1 => " SP slot 1",
-                    CabooseWhich::RotSlotA => "RoT slot A",
-                    CabooseWhich::RotSlotB => "RoT slot B",
-                };
-
-                let (board, name, version, git_commit) =
-                    match sw_cabooses.get(&ic.sw_caboose_id) {
-                        None => {
-                            nbugs += 1;
-                            ("-", "-", "-", "-")
-                        }
-                        Some(c) => (
-                            c.board.as_str(),
-                            c.name.as_str(),
-                            c.version.as_str(),
-                            c.git_commit.as_str(),
-                        ),
-                    };
-
-                CabooseRow { slot, board, name, version, git_commit }
-            });
-
-            let table = tabled::Table::new(rows)
-                .with(tabled::settings::Style::empty())
-                .with(tabled::settings::Padding::new(0, 1, 0, 0))
-                .to_string();
-
-            println!("{}", textwrap::indent(&table.to_string(), "        "));
-
-            if nbugs > 0 {
-                // Similar to above, if we don't have the sw_caboose for some
-                // inv_caboose, then it's a bug in either this tool (if we
-                // failed to fetch it) or the inventory system (if it failed to
-                // insert it).
-                println!(
-                    "error: at least one caboose above was missing data \
-                    -- this is a bug"
-                );
-            }
-        }
+        let sp_cabooses = &[
+            ("SP  slot 0", sp.slot0_inv_caboose_id),
+            ("SP  slot 1", sp.slot1_inv_caboose_id),
+        ];
+        inv_collection_print_cabooses(sp_cabooses, &inv_cabooses, &sw_cabooses);
 
         if let Some(rot) = rot {
             println!("    RoT: active slot: slot {:?}", rot.slot_active);
@@ -1947,6 +1888,16 @@ async fn inv_collection_print_devices(
                 rot.slot_b_sha3_256
                     .clone()
                     .unwrap_or_else(|| String::from("-"))
+            );
+
+            let rot_cabooses = &[
+                ("RoT slot 0", rot.slot_a_inv_caboose_id),
+                ("RoT slot 1", rot.slot_b_inv_caboose_id),
+            ];
+            inv_collection_print_cabooses(
+                rot_cabooses,
+                &inv_cabooses,
+                &sw_cabooses,
             );
         } else {
             println!("    RoT: no information found");
@@ -2001,4 +1952,60 @@ async fn inv_collection_print_devices(
     }
 
     Ok(())
+}
+
+fn inv_collection_print_cabooses(
+    component_cabooses: &[(&'static str, Option<Uuid>)],
+    inv_cabooses: &BTreeMap<Uuid, InvCaboose>,
+    sw_cabooses: &BTreeMap<Uuid, SwCaboose>,
+) {
+    println!("    cabooses:");
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct CabooseRow<'a> {
+        slot: &'static str,
+        board: &'a str,
+        name: &'a str,
+        version: &'a str,
+        git_commit: &'a str,
+    }
+    let mut nbugs = 0;
+
+    let rows = component_cabooses.iter().map(|(slot, inv_caboose_id)| {
+        let sw_caboose = inv_caboose_id
+            .and_then(|inv_caboose_id| inv_cabooses.get(&inv_caboose_id))
+            .and_then(|inv_caboose| {
+                sw_cabooses.get(&inv_caboose.sw_caboose_id)
+            });
+        let (board, name, version, git_commit) = match sw_caboose {
+            None => {
+                nbugs += 1;
+                ("-", "-", "-", "-")
+            }
+            Some(c) => (
+                c.board.as_str(),
+                c.name.as_str(),
+                c.version.as_str(),
+                c.git_commit.as_str(),
+            ),
+        };
+        CabooseRow { slot, board, name, version, git_commit }
+    });
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", textwrap::indent(&table.to_string(), "        "));
+
+    if nbugs > 0 {
+        // If we don't have the sw_caboose for some inv_caboose, then
+        // it's a bug in either this tool (if we failed to fetch it) or
+        // the inventory system (if it failed to insert it).
+        println!(
+            "error: at least one caboose above was missing data \
+                    -- this is a bug"
+        );
+    }
 }

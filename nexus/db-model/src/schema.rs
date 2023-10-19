@@ -1177,6 +1177,9 @@ table! {
         baseboard_revision -> Int8,
         hubris_archive_id -> Text,
         power_state -> crate::HwPowerStateEnum,
+
+        slot0_inv_caboose_id -> Nullable<Uuid>,
+        slot1_inv_caboose_id -> Nullable<Uuid>,
     }
 }
 
@@ -1193,17 +1196,19 @@ table! {
         slot_boot_pref_persistent_pending -> Nullable<crate::HwRotSlotEnum>,
         slot_a_sha3_256 -> Nullable<Text>,
         slot_b_sha3_256 -> Nullable<Text>,
+
+        slot_a_inv_caboose_id -> Nullable<Uuid>,
+        slot_b_inv_caboose_id -> Nullable<Uuid>,
     }
 }
 
 table! {
-    inv_caboose (inv_collection_id, hw_baseboard_id, which) {
+    inv_caboose (id) {
+        id -> Uuid,
         inv_collection_id -> Uuid,
-        hw_baseboard_id -> Uuid,
         time_collected -> Timestamptz,
         source -> Text,
 
-        which -> crate::CabooseWhichEnum,
         sw_caboose_id -> Uuid,
     }
 }

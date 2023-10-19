@@ -2528,7 +2528,13 @@ BEGIN;
  *         records is written.
  *
  * All rows in the `inv_*` tables point back to a particular collection.  They
- * represent the state observed at some particular time.
+ * represent the state observed at some particular time.  Generally, if two
+ * observations came from two different places, they're not put into the same
+ * row of the same table.  For example, caboose information comes from the SP,
+ * but it doesn't go into the `inv_service_processor` table.  It goes in a
+ * separate `inv_caboose` table.  This is debatable but it preserves a clearer
+ * record of exactly what information came from where, since the separate record
+ * has its own "source" and "time_collected".
  *
  * Information about service processors and roots of trust are joined with
  * information reported by sled agents via the baseboard id.
@@ -2662,6 +2668,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_service_processor (
     hubris_archive_id TEXT NOT NULL,
     power_state omicron.public.hw_power_state NOT NULL,
 
+    -- Caboose information (foreign keys into `inv_caboose`).  The requests to
+    -- fetch this information can individually fail so these fields can be NULL.
+    slot0_inv_caboose_id UUID,
+    slot1_inv_caboose_id UUID,
+
     PRIMARY KEY (inv_collection_id, hw_baseboard_id)
 );
 
@@ -2687,35 +2698,41 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_root_of_trust (
     slot_a_sha3_256 TEXT, -- nullable
     slot_b_sha3_256 TEXT, -- nullable
 
+    -- Caboose information (foreign keys into `inv_caboose`).  The requests to
+    -- fetch this information can individually fail so these fields can be NULL.
+    slot_a_inv_caboose_id UUID,
+    slot_b_inv_caboose_id UUID,
+
     PRIMARY KEY (inv_collection_id, hw_baseboard_id)
 );
 
-CREATE TYPE IF NOT EXISTS omicron.public.caboose_which AS ENUM (
-    'sp_slot_0',
-    'sp_slot_1',
-    'rot_slot_A',
-    'rot_slot_B'
-);
-
 -- cabooses found
+--
+-- Rows in this table reflect that a particular caboose (`sw_caboose_id`) was
+-- found in this collection, having been reported by `source` at
+-- `time_collected`.  It may be an SP or RoT caboose, and it could be in either
+-- slot.  To know which, you need to look at which field in
+-- `inv_service_processor` or `inv_root_of_trust` points to it.
+--
+-- Technically, we don't need `inv_collection_id` here because it's implied by
+-- whatever points to this record.
 CREATE TABLE IF NOT EXISTS omicron.public.inv_caboose (
     -- where this observation came from
     -- (foreign key into `inv_collection` table)
     inv_collection_id UUID NOT NULL,
-    -- which system this SP reports it is part of
-    -- (foreign key into `hw_baseboard_id` table)
-    hw_baseboard_id UUID NOT NULL,
     -- when this observation was made
     time_collected TIMESTAMPTZ NOT NULL,
     -- which MGS instance reported this data
     source TEXT NOT NULL,
 
-    which omicron.public.caboose_which NOT NULL,
-    sw_caboose_id UUID NOT NULL,
-
-    PRIMARY KEY (inv_collection_id, hw_baseboard_id, which)
+    id UUID PRIMARY KEY,
+    sw_caboose_id UUID NOT NULL
 );
 
+-- Allow us to paginate through the cabooses that are part of a collection
+CREATE INDEX IF NOT EXISTS lookup_caboose ON omicron.public.inv_caboose (
+    inv_collection_id, id
+);
 
 /*******************************************************************/
 

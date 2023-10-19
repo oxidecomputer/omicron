@@ -11,19 +11,12 @@ use crate::db::error::ErrorHandler;
 use crate::db::TransactionError;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
-use chrono::DateTime;
-use chrono::Utc;
-use diesel::sql_types;
 use diesel::sql_types::Nullable;
-use diesel::Column;
 use diesel::ExpressionMethods;
 use diesel::IntoSql;
 use diesel::NullableExpressionMethods;
 use diesel::QueryDsl;
-use diesel::QuerySource;
 use diesel::Table;
-use nexus_db_model::CabooseWhich;
-use nexus_db_model::CabooseWhichEnum;
 use nexus_db_model::HwBaseboardId;
 use nexus_db_model::HwPowerState;
 use nexus_db_model::HwPowerStateEnum;
@@ -34,8 +27,6 @@ use nexus_db_model::InvCollectionError;
 use nexus_db_model::SpType;
 use nexus_db_model::SpTypeEnum;
 use nexus_db_model::SwCaboose;
-use nexus_types::inventory::BaseboardId;
-use nexus_types::inventory::CabooseFound;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
@@ -68,6 +59,15 @@ impl DataStore {
             .iter()
             .map(|s| SwCaboose::from(s.as_ref()))
             .collect::<Vec<_>>();
+        let cabooses_found: Vec<_> = collection
+            .sps
+            .iter()
+            .flat_map(|(_, sp)| [&sp.slot0_caboose, &sp.slot1_caboose])
+            .chain(collection.rots.iter().flat_map(|(_, rot)| {
+                [&rot.slot_a_caboose, &rot.slot_b_caboose]
+            }))
+            .flatten()
+            .collect();
         let error_values = collection
             .errors
             .iter()
@@ -178,6 +178,18 @@ impl DataStore {
                                 .into_sql::<diesel::sql_types::Text>(),
                             HwPowerState::from(sp.power_state)
                                 .into_sql::<HwPowerStateEnum>(),
+                            sp.slot0_caboose
+                                .as_ref()
+                                .map(|c| c.id)
+                                .into_sql::<diesel::sql_types::Nullable<
+                                diesel::sql_types::Uuid,
+                            >>(),
+                            sp.slot1_caboose
+                                .as_ref()
+                                .map(|c| c.id)
+                                .into_sql::<diesel::sql_types::Nullable<
+                                diesel::sql_types::Uuid,
+                            >>(),
                         ))
                         .filter(
                             baseboard_dsl::part_number
@@ -202,6 +214,8 @@ impl DataStore {
                         sp_dsl::baseboard_revision,
                         sp_dsl::hubris_archive_id,
                         sp_dsl::power_state,
+                        sp_dsl::slot0_inv_caboose_id,
+                        sp_dsl::slot1_inv_caboose_id,
                     ))
                     .execute_async(&conn)
                     .await?;
@@ -231,6 +245,8 @@ impl DataStore {
                         _baseboard_revision,
                         _hubris_archive_id,
                         _power_state,
+                        _slot0_inv_caboose_id,
+                        _slot1_inv_caboose_id,
                     ) = sp_dsl::inv_service_processor::all_columns();
                 }
             }
@@ -269,6 +285,18 @@ impl DataStore {
                                 .clone()
                                 .into_sql::<Nullable<diesel::sql_types::Text>>(
                                 ),
+                            rot.slot_a_caboose
+                                .as_ref()
+                                .map(|c| c.id)
+                                .into_sql::<diesel::sql_types::Nullable<
+                                diesel::sql_types::Uuid,
+                            >>(),
+                            rot.slot_b_caboose
+                                .as_ref()
+                                .map(|c| c.id)
+                                .into_sql::<diesel::sql_types::Nullable<
+                                diesel::sql_types::Uuid,
+                            >>(),
                         ))
                         .filter(
                             baseboard_dsl::part_number
@@ -294,6 +322,8 @@ impl DataStore {
                         rot_dsl::slot_boot_pref_transient,
                         rot_dsl::slot_a_sha3_256,
                         rot_dsl::slot_b_sha3_256,
+                        rot_dsl::slot_a_inv_caboose_id,
+                        rot_dsl::slot_b_inv_caboose_id,
                     ))
                     .execute_async(&conn)
                     .await?;
@@ -312,26 +342,71 @@ impl DataStore {
                         _slot_boot_pref_transient,
                         _slot_a_sha3_256,
                         _slot_b_sha3_256,
+                        _slot_a_inv_caboose_id,
+                        _slot_b_inv_caboose_id,
                     ) = rot_dsl::inv_root_of_trust::all_columns();
                 }
             }
 
-            // Insert rows for the cabooses that we found.  Like service
-            // processors and roots of trust, we do this using INSERT INTO ...
-            // SELECT.  But because there are two foreign keys, we need a more
-            // complicated `SELECT`, which requires using a CTE.
-            for (which, tree) in &collection.cabooses_found {
-                let db_which = nexus_db_model::CabooseWhich::from(*which);
-                for (baseboard_id, found_caboose) in tree {
-                    InvCabooseInsert::new(
-                        collection_id,
-                        baseboard_id,
-                        found_caboose,
-                        db_which,
-                    )
-                    .execute_async(&conn)
-                    .await?;
+            // Insert records for cabooses found.  Like the others, we do this
+            // using INSERT INTO ... SELECT because we need ids from the
+            // `sw_caboose` table that we may not have.
+            {
+                use db::schema::inv_caboose::dsl as inv_dsl;
+                use db::schema::sw_caboose::dsl as sw_dsl;
+
+                for caboose_found in &cabooses_found {
+                    let selection = db::schema::sw_caboose::table
+                        .select((
+                            caboose_found
+                                .id
+                                .into_sql::<diesel::sql_types::Uuid>(),
+                            collection_id.into_sql::<diesel::sql_types::Uuid>(),
+                            caboose_found
+                                .time_collected
+                                .into_sql::<diesel::sql_types::Timestamptz>(),
+                            caboose_found
+                                .source
+                                .clone()
+                                .into_sql::<diesel::sql_types::Text>(),
+                            sw_dsl::id,
+                        ))
+                        .filter(
+                            sw_dsl::board
+                                .eq(caboose_found.caboose.board.clone()),
+                        )
+                        .filter(
+                            sw_dsl::git_commit
+                                .eq(caboose_found.caboose.git_commit.clone()),
+                        )
+                        .filter(
+                            sw_dsl::name.eq(caboose_found.caboose.name.clone()),
+                        )
+                        .filter(
+                            sw_dsl::version
+                                .eq(caboose_found.caboose.version.clone()),
+                        );
+
+                    let _ = diesel::insert_into(db::schema::inv_caboose::table)
+                        .values(selection)
+                        .into_columns((
+                            inv_dsl::id,
+                            inv_dsl::inv_collection_id,
+                            inv_dsl::time_collected,
+                            inv_dsl::source,
+                            inv_dsl::sw_caboose_id,
+                        ))
+                        .execute_async(&conn)
+                        .await?;
                 }
+
+                let (
+                    _id,
+                    _inv_collection_id,
+                    _time_collected,
+                    _source,
+                    _sw_caboose_id,
+                ) = inv_dsl::inv_caboose::all_columns();
             }
 
             // Finally, insert the list of errors.
@@ -663,252 +738,4 @@ impl DataStore {
 
         Ok(())
     }
-}
-
-/// A SQL common table expression (CTE) used to insert into `inv_caboose`
-///
-/// Concretely, we have these three tables:
-///
-/// - `hw_baseboard` with an "id" primary key and lookup columns "part_number"
-///    and "serial_number"
-/// - `sw_caboose` with an "id" primary key and lookup columns "board",
-///    "git_commit", "name", and "version"
-/// - `inv_caboose` with foreign keys "hw_baseboard_id", "sw_caboose_id", and
-///    various other columns
-///
-/// We want to INSERT INTO `inv_caboose` a row with:
-///
-/// - hw_baseboard_id (foreign key) the result of looking up an hw_baseboard row
-///   by part number and serial number provided by the caller
-///
-/// - sw_caboose_id (foreign key) the result of looking up a sw_caboose row by
-///   board, git_commit, name, and version provided by the caller
-///
-/// - the other columns being literals provided by the caller
-///
-/// To achieve this, we're going to generate something like:
-///
-/// WITH
-///     my_new_row
-/// AS (
-///     SELECT
-///         hw_baseboard.id, /* `hw_baseboard` foreign key */
-///         sw_caboose.id,   /* `sw_caboose` foreign key */
-///         ...              /* caller-provided literal values for the rest */
-///                          /* of the new inv_caboose row */
-///     FROM
-///         hw_baseboard,
-///         sw_caboose
-///     WHERE
-///         hw_baseboard.part_number = ...   /* caller-provided part number */
-///         hw_baseboard.serial_number = ... /* caller-provided serial number */
-///         sw_caboose.board = ...           /* caller-provided board */
-///         sw_caboose.git_commit = ...      /* caller-provided git_commit */
-///         sw_caboose.name = ...            /* caller-provided name */
-///         sw_caboose.version = ...         /* caller-provided version */
-/// ) INSERT INTO
-///     inv_caboose (... /* inv_caboose columns */)
-///     SELECT * from my_new_row;
-///
-/// The whole point is to avoid back-and-forth between the client and the
-/// database.  Those back-and-forth interactions can significantly increase
-/// latency and the probability of transaction conflicts.  See RFD 192 for
-/// details.
-#[must_use = "Queries must be executed"]
-struct InvCabooseInsert {
-    // fields used to look up baseboard id
-    baseboard_part_number: String,
-    baseboard_serial_number: String,
-
-    // fields used to look up caboose id
-    caboose_board: String,
-    caboose_git_commit: String,
-    caboose_name: String,
-    caboose_version: String,
-
-    // literal values for the rest of the inv_caboose columns
-    collection_id: Uuid,
-    time_collected: DateTime<Utc>,
-    source: String,
-    which: CabooseWhich,
-
-    // These are Diesel structures representing table names in the "from" or
-    // "into" parts of queries (e.g., "SELECT FROM tablename" or "INSERT INTO
-    // tablename").  We need this in `walk_ast()` below, but they must outlive
-    // `walk_ast()`, so they need to be created ahead of time.
-    //
-    // TODO-cleanup These Diesel-internal types are nasty.  It's not clear how
-    // else to do this.
-    from_hw_baseboard_id:
-        diesel::internal::table_macro::StaticQueryFragmentInstance<
-            db::schema::hw_baseboard_id::table,
-        >,
-    from_sw_caboose: diesel::internal::table_macro::StaticQueryFragmentInstance<
-        db::schema::sw_caboose::table,
-    >,
-    into_inv_caboose:
-        diesel::internal::table_macro::StaticQueryFragmentInstance<
-            db::schema::inv_caboose::table,
-        >,
-}
-
-impl InvCabooseInsert {
-    pub fn new(
-        collection_id: Uuid,
-        baseboard: &BaseboardId,
-        found_caboose: &CabooseFound,
-        which: CabooseWhich,
-    ) -> InvCabooseInsert {
-        InvCabooseInsert {
-            baseboard_part_number: baseboard.part_number.clone(),
-            baseboard_serial_number: baseboard.serial_number.clone(),
-            caboose_board: found_caboose.caboose.board.clone(),
-            caboose_git_commit: found_caboose.caboose.git_commit.clone(),
-            caboose_name: found_caboose.caboose.name.clone(),
-            caboose_version: found_caboose.caboose.version.clone(),
-            collection_id,
-            time_collected: found_caboose.time_collected,
-            source: found_caboose.source.clone(),
-            which,
-            from_hw_baseboard_id: db::schema::hw_baseboard_id::table
-                .from_clause(),
-            from_sw_caboose: db::schema::sw_caboose::table.from_clause(),
-            // It sounds a little goofy to use "from_clause()" when this is
-            // really part of an INSERT.  But really this just produces the
-            // table name as an identifier.  This is the same for both "FROM"
-            // and "INSERT" clauses.  And diesel internally does the same thing
-            // here (see the type of `InsertStatement::into_clause`).
-            into_inv_caboose: db::schema::inv_caboose::table.from_clause(),
-        }
-    }
-}
-
-impl diesel::query_builder::QueryFragment<diesel::pg::Pg> for InvCabooseInsert {
-    fn walk_ast<'b>(
-        &'b self,
-        mut pass: diesel::query_builder::AstPass<'_, 'b, diesel::pg::Pg>,
-    ) -> diesel::QueryResult<()> {
-        use db::schema::hw_baseboard_id::dsl as dsl_baseboard_id;
-        use db::schema::inv_caboose::dsl as dsl_inv_caboose;
-        use db::schema::sw_caboose::dsl as dsl_sw_caboose;
-
-        pass.unsafe_to_cache_prepared();
-        pass.push_sql("WITH my_new_row AS (");
-
-        pass.push_sql("SELECT ");
-
-        // Emit the values that we're going to insert into `inv_caboose`.
-        // First, emit the looked-up foreign keys.
-        self.from_hw_baseboard_id.walk_ast(pass.reborrow())?;
-        pass.push_sql(".");
-        pass.push_identifier(dsl_baseboard_id::id::NAME)?;
-        pass.push_sql(", ");
-        self.from_sw_caboose.walk_ast(pass.reborrow())?;
-        pass.push_sql(".");
-        pass.push_identifier(dsl_sw_caboose::id::NAME)?;
-        pass.push_sql(", ");
-        // Next, emit the literal values used for the rest of the columns.
-        pass.push_bind_param::<sql_types::Uuid, _>(&self.collection_id)?;
-        pass.push_sql(", ");
-        pass.push_bind_param::<sql_types::Timestamptz, _>(
-            &self.time_collected,
-        )?;
-        pass.push_sql(", ");
-        pass.push_bind_param::<sql_types::Text, _>(&self.source)?;
-        pass.push_sql(", ");
-        pass.push_bind_param::<CabooseWhichEnum, _>(&self.which)?;
-
-        // Finish the SELECT by adding the list of tables and the WHERE to pick
-        // out only the relevant row from each tables.
-        pass.push_sql(" FROM ");
-
-        self.from_hw_baseboard_id.walk_ast(pass.reborrow())?;
-        pass.push_sql(", ");
-        self.from_sw_caboose.walk_ast(pass.reborrow())?;
-
-        pass.push_sql(" WHERE ");
-        self.from_hw_baseboard_id.walk_ast(pass.reborrow())?;
-        pass.push_sql(".");
-        pass.push_identifier(dsl_baseboard_id::part_number::NAME)?;
-        pass.push_sql(" = ");
-        pass.push_bind_param::<sql_types::Text, _>(
-            &self.baseboard_part_number,
-        )?;
-        pass.push_sql(" AND ");
-        self.from_hw_baseboard_id.walk_ast(pass.reborrow())?;
-        pass.push_sql(".");
-        pass.push_identifier(dsl_baseboard_id::serial_number::NAME)?;
-        pass.push_sql(" = ");
-        pass.push_bind_param::<sql_types::Text, _>(
-            &self.baseboard_serial_number,
-        )?;
-        pass.push_sql(" AND ");
-        self.from_sw_caboose.walk_ast(pass.reborrow())?;
-        pass.push_sql(".");
-        pass.push_identifier(dsl_sw_caboose::board::NAME)?;
-        pass.push_sql(" = ");
-        pass.push_bind_param::<sql_types::Text, _>(&self.caboose_board)?;
-        pass.push_sql(" AND ");
-        self.from_sw_caboose.walk_ast(pass.reborrow())?;
-        pass.push_sql(".");
-        pass.push_identifier(dsl_sw_caboose::git_commit::NAME)?;
-        pass.push_sql(" = ");
-        pass.push_bind_param::<sql_types::Text, _>(&self.caboose_git_commit)?;
-        pass.push_sql(" AND ");
-        self.from_sw_caboose.walk_ast(pass.reborrow())?;
-        pass.push_sql(".");
-        pass.push_identifier(dsl_sw_caboose::name::NAME)?;
-        pass.push_sql(" = ");
-        pass.push_bind_param::<sql_types::Text, _>(&self.caboose_name)?;
-        pass.push_sql(" AND ");
-        self.from_sw_caboose.walk_ast(pass.reborrow())?;
-        pass.push_sql(".");
-        pass.push_identifier(dsl_sw_caboose::version::NAME)?;
-        pass.push_sql(" = ");
-        pass.push_bind_param::<sql_types::Text, _>(&self.caboose_version)?;
-
-        pass.push_sql(")\n"); // end of the SELECT query within the WITH
-
-        pass.push_sql("INSERT INTO ");
-        self.into_inv_caboose.walk_ast(pass.reborrow())?;
-
-        pass.push_sql("(");
-        pass.push_identifier(dsl_inv_caboose::hw_baseboard_id::NAME)?;
-        pass.push_sql(", ");
-        pass.push_identifier(dsl_inv_caboose::sw_caboose_id::NAME)?;
-        pass.push_sql(", ");
-        pass.push_identifier(dsl_inv_caboose::inv_collection_id::NAME)?;
-        pass.push_sql(", ");
-        pass.push_identifier(dsl_inv_caboose::time_collected::NAME)?;
-        pass.push_sql(", ");
-        pass.push_identifier(dsl_inv_caboose::source::NAME)?;
-        pass.push_sql(", ");
-        pass.push_identifier(dsl_inv_caboose::which::NAME)?;
-        pass.push_sql(")\n");
-        pass.push_sql("SELECT * FROM my_new_row");
-
-        // See the comment in inventory_insert_collection() where we use
-        // `inv_service_processor::all_columns()`.  The same applies here.
-        // If you update the statement below because the schema for
-        // `inv_caboose` has changed, be sure to update the code above, too!
-        let (
-            _hw_baseboard_id,
-            _sw_caboose_id,
-            _inv_collection_id,
-            _time_collected,
-            _source,
-            _which,
-        ) = dsl_inv_caboose::inv_caboose::all_columns();
-
-        Ok(())
-    }
-}
-
-// This is required to be able to call `inv_caboose_insert.execute_async()`.
-impl diesel::RunQueryDsl<db::pool::DbConnection> for InvCabooseInsert {}
-
-// This is required to be able to call `inv_caboose_insert.execute_async()`.
-impl diesel::query_builder::QueryId for InvCabooseInsert {
-    type QueryId = ();
-    const HAS_STATIC_QUERY_ID: bool = false;
 }

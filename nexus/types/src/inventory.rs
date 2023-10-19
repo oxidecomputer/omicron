@@ -17,7 +17,6 @@ pub use gateway_client::types::SpType;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::sync::Arc;
-use strum::EnumIter;
 use uuid::Uuid;
 
 /// Results of collecting hardware/software inventory from various Omicron
@@ -66,13 +65,6 @@ pub struct Collection {
     ///
     /// In practice, these will be inserted into the `inv_root_of_trust` table.
     pub rots: BTreeMap<Arc<BaseboardId>, RotState>,
-    /// all caboose contents found, keyed first by the kind of caboose
-    /// (`CabooseWhich`), then the baseboard id of the sled where they were
-    /// found
-    ///
-    /// In practice, these will be inserted into the `inv_caboose` table.
-    pub cabooses_found:
-        BTreeMap<CabooseWhich, BTreeMap<Arc<BaseboardId>, CabooseFound>>,
 }
 
 /// A unique baseboard id found during a collection
@@ -126,6 +118,7 @@ impl From<gateway_client::types::SpComponentCaboose> for Caboose {
 /// particular source, but these are only for debugging)
 #[derive(Clone, Debug, Ord, Eq, PartialOrd, PartialEq)]
 pub struct CabooseFound {
+    pub id: Uuid,
     pub time_collected: DateTime<Utc>,
     pub source: String,
     pub caboose: Arc<Caboose>,
@@ -143,6 +136,9 @@ pub struct ServiceProcessor {
     pub baseboard_revision: u32,
     pub hubris_archive: String,
     pub power_state: PowerState,
+
+    pub slot0_caboose: Option<Arc<CabooseFound>>,
+    pub slot1_caboose: Option<Arc<CabooseFound>>,
 }
 
 /// Describes the root of trust state found (from a service processor) during
@@ -158,13 +154,7 @@ pub struct RotState {
     pub transient_boot_preference: Option<RotSlot>,
     pub slot_a_sha3_256_digest: Option<String>,
     pub slot_b_sha3_256_digest: Option<String>,
-}
 
-/// Describes which caboose this is (which component, which slot)
-#[derive(Clone, Copy, Debug, EnumIter, PartialEq, Eq, PartialOrd, Ord)]
-pub enum CabooseWhich {
-    SpSlot0,
-    SpSlot1,
-    RotSlotA,
-    RotSlotB,
+    pub slot_a_caboose: Option<Arc<CabooseFound>>,
+    pub slot_b_caboose: Option<Arc<CabooseFound>>,
 }

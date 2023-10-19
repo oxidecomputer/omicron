@@ -9,22 +9,31 @@
 //! collected.
 
 use anyhow::anyhow;
+use anyhow::Context;
 use chrono::DateTime;
 use chrono::Utc;
+use gateway_client::types::RotSlot;
 use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpState;
 use gateway_client::types::SpType;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::Caboose;
 use nexus_types::inventory::CabooseFound;
-use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::RotState;
 use nexus_types::inventory::ServiceProcessor;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::sync::Arc;
+use strum::EnumIter;
 use uuid::Uuid;
+
+/// Identifies one of a service processor's two firmware slots
+#[derive(Debug, Clone, Copy, EnumIter)]
+pub enum SpSlot {
+    Slot0,
+    Slot1,
+}
 
 /// Build an inventory [`Collection`]
 ///
@@ -41,8 +50,6 @@ pub struct CollectionBuilder {
     cabooses: BTreeSet<Arc<Caboose>>,
     sps: BTreeMap<Arc<BaseboardId>, ServiceProcessor>,
     rots: BTreeMap<Arc<BaseboardId>, RotState>,
-    cabooses_found:
-        BTreeMap<CabooseWhich, BTreeMap<Arc<BaseboardId>, CabooseFound>>,
 }
 
 impl CollectionBuilder {
@@ -60,7 +67,6 @@ impl CollectionBuilder {
             cabooses: BTreeSet::new(),
             sps: BTreeMap::new(),
             rots: BTreeMap::new(),
-            cabooses_found: BTreeMap::new(),
         }
     }
 
@@ -76,7 +82,6 @@ impl CollectionBuilder {
             cabooses: self.cabooses,
             sps: self.sps,
             rots: self.rots,
-            cabooses_found: self.cabooses_found,
         }
     }
 
@@ -134,6 +139,9 @@ impl CollectionBuilder {
                 baseboard_revision: sp_state.revision,
                 hubris_archive: sp_state.hubris_archive_id,
                 power_state: sp_state.power_state,
+
+                slot0_caboose: None,
+                slot1_caboose: None,
             }
         });
 
@@ -157,6 +165,8 @@ impl CollectionBuilder {
                             transient_boot_preference,
                             slot_a_sha3_256_digest,
                             slot_b_sha3_256_digest,
+                            slot_a_caboose: None,
+                            slot_b_caboose: None,
                         }
                     });
             }
@@ -175,19 +185,47 @@ impl CollectionBuilder {
         Some(baseboard)
     }
 
-    /// Returns true if we already found the caboose for `which` for baseboard
-    /// `baseboard`
+    /// Returns true if we already found the SP caboose for slot `slot` for
+    /// baseboard `baseboard`
     ///
     /// This is used to avoid requesting it multiple times (from multiple MGS
     /// instances).
-    pub fn sp_found_caboose_already(
+    pub fn found_sp_caboose_already(
         &self,
         baseboard: &BaseboardId,
-        which: CabooseWhich,
+        slot: SpSlot,
     ) -> bool {
-        self.cabooses_found
-            .get(&which)
-            .map(|map| map.contains_key(baseboard))
+        self.sps
+            .get(baseboard)
+            .map(|sp| {
+                let sp_slot = match slot {
+                    SpSlot::Slot0 => &sp.slot0_caboose,
+                    SpSlot::Slot1 => &sp.slot1_caboose,
+                };
+                sp_slot.is_some()
+            })
+            .unwrap_or(false)
+    }
+
+    /// Returns true if we already found the RoT caboose for slot `slot` for
+    /// baseboard `baseboard`
+    ///
+    /// This is used to avoid requesting it multiple times (from multiple MGS
+    /// instances).
+    pub fn found_rot_caboose_already(
+        &self,
+        baseboard: &BaseboardId,
+        slot: RotSlot,
+    ) -> bool {
+        self.rots
+            .get(baseboard)
+            .map(|rot| {
+                let rot_slot = match slot {
+                    RotSlot::A => &rot.slot_a_caboose,
+                    RotSlot::B => &rot.slot_b_caboose,
+                };
+                rot_slot.is_some()
+            })
             .unwrap_or(false)
     }
 
@@ -201,7 +239,7 @@ impl CollectionBuilder {
     pub fn found_sp_caboose(
         &mut self,
         baseboard: &BaseboardId,
-        which: CabooseWhich,
+        slot: SpSlot,
         source: &str,
         caboose: SpComponentCaboose,
     ) -> Result<(), anyhow::Error> {
@@ -210,40 +248,87 @@ impl CollectionBuilder {
         // new one.
         let sw_caboose =
             Self::enum_item(&mut self.cabooses, Caboose::from(caboose));
-        let (baseboard, _) =
-            self.sps.get_key_value(baseboard).ok_or_else(|| {
-                anyhow!(
-                    "reporting caboose for unknown baseboard: {:?} ({:?})",
-                    baseboard,
-                    sw_caboose
-                )
-            })?;
-        let by_id =
-            self.cabooses_found.entry(which).or_insert_with(|| BTreeMap::new());
-        if let Some(previous) = by_id.insert(
-            baseboard.clone(),
-            CabooseFound {
-                time_collected: Utc::now(),
-                source: source.to_owned(),
-                caboose: sw_caboose.clone(),
-            },
-        ) {
-            let error = if *previous.caboose == *sw_caboose {
-                anyhow!("reported multiple times (same value)",)
-            } else {
-                anyhow!(
-                    "reported caboose multiple times (previously {:?}, \
+
+        // Find the SP.
+        let sp = self.sps.get_mut(baseboard).ok_or_else(|| {
+            anyhow!(
+                "reporting caboose for unknown baseboard: {:?} ({:?})",
+                baseboard,
+                sw_caboose
+            )
+        })?;
+        let sp_slot = match slot {
+            SpSlot::Slot0 => &mut sp.slot0_caboose,
+            SpSlot::Slot1 => &mut sp.slot1_caboose,
+        };
+        Self::record_caboose(sp_slot, source, sw_caboose)
+            .context(format!("baseboard {:?} SP caboose {:?}", baseboard, slot))
+    }
+
+    /// Record the given root of trust caboose information found for the given
+    /// baseboard
+    ///
+    /// The baseboard must previously have been reported using
+    /// `found_sp_state()`.
+    ///
+    /// `source` is an arbitrary string for debugging that describes the MGS
+    /// that reported this data (generally a URL string).
+    pub fn found_rot_caboose(
+        &mut self,
+        baseboard: &BaseboardId,
+        slot: RotSlot,
+        source: &str,
+        caboose: SpComponentCaboose,
+    ) -> Result<(), anyhow::Error> {
+        // Normalize the caboose contents: i.e., if we've seen this exact caboose
+        // contents before, use the same record from before.  Otherwise, make a
+        // new one.
+        let sw_caboose =
+            Self::enum_item(&mut self.cabooses, Caboose::from(caboose));
+
+        // Find the RoT state.  Note that it's possible that we _do_ have
+        // caboose information for an RoT that we have no information about
+        // because the SP couldn't talk to the RoT when we asked for its state,
+        // but was able to do so when we got the caboose.  This seems unlikely.
+        let rot = self.rots.get_mut(baseboard).ok_or_else(|| {
+            anyhow!(
+                "reporting caboose for unknown baseboard: {:?} ({:?})",
+                baseboard,
+                sw_caboose
+            )
+        })?;
+        let rot_slot = match slot {
+            RotSlot::A => &mut rot.slot_a_caboose,
+            RotSlot::B => &mut rot.slot_b_caboose,
+        };
+        Self::record_caboose(rot_slot, source, sw_caboose).context(format!(
+            "baseboard {:?} RoT caboose {:?}",
+            baseboard, slot
+        ))
+    }
+
+    fn record_caboose(
+        slot: &mut Option<Arc<CabooseFound>>,
+        source: &str,
+        sw_caboose: Arc<Caboose>,
+    ) -> Result<(), anyhow::Error> {
+        let old = slot.replace(Arc::new(CabooseFound {
+            id: Uuid::new_v4(),
+            time_collected: Utc::now(),
+            source: source.to_owned(),
+            caboose: sw_caboose.clone(),
+        }));
+        match old {
+            None => Ok(()),
+            Some(previous) if *previous.caboose == *sw_caboose => {
+                Err(anyhow!("reported multiple times (same value)"))
+            }
+            Some(previous) => Err(anyhow!(
+                "reported caboose multiple times (previously {:?}, \
                     now {:?})",
-                    previous,
-                    sw_caboose
-                )
-            };
-            Err(error.context(format!(
-                "baseboard {:?} caboose {:?}",
-                baseboard, which
-            )))
-        } else {
-            Ok(())
+                previous,
+                sw_caboose
+            )),
         }
     }
 
