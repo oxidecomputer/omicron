@@ -61,7 +61,7 @@ impl Eq for ExtractedArtifactDataHandle {}
 
 impl ExtractedArtifactDataHandle {
     /// File size of this artifact in bytes.
-    pub(super) fn file_size(&self) -> usize {
+    pub(crate) fn file_size(&self) -> usize {
         self.file_size
     }
 
