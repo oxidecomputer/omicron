@@ -711,6 +711,7 @@ pub enum ResourceType {
     LoopbackAddress,
     SwitchPortSettings,
     IpPool,
+    IpPoolResource,
     InstanceNetworkInterface,
     PhysicalDisk,
     Rack,

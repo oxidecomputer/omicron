@@ -322,19 +322,36 @@ impl DataStore {
             .authorize(authz::Action::CreateChild, &authz::IP_POOL_LIST)
             .await?;
 
-        // TODO: make sure on_conflict_do_nothing doesn't suppress the error for
-        // trying to give a silo two default pools
         diesel::insert_into(dsl::ip_pool_resource)
             .values(ip_pool_resource.clone())
+            // We have two constraints that are relevant here, and we need to
+            // make this behave correctly with respect to both. If the entry
+            // matches an existing (ip pool, silo/fleet), we want to update
+            // is_default because we want to handle the case where someone is
+            // trying to change is_default on an existing association. But
+            // you can only have one default pool for a given resource, so
+            // if that update violates the unique index ensuring one default,
+            // the insert should still fail.
+            // note that this on_conflict has to have all three because that's
+            // how the pk is defined. if it only has the IDs and not the type,
+            // CRDB complains that the tuple doesn't match any constraints it's
+            // aware of
+            .on_conflict((
+                dsl::ip_pool_id,
+                dsl::resource_type,
+                dsl::resource_id,
+            ))
+            .do_update()
+            .set(dsl::is_default.eq(ip_pool_resource.is_default))
             .returning(IpPoolResource::as_returning())
-            .on_conflict_do_nothing()
             .get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 public_error_from_diesel(
                     e,
                     ErrorHandler::Conflict(
-                        ResourceType::IpPool,
+                        ResourceType::IpPoolResource,
+                        // TODO: make string more useful
                         &ip_pool_resource.ip_pool_id.to_string(),
                     ),
                 )
@@ -530,8 +547,6 @@ mod test {
         assert_eq!(fleet_default_pool.identity.name.as_str(), "default");
 
         // unique index prevents second fleet-level default
-        // TODO: create the pool, and then the failure is on the attempt to
-        // associate it with the fleet as default
         let identity = IdentityMetadataCreateParams {
             name: "another-fleet-default".parse().unwrap(),
             description: "".to_string(),
@@ -552,27 +567,27 @@ mod test {
             )
             .await
             .expect_err("Failed to fail to make IP pool fleet default");
+
         assert_matches!(err, Error::ObjectAlreadyExists { .. });
 
-        // when we fetch the default pool for a silo, if those scopes do not
-        // have a default IP pool, we will still get back the fleet default
+        // now test logic preferring most specific available default
 
         let silo_id = opctx.authn.silo_required().unwrap().id();
 
         // create a non-default pool for the silo
         let identity = IdentityMetadataCreateParams {
-            name: "non-default-for-silo".parse().unwrap(),
+            name: "pool1-for-silo".parse().unwrap(),
             description: "".to_string(),
         };
-        let default_for_silo = datastore
+        let pool1_for_silo = datastore
             .ip_pool_create(&opctx, IpPool::new(&identity))
             .await
-            .expect("Failed to create silo non-default IP pool");
+            .expect("Failed to create IP pool");
         datastore
             .ip_pool_associate_resource(
                 &opctx,
                 IpPoolResource {
-                    ip_pool_id: default_for_silo.id(),
+                    ip_pool_id: pool1_for_silo.id(),
                     resource_type: IpPoolResourceType::Silo,
                     resource_id: silo_id,
                     is_default: false,
@@ -589,37 +604,27 @@ mod test {
             .expect("Failed to get silo default IP pool");
         assert_eq!(ip_pool.id(), fleet_default_pool.id());
 
-        // TODO: instead of a separate pool, this could now be done by
-        // associating the same pool? Would be nice to test both
-
-        // now create a default pool for the silo
-        let identity = IdentityMetadataCreateParams {
-            name: "default-for-silo".parse().unwrap(),
-            description: "".to_string(),
-        };
-        let default_for_silo = datastore
-            .ip_pool_create(&opctx, IpPool::new(&identity))
-            .await
-            .expect("Failed to create silo default IP pool");
+        // now we can change that association to is_default=true and
+        // it should update rather than erroring out
         datastore
             .ip_pool_associate_resource(
                 &opctx,
                 IpPoolResource {
-                    ip_pool_id: default_for_silo.id(),
+                    ip_pool_id: pool1_for_silo.id(),
                     resource_type: IpPoolResourceType::Silo,
                     resource_id: silo_id,
                     is_default: true,
                 },
             )
             .await
-            .expect("Failed to associate IP pool with silo");
+            .expect("Failed to make IP pool default for silo");
 
-        // now when we ask for the default pool, we get the one we just made
+        // now when we ask for the default pool again, we get the one we just changed
         let ip_pool = datastore
             .ip_pools_fetch_default(&opctx)
             .await
             .expect("Failed to get silo's default IP pool");
-        assert_eq!(ip_pool.name().as_str(), "default-for-silo");
+        assert_eq!(ip_pool.name().as_str(), "pool1-for-silo");
 
         // and we can't create a second default pool for the silo
         let identity = IdentityMetadataCreateParams {

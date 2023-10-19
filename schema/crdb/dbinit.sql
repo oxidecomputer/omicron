@@ -1466,6 +1466,30 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_pool_by_name ON omicron.public.ip_pool 
 ) WHERE
     time_deleted IS NULL;
 
+CREATE TYPE IF NOT EXISTS omicron.public.ip_pool_resource_type AS ENUM (
+    'fleet',
+    'silo'
+);
+
+-- join table associating IP pools with resources like fleet or silo
+CREATE TABLE IF NOT EXISTS omicron.public.ip_pool_resource (
+    ip_pool_id UUID NOT NULL,
+    resource_type ip_pool_resource_type NOT NULL,
+    resource_id UUID NOT NULL,
+    is_default BOOL NOT NULL,
+    -- TODO: timestamps for soft deletes?
+
+    -- resource_type is redundant because resource IDs are globally unique, but
+    -- logically it belongs here
+    PRIMARY KEY (ip_pool_id, resource_type, resource_id)
+);
+
+-- a given resource can only have one default ip pool
+CREATE UNIQUE INDEX IF NOT EXISTS one_default_ip_pool_per_resource ON omicron.public.ip_pool_resource (
+    resource_id
+) where
+    is_default = true;
+
 /*
  * IP Pools are made up of a set of IP ranges, which are start/stop addresses.
  * Note that these need not be CIDR blocks or well-behaved subnets with a
@@ -2538,30 +2562,6 @@ FROM
             instance.active_propolis_id = vmm.id
 WHERE
     instance.time_deleted IS NULL AND vmm.time_deleted IS NULL;
-
-CREATE TYPE IF NOT EXISTS omicron.public.ip_pool_resource_type AS ENUM (
-    'fleet',
-    'silo'
-);
-
--- join table associating IP pools with resources like fleet or silo
-CREATE TABLE IF NOT EXISTS omicron.public.ip_pool_resource (
-    ip_pool_id UUID NOT NULL,
-    resource_type ip_pool_resource_type NOT NULL,
-    resource_id UUID NOT NULL,
-    is_default BOOL NOT NULL,
-    -- TODO: timestamps for soft deletes?
-
-    -- resource_type is redundant because resource IDs are globally unique, but
-    -- logically it belongs here
-    PRIMARY KEY (ip_pool_id, resource_type, resource_id)
-);
-
--- a given resource can only have one default ip pool
-CREATE UNIQUE INDEX IF NOT EXISTS one_default_ip_pool_per_resource ON omicron.public.ip_pool_resource (
-    resource_id
-) where
-    is_default = true;
 
 CREATE TABLE IF NOT EXISTS omicron.public.db_metadata (
     -- There should only be one row of this table for the whole DB.

@@ -556,9 +556,7 @@ impl DataStore {
     ) -> Result<(), Error> {
         use omicron_common::api::external::Name;
 
-        dbg!("a");
         self.rack_insert(opctx, &db::model::Rack::new(rack_id)).await?;
-        dbg!("b");
 
         let internal_pool =
             db::model::IpPool::new(&IdentityMetadataCreateParams {
