@@ -32,8 +32,7 @@ use uuid::Uuid;
 /// FROM volume WHERE id = '{}')
 /// ```
 #[must_use = "Queries must be executed"]
-#[derive(Debug, Clone)]
-pub struct ResourcesToCleanUpColumnIsNull {
+struct ResourcesToCleanUpColumnIsNull {
     volume_id: Uuid,
 }
 
@@ -101,8 +100,7 @@ impl<GroupByClause> ValidGrouping<GroupByClause>
 ///  returning *
 /// ```
 #[must_use = "Queries must be executed"]
-#[derive(Debug, Clone)]
-pub struct ConditionallyDecreaseReferences {
+struct ConditionallyDecreaseReferences {
     resources_to_clean_up_column_is_null_clause: ResourcesToCleanUpColumnIsNull,
     snapshot_addrs: Vec<String>,
 }
@@ -193,8 +191,7 @@ impl<GroupByClause> ValidGrouping<GroupByClause>
 ///  select * from <table> where deleting = true and volume_references = 0
 /// ```
 #[must_use = "Queries must be executed"]
-#[derive(Debug, Clone)]
-pub struct RegionSnapshotsToCleanUp {
+struct RegionSnapshotsToCleanUp {
     table: String,
 }
 
@@ -295,8 +292,7 @@ impl<GroupByClause> ValidGrouping<GroupByClause> for RegionSnapshotsToCleanUp {
 /// }
 /// ```
 #[must_use = "Queries must be executed"]
-#[derive(Debug, Clone)]
-pub struct BuildJsonResourcesToCleanUp {
+struct BuildJsonResourcesToCleanUp {
     table: String,
     volume_id: Uuid,
 }
@@ -380,8 +376,7 @@ impl<GroupByClause> ValidGrouping<GroupByClause>
 ///    returning volume.*
 /// ```
 #[must_use = "Queries must be executed"]
-#[derive(Debug, Clone)]
-pub struct ConditionallyUpdateVolume {
+struct ConditionallyUpdateVolume {
     resources_to_clean_up_column_is_null_clause: ResourcesToCleanUpColumnIsNull,
     build_json_resources_to_clean_up_query: BuildJsonResourcesToCleanUp,
     volume_id: Uuid,
@@ -474,7 +469,6 @@ impl<GroupByClause> ValidGrouping<GroupByClause> for ConditionallyUpdateVolume {
 ///  from volume where id = '<volume id>';
 /// ```
 #[must_use = "Queries must be executed"]
-#[derive(Debug, Clone)]
 pub struct DecreaseCrucibleResourceCountAndSoftDeleteVolume {
     conditionally_decrease_references: ConditionallyDecreaseReferences,
     region_snapshots_to_clean_up_query: RegionSnapshotsToCleanUp,
