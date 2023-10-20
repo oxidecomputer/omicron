@@ -812,6 +812,11 @@ table! {
     }
 }
 
+allow_tables_to_appear_in_same_query! {
+    virtual_provisioning_resource,
+    instance
+}
+
 table! {
     zpool (id) {
         id -> Uuid,
