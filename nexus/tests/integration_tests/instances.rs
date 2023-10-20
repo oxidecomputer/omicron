@@ -3493,12 +3493,12 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
         },
     )
     .await;
-    let params = params::IpPoolAssociate {
+    let params = params::IpPoolAssociationCreate {
         resource_id: DEFAULT_SILO.id(),
         resource_type: params::IpPoolResourceType::Silo,
         is_default: true,
     };
-    let assoc_url = format!("/v1/system/ip-pools/{pool_name}/associate");
+    let assoc_url = format!("/v1/system/ip-pools/{pool_name}/association");
     let _ = NexusRequest::objects_post(client, &assoc_url, &params)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()

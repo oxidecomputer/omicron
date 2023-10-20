@@ -4577,13 +4577,13 @@
         }
       }
     },
-    "/v1/system/ip-pools/{pool}/associate": {
+    "/v1/system/ip-pools/{pool}/association": {
       "post": {
         "tags": [
           "system/networking"
         ],
         "summary": "Associate an IP Pool with a silo or project",
-        "operationId": "ip_pool_associate",
+        "operationId": "ip_pool_association_create",
         "parameters": [
           {
             "in": "path",
@@ -4599,7 +4599,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/IpPoolAssociate"
+                "$ref": "#/components/schemas/IpPoolAssociationCreate"
               }
             }
           },
@@ -4629,7 +4629,7 @@
           "system/networking"
         ],
         "summary": "Remove an IP pool's association with a silo or project",
-        "operationId": "ip_pool_dissociate",
+        "operationId": "ip_pool_association_delete",
         "parameters": [
           {
             "in": "path",
@@ -11625,7 +11625,7 @@
           "time_modified"
         ]
       },
-      "IpPoolAssociate": {
+      "IpPoolAssociationCreate": {
         "description": "Parameters for associating an IP pool with a resource (fleet, silo)",
         "type": "object",
         "properties": {

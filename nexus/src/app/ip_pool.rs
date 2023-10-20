@@ -75,7 +75,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pool_lookup: &lookup::IpPool<'_>,
-        ip_pool_resource: &params::IpPoolAssociate,
+        ip_pool_resource: &params::IpPoolAssociationCreate,
     ) -> CreateResult<db::model::IpPoolResource> {
         // TODO: check for perms on specified resource? or unnecessary because this is an operator action?
         let (.., authz_pool) =
@@ -113,7 +113,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pool_lookup: &lookup::IpPool<'_>,
-        ip_pool_dissoc: &params::IpPoolDissociate,
+        ip_pool_dissoc: &params::IpPoolAssociationDelete,
     ) -> DeleteResult {
         let (.., authz_pool) =
             pool_lookup.lookup_for(authz::Action::Modify).await?;

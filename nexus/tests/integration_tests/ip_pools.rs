@@ -360,7 +360,7 @@ async fn test_ip_pool_with_silo(cptestctx: &ControlPlaneTestContext) {
 
     // expect 404 on association if the specified silo doesn't exist
     let nonexistent_silo_id = Uuid::new_v4();
-    let params = params::IpPoolAssociate {
+    let params = params::IpPoolAssociationCreate {
         resource_id: nonexistent_silo_id,
         resource_type: params::IpPoolResourceType::Silo,
         is_default: false,
@@ -369,7 +369,7 @@ async fn test_ip_pool_with_silo(cptestctx: &ControlPlaneTestContext) {
         RequestBuilder::new(
             client,
             Method::POST,
-            "/v1/system/ip-pools/p1/associate",
+            "/v1/system/ip-pools/p1/association",
         )
         .body(Some(&params))
         .expect_status(Some(StatusCode::NOT_FOUND)),
@@ -394,7 +394,7 @@ async fn test_ip_pool_with_silo(cptestctx: &ControlPlaneTestContext) {
     // };
     // let _: IpPoolResource = object_create(
     //     client,
-    //     &format!("/v1/system/ip-pools/p1/associate"),
+    //     &format!("/v1/system/ip-pools/p1/association"),
     //     &params,
     // )
     // .await;
@@ -822,14 +822,14 @@ async fn test_ip_pool_list_usable_by_project(
     // add to fleet since we can't add to project yet
     // TODO: could do silo, might as well? need the ID, though. at least
     // until I make it so you can specify the resource by name
-    let params = params::IpPoolAssociate {
+    let params = params::IpPoolAssociationCreate {
         resource_id: *FLEET_ID,
         resource_type: params::IpPoolResourceType::Fleet,
         is_default: false,
     };
     let _: IpPoolResource = object_create(
         client,
-        &format!("/v1/system/ip-pools/{mypool_name}/associate"),
+        &format!("/v1/system/ip-pools/{mypool_name}/association"),
         &params,
     )
     .await;

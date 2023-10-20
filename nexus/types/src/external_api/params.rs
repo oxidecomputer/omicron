@@ -749,7 +749,7 @@ pub enum IpPoolResourceType {
 
 /// Parameters for associating an IP pool with a resource (fleet, silo)
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct IpPoolAssociate {
+pub struct IpPoolAssociationCreate {
     pub resource_id: Uuid,
     pub resource_type: IpPoolResourceType,
     pub is_default: bool,
@@ -775,7 +775,7 @@ pub struct IpPoolAssociate {
 // }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct IpPoolDissociate {
+pub struct IpPoolAssociationDelete {
     pub resource_id: Uuid,
     // TODO: not technically necessary, should we include it for completeness? feels user-unfriendly
     // pub resource_type: IpPoolResourceType,

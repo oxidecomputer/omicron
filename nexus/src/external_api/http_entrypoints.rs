@@ -116,8 +116,8 @@ pub(crate) fn external_api() -> NexusApiDescription {
         // Operator-Accessible IP Pools API
         api.register(ip_pool_list)?;
         api.register(ip_pool_create)?;
-        api.register(ip_pool_associate)?;
-        api.register(ip_pool_dissociate)?;
+        api.register(ip_pool_association_create)?;
+        api.register(ip_pool_association_delete)?;
         api.register(ip_pool_view)?;
         api.register(ip_pool_delete)?;
         api.register(ip_pool_update)?;
@@ -1311,14 +1311,13 @@ async fn ip_pool_update(
 /// Associate an IP Pool with a silo or project
 #[endpoint {
     method = POST,
-    // TODO: change this to /association
-    path = "/v1/system/ip-pools/{pool}/associate",
+    path = "/v1/system/ip-pools/{pool}/association",
     tags = ["system/networking"],
 }]
-async fn ip_pool_associate(
+async fn ip_pool_association_create(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::IpPoolPath>,
-    resource_assoc: TypedBody<params::IpPoolAssociate>,
+    resource_assoc: TypedBody<params::IpPoolAssociationCreate>,
     // TODO: what does this return? Returning the association record seems silly
 ) -> Result<HttpResponseCreated<views::IpPoolResource>, HttpError> {
     let apictx = rqctx.context();
@@ -1339,14 +1338,14 @@ async fn ip_pool_associate(
 /// Remove an IP pool's association with a silo or project
 #[endpoint {
     method = DELETE,
-    path = "/v1/system/ip-pools/{pool}/associate",
+    path = "/v1/system/ip-pools/{pool}/association",
     tags = ["system/networking"],
 }]
-async fn ip_pool_dissociate(
+async fn ip_pool_association_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::IpPoolPath>,
     // TODO: should this just be a path param? we have been trying to avoid that
-    query_params: Query<params::IpPoolDissociate>,
+    query_params: Query<params::IpPoolAssociationDelete>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let handler = async {

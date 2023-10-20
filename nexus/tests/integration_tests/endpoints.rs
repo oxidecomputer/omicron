@@ -467,9 +467,9 @@ lazy_static! {
                 description: Some(String::from("a new IP pool")),
             },
         };
-    pub static ref DEMO_IP_POOL_ASSOC_URL: String = format!("{}/associate", *DEMO_IP_POOL_URL);
-    pub static ref DEMO_IP_POOL_ASSOC_BODY: params::IpPoolAssociate =
-        params::IpPoolAssociate {
+    pub static ref DEMO_IP_POOL_ASSOC_URL: String = format!("{}/association", *DEMO_IP_POOL_URL);
+    pub static ref DEMO_IP_POOL_ASSOC_BODY: params::IpPoolAssociationCreate =
+        params::IpPoolAssociationCreate {
             resource_id:  DEFAULT_SILO.identity().id,
             resource_type: params::IpPoolResourceType::Silo,
             is_default: false,
