@@ -82,7 +82,7 @@ impl<GroupByClause> ValidGrouping<GroupByClause>
 /// The output should look like:
 ///
 /// ```sql
-///  set
+///  update region_snapshot set
 ///   volume_references = volume_references - 1,
 ///   deleting = case when volume_references = 1
 ///    then true
@@ -120,7 +120,9 @@ impl QueryFragment<Pg> for ConditionallyDecreaseReferences {
     fn walk_ast<'a>(&'a self, mut out: AstPass<'_, 'a, Pg>) -> QueryResult<()> {
         use db::schema::region_snapshot::dsl;
 
-        out.push_sql("SET ");
+        out.push_sql("UPDATE ");
+        dsl::region_snapshot.walk_ast(out.reborrow())?;
+        out.push_sql(" SET ");
         out.push_identifier(dsl::volume_references::NAME)?;
         out.push_sql(" = ");
         out.push_identifier(dsl::volume_references::NAME)?;
@@ -308,7 +310,7 @@ impl<GroupByClause> ValidGrouping<GroupByClause>
 /// The output should look like:
 ///
 /// ```sql
-///   set
+///   update volume set
 ///    time_deleted = now(),
 ///    resources_to_clean_up = ( select <BuildJsonResourcesToCleanUp> )
 ///    where id = '<volume_id>' and
@@ -343,7 +345,9 @@ impl QueryFragment<Pg> for ConditionallyUpdateVolume {
     fn walk_ast<'a>(&'a self, mut out: AstPass<'_, 'a, Pg>) -> QueryResult<()> {
         use db::schema::volume::dsl;
 
-        out.push_sql("SET ");
+        out.push_sql("UPDATE ");
+        dsl::volume.walk_ast(out.reborrow())?;
+        out.push_sql(" SET ");
         out.push_identifier(dsl::time_deleted::NAME)?;
         out.push_sql(" = now(), ");
         out.push_identifier(dsl::resources_to_clean_up::NAME)?;
@@ -439,7 +443,6 @@ impl QueryFragment<Pg> for DecreaseCrucibleResourceCountAndSoftDeleteVolume {
         out.push_sql("WITH ");
         out.push_sql(Self::UPDATED_REGION_SNAPSHOTS_TABLE);
         out.push_sql(" as (");
-        out.push_sql("UPDATE region_snapshot ");
         self.conditionally_decrease_references.walk_ast(out.reborrow())?;
         out.push_sql("), ");
 
@@ -454,13 +457,17 @@ impl QueryFragment<Pg> for DecreaseCrucibleResourceCountAndSoftDeleteVolume {
 
         out.push_sql(Self::UPDATED_VOLUME_TABLE);
         out.push_sql(" AS (");
-        out.push_sql("UPDATE volume ");
         self.conditionally_update_volume_query.walk_ast(out.reborrow())?;
         out.push_sql(") ");
 
-        out.push_sql("SELECT volume.* FROM volume WHERE ");
+        out.push_sql("SELECT ");
+        dsl::volume.walk_ast(out.reborrow())?;
+        out.push_sql(".* FROM ");
+        dsl::volume.walk_ast(out.reborrow())?;
+        out.push_sql(" WHERE ");
         out.push_identifier(dsl::id::NAME)?;
-        out.push_sql(&format!(" = '{}'", self.volume_id));
+        out.push_sql(" = ");
+        out.push_bind_param::<sql_types::Uuid, Uuid>(&self.volume_id)?;
 
         Ok(())
     }
