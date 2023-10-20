@@ -578,9 +578,7 @@ impl DataStore {
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
-        // Get the updated Volume to get the resources to clean up.
-        // TODO figure out how DecreaseCrucibleResourceCountAndSoftDeleteVolume
-        // can return the updated volume in away that Diesel likes
+        // Get the updated Volume to get the resources to clean up
         let resources_to_clean_up: CrucibleResources = match self
             .volume_get(volume_id)
             .await?
