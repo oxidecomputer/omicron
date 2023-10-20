@@ -2219,17 +2219,12 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
         assert_eq!(region_snapshot.deleting, true);
     }
 
-    match cr {
-        nexus_db_queries::db::datastore::CrucibleResources::V1(cr) => {
-            assert!(cr.datasets_and_regions.is_empty());
-            assert_eq!(cr.datasets_and_snapshots.len(), 3);
-        }
+    let datasets_and_regions = datastore.regions_to_delete(&cr).await.unwrap();
+    let datasets_and_snapshots =
+        datastore.snapshots_to_delete(&cr).await.unwrap();
 
-        nexus_db_queries::db::datastore::CrucibleResources::V2(cr) => {
-            assert!(cr.datasets_and_regions.is_empty());
-            assert_eq!(cr.snapshots_to_delete.len(), 3);
-        }
-    }
+    assert!(datasets_and_regions.is_empty());
+    assert_eq!(datasets_and_snapshots.len(), 3);
 
     // Now, let's say we're at a spot where the running snapshots have been
     // deleted, but before volume_hard_delete or region_snapshot_remove are
@@ -2350,17 +2345,12 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
         assert_eq!(region_snapshot.deleting, true);
     }
 
-    match cr {
-        nexus_db_queries::db::datastore::CrucibleResources::V1(cr) => {
-            assert!(cr.datasets_and_regions.is_empty());
-            assert_eq!(cr.datasets_and_snapshots.len(), 3);
-        }
+    let datasets_and_regions = datastore.regions_to_delete(&cr).await.unwrap();
+    let datasets_and_snapshots =
+        datastore.snapshots_to_delete(&cr).await.unwrap();
 
-        nexus_db_queries::db::datastore::CrucibleResources::V2(cr) => {
-            assert!(cr.datasets_and_regions.is_empty());
-            assert_eq!(cr.snapshots_to_delete.len(), 3);
-        }
-    }
+    assert!(datasets_and_regions.is_empty());
+    assert_eq!(datasets_and_snapshots.len(), 3);
 }
 
 #[nexus_test]
