@@ -13,6 +13,7 @@ use diesel::query_builder::AstPass;
 use diesel::query_builder::Query;
 use diesel::query_builder::QueryFragment;
 use diesel::query_builder::QueryId;
+use diesel::sql_types;
 use diesel::Column;
 use diesel::Expression;
 use diesel::QueryResult;
@@ -49,28 +50,23 @@ impl QueryId for ResourcesToCleanUpColumnIsNull {
 
 impl QueryFragment<Pg> for ResourcesToCleanUpColumnIsNull {
     fn walk_ast<'a>(&'a self, mut out: AstPass<'_, 'a, Pg>) -> QueryResult<()> {
-        let statement: String = [
-            "SELECT CASE",
-            "WHEN",
-            db::schema::volume::dsl::resources_to_clean_up::NAME,
-            "is null then true",
-            "ELSE false",
-            "END",
-            "FROM",
-            // XXX a way to refer to the table's name? db::schema::volume::NAME?
-            "volume",
-            &format!("WHERE id = '{}'", &self.volume_id),
-        ]
-        .join(" ");
+        use db::schema::volume;
 
-        out.push_sql(&statement);
+        out.push_sql("SELECT CASE WHEN ");
+        out.push_identifier(volume::dsl::resources_to_clean_up::NAME)?;
+        out.push_sql(" is null then true ELSE false END FROM ");
+        volume::dsl::volume.walk_ast(out.reborrow())?;
+        out.push_sql(" WHERE ");
+        out.push_identifier(volume::dsl::id::NAME)?;
+        out.push_sql(" = ");
+        out.push_bind_param::<sql_types::Uuid, Uuid>(&self.volume_id)?;
 
         Ok(())
     }
 }
 
 impl Expression for ResourcesToCleanUpColumnIsNull {
-    type SqlType = diesel::sql_types::Bool;
+    type SqlType = sql_types::Bool;
 }
 
 impl<GroupByClause> ValidGrouping<GroupByClause>
@@ -124,44 +120,34 @@ impl QueryFragment<Pg> for ConditionallyDecreaseReferences {
     fn walk_ast<'a>(&'a self, mut out: AstPass<'_, 'a, Pg>) -> QueryResult<()> {
         use db::schema::region_snapshot::dsl;
 
-        let statement: String = vec![
-            "SET",
-            dsl::volume_references::NAME,
-            "=",
-            dsl::volume_references::NAME,
-            "- 1",
-            ",",
-            dsl::deleting::NAME,
-            "= CASE",
-            "WHEN",
-            dsl::volume_references::NAME,
-            "= 1 THEN TRUE",
-            "ELSE FALSE",
-            "END",
-            "WHERE",
-            dsl::snapshot_addr::NAME,
-            "IN (",
-            // If self.snapshot_addrs is empty, this query fragment will
-            // intentionally not update any region_snapshot rows. The rest of
-            // the CTE should still run to completion.
-            &self
-                .snapshot_addrs
-                .iter()
-                .map(|x| format!("'{}'", x))
-                .collect::<Vec<String>>()
-                .join(",")
-                .to_string(),
-            ")",
-            "AND",
-            dsl::volume_references::NAME,
-            ">= 1",
-            "AND",
-            dsl::deleting::NAME,
-            "= false",
-            "AND (",
-        ]
-        .join(" ");
-        out.push_sql(&statement);
+        out.push_sql("SET ");
+        out.push_identifier(dsl::volume_references::NAME)?;
+        out.push_sql(" = ");
+        out.push_identifier(dsl::volume_references::NAME)?;
+        out.push_sql(" - 1, ");
+        out.push_identifier(dsl::deleting::NAME)?;
+        out.push_sql(" = CASE WHEN ");
+        out.push_identifier(dsl::volume_references::NAME)?;
+        out.push_sql(" = 1 THEN TRUE ELSE FALSE END WHERE ");
+        out.push_identifier(dsl::snapshot_addr::NAME)?;
+        out.push_sql(" IN (");
+
+        // If self.snapshot_addrs is empty, this query fragment will intentionally not update any
+        // region_snapshot rows. The rest of the CTE should still run to completion.
+        for (i, snapshot_addr) in self.snapshot_addrs.iter().enumerate() {
+            out.push_bind_param::<sql_types::Text, String>(snapshot_addr)?;
+            if i == self.snapshot_addrs.len() - 1 {
+                out.push_sql(" ");
+            } else {
+                out.push_sql(", ");
+            }
+        }
+
+        out.push_sql(") AND ");
+        out.push_identifier(dsl::volume_references::NAME)?;
+        out.push_sql(" >= 1 AND ");
+        out.push_identifier(dsl::deleting::NAME)?;
+        out.push_sql(" = false AND ( ");
         self.resources_to_clean_up_column_is_null_clause
             .walk_ast(out.reborrow())?;
         out.push_sql(") RETURNING *");
@@ -171,66 +157,12 @@ impl QueryFragment<Pg> for ConditionallyDecreaseReferences {
 }
 
 impl Expression for ConditionallyDecreaseReferences {
-    type SqlType = diesel::sql_types::Array<db::model::RegionSnapshot>;
+    type SqlType = sql_types::Array<db::model::RegionSnapshot>;
 }
 
 impl<GroupByClause> ValidGrouping<GroupByClause>
     for ConditionallyDecreaseReferences
 {
-    type IsAggregate = is_aggregate::Never;
-}
-
-/// Produces a query fragment that will select region_snapshot rows from those
-/// that were updated which are ready to be cleaned up. The table to select from
-/// should be from the previous data modifying statement of the CTE that
-/// conditionally decreased references for rows in region_snapshot.
-///
-/// The output should look like:
-///
-/// ```sql
-///  select * from <table> where deleting = true and volume_references = 0
-/// ```
-#[must_use = "Queries must be executed"]
-struct RegionSnapshotsToCleanUp {
-    table: String,
-}
-
-impl RegionSnapshotsToCleanUp {
-    pub fn new(table: String) -> Self {
-        Self { table }
-    }
-}
-
-impl QueryId for RegionSnapshotsToCleanUp {
-    type QueryId = ();
-    const HAS_STATIC_QUERY_ID: bool = false;
-}
-
-impl QueryFragment<Pg> for RegionSnapshotsToCleanUp {
-    fn walk_ast<'a>(&'a self, mut out: AstPass<'_, 'a, Pg>) -> QueryResult<()> {
-        use db::schema::region_snapshot::dsl;
-
-        let statement: String = [
-            "SELECT * FROM",
-            self.table.as_str(),
-            "WHERE",
-            dsl::deleting::NAME,
-            "= true and",
-            dsl::volume_references::NAME,
-            "= 0",
-        ]
-        .join(" ");
-        out.push_sql(&statement);
-
-        Ok(())
-    }
-}
-
-impl Expression for RegionSnapshotsToCleanUp {
-    type SqlType = diesel::sql_types::Array<db::model::RegionSnapshot>;
-}
-
-impl<GroupByClause> ValidGrouping<GroupByClause> for RegionSnapshotsToCleanUp {
     type IsAggregate = is_aggregate::Never;
 }
 
@@ -293,12 +225,12 @@ impl<GroupByClause> ValidGrouping<GroupByClause> for RegionSnapshotsToCleanUp {
 /// ```
 #[must_use = "Queries must be executed"]
 struct BuildJsonResourcesToCleanUp {
-    table: String,
+    table: &'static str,
     volume_id: Uuid,
 }
 
 impl BuildJsonResourcesToCleanUp {
-    pub fn new(table: String, volume_id: Uuid) -> Self {
+    pub fn new(table: &'static str, volume_id: Uuid) -> Self {
         Self { table, volume_id }
     }
 }
@@ -314,43 +246,51 @@ impl QueryFragment<Pg> for BuildJsonResourcesToCleanUp {
         use db::schema::region_snapshot::dsl as region_snapshot_dsl;
         use db::schema::volume::dsl;
 
-        let statement: String = vec![
-            "json_build_object('V3',",
-            "json_build_object(",
-            "'regions', (",
-            "SELECT json_agg(",
-            dsl::id::NAME,
-            ") FROM region JOIN",
-            self.table.as_str(),
-            "ON",
-            region_dsl::id::NAME,
-            &format!(" = {}.region_id", self.table),
-            "WHERE (",
-            &format!("{}.volume_references = 0", self.table),
-            "OR",
-            &format!("{}.volume_references is null", self.table),
-            ") AND",
-            region_dsl::volume_id::NAME,
-            &format!(" = '{}'", self.volume_id),
-            "),",
-            "'region_snapshots', (",
-            "SELECT json_agg(json_build_object(",
-            "'dataset',",
-            region_snapshot_dsl::dataset_id::NAME,
-            ", 'region',",
-            region_snapshot_dsl::region_id::NAME,
-            ", 'snapshot',",
-            region_snapshot_dsl::snapshot_id::NAME,
-            &format!(
-                ")) from {} where {}.volume_references = 0",
-                self.table, self.table
-            ),
-            ")",
-            ")",
-            ")",
-        ]
-        .join(" ");
-        out.push_sql(&statement);
+        out.push_sql("json_build_object('V3', ");
+        out.push_sql("json_build_object('regions', ");
+        out.push_sql("(SELECT json_agg(");
+        out.push_identifier(dsl::id::NAME)?;
+        out.push_sql(") FROM ");
+        region_dsl::region.walk_ast(out.reborrow())?;
+        out.push_sql(" JOIN ");
+        out.push_sql(self.table);
+        out.push_sql(" ON ");
+        out.push_identifier(region_dsl::id::NAME)?;
+        out.push_sql(" = ");
+        out.push_sql(self.table);
+        out.push_sql(".");
+        out.push_identifier(region_snapshot_dsl::region_id::NAME)?; // table's schema is equivalent to region_snapshot
+        out.push_sql(" WHERE ( ");
+
+        out.push_sql(self.table);
+        out.push_sql(".");
+        out.push_identifier(region_snapshot_dsl::volume_references::NAME)?;
+        out.push_sql(" = 0 OR ");
+        out.push_sql(self.table);
+        out.push_sql(".");
+        out.push_identifier(region_snapshot_dsl::volume_references::NAME)?;
+        out.push_sql(" IS NULL");
+
+        out.push_sql(") AND ");
+        out.push_identifier(region_dsl::volume_id::NAME)?;
+        out.push_sql(" = ");
+        out.push_bind_param::<sql_types::Uuid, Uuid>(&self.volume_id)?;
+
+        out.push_sql("), 'region_snapshots', (");
+        out.push_sql("SELECT json_agg(json_build_object(");
+        out.push_sql("'dataset', ");
+        out.push_identifier(region_snapshot_dsl::dataset_id::NAME)?;
+        out.push_sql(", 'region', ");
+        out.push_identifier(region_snapshot_dsl::region_id::NAME)?;
+        out.push_sql(", 'snapshot', ");
+        out.push_identifier(region_snapshot_dsl::snapshot_id::NAME)?;
+        out.push_sql(")) from ");
+        out.push_sql(self.table);
+        out.push_sql(" where ");
+        out.push_sql(self.table);
+        out.push_sql(".");
+        out.push_identifier(region_snapshot_dsl::volume_references::NAME)?;
+        out.push_sql(" = 0)))");
 
         Ok(())
     }
@@ -383,7 +323,7 @@ struct ConditionallyUpdateVolume {
 }
 
 impl ConditionallyUpdateVolume {
-    pub fn new(volume_id: Uuid, table: String) -> Self {
+    pub fn new(volume_id: Uuid, table: &'static str) -> Self {
         Self {
             resources_to_clean_up_column_is_null_clause:
                 ResourcesToCleanUpColumnIsNull::new(volume_id),
@@ -403,27 +343,19 @@ impl QueryFragment<Pg> for ConditionallyUpdateVolume {
     fn walk_ast<'a>(&'a self, mut out: AstPass<'_, 'a, Pg>) -> QueryResult<()> {
         use db::schema::volume::dsl;
 
-        let statement: String = [
-            "SET",
-            dsl::time_deleted::NAME,
-            " = now(),",
-            dsl::resources_to_clean_up::NAME,
-            "= ( SELECT ",
-        ]
-        .join(" ");
-        out.push_sql(&statement);
+        out.push_sql("SET ");
+        out.push_identifier(dsl::time_deleted::NAME)?;
+        out.push_sql(" = now(), ");
+        out.push_identifier(dsl::resources_to_clean_up::NAME)?;
+        out.push_sql(" = (SELECT ");
 
         self.build_json_resources_to_clean_up_query.walk_ast(out.reborrow())?;
 
-        let statement: String = [
-            ")",
-            "WHERE",
-            dsl::id::NAME,
-            &format!("= '{}'", self.volume_id),
-            "AND (",
-        ]
-        .join(" ");
-        out.push_sql(&statement);
+        out.push_sql(") WHERE ");
+        out.push_identifier(dsl::id::NAME)?;
+        out.push_sql(" = ");
+        out.push_bind_param::<sql_types::Uuid, Uuid>(&self.volume_id)?;
+        out.push_sql(" AND (");
 
         self.resources_to_clean_up_column_is_null_clause
             .walk_ast(out.reborrow())?;
@@ -457,7 +389,7 @@ impl<GroupByClause> ValidGrouping<GroupByClause> for ConditionallyUpdateVolume {
 ///    UPDATE region_snapshot <ConditionallyDecreaseReferences>
 ///  ),
 ///  REGION_SNAPSHOTS_TO_CLEAN_UP_TABLE as (
-///    <RegionSnapshotsToCleanUp>
+///    select * from UPDATED_REGION_SNAPSHOTS_TABLE where deleting = true and volume_references = 0
 ///  ),
 ///  UPDATED_VOLUME_TABLE as (
 ///    UPDATE volume <ConditionallyUpdateVolume>
@@ -471,7 +403,6 @@ impl<GroupByClause> ValidGrouping<GroupByClause> for ConditionallyUpdateVolume {
 #[must_use = "Queries must be executed"]
 pub struct DecreaseCrucibleResourceCountAndSoftDeleteVolume {
     conditionally_decrease_references: ConditionallyDecreaseReferences,
-    region_snapshots_to_clean_up_query: RegionSnapshotsToCleanUp,
     conditionally_update_volume_query: ConditionallyUpdateVolume,
     volume_id: Uuid,
 }
@@ -486,12 +417,9 @@ impl DecreaseCrucibleResourceCountAndSoftDeleteVolume {
         Self {
             conditionally_decrease_references:
                 ConditionallyDecreaseReferences::new(volume_id, snapshot_addrs),
-            region_snapshots_to_clean_up_query: RegionSnapshotsToCleanUp::new(
-                Self::UPDATED_REGION_SNAPSHOTS_TABLE.to_string(),
-            ),
             conditionally_update_volume_query: ConditionallyUpdateVolume::new(
                 volume_id,
-                Self::REGION_SNAPSHOTS_TO_CLEAN_UP_TABLE.to_string(),
+                Self::REGION_SNAPSHOTS_TO_CLEAN_UP_TABLE,
             ),
             volume_id,
         }
@@ -505,22 +433,27 @@ impl QueryId for DecreaseCrucibleResourceCountAndSoftDeleteVolume {
 
 impl QueryFragment<Pg> for DecreaseCrucibleResourceCountAndSoftDeleteVolume {
     fn walk_ast<'a>(&'a self, mut out: AstPass<'_, 'a, Pg>) -> QueryResult<()> {
+        use db::schema::region_snapshot::dsl as rs_dsl;
         use db::schema::volume::dsl;
 
         out.push_sql("WITH ");
-        out.push_sql(&format!("{} as (", Self::UPDATED_REGION_SNAPSHOTS_TABLE));
+        out.push_sql(Self::UPDATED_REGION_SNAPSHOTS_TABLE);
+        out.push_sql(" as (");
         out.push_sql("UPDATE region_snapshot ");
         self.conditionally_decrease_references.walk_ast(out.reborrow())?;
         out.push_sql("), ");
 
-        out.push_sql(&format!(
-            "{} as (",
-            Self::REGION_SNAPSHOTS_TO_CLEAN_UP_TABLE
-        ));
-        self.region_snapshots_to_clean_up_query.walk_ast(out.reborrow())?;
-        out.push_sql("), ");
+        out.push_sql(Self::REGION_SNAPSHOTS_TO_CLEAN_UP_TABLE);
+        out.push_sql(" AS (SELECT * FROM ");
+        out.push_sql(Self::UPDATED_REGION_SNAPSHOTS_TABLE);
+        out.push_sql(" WHERE ");
+        out.push_identifier(rs_dsl::deleting::NAME)?;
+        out.push_sql(" = TRUE AND ");
+        out.push_identifier(rs_dsl::volume_references::NAME)?;
+        out.push_sql(" = 0), ");
 
-        out.push_sql(&format!("{} as (", Self::UPDATED_VOLUME_TABLE));
+        out.push_sql(Self::UPDATED_VOLUME_TABLE);
+        out.push_sql(" AS (");
         out.push_sql("UPDATE volume ");
         self.conditionally_update_volume_query.walk_ast(out.reborrow())?;
         out.push_sql(") ");
