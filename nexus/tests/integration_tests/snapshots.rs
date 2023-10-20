@@ -1041,13 +1041,33 @@ async fn test_create_snapshot_record_idempotent(
         external::Error::ObjectAlreadyExists { .. },
     ));
 
-    // Test project_delete_snapshot is idempotent
+    // Move snapshot from Creating to Ready
+
+    let (.., authz_snapshot, db_snapshot) = LookupPath::new(&opctx, &datastore)
+        .snapshot_id(snapshot_created_1.id())
+        .fetch_for(authz::Action::Modify)
+        .await
+        .unwrap();
+
+    datastore
+        .project_snapshot_update_state(
+            &opctx,
+            &authz_snapshot,
+            db_snapshot.gen,
+            db::model::SnapshotState::Ready,
+        )
+        .await
+        .unwrap();
+
+    // Grab the new snapshot (so generation number is updated)
 
     let (.., authz_snapshot, db_snapshot) = LookupPath::new(&opctx, &datastore)
         .snapshot_id(snapshot_created_1.id())
         .fetch_for(authz::Action::Delete)
         .await
         .unwrap();
+
+    // Test project_delete_snapshot is idempotent for the same input
 
     datastore
         .project_delete_snapshot(
@@ -1063,6 +1083,16 @@ async fn test_create_snapshot_record_idempotent(
         )
         .await
         .unwrap();
+
+    {
+        // Ensure the snapshot is gone
+        let r = LookupPath::new(&opctx, &datastore)
+            .snapshot_id(snapshot_created_1.id())
+            .fetch_for(authz::Action::Read)
+            .await;
+
+        assert!(r.is_err());
+    }
 
     datastore
         .project_delete_snapshot(

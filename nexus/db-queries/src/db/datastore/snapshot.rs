@@ -18,7 +18,6 @@ use crate::db::model::Project;
 use crate::db::model::Snapshot;
 use crate::db::model::SnapshotState;
 use crate::db::pagination::paginated;
-use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::TransactionError;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -253,7 +252,6 @@ impl DataStore {
         use db::schema::snapshot::dsl;
 
         let updated_rows = diesel::update(dsl::snapshot)
-            .filter(dsl::time_deleted.is_null())
             .filter(dsl::gen.eq(gen))
             .filter(dsl::id.eq(snapshot_id))
             .filter(dsl::state.eq_any(ok_to_delete_states))
@@ -261,7 +259,6 @@ impl DataStore {
                 dsl::time_deleted.eq(now),
                 dsl::state.eq(SnapshotState::Destroyed),
             ))
-            .check_if_exists::<Snapshot>(snapshot_id)
             .execute_async(&*self.pool_connection_authorized(&opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
