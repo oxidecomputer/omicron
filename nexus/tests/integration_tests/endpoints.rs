@@ -469,11 +469,10 @@ lazy_static! {
         };
     pub static ref DEMO_IP_POOL_ASSOC_URL: String = format!("{}/association", *DEMO_IP_POOL_URL);
     pub static ref DEMO_IP_POOL_ASSOC_BODY: params::IpPoolAssociationCreate =
-        params::IpPoolAssociationCreate {
-            resource_id:  DEFAULT_SILO.identity().id,
-            resource_type: params::IpPoolResourceType::Silo,
+        params::IpPoolAssociationCreate::Silo(params::IpPoolAssociateSilo {
+            silo: NameOrId::Id(DEFAULT_SILO.identity().id),
             is_default: false,
-        };
+        });
     pub static ref DEMO_IP_POOL_RANGE: IpRange = IpRange::V4(Ipv4Range::new(
         std::net::Ipv4Addr::new(10, 0, 0, 0),
         std::net::Ipv4Addr::new(10, 0, 0, 255),

@@ -11627,23 +11627,47 @@
       },
       "IpPoolAssociationCreate": {
         "description": "Parameters for associating an IP pool with a resource (fleet, silo)",
-        "type": "object",
-        "properties": {
-          "is_default": {
-            "type": "boolean"
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "is_default": {
+                "type": "boolean"
+              },
+              "resource_type": {
+                "type": "string",
+                "enum": [
+                  "silo"
+                ]
+              },
+              "silo": {
+                "$ref": "#/components/schemas/NameOrId"
+              }
+            },
+            "required": [
+              "is_default",
+              "resource_type",
+              "silo"
+            ]
           },
-          "resource_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "resource_type": {
-            "$ref": "#/components/schemas/IpPoolResourceType"
+          {
+            "type": "object",
+            "properties": {
+              "is_default": {
+                "type": "boolean"
+              },
+              "resource_type": {
+                "type": "string",
+                "enum": [
+                  "fleet"
+                ]
+              }
+            },
+            "required": [
+              "is_default",
+              "resource_type"
+            ]
           }
-        },
-        "required": [
-          "is_default",
-          "resource_id",
-          "resource_type"
         ]
       },
       "IpPoolCreate": {
@@ -11711,13 +11735,6 @@
       },
       "IpPoolResource": {
         "type": "object"
-      },
-      "IpPoolResourceType": {
-        "type": "string",
-        "enum": [
-          "fleet",
-          "silo"
-        ]
       },
       "IpPoolResultsPage": {
         "description": "A single page of results",

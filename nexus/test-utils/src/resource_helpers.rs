@@ -12,7 +12,6 @@ use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use dropshot::Method;
 use http::StatusCode;
-use nexus_db_queries::db::fixed_data::FLEET_ID;
 use nexus_test_interface::NexusServer;
 use nexus_types::external_api::params;
 use nexus_types::external_api::params::PhysicalDiskKind;
@@ -149,11 +148,9 @@ pub async fn create_ip_pool(
     let _assoc: views::IpPoolResource = object_create(
         client,
         &format!("/v1/system/ip-pools/{pool_name}/association"),
-        &params::IpPoolAssociationCreate {
-            resource_id: *FLEET_ID,
-            resource_type: params::IpPoolResourceType::Fleet,
+        &params::IpPoolAssociationCreate::Fleet(params::IpPoolAssociateFleet {
             is_default: false,
-        },
+        }),
     )
     .await;
 

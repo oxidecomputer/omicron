@@ -741,38 +741,23 @@ pub struct IpPoolUpdate {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum IpPoolResourceType {
-    Fleet,
-    Silo,
+pub struct IpPoolAssociateSilo {
+    pub silo: NameOrId,
+    pub is_default: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct IpPoolAssociateFleet {
+    pub is_default: bool,
 }
 
 /// Parameters for associating an IP pool with a resource (fleet, silo)
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct IpPoolAssociationCreate {
-    pub resource_id: Uuid,
-    pub resource_type: IpPoolResourceType,
-    pub is_default: bool,
+#[serde(tag = "resource_type", rename_all = "snake_case")]
+pub enum IpPoolAssociationCreate {
+    Silo(IpPoolAssociateSilo),
+    Fleet(IpPoolAssociateFleet),
 }
-
-// #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-// pub struct IpPoolAssociateSilo {
-//     pub silo: NameOrId,
-//     pub is_default: bool,
-// }
-//
-// #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-// pub struct IpPoolAssociateFleet {
-//     pub is_default: bool,
-// }
-//
-// TODO: IpPoolAssociate as tagged enum
-// #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-// #[serde(tag = "resource_type", rename_all = "snake_case")]
-// pub enum IpPoolAssociate {
-//     Fleet(IpPoolAssociateFleet),
-//     Silo(IpPoolAssociateFleet),
-// }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct IpPoolAssociationDelete {

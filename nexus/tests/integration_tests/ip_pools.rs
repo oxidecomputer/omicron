@@ -9,7 +9,6 @@ use dropshot::HttpErrorResponseBody;
 use http::method::Method;
 use http::StatusCode;
 use nexus_db_queries::db::datastore::SERVICE_IP_POOL_NAME;
-use nexus_db_queries::db::fixed_data::FLEET_ID;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
@@ -33,7 +32,7 @@ use nexus_types::external_api::views::IpPool;
 use nexus_types::external_api::views::IpPoolRange;
 use nexus_types::external_api::views::IpPoolResource;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
-// use omicron_common::api::external::NameOrId;
+use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::{IdentityMetadataCreateParams, Name};
 use omicron_nexus::TestInterfaces;
 use sled_agent_client::TestInterfaces as SledTestInterfaces;
@@ -360,11 +359,11 @@ async fn test_ip_pool_with_silo(cptestctx: &ControlPlaneTestContext) {
 
     // expect 404 on association if the specified silo doesn't exist
     let nonexistent_silo_id = Uuid::new_v4();
-    let params = params::IpPoolAssociationCreate {
-        resource_id: nonexistent_silo_id,
-        resource_type: params::IpPoolResourceType::Silo,
-        is_default: false,
-    };
+    let params =
+        params::IpPoolAssociationCreate::Silo(params::IpPoolAssociateSilo {
+            silo: NameOrId::Id(nonexistent_silo_id),
+            is_default: false,
+        });
     let error = NexusRequest::new(
         RequestBuilder::new(
             client,
@@ -387,11 +386,9 @@ async fn test_ip_pool_with_silo(cptestctx: &ControlPlaneTestContext) {
     );
 
     // associate with silo that exists
-    // let params = params::IpPoolAssociate {
-    //     resource_id: *FLEET_ID,
-    //     resource_type: params::IpPoolResourceType::Silo,
+    // let params = params::IpPoolAssociationCreate::Fleet(params::IpPoolAssociateFleet {
     //     is_default: false,
-    // };
+    // });
     // let _: IpPoolResource = object_create(
     //     client,
     //     &format!("/v1/system/ip-pools/p1/association"),
@@ -822,11 +819,10 @@ async fn test_ip_pool_list_usable_by_project(
     // add to fleet since we can't add to project yet
     // TODO: could do silo, might as well? need the ID, though. at least
     // until I make it so you can specify the resource by name
-    let params = params::IpPoolAssociationCreate {
-        resource_id: *FLEET_ID,
-        resource_type: params::IpPoolResourceType::Fleet,
-        is_default: false,
-    };
+    let params =
+        params::IpPoolAssociationCreate::Fleet(params::IpPoolAssociateFleet {
+            is_default: false,
+        });
     let _: IpPoolResource = object_create(
         client,
         &format!("/v1/system/ip-pools/{mypool_name}/association"),

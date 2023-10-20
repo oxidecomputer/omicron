@@ -10,6 +10,7 @@ use ipnetwork::IpNetwork;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
+use nexus_db_queries::db::fixed_data::FLEET_ID;
 // use nexus_db_queries::db::fixed_data::silo::INTERNAL_SILO_ID;
 use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::lookup::LookupPath;
@@ -75,22 +76,30 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pool_lookup: &lookup::IpPool<'_>,
-        ip_pool_resource: &params::IpPoolAssociationCreate,
+        assoc_create: &params::IpPoolAssociationCreate,
     ) -> CreateResult<db::model::IpPoolResource> {
         // TODO: check for perms on specified resource? or unnecessary because this is an operator action?
         let (.., authz_pool) =
             pool_lookup.lookup_for(authz::Action::Modify).await?;
-        match ip_pool_resource.resource_type {
-            params::IpPoolResourceType::Silo => {
-                self.silo_lookup(
-                    &opctx,
-                    NameOrId::Id(ip_pool_resource.resource_id),
-                )?
-                .lookup_for(authz::Action::Read)
-                .await?;
+        let (resource_type, resource_id, is_default) = match assoc_create {
+            params::IpPoolAssociationCreate::Silo(assoc_silo) => {
+                let (silo,) = self
+                    .silo_lookup(&opctx, assoc_silo.silo.clone())?
+                    .lookup_for(authz::Action::Read)
+                    .await?;
+                (
+                    db::model::IpPoolResourceType::Silo,
+                    silo.id(),
+                    assoc_silo.is_default,
+                )
             }
-            params::IpPoolResourceType::Fleet => {
-                // hope we don't need to be assured of the fleet's existence
+            params::IpPoolAssociationCreate::Fleet(assoc_fleet) => {
+                // we don't need to be assured of the fleet's existence
+                (
+                    db::model::IpPoolResourceType::Fleet,
+                    *FLEET_ID,
+                    assoc_fleet.is_default,
+                )
             }
         };
         self.db_datastore
@@ -98,12 +107,9 @@ impl super::Nexus {
                 opctx,
                 db::model::IpPoolResource {
                     ip_pool_id: authz_pool.id(),
-                    resource_type: ip_pool_resource
-                        .resource_type
-                        .clone()
-                        .into(),
-                    resource_id: ip_pool_resource.resource_id,
-                    is_default: ip_pool_resource.is_default,
+                    resource_type,
+                    resource_id,
+                    is_default,
                 },
             )
             .await

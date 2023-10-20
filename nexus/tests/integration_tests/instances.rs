@@ -44,6 +44,7 @@ use omicron_common::api::external::InstanceNetworkInterface;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Ipv4Net;
 use omicron_common::api::external::Name;
+use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::Vni;
 use omicron_nexus::app::MAX_MEMORY_BYTES_PER_INSTANCE;
 use omicron_nexus::app::MAX_VCPU_PER_INSTANCE;
@@ -3493,11 +3494,11 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
         },
     )
     .await;
-    let params = params::IpPoolAssociationCreate {
-        resource_id: DEFAULT_SILO.id(),
-        resource_type: params::IpPoolResourceType::Silo,
-        is_default: true,
-    };
+    let params =
+        params::IpPoolAssociationCreate::Silo(params::IpPoolAssociateSilo {
+            silo: NameOrId::Id(DEFAULT_SILO.id()),
+            is_default: true,
+        });
     let assoc_url = format!("/v1/system/ip-pools/{pool_name}/association");
     let _ = NexusRequest::objects_post(client, &assoc_url, &params)
         .authn_as(AuthnMode::PrivilegedUser)
