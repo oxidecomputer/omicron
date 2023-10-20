@@ -415,7 +415,8 @@ mod test {
             datastore.ipv4_nat_list_since_version(&opctx, 0, 10).await.unwrap();
 
         // The NAT table has undergone four changes.
-        let nat_entry = nat_entries.last().unwrap();
+        let nat_entry =
+            datastore.ipv4_nat_find_by_id(&opctx, nat_entry.id).await.unwrap();
         assert_eq!(nat_entries.len(), 2);
         assert_eq!(nat_entry.version_added(), 4);
         assert_eq!(nat_entry.id, first_entry.id);
