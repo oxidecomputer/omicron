@@ -696,9 +696,6 @@ async fn write_network_bootstore_config(
     let bs = sa.bootstore();
     let config = body.into_inner();
 
-    //TODO is the bootstore checking the generation number, do we need to do
-    //     that here?
-
     bs.update_network_config(NetworkConfig::from(config)).await.map_err(
         |e| {
             HttpError::for_internal_error(format!(
