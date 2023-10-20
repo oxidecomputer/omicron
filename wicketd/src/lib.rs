@@ -11,6 +11,7 @@ mod http_entrypoints;
 mod installinator_progress;
 mod inventory;
 pub mod mgs;
+mod nexus_proxy;
 mod preflight_check;
 mod rss_config;
 mod update_tracker;
@@ -22,14 +23,17 @@ pub use config::Config;
 pub(crate) use context::ServerContext;
 use dropshot::{ConfigDropshot, HandlerTaskMode, HttpServer};
 pub use installinator_progress::{IprUpdateTracker, RunningUpdateState};
+use internal_dns::resolver::Resolver;
 pub use inventory::{RackV1Inventory, SpInventory};
 use mgs::make_mgs_client;
 pub(crate) use mgs::{MgsHandle, MgsManager};
+use nexus_proxy::NexusTcpProxy;
+use omicron_common::address::{Ipv6Subnet, AZ_PREFIX};
 use omicron_common::FileKv;
 use preflight_check::PreflightCheckerHandler;
 use sled_hardware::Baseboard;
 use slog::{debug, error, o, Drain};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 use std::{
     net::{SocketAddr, SocketAddrV6},
     sync::Arc,
@@ -53,7 +57,62 @@ pub struct Args {
     pub address: SocketAddrV6,
     pub artifact_address: SocketAddrV6,
     pub mgs_address: SocketAddrV6,
+    pub nexus_proxy_address: SocketAddrV6,
     pub baseboard: Option<Baseboard>,
+    pub rack_subnet: Option<Ipv6Subnet<AZ_PREFIX>>,
+}
+
+pub struct SmfConfigValues {
+    pub address: SocketAddrV6,
+    pub rack_subnet: Option<Ipv6Subnet<AZ_PREFIX>>,
+}
+
+impl SmfConfigValues {
+    #[cfg(target_os = "illumos")]
+    pub fn read_current() -> Result<Self> {
+        use anyhow::Context;
+        use illumos_utils::scf::ScfHandle;
+
+        const CONFIG_PG: &str = "config";
+        const PROP_RACK_SUBNET: &str = "rack-subnet";
+        const PROP_ADDRESS: &str = "address";
+
+        let scf = ScfHandle::new()?;
+        let instance = scf.self_instance()?;
+        let snapshot = instance.running_snapshot()?;
+        let config = snapshot.property_group(CONFIG_PG)?;
+
+        let rack_subnet = config.value_as_string(PROP_RACK_SUBNET)?;
+
+        let rack_subnet = if rack_subnet == "unknown" {
+            None
+        } else {
+            let addr = rack_subnet.parse().with_context(|| {
+                format!(
+                    "failed to parse {CONFIG_PG}/{PROP_RACK_SUBNET} \
+                     value {rack_subnet:?} as an IP address"
+                )
+            })?;
+            Some(Ipv6Subnet::new(addr))
+        };
+
+        let address = {
+            let address = config.value_as_string(PROP_ADDRESS)?;
+            address.parse().with_context(|| {
+                format!(
+                    "failed to parse {CONFIG_PG}/{PROP_ADDRESS} \
+                     value {address:?} as a socket address"
+                )
+            })?
+        };
+
+        Ok(Self { address, rack_subnet })
+    }
+
+    #[cfg(not(target_os = "illumos"))]
+    pub fn read_current() -> Result<Self> {
+        Err(anyhow!("reading SMF config only available on illumos"))
+    }
 }
 
 pub struct Server {
@@ -62,6 +121,7 @@ pub struct Server {
     pub artifact_store: WicketdArtifactStore,
     pub update_tracker: Arc<UpdateTracker>,
     pub ipr_update_tracker: IprUpdateTracker,
+    nexus_tcp_proxy: NexusTcpProxy,
 }
 
 impl Server {
@@ -80,8 +140,9 @@ impl Server {
 
         let dropshot_config = ConfigDropshot {
             bind_address: SocketAddr::V6(args.address),
-            // The maximum request size is set to 4 GB -- artifacts can be large and there's currently
-            // no way to set a larger request size for some endpoints.
+            // The maximum request size is set to 4 GB -- artifacts can be large
+            // and there's currently no way to set a larger request size for
+            // some endpoints.
             request_body_max_bytes: 4 << 30,
             default_handler_task_mode: HandlerTaskMode::Detached,
         };
@@ -104,6 +165,27 @@ impl Server {
         ));
 
         let bootstrap_peers = BootstrapPeers::new(&log);
+        let internal_dns_resolver = args
+            .rack_subnet
+            .map(|addr| {
+                Resolver::new_from_subnet(
+                    log.new(o!("component" => "InternalDnsResolver")),
+                    addr,
+                )
+                .map_err(|err| {
+                    format!("Could not create internal DNS resolver: {err}")
+                })
+            })
+            .transpose()?;
+
+        let internal_dns_resolver = Arc::new(Mutex::new(internal_dns_resolver));
+        let nexus_tcp_proxy = NexusTcpProxy::start(
+            args.nexus_proxy_address,
+            Arc::clone(&internal_dns_resolver),
+            &log,
+        )
+        .await
+        .map_err(|err| format!("failed to start Nexus TCP proxy: {err}"))?;
 
         let wicketd_server = {
             let ds_log = log.new(o!("component" => "dropshot (wicketd)"));
@@ -112,6 +194,7 @@ impl Server {
                 &dropshot_config,
                 http_entrypoints::api(),
                 ServerContext {
+                    bind_address: args.address,
                     mgs_handle,
                     mgs_client,
                     log: log.clone(),
@@ -121,6 +204,7 @@ impl Server {
                     baseboard: args.baseboard,
                     rss_config: Default::default(),
                     preflight_checker: PreflightCheckerHandler::new(&log),
+                    internal_dns_resolver,
                 },
                 &ds_log,
             )
@@ -146,17 +230,19 @@ impl Server {
             artifact_store: store,
             update_tracker,
             ipr_update_tracker,
+            nexus_tcp_proxy,
         })
     }
 
     /// Close all running dropshot servers.
-    pub async fn close(self) -> Result<()> {
+    pub async fn close(mut self) -> Result<()> {
         self.wicketd_server.close().await.map_err(|error| {
             anyhow!("error closing wicketd server: {error}")
         })?;
         self.artifact_server.close().await.map_err(|error| {
             anyhow!("error closing artifact server: {error}")
         })?;
+        self.nexus_tcp_proxy.shutdown();
         Ok(())
     }
 

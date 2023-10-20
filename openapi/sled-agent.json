@@ -1194,6 +1194,36 @@
           "vni"
         ]
       },
+      "DhcpConfig": {
+        "description": "DHCP configuration for a port\n\nNot present here: Hostname (DHCPv4 option 12; used in DHCPv6 option 39); we use `InstanceRuntimeState::hostname` for this value.",
+        "type": "object",
+        "properties": {
+          "dns_servers": {
+            "description": "DNS servers to send to the instance\n\n(DHCPv4 option 6; DHCPv6 option 23)",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "ip"
+            }
+          },
+          "host_domain": {
+            "nullable": true,
+            "description": "DNS zone this instance's hostname belongs to (e.g. the `project.example` part of `instance1.project.example`)\n\n(DHCPv4 option 15; used in DHCPv6 option 39)",
+            "type": "string"
+          },
+          "search_domains": {
+            "description": "DNS search domains\n\n(DHCPv4 option 119; DHCPv6 option 24)",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "dns_servers",
+          "search_domains"
+        ]
+      },
       "DiskEnsureBody": {
         "description": "Sent from to a sled agent to establish the runtime state of a Disk",
         "type": "object",
@@ -1697,6 +1727,9 @@
             "nullable": true,
             "type": "string"
           },
+          "dhcp_config": {
+            "$ref": "#/components/schemas/DhcpConfig"
+          },
           "disks": {
             "type": "array",
             "items": {
@@ -1731,6 +1764,7 @@
           }
         },
         "required": [
+          "dhcp_config",
           "disks",
           "external_ips",
           "firewall_rules",

@@ -2789,7 +2789,7 @@ dependencies = [
 [[package]]
 name = "gateway-messages"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=1e180ae55e56bd17af35cb868ffbd18ce487351d#1e180ae55e56bd17af35cb868ffbd18ce487351d"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=2739c18e80697aa6bc235c935176d14b4d757ee9#2739c18e80697aa6bc235c935176d14b4d757ee9"
 dependencies = [
  "bitflags 1.3.2",
  "hubpack 0.1.2",
@@ -2797,14 +2797,15 @@ dependencies = [
  "serde_repr",
  "smoltcp 0.9.1",
  "static_assertions",
+ "strum_macros 0.25.2",
  "uuid",
- "zerocopy 0.6.3",
+ "zerocopy 0.6.4",
 ]
 
 [[package]]
 name = "gateway-sp-comms"
 version = "0.1.1"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=1e180ae55e56bd17af35cb868ffbd18ce487351d#1e180ae55e56bd17af35cb868ffbd18ce487351d"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=2739c18e80697aa6bc235c935176d14b4d757ee9#2739c18e80697aa6bc235c935176d14b4d757ee9"
 dependencies = [
  "async-trait",
  "backoff",
@@ -2817,10 +2818,11 @@ dependencies = [
  "lru-cache",
  "nix 0.26.2 (git+https://github.com/jgallagher/nix?branch=r0.26-illumos)",
  "once_cell",
+ "paste",
  "serde",
  "serde-big-array 0.5.1",
  "slog",
- "socket2 0.5.3",
+ "socket2 0.5.4",
  "string_cache",
  "thiserror",
  "tlvc 0.3.1 (git+https://github.com/oxidecomputer/tlvc.git?branch=main)",
@@ -3249,7 +3251,7 @@ dependencies = [
 [[package]]
 name = "hubtools"
 version = "0.4.1"
-source = "git+https://github.com/oxidecomputer/hubtools.git?branch=main#2481445b80f8476041f62a1c8b6301e4918c63ed"
+source = "git+https://github.com/oxidecomputer/hubtools.git?branch=main#73cd5a84689d59ecce9da66ad4389c540d315168"
 dependencies = [
  "lpc55_areas",
  "lpc55_sign",
@@ -3261,7 +3263,7 @@ dependencies = [
  "tlvc-text",
  "toml 0.7.8",
  "x509-cert",
- "zerocopy 0.6.3",
+ "zerocopy 0.6.4",
  "zip",
 ]
 
@@ -3406,7 +3408,7 @@ dependencies = [
 [[package]]
 name = "illumos-sys-hdrs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=631c2017f19cafb1535f621e9e5aa9198ccad869#631c2017f19cafb1535f621e9e5aa9198ccad869"
+source = "git+https://github.com/oxidecomputer/opte?rev=258a8b59902dd36fc7ee5425e6b1fb5fc80d4649#258a8b59902dd36fc7ee5425e6b1fb5fc80d4649"
 
 [[package]]
 name = "illumos-utils"
@@ -3418,6 +3420,7 @@ dependencies = [
  "byteorder",
  "camino",
  "cfg-if 1.0.0",
+ "crucible-smf",
  "futures",
  "ipnetwork",
  "libc",
@@ -3724,7 +3727,7 @@ version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b58db92f96b720de98181bbbe63c831e87005ab460c1bf306eb2622b4707997f"
 dependencies = [
- "socket2 0.5.3",
+ "socket2 0.5.4",
  "widestring",
  "windows-sys 0.48.0",
  "winreg",
@@ -3827,7 +3830,7 @@ dependencies = [
 [[package]]
 name = "kstat-macro"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=631c2017f19cafb1535f621e9e5aa9198ccad869#631c2017f19cafb1535f621e9e5aa9198ccad869"
+source = "git+https://github.com/oxidecomputer/opte?rev=258a8b59902dd36fc7ee5425e6b1fb5fc80d4649#258a8b59902dd36fc7ee5425e6b1fb5fc80d4649"
 dependencies = [
  "quote",
  "syn 1.0.109",
@@ -4068,7 +4071,7 @@ dependencies = [
  "sha2",
  "thiserror",
  "x509-cert",
- "zerocopy 0.6.3",
+ "zerocopy 0.6.4",
 ]
 
 [[package]]
@@ -4996,9 +4999,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "base64 0.21.4",
  "ciborium",
  "clap 4.4.3",
- "crucible-smf",
  "dropshot",
  "expectorate",
  "futures",
@@ -5008,6 +5011,7 @@ dependencies = [
  "hex",
  "http",
  "hyper",
+ "illumos-utils",
  "ipcc-key-value",
  "omicron-common 0.1.0",
  "omicron-test-utils",
@@ -5310,7 +5314,6 @@ dependencies = [
  "openapi-lint",
  "openapiv3",
  "opte-ioctl",
- "oxide-vpc",
  "oximeter 0.1.0",
  "oximeter-producer 0.1.0",
  "percent-encoding",
@@ -5599,7 +5602,7 @@ dependencies = [
 [[package]]
 name = "opte"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=631c2017f19cafb1535f621e9e5aa9198ccad869#631c2017f19cafb1535f621e9e5aa9198ccad869"
+source = "git+https://github.com/oxidecomputer/opte?rev=258a8b59902dd36fc7ee5425e6b1fb5fc80d4649#258a8b59902dd36fc7ee5425e6b1fb5fc80d4649"
 dependencies = [
  "cfg-if 0.1.10",
  "dyn-clone",
@@ -5610,13 +5613,13 @@ dependencies = [
  "serde",
  "smoltcp 0.8.2",
  "version_check",
- "zerocopy 0.6.3",
+ "zerocopy 0.6.4",
 ]
 
 [[package]]
 name = "opte-api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=631c2017f19cafb1535f621e9e5aa9198ccad869#631c2017f19cafb1535f621e9e5aa9198ccad869"
+source = "git+https://github.com/oxidecomputer/opte?rev=258a8b59902dd36fc7ee5425e6b1fb5fc80d4649#258a8b59902dd36fc7ee5425e6b1fb5fc80d4649"
 dependencies = [
  "cfg-if 0.1.10",
  "illumos-sys-hdrs",
@@ -5629,7 +5632,7 @@ dependencies = [
 [[package]]
 name = "opte-ioctl"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=631c2017f19cafb1535f621e9e5aa9198ccad869#631c2017f19cafb1535f621e9e5aa9198ccad869"
+source = "git+https://github.com/oxidecomputer/opte?rev=258a8b59902dd36fc7ee5425e6b1fb5fc80d4649#258a8b59902dd36fc7ee5425e6b1fb5fc80d4649"
 dependencies = [
  "libc",
  "libnet",
@@ -5709,14 +5712,14 @@ dependencies = [
 [[package]]
 name = "oxide-vpc"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=631c2017f19cafb1535f621e9e5aa9198ccad869#631c2017f19cafb1535f621e9e5aa9198ccad869"
+source = "git+https://github.com/oxidecomputer/opte?rev=258a8b59902dd36fc7ee5425e6b1fb5fc80d4649#258a8b59902dd36fc7ee5425e6b1fb5fc80d4649"
 dependencies = [
  "cfg-if 0.1.10",
  "illumos-sys-hdrs",
  "opte",
  "serde",
  "smoltcp 0.8.2",
- "zerocopy 0.6.3",
+ "zerocopy 0.6.4",
 ]
 
 [[package]]
@@ -8359,9 +8362,9 @@ dependencies = [
 
 [[package]]
 name = "socket2"
-version = "0.5.3"
+version = "0.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2538b18701741680e0322a2302176d3253a35388e2e62f172f64f4f16605f877"
+checksum = "4031e820eb552adee9295814c0ced9e5cf38ddf1e8b7d566d6de8e2538ea989e"
 dependencies = [
  "libc",
  "windows-sys 0.48.0",
@@ -8941,7 +8944,7 @@ source = "git+https://github.com/oxidecomputer/tlvc.git?branch=main#e644a21a7ca9
 dependencies = [
  "byteorder",
  "crc",
- "zerocopy 0.6.3",
+ "zerocopy 0.6.4",
 ]
 
 [[package]]
@@ -8951,7 +8954,7 @@ source = "git+https://github.com/oxidecomputer/tlvc.git#e644a21a7ca973ed31499106
 dependencies = [
  "byteorder",
  "crc",
- "zerocopy 0.6.3",
+ "zerocopy 0.6.4",
 ]
 
 [[package]]
@@ -8962,7 +8965,7 @@ dependencies = [
  "ron 0.8.1",
  "serde",
  "tlvc 0.3.1 (git+https://github.com/oxidecomputer/tlvc.git)",
- "zerocopy 0.6.3",
+ "zerocopy 0.6.4",
 ]
 
 [[package]]
@@ -8991,7 +8994,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "pin-project-lite",
  "signal-hook-registry",
- "socket2 0.5.3",
+ "socket2 0.5.4",
  "tokio-macros",
  "windows-sys 0.48.0",
 ]
@@ -9037,7 +9040,7 @@ dependencies = [
  "postgres-protocol",
  "postgres-types",
  "rand 0.8.5",
- "socket2 0.5.3",
+ "socket2 0.5.4",
  "tokio",
  "tokio-util",
  "whoami",
@@ -9476,8 +9479,8 @@ version = "1.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97fee6b57c6a41524a810daee9286c02d7752c4253064d0b05472833a438f675"
 dependencies = [
- "cfg-if 1.0.0",
- "rand 0.8.5",
+ "cfg-if 0.1.10",
+ "rand 0.4.6",
  "static_assertions",
 ]
 
@@ -10083,6 +10086,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "base64 0.21.4",
  "bootstrap-agent-client",
  "bytes",
  "camino",
@@ -10111,6 +10115,7 @@ dependencies = [
  "installinator-artifact-client",
  "installinator-artifactd",
  "installinator-common",
+ "internal-dns 0.1.0",
  "itertools 0.11.0",
  "omicron-certificates",
  "omicron-common 0.1.0",
@@ -10432,12 +10437,12 @@ dependencies = [
 
 [[package]]
 name = "zerocopy"
-version = "0.6.3"
+version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3b9c234616391070b0b173963ebc65a9195068e7ed3731c6edac2ec45ebe106"
+checksum = "20707b61725734c595e840fb3704378a0cd2b9c74cc9e6e20724838fc6a1e2f9"
 dependencies = [
  "byteorder",
- "zerocopy-derive 0.6.3",
+ "zerocopy-derive 0.6.4",
 ]
 
 [[package]]
@@ -10453,9 +10458,9 @@ dependencies = [
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.6.3"
+version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f7f3a471f98d0a61c34322fbbfd10c384b07687f680d4119813713f72308d91"
+checksum = "56097d5b91d711293a42be9289403896b68654625021732067eac7a4ca388a1f"
 dependencies = [
  "proc-macro2",
  "quote",

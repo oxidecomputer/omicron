@@ -15,6 +15,7 @@ use crate::db::model::Region;
 use crate::db::model::RegionSnapshot;
 use crate::db::model::Volume;
 use crate::db::queries::volume::DecreaseCrucibleResourceCountAndSoftDeleteVolume;
+use anyhow::bail;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
@@ -392,6 +393,16 @@ impl DataStore {
                 opts,
                 gen,
             } => {
+                if !opts.read_only {
+                    // Only one volume can "own" a Region, and that volume's
+                    // UUID is recorded in the region table accordingly. It is
+                    // an error to make a copy of a volume construction request
+                    // that references non-read-only Regions.
+                    bail!(
+                        "only one Volume can reference a Region non-read-only!"
+                    );
+                }
+
                 let mut opts = opts.clone();
                 opts.id = Uuid::new_v4();
 
@@ -417,7 +428,10 @@ impl DataStore {
     /// Checkout a copy of the Volume from the database using `volume_checkout`,
     /// then randomize the UUIDs in the construction request. Because this is a
     /// new volume, it is immediately passed to `volume_create` so that the
-    /// accounting for Crucible resources stays correct.
+    /// accounting for Crucible resources stays correct. This is only valid for
+    /// Volumes that reference regions read-only - it's important for accounting
+    /// purposes that each region in this volume construction request is
+    /// returned by `read_only_resources_associated_with_volume`.
     pub async fn volume_checkout_randomize_ids(
         &self,
         volume_id: Uuid,
@@ -470,6 +484,8 @@ impl DataStore {
                     .eq(0)
                     // Despite the SQL specifying that this column is NOT NULL,
                     // this null check is required for this function to work!
+                    // It's possible that the left join of region_snapshot above
+                    // could join zero rows, making this null.
                     .or(dsl::volume_references.is_null()),
             )
             // where the volume has already been soft-deleted
