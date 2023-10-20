@@ -75,9 +75,9 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pool_lookup: &lookup::IpPool<'_>,
-        ip_pool_resource: &params::IpPoolResource,
+        ip_pool_resource: &params::IpPoolAssociate,
     ) -> CreateResult<db::model::IpPoolResource> {
-        // TODO: check for perms on specified resource
+        // TODO: check for perms on specified resource? or unnecessary because this is an operator action?
         let (.., authz_pool) =
             pool_lookup.lookup_for(authz::Action::Modify).await?;
         match ip_pool_resource.resource_type {
@@ -105,6 +105,23 @@ impl super::Nexus {
                     resource_id: ip_pool_resource.resource_id,
                     is_default: ip_pool_resource.is_default,
                 },
+            )
+            .await
+    }
+
+    pub(crate) async fn ip_pool_dissociate_resource(
+        &self,
+        opctx: &OpContext,
+        pool_lookup: &lookup::IpPool<'_>,
+        ip_pool_dissoc: &params::IpPoolDissociate,
+    ) -> DeleteResult {
+        let (.., authz_pool) =
+            pool_lookup.lookup_for(authz::Action::Modify).await?;
+        self.db_datastore
+            .ip_pool_dissociate_resource(
+                opctx,
+                authz_pool.id(),
+                ip_pool_dissoc.resource_id,
             )
             .await
     }

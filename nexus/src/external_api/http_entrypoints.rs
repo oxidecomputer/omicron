@@ -117,6 +117,7 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(ip_pool_list)?;
         api.register(ip_pool_create)?;
         api.register(ip_pool_associate)?;
+        api.register(ip_pool_dissociate)?;
         api.register(ip_pool_view)?;
         api.register(ip_pool_delete)?;
         api.register(ip_pool_update)?;
@@ -1306,16 +1307,18 @@ async fn ip_pool_update(
 // TODO: associate just seems like the wrong word and I'd like to change it
 // across the board. What I really mean is "make available to" or "make availale
 // for use in"
+
 /// Associate an IP Pool with a silo or project
 #[endpoint {
     method = POST,
+    // TODO: change this to /association
     path = "/v1/system/ip-pools/{pool}/associate",
     tags = ["system/networking"],
 }]
 async fn ip_pool_associate(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::IpPoolPath>,
-    resource_assoc: TypedBody<params::IpPoolResource>,
+    resource_assoc: TypedBody<params::IpPoolAssociate>,
     // TODO: what does this return? Returning the association record seems silly
 ) -> Result<HttpResponseCreated<views::IpPoolResource>, HttpError> {
     let apictx = rqctx.context();
@@ -1329,6 +1332,31 @@ async fn ip_pool_associate(
             .ip_pool_associate_resource(&opctx, &pool_lookup, &resource_assoc)
             .await?;
         Ok(HttpResponseCreated(views::IpPoolResource {}))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Remove an IP pool's association with a silo or project
+#[endpoint {
+    method = DELETE,
+    path = "/v1/system/ip-pools/{pool}/associate",
+    tags = ["system/networking"],
+}]
+async fn ip_pool_dissociate(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::IpPoolPath>,
+    // TODO: should this just be a path param? we have been trying to avoid that
+    query_params: Query<params::IpPoolDissociate>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
+        nexus.ip_pool_dissociate_resource(&opctx, &pool_lookup, &query).await?;
+        Ok(HttpResponseUpdatedNoContent())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

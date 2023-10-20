@@ -468,8 +468,8 @@ lazy_static! {
             },
         };
     pub static ref DEMO_IP_POOL_ASSOC_URL: String = format!("{}/associate", *DEMO_IP_POOL_URL);
-    pub static ref DEMO_IP_POOL_ASSOC_BODY: params::IpPoolResource =
-        params::IpPoolResource {
+    pub static ref DEMO_IP_POOL_ASSOC_BODY: params::IpPoolAssociate =
+        params::IpPoolAssociate {
             resource_id:  DEFAULT_SILO.identity().id,
             resource_type: params::IpPoolResourceType::Silo,
             is_default: false,

@@ -4599,7 +4599,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/IpPoolResource"
+                "$ref": "#/components/schemas/IpPoolAssociate"
               }
             }
           },
@@ -4615,6 +4615,44 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Remove an IP pool's association with a silo or project",
+        "operationId": "ip_pool_dissociate",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool",
+            "description": "Name or ID of the IP pool",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "resource_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -11587,6 +11625,27 @@
           "time_modified"
         ]
       },
+      "IpPoolAssociate": {
+        "description": "Parameters for associating an IP pool with a resource (fleet, silo)",
+        "type": "object",
+        "properties": {
+          "is_default": {
+            "type": "boolean"
+          },
+          "resource_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "resource_type": {
+            "$ref": "#/components/schemas/IpPoolResourceType"
+          }
+        },
+        "required": [
+          "is_default",
+          "resource_id",
+          "resource_type"
+        ]
+      },
       "IpPoolCreate": {
         "description": "Create-time parameters for an `IpPool`",
         "type": "object",
@@ -11651,25 +11710,7 @@
         ]
       },
       "IpPoolResource": {
-        "description": "Parameters for associating an IP pool with a resource (fleet, silo)",
-        "type": "object",
-        "properties": {
-          "is_default": {
-            "type": "boolean"
-          },
-          "resource_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "resource_type": {
-            "$ref": "#/components/schemas/IpPoolResourceType"
-          }
-        },
-        "required": [
-          "is_default",
-          "resource_id",
-          "resource_type"
-        ]
+        "type": "object"
       },
       "IpPoolResourceType": {
         "type": "string",

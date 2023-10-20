@@ -14,6 +14,7 @@ use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::create_project;
+use nexus_test_utils::resource_helpers::object_create;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::{
     create_instance, create_instance_with,
@@ -30,6 +31,7 @@ use nexus_types::external_api::shared::Ipv4Range;
 use nexus_types::external_api::shared::Ipv6Range;
 use nexus_types::external_api::views::IpPool;
 use nexus_types::external_api::views::IpPoolRange;
+use nexus_types::external_api::views::IpPoolResource;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 // use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::{IdentityMetadataCreateParams, Name};
@@ -345,13 +347,11 @@ async fn test_ip_pool_with_silo(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     // can create a pool with an existing silo by name
-    // TODO: confirm association post works with existing silo ID
-    // silo: Some(NameOrId::Name(cptestctx.silo_name.clone())),
-    // is_default: false,
     let _created_pool = create_pool(client, "p0").await;
 
     // let silo_id =
     //     created_pool.silo_id.expect("Expected pool to have a silo_id");
+    // silo: Some(NameOrId::Name()),
 
     // now we'll create another IP pool using that silo ID
     let _created_pool = create_pool(client, "p1").await;
@@ -360,7 +360,7 @@ async fn test_ip_pool_with_silo(cptestctx: &ControlPlaneTestContext) {
 
     // expect 404 on association if the specified silo doesn't exist
     let nonexistent_silo_id = Uuid::new_v4();
-    let params = params::IpPoolResource {
+    let params = params::IpPoolAssociate {
         resource_id: nonexistent_silo_id,
         resource_type: params::IpPoolResourceType::Silo,
         is_default: false,
@@ -386,10 +386,25 @@ async fn test_ip_pool_with_silo(cptestctx: &ControlPlaneTestContext) {
         format!("not found: silo with id \"{nonexistent_silo_id}\"")
     );
 
+    // associate with silo that exists
+    // let params = params::IpPoolAssociate {
+    //     resource_id: *FLEET_ID,
+    //     resource_type: params::IpPoolResourceType::Silo,
+    //     is_default: false,
+    // };
+    // let _: IpPoolResource = object_create(
+    //     client,
+    //     &format!("/v1/system/ip-pools/p1/associate"),
+    //     &params,
+    // )
+    // .await;
+
     // TODO: associating a resource that is already associated should be a noop
     // and return a success message
 
     // TODO: trying to set a second default for a resource should fail
+
+    // TODO: dissociate silo from pool
 }
 
 // IP pool list fetch logic includes a join to ip_pool_resource, which is
@@ -807,18 +822,16 @@ async fn test_ip_pool_list_usable_by_project(
     // add to fleet since we can't add to project yet
     // TODO: could do silo, might as well? need the ID, though. at least
     // until I make it so you can specify the resource by name
-    let params = params::IpPoolResource {
+    let params = params::IpPoolAssociate {
         resource_id: *FLEET_ID,
         resource_type: params::IpPoolResourceType::Fleet,
         is_default: false,
     };
-    let _ = NexusRequest::objects_post(
+    let _: IpPoolResource = object_create(
         client,
         &format!("/v1/system/ip-pools/{mypool_name}/associate"),
         &params,
     )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
     .await;
 
     // Add an IP range to mypool

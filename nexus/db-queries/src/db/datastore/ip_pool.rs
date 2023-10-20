@@ -358,6 +358,32 @@ impl DataStore {
             })
     }
 
+    pub async fn ip_pool_dissociate_resource(
+        &self,
+        opctx: &OpContext,
+        // TODO: this could take the authz_pool, it's just more annoying to test that way
+        ip_pool_id: Uuid,
+        resource_id: Uuid,
+    ) -> DeleteResult {
+        use db::schema::ip_pool_resource;
+        opctx
+            .authorize(authz::Action::CreateChild, &authz::IP_POOL_LIST)
+            .await?;
+
+        diesel::delete(ip_pool_resource::table)
+            .filter(ip_pool_resource::ip_pool_id.eq(ip_pool_id))
+            .filter(ip_pool_resource::resource_id.eq(resource_id))
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map(|_rows_deleted| ())
+            .map_err(|e| {
+                Error::internal_error(&format!(
+                    "error deleting IP pool association to resource: {:?}",
+                    e
+                ))
+            })
+    }
+
     pub async fn ip_pool_list_ranges(
         &self,
         opctx: &OpContext,
@@ -601,7 +627,7 @@ mod test {
         let ip_pool = datastore
             .ip_pools_fetch_default(&opctx)
             .await
-            .expect("Failed to get silo default IP pool");
+            .expect("Failed to get default IP pool");
         assert_eq!(ip_pool.id(), fleet_default_pool.id());
 
         // now we can change that association to is_default=true and
@@ -648,6 +674,18 @@ mod test {
             .await
             .expect_err("Failed to fail to set a second default pool for silo");
         assert_matches!(err, Error::ObjectAlreadyExists { .. });
+
+        // now remove the association and we should get the default fleet pool again
+        datastore
+            .ip_pool_dissociate_resource(&opctx, pool1_for_silo.id(), silo_id)
+            .await
+            .expect("Failed to dissociate IP pool from silo");
+
+        let ip_pool = datastore
+            .ip_pools_fetch_default(&opctx)
+            .await
+            .expect("Failed to get default IP pool");
+        assert_eq!(ip_pool.id(), fleet_default_pool.id());
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();

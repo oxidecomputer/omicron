@@ -3493,7 +3493,7 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
         },
     )
     .await;
-    let params = params::IpPoolResource {
+    let params = params::IpPoolAssociate {
         resource_id: DEFAULT_SILO.id(),
         resource_type: params::IpPoolResourceType::Silo,
         is_default: true,

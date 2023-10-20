@@ -149,7 +149,7 @@ pub async fn create_ip_pool(
     let _assoc: views::IpPoolResource = object_create(
         client,
         &format!("/v1/system/ip-pools/{pool_name}/associate"),
-        &params::IpPoolResource {
+        &params::IpPoolAssociate {
             resource_id: *FLEET_ID,
             resource_type: params::IpPoolResourceType::Fleet,
             is_default: false,
