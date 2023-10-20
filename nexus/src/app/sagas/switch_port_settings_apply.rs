@@ -18,7 +18,7 @@ use dpd_client::{Ipv4Cidr, Ipv6Cidr};
 use ipnetwork::IpNetwork;
 use mg_admin_client::types::Prefix4;
 use mg_admin_client::types::{ApplyRequest, BgpPeerConfig, BgpRoute};
-use nexus_db_model::{SwitchLinkFec, SwitchLinkSpeed};
+use nexus_db_model::{SwitchLinkFec, SwitchLinkSpeed, NETWORK_KEY};
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::UpdatePrecondition;
 use nexus_db_queries::{authn, db};
@@ -108,6 +108,7 @@ impl NexusSaga for SagaSwitchPortSettingsApply {
         builder.append(ensure_switch_port_settings_action());
         builder.append(ensure_switch_port_uplink_action());
         builder.append(ensure_switch_port_bgp_settings_action());
+        builder.append(ensure_switch_port_bootstore_network_settings_action());
         Ok(builder.build()?)
     }
 }
@@ -509,28 +510,27 @@ async fn spa_ensure_switch_port_bootstore_network_settings(
         &params.serialized_authn,
     );
 
-    let settings = sagactx
-        .lookup::<SwitchPortSettingsCombinedResult>("switch_port_settings")
-        .map_err(|e| {
-            ActionError::action_failed(format!(
-                "lookup switch port settings (bgp undo): {e}"
-            ))
-        })?;
-
     // Just choosing the sled agent associated with switch0 for no reason.
     let sa = switch_sled_agent(SwitchLocation::Switch0, &sagactx).await?;
 
-    // Read the current bootstore config, perform the update and write it back.
-    let mut config = read_bootstore_config(&sa).await?;
-    let update = bootstore_update(
-        &nexus,
-        &opctx,
-        params.switch_port_id,
-        &params.switch_port_name,
-        &settings,
-    )
-    .await?;
-    apply_bootstore_update(&mut config, &update)?;
+    let mut config =
+        nexus.bootstore_network_config(&opctx).await.map_err(|e| {
+            ActionError::action_failed(format!(
+                "read nexus bootstore network config: {e}"
+            ))
+        })?;
+
+    let generation = nexus
+        .datastore()
+        .bump_bootstore_generation(&opctx, NETWORK_KEY.into())
+        .await
+        .map_err(|e| {
+            ActionError::action_failed(format!(
+                "bump bootstore network generation number: {e}"
+            ))
+        })?;
+
+    config.generation = generation as u64;
     write_bootstore_config(&sa, &config).await?;
 
     Ok(())

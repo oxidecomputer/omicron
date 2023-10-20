@@ -2509,6 +2509,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_address_config (
     PRIMARY KEY (port_settings_id, address, interface_name)
 );
 
+CREATE TABLE IF NOT EXISTS omicron.public.bootstore_keys (
+    key TEXT NOT NULL PRIMARY KEY,
+    generation INT8 NOT NULL
+);
+
 /*
  * The `sled_instance` view's definition needs to be modified in a separate
  * transaction from the transaction that created it.

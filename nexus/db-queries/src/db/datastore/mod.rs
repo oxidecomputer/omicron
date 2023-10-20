@@ -49,6 +49,7 @@ use uuid::Uuid;
 
 mod address_lot;
 mod bgp;
+mod bootstore;
 mod certificate;
 mod console_session;
 mod dataset;

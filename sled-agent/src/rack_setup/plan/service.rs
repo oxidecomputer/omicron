@@ -46,17 +46,8 @@ use uuid::Uuid;
 // The number of boundary NTP servers to create from RSS.
 const BOUNDARY_NTP_COUNT: usize = 2;
 
-//XXX CHANGE BACK TO 3
-//XXX CHANGE BACK TO 3
-//XXX CHANGE BACK TO 3
-//XXX CHANGE BACK TO 3
-//XXX CHANGE BACK TO 3
-//XXX CHANGE BACK TO 3
-//XXX CHANGE BACK TO 3
-//XXX CHANGE BACK TO 3
-//XXX CHANGE BACK TO 3
 // The number of Nexus instances to create from RSS.
-const NEXUS_COUNT: usize = 1;
+const NEXUS_COUNT: usize = 3;
 
 // The number of CRDB instances to create from RSS.
 const CRDB_COUNT: usize = 5;

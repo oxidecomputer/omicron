@@ -1136,6 +1136,13 @@ table! {
 }
 
 table! {
+    bootstore_keys (key, generation) {
+        key -> Text,
+        generation -> Int8,
+    }
+}
+
+table! {
     db_metadata (singleton) {
         singleton -> Bool,
         time_created -> Timestamptz,

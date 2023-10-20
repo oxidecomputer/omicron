@@ -17,6 +17,7 @@ use crate::app::sagas::{
 use anyhow::Error;
 use dpd_client::types::PortId;
 use mg_admin_client::types::DeleteNeighborRequest;
+use nexus_db_model::NETWORK_KEY;
 use nexus_db_queries::authn;
 use nexus_db_queries::db::datastore::UpdatePrecondition;
 use omicron_common::api::external::{self, NameOrId, SwitchLocation};
@@ -315,11 +316,24 @@ async fn spa_clear_switch_port_bootstore_network_settings(
     // Just choosing the sled agent associated with switch0 for no reason.
     let sa = switch_sled_agent(SwitchLocation::Switch0, &sagactx).await?;
 
-    let config = nexus.bootstore_network_config(&opctx).await.map_err(|e| {
-        ActionError::action_failed(format!(
-            "read nexus bootstore network config: {e}"
-        ))
-    })?;
+    let mut config =
+        nexus.bootstore_network_config(&opctx).await.map_err(|e| {
+            ActionError::action_failed(format!(
+                "read nexus bootstore network config: {e}"
+            ))
+        })?;
+
+    let generation = nexus
+        .datastore()
+        .bump_bootstore_generation(&opctx, NETWORK_KEY.into())
+        .await
+        .map_err(|e| {
+            ActionError::action_failed(format!(
+                "bump bootstore network generation number: {e}"
+            ))
+        })?;
+
+    config.generation = generation as u64;
     write_bootstore_config(&sa, &config).await?;
 
     Ok(())
