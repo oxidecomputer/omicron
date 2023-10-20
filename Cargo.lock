@@ -495,7 +495,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=334df299a56cd0d33e1227ed4ce4d2fe7478d541#334df299a56cd0d33e1227ed4ce4d2fe7478d541"
+source = "git+https://github.com/oxidecomputer/propolis?rev=4019eb10fc2f4ba9bf210d0461dc6292b68309c2#4019eb10fc2f4ba9bf210d0461dc6292b68309c2"
 dependencies = [
  "bhyve_api_sys",
  "libc",
@@ -505,7 +505,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=334df299a56cd0d33e1227ed4ce4d2fe7478d541#334df299a56cd0d33e1227ed4ce4d2fe7478d541"
+source = "git+https://github.com/oxidecomputer/propolis?rev=4019eb10fc2f4ba9bf210d0461dc6292b68309c2#4019eb10fc2f4ba9bf210d0461dc6292b68309c2"
 dependencies = [
  "libc",
  "strum",
@@ -1235,7 +1235,7 @@ dependencies = [
 [[package]]
 name = "cpuid_profile_config"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=334df299a56cd0d33e1227ed4ce4d2fe7478d541#334df299a56cd0d33e1227ed4ce4d2fe7478d541"
+source = "git+https://github.com/oxidecomputer/propolis?rev=4019eb10fc2f4ba9bf210d0461dc6292b68309c2#4019eb10fc2f4ba9bf210d0461dc6292b68309c2"
 dependencies = [
  "propolis",
  "serde",
@@ -1443,7 +1443,7 @@ dependencies = [
 [[package]]
 name = "crucible"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=657d985247b41e38aac2e271c7ce8bc9ea81f4b6#657d985247b41e38aac2e271c7ce8bc9ea81f4b6"
+source = "git+https://github.com/oxidecomputer/crucible?rev=da534e73380f3cc53ca0de073e1ea862ae32109b#da534e73380f3cc53ca0de073e1ea862ae32109b"
 dependencies = [
  "aes-gcm-siv",
  "anyhow",
@@ -1488,7 +1488,7 @@ dependencies = [
 [[package]]
 name = "crucible-agent-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=657d985247b41e38aac2e271c7ce8bc9ea81f4b6#657d985247b41e38aac2e271c7ce8bc9ea81f4b6"
+source = "git+https://github.com/oxidecomputer/crucible?rev=da534e73380f3cc53ca0de073e1ea862ae32109b#da534e73380f3cc53ca0de073e1ea862ae32109b"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1504,7 +1504,7 @@ dependencies = [
 [[package]]
 name = "crucible-client-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=657d985247b41e38aac2e271c7ce8bc9ea81f4b6#657d985247b41e38aac2e271c7ce8bc9ea81f4b6"
+source = "git+https://github.com/oxidecomputer/crucible?rev=da534e73380f3cc53ca0de073e1ea862ae32109b#da534e73380f3cc53ca0de073e1ea862ae32109b"
 dependencies = [
  "base64 0.21.4",
  "crucible-workspace-hack",
@@ -1517,7 +1517,7 @@ dependencies = [
 [[package]]
 name = "crucible-common"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=657d985247b41e38aac2e271c7ce8bc9ea81f4b6#657d985247b41e38aac2e271c7ce8bc9ea81f4b6"
+source = "git+https://github.com/oxidecomputer/crucible?rev=da534e73380f3cc53ca0de073e1ea862ae32109b#da534e73380f3cc53ca0de073e1ea862ae32109b"
 dependencies = [
  "anyhow",
  "atty",
@@ -1545,7 +1545,7 @@ dependencies = [
 [[package]]
 name = "crucible-pantry-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=657d985247b41e38aac2e271c7ce8bc9ea81f4b6#657d985247b41e38aac2e271c7ce8bc9ea81f4b6"
+source = "git+https://github.com/oxidecomputer/crucible?rev=da534e73380f3cc53ca0de073e1ea862ae32109b#da534e73380f3cc53ca0de073e1ea862ae32109b"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1562,7 +1562,7 @@ dependencies = [
 [[package]]
 name = "crucible-protocol"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=657d985247b41e38aac2e271c7ce8bc9ea81f4b6#657d985247b41e38aac2e271c7ce8bc9ea81f4b6"
+source = "git+https://github.com/oxidecomputer/crucible?rev=da534e73380f3cc53ca0de073e1ea862ae32109b#da534e73380f3cc53ca0de073e1ea862ae32109b"
 dependencies = [
  "anyhow",
  "bincode",
@@ -1579,7 +1579,7 @@ dependencies = [
 [[package]]
 name = "crucible-smf"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=657d985247b41e38aac2e271c7ce8bc9ea81f4b6#657d985247b41e38aac2e271c7ce8bc9ea81f4b6"
+source = "git+https://github.com/oxidecomputer/crucible?rev=da534e73380f3cc53ca0de073e1ea862ae32109b#da534e73380f3cc53ca0de073e1ea862ae32109b"
 dependencies = [
  "crucible-workspace-hack",
  "libc",
@@ -2029,7 +2029,7 @@ checksum = "7e1a8646b2c125eeb9a84ef0faa6d2d102ea0d5da60b824ade2743263117b848"
 [[package]]
 name = "dladm"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=334df299a56cd0d33e1227ed4ce4d2fe7478d541#334df299a56cd0d33e1227ed4ce4d2fe7478d541"
+source = "git+https://github.com/oxidecomputer/propolis?rev=4019eb10fc2f4ba9bf210d0461dc6292b68309c2#4019eb10fc2f4ba9bf210d0461dc6292b68309c2"
 dependencies = [
  "libc",
  "strum",
@@ -6617,7 +6617,7 @@ dependencies = [
 [[package]]
 name = "propolis"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=334df299a56cd0d33e1227ed4ce4d2fe7478d541#334df299a56cd0d33e1227ed4ce4d2fe7478d541"
+source = "git+https://github.com/oxidecomputer/propolis?rev=4019eb10fc2f4ba9bf210d0461dc6292b68309c2#4019eb10fc2f4ba9bf210d0461dc6292b68309c2"
 dependencies = [
  "anyhow",
  "bhyve_api",
@@ -6650,7 +6650,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=334df299a56cd0d33e1227ed4ce4d2fe7478d541#334df299a56cd0d33e1227ed4ce4d2fe7478d541"
+source = "git+https://github.com/oxidecomputer/propolis?rev=4019eb10fc2f4ba9bf210d0461dc6292b68309c2#4019eb10fc2f4ba9bf210d0461dc6292b68309c2"
 dependencies = [
  "async-trait",
  "base64 0.21.4",
@@ -6674,7 +6674,7 @@ dependencies = [
 [[package]]
 name = "propolis-server"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=334df299a56cd0d33e1227ed4ce4d2fe7478d541#334df299a56cd0d33e1227ed4ce4d2fe7478d541"
+source = "git+https://github.com/oxidecomputer/propolis?rev=4019eb10fc2f4ba9bf210d0461dc6292b68309c2#4019eb10fc2f4ba9bf210d0461dc6292b68309c2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6726,7 +6726,7 @@ dependencies = [
 [[package]]
 name = "propolis-server-config"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=334df299a56cd0d33e1227ed4ce4d2fe7478d541#334df299a56cd0d33e1227ed4ce4d2fe7478d541"
+source = "git+https://github.com/oxidecomputer/propolis?rev=4019eb10fc2f4ba9bf210d0461dc6292b68309c2#4019eb10fc2f4ba9bf210d0461dc6292b68309c2"
 dependencies = [
  "cpuid_profile_config",
  "serde",
@@ -6738,7 +6738,7 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=334df299a56cd0d33e1227ed4ce4d2fe7478d541#334df299a56cd0d33e1227ed4ce4d2fe7478d541"
+source = "git+https://github.com/oxidecomputer/propolis?rev=4019eb10fc2f4ba9bf210d0461dc6292b68309c2#4019eb10fc2f4ba9bf210d0461dc6292b68309c2"
 dependencies = [
  "schemars",
  "serde",
@@ -8982,9 +8982,9 @@ dependencies = [
 
 [[package]]
 name = "tokio"
-version = "1.32.0"
+version = "1.33.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "17ed6077ed6cd6c74735e21f37eb16dc3935f96878b1fe961074089cc80893f9"
+checksum = "4f38200e3ef7995e5ef13baec2f432a6da0aa9ac495b2c0e8f3b7eec2c92d653"
 dependencies = [
  "backtrace",
  "bytes",
@@ -9778,7 +9778,7 @@ checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
 [[package]]
 name = "viona_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=334df299a56cd0d33e1227ed4ce4d2fe7478d541#334df299a56cd0d33e1227ed4ce4d2fe7478d541"
+source = "git+https://github.com/oxidecomputer/propolis?rev=4019eb10fc2f4ba9bf210d0461dc6292b68309c2#4019eb10fc2f4ba9bf210d0461dc6292b68309c2"
 dependencies = [
  "libc",
  "viona_api_sys",
@@ -9787,7 +9787,7 @@ dependencies = [
 [[package]]
 name = "viona_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=334df299a56cd0d33e1227ed4ce4d2fe7478d541#334df299a56cd0d33e1227ed4ce4d2fe7478d541"
+source = "git+https://github.com/oxidecomputer/propolis?rev=4019eb10fc2f4ba9bf210d0461dc6292b68309c2#4019eb10fc2f4ba9bf210d0461dc6292b68309c2"
 dependencies = [
  "libc",
 ]
