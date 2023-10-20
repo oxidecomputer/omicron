@@ -183,22 +183,42 @@ pub(crate) fn api_to_dpd_port_settings(
         v6_routes: HashMap::new(),
     };
 
-    // TODO handle breakouts
-    // https://github.com/oxidecomputer/omicron/issues/3062
+    //TODO breakouts
     let link_id = LinkId(0);
 
-    let link_settings = LinkSettings {
-        // TODO Allow user to configure link properties
-        // https://github.com/oxidecomputer/omicron/issues/3061
-        params: LinkCreate {
-            autoneg: false,
-            kr: false,
-            fec: PortFec::None,
-            speed: PortSpeed::Speed100G,
-        },
-        addrs: settings.addresses.iter().map(|a| a.address.ip()).collect(),
-    };
-    dpd_port_settings.links.insert(link_id.to_string(), link_settings);
+    for l in settings.links.iter() {
+        dpd_port_settings.links.insert(
+            link_id.to_string(),
+            LinkSettings {
+                params: LinkCreate {
+                    autoneg: false,
+                    kr: false,
+                    fec: match l.fec {
+                        SwitchLinkFec::Firecode => PortFec::Firecode,
+                        SwitchLinkFec::Rs => PortFec::Rs,
+                        SwitchLinkFec::None => PortFec::None,
+                    },
+                    speed: match l.speed {
+                        SwitchLinkSpeed::Speed0G => PortSpeed::Speed0G,
+                        SwitchLinkSpeed::Speed1G => PortSpeed::Speed1G,
+                        SwitchLinkSpeed::Speed10G => PortSpeed::Speed10G,
+                        SwitchLinkSpeed::Speed25G => PortSpeed::Speed25G,
+                        SwitchLinkSpeed::Speed40G => PortSpeed::Speed40G,
+                        SwitchLinkSpeed::Speed50G => PortSpeed::Speed50G,
+                        SwitchLinkSpeed::Speed100G => PortSpeed::Speed100G,
+                        SwitchLinkSpeed::Speed200G => PortSpeed::Speed200G,
+                        SwitchLinkSpeed::Speed400G => PortSpeed::Speed400G,
+                    },
+                },
+                //TODO won't work for breakouts
+                addrs: settings
+                    .addresses
+                    .iter()
+                    .map(|a| a.address.ip())
+                    .collect(),
+            },
+        );
+    }
 
     for r in &settings.routes {
         match &r.dst {
