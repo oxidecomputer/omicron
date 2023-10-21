@@ -1103,8 +1103,6 @@ async fn test_create_image_from_snapshot_delete(
     assert!(!disk_test.crucible_resources_deleted().await);
 
     // Delete the image
-    // TODO-unimplemented
-    /*
     let image_url = "/v1/images/debian-11";
     NexusRequest::object_delete(client, &image_url)
         .authn_as(AuthnMode::PrivilegedUser)
@@ -1114,7 +1112,213 @@ async fn test_create_image_from_snapshot_delete(
 
     // Assert everything was cleaned up
     assert!(disk_test.crucible_resources_deleted().await);
-    */
+}
+
+enum DeleteImageTestParam {
+    Image,
+    Disk,
+    Snapshot,
+}
+
+async fn delete_image_test(
+    cptestctx: &ControlPlaneTestContext,
+    order: &[DeleteImageTestParam],
+) {
+    // 1. Create a blank disk
+    // 2. Take a snapshot of that disk
+    // 3. Create an image from that snapshot
+    // 4. Delete each of these items in some order
+
+    let disk_test = DiskTest::new(&cptestctx).await;
+
+    let client = &cptestctx.external_client;
+    populate_ip_pool(&client, "default", None).await;
+    create_org_and_project(client).await;
+
+    let disks_url = get_disks_url();
+
+    // Create a blank disk
+
+    let disk_size = ByteCount::from_gibibytes_u32(2);
+    let base_disk_name: Name = "base-disk".parse().unwrap();
+    let base_disk = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: base_disk_name.clone(),
+            description: String::from("all your base disk are belong to us"),
+        },
+        disk_source: params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(512).unwrap(),
+        },
+        size: disk_size,
+    };
+
+    let _base_disk: Disk = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&base_disk))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
+
+    // Issue snapshot request
+    let snapshots_url = format!("/v1/snapshots?project={}", PROJECT_NAME);
+
+    let snapshot: views::Snapshot = object_create(
+        client,
+        &snapshots_url,
+        &params::SnapshotCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "a-snapshot".parse().unwrap(),
+                description: String::from("you are on the way to destruction"),
+            },
+            disk: base_disk_name.clone().into(),
+        },
+    )
+    .await;
+
+    // Create an image from the snapshot
+    let image_create_params = params::ImageCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "debian-11".parse().unwrap(),
+            description: String::from(
+                "you have no chance to survive make your time",
+            ),
+        },
+        source: params::ImageSource::Snapshot { id: snapshot.identity.id },
+        os: "debian".parse().unwrap(),
+        version: "12".into(),
+    };
+
+    let _image: views::Image =
+        NexusRequest::objects_post(client, "/v1/images", &image_create_params)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body()
+            .unwrap();
+
+    assert_eq!(order.len(), 3);
+    for item in order {
+        // Still some crucible resources
+        assert!(!disk_test.crucible_resources_deleted().await);
+
+        match item {
+            DeleteImageTestParam::Image => {
+                let image_url = "/v1/images/debian-11";
+                NexusRequest::object_delete(client, &image_url)
+                    .authn_as(AuthnMode::PrivilegedUser)
+                    .execute()
+                    .await
+                    .expect("failed to delete image");
+            }
+
+            DeleteImageTestParam::Disk => {
+                NexusRequest::object_delete(client, &get_disk_url("base-disk"))
+                    .authn_as(AuthnMode::PrivilegedUser)
+                    .execute()
+                    .await
+                    .expect("failed to delete disk");
+            }
+
+            DeleteImageTestParam::Snapshot => {
+                let snapshot_url = get_snapshot_url("a-snapshot");
+                NexusRequest::object_delete(client, &snapshot_url)
+                    .authn_as(AuthnMode::PrivilegedUser)
+                    .execute()
+                    .await
+                    .expect("failed to delete snapshot");
+            }
+        }
+    }
+
+    // Assert everything was cleaned up
+    assert!(disk_test.crucible_resources_deleted().await);
+}
+
+// Make sure that whatever order disks, images, and snapshots are deleted, the
+// Crucible resource accounting that Nexus does is correct.
+
+#[nexus_test]
+async fn test_delete_image_order_1(cptestctx: &ControlPlaneTestContext) {
+    delete_image_test(
+        cptestctx,
+        &[
+            DeleteImageTestParam::Disk,
+            DeleteImageTestParam::Image,
+            DeleteImageTestParam::Snapshot,
+        ],
+    )
+    .await;
+}
+
+#[nexus_test]
+async fn test_delete_image_order_2(cptestctx: &ControlPlaneTestContext) {
+    delete_image_test(
+        cptestctx,
+        &[
+            DeleteImageTestParam::Disk,
+            DeleteImageTestParam::Snapshot,
+            DeleteImageTestParam::Image,
+        ],
+    )
+    .await;
+}
+
+#[nexus_test]
+async fn test_delete_image_order_3(cptestctx: &ControlPlaneTestContext) {
+    delete_image_test(
+        cptestctx,
+        &[
+            DeleteImageTestParam::Image,
+            DeleteImageTestParam::Disk,
+            DeleteImageTestParam::Snapshot,
+        ],
+    )
+    .await;
+}
+
+#[nexus_test]
+async fn test_delete_image_order_4(cptestctx: &ControlPlaneTestContext) {
+    delete_image_test(
+        cptestctx,
+        &[
+            DeleteImageTestParam::Image,
+            DeleteImageTestParam::Snapshot,
+            DeleteImageTestParam::Disk,
+        ],
+    )
+    .await;
+}
+
+#[nexus_test]
+async fn test_delete_image_order_5(cptestctx: &ControlPlaneTestContext) {
+    delete_image_test(
+        cptestctx,
+        &[
+            DeleteImageTestParam::Snapshot,
+            DeleteImageTestParam::Disk,
+            DeleteImageTestParam::Image,
+        ],
+    )
+    .await;
+}
+
+#[nexus_test]
+async fn test_delete_image_order_6(cptestctx: &ControlPlaneTestContext) {
+    delete_image_test(
+        cptestctx,
+        &[
+            DeleteImageTestParam::Snapshot,
+            DeleteImageTestParam::Image,
+            DeleteImageTestParam::Disk,
+        ],
+    )
+    .await;
 }
 
 // A test function to create a volume with the provided read only parent.
@@ -1814,6 +2018,44 @@ async fn test_volume_checkout_updates_sparse_mid_multiple_gen(
     volume_match_gen(new_vol, vec![Some(8), None, Some(10)]);
 }
 
+#[nexus_test]
+async fn test_volume_checkout_randomize_ids_only_read_only(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    // Verify that a volume_checkout_randomize_ids will not work for
+    // non-read-only Regions
+    let nexus = &cptestctx.server.apictx().nexus;
+    let datastore = nexus.datastore();
+    let volume_id = Uuid::new_v4();
+    let block_size = 512;
+
+    // Create three sub_vols.
+    let subvol_one = create_region(block_size, 7, Uuid::new_v4());
+    let subvol_two = create_region(block_size, 7, Uuid::new_v4());
+    let subvol_three = create_region(block_size, 7, Uuid::new_v4());
+
+    // Make the volume with our three sub_volumes
+    let volume_construction_request = VolumeConstructionRequest::Volume {
+        id: volume_id,
+        block_size,
+        sub_volumes: vec![subvol_one, subvol_two, subvol_three],
+        read_only_parent: None,
+    };
+
+    // Insert the volume into the database.
+    datastore
+        .volume_create(nexus_db_model::Volume::new(
+            volume_id,
+            serde_json::to_string(&volume_construction_request).unwrap(),
+        ))
+        .await
+        .unwrap();
+
+    // volume_checkout_randomize_ids should fail
+    let r = datastore.volume_checkout_randomize_ids(volume_id).await;
+    assert!(r.is_err());
+}
+
 /// Test that the Crucible agent's port reuse does not confuse
 /// `decrease_crucible_resource_count_and_soft_delete_volume`, due to the
 /// `[ipv6]:port` targets being reused.
@@ -1977,17 +2219,12 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
         assert_eq!(region_snapshot.deleting, true);
     }
 
-    match cr {
-        nexus_db_queries::db::datastore::CrucibleResources::V1(cr) => {
-            assert!(cr.datasets_and_regions.is_empty());
-            assert_eq!(cr.datasets_and_snapshots.len(), 3);
-        }
+    let datasets_and_regions = datastore.regions_to_delete(&cr).await.unwrap();
+    let datasets_and_snapshots =
+        datastore.snapshots_to_delete(&cr).await.unwrap();
 
-        nexus_db_queries::db::datastore::CrucibleResources::V2(cr) => {
-            assert!(cr.datasets_and_regions.is_empty());
-            assert_eq!(cr.snapshots_to_delete.len(), 3);
-        }
-    }
+    assert!(datasets_and_regions.is_empty());
+    assert_eq!(datasets_and_snapshots.len(), 3);
 
     // Now, let's say we're at a spot where the running snapshots have been
     // deleted, but before volume_hard_delete or region_snapshot_remove are
@@ -2108,17 +2345,12 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
         assert_eq!(region_snapshot.deleting, true);
     }
 
-    match cr {
-        nexus_db_queries::db::datastore::CrucibleResources::V1(cr) => {
-            assert!(cr.datasets_and_regions.is_empty());
-            assert_eq!(cr.datasets_and_snapshots.len(), 3);
-        }
+    let datasets_and_regions = datastore.regions_to_delete(&cr).await.unwrap();
+    let datasets_and_snapshots =
+        datastore.snapshots_to_delete(&cr).await.unwrap();
 
-        nexus_db_queries::db::datastore::CrucibleResources::V2(cr) => {
-            assert!(cr.datasets_and_regions.is_empty());
-            assert_eq!(cr.snapshots_to_delete.len(), 3);
-        }
-    }
+    assert!(datasets_and_regions.is_empty());
+    assert_eq!(datasets_and_snapshots.len(), 3);
 }
 
 #[nexus_test]

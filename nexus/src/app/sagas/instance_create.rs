@@ -13,7 +13,6 @@ use crate::external_api::params;
 use nexus_db_model::NetworkInterfaceKind;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup::LookupPath;
-use nexus_db_queries::db::model::ByteCount as DbByteCount;
 use nexus_db_queries::db::queries::network_interface::InsertError as InsertNicError;
 use nexus_db_queries::{authn, authz, db};
 use nexus_defaults::DEFAULT_PRIMARY_NIC_NAME;
@@ -75,10 +74,6 @@ struct DiskAttachParams {
 
 declare_saga_actions! {
     instance_create;
-    VIRTUAL_RESOURCES_ACCOUNT -> "no_result" {
-        + sic_account_virtual_resources
-        - sic_account_virtual_resources_undo
-    }
     CREATE_INSTANCE_RECORD -> "instance_record" {
         + sic_create_instance_record
         - sic_delete_instance_record
@@ -131,7 +126,6 @@ impl NexusSaga for SagaInstanceCreate {
             })?,
         ));
 
-        builder.append(virtual_resources_account_action());
         builder.append(create_instance_record_action());
 
         // Helper function for appending subsagas to our parent saga.
@@ -725,56 +719,6 @@ async fn ensure_instance_disk_attach_state(
             .map_err(ActionError::action_failed)?;
     }
 
-    Ok(())
-}
-
-async fn sic_account_virtual_resources(
-    sagactx: NexusActionContext,
-) -> Result<(), ActionError> {
-    let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params::<Params>()?;
-    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
-
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
-    osagactx
-        .datastore()
-        .virtual_provisioning_collection_insert_instance(
-            &opctx,
-            instance_id,
-            params.project_id,
-            i64::from(params.create_params.ncpus.0),
-            DbByteCount(params.create_params.memory),
-        )
-        .await
-        .map_err(ActionError::action_failed)?;
-    Ok(())
-}
-
-async fn sic_account_virtual_resources_undo(
-    sagactx: NexusActionContext,
-) -> Result<(), anyhow::Error> {
-    let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params::<Params>()?;
-    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
-
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
-    osagactx
-        .datastore()
-        .virtual_provisioning_collection_delete_instance(
-            &opctx,
-            instance_id,
-            params.project_id,
-            i64::from(params.create_params.ncpus.0),
-            DbByteCount(params.create_params.memory),
-        )
-        .await
-        .map_err(ActionError::action_failed)?;
     Ok(())
 }
 

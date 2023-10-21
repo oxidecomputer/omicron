@@ -165,7 +165,7 @@ enum RunningUpdate {
     /// Reports from the installinator have been received.
     ///
     /// This is an `UnboundedSender` to avoid cancel-safety issues (see
-    /// https://github.com/oxidecomputer/omicron/pull/3579).
+    /// <https://github.com/oxidecomputer/omicron/pull/3579>).
     ReportsReceived(watch::Sender<installinator_common::EventReport>),
 
     /// All messages have been received.

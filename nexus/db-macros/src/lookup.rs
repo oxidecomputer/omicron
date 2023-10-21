@@ -15,7 +15,7 @@ use std::ops::Deref;
 // INPUT (arguments to the macro)
 //
 
-/// Arguments for [`lookup_resource!`]
+/// Arguments for [`super::lookup_resource!`]
 // NOTE: this is only "pub" for the `cargo doc` link on [`lookup_resource!`].
 #[derive(serde::Deserialize)]
 pub struct Input {
@@ -167,7 +167,7 @@ impl Resource {
 // MACRO IMPLEMENTATION
 //
 
-/// Implementation of [`lookup_resource!`]
+/// Implementation of [`super::lookup_resource!`]
 pub fn lookup_resource(
     raw_input: TokenStream,
 ) -> Result<TokenStream, syn::Error> {
