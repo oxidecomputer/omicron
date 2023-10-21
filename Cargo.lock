@@ -4162,6 +4162,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "mg-admin-client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "either",
+ "omicron-common 0.1.0",
+ "omicron-workspace-hack",
+ "omicron-zone-package",
+ "progenitor",
+ "progenitor-client",
+ "quote",
+ "reqwest",
+ "rustfmt-wrapper",
+ "serde",
+ "serde_json",
+ "sled-hardware",
+ "slog",
+ "thiserror",
+ "tokio",
+ "toml 0.7.8",
+]
+
+[[package]]
 name = "mime"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5078,6 +5101,7 @@ dependencies = [
  "itertools 0.11.0",
  "lazy_static",
  "macaddr",
+ "mg-admin-client",
  "mime_guess",
  "newtype_derive",
  "nexus-db-model",
@@ -5460,6 +5484,7 @@ dependencies = [
  "schemars",
  "semver 1.0.18",
  "serde",
+ "serde_json",
  "sha2",
  "signature 2.1.0",
  "similar",
@@ -10116,6 +10141,7 @@ dependencies = [
  "installinator-artifactd",
  "installinator-common",
  "internal-dns 0.1.0",
+ "ipnetwork",
  "itertools 0.11.0",
  "omicron-certificates",
  "omicron-common 0.1.0",

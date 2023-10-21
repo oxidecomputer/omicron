@@ -5165,6 +5165,318 @@
         }
       }
     },
+    "/v1/system/networking/bgp": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Get BGP configurations.",
+        "operationId": "networking_bgp_config_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "name_or_id",
+            "description": "A name or id to use when selecting BGP config.",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BgpConfigResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      },
+      "post": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Create a new BGP configuration.",
+        "operationId": "networking_bgp_config_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BgpConfigCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BgpConfig"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Delete a BGP configuration.",
+        "operationId": "networking_bgp_config_delete",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "name_or_id",
+            "description": "A name or id to use when selecting BGP config.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/bgp-announce": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Get originated routes for a given BGP configuration.",
+        "operationId": "networking_bgp_announce_set_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "name_or_id",
+            "description": "A name or id to use when selecting BGP port settings",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_BgpAnnouncement",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BgpAnnouncement"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Create a new BGP announce set.",
+        "operationId": "networking_bgp_announce_set_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BgpAnnounceSetCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BgpAnnounceSet"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Delete a BGP announce set.",
+        "operationId": "networking_bgp_announce_set_delete",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "name_or_id",
+            "description": "A name or id to use when selecting BGP port settings",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/bgp-routes-ipv4": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Get imported IPv4 BGP routes.",
+        "operationId": "networking_bgp_imported_routes_ipv4",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "asn",
+            "description": "The ASN to filter on. Required.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_BgpImportedRouteIpv4",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BgpImportedRouteIpv4"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/bgp-status": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Get BGP peer status",
+        "operationId": "networking_bgp_status",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_BgpPeerStatus",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BgpPeerStatus"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/networking/loopback-address": {
       "get": {
         "tags": [
@@ -7816,6 +8128,273 @@
           "serial"
         ]
       },
+      "BgpAnnounceSet": {
+        "description": "Represents a BGP announce set by id. The id can be used with other API calls to view and manage the announce set.",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "description",
+          "id",
+          "name",
+          "time_created",
+          "time_modified"
+        ]
+      },
+      "BgpAnnounceSetCreate": {
+        "description": "Parameters for creating a named set of BGP announcements.",
+        "type": "object",
+        "properties": {
+          "announcement": {
+            "description": "The announcements in this set.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BgpAnnouncementCreate"
+            }
+          },
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          }
+        },
+        "required": [
+          "announcement",
+          "description",
+          "name"
+        ]
+      },
+      "BgpAnnouncement": {
+        "description": "A BGP announcement tied to an address lot block.",
+        "type": "object",
+        "properties": {
+          "address_lot_block_id": {
+            "description": "The address block the IP network being announced is drawn from.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "announce_set_id": {
+            "description": "The id of the set this announcement is a part of.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "network": {
+            "description": "The IP network being announced.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpNet"
+              }
+            ]
+          }
+        },
+        "required": [
+          "address_lot_block_id",
+          "announce_set_id",
+          "network"
+        ]
+      },
+      "BgpAnnouncementCreate": {
+        "description": "A BGP announcement tied to a particular address lot block.",
+        "type": "object",
+        "properties": {
+          "address_lot_block": {
+            "description": "Address lot this announcement is drawn from.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NameOrId"
+              }
+            ]
+          },
+          "network": {
+            "description": "The network being announced.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpNet"
+              }
+            ]
+          }
+        },
+        "required": [
+          "address_lot_block",
+          "network"
+        ]
+      },
+      "BgpConfig": {
+        "description": "A base BGP configuration.",
+        "type": "object",
+        "properties": {
+          "asn": {
+            "description": "The autonomous system number of this BGP configuration.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          },
+          "vrf": {
+            "nullable": true,
+            "description": "Optional virtual routing and forwarding identifier for this BGP configuration.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "asn",
+          "description",
+          "id",
+          "name",
+          "time_created",
+          "time_modified"
+        ]
+      },
+      "BgpConfigCreate": {
+        "description": "Parameters for creating a BGP configuration. This includes and autonomous system number (ASN) and a virtual routing and forwarding (VRF) identifier.",
+        "type": "object",
+        "properties": {
+          "asn": {
+            "description": "The autonomous system number of this BGP configuration.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "bgp_announce_set_id": {
+            "$ref": "#/components/schemas/NameOrId"
+          },
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "vrf": {
+            "nullable": true,
+            "description": "Optional virtual routing and forwarding identifier for this BGP configuration.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          }
+        },
+        "required": [
+          "asn",
+          "bgp_announce_set_id",
+          "description",
+          "name"
+        ]
+      },
+      "BgpConfigResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BgpConfig"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "BgpImportedRouteIpv4": {
+        "description": "A route imported from a BGP peer.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "BGP identifier of the originating router.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "nexthop": {
+            "description": "The nexthop the prefix is reachable through.",
+            "type": "string",
+            "format": "ipv4"
+          },
+          "prefix": {
+            "description": "The destination network prefix.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv4Net"
+              }
+            ]
+          },
+          "switch": {
+            "description": "Switch the route is imported into.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SwitchLocation"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "nexthop",
+          "prefix",
+          "switch"
+        ]
+      },
       "BgpPeerConfig": {
         "description": "A BGP peer configuration for an interface. Includes the set of announcements that will be advertised to the peer identified by `addr`. The `bgp_config` parameter is a reference to global BGP parameters. The `interface_name` indicates what interface the peer should be contacted on.",
         "type": "object",
@@ -7841,16 +8420,158 @@
               }
             ]
           },
+          "connect_retry": {
+            "description": "How long to to wait between TCP connection retries (seconds).",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "delay_open": {
+            "description": "How long to delay sending an open request after establishing a TCP session (seconds).",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "hold_time": {
+            "description": "How long to hold peer connections between keppalives (seconds).",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "idle_hold_time": {
+            "description": "How long to hold a peer in idle before attempting a new session (seconds).",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
           "interface_name": {
             "description": "The name of interface to peer on. This is relative to the port configuration this BGP peer configuration is a part of. For example this value could be phy0 to refer to a primary physical interface. Or it could be vlan47 to refer to a VLAN interface.",
             "type": "string"
+          },
+          "keepalive": {
+            "description": "How often to send keepalive requests (seconds).",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
           }
         },
         "required": [
           "addr",
           "bgp_announce_set",
           "bgp_config",
-          "interface_name"
+          "connect_retry",
+          "delay_open",
+          "hold_time",
+          "idle_hold_time",
+          "interface_name",
+          "keepalive"
+        ]
+      },
+      "BgpPeerState": {
+        "description": "The current state of a BGP peer.",
+        "oneOf": [
+          {
+            "description": "Initial state. Refuse all incomming BGP connections. No resources allocated to peer.",
+            "type": "string",
+            "enum": [
+              "idle"
+            ]
+          },
+          {
+            "description": "Waiting for the TCP connection to be completed.",
+            "type": "string",
+            "enum": [
+              "connect"
+            ]
+          },
+          {
+            "description": "Trying to acquire peer by listening for and accepting a TCP connection.",
+            "type": "string",
+            "enum": [
+              "active"
+            ]
+          },
+          {
+            "description": "Waiting for open message from peer.",
+            "type": "string",
+            "enum": [
+              "open_sent"
+            ]
+          },
+          {
+            "description": "Waiting for keepaliave or notification from peer.",
+            "type": "string",
+            "enum": [
+              "open_confirm"
+            ]
+          },
+          {
+            "description": "Synchronizing with peer.",
+            "type": "string",
+            "enum": [
+              "session_setup"
+            ]
+          },
+          {
+            "description": "Session established. Able to exchange update, notification and keepliave messages with peers.",
+            "type": "string",
+            "enum": [
+              "established"
+            ]
+          }
+        ]
+      },
+      "BgpPeerStatus": {
+        "description": "The current status of a BGP peer.",
+        "type": "object",
+        "properties": {
+          "addr": {
+            "description": "IP address of the peer.",
+            "type": "string",
+            "format": "ip"
+          },
+          "local_asn": {
+            "description": "Local autonomous system number.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "remote_asn": {
+            "description": "Remote autonomous system number.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "state": {
+            "description": "State of the peer.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BgpPeerState"
+              }
+            ]
+          },
+          "state_duration_millis": {
+            "description": "Time of last state change.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "switch": {
+            "description": "Switch with the peer session.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SwitchLocation"
+              }
+            ]
+          }
+        },
+        "required": [
+          "addr",
+          "local_asn",
+          "remote_asn",
+          "state",
+          "state_duration_millis",
+          "switch"
         ]
       },
       "BinRangedouble": {
@@ -11747,6 +12468,14 @@
         "description": "Switch link configuration.",
         "type": "object",
         "properties": {
+          "fec": {
+            "description": "The forward error correction mode of the link.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LinkFec"
+              }
+            ]
+          },
           "lldp": {
             "description": "The link-layer discovery protocol (LLDP) configuration for the link.",
             "allOf": [
@@ -11760,11 +12489,115 @@
             "type": "integer",
             "format": "uint16",
             "minimum": 0
+          },
+          "speed": {
+            "description": "The speed of the link.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LinkSpeed"
+              }
+            ]
           }
         },
         "required": [
+          "fec",
           "lldp",
-          "mtu"
+          "mtu",
+          "speed"
+        ]
+      },
+      "LinkFec": {
+        "description": "The forward error correction mode of a link.",
+        "oneOf": [
+          {
+            "description": "Firecode foward error correction.",
+            "type": "string",
+            "enum": [
+              "firecode"
+            ]
+          },
+          {
+            "description": "No forward error correction.",
+            "type": "string",
+            "enum": [
+              "none"
+            ]
+          },
+          {
+            "description": "Reed-Solomon forward error correction.",
+            "type": "string",
+            "enum": [
+              "rs"
+            ]
+          }
+        ]
+      },
+      "LinkSpeed": {
+        "description": "The speed of a link.",
+        "oneOf": [
+          {
+            "description": "Zero gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed0_g"
+            ]
+          },
+          {
+            "description": "1 gigabit per second.",
+            "type": "string",
+            "enum": [
+              "speed1_g"
+            ]
+          },
+          {
+            "description": "10 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed10_g"
+            ]
+          },
+          {
+            "description": "25 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed25_g"
+            ]
+          },
+          {
+            "description": "40 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed40_g"
+            ]
+          },
+          {
+            "description": "50 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed50_g"
+            ]
+          },
+          {
+            "description": "100 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed100_g"
+            ]
+          },
+          {
+            "description": "200 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed200_g"
+            ]
+          },
+          {
+            "description": "400 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed400_g"
+            ]
+          }
         ]
       },
       "LldpServiceConfig": {
@@ -13539,6 +14372,25 @@
           }
         ]
       },
+      "SwitchLocation": {
+        "description": "Identifies switch physical location",
+        "oneOf": [
+          {
+            "description": "Switch in upper slot",
+            "type": "string",
+            "enum": [
+              "switch0"
+            ]
+          },
+          {
+            "description": "Switch in lower slot",
+            "type": "string",
+            "enum": [
+              "switch1"
+            ]
+          }
+        ]
+      },
       "SwitchPort": {
         "description": "A switch port represents a physical external port on a rack switch.",
         "type": "object",
@@ -13635,11 +14487,6 @@
             "type": "string",
             "format": "ip"
           },
-          "bgp_announce_set_id": {
-            "description": "The id for the set of prefixes announced in this peer configuration.",
-            "type": "string",
-            "format": "uuid"
-          },
           "bgp_config_id": {
             "description": "The id of the global BGP configuration referenced by this peer configuration.",
             "type": "string",
@@ -13657,7 +14504,6 @@
         },
         "required": [
           "addr",
-          "bgp_announce_set_id",
           "bgp_config_id",
           "interface_name",
           "port_settings_id"

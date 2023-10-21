@@ -18,7 +18,7 @@ use toml_edit::Value;
 use wicketd_client::types::BootstrapSledDescription;
 use wicketd_client::types::CurrentRssUserConfigInsensitive;
 use wicketd_client::types::IpRange;
-use wicketd_client::types::RackNetworkConfig;
+use wicketd_client::types::RackNetworkConfigV1;
 use wicketd_client::types::SpType;
 
 static TEMPLATE: &str = include_str!("config_template.toml");
@@ -176,7 +176,7 @@ fn build_sleds_array(sleds: &[BootstrapSledDescription]) -> Array {
 
 fn populate_network_table(
     table: &mut Table,
-    config: Option<&RackNetworkConfig>,
+    config: Option<&RackNetworkConfigV1>,
 ) {
     // Helper function to serialize enums into their appropriate string
     // representations.
@@ -195,6 +195,7 @@ fn populate_network_table(
     };
 
     for (property, value) in [
+        ("rack_subnet", config.rack_subnet.to_string()),
         ("infra_ip_first", config.infra_ip_first.to_string()),
         ("infra_ip_last", config.infra_ip_last.to_string()),
     ] {
@@ -202,20 +203,17 @@ fn populate_network_table(
             Value::String(Formatted::new(value));
     }
 
-    // If `config.uplinks` is empty, we'll leave the template uplinks in place;
-    // otherwise, replace it with the user's uplinks.
-    if !config.uplinks.is_empty() {
-        *table.get_mut("uplinks").unwrap().as_array_of_tables_mut().unwrap() =
+    if !config.ports.is_empty() {
+        *table.get_mut("ports").unwrap().as_array_of_tables_mut().unwrap() =
             config
-                .uplinks
+                .ports
                 .iter()
                 .map(|cfg| {
                     let mut uplink = Table::new();
-                    let mut last_key = None;
+                    let mut _last_key = None;
                     for (property, value) in [
                         ("switch", cfg.switch.to_string()),
-                        ("gateway_ip", cfg.gateway_ip.to_string()),
-                        ("uplink_port", cfg.uplink_port.to_string()),
+                        ("port", cfg.port.to_string()),
                         (
                             "uplink_port_speed",
                             enum_to_toml_string(&cfg.uplink_port_speed),
@@ -224,38 +222,90 @@ fn populate_network_table(
                             "uplink_port_fec",
                             enum_to_toml_string(&cfg.uplink_port_fec),
                         ),
-                        ("uplink_cidr", cfg.uplink_cidr.to_string()),
                     ] {
                         uplink.insert(
                             property,
                             Item::Value(Value::String(Formatted::new(value))),
                         );
-                        last_key = Some(property);
+                        _last_key = Some(property);
                     }
 
-                    if let Some(uplink_vid) = cfg.uplink_vid {
-                        uplink.insert(
-                            "uplink_vid",
-                            Item::Value(Value::Integer(Formatted::new(
-                                i64::from(uplink_vid),
-                            ))),
+                    let mut routes = Array::new();
+                    for r in &cfg.routes {
+                        let mut route = InlineTable::new();
+                        route.insert(
+                            "nexthop",
+                            Value::String(Formatted::new(
+                                r.nexthop.to_string(),
+                            )),
                         );
-                    } else {
-                        // Unwraps: We know `last_key` is `Some(_)`, because we
-                        // set it in every iteration of the loop above, and we
-                        // know it's present in `uplink` because we set it to
-                        // the `property` we just inserted.
-                        let last = uplink.get_mut(last_key.unwrap()).unwrap();
-
-                        // Every item we insert is an `Item::Value`, so we can
-                        // unwrap this conversion.
-                        last.as_value_mut()
-                            .unwrap()
-                            .decor_mut()
-                            .set_suffix("\n# uplink_vid =");
+                        route.insert(
+                            "destination",
+                            Value::String(Formatted::new(
+                                r.destination.to_string(),
+                            )),
+                        );
+                        routes.push(Value::InlineTable(route));
                     }
+                    uplink.insert("routes", Item::Value(Value::Array(routes)));
 
+                    let mut addresses = Array::new();
+                    for a in &cfg.addresses {
+                        addresses
+                            .push(Value::String(Formatted::new(a.to_string())))
+                    }
+                    uplink.insert(
+                        "addresses",
+                        Item::Value(Value::Array(addresses)),
+                    );
+
+                    let mut peers = Array::new();
+                    for p in &cfg.bgp_peers {
+                        let mut peer = InlineTable::new();
+                        peer.insert(
+                            "addr",
+                            Value::String(Formatted::new(p.addr.to_string())),
+                        );
+                        peer.insert(
+                            "asn",
+                            Value::Integer(Formatted::new(p.asn as i64)),
+                        );
+                        peer.insert(
+                            "port",
+                            Value::String(Formatted::new(p.port.to_string())),
+                        );
+                        peers.push(Value::InlineTable(peer));
+                    }
                     uplink
+                        .insert("bgp_peers", Item::Value(Value::Array(peers)));
+                    uplink
+                })
+                .collect();
+    }
+    if !config.bgp.is_empty() {
+        *table.get_mut("bgp").unwrap().as_array_of_tables_mut().unwrap() =
+            config
+                .bgp
+                .iter()
+                .map(|cfg| {
+                    let mut bgp = Table::new();
+                    bgp.insert(
+                        "asn",
+                        Item::Value(Value::Integer(Formatted::new(
+                            cfg.asn as i64,
+                        ))),
+                    );
+
+                    let mut originate = Array::new();
+                    for o in &cfg.originate {
+                        originate
+                            .push(Value::String(Formatted::new(o.to_string())));
+                    }
+                    bgp.insert(
+                        "originate",
+                        Item::Value(Value::Array(originate)),
+                    );
+                    bgp
                 })
                 .collect();
     }
@@ -264,23 +314,29 @@ fn populate_network_table(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use omicron_common::api::internal::shared::RackNetworkConfig as InternalRackNetworkConfig;
+    use omicron_common::api::internal::shared::RackNetworkConfigV1 as InternalRackNetworkConfig;
     use std::net::Ipv6Addr;
     use wicket_common::rack_setup::PutRssUserConfigInsensitive;
     use wicketd_client::types::Baseboard;
+    use wicketd_client::types::BgpConfig;
+    use wicketd_client::types::BgpPeerConfig;
+    use wicketd_client::types::PortConfigV1;
     use wicketd_client::types::PortFec;
     use wicketd_client::types::PortSpeed;
+    use wicketd_client::types::RouteConfig;
     use wicketd_client::types::SpIdentifier;
     use wicketd_client::types::SwitchLocation;
-    use wicketd_client::types::UplinkConfig;
 
     fn put_config_from_current_config(
         value: CurrentRssUserConfigInsensitive,
     ) -> PutRssUserConfigInsensitive {
+        use omicron_common::api::internal::shared::BgpConfig as InternalBgpConfig;
+        use omicron_common::api::internal::shared::BgpPeerConfig as InternalBgpPeerConfig;
+        use omicron_common::api::internal::shared::PortConfigV1 as InternalPortConfig;
         use omicron_common::api::internal::shared::PortFec as InternalPortFec;
         use omicron_common::api::internal::shared::PortSpeed as InternalPortSpeed;
+        use omicron_common::api::internal::shared::RouteConfig as InternalRouteConfig;
         use omicron_common::api::internal::shared::SwitchLocation as InternalSwitchLocation;
-        use omicron_common::api::internal::shared::UplinkConfig as InternalUplinkConfig;
 
         let rnc = value.rack_network_config.unwrap();
 
@@ -310,14 +366,32 @@ mod tests {
             external_dns_ips: value.external_dns_ips,
             ntp_servers: value.ntp_servers,
             rack_network_config: InternalRackNetworkConfig {
+                rack_subnet: rnc.rack_subnet,
                 infra_ip_first: rnc.infra_ip_first,
                 infra_ip_last: rnc.infra_ip_last,
-                uplinks: rnc
-                    .uplinks
+                ports: rnc
+                    .ports
                     .iter()
-                    .map(|config| InternalUplinkConfig {
-                        gateway_ip: config.gateway_ip,
-                        uplink_port: config.uplink_port.clone(),
+                    .map(|config| InternalPortConfig {
+                        routes: config
+                            .routes
+                            .iter()
+                            .map(|r| InternalRouteConfig {
+                                destination: r.destination,
+                                nexthop: r.nexthop,
+                            })
+                            .collect(),
+                        addresses: config.addresses.clone(),
+                        bgp_peers: config
+                            .bgp_peers
+                            .iter()
+                            .map(|p| InternalBgpPeerConfig {
+                                asn: p.asn,
+                                port: p.port.clone(),
+                                addr: p.addr,
+                            })
+                            .collect(),
+                        port: config.port.clone(),
                         uplink_port_speed: match config.uplink_port_speed {
                             PortSpeed::Speed0G => InternalPortSpeed::Speed0G,
                             PortSpeed::Speed1G => InternalPortSpeed::Speed1G,
@@ -340,8 +414,6 @@ mod tests {
                             PortFec::None => InternalPortFec::None,
                             PortFec::Rs => InternalPortFec::Rs,
                         },
-                        uplink_cidr: config.uplink_cidr,
-                        uplink_vid: config.uplink_vid,
                         switch: match config.switch {
                             SwitchLocation::Switch0 => {
                                 InternalSwitchLocation::Switch0
@@ -350,6 +422,14 @@ mod tests {
                                 InternalSwitchLocation::Switch1
                             }
                         },
+                    })
+                    .collect(),
+                bgp: rnc
+                    .bgp
+                    .iter()
+                    .map(|config| InternalBgpConfig {
+                        asn: config.asn,
+                        originate: config.originate.clone(),
                     })
                     .collect(),
             },
@@ -392,17 +472,29 @@ mod tests {
             )],
             external_dns_ips: vec!["10.0.0.1".parse().unwrap()],
             ntp_servers: vec!["ntp1.com".into(), "ntp2.com".into()],
-            rack_network_config: Some(RackNetworkConfig {
+            rack_network_config: Some(RackNetworkConfigV1 {
+                rack_subnet: "fd00:1122:3344:01::/56".parse().unwrap(),
                 infra_ip_first: "172.30.0.1".parse().unwrap(),
                 infra_ip_last: "172.30.0.10".parse().unwrap(),
-                uplinks: vec![UplinkConfig {
-                    gateway_ip: "172.30.0.10".parse().unwrap(),
-                    uplink_cidr: "172.30.0.1/24".parse().unwrap(),
+                ports: vec![PortConfigV1 {
+                    addresses: vec!["172.30.0.1/24".parse().unwrap()],
+                    routes: vec![RouteConfig {
+                        destination: "0.0.0.0/0".parse().unwrap(),
+                        nexthop: "172.30.0.10".parse().unwrap(),
+                    }],
+                    bgp_peers: vec![BgpPeerConfig {
+                        asn: 47,
+                        addr: "10.2.3.4".parse().unwrap(),
+                        port: "port0".into(),
+                    }],
                     uplink_port_speed: PortSpeed::Speed400G,
                     uplink_port_fec: PortFec::Firecode,
-                    uplink_port: "port0".into(),
-                    uplink_vid: None,
+                    port: "port0".into(),
                     switch: SwitchLocation::Switch0,
+                }],
+                bgp: vec![BgpConfig {
+                    asn: 47,
+                    originate: vec!["10.0.0.0/16".parse().unwrap()],
                 }],
             }),
         };

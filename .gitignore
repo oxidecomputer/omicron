@@ -13,3 +13,5 @@ core
 *.vdev
 debug.out
 rusty-tags.vi
+*.sw*
+tags

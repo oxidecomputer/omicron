@@ -25,6 +25,7 @@ hubtools.workspace = true
 http.workspace = true
 hyper.workspace = true
 illumos-utils.workspace = true
+ipnetwork.workspace = true
 internal-dns.workspace = true
 itertools.workspace = true
 reqwest.workspace = true

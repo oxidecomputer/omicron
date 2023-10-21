@@ -197,6 +197,10 @@ retry ./tools/ci_download_dendrite_openapi
 # asic and running dendrite instance
 retry ./tools/ci_download_dendrite_stub
 
+# Download mgd. This is required to run tests that invovle dynamic external
+# routing
+retry ./tools/ci_download_maghemite_mgd
+
 # Download transceiver-control. This is used as the source for the
 # xcvradm binary which is bundled with the switch zone.
 retry ./tools/ci_download_transceiver_control
