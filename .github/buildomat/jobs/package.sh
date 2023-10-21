@@ -71,7 +71,7 @@ tarball_src_dir="$(pwd)/out/versioned"
 stamp_packages() {
 	for package in "$@"; do
 		# TODO: remove once https://github.com/oxidecomputer/omicron-package/pull/54 lands
-		if [[ $package == maghemite ]]; then
+		if [[ $package == mg-ddm-gz ]]; then
 			echo "0.0.0" > VERSION
 			tar rvf "out/$package.tar" VERSION
 			rm VERSION
@@ -90,7 +90,7 @@ ptime -m cargo run --locked --release --bin omicron-package -- \
   -t host target create -i standard -m gimlet -s asic -r multi-sled
 ptime -m cargo run --locked --release --bin omicron-package -- \
   -t host package
-stamp_packages omicron-sled-agent maghemite propolis-server overlay
+stamp_packages omicron-sled-agent mg-ddm-gz propolis-server overlay
 
 # Create global zone package @ /work/global-zone-packages.tar.gz
 ptime -m ./tools/build-global-zone-packages.sh "$tarball_src_dir" /work
@@ -135,7 +135,7 @@ ptime -m cargo run --locked --release --bin omicron-package -- \
   -t recovery target create -i trampoline
 ptime -m cargo run --locked --release --bin omicron-package -- \
   -t recovery package
-stamp_packages installinator maghemite
+stamp_packages installinator mg-ddm-gz
 
 # Create trampoline global zone package @ /work/trampoline-global-zone-packages.tar.gz
 ptime -m ./tools/build-trampoline-global-zone-packages.sh "$tarball_src_dir" /work

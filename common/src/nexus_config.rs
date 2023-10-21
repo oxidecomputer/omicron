@@ -241,6 +241,12 @@ pub struct DpdConfig {
     pub address: SocketAddr,
 }
 
+/// Configuration for the `Dendrite` dataplane daemon.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct MgdConfig {
+    pub address: SocketAddr,
+}
+
 // A deserializable type that does no validation on the tunable parameters.
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 struct UnvalidatedTunables {
@@ -388,6 +394,9 @@ pub struct PackageConfig {
     /// `Dendrite` dataplane daemon configuration
     #[serde(default)]
     pub dendrite: HashMap<SwitchLocation, DpdConfig>,
+    /// Maghemite mgd daemon configuration
+    #[serde(default)]
+    pub mgd: HashMap<SwitchLocation, MgdConfig>,
     /// Background task configuration
     pub background_tasks: BackgroundTaskConfig,
     /// Default Crucible region allocation strategy
@@ -469,7 +478,7 @@ mod test {
     use crate::nexus_config::{
         BackgroundTaskConfig, ConfigDropshotWithTls, Database,
         DeploymentConfig, DnsTasksConfig, DpdConfig, ExternalEndpointsConfig,
-        InternalDns, LoadErrorKind,
+        InternalDns, LoadErrorKind, MgdConfig,
     };
     use dropshot::ConfigDropshot;
     use dropshot::ConfigLogging;
@@ -605,6 +614,8 @@ mod test {
             type = "from_dns"
             [dendrite.switch0]
             address = "[::1]:12224"
+            [mgd.switch0]
+            address = "[::1]:4676"
             [background_tasks]
             dns_internal.period_secs_config = 1
             dns_internal.period_secs_servers = 2
@@ -683,6 +694,13 @@ mod test {
                         SwitchLocation::Switch0,
                         DpdConfig {
                             address: SocketAddr::from_str("[::1]:12224")
+                                .unwrap(),
+                        }
+                    )]),
+                    mgd: HashMap::from([(
+                        SwitchLocation::Switch0,
+                        MgdConfig {
+                            address: SocketAddr::from_str("[::1]:4676")
                                 .unwrap(),
                         }
                     )]),
