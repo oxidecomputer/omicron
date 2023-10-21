@@ -77,7 +77,9 @@ use omicron_common::address::WICKETD_NEXUS_PROXY_PORT;
 use omicron_common::address::WICKETD_PORT;
 use omicron_common::address::{Ipv6Subnet, NEXUS_TECHPORT_EXTERNAL_PORT};
 use omicron_common::api::external::Generation;
-use omicron_common::api::internal::shared::RackNetworkConfig;
+use omicron_common::api::internal::shared::{
+    HostPortConfig, RackNetworkConfig,
+};
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, retry_policy_local,
     BackoffError,
@@ -96,8 +98,8 @@ use sled_hardware::underlay::BOOTSTRAP_PREFIX;
 use sled_hardware::Baseboard;
 use sled_hardware::SledMode;
 use slog::Logger;
+use std::collections::BTreeMap;
 use std::collections::HashSet;
-use std::collections::{BTreeMap, HashMap};
 use std::iter;
 use std::iter::FromIterator;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
@@ -758,7 +760,7 @@ impl ServiceManager {
                         }
                     }
                 }
-                ServiceType::Maghemite { .. } => {
+                ServiceType::MgDdm { .. } => {
                     // If on a non-gimlet, sled-agent can be configured to map
                     // links into the switch zone. Validate those links here.
                     for link in &self.inner.switch_zone_maghemite_links {
@@ -1953,8 +1955,13 @@ impl ServiceManager {
                     // Nothing to do here - this service is special and
                     // configured in `ensure_switch_zone_uplinks_configured`
                 }
-                ServiceType::Maghemite { mode } => {
-                    info!(self.inner.log, "Setting up Maghemite service");
+                ServiceType::Mgd => {
+                    info!(self.inner.log, "Setting up mgd service");
+                    smfh.setprop("config/admin_host", "::")?;
+                    smfh.refresh()?;
+                }
+                ServiceType::MgDdm { mode } => {
+                    info!(self.inner.log, "Setting up mg-ddm service");
 
                     smfh.setprop("config/mode", &mode)?;
                     smfh.setprop("config/admin_host", "::")?;
@@ -2015,8 +2022,8 @@ impl ServiceManager {
                     )?;
 
                     if is_gimlet {
-                        // Maghemite for a scrimlet needs to be configured to
-                        // talk to dendrite
+                        // Ddm for a scrimlet needs to be configured to talk to
+                        // dendrite
                         smfh.setprop("config/dpd_host", "[::1]")?;
                         smfh.setprop("config/dpd_port", DENDRITE_PORT)?;
                     }
@@ -2505,7 +2512,8 @@ impl ServiceManager {
                     ServiceType::Tfport { pkt_source: "tfpkt0".to_string() },
                     ServiceType::Uplink,
                     ServiceType::Wicketd { baseboard },
-                    ServiceType::Maghemite { mode: "transit".to_string() },
+                    ServiceType::Mgd,
+                    ServiceType::MgDdm { mode: "transit".to_string() },
                 ]
             }
 
@@ -2528,7 +2536,8 @@ impl ServiceManager {
                     ServiceType::ManagementGatewayService,
                     ServiceType::Uplink,
                     ServiceType::Wicketd { baseboard },
-                    ServiceType::Maghemite { mode: "transit".to_string() },
+                    ServiceType::Mgd,
+                    ServiceType::MgDdm { mode: "transit".to_string() },
                     ServiceType::Tfport { pkt_source: "tfpkt0".to_string() },
                     ServiceType::SpSim,
                 ]
@@ -2583,10 +2592,20 @@ impl ServiceManager {
         let log = &self.inner.log;
 
         // Configure uplinks via DPD in our switch zone.
-        let our_uplinks = EarlyNetworkSetup::new(log)
+        let our_ports = EarlyNetworkSetup::new(log)
             .init_switch_config(rack_network_config, switch_zone_ip)
-            .await?;
+            .await?
+            .into_iter()
+            .map(From::from)
+            .collect();
 
+        self.ensure_scrimlet_host_ports(our_ports).await
+    }
+
+    pub async fn ensure_scrimlet_host_ports(
+        &self,
+        our_ports: Vec<HostPortConfig>,
+    ) -> Result<(), Error> {
         // We expect the switch zone to be running, as we're called immediately
         // after `ensure_zone()` above and we just successfully configured
         // uplinks via DPD running in our switch zone. If somehow we're in any
@@ -2617,22 +2636,14 @@ impl ServiceManager {
         smfh.delpropgroup("uplinks")?;
         smfh.addpropgroup("uplinks", "application")?;
 
-        // When naming the uplink ports, we need to append `_0`, `_1`, etc., for
-        // each use of any given port. We use a hashmap of counters of port name
-        // -> number of uplinks to correctly supply that suffix.
-        let mut port_count = HashMap::new();
-        for uplink_config in &our_uplinks {
-            let this_port_count: &mut usize =
-                port_count.entry(&uplink_config.uplink_port).or_insert(0);
-            smfh.addpropvalue_type(
-                &format!(
-                    "uplinks/{}_{}",
-                    uplink_config.uplink_port, *this_port_count
-                ),
-                &uplink_config.uplink_cidr.to_string(),
-                "astring",
-            )?;
-            *this_port_count += 1;
+        for port_config in &our_ports {
+            for addr in &port_config.addrs {
+                smfh.addpropvalue_type(
+                    &format!("uplinks/{}_0", port_config.port,),
+                    &addr.to_string(),
+                    "astring",
+                )?;
+            }
         }
         smfh.refresh()?;
 
@@ -2868,7 +2879,7 @@ impl ServiceManager {
                             // Only configured in
                             // `ensure_switch_zone_uplinks_configured`
                         }
-                        ServiceType::Maghemite { mode } => {
+                        ServiceType::MgDdm { mode } => {
                             smfh.delpropvalue("config/mode", "*")?;
                             smfh.addpropvalue("config/mode", &mode)?;
                             smfh.refresh()?;

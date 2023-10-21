@@ -57,7 +57,8 @@
 use super::config::SetupServiceConfig as Config;
 use crate::bootstrap::config::BOOTSTRAP_AGENT_HTTP_PORT;
 use crate::bootstrap::early_networking::{
-    EarlyNetworkConfig, EarlyNetworkSetup, EarlyNetworkSetupError,
+    EarlyNetworkConfig, EarlyNetworkConfigBody, EarlyNetworkSetup,
+    EarlyNetworkSetupError,
 };
 use crate::bootstrap::params::BootstrapAddressDiscovery;
 use crate::bootstrap::params::StartSledAgentRequest;
@@ -575,17 +576,25 @@ impl ServiceInner {
 
         let rack_network_config = match &config.rack_network_config {
             Some(config) => {
-                let value = NexusTypes::RackNetworkConfig {
+                let value = NexusTypes::RackNetworkConfigV1 {
+                    rack_subnet: config.rack_subnet,
                     infra_ip_first: config.infra_ip_first,
                     infra_ip_last: config.infra_ip_last,
-                    uplinks: config
-                        .uplinks
+                    ports: config
+                        .ports
                         .iter()
-                        .map(|config| NexusTypes::UplinkConfig {
-                            gateway_ip: config.gateway_ip,
+                        .map(|config| NexusTypes::PortConfigV1 {
+                            port: config.port.clone(),
+                            routes: config
+                                .routes
+                                .iter()
+                                .map(|r| NexusTypes::RouteConfig {
+                                    destination: r.destination,
+                                    nexthop: r.nexthop,
+                                })
+                                .collect(),
+                            addresses: config.addresses.clone(),
                             switch: config.switch.into(),
-                            uplink_cidr: config.uplink_cidr,
-                            uplink_port: config.uplink_port.clone(),
                             uplink_port_speed: config
                                 .uplink_port_speed
                                 .clone()
@@ -594,7 +603,23 @@ impl ServiceInner {
                                 .uplink_port_fec
                                 .clone()
                                 .into(),
-                            uplink_vid: config.uplink_vid,
+                            bgp_peers: config
+                                .bgp_peers
+                                .iter()
+                                .map(|b| NexusTypes::BgpPeerConfig {
+                                    addr: b.addr,
+                                    asn: b.asn,
+                                    port: b.port.clone(),
+                                })
+                                .collect(),
+                        })
+                        .collect(),
+                    bgp: config
+                        .bgp
+                        .iter()
+                        .map(|config| NexusTypes::BgpConfig {
+                            asn: config.asn,
+                            originate: config.originate.clone(),
                         })
                         .collect(),
                 };
@@ -872,9 +897,11 @@ impl ServiceInner {
         // from the bootstore".
         let early_network_config = EarlyNetworkConfig {
             generation: 1,
-            rack_subnet: config.rack_subnet,
-            ntp_servers: config.ntp_servers.clone(),
-            rack_network_config: config.rack_network_config.clone(),
+            schema_version: 1,
+            body: EarlyNetworkConfigBody {
+                ntp_servers: config.ntp_servers.clone(),
+                rack_network_config: config.rack_network_config.clone(),
+            },
         };
         info!(self.log, "Writing Rack Network Configuration to bootstore");
         bootstore.update_network_config(early_network_config.into()).await?;

@@ -58,6 +58,8 @@ async fn test_setup<'a>(
     builder.start_external_dns().await;
     builder.start_dendrite(SwitchLocation::Switch0).await;
     builder.start_dendrite(SwitchLocation::Switch1).await;
+    builder.start_mgd(SwitchLocation::Switch0).await;
+    builder.start_mgd(SwitchLocation::Switch1).await;
     builder.populate_internal_dns().await;
     builder
 }
@@ -87,6 +89,7 @@ async fn apply_update_as_transaction(
         match apply_update_as_transaction_inner(client, sql).await {
             Ok(()) => break,
             Err(err) => {
+                warn!(log, "Failed to apply update as transaction"; "err" => err.to_string());
                 client
                     .batch_execute("ROLLBACK;")
                     .await
@@ -109,7 +112,9 @@ async fn apply_update(
     version: &str,
     times_to_apply: usize,
 ) {
-    info!(log, "Performing upgrade to {version}");
+    let log = log.new(o!("target version" => version.to_string()));
+    info!(log, "Performing upgrade");
+
     let client = crdb.connect().await.expect("failed to connect");
 
     // We skip this for the earliest supported version because these tables
@@ -124,11 +129,15 @@ async fn apply_update(
     }
 
     let target_dir = Utf8PathBuf::from(SCHEMA_DIR).join(version);
-    let sqls = all_sql_for_version_migration(&target_dir).await.unwrap();
+    let schema_change =
+        all_sql_for_version_migration(&target_dir).await.unwrap();
 
     for _ in 0..times_to_apply {
-        for sql in sqls.iter() {
-            apply_update_as_transaction(log, &client, sql).await;
+        for nexus_db_queries::db::datastore::SchemaUpgradeStep { path, sql } in
+            &schema_change.steps
+        {
+            info!(log, "Applying sql schema upgrade step"; "path" => path.to_string());
+            apply_update_as_transaction(&log, &client, sql).await;
         }
     }
 

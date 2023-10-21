@@ -368,10 +368,12 @@ impl VirtualProvisioningCollectionUpdate {
 
     pub fn new_delete_instance(
         id: uuid::Uuid,
+        max_instance_gen: i64,
         cpus_diff: i64,
         ram_diff: ByteCount,
         project_id: uuid::Uuid,
     ) -> Self {
+        use crate::db::schema::instance::dsl as instance_dsl;
         use virtual_provisioning_collection::dsl as collection_dsl;
         use virtual_provisioning_resource::dsl as resource_dsl;
 
@@ -379,9 +381,36 @@ impl VirtualProvisioningCollectionUpdate {
             // We should delete the record if it exists.
             DoUpdate::new_for_delete(id),
             // The query to actually delete the record.
+            //
+            // The filter condition here ensures that the provisioning record is
+            // only deleted if the corresponding instance has a generation
+            // number less than the supplied `max_instance_gen`. This allows a
+            // caller that is about to apply an instance update that will stop
+            // the instance and that bears generation G to avoid deleting
+            // resources if the instance generation was already advanced to or
+            // past G.
+            //
+            // If the relevant instance ID is not in the database, then some
+            // other operation must have ensured the instance was previously
+            // stopped (because that's the only way it could have been deleted),
+            // and that operation should have cleaned up the resources already,
+            // in which case there's nothing to do here.
+            //
+            // There is an additional "direct" filter on the target resource ID
+            // to avoid a full scan of the resource table.
             UnreferenceableSubquery(
                 diesel::delete(resource_dsl::virtual_provisioning_resource)
                     .filter(resource_dsl::id.eq(id))
+                    .filter(
+                        resource_dsl::id.nullable().eq(instance_dsl::instance
+                            .filter(instance_dsl::id.eq(id))
+                            .filter(
+                                instance_dsl::state_generation
+                                    .lt(max_instance_gen),
+                            )
+                            .select(instance_dsl::id)
+                            .single_value()),
+                    )
                     .returning(virtual_provisioning_resource::all_columns),
             ),
             // Within this project, silo, fleet...

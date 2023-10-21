@@ -8,7 +8,7 @@ use illumos_utils::addrobj::AddrObject;
 use slog::Logger;
 use thiserror::Error;
 
-const SERVICE_FMRI: &str = "svc:/system/illumos/mg-ddm";
+const SERVICE_FMRI: &str = "svc:/oxide/mg-ddm";
 const MANIFEST_PATH: &str = "/opt/oxide/mg-ddm/pkg/ddm/manifest.xml";
 
 #[derive(Debug, Error)]

@@ -232,11 +232,11 @@ infra_ip_first = \"$UPLINK_IP\"
 		/^infra_ip_last/c\\
 infra_ip_last = \"$UPLINK_IP\"
 	}
-	/^\\[\\[rack_network_config.uplinks/,/^\$/ {
-		/^gateway_ip/c\\
-gateway_ip = \"$GATEWAY_IP\"
-		/^uplink_cidr/c\\
-uplink_cidr = \"$UPLINK_IP/32\"
+	/^\\[\\[rack_network_config.ports/,/^\$/ {
+		/^routes/c\\
+routes = \\[{nexthop = \"$GATEWAY_IP\", destination = \"0.0.0.0/0\"}\\]
+		/^addresses/c\\
+addresses = \\[\"$UPLINK_IP/32\"\\]
 	}
 " pkg/config-rss.toml
 diff -u pkg/config-rss.toml{~,} || true
