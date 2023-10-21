@@ -32,6 +32,7 @@ use chrono::Utc;
 use diesel::prelude::*;
 use diesel::result::Error as DieselError;
 use diesel::upsert::excluded;
+use ipnetwork::IpNetwork;
 use nexus_db_model::DnsGroup;
 use nexus_db_model::DnsZone;
 use nexus_db_model::ExternalIp;
@@ -61,6 +62,7 @@ use uuid::Uuid;
 #[derive(Clone)]
 pub struct RackInit {
     pub rack_id: Uuid,
+    pub rack_subnet: IpNetwork,
     pub services: Vec<internal_params::ServicePutRequest>,
     pub datasets: Vec<Dataset>,
     pub service_ip_pool_ranges: Vec<IpRange>,
@@ -188,6 +190,28 @@ impl DataStore {
                     ),
                 )
             })
+    }
+
+    pub async fn update_rack_subnet(
+        &self,
+        opctx: &OpContext,
+        rack: &Rack,
+    ) -> Result<(), Error> {
+        debug!(
+            opctx.log,
+            "updating rack subnet for rack {} to {:#?}",
+            rack.id(),
+            rack.rack_subnet
+        );
+        use db::schema::rack::dsl;
+        diesel::update(dsl::rack)
+            .filter(dsl::id.eq(rack.id()))
+            .set(dsl::rack_subnet.eq(rack.rack_subnet))
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(())
     }
 
     // The following methods which return a `TxnError` take a `conn` parameter
@@ -681,6 +705,7 @@ mod test {
         fn default() -> Self {
             RackInit {
                 rack_id: Uuid::parse_str(nexus_test_utils::RACK_UUID).unwrap(),
+                rack_subnet: nexus_test_utils::RACK_SUBNET.parse().unwrap(),
                 services: vec![],
                 datasets: vec![],
                 service_ip_pool_ranges: vec![],

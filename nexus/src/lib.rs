@@ -32,12 +32,12 @@ use internal_api::http_entrypoints::internal_api;
 use nexus_types::internal_api::params::ServiceKind;
 use omicron_common::address::IpRange;
 use omicron_common::api::internal::shared::{
-    ExternalPortDiscovery, SwitchLocation,
+    ExternalPortDiscovery, RackNetworkConfig, SwitchLocation,
 };
 use omicron_common::FileKv;
 use slog::Logger;
 use std::collections::HashMap;
-use std::net::{SocketAddr, SocketAddrV6};
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -289,7 +289,13 @@ impl nexus_test_interface::NexusServer for Server {
                             vec!["qsfp0".parse().unwrap()],
                         )]),
                     ),
-                    rack_network_config: None,
+                    rack_network_config: Some(RackNetworkConfig {
+                        rack_subnet: "fd00:1122:3344:01::/56".parse().unwrap(),
+                        infra_ip_first: Ipv4Addr::UNSPECIFIED,
+                        infra_ip_last: Ipv4Addr::UNSPECIFIED,
+                        ports: Vec::new(),
+                        bgp: Vec::new(),
+                    }),
                 },
             )
             .await

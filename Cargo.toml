@@ -10,6 +10,7 @@ members = [
     "clients/dpd-client",
     "clients/gateway-client",
     "clients/installinator-artifact-client",
+    "clients/mg-admin-client",
     "clients/nexus-client",
     "clients/oxide-client",
     "clients/oximeter-client",
@@ -82,6 +83,7 @@ default-members = [
     "clients/oximeter-client",
     "clients/sled-agent-client",
     "clients/wicketd-client",
+    "clients/mg-admin-client",
     "common",
     "dev-tools/crdb-seed",
     "dev-tools/omdb",
@@ -227,6 +229,7 @@ macaddr = { version = "1.0.1", features = ["serde_std"] }
 mime_guess = "2.0.4"
 mockall = "0.11"
 newtype_derive = "0.1.6"
+mg-admin-client = { path = "clients/mg-admin-client" }
 nexus-client = { path = "clients/nexus-client" }
 nexus-db-model = { path = "nexus/db-model" }
 nexus-db-queries = { path = "nexus/db-queries" }
