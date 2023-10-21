@@ -1310,6 +1310,33 @@ mod tests {
                 .chain(&self.learner)
                 .filter_map(|node| node.node_handles.as_ref().map(|(h, _)| h))
         }
+
+        /// To ensure deterministic learning of shares from node 0 which sorts first
+        /// we wait to ensure that the learner sees peer0 as connected before we
+        /// call `init_learner`
+        ///
+        /// Panics if the connection doesn't happen within `POLL_TIMEOUT`
+        async fn wait_for_learner_to_connect_to_node(&self, i: usize) {
+            const POLL_TIMEOUT: Duration = Duration::from_secs(5);
+            let start = Instant::now();
+            loop {
+                let timeout =
+                    POLL_TIMEOUT.saturating_sub(Instant::now() - start);
+                tokio::select! {
+                    _ = sleep(timeout) => {
+                        panic!("Learner not connected to node {i}");
+                    }
+                    status = self[LEARNER].get_status() => {
+                        let status = status.unwrap();
+                        let id = &self.nodes[i].config.id;
+                        if status.connections.contains_key(id) {
+                            break;
+                        }
+                        tokio::time::sleep(Duration::from_millis(1)).await;
+                    }
+                }
+            }
+        }
     }
 
     impl std::ops::Index<usize> for TestNodes {
@@ -1401,6 +1428,9 @@ mod tests {
         nodes.add_learner(2).await;
         nodes.start_learner().await;
 
+        // Wait for the learner to connect to node 0
+        nodes.wait_for_learner_to_connect_to_node(0).await;
+
         // Tell the learner to go ahead and learn its share.
         nodes[LEARNER].init_learner().await.unwrap();
 
@@ -1410,31 +1440,20 @@ mod tests {
         let peer1_gen_new =
             nodes[1].get_status().await.unwrap().fsm_ledger_generation;
 
-        // Ensure only one of the peers generation numbers gets bumped
-        assert!(
-            (peer0_gen_new == peer0_gen && peer1_gen_new == peer1_gen + 1)
-                || (peer0_gen_new == peer0_gen + 1
-                    && peer1_gen_new == peer1_gen)
-        );
-
-        // Wipe the learner ledger, restart the learner and instruct it to
-        // relearn its share, and ensure that the neither generation number gets
-        // bumped because persistence doesn't occur. But for that to happen
-        // we need to make sure the learner asks the same peer. The choice of
-        // which peer is somewhat implementation dependent, so to get around
-        // that we stop the other peer until after restarting the learner.
-
-        // Infer the correct peer based on which generation number didn't get
-        // bumped and stop it.
-        let non_learner_peer = if peer0_gen_new == peer0_gen { 0 } else { 1 };
-        nodes.shutdown_node(non_learner_peer).await;
+        // Ensure only peer 0's generation number gets bumped
+        assert_eq!(peer0_gen_new, peer0_gen + 1);
+        assert_eq!(peer1_gen_new, peer1_gen);
 
         // Now we can stop the learner, wipe its ledger, and restart it.
         nodes.shutdown_learner(true).await;
         nodes.start_learner().await;
 
-        // Now restart the other peer and tell the learner to relearn its share
-        nodes.start_node(non_learner_peer).await;
+        // Wipe the learner ledger, restart the learner and instruct it to
+        // relearn its share, and ensure that the neither generation number gets
+        // bumped because persistence doesn't occur. But for that to happen
+        // we need to make sure the learner asks the same peer, which is node 0 since
+        // it sorts first based on its id which is of type `Baseboard`.
+        nodes.wait_for_learner_to_connect_to_node(0).await;
         nodes[LEARNER].init_learner().await.unwrap();
 
         // Ensure the peers' generation numbers didn't get bumped. The learner
