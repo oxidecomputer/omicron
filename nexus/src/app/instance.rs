@@ -1290,6 +1290,14 @@ impl super::Nexus {
               "propolis_id" => %propolis_id,
               "vmm_state" => ?new_runtime_state.vmm_state);
 
+        // Grab the current state of the instance in the DB to reason about
+        // whether this update is stale or not.
+        let (.., authz_instance, db_instance) =
+            LookupPath::new(&opctx, &self.db_datastore)
+                .instance_id(*instance_id)
+                .fetch()
+                .await?;
+
         // Update OPTE and Dendrite if the instance's active sled assignment
         // changed or a migration was retired. If these actions fail, sled agent
         // is expected to retry this update.
@@ -1303,12 +1311,6 @@ impl super::Nexus {
         //
         // In the future, this should be replaced by a call to trigger a
         // networking state update RPW.
-        let (.., authz_instance, db_instance) =
-            LookupPath::new(&opctx, &self.db_datastore)
-                .instance_id(*instance_id)
-                .fetch()
-                .await?;
-
         self.ensure_updated_instance_network_config(
             opctx,
             &authz_instance,
@@ -1316,6 +1318,27 @@ impl super::Nexus {
             &new_runtime_state.instance_state,
         )
         .await?;
+
+        // If the supplied instance state indicates that the instance no longer
+        // has an active VMM, attempt to delete the virtual provisioning record
+        //
+        // As with updating networking state, this must be done before
+        // committing the new runtime state to the database: once the DB is
+        // written, a new start saga can arrive and start the instance, which
+        // will try to create its own virtual provisioning charges, which will
+        // race with this operation.
+        if new_runtime_state.instance_state.propolis_id.is_none() {
+            self.db_datastore
+                .virtual_provisioning_collection_delete_instance(
+                    opctx,
+                    *instance_id,
+                    db_instance.project_id,
+                    i64::from(db_instance.ncpus.0 .0),
+                    db_instance.memory,
+                    (&new_runtime_state.instance_state.gen).into(),
+                )
+                .await?;
+        }
 
         // Write the new instance and VMM states back to CRDB. This needs to be
         // done before trying to clean up the VMM, since the datastore will only
@@ -1337,7 +1360,20 @@ impl super::Nexus {
 
         // If the VMM is now in a terminal state, make sure its resources get
         // cleaned up.
-        if let Ok((_, true)) = result {
+        //
+        // For idempotency, only check to see if the update was successfully
+        // processed and ignore whether the VMM record was actually updated.
+        // This is required to handle the case where this routine is called
+        // once, writes the terminal VMM state, fails before all per-VMM
+        // resources are released, returns a retriable error, and is retried:
+        // the per-VMM resources still need to be cleaned up, but the DB update
+        // will return Ok(_, false) because the database was already updated.
+        //
+        // Unlike the pre-update cases, it is legal to do this cleanup *after*
+        // committing state to the database, because a terminated VMM cannot be
+        // reused (restarting or migrating its former instance will use new VMM
+        // IDs).
+        if result.is_ok() {
             let propolis_terminated = matches!(
                 new_runtime_state.vmm_state.state,
                 InstanceState::Destroyed | InstanceState::Failed

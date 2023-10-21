@@ -9,7 +9,6 @@ use super::NexusActionContext;
 use super::NexusSaga;
 use crate::app::sagas::declare_saga_actions;
 use nexus_db_queries::{authn, authz, db};
-use nexus_types::identity::Resource;
 use omicron_common::api::external::{Error, ResourceType};
 use omicron_common::api::internal::shared::SwitchLocation;
 use serde::Deserialize;
@@ -40,9 +39,6 @@ declare_saga_actions! {
     DEALLOCATE_EXTERNAL_IP -> "no_result3" {
         + sid_deallocate_external_ip
     }
-    VIRTUAL_RESOURCES_ACCOUNT -> "no_result4" {
-        + sid_account_virtual_resources
-    }
 }
 
 // instance delete saga: definition
@@ -64,7 +60,6 @@ impl NexusSaga for SagaInstanceDelete {
         builder.append(instance_delete_record_action());
         builder.append(delete_network_interfaces_action());
         builder.append(deallocate_external_ip_action());
-        builder.append(virtual_resources_account_action());
         Ok(builder.build()?)
     }
 }
@@ -129,30 +124,6 @@ async fn sid_deallocate_external_ip(
         .deallocate_external_ip_by_instance_id(
             &opctx,
             params.authz_instance.id(),
-        )
-        .await
-        .map_err(ActionError::action_failed)?;
-    Ok(())
-}
-
-async fn sid_account_virtual_resources(
-    sagactx: NexusActionContext,
-) -> Result<(), ActionError> {
-    let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params::<Params>()?;
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
-
-    osagactx
-        .datastore()
-        .virtual_provisioning_collection_delete_instance(
-            &opctx,
-            params.instance.id(),
-            params.instance.project_id,
-            i64::from(params.instance.ncpus.0 .0),
-            params.instance.memory,
         )
         .await
         .map_err(ActionError::action_failed)?;

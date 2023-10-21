@@ -14,9 +14,9 @@ use std::sync::OnceLock;
 static MAYBE_LRTQ_RETRIEVER: OnceLock<LrtqOrHardcodedSecretRetrieverInner> =
     OnceLock::new();
 
-/// A [`key-manager::SecretRetriever`] that either uses a
-/// [`LocalSecretRetriever`] or [`LrtqSecretRetriever`] under the hood depending
-/// upon how many sleds are in the cluster at rack init time.
+/// A [`key_manager::SecretRetriever`] that either uses a
+/// [`HardcodedSecretRetriever`] or [`LrtqSecretRetriever`] under the
+/// hood depending upon how many sleds are in the cluster at rack init time.
 pub struct LrtqOrHardcodedSecretRetriever {}
 
 impl LrtqOrHardcodedSecretRetriever {

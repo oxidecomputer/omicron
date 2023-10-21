@@ -182,6 +182,7 @@ pub enum ServiceKind {
     Tfport,
     BoundaryNtp { snat: SourceNatConfig, nic: ServiceNic },
     InternalNtp,
+    Mgd,
 }
 
 impl fmt::Display for ServiceKind {
@@ -200,6 +201,7 @@ impl fmt::Display for ServiceKind {
             Tfport => "tfport",
             CruciblePantry => "crucible_pantry",
             BoundaryNtp { .. } | InternalNtp => "ntp",
+            Mgd => "mgd",
         };
         write!(f, "{}", s)
     }

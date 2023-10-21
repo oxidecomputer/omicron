@@ -272,7 +272,11 @@ impl DataStore {
         Ok(provisions)
     }
 
-    /// Transitively updates all CPU/RAM provisions from project -> fleet.
+    /// Transitively removes the CPU and memory charges for an instance from the
+    /// instance's project, silo, and fleet, provided that the instance's state
+    /// generation is less than `max_instance_gen`. This allows a caller who is
+    /// about to apply generation G to an instance to avoid deleting resources
+    /// if its update was superseded.
     pub async fn virtual_provisioning_collection_delete_instance(
         &self,
         opctx: &OpContext,
@@ -280,10 +284,15 @@ impl DataStore {
         project_id: Uuid,
         cpus_diff: i64,
         ram_diff: ByteCount,
+        max_instance_gen: i64,
     ) -> Result<Vec<VirtualProvisioningCollection>, Error> {
         let provisions =
             VirtualProvisioningCollectionUpdate::new_delete_instance(
-                id, cpus_diff, ram_diff, project_id,
+                id,
+                max_instance_gen,
+                cpus_diff,
+                ram_diff,
+                project_id,
             )
             .get_results_async(&*self.pool_connection_authorized(opctx).await?)
             .await
