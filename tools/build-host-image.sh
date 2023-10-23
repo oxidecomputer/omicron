@@ -92,22 +92,6 @@ function main
     # Move to the helios checkout
     cd "$HELIOS_PATH"
 
-    # Create the "./helios-build" command, which lets us build images
-    gmake setup
-
-    # Commands that "./helios-build" would ask us to run (either explicitly
-    # or implicitly, to avoid an error).
-    rc=0
-    pfexec pkg install -q /system/zones/brand/omicron1/tools || rc=$?
-    case $rc in
-        # `man pkg` notes that exit code 4 means no changes were made because
-        # there is nothing to do; that's fine. Any other exit code is an error.
-        0 | 4) ;;
-        *) exit $rc ;;
-    esac
-
-    pfexec zfs create -p rpool/images/"$USER"
-
     HELIOS_REPO=https://pkg.oxide.computer/helios/2/dev/
 
     # Build an image name that includes the omicron and host OS hashes
