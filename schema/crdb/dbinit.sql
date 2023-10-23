@@ -2589,7 +2589,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '8.0.1', NULL)
+    ( TRUE, NOW(), NOW(), '9.0.1', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
