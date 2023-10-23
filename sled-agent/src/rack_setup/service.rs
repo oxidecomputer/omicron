@@ -591,6 +591,7 @@ impl ServiceInner {
                                 .map(|r| NexusTypes::RouteConfig {
                                     destination: r.destination,
                                     nexthop: r.nexthop,
+                                    vid: r.vid,
                                 })
                                 .collect(),
                             addresses: config.addresses.clone(),

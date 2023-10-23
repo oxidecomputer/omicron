@@ -663,6 +663,7 @@ impl super::Nexus {
                     .map(|r| SledRouteConfig {
                         destination: r.dst,
                         nexthop: r.gw.ip(),
+                        vid: r.vid.map(Into::into),
                     })
                     .collect(),
                 addresses: info.addresses.iter().map(|a| a.address).collect(),

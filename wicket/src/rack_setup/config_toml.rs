@@ -245,6 +245,12 @@ fn populate_network_table(
                                 r.destination.to_string(),
                             )),
                         );
+                        if let Some(vid) = r.vid {
+                            route.insert(
+                                "vid",
+                                Value::Integer(Formatted::new(vid.into())),
+                            );
+                        }
                         routes.push(Value::InlineTable(route));
                     }
                     uplink.insert("routes", Item::Value(Value::Array(routes)));
@@ -379,6 +385,7 @@ mod tests {
                             .map(|r| InternalRouteConfig {
                                 destination: r.destination,
                                 nexthop: r.nexthop,
+                                vid: r.vid,
                             })
                             .collect(),
                         addresses: config.addresses.clone(),
@@ -478,10 +485,18 @@ mod tests {
                 infra_ip_last: "172.30.0.10".parse().unwrap(),
                 ports: vec![PortConfigV1 {
                     addresses: vec!["172.30.0.1/24".parse().unwrap()],
-                    routes: vec![RouteConfig {
-                        destination: "0.0.0.0/0".parse().unwrap(),
-                        nexthop: "172.30.0.10".parse().unwrap(),
-                    }],
+                    routes: vec![
+                        RouteConfig {
+                            destination: "0.0.0.0/0".parse().unwrap(),
+                            nexthop: "172.30.0.10".parse().unwrap(),
+                            vid: None,
+                        },
+                        RouteConfig {
+                            destination: "10.20.0.0/16".parse().unwrap(),
+                            nexthop: "10.0.0.20".parse().unwrap(),
+                            vid: Some(20),
+                        },
+                    ],
                     bgp_peers: vec![BgpPeerConfig {
                         asn: 47,
                         addr: "10.2.3.4".parse().unwrap(),
