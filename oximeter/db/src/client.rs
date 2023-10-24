@@ -384,11 +384,12 @@ impl Client {
         let name = sample_schema.timeseries_name.clone();
         let mut schema = self.schema.lock().await;
 
-        // We need to possibly check that this schema is in the local cache, or
-        // in the database, all while we hold the lock to ensure there's no
-        // concurrent additions. This containment check is needed so that we
-        // check both the local cache and the database, to avoid adding a schema
-        // a second time.
+        // We've taken the lock before we do any checks for schema. First, we
+        // check if we've already got one in the cache. If not, we update all
+        // the schema from the database, and then check the map again. If we
+        // find a schema (which now either came from the cache or the latest
+        // read of the DB), then we check that the derived schema matches. If
+        // not, we can insert it in the cache and the DB.
         if !schema.contains_key(&name) {
             self.get_schema_locked(&mut schema).await?;
         }
