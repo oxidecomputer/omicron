@@ -204,7 +204,7 @@ impl FakeStorageManager {
         }
     }
 
-    // Add a disk to `StorageResources` if it is new and return Ok(true) if so
+    // Add a disk to `StorageResources` if it is new and return true if so
     fn add_disk(&mut self, raw_disk: RawDisk) -> bool {
         let disk = match raw_disk {
             RawDisk::Real(_) => {

@@ -1773,17 +1773,17 @@ mod illumos_tests {
     use super::ZoneBundleInfo;
     use super::ZoneBundleMetadata;
     use super::ZoneBundler;
-    use crate::bootstrap::secret_retriever::HardcodedSecretRetriever;
+    use super::ZFS;
     use anyhow::Context;
     use chrono::TimeZone;
     use chrono::Utc;
-    use illumos_utils::zpool::{Zpool, ZpoolName};
-    use key_manager::KeyManager;
+    use illumos_utils::zpool::ZpoolName;
     use sled_storage::disk::RawDisk;
     use sled_storage::disk::SyntheticDisk;
-    use sled_storage::manager::{StorageHandle, StorageManager};
+    use sled_storage::manager::{FakeStorageManager, StorageHandle};
     use slog::Drain;
     use slog::Logger;
+    use tokio::process::Command;
 
     #[tokio::test]
     async fn test_zfs_quota() {
@@ -1827,35 +1827,20 @@ mod illumos_tests {
         dirs: Vec<Utf8PathBuf>,
     }
 
-    async fn setup_storage(log: &Logger) -> (StorageHandle, Vec<ZpoolName>) {
-        let (mut key_manager, key_requester) =
-            KeyManager::new(log, HardcodedSecretRetriever {});
-        let (mut manager, handle) = StorageManager::new(log, key_requester);
-
-        // Spawn the key_manager so that it will respond to requests for encryption keys
-        tokio::spawn(async move { key_manager.run().await });
+    async fn setup_storage() -> (StorageHandle, Vec<ZpoolName>) {
+        let (mut manager, handle) = FakeStorageManager::new();
 
         // Spawn the storage manager as done by sled-agent
         tokio::spawn(async move {
             manager.run().await;
         });
 
-        // Inform the storage manager that the secret retriever is ready We
-        // are using the HardcodedSecretRetriever, so no need to wait for RSS
-        // or anything to setup the LRTQ
-        handle.key_manager_ready().await;
-
-        let tempdir = camino_tempfile::Utf8TempDir::new().unwrap();
-
         // These must be internal zpools
         let mut zpool_names = vec![];
         for _ in 0..2 {
             let internal_zpool_name = ZpoolName::new_internal(Uuid::new_v4());
-            let internal_disk: RawDisk = SyntheticDisk::create_zpool(
-                tempdir.path(),
-                &internal_zpool_name,
-            )
-            .into();
+            let internal_disk: RawDisk =
+                SyntheticDisk::new(internal_zpool_name.clone()).into();
             handle.upsert_disk(internal_disk).await;
             zpool_names.push(internal_zpool_name);
         }
@@ -1865,21 +1850,27 @@ mod illumos_tests {
     impl ResourceWrapper {
         // Create new storage resources, and mount fake datasets at the required
         // locations.
-        async fn new(log: Logger) -> Self {
+        async fn new() -> Self {
             // Spawn the storage related tasks required for testing and insert
             // synthetic disks.
-            let (storage_handle, zpool_names) = setup_storage(&log).await;
+            let (storage_handle, zpool_names) = setup_storage().await;
             let resources = storage_handle.get_latest_resources().await;
             let dirs = resources.all_zone_bundle_directories();
-            info!(log, "Initial dirs = {:?}", dirs);
+            for d in dirs.iter() {
+                let id =
+                    d.components().nth(3).unwrap().as_str().parse().unwrap();
+                create_test_dataset(&id, d).await.unwrap();
+            }
             Self { storage_handle, zpool_names, dirs }
         }
     }
 
     impl Drop for ResourceWrapper {
         fn drop(&mut self) {
-            for name in &self.zpool_names {
-                Zpool::destroy(name).unwrap();
+            for d in self.dirs.iter() {
+                let id =
+                    d.components().nth(3).unwrap().as_str().parse().unwrap();
+                remove_test_dataset(&id).unwrap();
             }
         }
     }
@@ -1891,7 +1882,7 @@ mod illumos_tests {
         let log =
             Logger::root(drain, slog::o!("component" => "fake-cleanup-task"));
         let context = CleanupContext::default();
-        let resource_wrapper = ResourceWrapper::new(log.clone()).await;
+        let resource_wrapper = ResourceWrapper::new().await;
         let bundler = ZoneBundler::new(
             log,
             resource_wrapper.storage_handle.clone(),
@@ -1935,7 +1926,59 @@ mod illumos_tests {
     //
     // This needs to be at least this big lest we get "out of space" errors when
     // creating. Not sure where those come from, but could be ZFS overhead.
-    const TEST_QUOTA: u64 = sled_storage::dataset::DEBUG_DATASET_QUOTA as u64;
+    const TEST_QUOTA: u64 = 1024 * 32;
+
+    async fn create_test_dataset(
+        id: &Uuid,
+        mountpoint: &Utf8PathBuf,
+    ) -> anyhow::Result<()> {
+        let output = Command::new("/usr/bin/pfexec")
+            .arg(ZFS)
+            .arg("create")
+            .arg("-o")
+            .arg(format!("quota={TEST_QUOTA}"))
+            .arg("-o")
+            .arg(format!("mountpoint={mountpoint}"))
+            .arg(format!("rpool/{id}"))
+            .output()
+            .await
+            .context("failed to spawn zfs create operation")?;
+        anyhow::ensure!(
+            output.status.success(),
+            "zfs create operation failed: {}",
+            String::from_utf8_lossy(&output.stderr),
+        );
+
+        // Make the path operable by the test code.
+        let output = Command::new("/usr/bin/pfexec")
+            .arg("chmod")
+            .arg("a+rw")
+            .arg(&mountpoint)
+            .output()
+            .await
+            .context("failed to spawn chmod operation")?;
+        anyhow::ensure!(
+            output.status.success(),
+            "chmod-ing the dataset failed: {}",
+            String::from_utf8_lossy(&output.stderr),
+        );
+        Ok(())
+    }
+
+    fn remove_test_dataset(id: &Uuid) -> anyhow::Result<()> {
+        let output = std::process::Command::new("/usr/bin/pfexec")
+            .arg(ZFS)
+            .arg("destroy")
+            .arg(format!("rpool/{id}"))
+            .output()
+            .context("failed to spawn zfs destroy operation")?;
+        anyhow::ensure!(
+            output.status.success(),
+            "zfs destroy operation failed: {}",
+            String::from_utf8_lossy(&output.stderr),
+        );
+        Ok(())
+    }
 
     async fn run_test_with_zfs_dataset<T, Fut>(test: T)
     where

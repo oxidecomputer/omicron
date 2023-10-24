@@ -45,7 +45,7 @@ pub struct StorageResources {
 impl StorageResources {
     /// Insert a disk and its zpool
     ///
-    /// Return true, if data was changed, false otherwise
+    /// Return true if data was changed, false otherwise
     ///
     /// This really should not be used outside this crate, except for testing
     pub fn insert_disk(&mut self, disk: Disk) -> Result<bool, Error> {
@@ -69,7 +69,7 @@ impl StorageResources {
     /// This is a workaround for current mock based testing strategies
     /// in the sled-agent.
     ///
-    /// Return true, if data was changed, false otherwise
+    /// Return true if data was changed, false otherwise
     #[cfg(feature = "testing")]
     pub fn insert_fake_disk(&mut self, disk: Disk) -> bool {
         let disk_id = disk.identity().clone();
