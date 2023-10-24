@@ -92,7 +92,7 @@ impl LrtqOrHardcodedSecretRetriever {
 ///
 /// The local retriever only returns keys for epoch 0
 #[derive(Debug)]
-pub struct HardcodedSecretRetriever {}
+struct HardcodedSecretRetriever {}
 
 #[async_trait]
 impl SecretRetriever for HardcodedSecretRetriever {

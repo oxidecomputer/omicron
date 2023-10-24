@@ -116,6 +116,13 @@ impl RawDisk {
     pub fn is_real(&self) -> bool {
         !self.is_synthetic()
     }
+
+    pub fn devfs_path(&self) -> &Utf8PathBuf {
+        match self {
+            Self::Real(disk) => disk.devfs_path(),
+            Self::Synthetic(_) => unreachable!(),
+        }
+    }
 }
 
 /// A physical [`PooledDisk`] or a [`SyntheticDisk`] that contains or is backed
