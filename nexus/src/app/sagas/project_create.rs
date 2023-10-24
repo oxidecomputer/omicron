@@ -159,9 +159,10 @@ mod test {
     };
     use async_bb8_diesel::{
         AsyncConnection, AsyncRunQueryDsl, AsyncSimpleConnection,
-        OptionalExtension,
     };
-    use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
+    use diesel::{
+        ExpressionMethods, OptionalExtension, QueryDsl, SelectableHelper,
+    };
     use nexus_db_queries::{
         authn::saga::Serialized, authz, context::OpContext,
         db::datastore::DataStore,
@@ -213,7 +214,9 @@ mod test {
             // ignore built-in services project
             .filter(dsl::id.ne(*SERVICES_PROJECT_ID))
             .select(Project::as_select())
-            .first_async::<Project>(datastore.pool_for_tests().await.unwrap())
+            .first_async::<Project>(
+                &*datastore.pool_connection_for_tests().await.unwrap(),
+            )
             .await
             .optional()
             .unwrap()
@@ -230,7 +233,7 @@ mod test {
         use nexus_db_queries::db::model::VirtualProvisioningCollection;
         use nexus_db_queries::db::schema::virtual_provisioning_collection::dsl;
 
-        datastore.pool_for_tests()
+        datastore.pool_connection_for_tests()
             .await
             .unwrap()
             .transaction_async(|conn| async move {

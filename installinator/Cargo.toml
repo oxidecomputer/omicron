@@ -43,6 +43,7 @@ toml.workspace = true
 tufaceous-lib.workspace = true
 update-engine.workspace = true
 uuid.workspace = true
+omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 omicron-test-utils.workspace = true
@@ -57,3 +58,4 @@ tokio-stream.workspace = true
 [features]
 image-standard = []
 image-trampoline = []
+rack-topology-single-sled = []

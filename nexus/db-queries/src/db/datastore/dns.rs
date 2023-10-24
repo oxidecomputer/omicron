@@ -6,7 +6,7 @@ use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
-use crate::db::error::public_error_from_diesel_pool;
+use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::model::DnsGroup;
 use crate::db::model::DnsName;
@@ -15,9 +15,10 @@ use crate::db::model::DnsZone;
 use crate::db::model::Generation;
 use crate::db::model::InitialDnsGroup;
 use crate::db::pagination::paginated;
+use crate::db::pool::DbConnection;
 use crate::db::TransactionError;
+use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
-use async_bb8_diesel::PoolError;
 use diesel::prelude::*;
 use nexus_types::internal_api::params::DnsConfigParams;
 use nexus_types::internal_api::params::DnsConfigZone;
@@ -51,9 +52,9 @@ impl DataStore {
         paginated(dsl::dns_zone, dsl::zone_name, pagparams)
             .filter(dsl::dns_group.eq(dns_group))
             .select(DnsZone::as_select())
-            .load_async(self.pool_authorized(opctx).await?)
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// List all DNS zones in a DNS group without pagination
@@ -65,25 +66,18 @@ impl DataStore {
         opctx: &OpContext,
         dns_group: DnsGroup,
     ) -> ListResultVec<DnsZone> {
-        let conn = self.pool_authorized(opctx).await?;
-        self.dns_zones_list_all_on_connection(opctx, conn, dns_group).await
+        let conn = self.pool_connection_authorized(opctx).await?;
+        self.dns_zones_list_all_on_connection(opctx, &conn, dns_group).await
     }
 
     /// Variant of [`Self::dns_zones_list_all`] which may be called from a
     /// transaction context.
-    pub(crate) async fn dns_zones_list_all_on_connection<ConnErr>(
+    pub(crate) async fn dns_zones_list_all_on_connection(
         &self,
         opctx: &OpContext,
-        conn: &(impl async_bb8_diesel::AsyncConnection<
-            crate::db::pool::DbConnection,
-            ConnErr,
-        > + Sync),
+        conn: &async_bb8_diesel::Connection<DbConnection>,
         dns_group: DnsGroup,
-    ) -> ListResultVec<DnsZone>
-    where
-        ConnErr: From<diesel::result::Error> + Send + 'static,
-        ConnErr: Into<PoolError>,
-    {
+    ) -> ListResultVec<DnsZone> {
         use db::schema::dns_zone::dsl;
         const LIMIT: usize = 5;
 
@@ -95,9 +89,7 @@ impl DataStore {
             .select(DnsZone::as_select())
             .load_async(conn)
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(e.into(), ErrorHandler::Server)
-            })?;
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         bail_unless!(
             list.len() < LIMIT,
@@ -116,25 +108,18 @@ impl DataStore {
     ) -> LookupResult<DnsVersion> {
         self.dns_group_latest_version_conn(
             opctx,
-            self.pool_authorized(opctx).await?,
+            &*self.pool_connection_authorized(opctx).await?,
             dns_group,
         )
         .await
     }
 
-    pub async fn dns_group_latest_version_conn<ConnErr>(
+    pub async fn dns_group_latest_version_conn(
         &self,
         opctx: &OpContext,
-        conn: &(impl async_bb8_diesel::AsyncConnection<
-            crate::db::pool::DbConnection,
-            ConnErr,
-        > + Sync),
+        conn: &async_bb8_diesel::Connection<DbConnection>,
         dns_group: DnsGroup,
-    ) -> LookupResult<DnsVersion>
-    where
-        ConnErr: From<diesel::result::Error> + Send + 'static,
-        ConnErr: Into<PoolError>,
-    {
+    ) -> LookupResult<DnsVersion> {
         opctx.authorize(authz::Action::Read, &authz::DNS_CONFIG).await?;
         use db::schema::dns_version::dsl;
         let versions = dsl::dns_version
@@ -144,9 +129,7 @@ impl DataStore {
             .select(DnsVersion::as_select())
             .load_async(conn)
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(e.into(), ErrorHandler::Server)
-            })?;
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         bail_unless!(
             versions.len() == 1,
@@ -178,11 +161,9 @@ impl DataStore {
                     .or(dsl::version_removed.gt(version)),
             )
             .select(DnsName::as_select())
-            .load_async(self.pool_authorized(opctx).await?)
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
-            })?
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
             .into_iter()
             .filter_map(|n: DnsName| match n.records() {
                 Ok(records) => Some((n.name, records)),
@@ -326,17 +307,10 @@ impl DataStore {
     }
 
     /// Load initial data for a DNS group into the database
-    pub async fn load_dns_data<ConnErr>(
-        conn: &(impl async_bb8_diesel::AsyncConnection<
-            crate::db::pool::DbConnection,
-            ConnErr,
-        > + Sync),
+    pub async fn load_dns_data(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
         dns: InitialDnsGroup,
-    ) -> Result<(), Error>
-    where
-        ConnErr: From<diesel::result::Error> + Send + 'static,
-        ConnErr: Into<PoolError>,
-    {
+    ) -> Result<(), Error> {
         {
             use db::schema::dns_zone::dsl;
             diesel::insert_into(dsl::dns_zone)
@@ -346,10 +320,7 @@ impl DataStore {
                 .execute_async(conn)
                 .await
                 .map_err(|e| {
-                    public_error_from_diesel_pool(
-                        e.into(),
-                        ErrorHandler::Server,
-                    )
+                    public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
         }
 
@@ -362,10 +333,7 @@ impl DataStore {
                 .execute_async(conn)
                 .await
                 .map_err(|e| {
-                    public_error_from_diesel_pool(
-                        e.into(),
-                        ErrorHandler::Server,
-                    )
+                    public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
         }
 
@@ -378,10 +346,7 @@ impl DataStore {
                 .execute_async(conn)
                 .await
                 .map_err(|e| {
-                    public_error_from_diesel_pool(
-                        e.into(),
-                        ErrorHandler::Server,
-                    )
+                    public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
         }
 
@@ -407,20 +372,12 @@ impl DataStore {
     /// **Callers almost certainly want to wake up the corresponding Nexus
     /// background task to cause these changes to be propagated to the
     /// corresponding DNS servers.**
-    pub async fn dns_update<ConnErr>(
+    pub async fn dns_update(
         &self,
         opctx: &OpContext,
-        conn: &(impl async_bb8_diesel::AsyncConnection<
-            crate::db::pool::DbConnection,
-            ConnErr,
-        > + Sync),
+        conn: &async_bb8_diesel::Connection<DbConnection>,
         update: DnsVersionUpdateBuilder,
-    ) -> Result<(), Error>
-    where
-        ConnErr: From<diesel::result::Error> + Send + 'static,
-        ConnErr: Into<PoolError>,
-        TransactionError<Error>: From<ConnErr>,
-    {
+    ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, &authz::DNS_CONFIG).await?;
 
         let zones = self
@@ -438,28 +395,21 @@ impl DataStore {
         match result {
             Ok(()) => Ok(()),
             Err(TransactionError::CustomError(e)) => Err(e),
-            Err(TransactionError::Pool(e)) => {
-                Err(public_error_from_diesel_pool(e, ErrorHandler::Server))
+            Err(TransactionError::Database(e)) => {
+                Err(public_error_from_diesel(e, ErrorHandler::Server))
             }
         }
     }
 
     // This must only be used inside a transaction.  Otherwise, it may make
     // invalid changes to the database state.  Use `dns_update()` instead.
-    async fn dns_update_internal<ConnErr>(
+    async fn dns_update_internal(
         &self,
         opctx: &OpContext,
-        conn: &(impl async_bb8_diesel::AsyncConnection<
-            crate::db::pool::DbConnection,
-            ConnErr,
-        > + Sync),
+        conn: &async_bb8_diesel::Connection<DbConnection>,
         update: DnsVersionUpdateBuilder,
         zones: Vec<DnsZone>,
-    ) -> Result<(), Error>
-    where
-        ConnErr: From<diesel::result::Error> + Send + 'static,
-        ConnErr: Into<PoolError>,
-    {
+    ) -> Result<(), Error> {
         // TODO-scalability TODO-performance This would be much better as a CTE
         // for all the usual reasons described in RFD 192.  Using an interactive
         // transaction here means that either we wind up holding database locks
@@ -507,10 +457,7 @@ impl DataStore {
                 .execute_async(conn)
                 .await
                 .map_err(|e| {
-                    public_error_from_diesel_pool(
-                        e.into(),
-                        ErrorHandler::Server,
-                    )
+                    public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
         }
 
@@ -534,9 +481,7 @@ impl DataStore {
             .set(dsl::version_removed.eq(new_version_num))
             .execute_async(conn)
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(e.into(), ErrorHandler::Server)
-            })?;
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
             bail_unless!(
                 nremoved == ntoremove,
@@ -552,10 +497,7 @@ impl DataStore {
                 .execute_async(conn)
                 .await
                 .map_err(|e| {
-                    public_error_from_diesel_pool(
-                        e.into(),
-                        ErrorHandler::Server,
-                    )
+                    public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
 
             bail_unless!(
@@ -749,8 +691,8 @@ mod test {
                     comment: "test suite".to_string(),
                 })
                 .execute_async(
-                    datastore
-                        .pool_for_tests()
+                    &*datastore
+                        .pool_connection_for_tests()
                         .await
                         .expect("failed to get datastore connection"),
                 )
@@ -810,8 +752,8 @@ mod test {
             HashMap::new(),
         );
         {
-            let conn = datastore.pool_for_tests().await.unwrap();
-            DataStore::load_dns_data(conn, initial)
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+            DataStore::load_dns_data(&conn, initial)
                 .await
                 .expect("failed to load initial DNS zone");
         }
@@ -850,8 +792,8 @@ mod test {
             ]),
         );
         {
-            let conn = datastore.pool_for_tests().await.unwrap();
-            DataStore::load_dns_data(conn, initial)
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+            DataStore::load_dns_data(&conn, initial)
                 .await
                 .expect("failed to load initial DNS zone");
         }
@@ -1026,7 +968,9 @@ mod test {
                         zone_name: "z1.foo".to_string(),
                     },
                 ])
-                .execute_async(datastore.pool_for_tests().await.unwrap())
+                .execute_async(
+                    &*datastore.pool_connection_for_tests().await.unwrap(),
+                )
                 .await
                 .unwrap();
         }
@@ -1042,7 +986,9 @@ mod test {
                     vi1.clone(),
                     vi2.clone(),
                 ])
-                .execute_async(datastore.pool_for_tests().await.unwrap())
+                .execute_async(
+                    &*datastore.pool_connection_for_tests().await.unwrap(),
+                )
                 .await
                 .unwrap();
         }
@@ -1142,7 +1088,9 @@ mod test {
                     )
                     .unwrap(),
                 ])
-                .execute_async(datastore.pool_for_tests().await.unwrap())
+                .execute_async(
+                    &*datastore.pool_connection_for_tests().await.unwrap(),
+                )
                 .await
                 .unwrap();
         }
@@ -1288,7 +1236,9 @@ mod test {
                         zone_name: "z1.foo".to_string(),
                     },
                 ])
-                .execute_async(datastore.pool_for_tests().await.unwrap())
+                .execute_async(
+                    &*datastore.pool_connection_for_tests().await.unwrap(),
+                )
                 .await
                 .unwrap_err();
             assert!(error
@@ -1317,7 +1267,9 @@ mod test {
                         comment: "test suite 4".to_string(),
                     },
                 ])
-                .execute_async(datastore.pool_for_tests().await.unwrap())
+                .execute_async(
+                    &*datastore.pool_connection_for_tests().await.unwrap(),
+                )
                 .await
                 .unwrap_err();
             assert!(error
@@ -1349,7 +1301,9 @@ mod test {
                     )
                     .unwrap(),
                 ])
-                .execute_async(datastore.pool_for_tests().await.unwrap())
+                .execute_async(
+                    &*datastore.pool_connection_for_tests().await.unwrap(),
+                )
                 .await
                 .unwrap_err();
             assert!(error
@@ -1470,7 +1424,9 @@ mod test {
                     dns_zone2.clone(),
                     dns_zone3.clone(),
                 ])
-                .execute_async(datastore.pool_for_tests().await.unwrap())
+                .execute_async(
+                    &*datastore.pool_connection_for_tests().await.unwrap(),
+                )
                 .await
                 .unwrap();
         }
@@ -1494,7 +1450,9 @@ mod test {
                         comment: "test suite 8".to_string(),
                     },
                 ])
-                .execute_async(datastore.pool_for_tests().await.unwrap())
+                .execute_async(
+                    &*datastore.pool_connection_for_tests().await.unwrap(),
+                )
                 .await
                 .unwrap();
         }
@@ -1523,8 +1481,8 @@ mod test {
             update.add_name(String::from("n1"), records1.clone()).unwrap();
             update.add_name(String::from("n2"), records2.clone()).unwrap();
 
-            let conn = datastore.pool_for_tests().await.unwrap();
-            datastore.dns_update(&opctx, conn, update).await.unwrap();
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+            datastore.dns_update(&opctx, &conn, update).await.unwrap();
         }
 
         // Verify the new config.
@@ -1556,8 +1514,8 @@ mod test {
             update.remove_name(String::from("n1")).unwrap();
             update.add_name(String::from("n1"), records12.clone()).unwrap();
 
-            let conn = datastore.pool_for_tests().await.unwrap();
-            datastore.dns_update(&opctx, conn, update).await.unwrap();
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+            datastore.dns_update(&opctx, &conn, update).await.unwrap();
         }
 
         let dns_config = datastore
@@ -1586,8 +1544,8 @@ mod test {
             );
             update.remove_name(String::from("n1")).unwrap();
 
-            let conn = datastore.pool_for_tests().await.unwrap();
-            datastore.dns_update(&opctx, conn, update).await.unwrap();
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+            datastore.dns_update(&opctx, &conn, update).await.unwrap();
         }
 
         let dns_config = datastore
@@ -1613,8 +1571,8 @@ mod test {
             );
             update.add_name(String::from("n1"), records2.clone()).unwrap();
 
-            let conn = datastore.pool_for_tests().await.unwrap();
-            datastore.dns_update(&opctx, conn, update).await.unwrap();
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+            datastore.dns_update(&opctx, &conn, update).await.unwrap();
         }
 
         let dns_config = datastore
@@ -1644,8 +1602,8 @@ mod test {
             );
             update1.remove_name(String::from("n1")).unwrap();
 
-            let conn1 = datastore.pool_for_tests().await.unwrap();
-            let conn2 = datastore.pool_for_tests().await.unwrap();
+            let conn1 = datastore.pool_connection_for_tests().await.unwrap();
+            let conn2 = datastore.pool_connection_for_tests().await.unwrap();
             let (wait1_tx, wait1_rx) = tokio::sync::oneshot::channel();
             let (wait2_tx, wait2_rx) = tokio::sync::oneshot::channel();
 
@@ -1680,7 +1638,7 @@ mod test {
                 String::from("the test suite"),
             );
             update2.add_name(String::from("n1"), records1.clone()).unwrap();
-            datastore.dns_update(&opctx, conn2, update2).await.unwrap();
+            datastore.dns_update(&opctx, &conn2, update2).await.unwrap();
 
             // Now let the first one finish.
             wait2_tx.send(()).unwrap();
@@ -1723,9 +1681,9 @@ mod test {
             );
             update.remove_name(String::from("n4")).unwrap();
 
-            let conn = datastore.pool_for_tests().await.unwrap();
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
             let error =
-                datastore.dns_update(&opctx, conn, update).await.unwrap_err();
+                datastore.dns_update(&opctx, &conn, update).await.unwrap_err();
             assert_eq!(
                 error.to_string(),
                 "Internal Error: updated wrong number of dns_name \
@@ -1748,9 +1706,9 @@ mod test {
             );
             update.add_name(String::from("n2"), records1.clone()).unwrap();
 
-            let conn = datastore.pool_for_tests().await.unwrap();
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
             let error =
-                datastore.dns_update(&opctx, conn, update).await.unwrap_err();
+                datastore.dns_update(&opctx, &conn, update).await.unwrap_err();
             let msg = error.to_string();
             assert!(msg.starts_with("Internal Error: "));
             assert!(msg.contains("violates unique constraint"));

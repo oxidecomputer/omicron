@@ -9,7 +9,7 @@ jobs:
   check-style:
     runs-on: ubuntu-22.04
     steps:
-    - uses: actions/checkout@v3.5.0
+    - uses: actions/checkout@8f4b7f84864484a7bf31766abe9204da3cbe65b3 # v3.5.0
     - name: Report cargo version
       run: cargo --version
     - name: Report rustfmt version
@@ -27,8 +27,8 @@ jobs:
     # This repo is unstable and unnecessary: https://github.com/microsoft/linux-package-repositories/issues/34
     - name: Disable packages.microsoft.com repo
       run: sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list
-    - uses: actions/checkout@v3.5.0
-    - uses: Swatinem/rust-cache@v2.2.1
+    - uses: actions/checkout@8f4b7f84864484a7bf31766abe9204da3cbe65b3 # v3.5.0
+    - uses: Swatinem/rust-cache@6fd3edff6979b79f87531400ad694fb7f2c84b1f # v2.2.1
       if: ${{ github.ref != 'refs/heads/main' }}
     - name: Report cargo version
       run: cargo --version
@@ -41,7 +41,7 @@ jobs:
     - name: Install Pre-Requisites
       run: ./tools/install_builder_prerequisites.sh -y
     - name: Set default target
-      run: cargo run --bin omicron-package -- -t default target create
+      run: cargo run --bin omicron-package -- -t default target create -r single-sled
     - name: Check build of deployed Omicron packages
       run: cargo run --bin omicron-package -- -t default check
 
@@ -53,8 +53,8 @@ jobs:
     # This repo is unstable and unnecessary: https://github.com/microsoft/linux-package-repositories/issues/34
     - name: Disable packages.microsoft.com repo
       run: sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list
-    - uses: actions/checkout@v3.5.0
-    - uses: Swatinem/rust-cache@v2.2.1
+    - uses: actions/checkout@8f4b7f84864484a7bf31766abe9204da3cbe65b3 # v3.5.0
+    - uses: Swatinem/rust-cache@6fd3edff6979b79f87531400ad694fb7f2c84b1f # v2.2.1
       if: ${{ github.ref != 'refs/heads/main' }}
     - name: Report cargo version
       run: cargo --version
@@ -79,8 +79,8 @@ jobs:
     # This repo is unstable and unnecessary: https://github.com/microsoft/linux-package-repositories/issues/34
     - name: Disable packages.microsoft.com repo
       run: sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list
-    - uses: actions/checkout@v3.5.0
-    - uses: Swatinem/rust-cache@v2.2.1
+    - uses: actions/checkout@8f4b7f84864484a7bf31766abe9204da3cbe65b3 # v3.5.0
+    - uses: Swatinem/rust-cache@6fd3edff6979b79f87531400ad694fb7f2c84b1f # v2.2.1
       if: ${{ github.ref != 'refs/heads/main' }}
     - name: Report cargo version
       run: cargo --version

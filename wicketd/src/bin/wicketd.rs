@@ -5,11 +5,14 @@
 //! Executable for wicketd: technician port based management service
 
 use clap::Parser;
-use omicron_common::cmd::{fatal, CmdError};
+use omicron_common::{
+    address::Ipv6Subnet,
+    cmd::{fatal, CmdError},
+};
 use sled_hardware::Baseboard;
-use std::net::SocketAddrV6;
+use std::net::{Ipv6Addr, SocketAddrV6};
 use std::path::PathBuf;
-use wicketd::{self, run_openapi, Config, Server};
+use wicketd::{self, run_openapi, Config, Server, SmfConfigValues};
 
 #[derive(Debug, Parser)]
 #[clap(name = "wicketd", about = "See README.adoc for more information")]
@@ -30,12 +33,28 @@ enum Args {
         #[clap(long, action)]
         artifact_address: SocketAddrV6,
 
-        /// The port on localhost for MGS
+        /// The address (expected to be on localhost) for MGS
         #[clap(long, action)]
         mgs_address: SocketAddrV6,
 
+        /// The address (expected to be on localhost) on which we'll serve a TCP
+        /// proxy to Nexus's "techport external" API
+        #[clap(long, action)]
+        nexus_proxy_address: SocketAddrV6,
+
+        /// Path to a file containing our baseboard information
         #[clap(long)]
         baseboard_file: Option<PathBuf>,
+
+        /// Read dynamic properties from our SMF config instead of passing them
+        /// on the command line
+        #[clap(long)]
+        read_smf_config: bool,
+
+        /// The subnet for the rack; typically read directly from our SMF config
+        /// via `--read-smf-config` or an SMF refresh
+        #[clap(long, action, conflicts_with("read_smf_config"))]
+        rack_subnet: Option<Ipv6Addr>,
     },
 }
 
@@ -56,20 +75,22 @@ async fn do_run() -> Result<(), CmdError> {
             address,
             artifact_address,
             mgs_address,
+            nexus_proxy_address,
             baseboard_file,
+            read_smf_config,
+            rack_subnet,
         } => {
             let baseboard = if let Some(baseboard_file) = baseboard_file {
-                let baseboard_file =
-                    std::fs::read_to_string(&baseboard_file)
-                        .map_err(|e| CmdError::Failure(e.to_string()))?;
+                let baseboard_file = std::fs::read_to_string(baseboard_file)
+                    .map_err(|e| CmdError::Failure(e.to_string()))?;
                 let baseboard: Baseboard =
                     serde_json::from_str(&baseboard_file)
                         .map_err(|e| CmdError::Failure(e.to_string()))?;
 
                 // TODO-correctness `Baseboard::unknown()` is slated for removal
-                // after some refactoring in sled-agent, at which point we'll need a
-                // different way for sled-agent to tell us it doesn't know our
-                // baseboard.
+                // after some refactoring in sled-agent, at which point we'll
+                // need a different way for sled-agent to tell us it doesn't
+                // know our baseboard.
                 if matches!(baseboard, Baseboard::Unknown) {
                     None
                 } else {
@@ -87,11 +108,23 @@ async fn do_run() -> Result<(), CmdError> {
                 ))
             })?;
 
+            let rack_subnet = match rack_subnet {
+                Some(addr) => Some(Ipv6Subnet::new(addr)),
+                None if read_smf_config => {
+                    let smf_values = SmfConfigValues::read_current()
+                        .map_err(|e| CmdError::Failure(e.to_string()))?;
+                    smf_values.rack_subnet
+                }
+                None => None,
+            };
+
             let args = wicketd::Args {
                 address,
                 artifact_address,
                 mgs_address,
+                nexus_proxy_address,
                 baseboard,
+                rack_subnet,
             };
             let log = config.log.to_logger("wicketd").map_err(|msg| {
                 CmdError::Failure(format!("initializing logger: {}", msg))

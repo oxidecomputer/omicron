@@ -8,7 +8,7 @@ use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
-use crate::db::error::public_error_from_diesel_pool;
+use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
 use crate::db::model::DeviceAccessToken;
@@ -42,9 +42,9 @@ impl DataStore {
         diesel::insert_into(dsl::device_auth_request)
             .values(auth_request)
             .returning(DeviceAuthRequest::as_returning())
-            .get_result_async(self.pool_authorized(opctx).await?)
+            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Remove the device authorization request and create a new device
@@ -77,7 +77,7 @@ impl DataStore {
         }
         type TxnError = TransactionError<TokenGrantError>;
 
-        self.pool_authorized(opctx)
+        self.pool_connection_authorized(opctx)
             .await?
             .transaction_async(|conn| async move {
                 match delete_request.execute_async(&conn).await? {
@@ -103,8 +103,8 @@ impl DataStore {
                 TxnError::CustomError(TokenGrantError::TooManyRequests) => {
                     Error::internal_error("unexpectedly found multiple device auth requests for the same user code")
                 }
-                TxnError::Pool(e) => {
-                    public_error_from_diesel_pool(e, ErrorHandler::Server)
+                TxnError::Database(e) => {
+                    public_error_from_diesel(e, ErrorHandler::Server)
                 }
             })
     }
@@ -127,10 +127,10 @@ impl DataStore {
             .filter(dsl::client_id.eq(client_id))
             .filter(dsl::device_code.eq(device_code))
             .select(DeviceAccessToken::as_select())
-            .get_result_async(self.pool_authorized(opctx).await?)
+            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::NotFoundByLookup(
                         ResourceType::DeviceAccessToken,

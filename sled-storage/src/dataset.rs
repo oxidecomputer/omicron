@@ -27,6 +27,7 @@ pub const CRASH_DATASET: &'static str = "crash";
 pub const CLUSTER_DATASET: &'static str = "cluster";
 pub const CONFIG_DATASET: &'static str = "config";
 pub const M2_DEBUG_DATASET: &'static str = "debug";
+pub const M2_BACKING_DATASET: &'static str = "backing";
 
 cfg_if! {
     if #[cfg(any(test, feature = "testing"))] {
@@ -325,6 +326,7 @@ pub(crate) async fn ensure_zpool_has_datasets(
             do_format,
             Some(encryption_details),
             None,
+            None,
         );
 
         keyfile.zero_and_unlink().await.map_err(|error| {
@@ -381,6 +383,7 @@ pub(crate) async fn ensure_zpool_has_datasets(
             do_format,
             encryption_details,
             size_details,
+            None,
         )?;
 
         if dataset.wipe {

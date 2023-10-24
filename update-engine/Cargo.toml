@@ -21,6 +21,7 @@ schemars = { workspace = true, features = ["uuid1"] }
 slog.workspace = true
 tokio = { workspace = true, features = ["macros", "sync", "time", "rt-multi-thread"] }
 uuid.workspace = true
+omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 buf-list.workspace = true

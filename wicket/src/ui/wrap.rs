@@ -324,7 +324,7 @@ impl<'a> Fragment for StyledWord<'a> {
 
 /// Forcibly break spans wider than `line_width` into smaller spans.
 ///
-/// This simply calls [`Span::break_apart`] on spans that are too wide.
+/// This simply calls [`StyledWord::break_apart`] on spans that are too wide.
 fn break_words<'a, I>(spans: I, line_width: usize) -> Vec<StyledWord<'a>>
 where
     I: IntoIterator<Item = StyledWord<'a>>,

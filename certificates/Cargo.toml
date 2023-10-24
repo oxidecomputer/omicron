@@ -12,6 +12,7 @@ openssl-sys.workspace = true
 thiserror.workspace = true
 
 omicron-common.workspace = true
+omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 omicron-test-utils.workspace = true

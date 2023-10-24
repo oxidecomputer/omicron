@@ -46,7 +46,7 @@ impl DataStore {
         diesel::insert_into(dsl::console_session)
             .values(session)
             .returning(ConsoleSession::as_returning())
-            .get_result_async(self.pool_authorized(opctx).await?)
+            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 Error::internal_error(&format!(
@@ -68,7 +68,7 @@ impl DataStore {
             .filter(dsl::token.eq(authz_session.id()))
             .set((dsl::time_last_used.eq(Utc::now()),))
             .returning(ConsoleSession::as_returning())
-            .get_result_async(self.pool_authorized(opctx).await?)
+            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 Error::internal_error(&format!(
@@ -130,7 +130,7 @@ impl DataStore {
         diesel::delete(dsl::console_session)
             .filter(dsl::silo_user_id.eq(silo_user_id))
             .filter(dsl::token.eq(authz_session.id()))
-            .execute_async(self.pool_authorized(opctx).await?)
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map(|_rows_deleted| ())
             .map_err(|e| {

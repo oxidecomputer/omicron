@@ -29,45 +29,64 @@ pub struct DiskRuntimeState {
     pub time_updated: DateTime<Utc>,
 }
 
-/// Runtime state of the Instance, including the actual running state and minimal
-/// metadata
-///
-/// This state is owned by the sled agent running that Instance.
+/// The "static" properties of an instance: information about the instance that
+/// doesn't change while the instance is running.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct InstanceRuntimeState {
-    /// runtime state of the Instance
-    pub run_state: InstanceState,
-    /// which sled is running this Instance
-    pub sled_id: Uuid,
-    /// which propolis-server is running this Instance
-    pub propolis_id: Uuid,
-    /// the target propolis-server during a migration of this Instance
-    pub dst_propolis_id: Option<Uuid>,
-    /// address of propolis-server running this Instance
-    pub propolis_addr: Option<SocketAddr>,
-    /// migration id (if one in process)
-    pub migration_id: Option<Uuid>,
-    /// The generation number for the Propolis and sled identifiers for this
-    /// instance.
-    pub propolis_gen: Generation,
-    /// number of CPUs allocated for this Instance
+pub struct InstanceProperties {
     pub ncpus: InstanceCpuCount,
-    /// memory allocated for this Instance
     pub memory: ByteCount,
-    /// RFC1035-compliant hostname for the Instance.
+    /// RFC1035-compliant hostname for the instance.
     // TODO-cleanup different type?
     pub hostname: String,
-    /// generation number for this state
+}
+
+/// The dynamic runtime properties of an instance: its current VMM ID (if any),
+/// migration information (if any), and the instance state to report if there is
+/// no active VMM.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InstanceRuntimeState {
+    /// The instance's currently active VMM ID.
+    pub propolis_id: Option<Uuid>,
+    /// If a migration is active, the ID of the target VMM.
+    pub dst_propolis_id: Option<Uuid>,
+    /// If a migration is active, the ID of that migration.
+    pub migration_id: Option<Uuid>,
+    /// Generation number for this state.
     pub gen: Generation,
-    /// timestamp for this information
+    /// Timestamp for this information.
     pub time_updated: DateTime<Utc>,
+}
+
+/// The dynamic runtime properties of an individual VMM process.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct VmmRuntimeState {
+    /// The last state reported by this VMM.
+    pub state: InstanceState,
+    /// The generation number for this VMM's state.
+    pub gen: Generation,
+    /// Timestamp for the VMM's state.
+    pub time_updated: DateTime<Utc>,
+}
+
+/// A wrapper type containing a sled's total knowledge of the state of a
+/// specific VMM and the instance it incarnates.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SledInstanceState {
+    /// The sled's conception of the state of the instance.
+    pub instance_state: InstanceRuntimeState,
+
+    /// The ID of the VMM whose state is being reported.
+    pub propolis_id: Uuid,
+
+    /// The most recent state of the sled's VMM process.
+    pub vmm_state: VmmRuntimeState,
 }
 
 // Oximeter producer/collector objects.
 
 /// Information announced by a metric server, used so that clients can contact it and collect
 /// available metric data from it.
-#[derive(Debug, Clone, JsonSchema, Serialize, Deserialize)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
 pub struct ProducerEndpoint {
     pub id: Uuid,
     pub address: SocketAddr,

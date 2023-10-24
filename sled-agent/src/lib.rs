@@ -17,6 +17,7 @@ pub mod sim;
 pub mod common;
 
 // Modules for the non-simulated sled agent.
+mod backing_fs;
 pub mod bootstrap;
 pub mod config;
 pub(crate) mod dump_setup;

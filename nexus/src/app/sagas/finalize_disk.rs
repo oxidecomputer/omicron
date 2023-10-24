@@ -79,7 +79,7 @@ impl NexusSaga for SagaFinalizeDisk {
                 silo_id: params.silo_id,
                 project_id: params.project_id,
                 disk_id: params.disk_id,
-                use_the_pantry: true,
+                attached_instance_and_sled: None,
                 create_params: params::SnapshotCreate {
                     identity: external::IdentityMetadataCreateParams {
                         name: snapshot_name.clone(),

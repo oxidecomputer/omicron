@@ -51,7 +51,7 @@ use illumos_utils::dladm::{
     Dladm, Etherstub, EtherstubVnic, GetSimnetError, PhysicalLink,
 };
 use illumos_utils::link::{Link, VnicAllocator};
-use illumos_utils::opte::{Port, PortManager, PortTicket};
+use illumos_utils::opte::{DhcpCfg, Port, PortManager, PortTicket};
 use illumos_utils::running_zone::{
     InstalledZone, RunCommandError, RunningZone,
 };
@@ -61,7 +61,6 @@ use illumos_utils::zone::Zones;
 use illumos_utils::{execute, PFEXEC};
 use internal_dns::resolver::Resolver;
 use itertools::Itertools;
-use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::AZ_PREFIX;
 use omicron_common::address::BOOTSTRAP_ARTIFACT_PORT;
 use omicron_common::address::CLICKHOUSE_KEEPER_PORT;
@@ -73,9 +72,13 @@ use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
+use omicron_common::address::WICKETD_NEXUS_PROXY_PORT;
 use omicron_common::address::WICKETD_PORT;
+use omicron_common::address::{Ipv6Subnet, NEXUS_TECHPORT_EXTERNAL_PORT};
 use omicron_common::api::external::Generation;
-use omicron_common::api::internal::shared::RackNetworkConfig;
+use omicron_common::api::internal::shared::{
+    HostPortConfig, RackNetworkConfig,
+};
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, retry_policy_local,
     BackoffError,
@@ -95,8 +98,8 @@ use sled_hardware::SledMode;
 use sled_storage::dataset::{CONFIG_DATASET, INSTALL_DATASET, ZONE_DATASET};
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
+use std::collections::BTreeMap;
 use std::collections::HashSet;
-use std::collections::{BTreeMap, HashMap};
 use std::iter;
 use std::iter::FromIterator;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
@@ -756,7 +759,7 @@ impl ServiceManager {
                         }
                     }
                 }
-                ServiceType::Maghemite { .. } => {
+                ServiceType::MgDdm { .. } => {
                     // If on a non-gimlet, sled-agent can be configured to map
                     // links into the switch zone. Validate those links here.
                     for link in &self.inner.switch_zone_maghemite_links {
@@ -861,11 +864,11 @@ impl ServiceManager {
             // config allows outbound access which is enough for
             // Boundary NTP which needs to come up before Nexus.
             let port = port_manager
-                .create_port(nic, snat, external_ips, &[])
+                .create_port(nic, snat, external_ips, &[], DhcpCfg::default())
                 .map_err(|err| Error::ServicePortCreation {
-                service: svc.details.to_string(),
-                err: Box::new(err),
-            })?;
+                    service: svc.details.to_string(),
+                    err: Box::new(err),
+                })?;
 
             // We also need to update the switch with the NAT mappings
             let (target_ip, first_port, last_port) = match snat {
@@ -1447,6 +1450,8 @@ impl ServiceManager {
                     let deployment_config = NexusDeploymentConfig {
                         id: request.zone.id,
                         rack_id: sled_info.rack_id,
+                        techport_external_server_port:
+                            NEXUS_TECHPORT_EXTERNAL_PORT,
 
                         dropshot_external: ConfigDropshotWithTls {
                             tls: *external_tls,
@@ -1510,6 +1515,9 @@ impl ServiceManager {
                     let mut file = tokio::fs::OpenOptions::new()
                         .append(true)
                         .open(&config_path)
+                        .await
+                        .map_err(|err| Error::io_path(&config_path, err))?;
+                    file.write_all(b"\n\n")
                         .await
                         .map_err(|err| Error::io_path(&config_path, err))?;
                     file.write_all(config_str.as_bytes())
@@ -1691,6 +1699,28 @@ impl ServiceManager {
                         "config/mgs-address",
                         &format!("[::1]:{MGS_PORT}"),
                     )?;
+
+                    // We intentionally bind `nexus-proxy-address` to `::` so
+                    // wicketd will serve this on all interfaces, particularly
+                    // the tech port interfaces, allowing external clients to
+                    // connect to this Nexus proxy.
+                    smfh.setprop(
+                        "config/nexus-proxy-address",
+                        &format!("[::]:{WICKETD_NEXUS_PROXY_PORT}"),
+                    )?;
+                    if let Some(underlay_address) = self
+                        .inner
+                        .sled_info
+                        .get()
+                        .map(|info| info.underlay_address)
+                    {
+                        let rack_subnet =
+                            Ipv6Subnet::<AZ_PREFIX>::new(underlay_address);
+                        smfh.setprop(
+                            "config/rack-subnet",
+                            &rack_subnet.net().ip().to_string(),
+                        )?;
+                    }
 
                     let serialized_baseboard =
                         serde_json::to_string_pretty(&baseboard)?;
@@ -1924,8 +1954,13 @@ impl ServiceManager {
                     // Nothing to do here - this service is special and
                     // configured in `ensure_switch_zone_uplinks_configured`
                 }
-                ServiceType::Maghemite { mode } => {
-                    info!(self.inner.log, "Setting up Maghemite service");
+                ServiceType::Mgd => {
+                    info!(self.inner.log, "Setting up mgd service");
+                    smfh.setprop("config/admin_host", "::")?;
+                    smfh.refresh()?;
+                }
+                ServiceType::MgDdm { mode } => {
+                    info!(self.inner.log, "Setting up mg-ddm service");
 
                     smfh.setprop("config/mode", &mode)?;
                     smfh.setprop("config/admin_host", "::")?;
@@ -1986,8 +2021,8 @@ impl ServiceManager {
                     )?;
 
                     if is_gimlet {
-                        // Maghemite for a scrimlet needs to be configured to
-                        // talk to dendrite
+                        // Ddm for a scrimlet needs to be configured to talk to
+                        // dendrite
                         smfh.setprop("config/dpd_host", "[::1]")?;
                         smfh.setprop("config/dpd_port", DENDRITE_PORT)?;
                     }
@@ -2480,7 +2515,8 @@ impl ServiceManager {
                     ServiceType::Tfport { pkt_source: "tfpkt0".to_string() },
                     ServiceType::Uplink,
                     ServiceType::Wicketd { baseboard },
-                    ServiceType::Maghemite { mode: "transit".to_string() },
+                    ServiceType::Mgd,
+                    ServiceType::MgDdm { mode: "transit".to_string() },
                 ]
             }
 
@@ -2503,7 +2539,8 @@ impl ServiceManager {
                     ServiceType::ManagementGatewayService,
                     ServiceType::Uplink,
                     ServiceType::Wicketd { baseboard },
-                    ServiceType::Maghemite { mode: "transit".to_string() },
+                    ServiceType::Mgd,
+                    ServiceType::MgDdm { mode: "transit".to_string() },
                     ServiceType::Tfport { pkt_source: "tfpkt0".to_string() },
                     ServiceType::SpSim,
                 ]
@@ -2558,10 +2595,20 @@ impl ServiceManager {
         let log = &self.inner.log;
 
         // Configure uplinks via DPD in our switch zone.
-        let our_uplinks = EarlyNetworkSetup::new(log)
+        let our_ports = EarlyNetworkSetup::new(log)
             .init_switch_config(rack_network_config, switch_zone_ip)
-            .await?;
+            .await?
+            .into_iter()
+            .map(From::from)
+            .collect();
 
+        self.ensure_scrimlet_host_ports(our_ports).await
+    }
+
+    pub async fn ensure_scrimlet_host_ports(
+        &self,
+        our_ports: Vec<HostPortConfig>,
+    ) -> Result<(), Error> {
         // We expect the switch zone to be running, as we're called immediately
         // after `ensure_zone()` above and we just successfully configured
         // uplinks via DPD running in our switch zone. If somehow we're in any
@@ -2592,22 +2639,14 @@ impl ServiceManager {
         smfh.delpropgroup("uplinks")?;
         smfh.addpropgroup("uplinks", "application")?;
 
-        // When naming the uplink ports, we need to append `_0`, `_1`, etc., for
-        // each use of any given port. We use a hashmap of counters of port name
-        // -> number of uplinks to correctly supply that suffix.
-        let mut port_count = HashMap::new();
-        for uplink_config in &our_uplinks {
-            let this_port_count: &mut usize =
-                port_count.entry(&uplink_config.uplink_port).or_insert(0);
-            smfh.addpropvalue_type(
-                &format!(
-                    "uplinks/{}_{}",
-                    uplink_config.uplink_port, *this_port_count
-                ),
-                &uplink_config.uplink_cidr.to_string(),
-                "astring",
-            )?;
-            *this_port_count += 1;
+        for port_config in &our_ports {
+            for addr in &port_config.addrs {
+                smfh.addpropvalue_type(
+                    &format!("uplinks/{}_0", port_config.port,),
+                    &addr.to_string(),
+                    "astring",
+                )?;
+            }
         }
         smfh.refresh()?;
 
@@ -2705,9 +2744,8 @@ impl ServiceManager {
                 );
                 *request = new_request;
 
-                let address = request
-                    .addresses
-                    .get(0)
+                let first_address = request.addresses.get(0);
+                let address = first_address
                     .map(|addr| addr.to_string())
                     .unwrap_or_else(|| "".to_string());
 
@@ -2813,6 +2851,29 @@ impl ServiceManager {
                             }
                             smfh.refresh()?;
                         }
+                        ServiceType::Wicketd { .. } => {
+                            if let Some(&address) = first_address {
+                                let rack_subnet =
+                                    Ipv6Subnet::<AZ_PREFIX>::new(address);
+
+                                info!(
+                                    self.inner.log, "configuring wicketd";
+                                    "rack_subnet" => %rack_subnet.net().ip(),
+                                );
+
+                                smfh.setprop(
+                                    "config/rack-subnet",
+                                    &rack_subnet.net().ip().to_string(),
+                                )?;
+
+                                smfh.refresh()?;
+                            } else {
+                                error!(
+                                    self.inner.log,
+                                    "underlay address unexpectedly missing",
+                                );
+                            }
+                        }
                         ServiceType::Tfport { .. } => {
                             // Since tfport and dpd communicate using localhost,
                             // the tfport service shouldn't need to be restarted.
@@ -2821,7 +2882,7 @@ impl ServiceManager {
                             // Only configured in
                             // `ensure_switch_zone_uplinks_configured`
                         }
-                        ServiceType::Maghemite { mode } => {
+                        ServiceType::MgDdm { mode } => {
                             smfh.delpropvalue("config/mode", "*")?;
                             smfh.addpropvalue("config/mode", &mode)?;
                             smfh.refresh()?;

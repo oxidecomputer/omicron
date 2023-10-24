@@ -453,18 +453,21 @@ impl From<&'_ CurrentRssConfig> for CurrentRssUserConfig {
 
 fn validate_rack_network_config(
     config: &RackNetworkConfig,
-) -> Result<bootstrap_agent_client::types::RackNetworkConfig> {
+) -> Result<bootstrap_agent_client::types::RackNetworkConfigV1> {
+    use bootstrap_agent_client::types::BgpConfig as BaBgpConfig;
+    use bootstrap_agent_client::types::BgpPeerConfig as BaBgpPeerConfig;
+    use bootstrap_agent_client::types::PortConfigV1 as BaPortConfigV1;
     use bootstrap_agent_client::types::PortFec as BaPortFec;
     use bootstrap_agent_client::types::PortSpeed as BaPortSpeed;
+    use bootstrap_agent_client::types::RouteConfig as BaRouteConfig;
     use bootstrap_agent_client::types::SwitchLocation as BaSwitchLocation;
-    use bootstrap_agent_client::types::UplinkConfig as BaUplinkConfig;
     use omicron_common::api::internal::shared::PortFec;
     use omicron_common::api::internal::shared::PortSpeed;
     use omicron_common::api::internal::shared::SwitchLocation;
 
     // Ensure that there is at least one uplink
-    if config.uplinks.is_empty() {
-        return Err(anyhow!("Must have at least one uplink configured"));
+    if config.ports.is_empty() {
+        return Err(anyhow!("Must have at least one port configured"));
     }
 
     // Make sure `infra_ip_first`..`infra_ip_last` is a well-defined range...
@@ -475,34 +478,55 @@ fn validate_rack_network_config(
             },
         )?;
 
-    // iterate through each UplinkConfig
-    for uplink_config in &config.uplinks {
-        // ... and check that it contains `uplink_ip`.
-        if uplink_config.uplink_cidr.ip() < infra_ip_range.first
-            || uplink_config.uplink_cidr.ip() > infra_ip_range.last
-        {
-            bail!(
+    // TODO this implies a single contiguous range for port IPs which is over
+    // constraining
+    // iterate through each port config
+    for port_config in &config.ports {
+        for addr in &port_config.addresses {
+            // ... and check that it contains `uplink_ip`.
+            if addr.ip() < infra_ip_range.first
+                || addr.ip() > infra_ip_range.last
+            {
+                bail!(
                 "`uplink_cidr`'s IP address must be in the range defined by \
                 `infra_ip_first` and `infra_ip_last`"
             );
+            }
         }
     }
     // TODO Add more client side checks on `rack_network_config` contents?
 
-    Ok(bootstrap_agent_client::types::RackNetworkConfig {
+    Ok(bootstrap_agent_client::types::RackNetworkConfigV1 {
+        rack_subnet: config.rack_subnet,
         infra_ip_first: config.infra_ip_first,
         infra_ip_last: config.infra_ip_last,
-        uplinks: config
-            .uplinks
+        ports: config
+            .ports
             .iter()
-            .map(|config| BaUplinkConfig {
-                gateway_ip: config.gateway_ip,
+            .map(|config| BaPortConfigV1 {
+                port: config.port.clone(),
+                routes: config
+                    .routes
+                    .iter()
+                    .map(|r| BaRouteConfig {
+                        destination: r.destination,
+                        nexthop: r.nexthop,
+                    })
+                    .collect(),
+                addresses: config.addresses.clone(),
+                bgp_peers: config
+                    .bgp_peers
+                    .iter()
+                    .map(|p| BaBgpPeerConfig {
+                        addr: p.addr,
+                        asn: p.asn,
+                        port: p.port.clone(),
+                    })
+                    .collect(),
                 switch: match config.switch {
                     SwitchLocation::Switch0 => BaSwitchLocation::Switch0,
                     SwitchLocation::Switch1 => BaSwitchLocation::Switch1,
                 },
-                uplink_cidr: config.uplink_cidr,
-                uplink_port: config.uplink_port.clone(),
                 uplink_port_speed: match config.uplink_port_speed {
                     PortSpeed::Speed0G => BaPortSpeed::Speed0G,
                     PortSpeed::Speed1G => BaPortSpeed::Speed1G,
@@ -519,7 +543,14 @@ fn validate_rack_network_config(
                     PortFec::None => BaPortFec::None,
                     PortFec::Rs => BaPortFec::Rs,
                 },
-                uplink_vid: config.uplink_vid,
+            })
+            .collect(),
+        bgp: config
+            .bgp
+            .iter()
+            .map(|config| BaBgpConfig {
+                asn: config.asn,
+                originate: config.originate.clone(),
             })
             .collect(),
     })
