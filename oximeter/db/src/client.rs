@@ -25,7 +25,9 @@ use dropshot::WhichPage;
 use oximeter::types::Sample;
 use slog::debug;
 use slog::error;
+use slog::info;
 use slog::trace;
+use slog::warn;
 use slog::Logger;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
@@ -688,7 +690,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_single_node() {
-        let logctx = test_setup_log("test_build_client");
+        let logctx = test_setup_log("test_single_node");
         let log = &logctx.log;
 
         // Let the OS assign a port and discover it after ClickHouse starts
@@ -2399,9 +2401,190 @@ mod tests {
         Ok(())
     }
 
+    // Returns the number of timeseries schemas being used.
+    async fn get_schema_count(client: &Client) -> usize {
+        client
+            .execute_with_body(
+                "SELECT * FROM oximeter.timeseries_schema FORMAT JSONEachRow;",
+            )
+            .await
+            .expect("Failed to SELECT from database")
+            .lines()
+            .count()
+    }
+
+    #[tokio::test]
+    async fn test_database_version_update_idempotent() {
+        let logctx = test_setup_log("test_database_version_update_idempotent");
+        let log = &logctx.log;
+
+        let mut db = ClickHouseInstance::new_single_node(0)
+            .await
+            .expect("Failed to start ClickHouse");
+        let address = SocketAddr::new("::1".parse().unwrap(), db.port());
+
+        let replicated = false;
+
+        // Initialize the database...
+        let client = Client::new(address, &log);
+        client
+            .initialize_db_with_version(replicated, model::OXIMETER_VERSION)
+            .await
+            .expect("Failed to initialize timeseries database");
+
+        // Insert data here so we can verify it still exists later.
+        //
+        // The values here don't matter much, we just want to check that
+        // the database data hasn't been dropped.
+        assert_eq!(0, get_schema_count(&client).await);
+        let sample = test_util::make_sample();
+        client.insert_samples(&[sample.clone()]).await.unwrap();
+        assert_eq!(1, get_schema_count(&client).await);
+
+        // Re-initialize the database, see that our data still exists
+        client
+            .initialize_db_with_version(replicated, model::OXIMETER_VERSION)
+            .await
+            .expect("Failed to initialize timeseries database");
+
+        assert_eq!(1, get_schema_count(&client).await);
+
+        db.cleanup().await.expect("Failed to cleanup ClickHouse server");
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_database_version_will_not_downgrade() {
+        let logctx = test_setup_log("test_database_version_will_not_downgrade");
+        let log = &logctx.log;
+
+        let mut db = ClickHouseInstance::new_single_node(0)
+            .await
+            .expect("Failed to start ClickHouse");
+        let address = SocketAddr::new("::1".parse().unwrap(), db.port());
+
+        let replicated = false;
+
+        // Initialize the database
+        let client = Client::new(address, &log);
+        client
+            .initialize_db_with_version(replicated, model::OXIMETER_VERSION)
+            .await
+            .expect("Failed to initialize timeseries database");
+
+        // Bump the version of the database to a "too new" version
+        client
+            .insert_version(model::OXIMETER_VERSION + 1)
+            .await
+            .expect("Failed to insert very new DB version");
+
+        // Expect a failure re-initializing the client.
+        //
+        // This will attempt to initialize the client with "version =
+        // model::OXIMETER_VERSION", which is "too old".
+        client
+            .initialize_db_with_version(replicated, model::OXIMETER_VERSION)
+            .await
+            .expect_err("Should have failed, downgrades are not supported");
+
+        db.cleanup().await.expect("Failed to cleanup ClickHouse server");
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_database_version_wipes_old_version() {
+        let logctx = test_setup_log("test_database_version_wipes_old_version");
+        let log = &logctx.log;
+        let mut db = ClickHouseInstance::new_single_node(0)
+            .await
+            .expect("Failed to start ClickHouse");
+        let address = SocketAddr::new("::1".parse().unwrap(), db.port());
+
+        let replicated = false;
+
+        // Initialize the Client
+        let client = Client::new(address, &log);
+        client
+            .initialize_db_with_version(replicated, model::OXIMETER_VERSION)
+            .await
+            .expect("Failed to initialize timeseries database");
+
+        // Insert data here so we can remove it later.
+        //
+        // The values here don't matter much, we just want to check that
+        // the database data gets dropped later.
+        assert_eq!(0, get_schema_count(&client).await);
+        let sample = test_util::make_sample();
+        client.insert_samples(&[sample.clone()]).await.unwrap();
+        assert_eq!(1, get_schema_count(&client).await);
+
+        // If we try to upgrade to a newer version, we'll drop old data.
+        client
+            .initialize_db_with_version(replicated, model::OXIMETER_VERSION + 1)
+            .await
+            .expect("Should have initialized database successfully");
+        assert_eq!(0, get_schema_count(&client).await);
+
+        db.cleanup().await.expect("Failed to cleanup ClickHouse server");
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_update_schema_cache_on_new_sample() {
+        usdt::register_probes().unwrap();
+        let logctx = test_setup_log("test_update_schema_cache_on_new_sample");
+        let log = &logctx.log;
+
+        // Let the OS assign a port and discover it after ClickHouse starts
+        let mut db = ClickHouseInstance::new_single_node(0)
+            .await
+            .expect("Failed to start ClickHouse");
+        let address = SocketAddr::new("::1".parse().unwrap(), db.port());
+
+        let client = Client::new(address, &log);
+        client
+            .init_single_node_db()
+            .await
+            .expect("Failed to initialize timeseries database");
+        let samples = [test_util::make_sample()];
+        client.insert_samples(&samples).await.unwrap();
+
+        // Get the count of schema directly from the DB, which should have just
+        // one.
+        let response = client.execute_with_body(
+            "SELECT COUNT() FROM oximeter.timeseries_schema FORMAT JSONEachRow;
+        ").await.unwrap();
+        assert_eq!(response.lines().count(), 1, "Expected exactly 1 schema");
+        assert_eq!(client.schema.lock().await.len(), 1);
+
+        // Clear the internal cache, and insert the sample again.
+        //
+        // This should cause us to look up the schema in the DB again, but _not_
+        // insert a new one.
+        client.schema.lock().await.clear();
+        assert!(client.schema.lock().await.is_empty());
+
+        client.insert_samples(&samples).await.unwrap();
+
+        // Get the count of schema directly from the DB, which should still have
+        // only the one schema.
+        let response = client.execute_with_body(
+            "SELECT COUNT() FROM oximeter.timeseries_schema FORMAT JSONEachRow;
+        ").await.unwrap();
+        assert_eq!(
+            response.lines().count(),
+            1,
+            "Expected exactly 1 schema again"
+        );
+        assert_eq!(client.schema.lock().await.len(), 1);
+        db.cleanup().await.expect("Failed to cleanup ClickHouse server");
+        logctx.cleanup_successful();
+    }
+
     #[tokio::test]
     async fn test_build_replicated() {
-        let log = slog::Logger::root(slog::Discard, o!());
+        let logctx = test_setup_log("test_build_replicated");
+        let log = &logctx.log;
 
         let mut cluster = ClickHouseCluster::new()
             .await
@@ -2468,6 +2651,8 @@ mod tests {
             .cleanup()
             .await
             .expect("Failed to cleanup ClickHouse server 2");
+
+        logctx.cleanup_successful();
     }
 
     // Testing helper functions
