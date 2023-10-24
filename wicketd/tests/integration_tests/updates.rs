@@ -168,9 +168,8 @@ async fn test_updates() {
     match terminal_event.kind {
         StepEventKind::ExecutionFailed { failed_step, .. } => {
             // TODO: obviously we shouldn't stop here, get past more of the
-            // update process in this test. We currently fail when attempting to
-            // look up the RoT's CMPA/CFPA.
-            assert_eq!(failed_step.info.component, UpdateComponent::Rot);
+            // update process in this test.
+            assert_eq!(failed_step.info.component, UpdateComponent::Sp);
         }
         other => {
             panic!("unexpected terminal event kind: {other:?}");
