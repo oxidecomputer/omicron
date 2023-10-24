@@ -911,11 +911,7 @@ pub(crate) async fn bootstore_update(
             routes: settings
                 .routes
                 .iter()
-                .map(|r| RouteConfig {
-                    destination: r.dst,
-                    nexthop: r.gw.ip(),
-                    vid: r.vid.map(Into::into),
-                })
+                .map(|r| RouteConfig { destination: r.dst, nexthop: r.gw.ip() })
                 .collect(),
             addresses: settings.addresses.iter().map(|a| a.address).collect(),
             switch: switch_location,

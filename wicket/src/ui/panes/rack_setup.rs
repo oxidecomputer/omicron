@@ -718,12 +718,7 @@ fn rss_config_text<'a>(
                 vec![
                     Span::styled("  • Route     : ", label_style),
                     Span::styled(
-                        format!(
-                            "{} -> {} (vid={})",
-                            r.destination,
-                            r.nexthop,
-                            r.vid.unwrap_or(0),
-                        ),
+                        format!("{} -> {}", r.destination, r.nexthop),
                         ok_style,
                     ),
                 ]

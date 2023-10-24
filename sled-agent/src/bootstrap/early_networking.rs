@@ -509,7 +509,7 @@ impl<'a> EarlyNetworkSetup<'a> {
             {
                 dpd_port_settings.v4_routes.insert(
                     dst.to_string(),
-                    RouteSettingsV4 { link_id: link_id.0, nexthop, vid: r.vid },
+                    RouteSettingsV4 { link_id: link_id.0, nexthop, vid: None },
                 );
             }
             if let (IpNetwork::V6(dst), IpAddr::V6(nexthop)) =
@@ -517,7 +517,7 @@ impl<'a> EarlyNetworkSetup<'a> {
             {
                 dpd_port_settings.v6_routes.insert(
                     dst.to_string(),
-                    RouteSettingsV6 { link_id: link_id.0, nexthop, vid: r.vid },
+                    RouteSettingsV6 { link_id: link_id.0, nexthop, vid: None },
                 );
             }
         }
@@ -785,65 +785,6 @@ mod tests {
                         routes: vec![RouteConfig {
                             destination: "0.0.0.0/0".parse().unwrap(),
                             nexthop: uplink.gateway_ip.into(),
-                            vid: None,
-                        }],
-                        addresses: vec![uplink.uplink_cidr.into()],
-                        switch: uplink.switch,
-                        port: uplink.uplink_port,
-                        uplink_port_speed: uplink.uplink_port_speed,
-                        uplink_port_fec: uplink.uplink_port_fec,
-                        bgp_peers: vec![],
-                    }],
-                    bgp: vec![],
-                }),
-            },
-        };
-
-        assert_eq!(expected, v1);
-    }
-
-    #[test]
-    fn serialized_early_network_config_v0_to_v1_conversion_with_vid() {
-        let v0 = EarlyNetworkConfigV0 {
-            generation: 1,
-            rack_subnet: Ipv6Addr::UNSPECIFIED,
-            ntp_servers: Vec::new(),
-            rack_network_config: Some(RackNetworkConfigV0 {
-                infra_ip_first: Ipv4Addr::UNSPECIFIED,
-                infra_ip_last: Ipv4Addr::UNSPECIFIED,
-                uplinks: vec![UplinkConfig {
-                    gateway_ip: Ipv4Addr::UNSPECIFIED,
-                    switch: SwitchLocation::Switch0,
-                    uplink_port: "Port0".to_string(),
-                    uplink_port_speed: PortSpeed::Speed100G,
-                    uplink_port_fec: PortFec::None,
-                    uplink_cidr: "192.168.0.1/16".parse().unwrap(),
-                    uplink_vid: Some(10),
-                }],
-            }),
-        };
-
-        let v0_serialized = serde_json::to_vec(&v0).unwrap();
-        let bootstore_conf =
-            bootstore::NetworkConfig { generation: 1, blob: v0_serialized };
-
-        let v1 = EarlyNetworkConfig::try_from(bootstore_conf).unwrap();
-        let v0_rack_network_config = v0.rack_network_config.unwrap();
-        let uplink = v0_rack_network_config.uplinks[0].clone();
-        let expected = EarlyNetworkConfig {
-            generation: 1,
-            schema_version: 1,
-            body: EarlyNetworkConfigBody {
-                ntp_servers: v0.ntp_servers.clone(),
-                rack_network_config: Some(RackNetworkConfigV1 {
-                    rack_subnet: Ipv6Network::new(v0.rack_subnet, 56).unwrap(),
-                    infra_ip_first: v0_rack_network_config.infra_ip_first,
-                    infra_ip_last: v0_rack_network_config.infra_ip_last,
-                    ports: vec![PortConfigV1 {
-                        routes: vec![RouteConfig {
-                            destination: "0.0.0.0/0".parse().unwrap(),
-                            nexthop: uplink.gateway_ip.into(),
-                            vid: Some(10),
                         }],
                         addresses: vec![uplink.uplink_cidr.into()],
                         switch: uplink.switch,
