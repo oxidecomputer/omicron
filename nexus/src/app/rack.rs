@@ -493,7 +493,11 @@ impl super::Nexus {
 
                 match self
                     .db_datastore
-                    .switch_port_settings_create(opctx, &port_settings_params)
+                    .switch_port_settings_create(
+                        opctx,
+                        &port_settings_params,
+                        None,
+                    )
                     .await
                 {
                     Ok(_) | Err(Error::ObjectAlreadyExists { .. }) => Ok(()),

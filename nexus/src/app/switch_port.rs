@@ -51,7 +51,9 @@ impl super::Nexus {
             .await
         {
             Ok(id) => self.switch_port_settings_update(opctx, id, params).await,
-            Err(_) => self.switch_port_settings_create(opctx, params).await,
+            Err(_) => {
+                self.switch_port_settings_create(opctx, params, None).await
+            }
         }
     }
 
@@ -59,8 +61,9 @@ impl super::Nexus {
         self: &Arc<Self>,
         opctx: &OpContext,
         params: params::SwitchPortSettingsCreate,
+        id: Option<Uuid>,
     ) -> CreateResult<SwitchPortSettingsCombinedResult> {
-        self.db_datastore.switch_port_settings_create(opctx, &params).await
+        self.db_datastore.switch_port_settings_create(opctx, &params, id).await
     }
 
     pub(crate) async fn switch_port_settings_update(
@@ -80,7 +83,11 @@ impl super::Nexus {
 
         // create new settings
         let result = self
-            .switch_port_settings_create(opctx, new_settings.clone())
+            .switch_port_settings_create(
+                opctx,
+                new_settings.clone(),
+                Some(switch_port_settings_id),
+            )
             .await?;
 
         // run the port settings apply saga for each port referencing the
