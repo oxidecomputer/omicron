@@ -30,6 +30,7 @@ use oximeter::types::Sample;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::convert::TryFrom;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
@@ -107,7 +108,7 @@ pub(crate) struct DbFieldList {
     pub sources: Vec<DbFieldSource>,
 }
 
-impl From<DbFieldList> for Vec<FieldSchema> {
+impl From<DbFieldList> for BTreeSet<FieldSchema> {
     fn from(list: DbFieldList) -> Self {
         list.names
             .into_iter()
@@ -122,8 +123,8 @@ impl From<DbFieldList> for Vec<FieldSchema> {
     }
 }
 
-impl From<Vec<FieldSchema>> for DbFieldList {
-    fn from(list: Vec<FieldSchema>) -> Self {
+impl From<BTreeSet<FieldSchema>> for DbFieldList {
+    fn from(list: BTreeSet<FieldSchema>) -> Self {
         let mut names = Vec::with_capacity(list.len());
         let mut types = Vec::with_capacity(list.len());
         let mut sources = Vec::with_capacity(list.len());
@@ -914,6 +915,9 @@ pub(crate) fn unroll_measurement_row(sample: &Sample) -> (String, String) {
 
 /// Return the schema for a `Sample`.
 pub(crate) fn schema_for(sample: &Sample) -> TimeseriesSchema {
+    // The fields are iterated through whatever order the `Target` or `Metric`
+    // impl chooses. We'll store in a set ordered by field name, to ignore the
+    // declaration order.
     let created = Utc::now();
     let field_schema = sample
         .target_fields()
@@ -1403,7 +1407,7 @@ mod tests {
             sources: vec![DbFieldSource::Target, DbFieldSource::Metric],
         };
 
-        let list = vec![
+        let list: BTreeSet<_> = [
             FieldSchema {
                 name: String::from("field0"),
                 ty: FieldType::I64,
@@ -1414,11 +1418,13 @@ mod tests {
                 ty: FieldType::IpAddr,
                 source: FieldSource::Metric,
             },
-        ];
+        ]
+        .into_iter()
+        .collect();
 
         assert_eq!(DbFieldList::from(list.clone()), db_list);
         assert_eq!(db_list, list.clone().into());
-        let round_trip: Vec<FieldSchema> =
+        let round_trip: BTreeSet<FieldSchema> =
             DbFieldList::from(list.clone()).into();
         assert_eq!(round_trip, list);
     }
