@@ -35,7 +35,7 @@ crypto-common = { version = "0.1.6", default-features = false, features = ["getr
 diesel = { version = "2.1.1", features = ["chrono", "i-implement-a-third-party-backend-and-opt-into-breaking-changes", "network-address", "postgres", "r2d2", "serde_json", "uuid"] }
 digest = { version = "0.10.7", features = ["mac", "oid", "std"] }
 either = { version = "1.9.0" }
-flate2 = { version = "1.0.27" }
+flate2 = { version = "1.0.28" }
 futures = { version = "0.3.28" }
 futures-channel = { version = "0.3.28", features = ["sink"] }
 futures-core = { version = "0.3.28" }
@@ -128,7 +128,7 @@ crypto-common = { version = "0.1.6", default-features = false, features = ["getr
 diesel = { version = "2.1.1", features = ["chrono", "i-implement-a-third-party-backend-and-opt-into-breaking-changes", "network-address", "postgres", "r2d2", "serde_json", "uuid"] }
 digest = { version = "0.10.7", features = ["mac", "oid", "std"] }
 either = { version = "1.9.0" }
-flate2 = { version = "1.0.27" }
+flate2 = { version = "1.0.28" }
 futures = { version = "0.3.28" }
 futures-channel = { version = "0.3.28", features = ["sink"] }
 futures-core = { version = "0.3.28" }
