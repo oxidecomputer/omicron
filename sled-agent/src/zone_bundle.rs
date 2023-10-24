@@ -1823,11 +1823,10 @@ mod illumos_tests {
     // expected disk structure.
     struct ResourceWrapper {
         storage_handle: StorageHandle,
-        zpool_names: Vec<ZpoolName>,
         dirs: Vec<Utf8PathBuf>,
     }
 
-    async fn setup_storage() -> (StorageHandle, Vec<ZpoolName>) {
+    async fn setup_storage() -> StorageHandle {
         let (mut manager, handle) = FakeStorageManager::new();
 
         // Spawn the storage manager as done by sled-agent
@@ -1836,15 +1835,13 @@ mod illumos_tests {
         });
 
         // These must be internal zpools
-        let mut zpool_names = vec![];
         for _ in 0..2 {
             let internal_zpool_name = ZpoolName::new_internal(Uuid::new_v4());
             let internal_disk: RawDisk =
                 SyntheticDisk::new(internal_zpool_name.clone()).into();
             handle.upsert_disk(internal_disk).await;
-            zpool_names.push(internal_zpool_name);
         }
-        (handle, zpool_names)
+        handle
     }
 
     impl ResourceWrapper {
@@ -1853,7 +1850,7 @@ mod illumos_tests {
         async fn new() -> Self {
             // Spawn the storage related tasks required for testing and insert
             // synthetic disks.
-            let (storage_handle, zpool_names) = setup_storage().await;
+            let storage_handle = setup_storage().await;
             let resources = storage_handle.get_latest_resources().await;
             let dirs = resources.all_zone_bundle_directories();
             for d in dirs.iter() {
@@ -1861,7 +1858,7 @@ mod illumos_tests {
                     d.components().nth(3).unwrap().as_str().parse().unwrap();
                 create_test_dataset(&id, d).await.unwrap();
             }
-            Self { storage_handle, zpool_names, dirs }
+            Self { storage_handle, dirs }
         }
     }
 
