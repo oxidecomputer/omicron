@@ -170,6 +170,7 @@ pub struct FakeStorageManager {
     resource_updates: watch::Sender<StorageResources>,
 }
 
+#[cfg(feature = "testing")]
 impl FakeStorageManager {
     pub fn new() -> (Self, StorageHandle) {
         let (tx, rx) = mpsc::channel(QUEUE_SIZE);

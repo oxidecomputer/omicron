@@ -12,7 +12,7 @@
 //! these tasks are supposed to run forever, and they can shutdown if their
 //! handles are dropped.
 
-use crate::bootstrap::bootstore::{
+use crate::bootstrap::bootstore_setup::{
     new_bootstore_config, poll_ddmd_for_bootstore_peer_update,
 };
 use crate::bootstrap::secret_retriever::LrtqOrHardcodedSecretRetriever;

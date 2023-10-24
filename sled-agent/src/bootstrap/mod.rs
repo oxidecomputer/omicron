@@ -4,7 +4,7 @@
 
 //! Bootstrap-related utilities
 
-pub(crate) mod bootstore;
+pub(crate) mod bootstore_setup;
 pub mod client;
 pub mod config;
 pub mod early_networking;
