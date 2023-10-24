@@ -144,6 +144,8 @@ table! {
         lldp_service_config_id -> Uuid,
         link_name -> Text,
         mtu -> Int4,
+        fec -> crate::SwitchLinkFecEnum,
+        speed -> crate::SwitchLinkSpeedEnum,
     }
 }
 
@@ -188,7 +190,7 @@ table! {
 }
 
 table! {
-    switch_port_settings_route_config (port_settings_id, interface_name, dst, gw, vid) {
+    switch_port_settings_route_config (port_settings_id, interface_name, dst, gw) {
         port_settings_id -> Uuid,
         interface_name -> Text,
         dst -> Inet,
@@ -200,10 +202,14 @@ table! {
 table! {
     switch_port_settings_bgp_peer_config (port_settings_id, interface_name, addr) {
         port_settings_id -> Uuid,
-        bgp_announce_set_id -> Uuid,
         bgp_config_id -> Uuid,
         interface_name -> Text,
         addr -> Inet,
+        hold_time -> Int8,
+        idle_hold_time -> Int8,
+        delay_open -> Int8,
+        connect_retry -> Int8,
+        keepalive -> Int8,
     }
 }
 
@@ -216,6 +222,7 @@ table! {
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
         asn -> Int8,
+        bgp_announce_set_id -> Uuid,
         vrf -> Nullable<Text>,
     }
 }
@@ -344,19 +351,30 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         project_id -> Uuid,
         user_data -> Binary,
-        state -> crate::InstanceStateEnum,
-        time_state_updated -> Timestamptz,
-        state_generation -> Int8,
-        active_sled_id -> Uuid,
-        active_propolis_id -> Uuid,
-        active_propolis_ip -> Nullable<Inet>,
-        target_propolis_id -> Nullable<Uuid>,
-        migration_id -> Nullable<Uuid>,
-        propolis_generation -> Int8,
         ncpus -> Int8,
         memory -> Int8,
         hostname -> Text,
         boot_on_fault -> Bool,
+        state -> crate::InstanceStateEnum,
+        time_state_updated -> Timestamptz,
+        state_generation -> Int8,
+        active_propolis_id -> Nullable<Uuid>,
+        target_propolis_id -> Nullable<Uuid>,
+        migration_id -> Nullable<Uuid>,
+    }
+}
+
+table! {
+    vmm (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        instance_id -> Uuid,
+        sled_id -> Uuid,
+        propolis_ip -> Inet,
+        state -> crate::InstanceStateEnum,
+        time_state_updated -> Timestamptz,
+        state_generation -> Int8,
     }
 }
 
@@ -662,6 +680,7 @@ table! {
         time_modified -> Timestamptz,
         initialized -> Bool,
         tuf_base_url -> Nullable<Text>,
+        rack_subnet -> Nullable<Inet>,
     }
 }
 
@@ -801,6 +820,11 @@ table! {
     }
 }
 
+allow_tables_to_appear_in_same_query! {
+    virtual_provisioning_resource,
+    instance
+}
+
 table! {
     zpool (id) {
         id -> Uuid,
@@ -856,6 +880,7 @@ table! {
         snapshot_id -> Uuid,
         snapshot_addr -> Text,
         volume_references -> Int8,
+        deleting -> Bool,
     }
 }
 
@@ -1116,6 +1141,13 @@ table! {
 }
 
 table! {
+    bootstore_keys (key, generation) {
+        key -> Text,
+        generation -> Int8,
+    }
+}
+
+table! {
     db_metadata (singleton) {
         singleton -> Bool,
         time_created -> Timestamptz,
@@ -1130,7 +1162,7 @@ table! {
 ///
 /// This should be updated whenever the schema is changed. For more details,
 /// refer to: schema/crdb/README.adoc
-pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(4, 0, 0);
+pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(8, 0, 0);
 
 allow_tables_to_appear_in_same_query!(
     system_update,
@@ -1167,6 +1199,7 @@ allow_tables_to_appear_in_same_query!(
     sled,
     sled_resource,
     router_route,
+    vmm,
     volume,
     vpc,
     vpc_subnet,

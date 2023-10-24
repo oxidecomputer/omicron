@@ -7,15 +7,13 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::datastore::PgConnection;
-use crate::db::error::public_error_from_diesel_pool;
+use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
 use crate::db::model::Name;
 use crate::db::model::{AddressLot, AddressLotBlock, AddressLotReservedBlock};
 use crate::db::pagination::paginated;
-use async_bb8_diesel::{
-    AsyncConnection, AsyncRunQueryDsl, Connection, ConnectionError, PoolError,
-};
+use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl, Connection};
 use chrono::Utc;
 use diesel::result::Error as DieselError;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
@@ -47,7 +45,7 @@ impl DataStore {
         use db::schema::address_lot::dsl as lot_dsl;
         use db::schema::address_lot_block::dsl as block_dsl;
 
-        self.pool_authorized(opctx)
+        self.pool_connection_authorized(opctx)
             .await?
             // TODO https://github.com/oxidecomputer/omicron/issues/2811
             // Audit external networking database transaction usage
@@ -84,16 +82,14 @@ impl DataStore {
             })
             .await
             .map_err(|e| match e {
-                PoolError::Connection(ConnectionError::Query(
-                    DieselError::DatabaseError(_, _),
-                )) => public_error_from_diesel_pool(
+                DieselError::DatabaseError(_, _) => public_error_from_diesel(
                     e,
                     ErrorHandler::Conflict(
                         ResourceType::AddressLot,
                         &params.identity.name.as_str(),
                     ),
                 ),
-                _ => public_error_from_diesel_pool(e, ErrorHandler::Server),
+                _ => public_error_from_diesel(e, ErrorHandler::Server),
             })
     }
 
@@ -110,7 +106,7 @@ impl DataStore {
 
         let id = authz_address_lot.id();
 
-        let pool = self.pool_authorized(opctx).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
 
         #[derive(Debug)]
         enum AddressLotDeleteError {
@@ -121,7 +117,7 @@ impl DataStore {
 
         // TODO https://github.com/oxidecomputer/omicron/issues/2811
         // Audit external networking database transaction usage
-        pool.transaction_async(|conn| async move {
+        conn.transaction_async(|conn| async move {
             let rsvd: Vec<AddressLotReservedBlock> =
                 rsvd_block_dsl::address_lot_rsvd_block
                     .filter(rsvd_block_dsl::address_lot_id.eq(id))
@@ -151,8 +147,8 @@ impl DataStore {
         })
         .await
         .map_err(|e| match e {
-            TxnError::Pool(e) => {
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            TxnError::Database(e) => {
+                public_error_from_diesel(e, ErrorHandler::Server)
             }
             TxnError::CustomError(AddressLotDeleteError::LotInUse) => {
                 Error::invalid_request("lot is in use")
@@ -179,9 +175,9 @@ impl DataStore {
         }
         .filter(dsl::time_deleted.is_null())
         .select(AddressLot::as_select())
-        .load_async(self.pool_authorized(opctx).await?)
+        .load_async(&*self.pool_connection_authorized(opctx).await?)
         .await
-        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     pub async fn address_lot_block_list(
@@ -192,14 +188,14 @@ impl DataStore {
     ) -> ListResultVec<AddressLotBlock> {
         use db::schema::address_lot_block::dsl;
 
-        let pool = self.pool_authorized(opctx).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
 
         paginated(dsl::address_lot_block, dsl::id, &pagparams)
             .filter(dsl::address_lot_id.eq(authz_address_lot.id()))
             .select(AddressLotBlock::as_select())
-            .load_async(pool)
+            .load_async(&*conn)
             .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     pub async fn address_lot_id_for_block_id(
@@ -207,7 +203,7 @@ impl DataStore {
         opctx: &OpContext,
         address_lot_block_id: Uuid,
     ) -> LookupResult<Uuid> {
-        let pool = self.pool_authorized(opctx).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
 
         use db::schema::address_lot_block;
         use db::schema::address_lot_block::dsl as block_dsl;
@@ -216,11 +212,9 @@ impl DataStore {
             .filter(address_lot_block::id.eq(address_lot_block_id))
             .select(address_lot_block::address_lot_id)
             .limit(1)
-            .first_async::<Uuid>(pool)
+            .first_async::<Uuid>(&*conn)
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
-            })?;
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         Ok(address_lot_id)
     }
@@ -254,11 +248,10 @@ pub(crate) async fn try_reserve_block(
         .limit(1)
         .first_async::<AddressLotBlock>(conn)
         .await
-        .map_err(|e| match e {
-            ConnectionError::Query(_) => ReserveBlockTxnError::CustomError(
+        .map_err(|_e| {
+            ReserveBlockTxnError::CustomError(
                 ReserveBlockError::AddressNotInLot,
-            ),
-            e => e.into(),
+            )
         })?;
 
     // Ensure the address is not already taken.

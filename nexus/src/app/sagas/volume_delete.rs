@@ -155,39 +155,43 @@ async fn svd_delete_crucible_regions(
         sagactx.lookup::<CrucibleResources>("crucible_resources_to_delete")?;
 
     // Send DELETE calls to the corresponding Crucible agents
-    match crucible_resources_to_delete {
-        CrucibleResources::V1(crucible_resources_to_delete) => {
-            delete_crucible_regions(
-                log,
-                crucible_resources_to_delete.datasets_and_regions.clone(),
-            )
-            .await
-            .map_err(|e| {
-                ActionError::action_failed(format!(
-                    "failed to delete_crucible_regions: {:?}",
-                    e,
-                ))
-            })?;
+    let datasets_and_regions = osagactx
+        .datastore()
+        .regions_to_delete(
+            &crucible_resources_to_delete,
+        )
+        .await
+        .map_err(|e| {
+            ActionError::action_failed(format!(
+                "failed to get datasets_and_regions from crucible resources ({:?}): {:?}",
+                crucible_resources_to_delete,
+                e,
+            ))
+        })?;
 
-            // Remove DB records
-            let region_ids_to_delete = crucible_resources_to_delete
-                .datasets_and_regions
-                .iter()
-                .map(|(_, r)| r.id())
-                .collect();
+    delete_crucible_regions(log, datasets_and_regions.clone()).await.map_err(
+        |e| {
+            ActionError::action_failed(format!(
+                "failed to delete_crucible_regions: {:?}",
+                e,
+            ))
+        },
+    )?;
 
-            osagactx
-                .datastore()
-                .regions_hard_delete(log, region_ids_to_delete)
-                .await
-                .map_err(|e| {
-                    ActionError::action_failed(format!(
-                        "failed to regions_hard_delete: {:?}",
-                        e,
-                    ))
-                })?;
-        }
-    }
+    // Remove DB records
+    let region_ids_to_delete =
+        datasets_and_regions.iter().map(|(_, r)| r.id()).collect();
+
+    osagactx
+        .datastore()
+        .regions_hard_delete(log, region_ids_to_delete)
+        .await
+        .map_err(|e| {
+        ActionError::action_failed(format!(
+            "failed to regions_hard_delete: {:?}",
+            e,
+        ))
+    })?;
 
     Ok(())
 }
@@ -202,26 +206,34 @@ async fn svd_delete_crucible_running_snapshots(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let log = sagactx.user_data().log();
+    let osagactx = sagactx.user_data();
 
     let crucible_resources_to_delete =
         sagactx.lookup::<CrucibleResources>("crucible_resources_to_delete")?;
 
     // Send DELETE calls to the corresponding Crucible agents
-    match crucible_resources_to_delete {
-        CrucibleResources::V1(crucible_resources_to_delete) => {
-            delete_crucible_running_snapshots(
-                log,
-                crucible_resources_to_delete.datasets_and_snapshots.clone(),
-            )
-            .await
-            .map_err(|e| {
-                ActionError::action_failed(format!(
-                    "failed to delete_crucible_running_snapshots: {:?}",
-                    e,
-                ))
-            })?;
-        }
-    }
+    let datasets_and_snapshots = osagactx
+        .datastore()
+        .snapshots_to_delete(
+            &crucible_resources_to_delete,
+        )
+        .await
+        .map_err(|e| {
+            ActionError::action_failed(format!(
+                "failed to get datasets_and_snapshots from crucible resources ({:?}): {:?}",
+                crucible_resources_to_delete,
+                e,
+            ))
+        })?;
+
+    delete_crucible_running_snapshots(log, datasets_and_snapshots.clone())
+        .await
+        .map_err(|e| {
+            ActionError::action_failed(format!(
+                "failed to delete_crucible_running_snapshots: {:?}",
+                e,
+            ))
+        })?;
 
     Ok(())
 }
@@ -235,26 +247,34 @@ async fn svd_delete_crucible_snapshots(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let log = sagactx.user_data().log();
+    let osagactx = sagactx.user_data();
 
     let crucible_resources_to_delete =
         sagactx.lookup::<CrucibleResources>("crucible_resources_to_delete")?;
 
     // Send DELETE calls to the corresponding Crucible agents
-    match crucible_resources_to_delete {
-        CrucibleResources::V1(crucible_resources_to_delete) => {
-            delete_crucible_snapshots(
-                log,
-                crucible_resources_to_delete.datasets_and_snapshots.clone(),
-            )
-            .await
-            .map_err(|e| {
-                ActionError::action_failed(format!(
-                    "failed to delete_crucible_snapshots: {:?}",
-                    e,
-                ))
-            })?;
-        }
-    }
+    let datasets_and_snapshots = osagactx
+        .datastore()
+        .snapshots_to_delete(
+            &crucible_resources_to_delete,
+        )
+        .await
+        .map_err(|e| {
+            ActionError::action_failed(format!(
+                "failed to get datasets_and_snapshots from crucible resources ({:?}): {:?}",
+                crucible_resources_to_delete,
+                e,
+            ))
+        })?;
+
+    delete_crucible_snapshots(log, datasets_and_snapshots.clone())
+        .await
+        .map_err(|e| {
+            ActionError::action_failed(format!(
+                "failed to delete_crucible_snapshots: {:?}",
+                e,
+            ))
+        })?;
 
     Ok(())
 }
@@ -268,31 +288,39 @@ async fn svd_delete_crucible_snapshot_records(
     let crucible_resources_to_delete =
         sagactx.lookup::<CrucibleResources>("crucible_resources_to_delete")?;
 
-    match crucible_resources_to_delete {
-        CrucibleResources::V1(crucible_resources_to_delete) => {
-            // Remove DB records
-            for (_, region_snapshot) in
-                &crucible_resources_to_delete.datasets_and_snapshots
-            {
-                osagactx
-                    .datastore()
-                    .region_snapshot_remove(
-                        region_snapshot.dataset_id,
-                        region_snapshot.region_id,
-                        region_snapshot.snapshot_id,
-                    )
-                    .await
-                    .map_err(|e| {
-                        ActionError::action_failed(format!(
-                            "failed to region_snapshot_remove {} {} {}: {:?}",
-                            region_snapshot.dataset_id,
-                            region_snapshot.region_id,
-                            region_snapshot.snapshot_id,
-                            e,
-                        ))
-                    })?;
-            }
-        }
+    // Remove DB records
+    let datasets_and_snapshots = osagactx
+        .datastore()
+        .snapshots_to_delete(
+            &crucible_resources_to_delete,
+        )
+        .await
+        .map_err(|e| {
+            ActionError::action_failed(format!(
+                "failed to get datasets_and_snapshots from crucible resources ({:?}): {:?}",
+                crucible_resources_to_delete,
+                e,
+            ))
+        })?;
+
+    for (_, region_snapshot) in datasets_and_snapshots {
+        osagactx
+            .datastore()
+            .region_snapshot_remove(
+                region_snapshot.dataset_id,
+                region_snapshot.region_id,
+                region_snapshot.snapshot_id,
+            )
+            .await
+            .map_err(|e| {
+                ActionError::action_failed(format!(
+                    "failed to region_snapshot_remove {} {} {}: {:?}",
+                    region_snapshot.dataset_id,
+                    region_snapshot.region_id,
+                    region_snapshot.snapshot_id,
+                    e,
+                ))
+            })?;
     }
 
     Ok(())

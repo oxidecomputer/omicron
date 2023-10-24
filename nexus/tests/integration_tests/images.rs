@@ -7,15 +7,21 @@
 use dropshot::ResultsPage;
 use http::method::Method;
 use http::StatusCode;
+use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
+use nexus_db_queries::db::fixed_data::silo_user::USER_TEST_UNPRIVILEGED;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::create_project;
+use nexus_test_utils::resource_helpers::grant_iam;
 use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils_macros::nexus_test;
-use omicron_common::api::external::Disk;
-
+use nexus_types::external_api::shared::ProjectRole;
+use nexus_types::external_api::shared::SiloRole;
 use nexus_types::external_api::{params, views};
+use nexus_types::identity::Asset;
+use nexus_types::identity::Resource;
+use omicron_common::api::external::Disk;
 use omicron_common::api::external::{ByteCount, IdentityMetadataCreateParams};
 
 use httptest::{matchers::*, responders::*, Expectation, ServerBuilder};
@@ -708,4 +714,122 @@ async fn test_image_from_other_project_snapshot_fails(
     .parsed_body::<dropshot::HttpErrorResponseBody>()
     .unwrap();
     assert_eq!(error.message, "snapshot does not belong to this project");
+}
+
+#[nexus_test]
+async fn test_image_deletion_permissions(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    DiskTest::new(&cptestctx).await;
+
+    // Create a project
+
+    create_project(client, PROJECT_NAME).await;
+
+    // Grant the unprivileged user viewer on the silo and admin on that project
+
+    let silo_url = format!("/v1/system/silos/{}", DEFAULT_SILO.id());
+    grant_iam(
+        client,
+        &silo_url,
+        SiloRole::Viewer,
+        USER_TEST_UNPRIVILEGED.id(),
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    let project_url = format!("/v1/projects/{}", PROJECT_NAME);
+    grant_iam(
+        client,
+        &project_url,
+        ProjectRole::Admin,
+        USER_TEST_UNPRIVILEGED.id(),
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    // Create an image in the default silo using the privileged user
+
+    let server = ServerBuilder::new().run().unwrap();
+    server.expect(
+        Expectation::matching(request::method_path("HEAD", "/image.raw"))
+            .times(1..)
+            .respond_with(
+                status_code(200).append_header(
+                    "Content-Length",
+                    format!("{}", 4096 * 1000),
+                ),
+            ),
+    );
+
+    let silo_images_url = "/v1/images";
+    let images_url = get_project_images_url(PROJECT_NAME);
+
+    let image_create_params = get_image_create(params::ImageSource::Url {
+        url: server.url("/image.raw").to_string(),
+        block_size: BLOCK_SIZE,
+    });
+
+    let image =
+        NexusRequest::objects_post(client, &images_url, &image_create_params)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute_and_parse_unwrap::<views::Image>()
+            .await;
+
+    let image_id = image.identity.id;
+
+    // promote the image to the silo
+
+    let promote_url = format!("/v1/images/{}/promote", image_id);
+    NexusRequest::new(
+        RequestBuilder::new(client, http::Method::POST, &promote_url)
+            .expect_status(Some(http::StatusCode::ACCEPTED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap::<views::Image>()
+    .await;
+
+    let silo_images = NexusRequest::object_get(client, &silo_images_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
+        .await
+        .items;
+
+    assert_eq!(silo_images.len(), 1);
+    assert_eq!(silo_images[0].identity.name, "alpine-edge");
+
+    // the unprivileged user should not be able to delete that image
+
+    let image_url = format!("/v1/images/{}", image_id);
+    NexusRequest::new(
+        RequestBuilder::new(client, http::Method::DELETE, &image_url)
+            .expect_status(Some(http::StatusCode::FORBIDDEN)),
+    )
+    .authn_as(AuthnMode::UnprivilegedUser)
+    .execute()
+    .await
+    .expect("should not be able to delete silo image as unpriv user!");
+
+    // Demote that image
+
+    let demote_url =
+        format!("/v1/images/{}/demote?project={}", image_id, PROJECT_NAME);
+    NexusRequest::new(
+        RequestBuilder::new(client, http::Method::POST, &demote_url)
+            .expect_status(Some(http::StatusCode::ACCEPTED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap::<views::Image>()
+    .await;
+
+    // now the unpriviledged user should be able to delete that image
+
+    let image_url = format!("/v1/images/{}", image_id);
+    NexusRequest::new(
+        RequestBuilder::new(client, http::Method::DELETE, &image_url)
+            .expect_status(Some(http::StatusCode::NO_CONTENT)),
+    )
+    .authn_as(AuthnMode::UnprivilegedUser)
+    .execute()
+    .await
+    .expect("should be able to delete project image as unpriv user!");
 }

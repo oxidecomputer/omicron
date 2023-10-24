@@ -143,7 +143,10 @@ $ svcadm enable ipfilter
 
 Other network configurations are possible but beyond the scope of this doc.
 
-When making this choice, note that **in order to use the system once it's set up, you will need to be able to access it from a web browser.**  If you go with option 2 here, you may need to use an ssh tunnel or the like to do this.
+When making this choice, note that **in order to use the system once it's set
+up, you will need to be able to access it from a web browser.**  If you go with
+option 2 here, you may need to use an SSH tunnel (see:
+<<setting-up-an-ssh-tunnel-for-console-access>>) or the like to do this.
 
 === Picking a "machine" type
 
@@ -321,10 +324,32 @@ Error: Creates a new build target, and sets it as "active"
 Usage: omicron-package target create [OPTIONS]
 
 Options:
-  -i, --image <IMAGE>      [default: standard] [possible values: standard, trampoline]
-  -m, --machine <MACHINE>  [possible values: gimlet, gimlet-standalone, non-gimlet]
-  -s, --switch <SWITCH>    [possible values: asic, stub, softnpu]
-  -h, --help               Print help (see more with '--help')
+  -i, --image <IMAGE>
+          [default: standard]
+
+          Possible values:
+          - standard:   A typical host OS image
+          - trampoline: A recovery host OS image, intended to bootstrap a Standard image
+
+  -m, --machine <MACHINE>
+          Possible values:
+          - gimlet:            Use sled agent configuration for a Gimlet
+          - gimlet-standalone: Use sled agent configuration for a Gimlet running in isolation
+          - non-gimlet:        Use sled agent configuration for a device emulating a Gimlet
+
+  -s, --switch <SWITCH>
+          Possible values:
+          - asic:    Use the "real" Dendrite, that attempts to interact with the Tofino
+          - stub:    Use a "stub" Dendrite that does not require any real hardware
+          - softnpu: Use a "softnpu" Dendrite that uses the SoftNPU asic emulator
+
+  -r, --rack-topology <RACK_TOPOLOGY>
+          Possible values:
+          - multi-sled:  Use configurations suitable for a multi-sled deployment, such as dogfood and production racks
+          - single-sled: Use configurations suitable for a single-sled deployment, such as CI and dev machines
+
+  -h, --help
+          Print help (see a summary with '-h')
 
 ----
 
@@ -332,9 +357,9 @@ To set up a build target for a non-Gimlet machine with simulated (but fully func
 
 [source,console]
 ----
-$ cargo run --release --bin omicron-package -- -t default target create -i standard -m non-gimlet -s softnpu
+$ cargo run --release --bin omicron-package -- -t default target create -i standard -m non-gimlet -s softnpu -r single-sled
     Finished release [optimized] target(s) in 0.66s
-     Running `target/release/omicron-package -t default target create -i standard -m non-gimlet -s softnpu`
+     Running `target/release/omicron-package -t default target create -i standard -m non-gimlet -s softnpu -r single-sled`
 Created new build target 'default' and set it as active
 ----
 
@@ -411,7 +436,32 @@ Where did 192.168.1.20 come from?  That's the external address of the external
 DNS server.  We knew that because it's listed in the `external_dns_ips` entry of
 the `config-rss.toml` file we're using.
 
-Having looked this up, the easiest thing will be to use `http://192.168.1.21` for your URL (replacing with `https` if you used a certificate, and replacing that IP if needed).  If you've set up networking right, you should be able to reach this from your web browser.  You may have to instruct the browser to accept a self-signed TLS certificate.  See also <<_connecting_securely_with_tls_using_the_cli>>.
+Having looked this up, the easiest thing will be to use `http://192.168.1.21` for your URL (replacing with `https` if you used a certificate, and replacing that IP if needed).  If you've set up networking right, you should be able to reach this from your web browser.  You may have to instruct the browser to accept a self-signed TLS certificate.  See also <<connecting-securely-with-tls-using-the-cli>>.
+
+=== Setting up an SSH tunnel for console access
+
+If you set up a fake external network (method 2 in <<external-networking>>), one
+way to be able to access the console of your deployment is by setting up an SSH
+tunnel. Console access is required to use the CLI for device authentication.
+The following is an example of how to access the console with an SSH tunnel.
+
+Nexus serves the console, so first get a nexus IP from the instructions above.
+
+In this example, Omicron is running on the lab machine `dunkin`. Usually, you'll
+want to set up the tunnel from the machine where you run a browser, to the
+machine running Omicron. In this example, one would run this on the machine
+running the browser:
+
+```
+$ ssh -L 1234:192.168.1.22:80 dunkin.eng.oxide.computer
+```
+
+The above command configures `ssh` to bind to the TCP port `1234` on the machine
+running the browser, forward packets through the ssh connection, and redirect
+them to 192.168.1.22 port 80 *as seen from the other side of the connection*.
+
+Now you should be able to access the console from the browser on this machine,
+via something like: `127.0.0.1:1234`, using the port from the `ssh` command.
 
 === Using the CLI
 
@@ -674,4 +724,38 @@ To build a recovery host image:
 [source,console]
 ----
 $ ./tools/build-host-image.sh -R $HELIOS_PATH /work/trampoline-global-zone-packages.tar.gz
+----
+
+
+== Running `oximeter` in standalone mode
+
+`oximeter` is the program used to collect metrics from producers in the control
+plane. Normally, the producers register themselves with `nexus`, which creates a
+durable assignment between the producer and an `oximeter` collector in the
+database. That allows components to survive restarts, while still producing
+metrics.
+
+To ease development, `oximeter` can be run in "standalone" mode. In this case, a
+mock `nexus` server is started, with only the minimal subset of the internal API
+needed to register producers and collectors. Neither CockroachDB nor ClickHouse
+is required, although ClickHouse _can_ be used, if one wants to see how data is
+inserted into the database.
+
+To run `oximeter` in standalone, use:
+
+[source,console]
+----
+$ cargo run --bin oximeter -- standalone
+----
+
+The producer should still register with `nexus` as normal, which is usually done
+with an explicit IP address and port. This defaults to `[::1]:12221`.
+
+When run this way, `oximeter` will print the samples it collects from the
+producers to its logs, like so:
+
+[source,console]
+----
+Sep 26 17:48:56.006 INFO sample: Sample { measurement: Measurement { timestamp: 2023-09-26T17:48:56.004565890Z, datum: CumulativeF64(Cumulative { start_time: 2023-09-26T17:48:45.997404777Z, value: 10.007154703 }) }, timeseries_name: "virtual_machine:cpu_busy", target: FieldSet { name: "virtual_machine", fields: {"instance_id": Field { name: "instance_id", value: Uuid(564ef6df-d5f6-4204-88f7-5c615859cfa7) }, "project_id": Field { name: "project_id", value: Uuid(2dc7e1c9-f8ac-49d7-8292-46e9e2b1a61d) }} }, metric: FieldSet { name: "cpu_busy", fields: {"cpu_id": Field { name: "cpu_id", value: I64(0) }} } }, component: results-sink, collector_id: 78c7c9a5-1569-460a-8899-aada9ad5db6c, component: oximeter-standalone, component: nexus-standalone, file: oximeter/collector/src/lib.rs:280
+Sep 26 17:48:56.006 INFO sample: Sample { measurement: Measurement { timestamp: 2023-09-26T17:48:56.004700841Z, datum: CumulativeF64(Cumulative { start_time: 2023-09-26T17:48:45.997405187Z, value: 10.007154703 }) }, timeseries_name: "virtual_machine:cpu_busy", target: FieldSet { name: "virtual_machine", fields: {"instance_id": Field { name: "instance_id", value: Uuid(564ef6df-d5f6-4204-88f7-5c615859cfa7) }, "project_id": Field { name: "project_id", value: Uuid(2dc7e1c9-f8ac-49d7-8292-46e9e2b1a61d) }} }, metric: FieldSet { name: "cpu_busy", fields: {"cpu_id": Field { name: "cpu_id", value: I64(1) }} } }, component: results-sink, collector_id: 78c7c9a5-1569-460a-8899-aada9ad5db6c, component: oximeter-standalone, component: nexus-standalone, file: oximeter/collector/src/lib.rs:280
 ----

@@ -8,7 +8,7 @@ external oxide-dev.test               2   <REDACTED_TIMESTAMP> create silo: "tes
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
-note: database schema version matches expected (4.0.0)
+note: database schema version matches expected (8.0.0)
 =============================================
 EXECUTING COMMAND: omdb ["db", "dns", "diff", "external", "2"]
 termination: Exited(0)
@@ -24,7 +24,7 @@ changes:                    names added: 1, names removed: 0
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
-note: database schema version matches expected (4.0.0)
+note: database schema version matches expected (8.0.0)
 =============================================
 EXECUTING COMMAND: omdb ["db", "dns", "names", "external", "2"]
 termination: Exited(0)
@@ -36,7 +36,7 @@ External zone: oxide-dev.test
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
-note: database schema version matches expected (4.0.0)
+note: database schema version matches expected (8.0.0)
 =============================================
 EXECUTING COMMAND: omdb ["db", "services", "list-instances"]
 termination: Exited(0)
@@ -49,10 +49,12 @@ Dendrite       REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT         
 ExternalDns    REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              sim-b6d65341 
 InternalDns    REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              sim-b6d65341 
 Nexus          REDACTED_UUID_REDACTED_UUID_REDACTED [::ffff:127.0.0.1]:REDACTED_PORT sim-b6d65341 
+Mgd            REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              sim-b6d65341 
+Mgd            REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              sim-b6d65341 
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
-note: database schema version matches expected (4.0.0)
+note: database schema version matches expected (8.0.0)
 =============================================
 EXECUTING COMMAND: omdb ["db", "services", "list-by-sled"]
 termination: Exited(0)
@@ -67,22 +69,129 @@ sled: sim-b6d65341 (id REDACTED_UUID_REDACTED_UUID_REDACTED)
   ExternalDns    REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              
   InternalDns    REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              
   Nexus          REDACTED_UUID_REDACTED_UUID_REDACTED [::ffff:127.0.0.1]:REDACTED_PORT 
+  Mgd            REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              
+  Mgd            REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              
 
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
-note: database schema version matches expected (4.0.0)
+note: database schema version matches expected (8.0.0)
 =============================================
 EXECUTING COMMAND: omdb ["db", "sleds"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
-SERIAL       IP          ROLE ID                                   
-sim-b6d65341 [::1]:REDACTED_PORT -    REDACTED_UUID_REDACTED_UUID_REDACTED 
+SERIAL       IP          ROLE     ID                                   
+sim-b6d65341 [::1]:REDACTED_PORT scrimlet REDACTED_UUID_REDACTED_UUID_REDACTED 
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
-note: database schema version matches expected (4.0.0)
+note: database schema version matches expected (8.0.0)
+=============================================
+EXECUTING COMMAND: omdb ["mgs", "inventory"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+ALL CONFIGURED SPs
+
+    TYPE   SLOT 
+    Sled   0    
+    Sled   1    
+    Switch 0    
+    Switch 1    
+
+SPs FOUND THROUGH IGNITION
+
+    TYPE   SLOT SYSTEM_TYPE 
+    Sled   0    Gimlet      
+    Sled   1    Gimlet      
+    Switch 0    Sidecar     
+    Switch 1    Sidecar     
+
+SERVICE PROCESSOR STATES
+
+    TYPE   SLOT MODEL            SERIAL      REV HUBRIS           PWR ROT_ACTIVE 
+    Sled   0    FAKE_SIM_GIMLET  SimGimlet00 0   0000000000000000 A2  slot A     
+    Sled   1    FAKE_SIM_GIMLET  SimGimlet01 0   0000000000000000 A2  slot A     
+    Switch 0    FAKE_SIM_SIDECAR SimSidecar0 0   0000000000000000 A2  slot A     
+    Switch 1    FAKE_SIM_SIDECAR SimSidecar1 0   0000000000000000 A2  slot A     
+
+SP DETAILS: type "Sled" slot 0
+
+    ROOT OF TRUST
+
+        NAME                               VALUE  
+        active slot                        slot A 
+        persistent boot preference         slot A 
+        pending persistent boot preference -      
+        transient boot preference          -      
+        slot A SHA3 256 digest             -      
+        slot B SHA3 256 digest             -      
+
+    COMPONENTS
+
+        NAME         DESCRIPTION             DEVICE          PRESENCE SERIAL 
+        sp3-host-cpu FAKE host cpu           sp3-host-cpu    Present  None   
+        dev-0        FAKE temperature sensor fake-tmp-sensor Failed   None   
+
+    CABOOSES: none found
+
+SP DETAILS: type "Sled" slot 1
+
+    ROOT OF TRUST
+
+        NAME                               VALUE  
+        active slot                        slot A 
+        persistent boot preference         slot A 
+        pending persistent boot preference -      
+        transient boot preference          -      
+        slot A SHA3 256 digest             -      
+        slot B SHA3 256 digest             -      
+
+    COMPONENTS
+
+        NAME         DESCRIPTION   DEVICE       PRESENCE SERIAL 
+        sp3-host-cpu FAKE host cpu sp3-host-cpu Present  None   
+
+    CABOOSES: none found
+
+SP DETAILS: type "Switch" slot 0
+
+    ROOT OF TRUST
+
+        NAME                               VALUE  
+        active slot                        slot A 
+        persistent boot preference         slot A 
+        pending persistent boot preference -      
+        transient boot preference          -      
+        slot A SHA3 256 digest             -      
+        slot B SHA3 256 digest             -      
+
+    COMPONENTS
+
+        NAME  DESCRIPTION               DEVICE          PRESENCE SERIAL 
+        dev-0 FAKE temperature sensor 1 fake-tmp-sensor Present  None   
+        dev-1 FAKE temperature sensor 2 fake-tmp-sensor Failed   None   
+
+    CABOOSES: none found
+
+SP DETAILS: type "Switch" slot 1
+
+    ROOT OF TRUST
+
+        NAME                               VALUE  
+        active slot                        slot A 
+        persistent boot preference         slot A 
+        pending persistent boot preference -      
+        transient boot preference          -      
+        slot A SHA3 256 digest             -      
+        slot B SHA3 256 digest             -      
+
+    COMPONENTS: none found
+
+---------------------------------------------
+stderr:
+note: using MGS URL http://[::1]:REDACTED_PORT/
 =============================================
 EXECUTING COMMAND: omdb ["nexus", "background-tasks", "doc"]
 termination: Exited(0)

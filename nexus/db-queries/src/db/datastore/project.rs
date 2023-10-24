@@ -11,8 +11,7 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
-use crate::db::error::diesel_pool_result_optional;
-use crate::db::error::public_error_from_diesel_pool;
+use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
 use crate::db::fixed_data::project::SERVICES_PROJECT;
@@ -25,7 +24,7 @@ use crate::db::model::ProjectUpdate;
 use crate::db::model::Silo;
 use crate::db::model::VirtualProvisioningCollection;
 use crate::db::pagination::paginated;
-use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl, PoolError};
+use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl};
 use chrono::Utc;
 use diesel::prelude::*;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -60,16 +59,15 @@ macro_rules! generate_fn_to_ensure_none_in_project {
             ) -> DeleteResult {
                 use db::schema::$i;
 
-                let maybe_label = diesel_pool_result_optional(
-                    $i::dsl::$i
-                        .filter($i::dsl::project_id.eq(authz_project.id()))
-                        .filter($i::dsl::time_deleted.is_null())
-                        .select($i::dsl::$label)
-                        .limit(1)
-                        .first_async::<$label_ty>(self.pool_authorized(opctx).await?)
-                        .await,
-                )
-                .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
+                let maybe_label = $i::dsl::$i
+                    .filter($i::dsl::project_id.eq(authz_project.id()))
+                    .filter($i::dsl::time_deleted.is_null())
+                    .select($i::dsl::$label)
+                    .limit(1)
+                    .first_async::<$label_ty>(&*self.pool_connection_authorized(opctx).await?)
+                    .await
+                    .optional()
+                    .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
                 if let Some(label) = maybe_label {
                     let object = stringify!($i).replace('_', " ");
@@ -155,7 +153,7 @@ impl DataStore {
 
         let name = project.name().as_str().to_string();
         let db_project = self
-            .pool_authorized(opctx)
+            .pool_connection_authorized(opctx)
             .await?
             .transaction_async(|conn| async move {
                 let project: Project = Silo::insert_resource(
@@ -169,7 +167,7 @@ impl DataStore {
                         authz_silo_inner.not_found()
                     }
                     AsyncInsertError::DatabaseError(e) => {
-                        public_error_from_diesel_pool(
+                        public_error_from_diesel(
                             e,
                             ErrorHandler::Conflict(
                                 ResourceType::Project,
@@ -193,8 +191,8 @@ impl DataStore {
             .await
             .map_err(|e| match e {
                 TransactionError::CustomError(e) => e,
-                TransactionError::Pool(e) => {
-                    public_error_from_diesel_pool(e, ErrorHandler::Server)
+                TransactionError::Database(e) => {
+                    public_error_from_diesel(e, ErrorHandler::Server)
                 }
             })?;
 
@@ -233,7 +231,7 @@ impl DataStore {
         use db::schema::project::dsl;
 
         type TxnError = TransactionError<Error>;
-        self.pool_authorized(opctx)
+        self.pool_connection_authorized(opctx)
             .await?
             .transaction_async(|conn| async move {
                 let now = Utc::now();
@@ -246,8 +244,8 @@ impl DataStore {
                     .execute_async(&conn)
                     .await
                     .map_err(|e| {
-                        public_error_from_diesel_pool(
-                            PoolError::from(e),
+                        public_error_from_diesel(
+                            e,
                             ErrorHandler::NotFoundByResource(authz_project),
                         )
                     })?;
@@ -270,8 +268,8 @@ impl DataStore {
             .await
             .map_err(|e| match e {
                 TxnError::CustomError(e) => e,
-                TxnError::Pool(e) => {
-                    public_error_from_diesel_pool(e, ErrorHandler::Server)
+                TxnError::Database(e) => {
+                    public_error_from_diesel(e, ErrorHandler::Server)
                 }
             })?;
         Ok(())
@@ -300,9 +298,9 @@ impl DataStore {
         .filter(dsl::silo_id.eq(authz_silo.id()))
         .filter(dsl::time_deleted.is_null())
         .select(Project::as_select())
-        .load_async(self.pool_authorized(opctx).await?)
+        .load_async(&*self.pool_connection_authorized(opctx).await?)
         .await
-        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Updates a project (clobbering update -- no etag)
@@ -320,10 +318,10 @@ impl DataStore {
             .filter(dsl::id.eq(authz_project.id()))
             .set(updates)
             .returning(Project::as_returning())
-            .get_result_async(self.pool_authorized(opctx).await?)
+            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::NotFoundByResource(authz_project),
                 )
@@ -355,8 +353,8 @@ impl DataStore {
         .filter(dsl::silo_id.ne(*INTERNAL_SILO_ID).or(dsl::silo_id.is_null()))
         .filter(dsl::time_deleted.is_null())
         .select(db::model::IpPool::as_select())
-        .get_results_async(self.pool_authorized(opctx).await?)
+        .get_results_async(&*self.pool_connection_authorized(opctx).await?)
         .await
-        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 }

@@ -7,6 +7,7 @@
 use crate::artifacts::ArtifactIdData;
 use crate::artifacts::UpdatePlan;
 use crate::artifacts::WicketdArtifactStore;
+use crate::helpers::sps_to_string;
 use crate::http_entrypoints::GetArtifactsAndEventReportsResponse;
 use crate::http_entrypoints::StartUpdateOptions;
 use crate::http_entrypoints::UpdateSimulatedResult;
@@ -17,19 +18,23 @@ use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::ensure;
 use anyhow::Context;
+use base64::Engine;
 use display_error_chain::DisplayErrorChain;
 use dropshot::HttpError;
-use futures::Future;
+use futures::TryFutureExt;
 use gateway_client::types::HostPhase2Progress;
 use gateway_client::types::HostPhase2RecoveryImageId;
 use gateway_client::types::HostStartupOptions;
 use gateway_client::types::InstallinatorImageId;
 use gateway_client::types::PowerState;
+use gateway_client::types::RotCfpaSlot;
 use gateway_client::types::SpComponentFirmwareSlot;
 use gateway_client::types::SpIdentifier;
 use gateway_client::types::SpType;
 use gateway_client::types::SpUpdateStatus;
 use gateway_messages::SpComponent;
+use gateway_messages::ROT_PAGE_SIZE;
+use hubtools::RawHubrisArchive;
 use installinator_common::InstallinatorCompletionMetadata;
 use installinator_common::InstallinatorSpec;
 use installinator_common::M2Slot;
@@ -52,11 +57,13 @@ use std::sync::Mutex as StdMutex;
 use std::time::Duration;
 use std::time::Instant;
 use thiserror::Error;
+use tokio::io::AsyncReadExt;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::sync::watch;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
+use tokio_util::io::StreamReader;
 use update_engine::events::ProgressUnits;
 use update_engine::AbortHandle;
 use update_engine::StepSpec;
@@ -156,146 +163,23 @@ impl UpdateTracker {
 
     pub(crate) async fn start(
         &self,
-        sp: SpIdentifier,
-        update_id: Uuid,
+        sps: BTreeSet<SpIdentifier>,
         opts: StartUpdateOptions,
-    ) -> Result<(), StartUpdateError> {
-        self.start_impl(sp, |plan| async {
-            // Do we need to upload this plan's trampoline phase 2 to MGS?
-            let upload_trampoline_phase_2_to_mgs = {
-                let mut upload_trampoline_phase_2_to_mgs =
-                    self.upload_trampoline_phase_2_to_mgs.lock().await;
-
-                match upload_trampoline_phase_2_to_mgs.as_mut() {
-                    Some(prev) => {
-                        // We've previously started an upload - does it match
-                        // this artifact? If not, cancel the old task (which
-                        // might still be trying to upload) and start a new one
-                        // with our current image.
-                        if prev.status.borrow().hash
-                            != plan.trampoline_phase_2.data.hash()
-                        {
-                            // It does _not_ match - we have a new plan with a
-                            // different trampoline image. If the old task is
-                            // still running, cancel it, and start a new one.
-                            prev.task.abort();
-                            *prev = self
-                                .spawn_upload_trampoline_phase_2_to_mgs(&plan);
-                        }
-                    }
-                    None => {
-                        *upload_trampoline_phase_2_to_mgs = Some(
-                            self.spawn_upload_trampoline_phase_2_to_mgs(&plan),
-                        );
-                    }
-                }
-
-                // Both branches above leave `upload_trampoline_phase_2_to_mgs`
-                // with data, so we can unwrap here to clone the `watch`
-                // channel.
-                upload_trampoline_phase_2_to_mgs
-                    .as_ref()
-                    .unwrap()
-                    .status
-                    .clone()
-            };
-
-            let event_buffer = Arc::new(StdMutex::new(EventBuffer::new(16)));
-            let ipr_start_receiver =
-                self.ipr_update_tracker.register(update_id);
-
-            let update_cx = UpdateContext {
-                update_id,
-                sp,
-                mgs_client: self.mgs_client.clone(),
-                upload_trampoline_phase_2_to_mgs,
-                log: self.log.new(o!(
-                    "sp" => format!("{sp:?}"),
-                    "update_id" => update_id.to_string(),
-                )),
-            };
-            // TODO do we need `UpdateDriver` as a distinct type?
-            let update_driver = UpdateDriver {};
-
-            // Using a oneshot channel to communicate the abort handle isn't
-            // ideal, but it works and is the easiest way to send it without
-            // restructuring this code.
-            let (abort_handle_sender, abort_handle_receiver) =
-                oneshot::channel();
-            let task = tokio::spawn(update_driver.run(
-                plan,
-                update_cx,
-                event_buffer.clone(),
-                ipr_start_receiver,
-                opts,
-                abort_handle_sender,
-            ));
-
-            let abort_handle = abort_handle_receiver
-                .await
-                .expect("abort handle is sent immediately");
-
-            SpUpdateData { task, abort_handle, event_buffer }
-        })
-        .await
+    ) -> Result<(), Vec<StartUpdateError>> {
+        let imp = RealSpawnUpdateDriver { update_tracker: self, opts };
+        self.start_impl(sps, Some(imp)).await
     }
 
     /// Starts a fake update that doesn't perform any steps, but simply waits
-    /// for a oneshot receiver to resolve.
+    /// for a watch receiver to resolve.
     #[doc(hidden)]
     pub async fn start_fake_update(
         &self,
-        sp: SpIdentifier,
-        oneshot_receiver: oneshot::Receiver<()>,
-    ) -> Result<(), StartUpdateError> {
-        self.start_impl(sp, |_plan| async move {
-            let (sender, mut receiver) = mpsc::channel(128);
-            let event_buffer = Arc::new(StdMutex::new(EventBuffer::new(16)));
-            let event_buffer_2 = event_buffer.clone();
-            let log = self.log.clone();
-
-            let engine = UpdateEngine::new(&log, sender);
-            let abort_handle = engine.abort_handle();
-
-            let task = tokio::spawn(async move {
-                // The step component and ID have been chosen arbitrarily here --
-                // they aren't important.
-                engine
-                    .new_step(
-                        UpdateComponent::Host,
-                        UpdateStepId::RunningInstallinator,
-                        "Fake step that waits for receiver to resolve",
-                        move |_cx| async move {
-                            _ = oneshot_receiver.await;
-                            StepSuccess::new(()).into()
-                        },
-                    )
-                    .register();
-
-                // Spawn a task to accept all events from the executing engine.
-                let event_receiving_task = tokio::spawn(async move {
-                    while let Some(event) = receiver.recv().await {
-                        event_buffer_2.lock().unwrap().add_event(event);
-                    }
-                });
-
-                match engine.execute().await {
-                    Ok(_cx) => (),
-                    Err(err) => {
-                        error!(log, "update failed"; "err" => %err);
-                    }
-                }
-
-                // Wait for all events to be received and written to the event
-                // buffer.
-                event_receiving_task
-                    .await
-                    .expect("event receiving task panicked");
-            });
-
-            SpUpdateData { task, abort_handle, event_buffer }
-        })
-        .await
+        sps: BTreeSet<SpIdentifier>,
+        watch_receiver: watch::Receiver<()>,
+    ) -> Result<(), Vec<StartUpdateError>> {
+        let imp = FakeUpdateDriver { watch_receiver, log: self.log.clone() };
+        self.start_impl(sps, Some(imp)).await
     }
 
     pub(crate) async fn clear_update_state(
@@ -315,40 +199,107 @@ impl UpdateTracker {
         update_data.abort_update(sp, message).await
     }
 
-    async fn start_impl<F, Fut>(
+    /// Checks whether an update can be started for the given SPs, without
+    /// actually starting it.
+    ///
+    /// This should only be used in situations where starting the update is not
+    /// desired (for example, if we've already encountered errors earlier in the
+    /// process and we're just adding to the list of errors). In cases where the
+    /// start method *is* desired, prefer the [`Self::start`] method, which also
+    /// performs the same checks.
+    pub(crate) async fn update_pre_checks(
         &self,
-        sp: SpIdentifier,
-        spawn_update_driver: F,
-    ) -> Result<(), StartUpdateError>
+        sps: BTreeSet<SpIdentifier>,
+    ) -> Result<(), Vec<StartUpdateError>> {
+        self.start_impl::<NeverUpdateDriver>(sps, None).await
+    }
+
+    async fn start_impl<Spawn>(
+        &self,
+        sps: BTreeSet<SpIdentifier>,
+        spawn_update_driver: Option<Spawn>,
+    ) -> Result<(), Vec<StartUpdateError>>
     where
-        F: FnOnce(UpdatePlan) -> Fut,
-        Fut: Future<Output = SpUpdateData> + Send,
+        Spawn: SpawnUpdateDriver,
     {
         let mut update_data = self.sp_update_data.lock().await;
 
-        let plan = update_data
-            .artifact_store
-            .current_plan()
-            .ok_or(StartUpdateError::TufRepositoryUnavailable)?;
+        let mut errors = Vec::new();
 
-        match update_data.sp_update_data.entry(sp) {
-            // Vacant: this is the first time we've started an update to this
-            // sp.
-            Entry::Vacant(slot) => {
-                slot.insert(spawn_update_driver(plan).await);
-                Ok(())
-            }
-            // Occupied: we've previously started an update to this sp; only
-            // allow this one if that update is no longer running.
-            Entry::Occupied(mut slot) => {
-                if slot.get().task.is_finished() {
-                    slot.insert(spawn_update_driver(plan).await);
-                    Ok(())
-                } else {
-                    Err(StartUpdateError::UpdateInProgress(sp))
+        // Check that we're not already updating any of these SPs.
+        let update_in_progress: Vec<_> = sps
+            .iter()
+            .filter(|sp| {
+                // If we don't have any update data for this SP, it's not in
+                // progress.
+                //
+                // If we do, it's in progress if the task is not finished.
+                update_data
+                    .sp_update_data
+                    .get(sp)
+                    .map_or(false, |data| !data.task.is_finished())
+            })
+            .copied()
+            .collect();
+
+        if !update_in_progress.is_empty() {
+            errors.push(StartUpdateError::UpdateInProgress(update_in_progress));
+        }
+
+        let plan = update_data.artifact_store.current_plan();
+        if plan.is_none() {
+            // (1), referred to below.
+            errors.push(StartUpdateError::TufRepositoryUnavailable);
+        }
+
+        // If there are any errors, return now.
+        if !errors.is_empty() {
+            return Err(errors);
+        }
+
+        let plan =
+            plan.expect("we'd have returned an error at (1) if plan was None");
+
+        // Call the setup method now.
+        if let Some(mut spawn_update_driver) = spawn_update_driver {
+            let setup_data = spawn_update_driver.setup(&plan).await;
+
+            for sp in sps {
+                match update_data.sp_update_data.entry(sp) {
+                    // Vacant: this is the first time we've started an update to this
+                    // sp.
+                    Entry::Vacant(slot) => {
+                        slot.insert(
+                            spawn_update_driver
+                                .spawn_update_driver(
+                                    sp,
+                                    plan.clone(),
+                                    &setup_data,
+                                )
+                                .await,
+                        );
+                    }
+                    // Occupied: we've previously started an update to this sp.
+                    Entry::Occupied(mut slot) => {
+                        assert!(
+                            slot.get().task.is_finished(),
+                            "we just checked that the task was finished"
+                        );
+                        slot.insert(
+                            spawn_update_driver
+                                .spawn_update_driver(
+                                    sp,
+                                    plan.clone(),
+                                    &setup_data,
+                                )
+                                .await,
+                        );
+                    }
                 }
             }
         }
+
+        Ok(())
     }
 
     fn spawn_upload_trampoline_phase_2_to_mgs(
@@ -422,6 +373,226 @@ impl UpdateTracker {
                 slot.get().event_buffer.lock().unwrap().generate_report()
             }
         }
+    }
+}
+
+/// A trait that represents a backend implementation for spawning the update
+/// driver.
+#[async_trait::async_trait]
+trait SpawnUpdateDriver {
+    /// The type returned by the [`Self::setup`] method. This is passed in by
+    /// reference to [`Self::spawn_update_driver`].
+    type Setup;
+
+    /// Perform setup required to spawn the update driver.
+    ///
+    /// This is called *once*, before any calls to
+    /// [`Self::spawn_update_driver`].
+    async fn setup(&mut self, plan: &UpdatePlan) -> Self::Setup;
+
+    /// Spawn the update driver for the given SP.
+    ///
+    /// This is called once per SP.
+    async fn spawn_update_driver(
+        &mut self,
+        sp: SpIdentifier,
+        plan: UpdatePlan,
+        setup_data: &Self::Setup,
+    ) -> SpUpdateData;
+}
+
+/// The production implementation of [`SpawnUpdateDriver`].
+///
+/// This implementation spawns real update drivers.
+#[derive(Debug)]
+struct RealSpawnUpdateDriver<'tr> {
+    update_tracker: &'tr UpdateTracker,
+    opts: StartUpdateOptions,
+}
+
+#[async_trait::async_trait]
+impl<'tr> SpawnUpdateDriver for RealSpawnUpdateDriver<'tr> {
+    type Setup = watch::Receiver<UploadTrampolinePhase2ToMgsStatus>;
+
+    async fn setup(&mut self, plan: &UpdatePlan) -> Self::Setup {
+        // Do we need to upload this plan's trampoline phase 2 to MGS?
+
+        let mut upload_trampoline_phase_2_to_mgs =
+            self.update_tracker.upload_trampoline_phase_2_to_mgs.lock().await;
+
+        match upload_trampoline_phase_2_to_mgs.as_mut() {
+            Some(prev) => {
+                // We've previously started an upload - does it match
+                // this artifact? If not, cancel the old task (which
+                // might still be trying to upload) and start a new one
+                // with our current image.
+                if prev.status.borrow().hash
+                    != plan.trampoline_phase_2.data.hash()
+                {
+                    // It does _not_ match - we have a new plan with a
+                    // different trampoline image. If the old task is
+                    // still running, cancel it, and start a new one.
+                    prev.task.abort();
+                    *prev = self
+                        .update_tracker
+                        .spawn_upload_trampoline_phase_2_to_mgs(&plan);
+                }
+            }
+            None => {
+                *upload_trampoline_phase_2_to_mgs = Some(
+                    self.update_tracker
+                        .spawn_upload_trampoline_phase_2_to_mgs(&plan),
+                );
+            }
+        }
+
+        // Both branches above leave `upload_trampoline_phase_2_to_mgs`
+        // with data, so we can unwrap here to clone the `watch`
+        // channel.
+        upload_trampoline_phase_2_to_mgs.as_ref().unwrap().status.clone()
+    }
+
+    async fn spawn_update_driver(
+        &mut self,
+        sp: SpIdentifier,
+        plan: UpdatePlan,
+        setup_data: &Self::Setup,
+    ) -> SpUpdateData {
+        // Generate an ID for this update; the update tracker will send it to the
+        // sled as part of the InstallinatorImageId, and installinator will send it
+        // back to our artifact server with its progress reports.
+        let update_id = Uuid::new_v4();
+
+        let event_buffer = Arc::new(StdMutex::new(EventBuffer::new(16)));
+        let ipr_start_receiver =
+            self.update_tracker.ipr_update_tracker.register(update_id);
+
+        let update_cx = UpdateContext {
+            update_id,
+            sp,
+            mgs_client: self.update_tracker.mgs_client.clone(),
+            upload_trampoline_phase_2_to_mgs: setup_data.clone(),
+            log: self.update_tracker.log.new(o!(
+                "sp" => format!("{sp:?}"),
+                "update_id" => update_id.to_string(),
+            )),
+        };
+        // TODO do we need `UpdateDriver` as a distinct type?
+        let update_driver = UpdateDriver {};
+
+        // Using a oneshot channel to communicate the abort handle isn't
+        // ideal, but it works and is the easiest way to send it without
+        // restructuring this code.
+        let (abort_handle_sender, abort_handle_receiver) = oneshot::channel();
+        let task = tokio::spawn(update_driver.run(
+            plan,
+            update_cx,
+            event_buffer.clone(),
+            ipr_start_receiver,
+            self.opts.clone(),
+            abort_handle_sender,
+        ));
+
+        let abort_handle = abort_handle_receiver
+            .await
+            .expect("abort handle is sent immediately");
+
+        SpUpdateData { task, abort_handle, event_buffer }
+    }
+}
+
+/// A fake implementation of [`SpawnUpdateDriver`].
+///
+/// This implementation is only used by tests. It contains a single step that
+/// waits for a [`watch::Receiver`] to resolve.
+#[derive(Debug)]
+struct FakeUpdateDriver {
+    watch_receiver: watch::Receiver<()>,
+    log: Logger,
+}
+
+#[async_trait::async_trait]
+impl SpawnUpdateDriver for FakeUpdateDriver {
+    type Setup = ();
+
+    async fn setup(&mut self, _plan: &UpdatePlan) -> Self::Setup {}
+
+    async fn spawn_update_driver(
+        &mut self,
+        _sp: SpIdentifier,
+        _plan: UpdatePlan,
+        _setup_data: &Self::Setup,
+    ) -> SpUpdateData {
+        let (sender, mut receiver) = mpsc::channel(128);
+        let event_buffer = Arc::new(StdMutex::new(EventBuffer::new(16)));
+        let event_buffer_2 = event_buffer.clone();
+        let log = self.log.clone();
+
+        let engine = UpdateEngine::new(&log, sender);
+        let abort_handle = engine.abort_handle();
+
+        let mut watch_receiver = self.watch_receiver.clone();
+
+        let task = tokio::spawn(async move {
+            // The step component and ID have been chosen arbitrarily here --
+            // they aren't important.
+            engine
+                .new_step(
+                    UpdateComponent::Host,
+                    UpdateStepId::RunningInstallinator,
+                    "Fake step that waits for receiver to resolve",
+                    move |_cx| async move {
+                        // This will resolve as soon as the watch sender
+                        // (typically a test) sends a value over the watch
+                        // channel.
+                        _ = watch_receiver.changed().await;
+                        StepSuccess::new(()).into()
+                    },
+                )
+                .register();
+
+            // Spawn a task to accept all events from the executing engine.
+            let event_receiving_task = tokio::spawn(async move {
+                while let Some(event) = receiver.recv().await {
+                    event_buffer_2.lock().unwrap().add_event(event);
+                }
+            });
+
+            match engine.execute().await {
+                Ok(_cx) => (),
+                Err(err) => {
+                    error!(log, "update failed"; "err" => %err);
+                }
+            }
+
+            // Wait for all events to be received and written to the event
+            // buffer.
+            event_receiving_task.await.expect("event receiving task panicked");
+        });
+
+        SpUpdateData { task, abort_handle, event_buffer }
+    }
+}
+
+/// An implementation of [`SpawnUpdateDriver`] that cannot be constructed.
+///
+/// This is an uninhabited type (an empty enum), and is only used to provide a
+/// type parameter for the [`UpdateTracker::update_pre_checks`] method.
+enum NeverUpdateDriver {}
+
+#[async_trait::async_trait]
+impl SpawnUpdateDriver for NeverUpdateDriver {
+    type Setup = ();
+
+    async fn setup(&mut self, _plan: &UpdatePlan) -> Self::Setup {}
+
+    async fn spawn_update_driver(
+        &mut self,
+        _sp: SpIdentifier,
+        _plan: UpdatePlan,
+        _setup_data: &Self::Setup,
+    ) -> SpUpdateData {
+        unreachable!("this update driver cannot be constructed")
     }
 }
 
@@ -518,21 +689,8 @@ impl UpdateTrackerData {
 pub enum StartUpdateError {
     #[error("no TUF repository available")]
     TufRepositoryUnavailable,
-    #[error("target is already being updated: {0:?}")]
-    UpdateInProgress(SpIdentifier),
-}
-
-impl StartUpdateError {
-    pub(crate) fn to_http_error(&self) -> HttpError {
-        let message = DisplayErrorChain::new(self).to_string();
-
-        match self {
-            StartUpdateError::TufRepositoryUnavailable
-            | StartUpdateError::UpdateInProgress(_) => {
-                HttpError::for_bad_request(None, message)
-            }
-        }
-    }
+    #[error("targets are already being updated: {}", sps_to_string(.0))]
+    UpdateInProgress(Vec<SpIdentifier>),
 }
 
 #[derive(Debug, Clone, Error, Eq, PartialEq)]
@@ -617,19 +775,13 @@ impl UpdateDriver {
         }
 
         let (rot_a, rot_b, sp_artifacts) = match update_cx.sp.type_ {
-            SpType::Sled => (
-                plan.gimlet_rot_a.clone(),
-                plan.gimlet_rot_b.clone(),
-                &plan.gimlet_sp,
-            ),
-            SpType::Power => {
-                (plan.psc_rot_a.clone(), plan.psc_rot_b.clone(), &plan.psc_sp)
+            SpType::Sled => {
+                (&plan.gimlet_rot_a, &plan.gimlet_rot_b, &plan.gimlet_sp)
             }
-            SpType::Switch => (
-                plan.sidecar_rot_a.clone(),
-                plan.sidecar_rot_b.clone(),
-                &plan.sidecar_sp,
-            ),
+            SpType::Power => (&plan.psc_rot_a, &plan.psc_rot_b, &plan.psc_sp),
+            SpType::Switch => {
+                (&plan.sidecar_rot_a, &plan.sidecar_rot_b, &plan.sidecar_sp)
+            }
         };
 
         let rot_registrar = engine.for_component(UpdateComponent::Rot);
@@ -639,16 +791,15 @@ impl UpdateDriver {
         // currently executing; we must update the _other_ slot. We also want to
         // know its current version (so we can skip updating if we only need to
         // update the SP and/or host).
-        let rot_interrogation =
-            rot_registrar
-                .new_step(
-                    UpdateStepId::InterrogateRot,
-                    "Checking current RoT version and active slot",
-                    |_cx| async move {
-                        update_cx.interrogate_rot(rot_a, rot_b).await
-                    },
-                )
-                .register();
+        let rot_interrogation = rot_registrar
+            .new_step(
+                UpdateStepId::InterrogateRot,
+                "Checking current RoT version and active slot",
+                move |_cx| async move {
+                    update_cx.interrogate_rot(rot_a, rot_b).await
+                },
+            )
+            .register();
 
         // The SP only has one updateable firmware slot ("the inactive bank").
         // We want to ask about slot 0 (the active slot)'s current version, and
@@ -1406,8 +1557,8 @@ impl UpdateContext {
 
     async fn interrogate_rot(
         &self,
-        rot_a: ArtifactIdData,
-        rot_b: ArtifactIdData,
+        rot_a: &[ArtifactIdData],
+        rot_b: &[ArtifactIdData],
     ) -> Result<StepResult<RotInterrogation>, UpdateTerminalError> {
         let rot_active_slot = self
             .get_component_active_slot(SpComponent::ROT.const_as_str())
@@ -1418,7 +1569,7 @@ impl UpdateContext {
 
         // Flip these around: if 0 (A) is active, we want to
         // update 1 (B), and vice versa.
-        let (active_slot_name, slot_to_update, artifact_to_apply) =
+        let (active_slot_name, slot_to_update, available_artifacts) =
             match rot_active_slot {
                 0 => ('A', 1, rot_b),
                 1 => ('B', 0, rot_a),
@@ -1430,6 +1581,176 @@ impl UpdateContext {
                     })
                 }
             };
+
+        // Read the CMPA and currently-active CFPA so we can find the
+        // correctly-signed artifact.
+        let base64_decode_rot_page = |data: String| {
+            // Even though we know `data` should decode to exactly
+            // `ROT_PAGE_SIZE` bytes, the base64 crate requires an output buffer
+            // of at least `decoded_len_estimate`. Allocate such a buffer here,
+            // then we'll copy to the fixed-size array we need after confirming
+            // the number of decoded bytes;
+            let mut output_buf =
+                vec![0; base64::decoded_len_estimate(data.len())];
+
+            let n = base64::engine::general_purpose::STANDARD
+                .decode_slice(&data, &mut output_buf)
+                .with_context(|| {
+                    format!("failed to decode base64 string: {data:?}")
+                })?;
+            if n != ROT_PAGE_SIZE {
+                bail!(
+                    "incorrect len ({n}, expected {ROT_PAGE_SIZE}) \
+                     after decoding base64 string: {data:?}",
+                );
+            }
+            let mut page = [0; ROT_PAGE_SIZE];
+            page.copy_from_slice(&output_buf[..n]);
+            Ok(page)
+        };
+
+        // We may be talking to an SP / RoT that doesn't yet know how to give us
+        // its CMPA. If we hit a protocol version error here, we can fall back
+        // to our old behavior of requiring exactly 1 RoT artifact.
+        let mut artifact_to_apply = None;
+
+        let cmpa = match self
+            .mgs_client
+            .sp_rot_cmpa_get(
+                self.sp.type_,
+                self.sp.slot,
+                SpComponent::ROT.const_as_str(),
+            )
+            .await
+        {
+            Ok(response) => {
+                let data = response.into_inner().base64_data;
+                Some(base64_decode_rot_page(data).map_err(|error| {
+                    UpdateTerminalError::GetRotCmpaFailed { error }
+                })?)
+            }
+            // TODO is there a better way to check the _specific_ error response
+            // we get here? We only have a couple of strings; we could check the
+            // error string contents for something like "WrongVersion", but
+            // that's pretty fragile. Instead we'll treat any error response
+            // here as a "fallback to previous behavior".
+            Err(err @ gateway_client::Error::ErrorResponse(_)) => {
+                if available_artifacts.len() == 1 {
+                    info!(
+                        self.log,
+                        "Failed to get RoT CMPA page; \
+                         using only available RoT artifact";
+                        "err" => %err,
+                    );
+                    artifact_to_apply = Some(available_artifacts[0].clone());
+                    None
+                } else {
+                    error!(
+                        self.log,
+                        "Failed to get RoT CMPA; unable to choose from \
+                         multiple available RoT artifacts";
+                        "err" => %err,
+                        "num_rot_artifacts" => available_artifacts.len(),
+                    );
+                    return Err(UpdateTerminalError::GetRotCmpaFailed {
+                        error: err.into(),
+                    });
+                }
+            }
+            // For any other error (e.g., comms failures), just fail as normal.
+            Err(err) => {
+                return Err(UpdateTerminalError::GetRotCmpaFailed {
+                    error: err.into(),
+                });
+            }
+        };
+
+        // If we were able to fetch the CMPA, we also need to fetch the CFPA and
+        // then find the correct RoT artifact. If we weren't able to fetch the
+        // CMPA, we either already set `artifact_to_apply` to the one-and-only
+        // RoT artifact available, or we returned a terminal error.
+        if let Some(cmpa) = cmpa {
+            let cfpa = self
+                .mgs_client
+                .sp_rot_cfpa_get(
+                    self.sp.type_,
+                    self.sp.slot,
+                    SpComponent::ROT.const_as_str(),
+                    &gateway_client::types::GetCfpaParams {
+                        slot: RotCfpaSlot::Active,
+                    },
+                )
+                .await
+                .map_err(|err| UpdateTerminalError::GetRotCfpaFailed {
+                    error: err.into(),
+                })
+                .and_then(|response| {
+                    let data = response.into_inner().base64_data;
+                    base64_decode_rot_page(data).map_err(|error| {
+                        UpdateTerminalError::GetRotCfpaFailed { error }
+                    })
+                })?;
+
+            // Loop through our possible artifacts and find the first (we only
+            // expect one!) that verifies against the RoT's CMPA/CFPA.
+            for artifact in available_artifacts {
+                let image = artifact
+                    .data
+                    .reader_stream()
+                    .and_then(|stream| async {
+                        let mut buf =
+                            Vec::with_capacity(artifact.data.file_size());
+                        StreamReader::new(stream)
+                            .read_to_end(&mut buf)
+                            .await
+                            .context("I/O error reading extracted archive")?;
+                        Ok(buf)
+                    })
+                    .await
+                    .map_err(|error| {
+                        UpdateTerminalError::FailedFindingSignedRotImage {
+                            error,
+                        }
+                    })?;
+                let archive =
+                    RawHubrisArchive::from_vec(image).map_err(|err| {
+                        UpdateTerminalError::FailedFindingSignedRotImage {
+                            error: anyhow::Error::new(err).context(format!(
+                                "failed to read hubris archive for {:?}",
+                                artifact.id
+                            )),
+                        }
+                    })?;
+                match archive.verify(&cmpa, &cfpa) {
+                    Ok(()) => {
+                        info!(
+                            self.log, "RoT archive verification success";
+                            "name" => artifact.id.name.as_str(),
+                            "version" => %artifact.id.version,
+                            "kind" => ?artifact.id.kind,
+                        );
+                        artifact_to_apply = Some(artifact.clone());
+                        break;
+                    }
+                    Err(err) => {
+                        // We log this but don't fail - we want to continue
+                        // looking for a verifiable artifact.
+                        info!(
+                            self.log, "RoT archive verification failed";
+                            "artifact" => ?artifact.id,
+                            "err" => %DisplayErrorChain::new(&err),
+                        );
+                    }
+                }
+            }
+        }
+
+        // Ensure we found a valid RoT artifact.
+        let artifact_to_apply = artifact_to_apply.ok_or_else(|| {
+            UpdateTerminalError::FailedFindingSignedRotImage {
+                error: anyhow!("no RoT image found with valid CMPA/CFPA"),
+            }
+        })?;
 
         // Read the caboose of the currently-active slot.
         let caboose = self

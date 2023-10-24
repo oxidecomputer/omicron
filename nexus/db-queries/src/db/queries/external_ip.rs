@@ -20,6 +20,7 @@ use diesel::query_builder::AstPass;
 use diesel::query_builder::Query;
 use diesel::query_builder::QueryFragment;
 use diesel::query_builder::QueryId;
+use diesel::result::Error as DieselError;
 use diesel::sql_types;
 use diesel::Column;
 use diesel::Expression;
@@ -42,7 +43,7 @@ const REALLOCATION_WITH_DIFFERENT_IP_SENTINEL: &'static str =
     "Reallocation of IP with different value";
 
 /// Translates a generic pool error to an external error.
-pub fn from_pool(e: async_bb8_diesel::PoolError) -> external::Error {
+pub fn from_diesel(e: DieselError) -> external::Error {
     use crate::db::error;
 
     let sentinels = [REALLOCATION_WITH_DIFFERENT_IP_SENTINEL];
@@ -58,7 +59,7 @@ pub fn from_pool(e: async_bb8_diesel::PoolError) -> external::Error {
         }
     }
 
-    error::public_error_from_diesel_pool(e, error::ErrorHandler::Server)
+    error::public_error_from_diesel(e, error::ErrorHandler::Server)
 }
 
 const MAX_PORT: u16 = u16::MAX;
@@ -877,15 +878,16 @@ mod tests {
                 is_default,
             );
 
+            let conn = self
+                .db_datastore
+                .pool_connection_authorized(&self.opctx)
+                .await
+                .unwrap();
+
             use crate::db::schema::ip_pool::dsl as ip_pool_dsl;
             diesel::insert_into(ip_pool_dsl::ip_pool)
                 .values(pool.clone())
-                .execute_async(
-                    self.db_datastore
-                        .pool_authorized(&self.opctx)
-                        .await
-                        .unwrap(),
-                )
+                .execute_async(&*conn)
                 .await
                 .expect("Failed to create IP Pool");
 
@@ -895,16 +897,16 @@ mod tests {
         async fn initialize_ip_pool(&self, name: &str, range: IpRange) {
             // Find the target IP pool
             use crate::db::schema::ip_pool::dsl as ip_pool_dsl;
+            let conn = self
+                .db_datastore
+                .pool_connection_authorized(&self.opctx)
+                .await
+                .unwrap();
             let pool = ip_pool_dsl::ip_pool
                 .filter(ip_pool_dsl::name.eq(name.to_string()))
                 .filter(ip_pool_dsl::time_deleted.is_null())
                 .select(IpPool::as_select())
-                .get_result_async(
-                    self.db_datastore
-                        .pool_authorized(&self.opctx)
-                        .await
-                        .unwrap(),
-                )
+                .get_result_async(&*conn)
                 .await
                 .expect("Failed to 'SELECT' IP Pool");
 
@@ -915,7 +917,11 @@ mod tests {
             )
             .values(pool_range)
             .execute_async(
-                self.db_datastore.pool_authorized(&self.opctx).await.unwrap(),
+                &*self
+                    .db_datastore
+                    .pool_connection_authorized(&self.opctx)
+                    .await
+                    .unwrap(),
             )
             .await
             .expect("Failed to create IP Pool range");

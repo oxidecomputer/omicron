@@ -47,6 +47,7 @@ serde_urlencoded.workspace = true
 serde_with.workspace = true
 sled-agent-client.workspace = true
 slog.workspace = true
+static_assertions.workspace = true
 steno.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
@@ -63,6 +64,7 @@ nexus-types.workspace = true
 omicron-common.workspace = true
 omicron-passwords.workspace = true
 oximeter.workspace = true
+omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 assert_matches.workspace = true

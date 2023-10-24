@@ -12,6 +12,9 @@
 //! would be the only consumer -- and in that case it's okay to query the
 //! database directly.
 
+// NOTE: eminates from Tabled macros
+#![allow(clippy::useless_vec)]
+
 use crate::Omdb;
 use anyhow::anyhow;
 use anyhow::bail;
@@ -23,16 +26,26 @@ use clap::Subcommand;
 use clap::ValueEnum;
 use diesel::expression::SelectableHelper;
 use diesel::query_dsl::QueryDsl;
+use diesel::BoolExpressionMethods;
 use diesel::ExpressionMethods;
+use diesel::JoinOnDsl;
+use diesel::NullableExpressionMethods;
+use nexus_db_model::Dataset;
 use nexus_db_model::Disk;
 use nexus_db_model::DnsGroup;
 use nexus_db_model::DnsName;
 use nexus_db_model::DnsVersion;
 use nexus_db_model::DnsZone;
+use nexus_db_model::ExternalIp;
 use nexus_db_model::Instance;
+use nexus_db_model::Project;
+use nexus_db_model::Region;
 use nexus_db_model::Sled;
+use nexus_db_model::Vmm;
+use nexus_db_model::Zpool;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
+use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::model::ServiceKind;
@@ -45,12 +58,51 @@ use omicron_common::api::external::Generation;
 use omicron_common::postgres_config::PostgresConfigWithUrl;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
+use std::collections::HashSet;
 use std::fmt::Display;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use strum::IntoEnumIterator;
 use tabled::Tabled;
 use uuid::Uuid;
+
+const NO_ACTIVE_PROPOLIS_MSG: &str = "<no active Propolis>";
+const NOT_ON_SLED_MSG: &str = "<not on any sled>";
+
+struct MaybePropolisId(Option<Uuid>);
+struct MaybeSledId(Option<Uuid>);
+
+impl From<&InstanceAndActiveVmm> for MaybePropolisId {
+    fn from(value: &InstanceAndActiveVmm) -> Self {
+        Self(value.instance().runtime().propolis_id)
+    }
+}
+
+impl Display for MaybePropolisId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(id) = self.0 {
+            write!(f, "{}", id)
+        } else {
+            write!(f, "{}", NO_ACTIVE_PROPOLIS_MSG)
+        }
+    }
+}
+
+impl From<&InstanceAndActiveVmm> for MaybeSledId {
+    fn from(value: &InstanceAndActiveVmm) -> Self {
+        Self(value.sled_id())
+    }
+}
+
+impl Display for MaybeSledId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(id) = self.0 {
+            write!(f, "{}", id)
+        } else {
+            write!(f, "{}", NOT_ON_SLED_MSG)
+        }
+    }
+}
 
 #[derive(Debug, Args)]
 pub struct DbArgs {
@@ -82,6 +134,8 @@ enum DbCommands {
     Sleds,
     /// Print information about customer instances
     Instances,
+    /// Print information about the network
+    Network(NetworkArgs),
 }
 
 #[derive(Debug, Args)]
@@ -96,11 +150,19 @@ enum DiskCommands {
     Info(DiskInfoArgs),
     /// Summarize current disks
     List,
+    /// Determine what crucible resources are on the given physical disk.
+    Physical(DiskPhysicalArgs),
 }
 
 #[derive(Debug, Args)]
 struct DiskInfoArgs {
     /// The UUID of the volume
+    uuid: Uuid,
+}
+
+#[derive(Debug, Args)]
+struct DiskPhysicalArgs {
+    /// The UUID of the physical disk
     uuid: Uuid,
 }
 
@@ -156,6 +218,22 @@ enum ServicesCommands {
     ListInstances,
     /// List service instances, grouped by sled
     ListBySled,
+}
+
+#[derive(Debug, Args)]
+struct NetworkArgs {
+    #[command(subcommand)]
+    command: NetworkCommands,
+
+    /// Print out raw data structures from the data store.
+    #[clap(long)]
+    verbose: bool,
+}
+
+#[derive(Debug, Subcommand)]
+enum NetworkCommands {
+    /// List external IPs
+    ListEips,
 }
 
 impl DbArgs {
@@ -214,6 +292,12 @@ impl DbArgs {
             DbCommands::Disks(DiskArgs { command: DiskCommands::List }) => {
                 cmd_db_disk_list(&datastore, self.fetch_limit).await
             }
+            DbCommands::Disks(DiskArgs {
+                command: DiskCommands::Physical(uuid),
+            }) => {
+                cmd_db_disk_physical(&opctx, &datastore, self.fetch_limit, uuid)
+                    .await
+            }
             DbCommands::Dns(DnsArgs { command: DnsCommands::Show }) => {
                 cmd_db_dns_show(&opctx, &datastore, self.fetch_limit).await
             }
@@ -250,6 +334,13 @@ impl DbArgs {
             }
             DbCommands::Instances => {
                 cmd_db_instances(&datastore, self.fetch_limit).await
+            }
+            DbCommands::Network(NetworkArgs {
+                command: NetworkCommands::ListEips,
+                verbose,
+            }) => {
+                cmd_db_eips(&opctx, &datastore, self.fetch_limit, *verbose)
+                    .await
             }
         }
     }
@@ -349,7 +440,7 @@ async fn cmd_db_disk_list(
         .filter(dsl::time_deleted.is_null())
         .limit(i64::from(u32::from(limit)))
         .select(Disk::as_select())
-        .load_async(datastore.pool_for_tests().await?)
+        .load_async(&*datastore.pool_connection_for_tests().await?)
         .await
         .context("loading disks")?;
 
@@ -403,11 +494,13 @@ async fn cmd_db_disk_info(
 
     use db::schema::disk::dsl as disk_dsl;
 
+    let conn = datastore.pool_connection_for_tests().await?;
+
     let disk = disk_dsl::disk
         .filter(disk_dsl::id.eq(args.uuid))
         .limit(1)
         .select(Disk::as_select())
-        .load_async(datastore.pool_for_tests().await?)
+        .load_async(&*conn)
         .await
         .context("loading requested disk")?;
 
@@ -423,33 +516,54 @@ async fn cmd_db_disk_info(
     if let Some(instance_uuid) = disk.runtime().attach_instance_id {
         // Get the instance this disk is attached to
         use db::schema::instance::dsl as instance_dsl;
-        let instance = instance_dsl::instance
+        use db::schema::vmm::dsl as vmm_dsl;
+        let instances: Vec<InstanceAndActiveVmm> = instance_dsl::instance
             .filter(instance_dsl::id.eq(instance_uuid))
+            .left_join(
+                vmm_dsl::vmm.on(vmm_dsl::id
+                    .nullable()
+                    .eq(instance_dsl::active_propolis_id)
+                    .and(vmm_dsl::time_deleted.is_null())),
+            )
             .limit(1)
-            .select(Instance::as_select())
-            .load_async(datastore.pool_for_tests().await?)
+            .select((Instance::as_select(), Option::<Vmm>::as_select()))
+            .load_async(&*conn)
             .await
-            .context("loading requested instance")?;
+            .context("loading requested instance")?
+            .into_iter()
+            .map(|i: (Instance, Option<Vmm>)| i.into())
+            .collect();
 
-        let Some(instance) = instance.into_iter().next() else {
+        let Some(instance) = instances.into_iter().next() else {
             bail!("no instance: {} found", instance_uuid);
         };
 
-        let instance_name = instance.name().to_string();
-        let propolis_id = instance.runtime().propolis_id.to_string();
-        let my_sled_id = instance.runtime().sled_id;
+        let instance_name = instance.instance().name().to_string();
+        let disk_name = disk.name().to_string();
+        let usr = if instance.vmm().is_some() {
+            let propolis_id =
+                instance.instance().runtime().propolis_id.unwrap();
+            let my_sled_id = instance.sled_id().unwrap();
 
-        let (_, my_sled) = LookupPath::new(opctx, datastore)
-            .sled_id(my_sled_id)
-            .fetch()
-            .await
-            .context("failed to look up sled")?;
+            let (_, my_sled) = LookupPath::new(opctx, datastore)
+                .sled_id(my_sled_id)
+                .fetch()
+                .await
+                .context("failed to look up sled")?;
 
-        let usr = UpstairsRow {
-            host_serial: my_sled.serial_number().to_string(),
-            disk_name: disk.name().to_string(),
-            instance_name,
-            propolis_zone: format!("oxz_propolis-server_{}", propolis_id),
+            UpstairsRow {
+                host_serial: my_sled.serial_number().to_string(),
+                disk_name,
+                instance_name,
+                propolis_zone: format!("oxz_propolis-server_{}", propolis_id),
+            }
+        } else {
+            UpstairsRow {
+                host_serial: NOT_ON_SLED_MSG.to_string(),
+                propolis_zone: NO_ACTIVE_PROPOLIS_MSG.to_string(),
+                disk_name,
+                instance_name,
+            }
         };
         rows.push(usr);
     } else {
@@ -506,6 +620,151 @@ async fn cmd_db_disk_info(
 
     println!("{}", table);
 
+    Ok(())
+}
+
+/// Run `omdb db disk physical <UUID>`.
+async fn cmd_db_disk_physical(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    limit: NonZeroU32,
+    args: &DiskPhysicalArgs,
+) -> Result<(), anyhow::Error> {
+    // We start by finding any zpools that are using the physical disk.
+    use db::schema::zpool::dsl as zpool_dsl;
+    let zpools = zpool_dsl::zpool
+        .filter(zpool_dsl::time_deleted.is_null())
+        .filter(zpool_dsl::physical_disk_id.eq(args.uuid))
+        .select(Zpool::as_select())
+        .load_async(&*datastore.pool_connection_for_tests().await?)
+        .await
+        .context("loading zpool from pysical disk id")?;
+
+    let mut sled_ids = HashSet::new();
+    let mut dataset_ids = HashSet::new();
+
+    // The current plan is a single zpool per physical disk, so we expect that
+    // this will have a single item.  However, If single zpool per disk ever
+    // changes, this code will still work.
+    for zp in zpools {
+        // zpool has the sled id, record that so we can find the serial number.
+        sled_ids.insert(zp.sled_id);
+
+        // Next, we find all the datasets that are on our zpool.
+        use db::schema::dataset::dsl as dataset_dsl;
+        let datasets = dataset_dsl::dataset
+            .filter(dataset_dsl::time_deleted.is_null())
+            .filter(dataset_dsl::pool_id.eq(zp.id()))
+            .select(Dataset::as_select())
+            .load_async(&*datastore.pool_connection_for_tests().await?)
+            .await
+            .context("loading dataset")?;
+
+        // Add all the datasets ids that are using this pool.
+        for ds in datasets {
+            dataset_ids.insert(ds.id());
+        }
+    }
+
+    // If we do have more than one sled ID, then something is wrong, but
+    // go ahead and print out whatever we have found.
+    for sid in sled_ids {
+        let (_, my_sled) = LookupPath::new(opctx, datastore)
+            .sled_id(sid)
+            .fetch()
+            .await
+            .context("failed to look up sled")?;
+
+        println!(
+            "Physical disk: {} found on sled: {}",
+            args.uuid,
+            my_sled.serial_number()
+        );
+    }
+
+    let mut volume_ids = HashSet::new();
+    // Now, take the list of datasets we found and search all the regions
+    // to see if any of them are on the dataset.  If we find a region that
+    // is on one of our datasets, then record the volume ID of that region.
+    for did in dataset_ids.clone().into_iter() {
+        use db::schema::region::dsl as region_dsl;
+        let regions = region_dsl::region
+            .filter(region_dsl::dataset_id.eq(did))
+            .select(Region::as_select())
+            .load_async(&*datastore.pool_connection_for_tests().await?)
+            .await
+            .context("loading region")?;
+
+        for rs in regions {
+            volume_ids.insert(rs.volume_id());
+        }
+    }
+
+    // At this point, we have a list of volume IDs that contain a region
+    // that is part of a dataset on a pool on our disk.  The final step is
+    // to find the virtual disks associated with these volume IDs and
+    // display information about those disks.
+    use db::schema::disk::dsl;
+    let disks = dsl::disk
+        .filter(dsl::time_deleted.is_null())
+        .filter(dsl::volume_id.eq_any(volume_ids))
+        .limit(i64::from(u32::from(limit)))
+        .select(Disk::as_select())
+        .load_async(&*datastore.pool_connection_for_tests().await?)
+        .await
+        .context("loading disks")?;
+
+    check_limit(&disks, limit, || "listing disks".to_string());
+
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct DiskRow {
+        name: String,
+        id: String,
+        state: String,
+        instance_name: String,
+    }
+
+    let mut rows = Vec::new();
+
+    for disk in disks {
+        // If the disk is attached to an instance, determine the name of the
+        // instance.
+        let instance_name =
+            if let Some(instance_uuid) = disk.runtime().attach_instance_id {
+                // Get the instance this disk is attached to
+                use db::schema::instance::dsl as instance_dsl;
+                let instance = instance_dsl::instance
+                    .filter(instance_dsl::id.eq(instance_uuid))
+                    .limit(1)
+                    .select(Instance::as_select())
+                    .load_async(&*datastore.pool_connection_for_tests().await?)
+                    .await
+                    .context("loading requested instance")?;
+
+                if let Some(instance) = instance.into_iter().next() {
+                    instance.name().to_string()
+                } else {
+                    "???".to_string()
+                }
+            } else {
+                "-".to_string()
+            };
+
+        rows.push(DiskRow {
+            name: disk.name().to_string(),
+            id: disk.id().to_string(),
+            state: disk.runtime().disk_state,
+            instance_name,
+        });
+    }
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
     Ok(())
 }
 
@@ -690,17 +949,17 @@ async fn cmd_db_sleds(
 struct CustomerInstanceRow {
     id: Uuid,
     state: String,
-    propolis_id: Uuid,
-    sled_id: Uuid,
+    propolis_id: MaybePropolisId,
+    sled_id: MaybeSledId,
 }
 
-impl From<Instance> for CustomerInstanceRow {
-    fn from(i: Instance) -> Self {
+impl From<InstanceAndActiveVmm> for CustomerInstanceRow {
+    fn from(i: InstanceAndActiveVmm) -> Self {
         CustomerInstanceRow {
-            id: i.id(),
-            state: format!("{:?}", i.runtime_state.state.0),
-            propolis_id: i.runtime_state.propolis_id,
-            sled_id: i.runtime_state.sled_id,
+            id: i.instance().id(),
+            state: format!("{:?}", i.effective_state()),
+            propolis_id: (&i).into(),
+            sled_id: (&i).into(),
         }
     }
 }
@@ -711,12 +970,22 @@ async fn cmd_db_instances(
     limit: NonZeroU32,
 ) -> Result<(), anyhow::Error> {
     use db::schema::instance::dsl;
-    let instances = dsl::instance
+    use db::schema::vmm::dsl as vmm_dsl;
+    let instances: Vec<InstanceAndActiveVmm> = dsl::instance
+        .left_join(
+            vmm_dsl::vmm.on(vmm_dsl::id
+                .nullable()
+                .eq(dsl::active_propolis_id)
+                .and(vmm_dsl::time_deleted.is_null())),
+        )
         .limit(i64::from(u32::from(limit)))
-        .select(Instance::as_select())
-        .load_async(datastore.pool_for_tests().await?)
+        .select((Instance::as_select(), Option::<Vmm>::as_select()))
+        .load_async(&*datastore.pool_connection_for_tests().await?)
         .await
-        .context("loading instances")?;
+        .context("loading instances")?
+        .into_iter()
+        .map(|i: (Instance, Option<Vmm>)| i.into())
+        .collect();
 
     let ctx = || "listing instances".to_string();
     check_limit(&instances, limit, ctx);
@@ -808,7 +1077,7 @@ async fn load_zones_version(
         .filter(dsl::version.eq(nexus_db_model::Generation::from(version)))
         .limit(1)
         .select(DnsVersion::as_select())
-        .load_async(datastore.pool_for_tests().await?)
+        .load_async(&*datastore.pool_connection_for_tests().await?)
         .await
         .context("loading requested version")?;
 
@@ -850,7 +1119,7 @@ async fn cmd_db_dns_diff(
             .filter(dsl::version_added.eq(version.version))
             .limit(i64::from(u32::from(limit)))
             .select(DnsName::as_select())
-            .load_async(datastore.pool_for_tests().await?)
+            .load_async(&*datastore.pool_connection_for_tests().await?)
             .await
             .context("loading added names")?;
         check_limit(&added, limit, || "loading added names");
@@ -860,7 +1129,7 @@ async fn cmd_db_dns_diff(
             .filter(dsl::version_removed.eq(version.version))
             .limit(i64::from(u32::from(limit)))
             .select(DnsName::as_select())
-            .load_async(datastore.pool_for_tests().await?)
+            .load_async(&*datastore.pool_connection_for_tests().await?)
             .await
             .context("loading added names")?;
         check_limit(&added, limit, || "loading removed names");
@@ -929,6 +1198,156 @@ async fn cmd_db_dns_names(
             print_name("", &name, Ok(records));
         }
     }
+
+    Ok(())
+}
+
+async fn cmd_db_eips(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    limit: NonZeroU32,
+    verbose: bool,
+) -> Result<(), anyhow::Error> {
+    use db::schema::external_ip::dsl;
+    let ips: Vec<ExternalIp> = dsl::external_ip
+        .filter(dsl::time_deleted.is_null())
+        .select(ExternalIp::as_select())
+        .get_results_async(&*datastore.pool_connection_for_tests().await?)
+        .await?;
+
+    check_limit(&ips, limit, || String::from("listing external ips"));
+
+    struct PortRange {
+        first: u16,
+        last: u16,
+    }
+
+    impl Display for PortRange {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{}/{}", self.first, self.last)
+        }
+    }
+
+    #[derive(Tabled)]
+    enum Owner {
+        Instance { project: String, name: String },
+        Service { kind: String },
+        None,
+    }
+
+    impl Display for Owner {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                Self::Instance { project, name } => {
+                    write!(f, "Instance {project}/{name}")
+                }
+                Self::Service { kind } => write!(f, "Service {kind}"),
+                Self::None => write!(f, "None"),
+            }
+        }
+    }
+
+    #[derive(Tabled)]
+    struct IpRow {
+        ip: ipnetwork::IpNetwork,
+        ports: PortRange,
+        kind: String,
+        owner: Owner,
+    }
+
+    if verbose {
+        for ip in &ips {
+            if verbose {
+                println!("{ip:#?}");
+            }
+        }
+        return Ok(());
+    }
+
+    let mut rows = Vec::new();
+
+    for ip in &ips {
+        let owner = if let Some(owner_id) = ip.parent_id {
+            if ip.is_service {
+                let service = match LookupPath::new(opctx, datastore)
+                    .service_id(owner_id)
+                    .fetch()
+                    .await
+                {
+                    Ok(instance) => instance,
+                    Err(e) => {
+                        eprintln!(
+                            "error looking up service with id {owner_id}: {e}"
+                        );
+                        continue;
+                    }
+                };
+                Owner::Service { kind: format!("{:?}", service.1.kind) }
+            } else {
+                use db::schema::instance::dsl as instance_dsl;
+                let instance = match instance_dsl::instance
+                    .filter(instance_dsl::id.eq(owner_id))
+                    .limit(1)
+                    .select(Instance::as_select())
+                    .load_async(&*datastore.pool_connection_for_tests().await?)
+                    .await
+                    .context("loading requested instance")?
+                    .pop()
+                {
+                    Some(instance) => instance,
+                    None => {
+                        eprintln!("instance with id {owner_id} not found");
+                        continue;
+                    }
+                };
+
+                use db::schema::project::dsl as project_dsl;
+                let project = match project_dsl::project
+                    .filter(project_dsl::id.eq(instance.project_id))
+                    .limit(1)
+                    .select(Project::as_select())
+                    .load_async(&*datastore.pool_connection_for_tests().await?)
+                    .await
+                    .context("loading requested project")?
+                    .pop()
+                {
+                    Some(instance) => instance,
+                    None => {
+                        eprintln!(
+                            "project with id {} not found",
+                            instance.project_id
+                        );
+                        continue;
+                    }
+                };
+
+                Owner::Instance {
+                    project: project.name().to_string(),
+                    name: instance.name().to_string(),
+                }
+            }
+        } else {
+            Owner::None
+        };
+
+        let row = IpRow {
+            ip: ip.ip,
+            ports: PortRange {
+                first: ip.first_port.into(),
+                last: ip.last_port.into(),
+            },
+            kind: format!("{:?}", ip.kind),
+            owner,
+        };
+        rows.push(row);
+    }
+
+    rows.sort_by(|a, b| a.ip.cmp(&b.ip));
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .to_string();
+
+    println!("{}", table);
 
     Ok(())
 }

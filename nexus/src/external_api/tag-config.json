@@ -80,6 +80,12 @@
         "url": "http://docs.oxide.computer/api/vpcs"
       }
     },
+    "system/status": {
+      "description": "Endpoints related to system health",
+      "external_docs": {
+        "url": "http://docs.oxide.computer/api/system-status"
+      }
+    },
     "system/hardware": {
       "description": "These operations pertain to hardware inventory and management. Racks are the unit of expansion of an Oxide deployment. Racks are in turn composed of sleds, switches, power supplies, and a cabled backplane.",
       "external_docs": {

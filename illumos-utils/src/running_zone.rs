@@ -391,13 +391,16 @@ pub struct RunningZone {
 }
 
 impl RunningZone {
+    /// The path to the zone's root filesystem (i.e., `/`), within zonepath.
+    pub const ROOT_FS_PATH: &'static str = "root";
+
     pub fn name(&self) -> &str {
         &self.inner.name
     }
 
-    /// Returns the filesystem path to the zone's root
+    /// Returns the filesystem path to the zone's root in the GZ.
     pub fn root(&self) -> Utf8PathBuf {
-        self.inner.zonepath.join("root")
+        self.inner.zonepath.join(Self::ROOT_FS_PATH)
     }
 
     pub fn control_interface(&self) -> AddrObject {
@@ -958,13 +961,11 @@ impl RunningZone {
                 };
                 let binary = Utf8PathBuf::from(path);
 
-                // Fetch any log files for this SMF service.
-                let Some((log_file, rotated_log_files)) =
-                    self.service_log_files(&service_name)?
+                let Some(log_file) = self.service_log_file(&service_name)?
                 else {
                     error!(
                         self.inner.log,
-                        "failed to find log files for existing service";
+                        "failed to find log file for existing service";
                         "service_name" => &service_name,
                     );
                     continue;
@@ -975,7 +976,6 @@ impl RunningZone {
                     binary,
                     pid,
                     log_file,
-                    rotated_log_files,
                 });
             }
         }
@@ -987,75 +987,27 @@ impl RunningZone {
         let output = self.run_cmd(&["svcs", "-H", "-o", "fmri"])?;
         Ok(output
             .lines()
-            .filter(|line| is_oxide_smf_log_file(line))
+            .filter(|line| is_oxide_smf_service(line))
             .map(|line| line.trim().to_string())
             .collect())
     }
 
-    /// Return any SMF log files associated with the named service.
+    /// Return any SMF log file associated with the named service.
     ///
-    /// Given a named service, this returns a tuple of the latest or current log
-    /// file, and an array of any rotated log files. If the service does not
-    /// exist, or there are no log files, `None` is returned.
-    pub fn service_log_files(
+    /// Given a named service, this returns the path of the current log file.
+    /// This can be used to find rotated or archived log files, but keep in mind
+    /// this returns only the current, if it exists.
+    pub fn service_log_file(
         &self,
         name: &str,
-    ) -> Result<Option<(Utf8PathBuf, Vec<Utf8PathBuf>)>, ServiceError> {
+    ) -> Result<Option<Utf8PathBuf>, ServiceError> {
         let output = self.run_cmd(&["svcs", "-L", name])?;
         let mut lines = output.lines();
         let Some(current) = lines.next() else {
             return Ok(None);
         };
-        // We need to prepend the zonepath root to get the path in the GZ. We
-        // can do this with `join()`, but that will _replace_ the path if the
-        // second one is absolute. So trim any prefixed `/` from each path.
-        let root = self.root();
-        let current_log_file =
-            root.join(current.trim().trim_start_matches('/'));
-
-        // The rotated log files should have the same prefix as the current, but
-        // with an index appended. We'll search the parent directory for
-        // matching names, skipping the current file.
-        //
-        // See https://illumos.org/man/8/logadm for details on the naming
-        // conventions around these files.
-        let dir = current_log_file.parent().unwrap();
-        let mut rotated_files: Vec<Utf8PathBuf> = Vec::new();
-        for entry in dir.read_dir_utf8()? {
-            let entry = entry?;
-            let path = entry.path();
-
-            // Camino's Utf8Path only considers whole path components to match,
-            // so convert both paths into a &str and use that object's
-            // starts_with. See the `camino_starts_with_behaviour` test.
-            let path_ref: &str = path.as_ref();
-            let current_log_file_ref: &str = current_log_file.as_ref();
-            if path != current_log_file
-                && path_ref.starts_with(current_log_file_ref)
-            {
-                rotated_files.push(path.clone().into());
-            }
-        }
-
-        Ok(Some((current_log_file, rotated_files)))
+        return Ok(Some(Utf8PathBuf::from(current.trim())));
     }
-}
-
-#[test]
-fn camino_starts_with_behaviour() {
-    let logfile =
-        Utf8PathBuf::from("/zonepath/var/svc/log/oxide-nexus:default.log");
-    let rotated_logfile =
-        Utf8PathBuf::from("/zonepath/var/svc/log/oxide-nexus:default.log.0");
-
-    let logfile_as_string: &str = logfile.as_ref();
-    let rotated_logfile_as_string: &str = rotated_logfile.as_ref();
-
-    assert!(logfile != rotated_logfile);
-    assert!(logfile_as_string != rotated_logfile_as_string);
-
-    assert!(!rotated_logfile.starts_with(&logfile));
-    assert!(rotated_logfile_as_string.starts_with(&logfile_as_string));
 }
 
 impl Drop for RunningZone {
@@ -1088,8 +1040,6 @@ pub struct ServiceProcess {
     pub pid: u32,
     /// The path for the current log file.
     pub log_file: Utf8PathBuf,
-    /// The paths for any rotated log files.
-    pub rotated_log_files: Vec<Utf8PathBuf>,
 }
 
 /// Errors returned from [`InstalledZone::install`].
@@ -1267,10 +1217,51 @@ impl InstalledZone {
     }
 }
 
-/// Return true if the named file appears to be a log file for an Oxide SMF
-/// service.
-pub fn is_oxide_smf_log_file(name: impl AsRef<str>) -> bool {
-    const SMF_SERVICE_PREFIXES: [&str; 2] = ["/oxide", "/system/illumos"];
-    let name = name.as_ref();
-    SMF_SERVICE_PREFIXES.iter().any(|needle| name.contains(needle))
+/// Return true if the service with the given FMRI appears to be an
+/// Oxide-managed service.
+pub fn is_oxide_smf_service(fmri: impl AsRef<str>) -> bool {
+    const SMF_SERVICE_PREFIXES: [&str; 2] =
+        ["svc:/oxide/", "svc:/system/illumos/"];
+    let fmri = fmri.as_ref();
+    SMF_SERVICE_PREFIXES.iter().any(|prefix| fmri.starts_with(prefix))
+}
+
+/// Return true if the provided file name appears to be a valid log file for an
+/// Oxide-managed SMF service.
+///
+/// Note that this operates on the _file name_. Any leading path components will
+/// cause this check to return `false`.
+pub fn is_oxide_smf_log_file(filename: impl AsRef<str>) -> bool {
+    // Log files are named by the SMF services, with the `/` in the FMRI
+    // translated to a `-`.
+    const PREFIXES: [&str; 2] = ["oxide-", "system-illumos-"];
+    let filename = filename.as_ref();
+    PREFIXES
+        .iter()
+        .any(|prefix| filename.starts_with(prefix) && filename.contains(".log"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_oxide_smf_log_file;
+    use super::is_oxide_smf_service;
+
+    #[test]
+    fn test_is_oxide_smf_service() {
+        assert!(is_oxide_smf_service("svc:/oxide/blah:default"));
+        assert!(is_oxide_smf_service("svc:/system/illumos/blah:default"));
+        assert!(!is_oxide_smf_service("svc:/system/blah:default"));
+        assert!(!is_oxide_smf_service("svc:/not/oxide/blah:default"));
+    }
+
+    #[test]
+    fn test_is_oxide_smf_log_file() {
+        assert!(is_oxide_smf_log_file("oxide-blah:default.log"));
+        assert!(is_oxide_smf_log_file("oxide-blah:default.log.0"));
+        assert!(is_oxide_smf_log_file("oxide-blah:default.log.1111"));
+        assert!(is_oxide_smf_log_file("system-illumos-blah:default.log"));
+        assert!(is_oxide_smf_log_file("system-illumos-blah:default.log.0"));
+        assert!(!is_oxide_smf_log_file("not-oxide-blah:default.log"));
+        assert!(!is_oxide_smf_log_file("not-system-illumos-blah:default.log"));
+    }
 }

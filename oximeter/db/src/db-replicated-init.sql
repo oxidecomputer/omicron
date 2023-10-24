@@ -1,5 +1,13 @@
 CREATE DATABASE IF NOT EXISTS oximeter ON CLUSTER oximeter_cluster;
 --
+CREATE TABLE IF NOT EXISTS oximeter.version ON CLUSTER oximeter_cluster
+(
+    value UInt64,
+    timestamp DateTime64(9, 'UTC')
+)
+ENGINE = ReplicatedMergeTree()
+ORDER BY (value, timestamp);
+--
 CREATE TABLE IF NOT EXISTS oximeter.measurements_bool_local ON CLUSTER oximeter_cluster
 (
     timeseries_name String,

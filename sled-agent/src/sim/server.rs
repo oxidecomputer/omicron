@@ -94,7 +94,7 @@ impl Server {
                     &config.id,
                     &NexusTypes::SledAgentStartupInfo {
                         sa_address: sa_address.to_string(),
-                        role: NexusTypes::SledRole::Gimlet,
+                        role: NexusTypes::SledRole::Scrimlet,
                         baseboard: NexusTypes::Baseboard {
                             serial_number: format!(
                                 "sim-{}",

@@ -30,6 +30,7 @@ trust-dns-proto.workspace = true
 trust-dns-resolver.workspace = true
 trust-dns-server.workspace = true
 uuid.workspace = true
+omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 expectorate.workspace = true

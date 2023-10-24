@@ -15,7 +15,7 @@ use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_common::nexus_config::Config;
 use omicron_common::nexus_config::SchemaConfig;
 use omicron_test_utils::dev::db::CockroachInstance;
-use pretty_assertions::assert_eq;
+use pretty_assertions::{assert_eq, assert_ne};
 use similar_asserts;
 use slog::Logger;
 use std::collections::{BTreeMap, BTreeSet};
@@ -58,8 +58,52 @@ async fn test_setup<'a>(
     builder.start_external_dns().await;
     builder.start_dendrite(SwitchLocation::Switch0).await;
     builder.start_dendrite(SwitchLocation::Switch1).await;
+    builder.start_mgd(SwitchLocation::Switch0).await;
+    builder.start_mgd(SwitchLocation::Switch1).await;
     builder.populate_internal_dns().await;
     builder
+}
+
+// Attempts to apply an update as a transaction.
+//
+// Only returns an error if the transaction failed to commit.
+async fn apply_update_as_transaction_inner(
+    client: &omicron_test_utils::dev::db::Client,
+    sql: &str,
+) -> Result<(), tokio_postgres::Error> {
+    client.batch_execute("BEGIN;").await.expect("Failed to BEGIN transaction");
+    client.batch_execute(&sql).await.expect("Failed to execute update");
+    client.batch_execute("COMMIT;").await?;
+    Ok(())
+}
+
+// Applies an update as a transaction.
+//
+// Automatically retries transactions that can be retried client-side.
+async fn apply_update_as_transaction(
+    log: &Logger,
+    client: &omicron_test_utils::dev::db::Client,
+    sql: &str,
+) {
+    loop {
+        match apply_update_as_transaction_inner(client, sql).await {
+            Ok(()) => break,
+            Err(err) => {
+                warn!(log, "Failed to apply update as transaction"; "err" => err.to_string());
+                client
+                    .batch_execute("ROLLBACK;")
+                    .await
+                    .expect("Failed to ROLLBACK failed transaction");
+                if let Some(code) = err.code() {
+                    if code == &tokio_postgres::error::SqlState::T_R_SERIALIZATION_FAILURE {
+                        warn!(log, "Transaction retrying");
+                        continue;
+                    }
+                }
+                panic!("Failed to apply update: {err}");
+            }
+        }
+    }
 }
 
 async fn apply_update(
@@ -68,7 +112,9 @@ async fn apply_update(
     version: &str,
     times_to_apply: usize,
 ) {
-    info!(log, "Performing upgrade to {version}");
+    let log = log.new(o!("target version" => version.to_string()));
+    info!(log, "Performing upgrade");
+
     let client = crdb.connect().await.expect("failed to connect");
 
     // We skip this for the earliest supported version because these tables
@@ -83,19 +129,15 @@ async fn apply_update(
     }
 
     let target_dir = Utf8PathBuf::from(SCHEMA_DIR).join(version);
-    let sqls = all_sql_for_version_migration(&target_dir).await.unwrap();
+    let schema_change =
+        all_sql_for_version_migration(&target_dir).await.unwrap();
 
     for _ in 0..times_to_apply {
-        for sql in sqls.iter() {
-            client
-                .batch_execute("BEGIN;")
-                .await
-                .expect("Failed to BEGIN update");
-            client.batch_execute(&sql).await.expect("Failed to execute update");
-            client
-                .batch_execute("COMMIT;")
-                .await
-                .expect("Failed to COMMIT update");
+        for nexus_db_queries::db::datastore::SchemaUpgradeStep { path, sql } in
+            &schema_change.steps
+        {
+            info!(log, "Applying sql schema upgrade step"; "path" => path.to_string());
+            apply_update_as_transaction(&log, &client, sql).await;
         }
     }
 
@@ -132,6 +174,7 @@ enum AnySqlType {
     String(String),
     Bool(bool),
     Uuid(Uuid),
+    Int8(i64),
     // TODO: This isn't exhaustive, feel free to add more.
     //
     // These should only be necessary for rows where the database schema changes also choose to
@@ -166,6 +209,9 @@ impl<'a> tokio_postgres::types::FromSql<'a> for AnySqlType {
         }
         if Uuid::accepts(ty) {
             return Ok(AnySqlType::Uuid(Uuid::from_sql(ty, raw)?));
+        }
+        if i64::accepts(ty) {
+            return Ok(AnySqlType::Int8(i64::from_sql(ty, raw)?));
         }
         Err(anyhow::anyhow!(
             "Cannot parse type {ty}. If you're trying to use this type in a table which is populated \
@@ -216,7 +262,35 @@ impl<'a> From<&'a [&'static str]> for ColumnSelector<'a> {
     }
 }
 
-async fn query_crdb_for_rows_of_strings(
+async fn crdb_show_constraints(
+    crdb: &CockroachInstance,
+    table: &str,
+) -> Vec<Row> {
+    let client = crdb.connect().await.expect("failed to connect");
+
+    let sql = format!("SHOW CONSTRAINTS FROM {table}");
+    let rows = client
+        .query(&sql, &[])
+        .await
+        .unwrap_or_else(|_| panic!("failed to query {table}"));
+    client.cleanup().await.expect("cleaning up after wipe");
+
+    let mut result = vec![];
+    for row in rows {
+        let mut row_result = Row::new();
+        for i in 0..row.len() {
+            let column_name = row.columns()[i].name();
+            row_result.values.push(NamedSqlValue {
+                column: column_name.to_string(),
+                value: row.get(i),
+            });
+        }
+        result.push(row_result);
+    }
+    result
+}
+
+async fn crdb_select(
     crdb: &CockroachInstance,
     columns: ColumnSelector<'_>,
     table: &str,
@@ -416,20 +490,24 @@ async fn versions_have_idempotent_up() {
     logctx.cleanup_successful();
 }
 
-const COLUMNS: [&'static str; 6] = [
+const COLUMNS: [&'static str; 7] = [
     "table_catalog",
     "table_schema",
     "table_name",
     "column_name",
     "column_default",
+    "is_nullable",
     "data_type",
 ];
 
-const CHECK_CONSTRAINTS: [&'static str; 4] = [
+const CONSTRAINT_COLUMN_USAGE: [&'static str; 7] = [
+    "table_catalog",
+    "table_schema",
+    "table_name",
+    "column_name",
     "constraint_catalog",
     "constraint_schema",
     "constraint_name",
-    "check_clause",
 ];
 
 const KEY_COLUMN_USAGE: [&'static str; 7] = [
@@ -456,16 +534,37 @@ const REFERENTIAL_CONSTRAINTS: [&'static str; 8] = [
 const VIEWS: [&'static str; 4] =
     ["table_catalog", "table_schema", "table_name", "view_definition"];
 
-const STATISTICS: [&'static str; 8] = [
+const STATISTICS: [&'static str; 11] = [
     "table_catalog",
     "table_schema",
     "table_name",
     "non_unique",
     "index_schema",
     "index_name",
+    "seq_in_index",
     "column_name",
     "direction",
+    "storing",
+    "implicit",
 ];
+
+const SEQUENCES: [&'static str; 12] = [
+    "sequence_catalog",
+    "sequence_schema",
+    "sequence_name",
+    "data_type",
+    "numeric_precision",
+    "numeric_precision_radix",
+    "numeric_scale",
+    "start_value",
+    "minimum_value",
+    "maximum_value",
+    "increment",
+    "cycle_option",
+];
+
+const PG_INDEXES: [&'static str; 5] =
+    ["schemaname", "tablename", "indexname", "tablespace", "indexdef"];
 
 const TABLES: [&'static str; 4] =
     ["table_catalog", "table_schema", "table_name", "table_type"];
@@ -473,22 +572,31 @@ const TABLES: [&'static str; 4] =
 #[derive(Eq, PartialEq, Debug)]
 struct InformationSchema {
     columns: Vec<Row>,
-    check_constraints: Vec<Row>,
+    constraint_column_usage: Vec<Row>,
     key_column_usage: Vec<Row>,
     referential_constraints: Vec<Row>,
     views: Vec<Row>,
     statistics: Vec<Row>,
+    sequences: Vec<Row>,
+    pg_indexes: Vec<Row>,
     tables: Vec<Row>,
+    table_constraints: BTreeMap<String, Vec<Row>>,
 }
 
 impl InformationSchema {
     fn pretty_assert_eq(&self, other: &Self) {
         // similar_asserts gets us nice diff that only includes the relevant context.
         // the columns diff especially needs this: it can be 20k lines otherwise
+        similar_asserts::assert_eq!(self.tables, other.tables);
         similar_asserts::assert_eq!(self.columns, other.columns);
+        similar_asserts::assert_eq!(self.views, other.views);
         similar_asserts::assert_eq!(
-            self.check_constraints,
-            other.check_constraints
+            self.table_constraints,
+            other.table_constraints
+        );
+        similar_asserts::assert_eq!(
+            self.constraint_column_usage,
+            other.constraint_column_usage
         );
         similar_asserts::assert_eq!(
             self.key_column_usage,
@@ -498,9 +606,9 @@ impl InformationSchema {
             self.referential_constraints,
             other.referential_constraints
         );
-        similar_asserts::assert_eq!(self.views, other.views);
         similar_asserts::assert_eq!(self.statistics, other.statistics);
-        similar_asserts::assert_eq!(self.tables, other.tables);
+        similar_asserts::assert_eq!(self.sequences, other.sequences);
+        similar_asserts::assert_eq!(self.pg_indexes, other.pg_indexes);
     }
 
     async fn new(crdb: &CockroachInstance) -> Self {
@@ -508,7 +616,7 @@ impl InformationSchema {
         // https://www.cockroachlabs.com/docs/v23.1/information-schema
         //
         // For details on each of these tables.
-        let columns = query_crdb_for_rows_of_strings(
+        let columns = crdb_select(
             crdb,
             COLUMNS.as_slice().into(),
             "information_schema.columns",
@@ -516,15 +624,15 @@ impl InformationSchema {
         )
         .await;
 
-        let check_constraints = query_crdb_for_rows_of_strings(
+        let constraint_column_usage = crdb_select(
             crdb,
-            CHECK_CONSTRAINTS.as_slice().into(),
-            "information_schema.check_constraints",
+            CONSTRAINT_COLUMN_USAGE.as_slice().into(),
+            "information_schema.constraint_column_usage",
             None,
         )
         .await;
 
-        let key_column_usage = query_crdb_for_rows_of_strings(
+        let key_column_usage = crdb_select(
             crdb,
             KEY_COLUMN_USAGE.as_slice().into(),
             "information_schema.key_column_usage",
@@ -532,7 +640,7 @@ impl InformationSchema {
         )
         .await;
 
-        let referential_constraints = query_crdb_for_rows_of_strings(
+        let referential_constraints = crdb_select(
             crdb,
             REFERENTIAL_CONSTRAINTS.as_slice().into(),
             "information_schema.referential_constraints",
@@ -540,7 +648,7 @@ impl InformationSchema {
         )
         .await;
 
-        let views = query_crdb_for_rows_of_strings(
+        let views = crdb_select(
             crdb,
             VIEWS.as_slice().into(),
             "information_schema.views",
@@ -548,7 +656,7 @@ impl InformationSchema {
         )
         .await;
 
-        let statistics = query_crdb_for_rows_of_strings(
+        let statistics = crdb_select(
             crdb,
             STATISTICS.as_slice().into(),
             "information_schema.statistics",
@@ -556,7 +664,23 @@ impl InformationSchema {
         )
         .await;
 
-        let tables = query_crdb_for_rows_of_strings(
+        let sequences = crdb_select(
+            crdb,
+            SEQUENCES.as_slice().into(),
+            "information_schema.sequences",
+            None,
+        )
+        .await;
+
+        let pg_indexes = crdb_select(
+            crdb,
+            PG_INDEXES.as_slice().into(),
+            "pg_indexes",
+            Some("schemaname = 'public'"),
+        )
+        .await;
+
+        let tables = crdb_select(
             crdb,
             TABLES.as_slice().into(),
             "information_schema.tables",
@@ -564,15 +688,48 @@ impl InformationSchema {
         )
         .await;
 
+        let table_constraints =
+            Self::show_constraints_all_tables(&tables, crdb).await;
+
         Self {
             columns,
-            check_constraints,
+            constraint_column_usage,
             key_column_usage,
             referential_constraints,
             views,
             statistics,
+            sequences,
+            pg_indexes,
             tables,
+            table_constraints,
         }
+    }
+
+    async fn show_constraints_all_tables(
+        tables: &Vec<Row>,
+        crdb: &CockroachInstance,
+    ) -> BTreeMap<String, Vec<Row>> {
+        let mut map = BTreeMap::new();
+
+        for table in tables {
+            let table = &table.values;
+            let table_catalog =
+                table[0].expect("table_catalog").unwrap().as_str();
+            let table_schema =
+                table[1].expect("table_schema").unwrap().as_str();
+            let table_name = table[2].expect("table_name").unwrap().as_str();
+            let table_type = table[3].expect("table_type").unwrap().as_str();
+
+            if table_type != "BASE TABLE" {
+                continue;
+            }
+
+            let table_name =
+                format!("{}.{}.{}", table_catalog, table_schema, table_name);
+            let rows = crdb_show_constraints(crdb, &table_name).await;
+            map.insert(table_name, rows);
+        }
+        map
     }
 
     // This would normally be quite an expensive operation, but we expect it'll
@@ -601,13 +758,9 @@ impl InformationSchema {
             let table_name =
                 format!("{}.{}.{}", table_catalog, table_schema, table_name);
             info!(log, "Querying table: {table_name}");
-            let rows = query_crdb_for_rows_of_strings(
-                crdb,
-                ColumnSelector::Star,
-                &table_name,
-                None,
-            )
-            .await;
+            let rows =
+                crdb_select(crdb, ColumnSelector::Star, &table_name, None)
+                    .await;
             info!(log, "Saw data: {rows:?}");
             map.insert(table_name, rows);
         }
@@ -657,5 +810,272 @@ async fn dbinit_equals_sum_of_all_up() {
     assert_eq!(observed_data, expected_data);
 
     crdb.cleanup().await.unwrap();
+    logctx.cleanup_successful();
+}
+
+// Returns the InformationSchema object for a database populated via `sql`.
+async fn get_information_schema(log: &Logger, sql: &str) -> InformationSchema {
+    let populate = false;
+    let mut crdb = test_setup_just_crdb(&log, populate).await;
+
+    let client = crdb.connect().await.expect("failed to connect");
+    client.batch_execute(sql).await.expect("failed to apply SQL");
+
+    let observed_schema = InformationSchema::new(&crdb).await;
+    crdb.cleanup().await.unwrap();
+    observed_schema
+}
+
+// Reproduction case for https://github.com/oxidecomputer/omicron/issues/4143
+#[tokio::test]
+async fn compare_index_creation_differing_where_clause() {
+    let config = load_test_config();
+    let logctx = LogContext::new(
+        "compare_index_creation_differing_where_clause",
+        &config.pkg.log,
+    );
+    let log = &logctx.log;
+
+    let schema1 = get_information_schema(log, "
+        CREATE DATABASE omicron;
+        CREATE TABLE omicron.public.animal (
+            id UUID PRIMARY KEY,
+            name TEXT,
+            time_deleted TIMESTAMPTZ
+        );
+
+        CREATE INDEX IF NOT EXISTS lookup_animal_by_name ON omicron.public.animal (
+            name, id
+        ) WHERE name IS NOT NULL AND time_deleted IS NULL;
+    ").await;
+
+    let schema2 = get_information_schema(log, "
+        CREATE DATABASE omicron;
+        CREATE TABLE omicron.public.animal (
+            id UUID PRIMARY KEY,
+            name TEXT,
+            time_deleted TIMESTAMPTZ
+        );
+
+        CREATE INDEX IF NOT EXISTS lookup_animal_by_name ON omicron.public.animal (
+            name, id
+        ) WHERE time_deleted IS NULL;
+    ").await;
+
+    // pg_indexes includes a column "indexdef" that compares partial indexes.
+    // This should catch the differing "WHERE" clause.
+    assert_ne!(schema1.pg_indexes, schema2.pg_indexes);
+
+    logctx.cleanup_successful();
+}
+
+// Reproduction case for https://github.com/oxidecomputer/omicron/issues/4143
+#[tokio::test]
+async fn compare_index_creation_differing_columns() {
+    let config = load_test_config();
+    let logctx = LogContext::new(
+        "compare_index_creation_differing_columns",
+        &config.pkg.log,
+    );
+    let log = &logctx.log;
+
+    let schema1 = get_information_schema(log, "
+        CREATE DATABASE omicron;
+        CREATE TABLE omicron.public.animal (
+            id UUID PRIMARY KEY,
+            name TEXT,
+            time_deleted TIMESTAMPTZ
+        );
+
+        CREATE INDEX IF NOT EXISTS lookup_animal_by_name ON omicron.public.animal (
+            name
+        ) WHERE name IS NOT NULL AND time_deleted IS NULL;
+    ").await;
+
+    let schema2 = get_information_schema(log, "
+        CREATE DATABASE omicron;
+        CREATE TABLE omicron.public.animal (
+            id UUID PRIMARY KEY,
+            name TEXT,
+            time_deleted TIMESTAMPTZ
+        );
+
+        CREATE INDEX IF NOT EXISTS lookup_animal_by_name ON omicron.public.animal (
+            name, id
+        ) WHERE name IS NOT NULL AND time_deleted IS NULL;
+    ").await;
+
+    // "statistics" identifies table indices.
+    // These tables should differ in the "implicit" column.
+    assert_ne!(schema1.statistics, schema2.statistics);
+
+    logctx.cleanup_successful();
+}
+
+#[tokio::test]
+async fn compare_view_differing_where_clause() {
+    let config = load_test_config();
+    let logctx =
+        LogContext::new("compare_view_differing_where_clause", &config.pkg.log);
+    let log = &logctx.log;
+
+    let schema1 = get_information_schema(
+        log,
+        "
+        CREATE DATABASE omicron;
+        CREATE TABLE omicron.public.animal (
+            id UUID PRIMARY KEY,
+            name TEXT,
+            time_deleted TIMESTAMPTZ
+        );
+
+        CREATE VIEW live_view AS
+            SELECT animal.id, animal.name
+            FROM omicron.public.animal
+            WHERE animal.time_deleted IS NOT NULL;
+    ",
+    )
+    .await;
+
+    let schema2 = get_information_schema(
+        log,
+        "
+        CREATE DATABASE omicron;
+        CREATE TABLE omicron.public.animal (
+            id UUID PRIMARY KEY,
+            name TEXT,
+            time_deleted TIMESTAMPTZ
+        );
+
+        CREATE VIEW live_view AS
+            SELECT animal.id, animal.name
+            FROM omicron.public.animal
+            WHERE animal.time_deleted IS NOT NULL AND animal.name = 'Thomas';
+    ",
+    )
+    .await;
+
+    assert_ne!(schema1.views, schema2.views);
+
+    logctx.cleanup_successful();
+}
+
+#[tokio::test]
+async fn compare_sequence_differing_increment() {
+    let config = load_test_config();
+    let logctx = LogContext::new(
+        "compare_sequence_differing_increment",
+        &config.pkg.log,
+    );
+    let log = &logctx.log;
+
+    let schema1 = get_information_schema(
+        log,
+        "
+        CREATE DATABASE omicron;
+        CREATE SEQUENCE omicron.public.myseq START 1 INCREMENT 1;
+    ",
+    )
+    .await;
+
+    let schema2 = get_information_schema(
+        log,
+        "
+        CREATE DATABASE omicron;
+        CREATE SEQUENCE omicron.public.myseq START 1 INCREMENT 2;
+    ",
+    )
+    .await;
+
+    assert_ne!(schema1.sequences, schema2.sequences);
+
+    logctx.cleanup_successful();
+}
+
+#[tokio::test]
+async fn compare_table_differing_constraint() {
+    let config = load_test_config();
+    let logctx =
+        LogContext::new("compare_table_differing_constraint", &config.pkg.log);
+    let log = &logctx.log;
+
+    let schema1 = get_information_schema(
+        log,
+        "
+        CREATE DATABASE omicron;
+        CREATE TABLE omicron.public.animal (
+            id UUID PRIMARY KEY,
+            name TEXT,
+            time_deleted TIMESTAMPTZ,
+
+            CONSTRAINT dead_animals_have_names CHECK (
+                (time_deleted IS NULL) OR
+                (name IS NOT NULL)
+            )
+        );
+    ",
+    )
+    .await;
+
+    let schema2 = get_information_schema(
+        log,
+        "
+        CREATE DATABASE omicron;
+        CREATE TABLE omicron.public.animal (
+            id UUID PRIMARY KEY,
+            name TEXT,
+            time_deleted TIMESTAMPTZ,
+
+            CONSTRAINT dead_animals_have_names CHECK (
+                (time_deleted IS NULL) OR
+                (name IS NULL)
+            )
+        );
+    ",
+    )
+    .await;
+
+    assert_ne!(schema1.table_constraints, schema2.table_constraints);
+    logctx.cleanup_successful();
+}
+
+#[tokio::test]
+async fn compare_table_differing_not_null_order() {
+    let config = load_test_config();
+    let logctx = LogContext::new(
+        "compare_table_differing_not_null_order",
+        &config.pkg.log,
+    );
+    let log = &logctx.log;
+
+    let schema1 = get_information_schema(
+        log,
+        "
+        CREATE DATABASE omicron;
+        CREATE TABLE omicron.public.pet ( id UUID PRIMARY KEY );
+        CREATE TABLE omicron.public.employee (
+            id UUID PRIMARY KEY,
+            name TEXT NOT NULL,
+            hobbies TEXT
+        );
+        ",
+    )
+    .await;
+
+    let schema2 = get_information_schema(
+        log,
+        "
+        CREATE DATABASE omicron;
+        CREATE TABLE omicron.public.employee (
+            id UUID PRIMARY KEY,
+            name TEXT NOT NULL,
+            hobbies TEXT
+        );
+        CREATE TABLE omicron.public.pet ( id UUID PRIMARY KEY );
+        ",
+    )
+    .await;
+
+    schema1.pretty_assert_eq(&schema2);
     logctx.cleanup_successful();
 }

@@ -8,54 +8,23 @@
 pub mod clickhouse;
 pub mod db;
 pub mod dendrite;
+pub mod maghemite;
 pub mod poll;
+#[cfg(feature = "seed-gen")]
+pub mod seed;
 pub mod test_cmds;
 
-use anyhow::Context;
+use anyhow::{Context, Result};
+use camino::Utf8PathBuf;
 pub use dropshot::test_util::LogContext;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingIfExists;
 use dropshot::ConfigLoggingLevel;
 use slog::Logger;
-use std::path::{Path, PathBuf};
+use std::io::BufReader;
 
-// Helper for copying all the files in one directory to another.
-fn copy_dir(
-    src: impl AsRef<Path>,
-    dst: impl AsRef<Path>,
-) -> Result<(), anyhow::Error> {
-    let src = src.as_ref();
-    let dst = dst.as_ref();
-    std::fs::create_dir_all(&dst)
-        .with_context(|| format!("Failed to create dst {}", dst.display()))?;
-    for entry in std::fs::read_dir(src)
-        .with_context(|| format!("Failed to read_dir {}", src.display()))?
-    {
-        let entry = entry.with_context(|| {
-            format!("Failed to read entry in {}", src.display())
-        })?;
-        let ty = entry.file_type().context("Failed to access file type")?;
-        let target = dst.join(entry.file_name());
-        if ty.is_dir() {
-            copy_dir(entry.path(), &target).with_context(|| {
-                format!(
-                    "Failed to copy subdirectory {} to {}",
-                    entry.path().display(),
-                    target.display()
-                )
-            })?;
-        } else {
-            std::fs::copy(entry.path(), &target).with_context(|| {
-                format!(
-                    "Failed to copy file at {} to {}",
-                    entry.path().display(),
-                    target.display()
-                )
-            })?;
-        }
-    }
-    Ok(())
-}
+/// The environment variable via which the path to the seed tarball is passed.
+pub static CRDB_SEED_TAR_ENV: &str = "CRDB_SEED_TAR";
 
 /// Set up a [`dropshot::test_util::LogContext`] appropriate for a test named
 /// `test_name`
@@ -77,37 +46,10 @@ pub enum StorageSource {
     /// Do not populate anything. This is primarily used for migration testing.
     DoNotPopulate,
     /// Populate the latest version of the database.
-    PopulateLatest { output_dir: PathBuf },
-    /// Copy the database from a seed directory, which has previously
+    PopulateLatest { output_dir: Utf8PathBuf },
+    /// Copy the database from a seed tarball, which has previously
     /// been created with `PopulateLatest`.
-    CopyFromSeed { input_dir: PathBuf },
-}
-
-/// Creates a [`db::CockroachInstance`] with a populated storage directory.
-///
-/// This is intended to optimize subsequent calls to [`test_setup_database`]
-/// by reducing the latency of populating the storage directory.
-pub async fn test_setup_database_seed(log: &Logger, dir: &Path) {
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    let mut db = setup_database(
-        log,
-        StorageSource::PopulateLatest { output_dir: dir.to_path_buf() },
-    )
-    .await;
-    db.cleanup().await.unwrap();
-
-    // See https://github.com/cockroachdb/cockroach/issues/74231 for context on
-    // this. We use this assertion to check that our seed directory won't point
-    // back to itself, even if it is copied elsewhere.
-    assert_eq!(
-        0,
-        dir.join("temp-dirs-record.txt")
-            .metadata()
-            .expect("Cannot access metadata")
-            .len(),
-        "Temporary directory record should be empty after graceful shutdown",
-    );
+    CopyFromSeed { input_tar: Utf8PathBuf },
 }
 
 /// Set up a [`db::CockroachInstance`] for running tests.
@@ -116,13 +58,15 @@ pub async fn test_setup_database(
     source: StorageSource,
 ) -> db::CockroachInstance {
     usdt::register_probes().expect("Failed to register USDT DTrace probes");
-    setup_database(log, source).await
+    setup_database(log, source).await.unwrap()
 }
 
+// TODO: switch to anyhow entirely -- this function is currently a mishmash of
+// anyhow and unwrap/expect calls.
 async fn setup_database(
     log: &Logger,
     storage_source: StorageSource,
-) -> db::CockroachInstance {
+) -> Result<db::CockroachInstance> {
     let builder = db::CockroachStarterBuilder::new();
     let mut builder = match &storage_source {
         StorageSource::DoNotPopulate | StorageSource::CopyFromSeed { .. } => {
@@ -133,7 +77,7 @@ async fn setup_database(
         }
     };
     builder.redirect_stdio_to_files();
-    let starter = builder.build().unwrap();
+    let starter = builder.build().context("error building CockroachStarter")?;
     info!(
         &log,
         "cockroach temporary directory: {}",
@@ -145,13 +89,22 @@ async fn setup_database(
     match &storage_source {
         StorageSource::DoNotPopulate | StorageSource::PopulateLatest { .. } => {
         }
-        StorageSource::CopyFromSeed { input_dir } => {
+        StorageSource::CopyFromSeed { input_tar } => {
             info!(&log,
-                "cockroach: copying from seed directory ({}) to storage directory ({})",
-                input_dir.to_string_lossy(), starter.store_dir().to_string_lossy(),
+                "cockroach: copying from seed tarball ({}) to storage directory ({})",
+                input_tar, starter.store_dir().to_string_lossy(),
             );
-            copy_dir(input_dir, starter.store_dir())
-                .expect("Cannot copy storage from seed directory");
+            let reader = std::fs::File::open(input_tar).with_context(|| {
+                format!("cannot open input tar {}", input_tar)
+            })?;
+            let mut tar = tar::Archive::new(BufReader::new(reader));
+            tar.unpack(starter.store_dir()).with_context(|| {
+                format!(
+                    "cannot unpack input tar {} into {}",
+                    input_tar,
+                    starter.store_dir().display()
+                )
+            })?;
         }
     }
 
@@ -182,7 +135,8 @@ async fn setup_database(
             info!(&log, "cockroach: populated");
         }
     }
-    database
+
+    Ok(database)
 }
 
 /// Returns whether the given process is currently running

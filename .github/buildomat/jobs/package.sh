@@ -3,7 +3,7 @@
 #: name = "helios / package"
 #: variety = "basic"
 #: target = "helios-2.0"
-#: rust_toolchain = "1.72.0"
+#: rust_toolchain = "1.72.1"
 #: output_rules = [
 #:	"=/work/version.txt",
 #:	"=/work/package.tar.gz",
@@ -37,7 +37,7 @@ rustc --version
 # trampoline global zone images.
 #
 COMMIT=$(git rev-parse HEAD)
-VERSION="1.0.2-0.ci+git${COMMIT:0:11}"
+VERSION="1.0.3-0.ci+git${COMMIT:0:11}"
 echo "$VERSION" >/work/version.txt
 
 ptime -m ./tools/install_builder_prerequisites.sh -yp
@@ -45,7 +45,7 @@ ptime -m ./tools/ci_download_softnpu_machinery
 
 # Build the test target
 ptime -m cargo run --locked --release --bin omicron-package -- \
-  -t test target create -i standard -m non-gimlet -s softnpu
+  -t test target create -i standard -m non-gimlet -s softnpu -r single-sled
 ptime -m cargo run --locked --release --bin omicron-package -- \
   -t test package
 
@@ -71,7 +71,7 @@ tarball_src_dir="$(pwd)/out/versioned"
 stamp_packages() {
 	for package in "$@"; do
 		# TODO: remove once https://github.com/oxidecomputer/omicron-package/pull/54 lands
-		if [[ $package == maghemite ]]; then
+		if [[ $package == mg-ddm-gz ]]; then
 			echo "0.0.0" > VERSION
 			tar rvf "out/$package.tar" VERSION
 			rm VERSION
@@ -81,12 +81,16 @@ stamp_packages() {
 	done
 }
 
+# Keep the single-sled Nexus zone around for the deploy job. (The global zone
+# build below overwrites the file.)
+mv out/omicron-nexus.tar.gz out/omicron-nexus-single-sled.tar.gz
+
 # Build necessary for the global zone
 ptime -m cargo run --locked --release --bin omicron-package -- \
-  -t host target create -i standard -m gimlet -s asic
+  -t host target create -i standard -m gimlet -s asic -r multi-sled
 ptime -m cargo run --locked --release --bin omicron-package -- \
   -t host package
-stamp_packages omicron-sled-agent maghemite propolis-server overlay
+stamp_packages omicron-sled-agent mg-ddm-gz propolis-server overlay
 
 # Create global zone package @ /work/global-zone-packages.tar.gz
 ptime -m ./tools/build-global-zone-packages.sh "$tarball_src_dir" /work
@@ -111,6 +115,7 @@ zones=(
   out/external-dns.tar.gz
   out/internal-dns.tar.gz
   out/omicron-nexus.tar.gz
+  out/omicron-nexus-single-sled.tar.gz
   out/oximeter-collector.tar.gz
   out/propolis-server.tar.gz
   out/switch-*.tar.gz
@@ -130,7 +135,7 @@ ptime -m cargo run --locked --release --bin omicron-package -- \
   -t recovery target create -i trampoline
 ptime -m cargo run --locked --release --bin omicron-package -- \
   -t recovery package
-stamp_packages installinator maghemite
+stamp_packages installinator mg-ddm-gz
 
 # Create trampoline global zone package @ /work/trampoline-global-zone-packages.tar.gz
 ptime -m ./tools/build-trampoline-global-zone-packages.sh "$tarball_src_dir" /work

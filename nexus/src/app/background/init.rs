@@ -370,7 +370,7 @@ pub mod test {
     ) {
         type TxnError = TransactionError<()>;
         {
-            let conn = datastore.pool_for_tests().await.unwrap();
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
             let _: Result<(), TxnError> = conn
                 .transaction_async(|conn| async move {
                     {

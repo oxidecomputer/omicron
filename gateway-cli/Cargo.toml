@@ -24,3 +24,4 @@ uuid.workspace = true
 
 gateway-client.workspace = true
 gateway-messages.workspace = true
+omicron-workspace-hack.workspace = true

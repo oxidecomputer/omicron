@@ -35,7 +35,7 @@ use std::collections::BTreeSet;
 use std::convert::TryFrom;
 use std::net::SocketAddr;
 use std::num::NonZeroU32;
-use std::sync::Mutex;
+use tokio::sync::Mutex;
 use uuid::Uuid;
 
 #[usdt::provider(provider = "clickhouse__client")]
@@ -208,16 +208,12 @@ impl Client {
         &self,
         name: &TimeseriesName,
     ) -> Result<Option<TimeseriesSchema>, Error> {
-        {
-            let map = self.schema.lock().unwrap();
-            if let Some(s) = map.get(name) {
-                return Ok(Some(s.clone()));
-            }
+        let mut schema = self.schema.lock().await;
+        if let Some(s) = schema.get(name) {
+            return Ok(Some(s.clone()));
         }
-        // `get_schema` acquires the lock internally, so the above scope is required to avoid
-        // deadlock.
-        self.get_schema().await?;
-        Ok(self.schema.lock().unwrap().get(name).map(Clone::clone))
+        self.get_schema_locked(&mut schema).await?;
+        Ok(schema.get(name).map(Clone::clone))
     }
 
     /// List timeseries schema, paginated.
@@ -271,7 +267,103 @@ impl Client {
         .map_err(|e| Error::Database(e.to_string()))
     }
 
-    // Verifies if instance is part of oximeter_cluster
+    /// Validates that the schema used by the DB matches the version used by
+    /// the executable using it.
+    ///
+    /// This function will wipe metrics data if the version stored within
+    /// the DB is less than the schema version of Oximeter.
+    /// If the version in the DB is newer than what is known to Oximeter, an
+    /// error is returned.
+    ///
+    /// NOTE: This function is not safe for concurrent usage!
+    pub async fn initialize_db_with_version(
+        &self,
+        replicated: bool,
+        expected_version: u64,
+    ) -> Result<(), Error> {
+        info!(self.log, "reading db version");
+
+        // Read the version from the DB
+        let version = self.read_latest_version().await?;
+        info!(self.log, "read oximeter database version"; "version" => version);
+
+        // Decide how to conform the on-disk version with this version of
+        // Oximeter.
+        if version < expected_version {
+            info!(self.log, "wiping and re-initializing oximeter schema");
+            // If the on-storage version is less than the constant embedded into
+            // this binary, the DB is out-of-date. Drop it, and re-populate it
+            // later.
+            if !replicated {
+                self.wipe_single_node_db().await?;
+                self.init_single_node_db().await?;
+            } else {
+                self.wipe_replicated_db().await?;
+                self.init_replicated_db().await?;
+            }
+        } else if version > expected_version {
+            // If the on-storage version is greater than the constant embedded
+            // into this binary, we may have downgraded.
+            return Err(Error::Database(
+                format!(
+                    "Expected version {expected_version}, saw {version}. Downgrading is not supported.",
+                )
+            ));
+        } else {
+            // If the version matches, we don't need to update the DB
+            return Ok(());
+        }
+
+        info!(self.log, "inserting current version"; "version" => expected_version);
+        self.insert_version(expected_version).await?;
+        Ok(())
+    }
+
+    async fn read_latest_version(&self) -> Result<u64, Error> {
+        let sql = format!(
+            "SELECT MAX(value) FROM {db_name}.version;",
+            db_name = crate::DATABASE_NAME,
+        );
+
+        let version = match self.execute_with_body(sql).await {
+            Ok(body) if body.is_empty() => {
+                warn!(
+                    self.log,
+                    "no version in database (treated as 'version 0')"
+                );
+                0
+            }
+            Ok(body) => body.trim().parse::<u64>().map_err(|err| {
+                Error::Database(format!("Cannot read version: {err}"))
+            })?,
+            Err(Error::Database(err))
+                // Case 1: The database has not been created.
+                if err.contains("Database oximeter doesn't exist") ||
+                // Case 2: The database has been created, but it's old (exists
+                // prior to the version table).
+                    err.contains("Table oximeter.version doesn't exist") =>
+            {
+                warn!(self.log, "oximeter database does not exist, or is out-of-date");
+                0
+            }
+            Err(err) => {
+                warn!(self.log, "failed to read version"; "error" => err.to_string());
+                return Err(err);
+            }
+        };
+        Ok(version)
+    }
+
+    async fn insert_version(&self, version: u64) -> Result<(), Error> {
+        let sql = format!(
+            "INSERT INTO {db_name}.version (*) VALUES ({version}, now());",
+            db_name = crate::DATABASE_NAME,
+        );
+        self.execute_with_body(sql).await?;
+        Ok(())
+    }
+
+    /// Verifies if instance is part of oximeter_cluster
     pub async fn is_oximeter_cluster(&self) -> Result<bool, Error> {
         let sql = String::from("SHOW CLUSTERS FORMAT JSONEachRow;");
         let res = self.execute_with_body(sql).await?;
@@ -288,30 +380,48 @@ impl Client {
         &self,
         sample: &Sample,
     ) -> Result<Option<String>, Error> {
-        let schema = model::schema_for(sample);
-        let name = schema.timeseries_name.clone();
-        let maybe_new_schema = match self.schema.lock().unwrap().entry(name) {
-            Entry::Vacant(entry) => Ok(Some(entry.insert(schema).clone())),
+        let sample_schema = model::schema_for(sample);
+        let name = sample_schema.timeseries_name.clone();
+        let mut schema = self.schema.lock().await;
+
+        // We've taken the lock before we do any checks for schema. First, we
+        // check if we've already got one in the cache. If not, we update all
+        // the schema from the database, and then check the map again. If we
+        // find a schema (which now either came from the cache or the latest
+        // read of the DB), then we check that the derived schema matches. If
+        // not, we can insert it in the cache and the DB.
+        if !schema.contains_key(&name) {
+            self.get_schema_locked(&mut schema).await?;
+        }
+        match schema.entry(name) {
             Entry::Occupied(entry) => {
                 let existing_schema = entry.get();
-                if existing_schema == &schema {
+                if existing_schema == &sample_schema {
                     Ok(None)
                 } else {
-                    let err =
-                        error_for_schema_mismatch(&schema, &existing_schema);
                     error!(
                         self.log,
-                        "timeseries schema mismatch, sample will be skipped: {}",
-                        err
+                        "timeseries schema mismatch, sample will be skipped";
+                        "expected" => ?existing_schema,
+                        "actual" => ?sample_schema,
+                        "sample" => ?sample,
                     );
-                    Err(err)
+                    Err(Error::SchemaMismatch {
+                        expected: existing_schema.clone(),
+                        actual: sample_schema,
+                    })
                 }
             }
-        }?;
-        Ok(maybe_new_schema.map(|schema| {
-            serde_json::to_string(&model::DbTimeseriesSchema::from(schema))
-                .expect("Failed to convert schema to DB model")
-        }))
+            Entry::Vacant(entry) => {
+                entry.insert(sample_schema.clone());
+                Ok(Some(
+                    serde_json::to_string(&model::DbTimeseriesSchema::from(
+                        sample_schema,
+                    ))
+                    .expect("Failed to convert schema to DB model"),
+                ))
+            }
+        }
     }
 
     // Select the timeseries, including keys and field values, that match the given field-selection
@@ -407,10 +517,15 @@ impl Client {
         response
     }
 
-    async fn get_schema(&self) -> Result<(), Error> {
+    // Get timeseries schema from the database.
+    //
+    // Can only be called after acquiring the lock around `self.schema`.
+    async fn get_schema_locked(
+        &self,
+        schema: &mut BTreeMap<TimeseriesName, TimeseriesSchema>,
+    ) -> Result<(), Error> {
         debug!(self.log, "retrieving timeseries schema from database");
         let sql = {
-            let schema = self.schema.lock().unwrap();
             if schema.is_empty() {
                 format!(
                     "SELECT * FROM {db_name}.timeseries_schema FORMAT JSONEachRow;",
@@ -449,7 +564,7 @@ impl Client {
                 );
                 (schema.timeseries_name.clone(), schema)
             });
-            self.schema.lock().unwrap().extend(new);
+            schema.extend(new);
         }
         Ok(())
     }
@@ -497,7 +612,7 @@ impl DbWrite for Client {
                 }
                 Ok(schema) => {
                     if let Some(schema) = schema {
-                        debug!(self.log, "new timeseries schema: {:?}", schema);
+                        debug!(self.log, "new timeseries schema"; "schema" => ?schema);
                         new_schema.push(schema);
                     }
                 }
@@ -634,28 +749,6 @@ async fn handle_db_response(
     }
 }
 
-// Generate an error describing a schema mismatch
-fn error_for_schema_mismatch(
-    schema: &TimeseriesSchema,
-    existing_schema: &TimeseriesSchema,
-) -> Error {
-    let expected = existing_schema
-        .field_schema
-        .iter()
-        .map(|field| (field.name.clone(), field.ty))
-        .collect();
-    let actual = schema
-        .field_schema
-        .iter()
-        .map(|field| (field.name.clone(), field.ty))
-        .collect();
-    Error::SchemaMismatch {
-        name: schema.timeseries_name.to_string(),
-        expected,
-        actual,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -673,7 +766,6 @@ mod tests {
     use oximeter::FieldValue;
     use oximeter::Metric;
     use oximeter::Target;
-    use slog::o;
     use std::net::Ipv4Addr;
     use std::net::Ipv6Addr;
     use std::time::Duration;
@@ -941,7 +1033,7 @@ mod tests {
             );
 
         // Clear the internal caches of seen schema
-        client.schema.lock().unwrap().clear();
+        client.schema.lock().await.clear();
 
         // Insert the new sample
         client.insert_samples(&[sample.clone()]).await.unwrap();
@@ -953,7 +1045,7 @@ mod tests {
         let expected_schema = client
             .schema
             .lock()
-            .unwrap()
+            .await
             .get(&timeseries_name)
             .expect(
                 "After inserting a new sample, its schema should be included",
@@ -1534,7 +1626,6 @@ mod tests {
         log: &Logger,
     ) -> Result<(), Error> {
         let (_, _, samples) = setup_select_test();
-
         let client = Client::new(address, &log);
         client
             .init_single_node_db()
@@ -1650,7 +1741,6 @@ mod tests {
         log: &Logger,
     ) -> Result<(), Error> {
         let (_, _, samples) = setup_select_test();
-
         let client = Client::new(address, &log);
         client
             .init_single_node_db()
@@ -1756,13 +1846,13 @@ mod tests {
         let samples = test_util::generate_test_samples(2, 2, 2, 2);
         client.insert_samples(&samples).await?;
 
-        let schema = &client.schema.lock().unwrap().clone();
-        client.get_schema().await.expect("Failed to get timeseries schema");
-        assert_eq!(
-            schema,
-            &*client.schema.lock().unwrap(),
-            "Schema shouldn't change"
-        );
+        let original_schema = client.schema.lock().await.clone();
+        let mut schema = client.schema.lock().await;
+        client
+            .get_schema_locked(&mut schema)
+            .await
+            .expect("Failed to get timeseries schema");
+        assert_eq!(&original_schema, &*schema, "Schema shouldn't change");
 
         client.wipe_single_node_db().await?;
         Ok(())

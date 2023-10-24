@@ -56,6 +56,7 @@ enum Args {
 struct ConfigProperties {
     id: Uuid,
     addresses: Vec<SocketAddrV6>,
+    rack_id: Option<Uuid>,
 }
 
 #[tokio::main]
@@ -84,22 +85,23 @@ async fn do_run() -> Result<(), CmdError> {
                 ))
             })?;
 
-            let mut signals =
-                Signals::new(&[signal::SIGUSR1]).map_err(|e| {
-                    CmdError::Failure(format!(
-                        "failed to set up signal handler: {e}"
-                    ))
-                })?;
+            let mut signals = Signals::new([signal::SIGUSR1]).map_err(|e| {
+                CmdError::Failure(format!(
+                    "failed to set up signal handler: {e}"
+                ))
+            })?;
 
-            let (id, addresses) = if id_and_address_from_smf {
+            let (id, addresses, rack_id) = if id_and_address_from_smf {
                 let config = read_smf_config()?;
-                (config.id, config.addresses)
+                (config.id, config.addresses, config.rack_id)
             } else {
-                // Clap ensures these are present if `id_and_address_from_smf`
-                // is false, so we can safely unwrap.
-                (id.unwrap(), vec![address.unwrap()])
+                // Does it matter if `rack_id` is always `None` in this case?
+                let rack_id = None;
+                // Clap ensures the first two fields are present if
+                // `id_and_address_from_smf` is false, so we can safely unwrap.
+                (id.unwrap(), vec![address.unwrap()], rack_id)
             };
-            let args = MgsArguments { id, addresses };
+            let args = MgsArguments { id, addresses, rack_id };
             let mut server =
                 start_server(config, args).await.map_err(CmdError::Failure)?;
 
@@ -114,6 +116,7 @@ async fn do_run() -> Result<(), CmdError> {
                                         .to_string()
                                 ));
                             }
+                            server.set_rack_id(new_config.rack_id);
                             server
                                 .adjust_dropshot_addresses(&new_config.addresses)
                                 .await
@@ -137,7 +140,11 @@ async fn do_run() -> Result<(), CmdError> {
 
 #[cfg(target_os = "illumos")]
 fn read_smf_config() -> Result<ConfigProperties, CmdError> {
-    use crucible_smf::{Scf, ScfError};
+    fn scf_to_cmd_err(err: illumos_utils::scf::ScfError) -> CmdError {
+        CmdError::Failure(err.to_string())
+    }
+
+    use illumos_utils::scf::ScfHandle;
 
     // Name of our config property group; must match our SMF manifest.xml.
     const CONFIG_PG: &str = "config";
@@ -148,87 +155,49 @@ fn read_smf_config() -> Result<ConfigProperties, CmdError> {
     // Name of the property within CONFIG_PG for our server addresses.
     const PROP_ADDR: &str = "address";
 
-    // This function is pretty boilerplate-y; we can reduce it by using this
-    // error type to help us construct a `CmdError::Failure(_)` string. It
-    // assumes (for the purposes of error messages) any property being fetched
-    // lives under the `CONFIG_PG` property group.
-    #[derive(Debug, thiserror::Error)]
-    enum Error {
-        #[error("failed to create scf handle: {0}")]
-        ScfHandle(ScfError),
-        #[error("failed to get self smf instance: {0}")]
-        SelfInstance(ScfError),
-        #[error("failed to get self running snapshot: {0}")]
-        RunningSnapshot(ScfError),
-        #[error("failed to get propertygroup `{CONFIG_PG}`: {0}")]
-        GetPg(ScfError),
-        #[error("missing propertygroup `{CONFIG_PG}`")]
-        MissingPg,
-        #[error("failed to get property `{CONFIG_PG}/{prop}`: {err}")]
-        GetProperty { prop: &'static str, err: ScfError },
-        #[error("missing property `{CONFIG_PG}/{prop}`")]
-        MissingProperty { prop: &'static str },
-        #[error("failed to get value for `{CONFIG_PG}/{prop}`: {err}")]
-        GetValue { prop: &'static str, err: ScfError },
-        #[error("failed to get values for `{CONFIG_PG}/{prop}`: {err}")]
-        GetValues { prop: &'static str, err: ScfError },
-        #[error("failed to get value for `{CONFIG_PG}/{prop}`")]
-        MissingValue { prop: &'static str },
-        #[error("failed to get `{CONFIG_PG}/{prop} as a string: {err}")]
-        ValueAsString { prop: &'static str, err: ScfError },
-    }
+    // Name of the property within CONFIG_PG for our rack ID.
+    const PROP_RACK_ID: &str = "rack_id";
 
-    impl From<Error> for CmdError {
-        fn from(err: Error) -> Self {
-            Self::Failure(err.to_string())
-        }
-    }
+    let scf = ScfHandle::new().map_err(scf_to_cmd_err)?;
+    let instance = scf.self_instance().map_err(scf_to_cmd_err)?;
+    let snapshot = instance.running_snapshot().map_err(scf_to_cmd_err)?;
+    let config = snapshot.property_group(CONFIG_PG).map_err(scf_to_cmd_err)?;
 
-    let scf = Scf::new().map_err(Error::ScfHandle)?;
-    let instance = scf.get_self_instance().map_err(Error::SelfInstance)?;
-    let snapshot =
-        instance.get_running_snapshot().map_err(Error::RunningSnapshot)?;
-
-    let config = snapshot
-        .get_pg("config")
-        .map_err(Error::GetPg)?
-        .ok_or(Error::MissingPg)?;
-
-    let prop_id = config
-        .get_property(PROP_ID)
-        .map_err(|err| Error::GetProperty { prop: PROP_ID, err })?
-        .ok_or_else(|| Error::MissingProperty { prop: PROP_ID })?
-        .value()
-        .map_err(|err| Error::GetValue { prop: PROP_ID, err })?
-        .ok_or(Error::MissingValue { prop: PROP_ID })?
-        .as_string()
-        .map_err(|err| Error::ValueAsString { prop: PROP_ID, err })?;
+    let prop_id = config.value_as_string(PROP_ID).map_err(scf_to_cmd_err)?;
 
     let prop_id = Uuid::try_parse(&prop_id).map_err(|err| {
         CmdError::Failure(format!(
-            "failed to parse `{CONFIG_PG}/{PROP_ID}` ({prop_id:?}) as a UUID: {err}"
+            "failed to parse `{CONFIG_PG}/{PROP_ID}` \
+             ({prop_id:?}) as a UUID: {err}"
         ))
     })?;
 
-    let prop_addr = config
-        .get_property(PROP_ADDR)
-        .map_err(|err| Error::GetProperty { prop: PROP_ADDR, err })?
-        .ok_or_else(|| Error::MissingProperty { prop: PROP_ADDR })?;
+    let prop_rack_id =
+        config.value_as_string(PROP_RACK_ID).map_err(scf_to_cmd_err)?;
 
-    let mut addresses = Vec::new();
+    let rack_id = if prop_rack_id == "unknown" {
+        None
+    } else {
+        Some(Uuid::try_parse(&prop_rack_id).map_err(|err| {
+            CmdError::Failure(format!(
+                "failed to parse `{CONFIG_PG}/{PROP_RACK_ID}` \
+                 ({prop_rack_id:?}) as a UUID: {err}"
+            ))
+        })?)
+    };
 
-    for value in prop_addr
-        .values()
-        .map_err(|err| Error::GetValues { prop: PROP_ADDR, err })?
-    {
-        let addr = value
-            .map_err(|err| Error::GetValue { prop: PROP_ADDR, err })?
-            .as_string()
-            .map_err(|err| Error::ValueAsString { prop: PROP_ADDR, err })?;
+    let prop_addr =
+        config.values_as_strings(PROP_ADDR).map_err(scf_to_cmd_err)?;
 
-        addresses.push(addr.parse().map_err(|err| CmdError::Failure(format!(
-            "failed to parse `{CONFIG_PG}/{PROP_ADDR}` ({addr:?}) as a socket address: {err}"
-        )))?);
+    let mut addresses = Vec::with_capacity(prop_addr.len());
+
+    for addr in prop_addr {
+        addresses.push(addr.parse().map_err(|err| {
+            CmdError::Failure(format!(
+                "failed to parse `{CONFIG_PG}/{PROP_ADDR}` \
+             ({addr:?}) as a socket address: {err}"
+            ))
+        })?);
     }
 
     if addresses.is_empty() {
@@ -236,7 +205,7 @@ fn read_smf_config() -> Result<ConfigProperties, CmdError> {
             "no addresses specified by `{CONFIG_PG}/{PROP_ADDR}`"
         )))
     } else {
-        Ok(ConfigProperties { id: prop_id, addresses })
+        Ok(ConfigProperties { id: prop_id, addresses, rack_id })
     }
 }
 
