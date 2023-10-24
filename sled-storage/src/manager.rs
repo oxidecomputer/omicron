@@ -159,6 +159,67 @@ impl StorageHandle {
     }
 }
 
+// Some sled-agent tests cannot currently use the real StorageManager
+// and want to fake the entire behavior, but still have access to the
+// `StorageResources`. We allow this via use of the `FakeStorageManager`
+// that will respond to real storage requests from a real `StorageHandle`.
+#[cfg(feature = "testing")]
+pub struct FakeStorageManager {
+    rx: mpsc::Receiver<StorageRequest>,
+    resources: StorageResources,
+    resource_updates: watch::Sender<StorageResources>,
+}
+
+impl FakeStorageManager {
+    pub fn new() -> (Self, StorageHandle) {
+        let (tx, rx) = mpsc::channel(QUEUE_SIZE);
+        let resources = StorageResources::default();
+        let (update_tx, update_rx) = watch::channel(resources.clone());
+        (
+            Self { rx, resources, resource_updates: update_tx },
+            StorageHandle { tx, resource_updates: update_rx },
+        )
+    }
+
+    /// Run the main receive loop of the `StorageManager`
+    ///
+    /// This should be spawned into a tokio task
+    pub async fn run(&mut self) {
+        loop {
+            // The sending side should never disappear
+            match self.rx.recv().await.unwrap() {
+                StorageRequest::AddDisk(raw_disk) => {
+                    if self.add_disk(raw_disk) {
+                        self.resource_updates
+                            .send_replace(self.resources.clone());
+                    }
+                }
+                StorageRequest::GetLatestResources(tx) => {
+                    let _ = tx.send(self.resources.clone());
+                }
+                _ => {
+                    unreachable!();
+                }
+            }
+        }
+    }
+
+    // Add a disk to `StorageResources` if it is new and return Ok(true) if so
+    fn add_disk(&mut self, raw_disk: RawDisk) -> bool {
+        let disk = match raw_disk {
+            RawDisk::Real(_) => {
+                panic!(
+                    "Only synthetic disks can be used with `FakeStorageManager`"
+                );
+            }
+            RawDisk::Synthetic(synthetic_disk) => {
+                Disk::Synthetic(synthetic_disk)
+            }
+        };
+        self.resources.insert_fake_disk(disk)
+    }
+}
+
 /// The storage manager responsible for the state of the storage
 /// on a sled. The storage manager runs in its own task and is interacted
 /// with via the [`StorageHandle`].

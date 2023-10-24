@@ -2935,7 +2935,6 @@ impl ServiceManager {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::bootstrap::secret_retriever::HardcodedSecretRetriever;
     use crate::params::{ServiceZoneService, ZoneType};
     use illumos_utils::zpool::ZpoolName;
     use illumos_utils::{
@@ -2946,11 +2945,10 @@ mod test {
         svc,
         zone::MockZones,
     };
-    use key_manager::KeyManager;
     use omicron_common::address::OXIMETER_PORT;
     use sled_storage::disk::{RawDisk, SyntheticDisk};
 
-    use sled_storage::manager::{StorageHandle, StorageManager};
+    use sled_storage::manager::{FakeStorageManager, StorageHandle};
     use std::net::{Ipv6Addr, SocketAddrV6};
     use std::os::unix::process::ExitStatusExt;
     use uuid::Uuid;
@@ -3142,33 +3140,14 @@ mod test {
         }
     }
 
-    // Spawn storage related tasks and return a handle to pass to both the `ServiceManager`
-    // and `ZoneBundler`. However, it is expected that this handle is not actually used
-    // as there are no provisioned zones or datasets. This is consistent with the use of
-    // `test_config.override_paths` below.
-    async fn setup_storage(log: &Logger) -> StorageHandle {
-        let (mut key_manager, key_requester) =
-            KeyManager::new(log, HardcodedSecretRetriever {});
-        let (mut manager, handle) = StorageManager::new(log, key_requester);
-
-        // Spawn the key_manager so that it will respond to requests for encryption keys
-        tokio::spawn(async move { key_manager.run().await });
+    async fn setup_storage() -> StorageHandle {
+        let (mut manager, handle) = FakeStorageManager::new();
 
         // Spawn the storage manager as done by sled-agent
         tokio::spawn(async move {
             manager.run().await;
         });
 
-        // Inform the storage manager that the secret retriever is ready We
-        // are using the HardcodedSecretRetriever, so no need to wait for RSS
-        // or anything to setup the LRTQ
-        handle.key_manager_ready().await;
-
-        // Create some backing disks
-        let tempdir = camino_tempfile::Utf8TempDir::new().unwrap();
-
-        // These must be internal zpools
-        //let mut zpool_names = vec![];
         let internal_zpool_name = ZpoolName::new_internal(Uuid::new_v4());
         let internal_disk: RawDisk =
             SyntheticDisk::new(internal_zpool_name).into();
@@ -3178,7 +3157,6 @@ mod test {
             SyntheticDisk::new(external_zpool_name).into();
         handle.upsert_disk(external_disk).await;
 
-        //zpool_names.push(internal_zpool_name);
         handle
     }
 
@@ -3190,7 +3168,7 @@ mod test {
         let log = logctx.log.clone();
         let test_config = TestConfig::new().await;
 
-        let storage_handle = setup_storage(&log).await;
+        let storage_handle = setup_storage().await;
         let zone_bundler = ZoneBundler::new(
             log.clone(),
             storage_handle.clone(),
@@ -3238,7 +3216,7 @@ mod test {
         let log = logctx.log.clone();
         let test_config = TestConfig::new().await;
 
-        let storage_handle = setup_storage(&log).await;
+        let storage_handle = setup_storage().await;
         let zone_bundler = ZoneBundler::new(
             log.clone(),
             storage_handle.clone(),
@@ -3291,7 +3269,7 @@ mod test {
 
         // First, spin up a ServiceManager, create a new service, and tear it
         // down.
-        let storage_handle = setup_storage(&log).await;
+        let storage_handle = setup_storage().await;
         let zone_bundler = ZoneBundler::new(
             log.clone(),
             storage_handle.clone(),
@@ -3374,7 +3352,7 @@ mod test {
 
         // First, spin up a ServiceManager, create a new service, and tear it
         // down.
-        let storage_handle = setup_storage(&log).await;
+        let storage_handle = setup_storage().await;
         let zone_bundler = ZoneBundler::new(
             log.clone(),
             storage_handle.clone(),

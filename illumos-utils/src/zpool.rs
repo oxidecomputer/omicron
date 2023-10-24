@@ -128,6 +128,17 @@ impl ZpoolInfo {
     pub fn health(&self) -> ZpoolHealth {
         self.health
     }
+
+    #[cfg(any(test, feature = "testing"))]
+    pub fn new_hardcoded(name: String) -> ZpoolInfo {
+        ZpoolInfo {
+            name,
+            size: 1024 * 1024 * 64,
+            allocated: 1024,
+            free: 1024 * 1023 * 64,
+            health: ZpoolHealth::Online,
+        }
+    }
 }
 
 impl FromStr for ZpoolInfo {

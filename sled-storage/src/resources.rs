@@ -65,6 +65,24 @@ impl StorageResources {
         Ok(true)
     }
 
+    /// Insert a disk while creating a fake pool
+    /// This is a workaround for current mock based testing strategies
+    /// in the sled-agent.
+    ///
+    /// Return true, if data was changed, false otherwise
+    #[cfg(feature = "testing")]
+    pub fn insert_fake_disk(&mut self, disk: Disk) -> bool {
+        let disk_id = disk.identity().clone();
+        let zpool_name = disk.zpool_name().clone();
+        let zpool = Pool::new_with_fake_info(zpool_name, disk_id.clone());
+        if self.disks.contains_key(&disk_id) {
+            return false;
+        }
+        // Either the disk or zpool changed
+        Arc::make_mut(&mut self.disks).insert(disk_id, (disk, zpool));
+        true
+    }
+
     /// Delete a real disk and its zpool
     ///
     /// Return true, if data was changed, false otherwise
