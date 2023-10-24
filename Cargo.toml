@@ -358,7 +358,7 @@ tokio = "1.33.0"
 tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-1" ] }
 tokio-stream = "0.1.14"
 tokio-tungstenite = "0.18"
-tokio-util = "0.7.8"
+tokio-util = "0.7.9"
 toml = "0.7.8"
 toml_edit = "0.19.15"
 topological-sort = "0.2.2"
