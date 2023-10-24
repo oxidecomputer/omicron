@@ -908,13 +908,6 @@
             "description": "The nexthop/gateway address.",
             "type": "string",
             "format": "ip"
-          },
-          "vid": {
-            "nullable": true,
-            "description": "The VLAN ID the gateway is reachable over.",
-            "type": "integer",
-            "format": "uint16",
-            "minimum": 0
           }
         },
         "required": [

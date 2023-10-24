@@ -581,15 +581,6 @@
           "description": "The nexthop/gateway address.",
           "type": "string",
           "format": "ip"
-        },
-        "vid": {
-          "description": "The VLAN ID the gateway is reachable over.",
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint16",
-          "minimum": 0.0
         }
       }
     },
