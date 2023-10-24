@@ -1340,6 +1340,42 @@ pub enum SwitchPortGeometry {
     Sfp28x4,
 }
 
+/// The forward error correction mode of a link.
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LinkFec {
+    /// Firecode foward error correction.
+    Firecode,
+    /// No forward error correction.
+    None,
+    /// Reed-Solomon forward error correction.
+    Rs,
+}
+
+/// The speed of a link.
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LinkSpeed {
+    /// Zero gigabits per second.
+    Speed0G,
+    /// 1 gigabit per second.
+    Speed1G,
+    /// 10 gigabits per second.
+    Speed10G,
+    /// 25 gigabits per second.
+    Speed25G,
+    /// 40 gigabits per second.
+    Speed40G,
+    /// 50 gigabits per second.
+    Speed50G,
+    /// 100 gigabits per second.
+    Speed100G,
+    /// 200 gigabits per second.
+    Speed200G,
+    /// 400 gigabits per second.
+    Speed400G,
+}
+
 /// Switch link configuration.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct LinkConfig {
@@ -1348,6 +1384,12 @@ pub struct LinkConfig {
 
     /// The link-layer discovery protocol (LLDP) configuration for the link.
     pub lldp: LldpServiceConfig,
+
+    /// The forward error correction mode of the link.
+    pub fec: LinkFec,
+
+    /// The speed of the link.
+    pub speed: LinkSpeed,
 }
 
 /// The LLDP configuration associated with a port. LLDP may be either enabled or
@@ -1421,6 +1463,20 @@ pub struct Route {
     pub vid: Option<u16>,
 }
 
+/// Select a BGP config by a name or id.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct BgpConfigSelector {
+    /// A name or id to use when selecting BGP config.
+    pub name_or_id: NameOrId,
+}
+
+/// List BGP configs with an optional name or id.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct BgpConfigListSelector {
+    /// A name or id to use when selecting BGP config.
+    pub name_or_id: Option<NameOrId>,
+}
+
 /// A BGP peer configuration for an interface. Includes the set of announcements
 /// that will be advertised to the peer identified by `addr`. The `bgp_config`
 /// parameter is a reference to global BGP parameters. The `interface_name`
@@ -1442,21 +1498,59 @@ pub struct BgpPeerConfig {
 
     /// The address of the host to peer with.
     pub addr: IpAddr,
+
+    /// How long to hold peer connections between keppalives (seconds).
+    pub hold_time: u32,
+
+    /// How long to hold a peer in idle before attempting a new session
+    /// (seconds).
+    pub idle_hold_time: u32,
+
+    /// How long to delay sending an open request after establishing a TCP
+    /// session (seconds).
+    pub delay_open: u32,
+
+    /// How long to to wait between TCP connection retries (seconds).
+    pub connect_retry: u32,
+
+    /// How often to send keepalive requests (seconds).
+    pub keepalive: u32,
 }
 
 /// Parameters for creating a named set of BGP announcements.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct CreateBgpAnnounceSet {
+pub struct BgpAnnounceSetCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
 
     /// The announcements in this set.
-    pub announcement: Vec<BgpAnnouncement>,
+    pub announcement: Vec<BgpAnnouncementCreate>,
+}
+
+/// Select a BGP announce set by a name or id.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct BgpAnnounceSetSelector {
+    /// A name or id to use when selecting BGP port settings
+    pub name_or_id: NameOrId,
+}
+
+/// List BGP announce set with an optional name or id.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct BgpAnnounceListSelector {
+    /// A name or id to use when selecting BGP config.
+    pub name_or_id: Option<NameOrId>,
+}
+
+/// Selector used for querying imported BGP routes.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct BgpRouteSelector {
+    /// The ASN to filter on. Required.
+    pub asn: u32,
 }
 
 /// A BGP announcement tied to a particular address lot block.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct BgpAnnouncement {
+pub struct BgpAnnouncementCreate {
     /// Address lot this announcement is drawn from.
     pub address_lot_block: NameOrId,
 
@@ -1467,16 +1561,25 @@ pub struct BgpAnnouncement {
 /// Parameters for creating a BGP configuration. This includes and autonomous
 /// system number (ASN) and a virtual routing and forwarding (VRF) identifier.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct CreateBgpConfig {
+pub struct BgpConfigCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
 
     /// The autonomous system number of this BGP configuration.
     pub asn: u32,
 
+    pub bgp_announce_set_id: NameOrId,
+
     /// Optional virtual routing and forwarding identifier for this BGP
     /// configuration.
     pub vrf: Option<Name>,
+}
+
+/// Select a BGP status information by BGP config id.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct BgpStatusSelector {
+    /// A name or id of the BGP configuration to get status for
+    pub name_or_id: NameOrId,
 }
 
 /// A set of addresses associated with a port configuration.

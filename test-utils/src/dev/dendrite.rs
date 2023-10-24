@@ -19,7 +19,7 @@ use tokio::{
 /// Specifies the amount of time we will wait for `dpd` to launch,
 /// which is currently confirmed by watching `dpd`'s log output
 /// for a message specifying the address and port `dpd` is listening on.
-pub const DENDRITE_TIMEOUT: Duration = Duration::new(5, 0);
+pub const DENDRITE_TIMEOUT: Duration = Duration::new(30, 0);
 
 /// Represents a running instance of the Dendrite dataplane daemon (dpd).
 pub struct DendriteInstance {

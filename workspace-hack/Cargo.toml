@@ -35,7 +35,7 @@ crypto-common = { version = "0.1.6", default-features = false, features = ["getr
 diesel = { version = "2.1.1", features = ["chrono", "i-implement-a-third-party-backend-and-opt-into-breaking-changes", "network-address", "postgres", "r2d2", "serde_json", "uuid"] }
 digest = { version = "0.10.7", features = ["mac", "oid", "std"] }
 either = { version = "1.9.0" }
-flate2 = { version = "1.0.27" }
+flate2 = { version = "1.0.28" }
 futures = { version = "0.3.28" }
 futures-channel = { version = "0.3.28", features = ["sink"] }
 futures-core = { version = "0.3.28" }
@@ -43,7 +43,7 @@ futures-io = { version = "0.3.28", default-features = false, features = ["std"] 
 futures-sink = { version = "0.3.28" }
 futures-task = { version = "0.3.28", default-features = false, features = ["std"] }
 futures-util = { version = "0.3.28", features = ["channel", "io", "sink"] }
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "1e180ae55e56bd17af35cb868ffbd18ce487351d", features = ["std"] }
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "2739c18e80697aa6bc235c935176d14b4d757ee9", features = ["std"] }
 generic-array = { version = "0.14.7", default-features = false, features = ["more_lengths", "zeroize"] }
 getrandom = { version = "0.2.10", default-features = false, features = ["js", "rdrand", "std"] }
 hashbrown-582f2526e08bb6a0 = { package = "hashbrown", version = "0.14.0", features = ["raw"] }
@@ -77,9 +77,10 @@ regex-syntax = { version = "0.7.5" }
 reqwest = { version = "0.11.20", features = ["blocking", "json", "rustls-tls", "stream"] }
 ring = { version = "0.16.20", features = ["std"] }
 schemars = { version = "0.8.13", features = ["bytes", "chrono", "uuid1"] }
-semver = { version = "1.0.18", features = ["serde"] }
+semver = { version = "1.0.20", features = ["serde"] }
 serde = { version = "1.0.188", features = ["alloc", "derive", "rc"] }
-sha2 = { version = "0.10.7", features = ["oid"] }
+serde_json = { version = "1.0.107", features = ["raw_value"] }
+sha2 = { version = "0.10.8", features = ["oid"] }
 signature = { version = "2.1.0", default-features = false, features = ["digest", "rand_core", "std"] }
 similar = { version = "2.2.1", features = ["inline", "unicode"] }
 slog = { version = "2.7.0", features = ["dynamic-keys", "max_level_trace", "release_max_level_debug", "release_max_level_trace"] }
@@ -90,7 +91,7 @@ syn-dff4ba8e3ae991db = { package = "syn", version = "1.0.109", features = ["extr
 syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.32", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
 textwrap = { version = "0.16.0" }
 time = { version = "0.3.27", features = ["formatting", "local-offset", "macros", "parsing"] }
-tokio = { version = "1.32.0", features = ["full", "test-util"] }
+tokio = { version = "1.33.0", features = ["full", "test-util"] }
 tokio-postgres = { version = "0.7.10", features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 tokio-stream = { version = "0.1.14", features = ["net"] }
 toml = { version = "0.7.8" }
@@ -127,7 +128,7 @@ crypto-common = { version = "0.1.6", default-features = false, features = ["getr
 diesel = { version = "2.1.1", features = ["chrono", "i-implement-a-third-party-backend-and-opt-into-breaking-changes", "network-address", "postgres", "r2d2", "serde_json", "uuid"] }
 digest = { version = "0.10.7", features = ["mac", "oid", "std"] }
 either = { version = "1.9.0" }
-flate2 = { version = "1.0.27" }
+flate2 = { version = "1.0.28" }
 futures = { version = "0.3.28" }
 futures-channel = { version = "0.3.28", features = ["sink"] }
 futures-core = { version = "0.3.28" }
@@ -135,7 +136,7 @@ futures-io = { version = "0.3.28", default-features = false, features = ["std"] 
 futures-sink = { version = "0.3.28" }
 futures-task = { version = "0.3.28", default-features = false, features = ["std"] }
 futures-util = { version = "0.3.28", features = ["channel", "io", "sink"] }
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "1e180ae55e56bd17af35cb868ffbd18ce487351d", features = ["std"] }
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "2739c18e80697aa6bc235c935176d14b4d757ee9", features = ["std"] }
 generic-array = { version = "0.14.7", default-features = false, features = ["more_lengths", "zeroize"] }
 getrandom = { version = "0.2.10", default-features = false, features = ["js", "rdrand", "std"] }
 hashbrown-582f2526e08bb6a0 = { package = "hashbrown", version = "0.14.0", features = ["raw"] }
@@ -169,9 +170,10 @@ regex-syntax = { version = "0.7.5" }
 reqwest = { version = "0.11.20", features = ["blocking", "json", "rustls-tls", "stream"] }
 ring = { version = "0.16.20", features = ["std"] }
 schemars = { version = "0.8.13", features = ["bytes", "chrono", "uuid1"] }
-semver = { version = "1.0.18", features = ["serde"] }
+semver = { version = "1.0.20", features = ["serde"] }
 serde = { version = "1.0.188", features = ["alloc", "derive", "rc"] }
-sha2 = { version = "0.10.7", features = ["oid"] }
+serde_json = { version = "1.0.107", features = ["raw_value"] }
+sha2 = { version = "0.10.8", features = ["oid"] }
 signature = { version = "2.1.0", default-features = false, features = ["digest", "rand_core", "std"] }
 similar = { version = "2.2.1", features = ["inline", "unicode"] }
 slog = { version = "2.7.0", features = ["dynamic-keys", "max_level_trace", "release_max_level_debug", "release_max_level_trace"] }
@@ -183,7 +185,7 @@ syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.32", features = ["extra
 textwrap = { version = "0.16.0" }
 time = { version = "0.3.27", features = ["formatting", "local-offset", "macros", "parsing"] }
 time-macros = { version = "0.2.13", default-features = false, features = ["formatting", "parsing"] }
-tokio = { version = "1.32.0", features = ["full", "test-util"] }
+tokio = { version = "1.33.0", features = ["full", "test-util"] }
 tokio-postgres = { version = "0.7.10", features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 tokio-stream = { version = "0.1.14", features = ["net"] }
 toml = { version = "0.7.8" }

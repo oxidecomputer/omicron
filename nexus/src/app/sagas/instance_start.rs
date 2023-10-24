@@ -52,6 +52,11 @@ declare_saga_actions! {
         - sis_move_to_starting_undo
     }
 
+    ADD_VIRTUAL_RESOURCES -> "virtual_resources" {
+        + sis_account_virtual_resources
+        - sis_account_virtual_resources_undo
+    }
+
     // TODO(#3879) This can be replaced with an action that triggers the NAT RPW
     // once such an RPW is available.
     DPD_ENSURE -> "dpd_ensure" {
@@ -98,6 +103,7 @@ impl NexusSaga for SagaInstanceStart {
         builder.append(alloc_propolis_ip_action());
         builder.append(create_vmm_record_action());
         builder.append(mark_as_starting_action());
+        builder.append(add_virtual_resources_action());
         builder.append(dpd_ensure_action());
         builder.append(v2p_ensure_action());
         builder.append(ensure_registered_action());
@@ -302,6 +308,66 @@ async fn sis_move_to_starting_undo(
               "instance_id" => %instance_id);
     }
 
+    Ok(())
+}
+
+async fn sis_account_virtual_resources(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let instance_id = params.db_instance.id();
+
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    osagactx
+        .datastore()
+        .virtual_provisioning_collection_insert_instance(
+            &opctx,
+            instance_id,
+            params.db_instance.project_id,
+            i64::from(params.db_instance.ncpus.0 .0),
+            nexus_db_model::ByteCount(*params.db_instance.memory),
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
+    Ok(())
+}
+
+async fn sis_account_virtual_resources_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let instance_id = params.db_instance.id();
+
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    let started_record =
+        sagactx.lookup::<db::model::Instance>("started_record")?;
+
+    osagactx
+        .datastore()
+        .virtual_provisioning_collection_delete_instance(
+            &opctx,
+            instance_id,
+            params.db_instance.project_id,
+            i64::from(params.db_instance.ncpus.0 .0),
+            nexus_db_model::ByteCount(*params.db_instance.memory),
+            // Use the next instance generation number as the generation limit
+            // to ensure the provisioning counters are released. (The "mark as
+            // starting" undo step will "publish" this new state generation when
+            // it moves the instance back to Stopped.)
+            (&started_record.runtime().gen.next()).into(),
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
     Ok(())
 }
 

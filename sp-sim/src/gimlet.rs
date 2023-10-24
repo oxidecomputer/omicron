@@ -1282,6 +1282,25 @@ impl SpHandler for Handler {
         buf[..val.len()].copy_from_slice(val);
         Ok(val.len())
     }
+
+    fn read_sensor(
+        &mut self,
+        _request: gateway_messages::SensorRequest,
+    ) -> std::result::Result<gateway_messages::SensorResponse, SpError> {
+        Err(SpError::RequestUnsupportedForSp)
+    }
+
+    fn current_time(&mut self) -> std::result::Result<u64, SpError> {
+        Err(SpError::RequestUnsupportedForSp)
+    }
+
+    fn read_rot(
+        &mut self,
+        _request: gateway_messages::RotRequest,
+        _buf: &mut [u8],
+    ) -> std::result::Result<gateway_messages::RotResponse, SpError> {
+        Err(SpError::RequestUnsupportedForSp)
+    }
 }
 
 enum UpdateState {

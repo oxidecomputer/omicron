@@ -25,6 +25,17 @@ use std::str::FromStr;
 
 pub const EARLIEST_SUPPORTED_VERSION: &'static str = "1.0.0";
 
+/// Describes a single file containing a schema change, as SQL.
+pub struct SchemaUpgradeStep {
+    pub path: Utf8PathBuf,
+    pub sql: String,
+}
+
+/// Describes a sequence of files containing schema changes.
+pub struct SchemaUpgrade {
+    pub steps: Vec<SchemaUpgradeStep>,
+}
+
 /// Reads a "version directory" and reads all SQL changes into
 /// a result Vec.
 ///
@@ -34,7 +45,7 @@ pub const EARLIEST_SUPPORTED_VERSION: &'static str = "1.0.0";
 /// These are sorted lexicographically.
 pub async fn all_sql_for_version_migration<P: AsRef<Utf8Path>>(
     path: P,
-) -> Result<Vec<String>, String> {
+) -> Result<SchemaUpgrade, String> {
     let target_dir = path.as_ref();
     let mut up_sqls = vec![];
     let entries = target_dir
@@ -54,13 +65,12 @@ pub async fn all_sql_for_version_migration<P: AsRef<Utf8Path>>(
     }
     up_sqls.sort();
 
-    let mut result = vec![];
+    let mut result = SchemaUpgrade { steps: vec![] };
     for path in up_sqls.into_iter() {
-        result.push(
-            tokio::fs::read_to_string(&path)
-                .await
-                .map_err(|e| format!("Cannot read {path}: {e}"))?,
-        );
+        let sql = tokio::fs::read_to_string(&path)
+            .await
+            .map_err(|e| format!("Cannot read {path}: {e}"))?;
+        result.steps.push(SchemaUpgradeStep { path: path.to_owned(), sql });
     }
     Ok(result)
 }
@@ -187,7 +197,8 @@ impl DataStore {
             )
             .map_err(|e| format!("Invalid schema path: {}", e.display()))?;
 
-            let up_sqls = all_sql_for_version_migration(&target_dir).await?;
+            let schema_change =
+                all_sql_for_version_migration(&target_dir).await?;
 
             // Confirm the current version, set the "target_version"
             // column to indicate that a schema update is in-progress.
@@ -205,7 +216,7 @@ impl DataStore {
                 "target_version" => target_version.to_string(),
             );
 
-            for sql in &up_sqls {
+            for SchemaUpgradeStep { path: _, sql } in &schema_change.steps {
                 // Perform the schema change.
                 self.apply_schema_update(
                     &current_version,

@@ -144,6 +144,8 @@ table! {
         lldp_service_config_id -> Uuid,
         link_name -> Text,
         mtu -> Int4,
+        fec -> crate::SwitchLinkFecEnum,
+        speed -> crate::SwitchLinkSpeedEnum,
     }
 }
 
@@ -188,7 +190,7 @@ table! {
 }
 
 table! {
-    switch_port_settings_route_config (port_settings_id, interface_name, dst, gw, vid) {
+    switch_port_settings_route_config (port_settings_id, interface_name, dst, gw) {
         port_settings_id -> Uuid,
         interface_name -> Text,
         dst -> Inet,
@@ -200,10 +202,14 @@ table! {
 table! {
     switch_port_settings_bgp_peer_config (port_settings_id, interface_name, addr) {
         port_settings_id -> Uuid,
-        bgp_announce_set_id -> Uuid,
         bgp_config_id -> Uuid,
         interface_name -> Text,
         addr -> Inet,
+        hold_time -> Int8,
+        idle_hold_time -> Int8,
+        delay_open -> Int8,
+        connect_retry -> Int8,
+        keepalive -> Int8,
     }
 }
 
@@ -216,6 +222,7 @@ table! {
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
         asn -> Int8,
+        bgp_announce_set_id -> Uuid,
         vrf -> Nullable<Text>,
     }
 }
@@ -680,6 +687,7 @@ table! {
         time_modified -> Timestamptz,
         initialized -> Bool,
         tuf_base_url -> Nullable<Text>,
+        rack_subnet -> Nullable<Inet>,
     }
 }
 
@@ -817,6 +825,11 @@ table! {
         cpus_provisioned -> Int8,
         ram_provisioned -> Int8,
     }
+}
+
+allow_tables_to_appear_in_same_query! {
+    virtual_provisioning_resource,
+    instance
 }
 
 table! {
@@ -1131,6 +1144,13 @@ table! {
     system_update_component_update (system_update_id, component_update_id) {
         system_update_id -> Uuid,
         component_update_id -> Uuid,
+    }
+}
+
+table! {
+    bootstore_keys (key, generation) {
+        key -> Text,
+        generation -> Int8,
     }
 }
 

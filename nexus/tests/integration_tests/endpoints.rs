@@ -421,6 +421,40 @@ lazy_static! {
 }
 
 lazy_static! {
+    pub static ref DEMO_BGP_CONFIG_CREATE_URL: String =
+        format!("/v1/system/networking/bgp?name_or_id=as47");
+    pub static ref DEMO_BGP_CONFIG: params::BgpConfigCreate =
+        params::BgpConfigCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "as47".parse().unwrap(),
+                description: "BGP config for AS47".into(),
+            },
+            bgp_announce_set_id: NameOrId::Name("instances".parse().unwrap()),
+            asn: 47,
+            vrf: None,
+        };
+    pub static ref DEMO_BGP_ANNOUNCE_SET_URL: String =
+        format!("/v1/system/networking/bgp-announce?name_or_id=a-bag-of-addrs");
+    pub static ref DEMO_BGP_ANNOUNCE: params::BgpAnnounceSetCreate =
+        params::BgpAnnounceSetCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "a-bag-of-addrs".parse().unwrap(),
+                description: "a bag of addrs".into(),
+            },
+            announcement: vec![params::BgpAnnouncementCreate {
+                address_lot_block: NameOrId::Name(
+                    "some-block".parse().unwrap(),
+                ),
+                network: "10.0.0.0/16".parse().unwrap(),
+            }],
+        };
+    pub static ref DEMO_BGP_STATUS_URL: String =
+        format!("/v1/system/networking/bgp-status");
+    pub static ref DEMO_BGP_ROUTES_IPV4_URL: String =
+        format!("/v1/system/networking/bgp-routes-ipv4?asn=47");
+}
+
+lazy_static! {
     // Project Images
     pub static ref DEMO_IMAGE_NAME: Name = "demo-image".parse().unwrap();
     pub static ref DEMO_PROJECT_IMAGES_URL: String =
@@ -1890,5 +1924,48 @@ lazy_static! {
                 AllowedMethod::GetNonexistent
             ],
         },
+        VerifyEndpoint {
+            url: &DEMO_BGP_CONFIG_CREATE_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_BGP_CONFIG).unwrap(),
+                ),
+                AllowedMethod::Get,
+                AllowedMethod::Delete
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_BGP_ANNOUNCE_SET_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_BGP_ANNOUNCE).unwrap(),
+                ),
+                AllowedMethod::GetNonexistent,
+                AllowedMethod::Delete
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_BGP_STATUS_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::GetNonexistent,
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_BGP_ROUTES_IPV4_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::GetNonexistent,
+            ],
+        }
     ];
 }

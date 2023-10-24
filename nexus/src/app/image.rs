@@ -4,8 +4,8 @@
 
 //! Images (both project and silo scoped)
 
-use super::Unimpl;
 use crate::external_api::params;
+use nexus_db_queries::authn;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
@@ -26,6 +26,8 @@ use omicron_common::api::external::UpdateResult;
 use std::str::FromStr;
 use std::sync::Arc;
 use uuid::Uuid;
+
+use super::sagas;
 
 impl super::Nexus {
     pub(crate) async fn image_lookup<'a>(
@@ -356,26 +358,33 @@ impl super::Nexus {
         }
     }
 
-    // TODO-MVP: Implement
     pub(crate) async fn image_delete(
         self: &Arc<Self>,
         opctx: &OpContext,
         image_lookup: &ImageLookup<'_>,
     ) -> DeleteResult {
-        match image_lookup {
+        let image_param: sagas::image_delete::ImageParam = match image_lookup {
             ImageLookup::ProjectImage(lookup) => {
-                lookup.lookup_for(authz::Action::Delete).await?;
+                let (_, _, authz_image, image) =
+                    lookup.fetch_for(authz::Action::Delete).await?;
+                sagas::image_delete::ImageParam::Project { authz_image, image }
             }
             ImageLookup::SiloImage(lookup) => {
-                lookup.lookup_for(authz::Action::Delete).await?;
+                let (_, authz_image, image) =
+                    lookup.fetch_for(authz::Action::Delete).await?;
+                sagas::image_delete::ImageParam::Silo { authz_image, image }
             }
         };
-        let error = Error::InternalError {
-            internal_message: "Endpoint not implemented".to_string(),
+
+        let saga_params = sagas::image_delete::Params {
+            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+            image_param,
         };
-        Err(self
-            .unimplemented_todo(opctx, Unimpl::ProtectedLookup(error))
-            .await)
+
+        self.execute_saga::<sagas::image_delete::SagaImageDelete>(saga_params)
+            .await?;
+
+        Ok(())
     }
 
     /// Converts a project scoped image into a silo scoped image

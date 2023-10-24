@@ -63,7 +63,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.rack (
     initialized BOOL NOT NULL,
 
     /* Used to configure the updates service URL */
-    tuf_base_url STRING(512)
+    tuf_base_url STRING(512),
+
+    /* The IPv6 underlay /56 prefix for the rack */
+    rack_subnet INET
 );
 
 /*
@@ -198,7 +201,8 @@ CREATE TYPE IF NOT EXISTS omicron.public.service_kind AS ENUM (
   'nexus',
   'ntp',
   'oximeter',
-  'tfport'
+  'tfport',
+  'mgd'
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.service (
@@ -2445,10 +2449,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_route_config (
 
 CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config (
     port_settings_id UUID,
-    bgp_announce_set_id UUID NOT NULL,
     bgp_config_id UUID NOT NULL,
     interface_name TEXT,
     addr INET,
+    hold_time INT8,
+    idle_hold_time INT8,
+    delay_open INT8,
+    connect_retry INT8,
+    keepalive INT8,
 
     /* TODO https://github.com/oxidecomputer/omicron/issues/3013 */
     PRIMARY KEY (port_settings_id, interface_name, addr)
@@ -2462,7 +2470,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.bgp_config (
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
     asn INT8 NOT NULL,
-    vrf TEXT
+    vrf TEXT,
+    bgp_announce_set_id UUID NOT NULL
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_bgp_config_by_name ON omicron.public.bgp_config (
@@ -2502,6 +2511,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_address_config (
 
     /* TODO https://github.com/oxidecomputer/omicron/issues/3013 */
     PRIMARY KEY (port_settings_id, address, interface_name)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.bootstore_keys (
+    key TEXT NOT NULL PRIMARY KEY,
+    generation INT8 NOT NULL
 );
 
 /*
@@ -2562,6 +2576,27 @@ FROM
             instance.active_propolis_id = vmm.id
 WHERE
     instance.time_deleted IS NULL AND vmm.time_deleted IS NULL;
+
+CREATE TYPE IF NOT EXISTS omicron.public.switch_link_fec AS ENUM (
+    'Firecode',
+    'None',
+    'Rs'
+);
+
+CREATE TYPE IF NOT EXISTS omicron.public.switch_link_speed AS ENUM (
+    '0G',
+    '1G',
+    '10G',
+    '25G',
+    '40G',
+    '50G',
+    '100G',
+    '200G',
+    '400G'
+);
+
+ALTER TABLE omicron.public.switch_port_settings_link_config ADD COLUMN IF NOT EXISTS fec omicron.public.switch_link_fec;
+ALTER TABLE omicron.public.switch_port_settings_link_config ADD COLUMN IF NOT EXISTS speed omicron.public.switch_link_speed;
 
 CREATE TABLE IF NOT EXISTS omicron.public.db_metadata (
     -- There should only be one row of this table for the whole DB.

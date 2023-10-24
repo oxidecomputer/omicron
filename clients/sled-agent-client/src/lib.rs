@@ -5,11 +5,33 @@
 //! Interface for making API requests to a Sled Agent
 
 use async_trait::async_trait;
-use omicron_common::generate_logging_api;
 use std::convert::TryFrom;
 use uuid::Uuid;
 
-generate_logging_api!("../../openapi/sled-agent.json");
+progenitor::generate_api!(
+    spec = "../../openapi/sled-agent.json",
+    inner_type = slog::Logger,
+    pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
+        slog::debug!(log, "client request";
+            "method" => %request.method(),
+            "uri" => %request.url(),
+            "body" => ?&request.body(),
+        );
+    }),
+    post_hook = (|log: &slog::Logger, result: &Result<_, _>| {
+        slog::debug!(log, "client response"; "result" => ?result);
+    }),
+    //TODO trade the manual transformations later in this file for the
+    //     replace directives below?
+    replace = {
+        //Ipv4Network = ipnetwork::Ipv4Network,
+        SwitchLocation = omicron_common::api::external::SwitchLocation,
+        Ipv6Network = ipnetwork::Ipv6Network,
+        IpNetwork = ipnetwork::IpNetwork,
+        PortFec = omicron_common::api::internal::shared::PortFec,
+        PortSpeed = omicron_common::api::internal::shared::PortSpeed,
+    }
+);
 
 impl omicron_common::api::external::ClientError for types::Error {
     fn message(&self) -> String {
@@ -264,6 +286,12 @@ impl From<omicron_common::api::external::IpNet> for types::IpNet {
 }
 
 impl From<ipnetwork::Ipv4Network> for types::Ipv4Net {
+    fn from(n: ipnetwork::Ipv4Network) -> Self {
+        Self::try_from(n.to_string()).unwrap_or_else(|e| panic!("{}: {}", n, e))
+    }
+}
+
+impl From<ipnetwork::Ipv4Network> for types::Ipv4Network {
     fn from(n: ipnetwork::Ipv4Network) -> Self {
         Self::try_from(n.to_string()).unwrap_or_else(|e| panic!("{}: {}", n, e))
     }

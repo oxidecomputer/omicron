@@ -14,6 +14,7 @@ mod next_item;
 pub mod network_interface;
 pub mod region_allocation;
 pub mod virtual_provisioning_collection_update;
+pub mod volume;
 pub mod vpc;
 pub mod vpc_subnet;
 
