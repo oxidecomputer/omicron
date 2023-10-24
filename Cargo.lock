@@ -2737,6 +2737,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.21.5",
  "chrono",
+ "gateway-messages",
  "omicron-workspace-hack",
  "progenitor",
  "rand 0.8.5",

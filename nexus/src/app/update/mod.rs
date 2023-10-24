@@ -26,6 +26,10 @@ use std::path::Path;
 use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
+mod sp_updater;
+
+pub use sp_updater::{SpUpdateError, SpUpdater};
+
 static BASE_ARTIFACT_DIR: &str = "/var/tmp/oxide_artifacts";
 
 impl super::Nexus {

@@ -10,6 +10,10 @@ use sled_agent_client::Client as SledAgentClient;
 use std::sync::Arc;
 use uuid::Uuid;
 
+pub use super::update::SpUpdateError;
+pub use super::update::SpUpdater;
+pub use gateway_client::types::SpType;
+
 /// Exposes additional [`super::Nexus`] interfaces for use by the test suite
 #[async_trait]
 pub trait TestInterfaces {
@@ -52,6 +56,14 @@ pub trait TestInterfaces {
     async fn set_disk_as_faulted(&self, disk_id: &Uuid) -> Result<bool, Error>;
 
     fn set_samael_max_issue_delay(&self, max_issue_delay: chrono::Duration);
+
+    fn sp_updater(
+        &self,
+        sp_type: SpType,
+        sp_slot: u32,
+        update_id: Uuid,
+        sp_hubris_archive: Vec<u8>,
+    ) -> SpUpdater;
 }
 
 #[async_trait]
@@ -150,5 +162,21 @@ impl TestInterfaces for super::Nexus {
     fn set_samael_max_issue_delay(&self, max_issue_delay: chrono::Duration) {
         let mut mid = self.samael_max_issue_delay.lock().unwrap();
         *mid = Some(max_issue_delay);
+    }
+
+    fn sp_updater(
+        &self,
+        sp_type: SpType,
+        sp_slot: u32,
+        update_id: Uuid,
+        sp_hubris_archive: Vec<u8>,
+    ) -> SpUpdater {
+        SpUpdater::new(
+            sp_type,
+            sp_slot,
+            update_id,
+            sp_hubris_archive,
+            &self.log,
+        )
     }
 }
