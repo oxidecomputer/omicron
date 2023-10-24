@@ -1645,11 +1645,19 @@ impl UpdateContext {
                     artifact_to_apply = Some(available_artifacts[0].clone());
                     None
                 } else {
+                    error!(
+                        self.log,
+                        "Failed to get RoT CMPA; unable to choose from \
+                         multiple available RoT artifacts";
+                        "err" => %err,
+                        "num_rot_artifacts" => available_artifacts.len(),
+                    );
                     return Err(UpdateTerminalError::GetRotCmpaFailed {
                         error: err.into(),
                     });
                 }
             }
+            // For any other error (e.g., comms failures), just fail as normal.
             Err(err) => {
                 return Err(UpdateTerminalError::GetRotCmpaFailed {
                     error: err.into(),
