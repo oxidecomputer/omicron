@@ -27,6 +27,7 @@ slog.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 uuid.workspace = true
+omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 illumos-utils = { workspace = true, features = ["tmp_keypath"] }

@@ -25,7 +25,6 @@ use crate::config::ConfigError;
 use crate::long_running_tasks::LongRunningTaskHandles;
 use crate::server::Server as SledAgentServer;
 use crate::services::ServiceManager;
-use crate::sled_agent::SledAgent;
 use camino::Utf8PathBuf;
 use cancel_safe_futures::TryStreamExt;
 use ddm_admin_client::Client as DdmAdminClient;
@@ -310,15 +309,6 @@ enum SledAgentState {
     Bootstrapping,
     // ... or the sled agent server is running.
     ServerStarted(SledAgentServer),
-}
-
-impl SledAgentState {
-    fn sled_agent(&self) -> Option<&SledAgent> {
-        match self {
-            SledAgentState::Bootstrapping => None,
-            SledAgentState::ServerStarted(server) => Some(server.sled_agent()),
-        }
-    }
 }
 
 #[derive(thiserror::Error, Debug)]
