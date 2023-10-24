@@ -516,6 +516,9 @@ impl Client {
         response
     }
 
+    // Get timeseries schema from the database.
+    //
+    // Can only be called after acquiring the lock around `self.schema`.
     async fn get_schema_locked(
         &self,
         schema: &mut BTreeMap<TimeseriesName, TimeseriesSchema>,
