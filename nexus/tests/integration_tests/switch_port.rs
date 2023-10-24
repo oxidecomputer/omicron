@@ -128,11 +128,18 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     settings.routes.insert(
         "phy0".into(),
         RouteConfig {
-            routes: vec![Route {
-                dst: "1.2.3.0/24".parse().unwrap(),
-                gw: "1.2.3.4".parse().unwrap(),
-                vid: None,
-            }],
+            routes: vec![
+                Route {
+                    dst: "1.2.3.0/24".parse().unwrap(),
+                    gw: "1.2.3.4".parse().unwrap(),
+                    vid: None,
+                },
+                Route {
+                    dst: "5.6.7.0/24".parse().unwrap(),
+                    gw: "5.6.7.8".parse().unwrap(),
+                    vid: Some(5),
+                },
+            ],
         },
     );
     // addresses
@@ -159,7 +166,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     .unwrap();
 
     assert_eq!(created.links.len(), 1);
-    assert_eq!(created.routes.len(), 1);
+    assert_eq!(created.routes.len(), 2);
     assert_eq!(created.addresses.len(), 1);
 
     let link0 = &created.links[0];
@@ -178,6 +185,11 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     let route0 = &created.routes[0];
     assert_eq!(route0.dst, "1.2.3.0/24".parse().unwrap());
     assert_eq!(route0.gw, "1.2.3.4".parse().unwrap());
+    assert_eq!(route0.vlan_id, None);
+    let route1 = &created.routes[1];
+    assert_eq!(route1.dst, "5.6.7.0/24".parse().unwrap());
+    assert_eq!(route1.gw, "5.6.7.8".parse().unwrap());
+    assert_eq!(route1.vlan_id, Some(5));
 
     let addr0 = &created.addresses[0];
     assert_eq!(addr0.address, "203.0.113.10/24".parse().unwrap());
@@ -195,7 +207,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     .unwrap();
 
     assert_eq!(roundtrip.links.len(), 1);
-    assert_eq!(roundtrip.routes.len(), 1);
+    assert_eq!(roundtrip.routes.len(), 2);
     assert_eq!(roundtrip.addresses.len(), 1);
 
     let link0 = &roundtrip.links[0];
@@ -214,6 +226,11 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     let route0 = &roundtrip.routes[0];
     assert_eq!(route0.dst, "1.2.3.0/24".parse().unwrap());
     assert_eq!(route0.gw, "1.2.3.4".parse().unwrap());
+    assert_eq!(route0.vlan_id, None);
+    let route1 = &roundtrip.routes[1];
+    assert_eq!(route1.dst, "5.6.7.0/24".parse().unwrap());
+    assert_eq!(route1.gw, "5.6.7.8".parse().unwrap());
+    assert_eq!(route1.vlan_id, Some(5));
 
     let addr0 = &roundtrip.addresses[0];
     assert_eq!(addr0.address, "203.0.113.10/24".parse().unwrap());
