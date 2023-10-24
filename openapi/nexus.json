@@ -5170,7 +5170,7 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Get BGP configurations.",
+        "summary": "List BGP configurations",
         "operationId": "networking_bgp_config_list",
         "parameters": [
           {
@@ -5235,7 +5235,7 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Create a new BGP configuration.",
+        "summary": "Create a new BGP configuration",
         "operationId": "networking_bgp_config_create",
         "requestBody": {
           "content": {
@@ -5270,7 +5270,7 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Delete a BGP configuration.",
+        "summary": "Delete a BGP configuration",
         "operationId": "networking_bgp_config_delete",
         "parameters": [
           {
@@ -5301,7 +5301,7 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Get originated routes for a given BGP configuration.",
+        "summary": "Get originated routes for a BGP configuration",
         "operationId": "networking_bgp_announce_set_list",
         "parameters": [
           {
@@ -5341,7 +5341,7 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Create a new BGP announce set.",
+        "summary": "Create a new BGP announce set",
         "operationId": "networking_bgp_announce_set_create",
         "requestBody": {
           "content": {
@@ -5376,7 +5376,7 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Delete a BGP announce set.",
+        "summary": "Delete a BGP announce set",
         "operationId": "networking_bgp_announce_set_delete",
         "parameters": [
           {
@@ -5407,7 +5407,7 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Get imported IPv4 BGP routes.",
+        "summary": "Get imported IPv4 BGP routes",
         "operationId": "networking_bgp_imported_routes_ipv4",
         "parameters": [
           {
@@ -5482,7 +5482,7 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Get loopback addresses, optionally filtering by id",
+        "summary": "List loopback addresses",
         "operationId": "networking_loopback_address_list",
         "parameters": [
           {
