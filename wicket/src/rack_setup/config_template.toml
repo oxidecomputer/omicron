@@ -47,6 +47,9 @@ infra_ip_last = ""
 [[rack_network_config.ports]]
 # Routes associated with this port.
 # { nexthop = "1.2.3.4", destination = "0.0.0.0/0" }
+# Can also optionally specify a VLAN id if the next hop is reachable
+# over an 802.1Q tagged L2 segment.
+# { nexthop = "5.6.7.8", destination = "5.6.7.0/24", vid = 5 }
 routes = []
 
 # Addresses associated with this port.
