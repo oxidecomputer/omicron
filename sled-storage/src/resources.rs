@@ -23,9 +23,9 @@ const ZONE_BUNDLE_DIRECTORY: &str = "zone";
 
 /// Storage related resources: disks and zpools
 ///
-/// This state is internal to the [`crate::StorageManager`] task. Clones
+/// This state is internal to the [`crate::manager::StorageManager`] task. Clones
 /// of this state can be retrieved by requests to the `StorageManager` task
-/// from the [`crate::StorageManagerHandle`]. This state is not `Sync`, and
+/// from the [`crate::manager::StorageHandle`]. This state is not `Sync`, and
 /// as such does not require any mutexes. However, we do expect to share it
 /// relatively frequently, and we want copies of it to be as cheaply made
 /// as possible. So any large state is stored inside `Arc`s. On the other

@@ -118,9 +118,9 @@ impl DiskPaths {
 /// A disk which has been observed by monitoring hardware.
 ///
 /// No guarantees are made about the partitions which exist within this disk.
-/// This exists as a distinct entity from [Disk] because it may be desirable to
-/// monitor for hardware in one context, and conform disks to partition layouts
-/// in a different context.
+/// This exists as a distinct entity from `Disk` in `sled-storage` because it
+/// may be desirable to monitor for hardware in one context, and conform disks
+/// to partition layouts in a different context.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct UnparsedDisk {
     paths: DiskPaths,

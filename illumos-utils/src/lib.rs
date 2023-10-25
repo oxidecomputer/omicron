@@ -4,6 +4,7 @@
 
 //! Wrappers around illumos-specific commands.
 
+#[allow(unused)]
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use cfg_if::cfg_if;

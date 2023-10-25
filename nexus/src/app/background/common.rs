@@ -177,7 +177,7 @@ pub struct Driver {
 ///
 /// This is returned by [`Driver::register()`] to identify the corresponding
 /// background task.  It's then accepted by functions like
-/// [`Driver::activate()`] and [`Driver::status()`] to identify the task.
+/// [`Driver::activate()`] and [`Driver::task_status()`] to identify the task.
 #[derive(Clone, Debug, Ord, PartialOrd, PartialEq, Eq)]
 pub struct TaskHandle(String);
 
@@ -277,7 +277,7 @@ impl Driver {
     /// Enumerate all registered background tasks
     ///
     /// This is aimed at callers that want to get the status of all background
-    /// tasks.  You'd call [`Driver::status()`] with each of the items produced
+    /// tasks.  You'd call [`Driver::task_status()`] with each of the items produced
     /// by the iterator.
     pub fn tasks(&self) -> impl Iterator<Item = &TaskHandle> {
         self.tasks.keys()

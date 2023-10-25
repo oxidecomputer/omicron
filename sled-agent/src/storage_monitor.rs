@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! A task that listens for storage events from [`sled_storage::StorageMonitor`]
+//! A task that listens for storage events from [`sled_storage::manager::StorageManager`]
 //! and dispatches them to other parst of the bootstrap agent and sled agent
 //! code.
 
