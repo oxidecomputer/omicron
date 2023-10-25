@@ -856,6 +856,18 @@ mod tests {
         // Tests listing timeseries
         list_timeseries_test(address, &log).await.unwrap();
 
+        // Tests no changes are made when version is not updated
+        database_version_update_idempotent_test(address).await.unwrap();
+
+        // Tests that downgrading is impossible
+        database_version_will_not_downgrade_test(address).await.unwrap();
+
+        // Tests old data is dropped if version is updated
+        database_version_wipes_old_version_test(address).await.unwrap();
+
+        // Tests schema cache is updated when a new sample is inserted
+        update_schema_cache_on_new_sample_test(address).await.unwrap();
+
         // Tests for fields and measurements
         recall_field_value_bool_test(address).await.unwrap();
 
@@ -2503,15 +2515,9 @@ mod tests {
             .count()
     }
 
-    #[tokio::test]
-    async fn test_database_version_update_idempotent() {
+    async fn database_version_update_idempotent_test(address: SocketAddr) -> Result<(), Error> {
         let logctx = test_setup_log("test_database_version_update_idempotent");
         let log = &logctx.log;
-
-        let mut db = ClickHouseInstance::new_single_node(0)
-            .await
-            .expect("Failed to start ClickHouse");
-        let address = SocketAddr::new("::1".parse().unwrap(), db.port());
 
         let replicated = false;
 
@@ -2539,19 +2545,14 @@ mod tests {
 
         assert_eq!(1, get_schema_count(&client).await);
 
-        db.cleanup().await.expect("Failed to cleanup ClickHouse server");
+        client.wipe_single_node_db().await?;
         logctx.cleanup_successful();
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_database_version_will_not_downgrade() {
+    async fn database_version_will_not_downgrade_test(address: SocketAddr) -> Result<(), Error> {
         let logctx = test_setup_log("test_database_version_will_not_downgrade");
         let log = &logctx.log;
-
-        let mut db = ClickHouseInstance::new_single_node(0)
-            .await
-            .expect("Failed to start ClickHouse");
-        let address = SocketAddr::new("::1".parse().unwrap(), db.port());
 
         let replicated = false;
 
@@ -2577,18 +2578,14 @@ mod tests {
             .await
             .expect_err("Should have failed, downgrades are not supported");
 
-        db.cleanup().await.expect("Failed to cleanup ClickHouse server");
+        client.wipe_single_node_db().await?;
         logctx.cleanup_successful();
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_database_version_wipes_old_version() {
+    async fn database_version_wipes_old_version_test(address: SocketAddr) -> Result<(), Error> {
         let logctx = test_setup_log("test_database_version_wipes_old_version");
         let log = &logctx.log;
-        let mut db = ClickHouseInstance::new_single_node(0)
-            .await
-            .expect("Failed to start ClickHouse");
-        let address = SocketAddr::new("::1".parse().unwrap(), db.port());
 
         let replicated = false;
 
@@ -2615,21 +2612,15 @@ mod tests {
             .expect("Should have initialized database successfully");
         assert_eq!(0, get_schema_count(&client).await);
 
-        db.cleanup().await.expect("Failed to cleanup ClickHouse server");
+        client.wipe_single_node_db().await?;
         logctx.cleanup_successful();
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_update_schema_cache_on_new_sample() {
+    async fn update_schema_cache_on_new_sample_test(address: SocketAddr) -> Result<(), Error> {
         usdt::register_probes().unwrap();
         let logctx = test_setup_log("test_update_schema_cache_on_new_sample");
         let log = &logctx.log;
-
-        // Let the OS assign a port and discover it after ClickHouse starts
-        let mut db = ClickHouseInstance::new_single_node(0)
-            .await
-            .expect("Failed to start ClickHouse");
-        let address = SocketAddr::new("::1".parse().unwrap(), db.port());
 
         let client = Client::new(address, &log);
         client
@@ -2667,8 +2658,9 @@ mod tests {
             "Expected exactly 1 schema again"
         );
         assert_eq!(client.schema.lock().await.len(), 1);
-        db.cleanup().await.expect("Failed to cleanup ClickHouse server");
+        client.wipe_single_node_db().await?;
         logctx.cleanup_successful();
+        Ok(())
     }
 
     #[tokio::test]
