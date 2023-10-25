@@ -31,6 +31,7 @@ use nexus_types::external_api::shared::Ipv6Range;
 use nexus_types::external_api::views::IpPool;
 use nexus_types::external_api::views::IpPoolRange;
 use nexus_types::external_api::views::IpPoolResource;
+use nexus_types::external_api::views::Silo;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::{IdentityMetadataCreateParams, Name};
@@ -345,17 +346,8 @@ async fn test_ip_pool_service_no_cud(cptestctx: &ControlPlaneTestContext) {
 async fn test_ip_pool_with_silo(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    // can create a pool with an existing silo by name
     let _created_pool = create_pool(client, "p0").await;
-
-    // let silo_id =
-    //     created_pool.silo_id.expect("Expected pool to have a silo_id");
-    // silo: Some(NameOrId::Name()),
-
-    // now we'll create another IP pool using that silo ID
     let _created_pool = create_pool(client, "p1").await;
-    // assert_eq!(created_pool.silo_id.unwrap(), silo_id);
-    // TODO: confirm a second pool can be assocatied with the same silo ID
 
     // expect 404 on association if the specified silo doesn't exist
     let nonexistent_silo_id = Uuid::new_v4();
@@ -364,6 +356,7 @@ async fn test_ip_pool_with_silo(cptestctx: &ControlPlaneTestContext) {
             silo: NameOrId::Id(nonexistent_silo_id),
             is_default: false,
         });
+
     let error = NexusRequest::new(
         RequestBuilder::new(
             client,
@@ -386,22 +379,48 @@ async fn test_ip_pool_with_silo(cptestctx: &ControlPlaneTestContext) {
     );
 
     // associate with silo that exists
-    // let params = params::IpPoolAssociationCreate::Fleet(params::IpPoolAssociateFleet {
-    //     is_default: false,
-    // });
-    // let _: IpPoolResource = object_create(
-    //     client,
-    //     &format!("/v1/system/ip-pools/p1/association"),
-    //     &params,
-    // )
-    // .await;
+    let params =
+        params::IpPoolAssociationCreate::Silo(params::IpPoolAssociateSilo {
+            // TODO: this is probably not the best silo ID to use
+            silo: NameOrId::Name(cptestctx.silo_name.clone()),
+            is_default: false,
+        });
+    let _: IpPoolResource = object_create(
+        client,
+        &format!("/v1/system/ip-pools/p1/association"),
+        &params,
+    )
+    .await;
+
+    // TODO: test assocation worked, or at least comes back in association list
+
+    // get silo ID so we can test assocation by ID as well
+    let silo_url = format!("/v1/system/silos/{}", cptestctx.silo_name);
+    let silo = NexusRequest::object_get(client, &silo_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<Silo>()
+        .await;
+
+    // TODO: dissociate silo
+    // TODO: confirm dissociation
+
+    // associate same silo by ID
+    let params =
+        params::IpPoolAssociationCreate::Silo(params::IpPoolAssociateSilo {
+            silo: NameOrId::Id(silo.identity.id),
+            is_default: false,
+        });
+    let _: IpPoolResource = object_create(
+        client,
+        &format!("/v1/system/ip-pools/p1/association"),
+        &params,
+    )
+    .await;
 
     // TODO: associating a resource that is already associated should be a noop
     // and return a success message
 
     // TODO: trying to set a second default for a resource should fail
-
-    // TODO: dissociate silo from pool
 }
 
 // IP pool list fetch logic includes a join to ip_pool_resource, which is
