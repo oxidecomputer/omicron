@@ -13,7 +13,7 @@ use crate::db::collection_detach_many::DatastoreDetachManyTarget;
 use crate::db::collection_detach_many::DetachManyError;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
-use crate::db::error::public_error_from_diesel_pool;
+use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Resource;
 use crate::db::lookup::LookupPath;
@@ -21,12 +21,14 @@ use crate::db::model::Instance;
 use crate::db::model::InstanceRuntimeState;
 use crate::db::model::Name;
 use crate::db::model::Project;
+use crate::db::model::Vmm;
 use crate::db::pagination::paginated;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use nexus_db_model::VmmRuntimeState;
 use omicron_common::api;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
@@ -39,6 +41,68 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
 use ref_cast::RefCast;
 use uuid::Uuid;
+
+/// Wraps a record of an `Instance` along with its active `Vmm`, if it has one.
+#[derive(Clone, Debug)]
+pub struct InstanceAndActiveVmm {
+    instance: Instance,
+    vmm: Option<Vmm>,
+}
+
+impl InstanceAndActiveVmm {
+    pub fn instance(&self) -> &Instance {
+        &self.instance
+    }
+
+    pub fn vmm(&self) -> &Option<Vmm> {
+        &self.vmm
+    }
+
+    pub fn sled_id(&self) -> Option<Uuid> {
+        self.vmm.as_ref().map(|v| v.sled_id)
+    }
+
+    pub fn effective_state(
+        &self,
+    ) -> omicron_common::api::external::InstanceState {
+        if let Some(vmm) = &self.vmm {
+            vmm.runtime.state.0
+        } else {
+            self.instance.runtime().nexus_state.0
+        }
+    }
+}
+
+impl From<(Instance, Option<Vmm>)> for InstanceAndActiveVmm {
+    fn from(value: (Instance, Option<Vmm>)) -> Self {
+        Self { instance: value.0, vmm: value.1 }
+    }
+}
+
+impl From<InstanceAndActiveVmm> for omicron_common::api::external::Instance {
+    fn from(value: InstanceAndActiveVmm) -> Self {
+        let (run_state, time_run_state_updated) = if let Some(vmm) = value.vmm {
+            (vmm.runtime.state, vmm.runtime.time_state_updated)
+        } else {
+            (
+                value.instance.runtime_state.nexus_state.clone(),
+                value.instance.runtime_state.time_updated,
+            )
+        };
+
+        Self {
+            identity: value.instance.identity(),
+            project_id: value.instance.project_id,
+            ncpus: value.instance.ncpus.into(),
+            memory: value.instance.memory.into(),
+            hostname: value.instance.hostname,
+            runtime: omicron_common::api::external::InstanceRuntimeState {
+                run_state: *run_state.state(),
+                time_run_state_updated,
+            },
+        }
+    }
+}
 
 impl DataStore {
     /// Idempotently insert a database record for an Instance
@@ -84,26 +148,23 @@ impl DataStore {
                 .do_update()
                 .set(dsl::time_modified.eq(dsl::time_modified)),
         )
-        .insert_and_get_result_async(self.pool_authorized(opctx).await?)
+        .insert_and_get_result_async(
+            &*self.pool_connection_authorized(opctx).await?,
+        )
         .await
         .map_err(|e| match e {
             AsyncInsertError::CollectionNotFound => authz_project.not_found(),
-            AsyncInsertError::DatabaseError(e) => {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::Conflict(
-                        ResourceType::Instance,
-                        name.as_str(),
-                    ),
-                )
-            }
+            AsyncInsertError::DatabaseError(e) => public_error_from_diesel(
+                e,
+                ErrorHandler::Conflict(ResourceType::Instance, name.as_str()),
+            ),
         })?;
 
         bail_unless!(
-            instance.runtime().state.state()
+            instance.runtime().nexus_state.state()
                 == &api::external::InstanceState::Creating,
             "newly-created Instance has unexpected state: {:?}",
-            instance.runtime().state
+            instance.runtime().nexus_state
         );
         bail_unless!(
             instance.runtime().gen == gen,
@@ -118,11 +179,12 @@ impl DataStore {
         opctx: &OpContext,
         authz_project: &authz::Project,
         pagparams: &PaginatedBy<'_>,
-    ) -> ListResultVec<Instance> {
+    ) -> ListResultVec<InstanceAndActiveVmm> {
         opctx.authorize(authz::Action::ListChildren, authz_project).await?;
 
         use db::schema::instance::dsl;
-        match pagparams {
+        use db::schema::vmm::dsl as vmm_dsl;
+        Ok(match pagparams {
             PaginatedBy::Id(pagparams) => {
                 paginated(dsl::instance, dsl::id, &pagparams)
             }
@@ -134,10 +196,21 @@ impl DataStore {
         }
         .filter(dsl::project_id.eq(authz_project.id()))
         .filter(dsl::time_deleted.is_null())
-        .select(Instance::as_select())
-        .load_async::<Instance>(self.pool_authorized(opctx).await?)
+        .left_join(
+            vmm_dsl::vmm.on(vmm_dsl::id
+                .nullable()
+                .eq(dsl::active_propolis_id)
+                .and(vmm_dsl::time_deleted.is_null())),
+        )
+        .select((Instance::as_select(), Option::<Vmm>::as_select()))
+        .load_async::<(Instance, Option<Vmm>)>(
+            &*self.pool_connection_authorized(opctx).await?,
+        )
         .await
-        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
+        .into_iter()
+        .map(|(instance, vmm)| InstanceAndActiveVmm { instance, vmm })
+        .collect())
     }
 
     /// Fetches information about an Instance that the caller has previously
@@ -163,25 +236,32 @@ impl DataStore {
         Ok(db_instance)
     }
 
-    /// Fetches information about a deleted instance. This can be used to
-    /// query the properties an instance had at the time it was deleted, which
-    /// can be useful when cleaning up a deleted instance.
-    pub async fn instance_fetch_deleted(
+    pub async fn instance_fetch_with_vmm(
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,
-    ) -> LookupResult<Instance> {
+    ) -> LookupResult<InstanceAndActiveVmm> {
         opctx.authorize(authz::Action::Read, authz_instance).await?;
 
-        use db::schema::instance::dsl;
-        let instance = dsl::instance
-            .filter(dsl::id.eq(authz_instance.id()))
-            .filter(dsl::time_deleted.is_not_null())
-            .select(Instance::as_select())
-            .get_result_async(self.pool_authorized(opctx).await?)
+        use db::schema::instance::dsl as instance_dsl;
+        use db::schema::vmm::dsl as vmm_dsl;
+
+        let (instance, vmm) = instance_dsl::instance
+            .filter(instance_dsl::id.eq(authz_instance.id()))
+            .filter(instance_dsl::time_deleted.is_null())
+            .left_join(
+                vmm_dsl::vmm.on(vmm_dsl::id
+                    .nullable()
+                    .eq(instance_dsl::active_propolis_id)
+                    .and(vmm_dsl::time_deleted.is_null())),
+            )
+            .select((Instance::as_select(), Option::<Vmm>::as_select()))
+            .get_result_async::<(Instance, Option<Vmm>)>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::NotFoundByLookup(
                         ResourceType::Instance,
@@ -190,7 +270,7 @@ impl DataStore {
                 )
             })?;
 
-        Ok(instance)
+        Ok(InstanceAndActiveVmm { instance, vmm })
     }
 
     // TODO-design It's tempting to return the updated state of the Instance
@@ -214,25 +294,17 @@ impl DataStore {
             // - the active Propolis ID will not change, the state generation
             //   increased, and the Propolis generation will not change, or
             // - the Propolis generation increased.
-            .filter(
-                (dsl::active_propolis_id
-                    .eq(new_runtime.propolis_id)
-                    .and(dsl::state_generation.lt(new_runtime.gen))
-                    .and(
-                        dsl::propolis_generation.eq(new_runtime.propolis_gen),
-                    ))
-                .or(dsl::propolis_generation.lt(new_runtime.propolis_gen)),
-            )
+            .filter(dsl::state_generation.lt(new_runtime.gen))
             .set(new_runtime.clone())
             .check_if_exists::<Instance>(*instance_id)
-            .execute_and_check(self.pool())
+            .execute_and_check(&*self.pool_connection_unauthorized().await?)
             .await
             .map(|r| match r.status {
                 UpdateStatus::Updated => true,
                 UpdateStatus::NotUpdatedButExists => false,
             })
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::NotFoundByLookup(
                         ResourceType::Instance,
@@ -242,6 +314,69 @@ impl DataStore {
             })?;
 
         Ok(updated)
+    }
+
+    /// Updates an instance record and a VMM record with a single database
+    /// command.
+    ///
+    /// This is intended to be used to apply updates from sled agent that
+    /// may change a VMM's runtime state (e.g. moving an instance from Running
+    /// to Stopped) and its corresponding instance's state (e.g. changing the
+    /// active Propolis ID to reflect a completed migration) in a single
+    /// transaction. The caller is responsible for ensuring the instance and
+    /// VMM states are consistent with each other before calling this routine.
+    ///
+    /// # Arguments
+    ///
+    /// - instance_id: The ID of the instance to update.
+    /// - new_instance: The new instance runtime state to try to write.
+    /// - vmm_id: The ID of the VMM to update.
+    /// - new_vmm: The new VMM runtime state to try to write.
+    ///
+    /// # Return value
+    ///
+    /// - `Ok((instance_updated, vmm_updated))` if the query was issued
+    ///   successfully. `instance_updated` and `vmm_updated` are each true if
+    ///   the relevant item was updated and false otherwise. Note that an update
+    ///   can fail because it was inapplicable (i.e. the database has state with
+    ///   a newer generation already) or because the relevant record was not
+    ///   found.
+    /// - `Err` if another error occurred while accessing the database.
+    pub async fn instance_and_vmm_update_runtime(
+        &self,
+        instance_id: &Uuid,
+        new_instance: &InstanceRuntimeState,
+        vmm_id: &Uuid,
+        new_vmm: &VmmRuntimeState,
+    ) -> Result<(bool, bool), Error> {
+        let query = crate::db::queries::instance::InstanceAndVmmUpdate::new(
+            *instance_id,
+            new_instance.clone(),
+            *vmm_id,
+            new_vmm.clone(),
+        );
+
+        // The InstanceAndVmmUpdate query handles and indicates failure to find
+        // either the instance or the VMM, so a query failure here indicates
+        // some kind of internal error and not a failed lookup.
+        let result = query
+            .execute_and_check(&*self.pool_connection_unauthorized().await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        let instance_updated = match result.instance_status {
+            Some(UpdateStatus::Updated) => true,
+            Some(UpdateStatus::NotUpdatedButExists) => false,
+            None => false,
+        };
+
+        let vmm_updated = match result.vmm_status {
+            Some(UpdateStatus::Updated) => true,
+            Some(UpdateStatus::NotUpdatedButExists) => false,
+            None => false,
+        };
+
+        Ok((instance_updated, vmm_updated))
     }
 
     pub async fn project_delete_instance(
@@ -273,7 +408,9 @@ impl DataStore {
         let _instance = Instance::detach_resources(
             authz_instance.id(),
             instance::table.into_boxed().filter(
-                instance::dsl::state.eq_any(ok_to_delete_instance_states),
+                instance::dsl::state
+                    .eq_any(ok_to_delete_instance_states)
+                    .and(instance::dsl::active_propolis_id.is_null()),
             ),
             disk::table.into_boxed().filter(
                 disk::dsl::disk_state.eq_any(ok_to_detach_disk_state_labels),
@@ -288,7 +425,9 @@ impl DataStore {
                 disk::dsl::slot.eq(Option::<i16>::None),
             )),
         )
-        .detach_and_get_result_async(self.pool_authorized(opctx).await?)
+        .detach_and_get_result_async(
+            &*self.pool_connection_authorized(opctx).await?,
+        )
         .await
         .map_err(|e| match e {
             DetachManyError::CollectionNotFound => Error::not_found_by_id(
@@ -296,7 +435,14 @@ impl DataStore {
                 &authz_instance.id(),
             ),
             DetachManyError::NoUpdate { collection } => {
-                let instance_state = collection.runtime_state.state.state();
+                if collection.runtime_state.propolis_id.is_some() {
+                    return Error::invalid_request(
+                        "cannot delete instance: instance is running or has \
+                                not yet fully stopped",
+                    );
+                }
+                let instance_state =
+                    collection.runtime_state.nexus_state.state();
                 match instance_state {
                     api::external::InstanceState::Stopped
                     | api::external::InstanceState::Failed => {
@@ -309,7 +455,7 @@ impl DataStore {
                 }
             }
             DetachManyError::DatabaseError(e) => {
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
+                public_error_from_diesel(e, ErrorHandler::Server)
             }
         })?;
 

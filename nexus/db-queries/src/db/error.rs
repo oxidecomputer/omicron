@@ -4,7 +4,6 @@
 
 //! Error handling and conversions.
 
-use async_bb8_diesel::{ConnectionError, PoolError, PoolResult};
 use diesel::result::DatabaseErrorInformation;
 use diesel::result::DatabaseErrorKind as DieselErrorKind;
 use diesel::result::Error as DieselError;
@@ -25,24 +24,8 @@ pub enum TransactionError<T> {
     ///
     /// This error covers failure due to accessing the DB pool or errors
     /// propagated from the DB itself.
-    #[error("Pool error: {0}")]
-    Pool(#[from] async_bb8_diesel::PoolError),
-}
-
-// Maps a "diesel error" into a "pool error", which
-// is already contained within the error type.
-impl<T> From<DieselError> for TransactionError<T> {
-    fn from(err: DieselError) -> Self {
-        Self::Pool(PoolError::Connection(ConnectionError::Query(err)))
-    }
-}
-
-// Maps a "connection error" into a "pool error", which
-// is already contained within the error type.
-impl<T> From<async_bb8_diesel::ConnectionError> for TransactionError<T> {
-    fn from(err: async_bb8_diesel::ConnectionError) -> Self {
-        Self::Pool(PoolError::Connection(err))
-    }
+    #[error("Database error: {0}")]
+    Database(#[from] DieselError),
 }
 
 impl From<PublicError> for TransactionError<PublicError> {
@@ -58,22 +41,17 @@ impl<T> TransactionError<T> {
     /// [1]: https://www.cockroachlabs.com/docs/v23.1/transaction-retry-error-reference#client-side-retry-handling
     pub fn retry_transaction(&self) -> bool {
         match &self {
-            TransactionError::Pool(e) => match e {
-                PoolError::Connection(ConnectionError::Query(
-                    DieselError::DatabaseError(kind, boxed_error_information),
-                )) => match kind {
-                    DieselErrorKind::SerializationFailure => {
-                        return boxed_error_information
-                            .message()
-                            .starts_with("restart transaction");
-                    }
-
-                    _ => false,
-                },
-
+            Self::Database(DieselError::DatabaseError(
+                kind,
+                boxed_error_information,
+            )) => match kind {
+                DieselErrorKind::SerializationFailure => {
+                    return boxed_error_information
+                        .message()
+                        .starts_with("restart transaction");
+                }
                 _ => false,
             },
-
             _ => false,
         }
     }
@@ -107,21 +85,6 @@ fn format_database_error(
     rv
 }
 
-/// Like [`diesel::result::OptionalExtension<T>::optional`]. This turns Ok(v)
-/// into Ok(Some(v)), Err("NotFound") into Ok(None), and leave all other values
-/// unchanged.
-pub fn diesel_pool_result_optional<T>(
-    result: PoolResult<T>,
-) -> PoolResult<Option<T>> {
-    match result {
-        Ok(v) => Ok(Some(v)),
-        Err(PoolError::Connection(ConnectionError::Query(
-            DieselError::NotFound,
-        ))) => Ok(None),
-        Err(e) => Err(e),
-    }
-}
-
 /// Allows the caller to handle user-facing errors, and provide additional
 /// context which may be used to populate more informative errors.
 ///
@@ -153,15 +116,15 @@ pub enum ErrorHandler<'a> {
     Server,
 }
 
-/// Converts a Diesel pool error to a public-facing error.
+/// Converts a Diesel connection error to a public-facing error.
 ///
 /// [`ErrorHandler`] may be used to add additional handlers for the error
 /// being returned.
-pub fn public_error_from_diesel_pool(
-    error: PoolError,
+pub fn public_error_from_diesel(
+    error: DieselError,
     handler: ErrorHandler<'_>,
 ) -> PublicError {
-    public_error_from_diesel_pool_helper(error, |error| match handler {
+    match handler {
         ErrorHandler::NotFoundByResource(resource) => {
             public_error_from_diesel_lookup(
                 error,
@@ -179,31 +142,6 @@ pub fn public_error_from_diesel_pool(
             "unexpected database error: {:#}",
             error
         )),
-    })
-}
-
-/// Handles the common cases for all pool errors (particularly around transient
-/// errors while delegating the special case of
-/// `PoolError::Connection(ConnectionError::Query(diesel_error))` to
-/// `make_query_error(diesel_error)`, allowing the caller to decide how to
-/// format a message for that case.
-fn public_error_from_diesel_pool_helper<F>(
-    error: PoolError,
-    make_query_error: F,
-) -> PublicError
-where
-    F: FnOnce(DieselError) -> PublicError,
-{
-    match error {
-        PoolError::Connection(error) => match error {
-            ConnectionError::Connection(error) => PublicError::unavail(
-                &format!("Failed to access connection pool: {}", error),
-            ),
-            ConnectionError::Query(error) => make_query_error(error),
-        },
-        PoolError::Timeout => {
-            PublicError::unavail("Timeout accessing connection pool")
-        }
     }
 }
 

@@ -22,6 +22,7 @@ crucible-agent-client.workspace = true
 crucible-pantry-client.workspace = true
 dns-service-client.workspace = true
 dpd-client.workspace = true
+mg-admin-client.workspace = true
 dropshot.workspace = true
 fatfs.workspace = true
 futures.workspace = true
@@ -90,7 +91,7 @@ oximeter.workspace = true
 oximeter-instruments = { workspace = true, features = ["http-instruments"] }
 oximeter-producer.workspace = true
 rustls = { workspace = true }
-omicron-workspace-hack = { version = "0.1", path = "../workspace-hack" }
+omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 async-bb8-diesel.workspace = true

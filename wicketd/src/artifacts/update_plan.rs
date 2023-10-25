@@ -39,14 +39,14 @@ use tufaceous_lib::RotArchives;
 pub struct UpdatePlan {
     pub(crate) system_version: SemverVersion,
     pub(crate) gimlet_sp: BTreeMap<Board, ArtifactIdData>,
-    pub(crate) gimlet_rot_a: ArtifactIdData,
-    pub(crate) gimlet_rot_b: ArtifactIdData,
+    pub(crate) gimlet_rot_a: Vec<ArtifactIdData>,
+    pub(crate) gimlet_rot_b: Vec<ArtifactIdData>,
     pub(crate) psc_sp: BTreeMap<Board, ArtifactIdData>,
-    pub(crate) psc_rot_a: ArtifactIdData,
-    pub(crate) psc_rot_b: ArtifactIdData,
+    pub(crate) psc_rot_a: Vec<ArtifactIdData>,
+    pub(crate) psc_rot_b: Vec<ArtifactIdData>,
     pub(crate) sidecar_sp: BTreeMap<Board, ArtifactIdData>,
-    pub(crate) sidecar_rot_a: ArtifactIdData,
-    pub(crate) sidecar_rot_b: ArtifactIdData,
+    pub(crate) sidecar_rot_a: Vec<ArtifactIdData>,
+    pub(crate) sidecar_rot_b: Vec<ArtifactIdData>,
 
     // Note: The Trampoline image is broken into phase1/phase2 as part of our
     // update plan (because they go to different destinations), but the two
@@ -83,14 +83,14 @@ pub(super) struct UpdatePlanBuilder<'a> {
     // fields that mirror `UpdatePlan`
     system_version: SemverVersion,
     gimlet_sp: BTreeMap<Board, ArtifactIdData>,
-    gimlet_rot_a: Option<ArtifactIdData>,
-    gimlet_rot_b: Option<ArtifactIdData>,
+    gimlet_rot_a: Vec<ArtifactIdData>,
+    gimlet_rot_b: Vec<ArtifactIdData>,
     psc_sp: BTreeMap<Board, ArtifactIdData>,
-    psc_rot_a: Option<ArtifactIdData>,
-    psc_rot_b: Option<ArtifactIdData>,
+    psc_rot_a: Vec<ArtifactIdData>,
+    psc_rot_b: Vec<ArtifactIdData>,
     sidecar_sp: BTreeMap<Board, ArtifactIdData>,
-    sidecar_rot_a: Option<ArtifactIdData>,
-    sidecar_rot_b: Option<ArtifactIdData>,
+    sidecar_rot_a: Vec<ArtifactIdData>,
+    sidecar_rot_b: Vec<ArtifactIdData>,
 
     // We always send phase 1 images (regardless of host or trampoline) to the
     // SP via MGS, so we retain their data.
@@ -124,14 +124,14 @@ impl<'a> UpdatePlanBuilder<'a> {
         Ok(Self {
             system_version,
             gimlet_sp: BTreeMap::new(),
-            gimlet_rot_a: None,
-            gimlet_rot_b: None,
+            gimlet_rot_a: Vec::new(),
+            gimlet_rot_b: Vec::new(),
             psc_sp: BTreeMap::new(),
-            psc_rot_a: None,
-            psc_rot_b: None,
+            psc_rot_a: Vec::new(),
+            psc_rot_b: Vec::new(),
             sidecar_sp: BTreeMap::new(),
-            sidecar_rot_a: None,
-            sidecar_rot_b: None,
+            sidecar_rot_a: Vec::new(),
+            sidecar_rot_b: Vec::new(),
             host_phase_1: None,
             trampoline_phase_1: None,
             trampoline_phase_2: None,
@@ -309,10 +309,6 @@ impl<'a> UpdatePlanBuilder<'a> {
             | KnownArtifactKind::SwitchSp => unreachable!(),
         };
 
-        if rot_a.is_some() || rot_b.is_some() {
-            return Err(RepositoryError::DuplicateArtifactKind(artifact_kind));
-        }
-
         let (rot_a_data, rot_b_data) = Self::extract_nested_artifact_pair(
             &mut self.extracted_artifacts,
             artifact_kind,
@@ -336,10 +332,8 @@ impl<'a> UpdatePlanBuilder<'a> {
             kind: rot_b_kind.clone(),
         };
 
-        *rot_a =
-            Some(ArtifactIdData { id: rot_a_id, data: rot_a_data.clone() });
-        *rot_b =
-            Some(ArtifactIdData { id: rot_b_id, data: rot_b_data.clone() });
+        rot_a.push(ArtifactIdData { id: rot_a_id, data: rot_a_data.clone() });
+        rot_b.push(ArtifactIdData { id: rot_b_id, data: rot_b_data.clone() });
 
         record_extracted_artifact(
             artifact_id.clone(),
@@ -574,53 +568,39 @@ impl<'a> UpdatePlanBuilder<'a> {
     pub(super) fn build(self) -> Result<UpdatePlan, RepositoryError> {
         // Ensure our multi-board-supporting kinds have at least one board
         // present.
-        if self.gimlet_sp.is_empty() {
-            return Err(RepositoryError::MissingArtifactKind(
-                KnownArtifactKind::GimletSp,
-            ));
-        }
-        if self.psc_sp.is_empty() {
-            return Err(RepositoryError::MissingArtifactKind(
-                KnownArtifactKind::PscSp,
-            ));
-        }
-        if self.sidecar_sp.is_empty() {
-            return Err(RepositoryError::MissingArtifactKind(
-                KnownArtifactKind::SwitchSp,
-            ));
+        for (kind, no_artifacts) in [
+            (KnownArtifactKind::GimletSp, self.gimlet_sp.is_empty()),
+            (KnownArtifactKind::PscSp, self.psc_sp.is_empty()),
+            (KnownArtifactKind::SwitchSp, self.sidecar_sp.is_empty()),
+            (
+                KnownArtifactKind::GimletRot,
+                self.gimlet_rot_a.is_empty() || self.gimlet_rot_b.is_empty(),
+            ),
+            (
+                KnownArtifactKind::PscRot,
+                self.psc_rot_a.is_empty() || self.psc_rot_b.is_empty(),
+            ),
+            (
+                KnownArtifactKind::SwitchRot,
+                self.sidecar_rot_a.is_empty() || self.sidecar_rot_b.is_empty(),
+            ),
+        ] {
+            if no_artifacts {
+                return Err(RepositoryError::MissingArtifactKind(kind));
+            }
         }
 
         Ok(UpdatePlan {
             system_version: self.system_version,
             gimlet_sp: self.gimlet_sp, // checked above
-            gimlet_rot_a: self.gimlet_rot_a.ok_or(
-                RepositoryError::MissingArtifactKind(
-                    KnownArtifactKind::GimletRot,
-                ),
-            )?,
-            gimlet_rot_b: self.gimlet_rot_b.ok_or(
-                RepositoryError::MissingArtifactKind(
-                    KnownArtifactKind::GimletRot,
-                ),
-            )?,
-            psc_sp: self.psc_sp, // checked above
-            psc_rot_a: self.psc_rot_a.ok_or(
-                RepositoryError::MissingArtifactKind(KnownArtifactKind::PscRot),
-            )?,
-            psc_rot_b: self.psc_rot_b.ok_or(
-                RepositoryError::MissingArtifactKind(KnownArtifactKind::PscRot),
-            )?,
+            gimlet_rot_a: self.gimlet_rot_a, // checked above
+            gimlet_rot_b: self.gimlet_rot_b, // checked above
+            psc_sp: self.psc_sp,       // checked above
+            psc_rot_a: self.psc_rot_a, // checked above
+            psc_rot_b: self.psc_rot_b, // checked above
             sidecar_sp: self.sidecar_sp, // checked above
-            sidecar_rot_a: self.sidecar_rot_a.ok_or(
-                RepositoryError::MissingArtifactKind(
-                    KnownArtifactKind::SwitchRot,
-                ),
-            )?,
-            sidecar_rot_b: self.sidecar_rot_b.ok_or(
-                RepositoryError::MissingArtifactKind(
-                    KnownArtifactKind::SwitchRot,
-                ),
-            )?,
+            sidecar_rot_a: self.sidecar_rot_a, // checked above
+            sidecar_rot_b: self.sidecar_rot_b, // checked above
             host_phase_1: self.host_phase_1.ok_or(
                 RepositoryError::MissingArtifactKind(KnownArtifactKind::Host),
             )?,
@@ -1030,21 +1010,27 @@ mod tests {
 
         // Check extracted RoT data
         assert_eq!(
-            read_to_vec(&plan.gimlet_rot_a.data).await,
+            read_to_vec(&plan.gimlet_rot_a[0].data).await,
             gimlet_rot.archive_a
         );
         assert_eq!(
-            read_to_vec(&plan.gimlet_rot_b.data).await,
+            read_to_vec(&plan.gimlet_rot_b[0].data).await,
             gimlet_rot.archive_b
         );
-        assert_eq!(read_to_vec(&plan.psc_rot_a.data).await, psc_rot.archive_a);
-        assert_eq!(read_to_vec(&plan.psc_rot_b.data).await, psc_rot.archive_b);
         assert_eq!(
-            read_to_vec(&plan.sidecar_rot_a.data).await,
+            read_to_vec(&plan.psc_rot_a[0].data).await,
+            psc_rot.archive_a
+        );
+        assert_eq!(
+            read_to_vec(&plan.psc_rot_b[0].data).await,
+            psc_rot.archive_b
+        );
+        assert_eq!(
+            read_to_vec(&plan.sidecar_rot_a[0].data).await,
             sidecar_rot.archive_a
         );
         assert_eq!(
-            read_to_vec(&plan.sidecar_rot_b.data).await,
+            read_to_vec(&plan.sidecar_rot_b[0].data).await,
             sidecar_rot.archive_b
         );
 

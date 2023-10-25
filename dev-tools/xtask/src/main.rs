@@ -133,12 +133,6 @@ fn cmd_check_workspace_deps() -> Result<()> {
                     }
                 }
 
-                if name == WORKSPACE_HACK_PACKAGE_NAME {
-                    // Skip over workspace-hack because hakari doesn't yet support
-                    // workspace deps: https://github.com/guppy-rs/guppy/issues/7
-                    continue;
-                }
-
                 non_workspace_dependencies
                     .entry(name.to_owned())
                     .or_insert_with(Vec::new)

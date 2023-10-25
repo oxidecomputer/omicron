@@ -34,8 +34,13 @@ async fn main() -> Result<()> {
 
 #[derive(Debug, Parser)]
 struct App {
+    /// Display style to use.
     #[clap(long, short = 's', default_value_t, value_enum)]
     display_style: DisplayStyleOpt,
+
+    /// Prefix to set on all log messages with display-style=line.
+    #[clap(long, short = 'p')]
+    prefix: Option<String>,
 }
 
 impl App {
@@ -56,7 +61,7 @@ impl App {
 
         let context = ExampleContext::new(&logctx.log);
         let (display_handle, sender) =
-            make_displayer(&logctx.log, display_style);
+            make_displayer(&logctx.log, display_style, self.prefix);
 
         let engine = UpdateEngine::new(&logctx.log, sender);
 

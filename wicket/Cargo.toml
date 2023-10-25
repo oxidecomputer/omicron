@@ -34,6 +34,7 @@ slog.workspace = true
 slog-async.workspace = true
 slog-envlogger.workspace = true
 slog-term.workspace = true
+supports-color.workspace = true
 textwrap.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tokio-util.workspace = true
@@ -48,7 +49,7 @@ omicron-passwords.workspace = true
 update-engine.workspace = true
 wicket-common.workspace = true
 wicketd-client.workspace = true
-omicron-workspace-hack = { version = "0.1", path = "../workspace-hack" }
+omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 assert_cmd.workspace = true

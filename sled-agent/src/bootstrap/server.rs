@@ -528,7 +528,7 @@ fn start_dropshot_server(
 ///
 /// TODO-correctness Subsequent steps may assume all M.2s that will ever be
 /// present are present once we return from this function; see
-/// https://github.com/oxidecomputer/omicron/issues/3815.
+/// <https://github.com/oxidecomputer/omicron/issues/3815>.
 async fn wait_for_boot_m2(storage_resources: &StorageResources, log: &Logger) {
     // Wait for at least the M.2 we booted from to show up.
     loop {

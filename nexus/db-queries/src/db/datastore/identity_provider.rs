@@ -8,7 +8,7 @@ use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
-use crate::db::error::public_error_from_diesel_pool;
+use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Resource;
 use crate::db::model::IdentityProvider;
@@ -46,9 +46,11 @@ impl DataStore {
         .filter(dsl::silo_id.eq(authz_idp_list.silo().id()))
         .filter(dsl::time_deleted.is_null())
         .select(IdentityProvider::as_select())
-        .load_async::<IdentityProvider>(self.pool_authorized(opctx).await?)
+        .load_async::<IdentityProvider>(
+            &*self.pool_connection_authorized(opctx).await?,
+        )
         .await
-        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     pub async fn saml_identity_provider_create(
@@ -61,7 +63,7 @@ impl DataStore {
         assert_eq!(provider.silo_id, authz_idp_list.silo().id());
 
         let name = provider.identity().name.to_string();
-        self.pool_authorized(opctx)
+        self.pool_connection_authorized(opctx)
             .await?
             .transaction_async(|conn| async move {
                 // insert silo identity provider record with type Saml
@@ -94,7 +96,7 @@ impl DataStore {
             })
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::Conflict(
                         ResourceType::SamlIdentityProvider,

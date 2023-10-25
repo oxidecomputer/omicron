@@ -35,6 +35,14 @@ use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use uuid::Uuid;
 
+/// Describes the version of the Oximeter database.
+///
+/// See: [crate::Client::initialize_db_with_version] for usage.
+///
+/// TODO(#4271): The current implementation of versioning will wipe the metrics
+/// database if this number is incremented.
+pub const OXIMETER_VERSION: u64 = 1;
+
 // Wrapper type to represent a boolean in the database.
 //
 // ClickHouse's type system lacks a boolean, and using `u8` to represent them. This a safe wrapper

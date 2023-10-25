@@ -19,10 +19,22 @@
 #: job = "helios / package"
 #:
 #: [dependencies.host]
-#: job = "helios / build OS image"
+#: job = "helios / build OS images"
 #:
-#: [dependencies.trampoline]
-#: job = "helios / build trampoline OS image"
+#: [[publish]]
+#: series = "rot-all"
+#: name = "repo.zip.parta"
+#: from_output = "/work/repo-rot-all.zip.parta"
+#:
+#: [[publish]]
+#: series = "rot-all"
+#: name = "repo.zip.partb"
+#: from_output = "/work/repo-rot-all.zip.partb"
+#:
+#: [[publish]]
+#: series = "rot-all"
+#: name = "repo.zip.sha256.txt"
+#: from_output = "/work/repo-rot-all.zip.sha256.txt"
 #:
 #: [[publish]]
 #: series = "rot-prod-rel"
@@ -77,10 +89,11 @@ done
 mkdir /work/package
 pushd /work/package
 tar xf /input/package/work/package.tar.gz out package-manifest.toml target/release/omicron-package
-target/release/omicron-package -t default target create -i standard -m gimlet -s asic
+target/release/omicron-package -t default target create -i standard -m gimlet -s asic -r multi-sled
 ln -s /input/package/work/zones/* out/
 rm out/switch-softnpu.tar.gz  # not used when target switch=asic
 rm out/omicron-gateway-softnpu.tar.gz  # not used when target switch=asic
+rm out/omicron-nexus-single-sled.tar.gz # only used for deploy tests
 for zone in out/*.tar.gz; do
     target/release/omicron-package stamp "$(basename "${zone%.tar.gz}")" "$VERSION"
 done
@@ -123,7 +136,7 @@ name = "$kind"
 version = "$VERSION"
 [artifact.$kind.source]
 kind = "file"
-path = "/input/$kind/work/helios/image/output/os.tar.gz"
+path = "/input/host/work/helios/upload/os-$kind.tar.gz"
 EOF
 done
 
@@ -167,6 +180,38 @@ caboose_util_rot() {
 }
 
 SERIES_LIST=()
+
+# Create an initial `manifest-rot-all.toml` containing the SP images for all
+# boards. While we still need to build multiple TUF repos,
+# `add_hubris_artifacts` below will append RoT images to this manifest (in
+# addition to the single-RoT manifest it creates).
+prep_rot_all_series() {
+    series="rot-all"
+
+    SERIES_LIST+=("$series")
+
+    manifest=/work/manifest-$series.toml
+    cp /work/manifest.toml "$manifest"
+
+    for board_rev in "${ALL_BOARDS[@]}"; do
+        board=${board_rev%-?}
+        tufaceous_board=${board//sidecar/switch}
+        sp_image="/work/hubris/${board_rev}.zip"
+        sp_caboose_version=$(/work/caboose-util read-version "$sp_image")
+        sp_caboose_board=$(/work/caboose-util read-board "$sp_image")
+
+        cat >>"$manifest" <<EOF
+[[artifact.${tufaceous_board}_sp]]
+name = "$sp_caboose_board"
+version = "$sp_caboose_version"
+[artifact.${tufaceous_board}_sp.source]
+kind = "file"
+path = "$sp_image"
+EOF
+    done
+}
+prep_rot_all_series
+
 add_hubris_artifacts() {
     series="$1"
     rot_dir="$2"
@@ -176,6 +221,7 @@ add_hubris_artifacts() {
     SERIES_LIST+=("$series")
 
     manifest=/work/manifest-$series.toml
+    manifest_rot_all=/work/manifest-rot-all.toml
     cp /work/manifest.toml "$manifest"
 
     for board in gimlet psc sidecar; do
@@ -188,6 +234,20 @@ add_hubris_artifacts() {
         cat >>"$manifest" <<EOF
 [[artifact.${tufaceous_board}_rot]]
 name = "$rot_caboose_board"
+version = "$rot_caboose_version"
+[artifact.${tufaceous_board}_rot.source]
+kind = "composite-rot"
+[artifact.${tufaceous_board}_rot.source.archive_a]
+kind = "file"
+path = "$rot_image_a"
+[artifact.${tufaceous_board}_rot.source.archive_b]
+kind = "file"
+path = "$rot_image_b"
+EOF
+
+        cat >>"$manifest_rot_all" <<EOF
+[[artifact.${tufaceous_board}_rot]]
+name = "$rot_caboose_board-${rot_dir//\//-}"
 version = "$rot_caboose_version"
 [artifact.${tufaceous_board}_rot.source]
 kind = "composite-rot"
@@ -218,8 +278,8 @@ EOF
     done
 }
 # usage:              SERIES           ROT_DIR      ROT_VERSION              BOARDS...
-add_hubris_artifacts  rot-staging-dev  staging/dev  cert-staging-dev-v1.0.0  "${ALL_BOARDS[@]}"
-add_hubris_artifacts  rot-prod-rel     prod/rel     cert-prod-rel-v1.0.0     "${ALL_BOARDS[@]}"
+add_hubris_artifacts  rot-staging-dev  staging/dev  cert-staging-dev-v1.0.2  "${ALL_BOARDS[@]}"
+add_hubris_artifacts  rot-prod-rel     prod/rel     cert-prod-rel-v1.0.2     "${ALL_BOARDS[@]}"
 
 for series in "${SERIES_LIST[@]}"; do
     /work/tufaceous assemble --no-generate-key /work/manifest-"$series".toml /work/repo-"$series".zip

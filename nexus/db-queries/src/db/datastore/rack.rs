@@ -12,7 +12,7 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
-use crate::db::error::public_error_from_diesel_pool;
+use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
 use crate::db::fixed_data::silo::INTERNAL_SILO_ID;
@@ -28,10 +28,11 @@ use crate::db::pagination::paginated;
 use crate::db::pool::DbConnection;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
-use async_bb8_diesel::PoolError;
 use chrono::Utc;
 use diesel::prelude::*;
+use diesel::result::Error as DieselError;
 use diesel::upsert::excluded;
+use ipnetwork::IpNetwork;
 use nexus_db_model::DnsGroup;
 use nexus_db_model::DnsZone;
 use nexus_db_model::ExternalIp;
@@ -61,6 +62,7 @@ use uuid::Uuid;
 #[derive(Clone)]
 pub struct RackInit {
     pub rack_id: Uuid,
+    pub rack_subnet: IpNetwork,
     pub services: Vec<internal_params::ServicePutRequest>,
     pub datasets: Vec<Dataset>,
     pub service_ip_pool_ranges: Vec<IpRange>,
@@ -80,7 +82,7 @@ enum RackInitError {
     AddingNic(Error),
     ServiceInsert(Error),
     DatasetInsert { err: AsyncInsertError, zpool_id: Uuid },
-    RackUpdate { err: PoolError, rack_id: Uuid },
+    RackUpdate { err: DieselError, rack_id: Uuid },
     DnsSerialization(Error),
     Silo(Error),
     RoleAssignment(Error),
@@ -101,7 +103,7 @@ impl From<TxnError> for Error {
                     lookup_type: LookupType::ById(zpool_id),
                 },
                 AsyncInsertError::DatabaseError(e) => {
-                    public_error_from_diesel_pool(e, ErrorHandler::Server)
+                    public_error_from_diesel(e, ErrorHandler::Server)
                 }
             },
             TxnError::CustomError(RackInitError::ServiceInsert(err)) => {
@@ -113,7 +115,7 @@ impl From<TxnError> for Error {
             TxnError::CustomError(RackInitError::RackUpdate {
                 err,
                 rack_id,
-            }) => public_error_from_diesel_pool(
+            }) => public_error_from_diesel(
                 err,
                 ErrorHandler::NotFoundByLookup(
                     ResourceType::Rack,
@@ -138,7 +140,7 @@ impl From<TxnError> for Error {
                     err
                 ))
             }
-            TxnError::Pool(e) => {
+            TxnError::Database(e) => {
                 Error::internal_error(&format!("Transaction error: {}", e))
             }
         }
@@ -155,9 +157,9 @@ impl DataStore {
         use db::schema::rack::dsl;
         paginated(dsl::rack, dsl::id, pagparams)
             .select(Rack::as_select())
-            .load_async(self.pool_authorized(opctx).await?)
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Stores a new rack in the database.
@@ -177,10 +179,10 @@ impl DataStore {
             // This is a no-op, since we conflicted on the ID.
             .set(dsl::id.eq(excluded(dsl::id)))
             .returning(Rack::as_returning())
-            .get_result_async(self.pool_authorized(opctx).await?)
+            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::Conflict(
                         ResourceType::Rack,
@@ -190,29 +192,43 @@ impl DataStore {
             })
     }
 
+    pub async fn update_rack_subnet(
+        &self,
+        opctx: &OpContext,
+        rack: &Rack,
+    ) -> Result<(), Error> {
+        debug!(
+            opctx.log,
+            "updating rack subnet for rack {} to {:#?}",
+            rack.id(),
+            rack.rack_subnet
+        );
+        use db::schema::rack::dsl;
+        diesel::update(dsl::rack)
+            .filter(dsl::id.eq(rack.id()))
+            .set(dsl::rack_subnet.eq(rack.rack_subnet))
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(())
+    }
+
     // The following methods which return a `TxnError` take a `conn` parameter
     // which comes from the transaction created in `rack_set_initialized`.
 
     #[allow(clippy::too_many_arguments)]
-    async fn rack_create_recovery_silo<ConnError>(
+    async fn rack_create_recovery_silo(
         &self,
         opctx: &OpContext,
-        conn: &(impl AsyncConnection<DbConnection, ConnError> + Sync),
+        conn: &async_bb8_diesel::Connection<DbConnection>,
         log: &slog::Logger,
         recovery_silo: external_params::SiloCreate,
         recovery_silo_fq_dns_name: String,
         recovery_user_id: external_params::UserId,
         recovery_user_password_hash: omicron_passwords::PasswordHashString,
         dns_update: DnsVersionUpdateBuilder,
-    ) -> Result<(), TxnError>
-    where
-        ConnError: From<diesel::result::Error> + Send + 'static,
-        PoolError: From<ConnError>,
-        TransactionError<Error>: From<ConnError>,
-        TxnError: From<ConnError>,
-        async_bb8_diesel::Connection<DbConnection>:
-            AsyncConnection<DbConnection, ConnError>,
-    {
+    ) -> Result<(), TxnError> {
         let db_silo = self
             .silo_create_conn(
                 conn,
@@ -289,17 +305,13 @@ impl DataStore {
         Ok(())
     }
 
-    async fn rack_populate_service_records<ConnError>(
+    async fn rack_populate_service_records(
         &self,
-        conn: &(impl AsyncConnection<DbConnection, ConnError> + Sync),
+        conn: &async_bb8_diesel::Connection<DbConnection>,
         log: &slog::Logger,
         service_pool: &db::model::IpPool,
         service: internal_params::ServicePutRequest,
-    ) -> Result<(), TxnError>
-    where
-        ConnError: From<diesel::result::Error> + Send + 'static,
-        PoolError: From<ConnError>,
-    {
+    ) -> Result<(), TxnError> {
         use internal_params::ServiceKind;
 
         let service_db = db::model::Service::new(
@@ -431,7 +443,7 @@ impl DataStore {
         // the low-frequency of calls, this optimization has been deferred.
         let log = opctx.log.clone();
         let rack = self
-            .pool_authorized(opctx)
+            .pool_connection_authorized(opctx)
             .await?
             .transaction_async(|conn| async move {
                 // Early exit if the rack has already been initialized.
@@ -443,7 +455,7 @@ impl DataStore {
                     .map_err(|e| {
                         warn!(log, "Initializing Rack: Rack UUID not found");
                         TxnError::CustomError(RackInitError::RackUpdate {
-                            err: PoolError::from(e),
+                            err: e,
                             rack_id,
                         })
                     })?;
@@ -548,9 +560,9 @@ impl DataStore {
                     .returning(Rack::as_returning())
                     .get_result_async::<Rack>(&conn)
                     .await
-                    .map_err(|e| {
+                    .map_err(|err| {
                         TxnError::CustomError(RackInitError::RackUpdate {
-                            err: PoolError::from(e),
+                            err,
                             rack_id,
                         })
                     })?;
@@ -612,7 +624,7 @@ impl DataStore {
         use crate::db::schema::external_ip::dsl as extip_dsl;
         use crate::db::schema::service::dsl as service_dsl;
         type TxnError = TransactionError<Error>;
-        self.pool_authorized(opctx)
+        self.pool_connection_authorized(opctx)
             .await?
             .transaction_async(|conn| async move {
                 let ips = extip_dsl::external_ip
@@ -644,8 +656,8 @@ impl DataStore {
             .await
             .map_err(|error: TxnError| match error {
                 TransactionError::CustomError(err) => err,
-                TransactionError::Pool(e) => {
-                    public_error_from_diesel_pool(e, ErrorHandler::Server)
+                TransactionError::Database(e) => {
+                    public_error_from_diesel(e, ErrorHandler::Server)
                 }
             })
     }
@@ -693,6 +705,7 @@ mod test {
         fn default() -> Self {
             RackInit {
                 rack_id: Uuid::parse_str(nexus_test_utils::RACK_UUID).unwrap(),
+                rack_subnet: nexus_test_utils::RACK_SUBNET.parse().unwrap(),
                 services: vec![],
                 datasets: vec![],
                 service_ip_pool_ranges: vec![],
@@ -879,7 +892,7 @@ mod test {
                 async fn [<get_all_ $table s>](db: &DataStore) -> Vec<$model> {
                     use crate::db::schema::$table::dsl;
                     use nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL;
-                    db.pool_for_tests()
+                    db.pool_connection_for_tests()
                         .await
                         .unwrap()
                         .transaction_async(|conn| async move {

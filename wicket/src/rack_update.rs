@@ -8,19 +8,19 @@
 
 use std::{
     collections::{BTreeMap, BTreeSet},
+    io::Stdout,
     net::SocketAddrV6,
     time::Duration,
 };
 
 use anyhow::{bail, Context, Result};
 use clap::{Args, Subcommand};
-use debug_ignore::DebugIgnore;
-use owo_colors::{OwoColorize, Style};
 use slog::Logger;
-use update_engine::{ExecutionId, NestedSpec};
-use wicket_common::update_events::{
-    EventBuffer, EventReport, StepInfo, StepOutcome, StepStatus,
+use update_engine::{
+    display::{LineDisplay, LineDisplayStyles},
+    ExecutionTerminalStatus,
 };
+use wicket_common::update_events::{EventBuffer, EventReport};
 use wicketd_client::types::{StartUpdateOptions, StartUpdateParams};
 
 use crate::{
@@ -28,6 +28,7 @@ use crate::{
     helpers::{get_update_simulated_result, get_update_test_error},
     state::{ComponentId, ParsableComponentId},
     wicketd::{create_wicketd_client, WICKETD_TIMEOUT},
+    GlobalOpts,
 };
 
 #[derive(Debug, Subcommand)]
@@ -43,20 +44,26 @@ impl RackUpdateArgs {
         self,
         log: Logger,
         wicketd_addr: SocketAddrV6,
+        global_opts: GlobalOpts,
     ) -> Result<()> {
         let runtime =
             tokio::runtime::Runtime::new().context("creating tokio runtime")?;
-        runtime.block_on(self.exec_impl(log, wicketd_addr))
+        runtime.block_on(self.exec_impl(log, wicketd_addr, global_opts))
     }
 
     async fn exec_impl(
         self,
         log: Logger,
         wicketd_addr: SocketAddrV6,
+        global_opts: GlobalOpts,
     ) -> Result<()> {
         match self {
-            RackUpdateArgs::Start(args) => args.exec(log, wicketd_addr).await,
-            RackUpdateArgs::Attach(args) => args.exec(log, wicketd_addr).await,
+            RackUpdateArgs::Start(args) => {
+                args.exec(log, wicketd_addr, global_opts).await
+            }
+            RackUpdateArgs::Attach(args) => {
+                args.exec(log, wicketd_addr, global_opts).await
+            }
         }
     }
 }
@@ -82,7 +89,12 @@ pub(crate) struct StartRackUpdateArgs {
 }
 
 impl StartRackUpdateArgs {
-    async fn exec(self, log: Logger, wicketd_addr: SocketAddrV6) -> Result<()> {
+    async fn exec(
+        self,
+        log: Logger,
+        wicketd_addr: SocketAddrV6,
+        global_opts: GlobalOpts,
+    ) -> Result<()> {
         // NOTE: This process is not idempotent. Doing so would require using a
         // UUID, and storing that UUID in wicket.
         let client = create_wicketd_client(&log, wicketd_addr, WICKETD_TIMEOUT);
@@ -97,23 +109,24 @@ impl StartRackUpdateArgs {
         let num_update_ids = update_ids.len();
 
         let params = StartUpdateParams {
-            targets: update_ids.into_iter().map(Into::into).collect(),
+            targets: update_ids.iter().copied().map(Into::into).collect(),
             options,
         };
 
+        slog::debug!(log, "Sending post_start_update"; "num_update_ids" => num_update_ids);
         match client.post_start_update(&params).await {
             Ok(_) => {
                 slog::info!(log, "Update started for {num_update_ids} targets");
             }
             Err(error) => {
                 // Error responses can be printed out more clearly.
-                if let wicketd_client::Error::ErrorResponse(error) = &error {
+                if let wicketd_client::Error::ErrorResponse(rv) = &error {
                     slog::error!(
                         log,
                         "Error response from wicketd: {}",
-                        error.message
+                        rv.message
                     );
-                    bail!("Received error from wicketd");
+                    bail!("Received error from wicketd while starting update");
                 } else {
                     bail!(error);
                 }
@@ -125,6 +138,9 @@ impl StartRackUpdateArgs {
         }
 
         // Now, attach to the update by printing out update logs.
+        do_attach_to_updates(log, client, update_ids, global_opts).await?;
+
+        Ok(())
     }
 }
 
@@ -135,11 +151,16 @@ pub(crate) struct AttachArgs {
 }
 
 impl AttachArgs {
-    async fn exec(self, log: Logger, wicketd_addr: SocketAddrV6) -> Result<()> {
+    async fn exec(
+        self,
+        log: Logger,
+        wicketd_addr: SocketAddrV6,
+        global_opts: GlobalOpts,
+    ) -> Result<()> {
         let client = create_wicketd_client(&log, wicketd_addr, WICKETD_TIMEOUT);
 
         let update_ids = self.component_ids.to_component_ids()?;
-        do_attach_to_updates(log, client, update_ids).await
+        do_attach_to_updates(log, client, update_ids, global_opts).await
     }
 }
 
@@ -147,13 +168,17 @@ async fn do_attach_to_updates(
     log: Logger,
     client: wicketd_client::Client,
     update_ids: BTreeSet<ComponentId>,
+    global_opts: GlobalOpts,
 ) -> Result<()> {
-    // Maintain an UpdateAttachState for each update ID.
-    let mut event_buffers: BTreeMap<_, _> =
-        update_ids.iter().map(|id| (*id, AttachState::new())).collect();
-    let reporter = AttachReporter::new();
+    // Maintain state for each update ID.
+    let mut states: BTreeMap<_, _> = update_ids
+        .iter()
+        .map(|id| (*id, AttachState::new(*id, global_opts.use_color())))
+        .collect();
+    let mut results = AttachResults::default();
 
-    loop {
+    // results.terminal is always a subset of the keys in states.
+    while states.len() > results.terminal.len() {
         // TODO: Ideally we'd not fetch the full event report each time and just
         // get diffs from the last report. The capability for this exists in the
         // update-engine, it just needs to be plumbed through the API.
@@ -178,210 +203,162 @@ async fn do_attach_to_updates(
         let event_reports = parse_event_report_map(&log, event_reports);
         // TODO: parallelize this computation?
         for (id, event_report) in event_reports {
-            let state = event_buffers.get_mut(&id).unwrap();
-            if !state.add_event_report(event_report) {
-                // This event report is for a different execution ID -- likely
-                // means that a new report has been started.
+            let Some(state) = states.get_mut(&id) else {
+                // We were never interested in this component ID, so ignore this
+                // report.
                 continue;
-            }
+            };
+            state.add_event_report(event_report);
+        }
 
-            reporter.report(id, state);
+        // Print out status for each component ID at the end -- do it here so
+        // that we also consider components for which we haven't seen status
+        // yet.
+        for (id, state) in &mut states {
+            state.display_and_update()?;
+            if let AttachStateKind::Terminal = state.kind {
+                terminal.insert(*id);
+            }
         }
     }
+
+    slog::info!(log, "All updates completed"; "num_updates" => update_ids.len());
+
+    Ok(())
 }
 
 struct AttachState {
-    event_buffer: EventBuffer,
-    root_execution_id: Option<ExecutionId>,
-    last_seen: Option<usize>,
+    kind: AttachStateKind,
+    line_display: LineDisplay<Stdout>,
 }
 
 impl AttachState {
-    fn new() -> AttachState {
+    fn new(id: ComponentId, use_color: bool) -> AttachState {
+        let mut line_display = LineDisplay::new(std::io::stdout());
+        if use_color {
+            line_display.set_styles(LineDisplayStyles::colorized());
+        }
+
+        line_display.set_prefix(id.to_string_standard_case());
         AttachState {
-            event_buffer: EventBuffer::new(8),
-            root_execution_id: None,
-            last_seen: None,
+            kind: AttachStateKind::NotStarted { displayed: false },
+            line_display,
         }
     }
 
-    fn root_execution_id(&self) -> Option<ExecutionId> {
-        self.event_buffer.root_execution_id()
-    }
+    /// Adds an event report.
+    fn add_event_report(&mut self, event_report: EventReport) {
+        let was_running = match &self.kind {
+            AttachStateKind::NotStarted { .. } => {
+                self.kind = AttachStateKind::Running {
+                    event_buffer: EventBuffer::new(8),
+                };
+                false
+            }
+            AttachStateKind::Running { .. } => true,
+            AttachStateKind::Terminal { .. }
+            | AttachStateKind::Overwritten { .. } => {
+                // This update has already completed -- assume that the event
+                // buffer is for a new update, which we don't show.
+                return;
+            }
+        };
 
-    /// Returns false if the event report was not added because it is from a
-    /// different execution ID, and true otherwise.
-    fn add_event_report(&mut self, event_report: EventReport) -> bool {
-        if let Some(root_execution_id) = self.root_execution_id() {
+        let AttachStateKind::Running { event_buffer } = &mut self.kind else {
+            unreachable!("other branches were handled above");
+        };
+
+        if let Some(root_execution_id) = event_buffer.root_execution_id() {
             if event_report.root_execution_id != Some(root_execution_id) {
-                return false;
+                // The report is for a different execution ID -- assume that
+                // this event is completed and mark our current execution as
+                // completed.
+                self.kind = AttachStateKind::Overwritten { displayed: false };
+                return;
             }
-        } else {
-            // This is the first event report with a root execution ID we've
-            // seen.
-            self.root_execution_id = event_report.root_execution_id;
         }
-        self.event_buffer.add_event_report(event_report);
-        true
+
+        event_buffer.add_event_report(event_report);
     }
 
-    // fn diff_and_update(&mut self) -> EventReport {
-    //     let diff = self.event_buffer.generate_report_since(self.last_seen);
-    //     self.last_seen = diff.last_seen;
-    //     diff
-    // }
-}
-
-#[derive(Debug)]
-struct AttachReporter<'out> {
-    styles: AttachReporterStyles,
-    output: DebugIgnore<&'out mut dyn std::io::Write>,
-    // TODO: write to an explicit output buffer here?
-}
-
-impl<'out> AttachReporter<'out> {
-    fn new(output: &'out mut dyn std::io::Write) -> Self {
-        Self { styles: Default::default(), output: output.into() }
-    }
-
-    fn colorize(&mut self) {
-        self.styles.colorize();
-    }
-
-    fn report(&self, id: ComponentId, state: &AttachState) {
-        let steps = state.event_buffer.steps();
-        for (step_key, data) in steps.as_slice() {
-            self.report_step_event(
-                id,
-                data.nest_level(),
-                data.step_info(),
-                data.step_status(),
-            );
-        }
-    }
-
-    // TODO: diffs against last seen
-    fn report_step_event(
-        &self,
-        id: ComponentId,
-        nest_level: usize,
-        step_info: &StepInfo<NestedSpec>,
-        status: &StepStatus,
-    ) -> std::io::Result<()> {
-        match status {
-            StepStatus::NotStarted => {}
-            StepStatus::Running { low_priority, progress_event } => {
-                // TODO: report low-priority and progress events here.
-            }
-            StepStatus::Completed { info } => match info {
-                Some(info) => {
-                    let mut line = match info.outcome {
-                        StepOutcome::Success { message, metadata } => {
-                            match message {
-                                Some(message) => {
-                                    format!(
-                                        "{}: {} with message \"{}\"",
-                                        step_info
-                                            .description
-                                            .style(self.styles.meta_style),
-                                        "Completed"
-                                            .style(self.styles.progress_style),
-                                        message,
-                                    )
-                                }
-                                None => {
-                                    format!(
-                                        "{}: {}",
-                                        step_info
-                                            .description
-                                            .style(self.styles.meta_style),
-                                        "Completed"
-                                            .style(self.styles.progress_style),
-                                    )
-                                }
-                            }
-                        }
-                        StepOutcome::Warning { message, .. } => {
-                            format!(
-                                "{}: {}: \"{}\"",
-                                step_info
-                                    .description
-                                    .style(self.styles.meta_style),
-                                "Completed with warning"
-                                    .style(self.styles.warning_style),
-                                message,
-                            )
-                        }
-                        StepOutcome::Skipped { message, .. } => {
-                            format!(
-                                "{}: {} with message \"{}\"",
-                                step_info
-                                    .description
-                                    .style(self.styles.meta_style),
-                                "Skipped".style(self.styles.skipped_style),
-                                message,
-                            )
-                        }
-                    };
-
-                    self.display_line(id, nest_level, &line)?;
+    /// Displays the latest state that must be shown, and updates internal state
+    /// accordingly. Returns true if this has been marked completed.
+    fn display_and_update(&mut self) -> std::io::Result<()> {
+        match &mut self.kind {
+            AttachStateKind::NotStarted { displayed } => {
+                if !*displayed {
+                    self.line_display
+                        .println("Update not started, waiting...")?;
+                    *displayed = true;
                 }
-                None => {
-                    // This means that we don't know what happened to the step
-                    // but it did complete.
-                    let line = format!(
-                        "{}: {} with {}",
-                        step_info.description.style(self.styles.meta_style),
-                        "Completed".style(self.styles.progress_style),
-                        "unknown outcome".style(self.styles.meta_style),
-                    );
-                    self.display_line(id, nest_level, &line)?;
-                }
-            },
-            StepStatus::Failed { info } => match info {
-                Some(info) => match info {},
-            },
-            update_engine::StepStatus::Aborted { reason, last_progress } => {
-                todo!()
             }
-            update_engine::StepStatus::WillNotBeRun { reason } => todo!(),
+            AttachStateKind::Running { event_buffer } => {
+                self.line_display.display_event_buffer(event_buffer)?;
+                // Is this update done?
+                if let Some((status, total_elapsed)) =
+                    event_buffer.root_terminal_status()
+                {
+                    self.line_display
+                        .print_terminal_status(&status, total_elapsed)?;
+                    self.kind = AttachStateKind::Terminal { status };
+                }
+            }
+            AttachStateKind::Terminal { .. } => {
+                // Nothing to do, the terminal status was already printed above.
+            }
+            AttachStateKind::Overwritten { displayed } => {
+                if !*displayed {
+                    self.line_display.println(
+                        "Update overwritten (a different update was started)\
+                                assuming failure",
+                    )?;
+                    *displayed = true;
+                }
+            }
         }
 
         Ok(())
     }
+}
 
-    fn display_line(
-        &self,
-        id: ComponentId,
-        nest_level: usize,
-        line: &str,
-    ) -> std::io::Result<()> {
-        writeln!(
-            self.output,
-            "{}{} {}",
-            " ".repeat(nest_level * 2),
-            id.style(self.styles.meta_style),
-            line,
-        )
-    }
+#[derive(Debug)]
+enum AttachStateKind {
+    NotStarted { displayed: bool },
+    Running { event_buffer: EventBuffer },
+    Terminal { status: ExecutionTerminalStatus },
+    Overwritten { displayed: bool },
+}
+
+struct AttachResult
+
+#[derive(Debug, Default)]
+struct AttachResults {
+    terminal: BTreeSet<ComponentId>,
+    stats: AttachStats,
 }
 
 #[derive(Debug, Default)]
-struct AttachReporterStyles {
-    meta_style: Style,
-    progress_style: Style,
-    warning_style: Style,
-    skipped_style: Style,
-    retry_style: Style,
+struct AttachStats {
+    /// The number of updates currently running.
+    running: usize,
+
+    /// The number of components for which the update was completed.
+    completed: usize,
+
+    /// The number of components for which the update failed.
+    failed: usize,
+
+    /// The number of components for which the update was aborted.
+    aborted: usize,
 }
 
-impl AttachReporterStyles {
-    fn colorize(&mut self) {
-        self.meta_style = Style::new().bold();
-        self.progress_style = Style::new().bold().green();
-        self.warning_style = Style::new().bold().yellow();
-        self.skipped_style = Style::new().bold().yellow();
-        self.retry_style = Style::new().bold().yellow();
+impl Stats {
+    fn record(&mut self, status: &ExecutionTerminalStatus) {
+        match status {
+            ExecutionTerminalStatus::Completed { .. } => self.completed += 1,
+            ExecutionTerminalStatus::Failed { .. } => self.failed += 1,
+            ExecutionTerminalStatus::Aborted { .. } => self.aborted += 1,
+        }
     }
 }
 
@@ -408,14 +385,17 @@ impl ComponentIdSelector {
     /// selected component IDs.
     fn to_component_ids(&self) -> Result<BTreeSet<ComponentId>> {
         let mut component_ids = BTreeSet::new();
-        for sled in self.sled {
-            component_ids.insert(ComponentId::new_sled(sled)?);
+        for sled in &self.sled {
+            component_ids.insert(ComponentId::new_sled(*sled)?);
         }
-        for switch in self.switch {
-            component_ids.insert(ComponentId::new_switch(switch)?);
+        for switch in &self.switch {
+            component_ids.insert(ComponentId::new_switch(*switch)?);
         }
-        for psc in self.psc {
-            component_ids.insert(ComponentId::new_psc(psc)?);
+        for psc in &self.psc {
+            component_ids.insert(ComponentId::new_psc(*psc)?);
+        }
+        if component_ids.is_empty() {
+            bail!("at least one component ID must be selected via --sled, --switch or --psc");
         }
 
         Ok(component_ids)

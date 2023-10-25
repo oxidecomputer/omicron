@@ -30,6 +30,7 @@ use crate::{
 pub(crate) fn make_displayer(
     log: &slog::Logger,
     display_style: DisplayStyle,
+    prefix: Option<String>,
 ) -> (JoinHandle<Result<()>>, mpsc::Sender<Event>) {
     let (sender, receiver) = mpsc::channel(512);
     let log = log.clone();
@@ -37,11 +38,9 @@ pub(crate) fn make_displayer(
         DisplayStyle::ProgressBar => tokio::task::spawn(async move {
             display_progress_bar(&log, receiver).await
         }),
-        DisplayStyle::Line => {
-            tokio::task::spawn(
-                async move { display_line(&log, receiver).await },
-            )
-        }
+        DisplayStyle::Line => tokio::task::spawn(async move {
+            display_line(&log, receiver, prefix).await
+        }),
     };
 
     (join_handle, sender)
@@ -50,6 +49,7 @@ pub(crate) fn make_displayer(
 async fn display_line(
     log: &slog::Logger,
     mut receiver: mpsc::Receiver<Event>,
+    prefix: Option<String>,
 ) -> Result<()> {
     slog::info!(log, "setting up display");
     let mut buffer = EventBuffer::new(8);
@@ -58,6 +58,9 @@ async fn display_line(
     // done based on always/auto/never etc.
     if supports_color::on(supports_color::Stream::Stdout).is_some() {
         display.set_styles(LineDisplayStyles::colorized());
+    }
+    if let Some(prefix) = prefix {
+        display.set_prefix(prefix);
     }
     display.set_progress_interval(Duration::from_millis(50));
     while let Some(event) = receiver.recv().await {
