@@ -19,10 +19,7 @@
 #: job = "helios / package"
 #:
 #: [dependencies.host]
-#: job = "helios / build OS image"
-#:
-#: [dependencies.trampoline]
-#: job = "helios / build trampoline OS image"
+#: job = "helios / build OS images"
 #:
 #: [[publish]]
 #: series = "rot-all"
@@ -139,7 +136,7 @@ name = "$kind"
 version = "$VERSION"
 [artifact.$kind.source]
 kind = "file"
-path = "/input/$kind/work/helios/image/output/os.tar.gz"
+path = "/input/host/work/helios/upload/os-$kind.tar.gz"
 EOF
 done
 

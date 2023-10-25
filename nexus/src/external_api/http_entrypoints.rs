@@ -2609,7 +2609,7 @@ async fn networking_loopback_address_delete(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Get loopback addresses, optionally filtering by id
+/// List loopback addresses
 #[endpoint {
     method = GET,
     path = "/v1/system/networking/loopback-address",
@@ -2824,7 +2824,7 @@ async fn networking_switch_port_clear_settings(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create a new BGP configuration.
+/// Create a new BGP configuration
 #[endpoint {
     method = POST,
     path = "/v1/system/networking/bgp",
@@ -2845,7 +2845,7 @@ async fn networking_bgp_config_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Get BGP configurations.
+/// List BGP configurations
 #[endpoint {
     method = GET,
     path = "/v1/system/networking/bgp",
@@ -2900,7 +2900,7 @@ async fn networking_bgp_status(
 }
 
 //TODO pagination? the normal by-name/by-id stuff does not work here
-/// Get imported IPv4 BGP routes.
+/// Get imported IPv4 BGP routes
 #[endpoint {
     method = GET,
     path = "/v1/system/networking/bgp-routes-ipv4",
@@ -2921,7 +2921,7 @@ async fn networking_bgp_imported_routes_ipv4(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete a BGP configuration.
+/// Delete a BGP configuration
 #[endpoint {
     method = DELETE,
     path = "/v1/system/networking/bgp",
@@ -2942,7 +2942,7 @@ async fn networking_bgp_config_delete(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create a new BGP announce set.
+/// Create a new BGP announce set
 #[endpoint {
     method = POST,
     path = "/v1/system/networking/bgp-announce",
@@ -2964,7 +2964,7 @@ async fn networking_bgp_announce_set_create(
 }
 
 //TODO pagination? the normal by-name/by-id stuff does not work here
-/// Get originated routes for a given BGP configuration.
+/// Get originated routes for a BGP configuration
 #[endpoint {
     method = GET,
     path = "/v1/system/networking/bgp-announce",
@@ -2990,7 +2990,7 @@ async fn networking_bgp_announce_set_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete a BGP announce set.
+/// Delete a BGP announce set
 #[endpoint {
     method = DELETE,
     path = "/v1/system/networking/bgp-announce",

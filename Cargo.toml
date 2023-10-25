@@ -145,7 +145,7 @@ authz-macros = { path = "nexus/authz-macros" }
 backoff = { version = "0.4.0", features = [ "tokio" ] }
 base64 = "0.21.4"
 bb8 = "0.8.1"
-bcs = "0.1.5"
+bcs = "0.1.6"
 bincode = "1.3.3"
 bootstore = { path = "bootstore" }
 bootstrap-agent-client = { path = "clients/bootstrap-agent-client" }
@@ -165,10 +165,10 @@ cookie = "0.16"
 criterion = { version = "0.5.1", features = [ "async_tokio" ] }
 crossbeam = "0.8"
 crossterm = { version = "0.27.0", features = ["event-stream"] }
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "657d985247b41e38aac2e271c7ce8bc9ea81f4b6" }
-crucible-client-types = { git = "https://github.com/oxidecomputer/crucible", rev = "657d985247b41e38aac2e271c7ce8bc9ea81f4b6" }
-crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "657d985247b41e38aac2e271c7ce8bc9ea81f4b6" }
-crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "657d985247b41e38aac2e271c7ce8bc9ea81f4b6" }
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "da534e73380f3cc53ca0de073e1ea862ae32109b" }
+crucible-client-types = { git = "https://github.com/oxidecomputer/crucible", rev = "da534e73380f3cc53ca0de073e1ea862ae32109b" }
+crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "da534e73380f3cc53ca0de073e1ea862ae32109b" }
+crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "da534e73380f3cc53ca0de073e1ea862ae32109b" }
 curve25519-dalek = "4"
 datatest-stable = "0.1.3"
 display-error-chain = "0.1.1"
@@ -187,7 +187,7 @@ either = "1.9.0"
 expectorate = "1.1.0"
 fatfs = "0.3.6"
 filetime = "0.2.22"
-flate2 = "1.0.27"
+flate2 = "1.0.28"
 flume = "0.11.0"
 foreign-types = "0.3.2"
 fs-err = "2.9.0"
@@ -259,7 +259,7 @@ openapiv3 = "1.0"
 # must match samael's crate!
 openssl = "0.10"
 openssl-sys = "0.9"
-openssl-probe = "0.1.2"
+openssl-probe = "0.1.5"
 opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "258a8b59902dd36fc7ee5425e6b1fb5fc80d4649" }
 oso = "0.26"
 owo-colors = "3.5.0"
@@ -284,9 +284,9 @@ pretty-hex = "0.3.0"
 proc-macro2 = "1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "334df299a56cd0d33e1227ed4ce4d2fe7478d541" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "334df299a56cd0d33e1227ed4ce4d2fe7478d541", features = [ "generated-migration" ] }
-propolis-server = { git = "https://github.com/oxidecomputer/propolis", rev = "334df299a56cd0d33e1227ed4ce4d2fe7478d541", default-features = false, features = ["mock-only"] }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "4019eb10fc2f4ba9bf210d0461dc6292b68309c2" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "4019eb10fc2f4ba9bf210d0461dc6292b68309c2", features = [ "generated-migration" ] }
+propolis-server = { git = "https://github.com/oxidecomputer/propolis", rev = "4019eb10fc2f4ba9bf210d0461dc6292b68309c2", default-features = false, features = ["mock-only"] }
 proptest = "1.3.1"
 quote = "1.0"
 rand = "0.8.5"
@@ -305,7 +305,7 @@ rustls = "0.21.7"
 samael = { git = "https://github.com/njaremko/samael", features = ["xmlsec"], branch = "master" }
 schemars = "0.8.12"
 secrecy = "0.8.0"
-semver = { version = "1.0.18", features = ["std", "serde"] }
+semver = { version = "1.0.20", features = ["std", "serde"] }
 serde = { version = "1.0", default-features = false, features = [ "derive" ] }
 serde_derive = "1.0"
 serde_human_bytes = { git = "http://github.com/oxidecomputer/serde_human_bytes", branch = "main" }
@@ -315,7 +315,7 @@ serde_tokenstream = "0.2"
 serde_urlencoded = "0.7.1"
 serde_with = "2.3.3"
 serial_test = "0.10"
-sha2 = "0.10.7"
+sha2 = "0.10.8"
 sha3 = "0.10.8"
 shell-words = "1.1.0"
 signal-hook = "0.3"
@@ -354,11 +354,11 @@ textwrap = "0.16.0"
 test-strategy = "0.2.1"
 thiserror = "1.0"
 tofino = { git = "http://github.com/oxidecomputer/tofino", branch = "main" }
-tokio = "1.29"
+tokio = "1.33.0"
 tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-1" ] }
 tokio-stream = "0.1.14"
 tokio-tungstenite = "0.18"
-tokio-util = "0.7.8"
+tokio-util = "0.7.9"
 toml = "0.7.8"
 toml_edit = "0.19.15"
 topological-sort = "0.2.2"

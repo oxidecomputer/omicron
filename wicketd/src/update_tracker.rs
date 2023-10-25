@@ -1608,7 +1608,13 @@ impl UpdateContext {
             page.copy_from_slice(&output_buf[..n]);
             Ok(page)
         };
-        let cmpa = self
+
+        // We may be talking to an SP / RoT that doesn't yet know how to give us
+        // its CMPA. If we hit a protocol version error here, we can fall back
+        // to our old behavior of requiring exactly 1 RoT artifact.
+        let mut artifact_to_apply = None;
+
+        let cmpa = match self
             .mgs_client
             .sp_rot_cmpa_get(
                 self.sp.type_,
@@ -1616,82 +1622,125 @@ impl UpdateContext {
                 SpComponent::ROT.const_as_str(),
             )
             .await
-            .map_err(|err| UpdateTerminalError::GetRotCmpaFailed {
-                error: err.into(),
-            })
-            .and_then(|response| {
+        {
+            Ok(response) => {
                 let data = response.into_inner().base64_data;
-                base64_decode_rot_page(data).map_err(|error| {
+                Some(base64_decode_rot_page(data).map_err(|error| {
                     UpdateTerminalError::GetRotCmpaFailed { error }
-                })
-            })?;
-        let cfpa = self
-            .mgs_client
-            .sp_rot_cfpa_get(
-                self.sp.type_,
-                self.sp.slot,
-                SpComponent::ROT.const_as_str(),
-                &gateway_client::types::GetCfpaParams {
-                    slot: RotCfpaSlot::Active,
-                },
-            )
-            .await
-            .map_err(|err| UpdateTerminalError::GetRotCfpaFailed {
-                error: err.into(),
-            })
-            .and_then(|response| {
-                let data = response.into_inner().base64_data;
-                base64_decode_rot_page(data).map_err(|error| {
-                    UpdateTerminalError::GetRotCfpaFailed { error }
-                })
-            })?;
+                })?)
+            }
+            // TODO is there a better way to check the _specific_ error response
+            // we get here? We only have a couple of strings; we could check the
+            // error string contents for something like "WrongVersion", but
+            // that's pretty fragile. Instead we'll treat any error response
+            // here as a "fallback to previous behavior".
+            Err(err @ gateway_client::Error::ErrorResponse(_)) => {
+                if available_artifacts.len() == 1 {
+                    info!(
+                        self.log,
+                        "Failed to get RoT CMPA page; \
+                         using only available RoT artifact";
+                        "err" => %err,
+                    );
+                    artifact_to_apply = Some(available_artifacts[0].clone());
+                    None
+                } else {
+                    error!(
+                        self.log,
+                        "Failed to get RoT CMPA; unable to choose from \
+                         multiple available RoT artifacts";
+                        "err" => %err,
+                        "num_rot_artifacts" => available_artifacts.len(),
+                    );
+                    return Err(UpdateTerminalError::GetRotCmpaFailed {
+                        error: err.into(),
+                    });
+                }
+            }
+            // For any other error (e.g., comms failures), just fail as normal.
+            Err(err) => {
+                return Err(UpdateTerminalError::GetRotCmpaFailed {
+                    error: err.into(),
+                });
+            }
+        };
 
-        // Loop through our possible artifacts and find the first (we only
-        // expect one!) that verifies against the RoT's CMPA/CFPA.
-        let mut artifact_to_apply = None;
-        for artifact in available_artifacts {
-            let image = artifact
-                .data
-                .reader_stream()
-                .and_then(|stream| async {
-                    let mut buf = Vec::with_capacity(artifact.data.file_size());
-                    StreamReader::new(stream)
-                        .read_to_end(&mut buf)
-                        .await
-                        .context("I/O error reading extracted archive")?;
-                    Ok(buf)
-                })
+        // If we were able to fetch the CMPA, we also need to fetch the CFPA and
+        // then find the correct RoT artifact. If we weren't able to fetch the
+        // CMPA, we either already set `artifact_to_apply` to the one-and-only
+        // RoT artifact available, or we returned a terminal error.
+        if let Some(cmpa) = cmpa {
+            let cfpa = self
+                .mgs_client
+                .sp_rot_cfpa_get(
+                    self.sp.type_,
+                    self.sp.slot,
+                    SpComponent::ROT.const_as_str(),
+                    &gateway_client::types::GetCfpaParams {
+                        slot: RotCfpaSlot::Active,
+                    },
+                )
                 .await
-                .map_err(|error| {
-                    UpdateTerminalError::FailedFindingSignedRotImage { error }
+                .map_err(|err| UpdateTerminalError::GetRotCfpaFailed {
+                    error: err.into(),
+                })
+                .and_then(|response| {
+                    let data = response.into_inner().base64_data;
+                    base64_decode_rot_page(data).map_err(|error| {
+                        UpdateTerminalError::GetRotCfpaFailed { error }
+                    })
                 })?;
-            let archive = RawHubrisArchive::from_vec(image).map_err(|err| {
-                UpdateTerminalError::FailedFindingSignedRotImage {
-                    error: anyhow::Error::new(err).context(format!(
-                        "failed to read hubris archive for {:?}",
-                        artifact.id
-                    )),
-                }
-            })?;
-            match archive.verify(&cmpa, &cfpa) {
-                Ok(()) => {
-                    info!(
-                        self.log, "RoT archive verification success";
-                        "name" => artifact.id.name.as_str(),
-                        "version" => %artifact.id.version,
-                        "kind" => ?artifact.id.kind,
-                    );
-                    artifact_to_apply = Some(artifact.clone());
-                    break;
-                }
-                Err(err) => {
-                    // We log this but don't fail - we want to continue looking
-                    // for a verifiable artifact.
-                    info!(
-                        self.log, "RoT archive verification failed";
-                        "artifact" => ?artifact.id,
-                        "err" => %DisplayErrorChain::new(&err),
-                    );
+
+            // Loop through our possible artifacts and find the first (we only
+            // expect one!) that verifies against the RoT's CMPA/CFPA.
+            for artifact in available_artifacts {
+                let image = artifact
+                    .data
+                    .reader_stream()
+                    .and_then(|stream| async {
+                        let mut buf =
+                            Vec::with_capacity(artifact.data.file_size());
+                        StreamReader::new(stream)
+                            .read_to_end(&mut buf)
+                            .await
+                            .context("I/O error reading extracted archive")?;
+                        Ok(buf)
+                    })
+                    .await
+                    .map_err(|error| {
+                        UpdateTerminalError::FailedFindingSignedRotImage {
+                            error,
+                        }
+                    })?;
+                let archive =
+                    RawHubrisArchive::from_vec(image).map_err(|err| {
+                        UpdateTerminalError::FailedFindingSignedRotImage {
+                            error: anyhow::Error::new(err).context(format!(
+                                "failed to read hubris archive for {:?}",
+                                artifact.id
+                            )),
+                        }
+                    })?;
+                match archive.verify(&cmpa, &cfpa) {
+                    Ok(()) => {
+                        info!(
+                            self.log, "RoT archive verification success";
+                            "name" => artifact.id.name.as_str(),
+                            "version" => %artifact.id.version,
+                            "kind" => ?artifact.id.kind,
+                        );
+                        artifact_to_apply = Some(artifact.clone());
+                        break;
+                    }
+                    Err(err) => {
+                        // We log this but don't fail - we want to continue
+                        // looking for a verifiable artifact.
+                        info!(
+                            self.log, "RoT archive verification failed";
+                            "artifact" => ?artifact.id,
+                            "err" => %DisplayErrorChain::new(&err),
+                        );
+                    }
                 }
             }
         }
