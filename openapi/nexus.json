@@ -4577,7 +4577,7 @@
         }
       }
     },
-    "/v1/system/ip-pools/{pool}/association": {
+    "/v1/system/ip-pools/{pool}/associations": {
       "post": {
         "tags": [
           "system/networking"

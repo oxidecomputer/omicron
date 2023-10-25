@@ -361,7 +361,7 @@ async fn test_ip_pool_with_silo(cptestctx: &ControlPlaneTestContext) {
         RequestBuilder::new(
             client,
             Method::POST,
-            "/v1/system/ip-pools/p1/association",
+            "/v1/system/ip-pools/p1/associations",
         )
         .body(Some(&params))
         .expect_status(Some(StatusCode::NOT_FOUND)),
@@ -387,7 +387,7 @@ async fn test_ip_pool_with_silo(cptestctx: &ControlPlaneTestContext) {
         });
     let _: IpPoolResource = object_create(
         client,
-        &format!("/v1/system/ip-pools/p1/association"),
+        &format!("/v1/system/ip-pools/p1/associations"),
         &params,
     )
     .await;
@@ -412,7 +412,7 @@ async fn test_ip_pool_with_silo(cptestctx: &ControlPlaneTestContext) {
         });
     let _: IpPoolResource = object_create(
         client,
-        &format!("/v1/system/ip-pools/p1/association"),
+        &format!("/v1/system/ip-pools/p1/associations"),
         &params,
     )
     .await;
@@ -844,7 +844,7 @@ async fn test_ip_pool_list_usable_by_project(
         });
     let _: IpPoolResource = object_create(
         client,
-        &format!("/v1/system/ip-pools/{mypool_name}/association"),
+        &format!("/v1/system/ip-pools/{mypool_name}/associations"),
         &params,
     )
     .await;

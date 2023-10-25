@@ -129,8 +129,8 @@ system_metric                            GET      /v1/system/metrics/{metric_nam
 
 API operations found with tag "system/networking"
 OPERATION ID                             METHOD   URL PATH
-ip_pool_association_create               POST     /v1/system/ip-pools/{pool}/association
-ip_pool_association_delete               DELETE   /v1/system/ip-pools/{pool}/association
+ip_pool_association_create               POST     /v1/system/ip-pools/{pool}/associations
+ip_pool_association_delete               DELETE   /v1/system/ip-pools/{pool}/associations
 ip_pool_create                           POST     /v1/system/ip-pools
 ip_pool_delete                           DELETE   /v1/system/ip-pools/{pool}
 ip_pool_list                             GET      /v1/system/ip-pools

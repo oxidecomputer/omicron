@@ -1325,7 +1325,7 @@ async fn ip_pool_update(
 /// Associate an IP Pool with a silo or project
 #[endpoint {
     method = POST,
-    path = "/v1/system/ip-pools/{pool}/association",
+    path = "/v1/system/ip-pools/{pool}/associations",
     tags = ["system/networking"],
 }]
 async fn ip_pool_association_create(
@@ -1352,7 +1352,7 @@ async fn ip_pool_association_create(
 /// Remove an IP pool's association with a silo or project
 #[endpoint {
     method = DELETE,
-    path = "/v1/system/ip-pools/{pool}/association",
+    path = "/v1/system/ip-pools/{pool}/associations",
     tags = ["system/networking"],
 }]
 async fn ip_pool_association_delete(

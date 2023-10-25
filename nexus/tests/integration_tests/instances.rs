@@ -3618,7 +3618,7 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
             silo: NameOrId::Id(DEFAULT_SILO.id()),
             is_default: true,
         });
-    let assoc_url = format!("/v1/system/ip-pools/{pool_name}/association");
+    let assoc_url = format!("/v1/system/ip-pools/{pool_name}/associations");
     let _ = NexusRequest::objects_post(client, &assoc_url, &params)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
