@@ -629,7 +629,7 @@ impl Client {
         UnrolledSampleRows { new_schema, rows }
     }
 
-    // Flush new schema to the database, or remove them from the cache on
+    // Save new schema to the database, or remove them from the cache on
     // failure.
     //
     // This attempts to insert the provided schema into the timeseries schema
@@ -647,7 +647,7 @@ impl Client {
     //
     // NOTE: This is an issue even in the case where the schema don't conflict. Two clients may
     // receive a sample with a new schema, and both would then try to insert that schema.
-    async fn flush_new_schema_or_remove(
+    async fn save_new_schema_or_remove(
         &self,
         new_schema: BTreeMap<TimeseriesName, String>,
     ) -> Result<(), Error> {
@@ -761,7 +761,7 @@ impl DbWrite for Client {
         debug!(self.log, "unrolling {} total samples", samples.len());
         let UnrolledSampleRows { new_schema, rows } =
             self.unroll_samples(samples).await;
-        self.flush_new_schema_or_remove(new_schema).await?;
+        self.save_new_schema_or_remove(new_schema).await?;
         self.insert_unrolled_samples(rows).await
     }
 
@@ -2787,7 +2787,7 @@ mod tests {
         // Next, we'll kill the database, and then try to insert the schema.
         // That will fail, since the DB is now inaccessible.
         db.cleanup().await.expect("failed to cleanup ClickHouse server");
-        let res = client.flush_new_schema_or_remove(new_schema).await;
+        let res = client.save_new_schema_or_remove(new_schema).await;
         assert!(res.is_err(), "Should have failed since the DB is gone");
         assert!(
             client.schema.lock().await.is_empty(),
