@@ -799,62 +799,62 @@ mod tests {
         ));
 
         // Tests that a new client has started and it is not part of a cluster
-        is_not_oximeter_cluster_test(address, &log).await.unwrap();
+        is_not_oximeter_cluster_test(address).await.unwrap();
 
         // Tests that data can be inserted via the client
-        insert_samples_test(address, &log).await.unwrap();
+        insert_samples_test(address).await.unwrap();
 
         // Tests for a schema mismatch
-        schema_mismatch_test(address, &log).await.unwrap();
+        schema_mismatch_test(address).await.unwrap();
 
         // Tests for a schema update
-        schema_updated_test(address, &log).await.unwrap();
+        schema_updated_test(address).await.unwrap();
 
         // Tests for specific timeseries selection
-        client_select_timeseries_one_test(address, &log).await.unwrap();
+        client_select_timeseries_one_test(address).await.unwrap();
 
         // Tests for specific timeseries selection
-        field_record_count_test(address, &log).await.unwrap();
+        field_record_count_test(address).await.unwrap();
 
         // ClickHouse regression test
-        unquoted_64bit_integers_test(address, &log).await.unwrap();
+        unquoted_64bit_integers_test(address).await.unwrap();
 
         // Tests to verify that we can distinguish between metrics by name
-        differentiate_by_timeseries_name_test(address, &log).await.unwrap();
+        differentiate_by_timeseries_name_test(address).await.unwrap();
 
         // Tests selecting a single timeseries
-        select_timeseries_with_select_one_test(address, &log).await.unwrap();
+        select_timeseries_with_select_one_test(address).await.unwrap();
 
         // Tests selecting two timeseries
         select_timeseries_with_select_one_field_with_multiple_values_test(
-            address, &log,
+            address,
         )
         .await
         .unwrap();
 
         // Tests selecting multiple timeseries
-        select_timeseries_with_select_multiple_fields_with_multiple_values_test(address, &log).await.unwrap();
+        select_timeseries_with_select_multiple_fields_with_multiple_values_test(address).await.unwrap();
 
         // Tests selecting all timeseries
-        select_timeseries_with_all_test(address, &log).await.unwrap();
+        select_timeseries_with_all_test(address).await.unwrap();
 
         // Tests selecting all timeseries with start time
-        select_timeseries_with_start_time_test(address, &log).await.unwrap();
+        select_timeseries_with_start_time_test(address).await.unwrap();
 
         // Tests selecting all timeseries with start time
-        select_timeseries_with_limit_test(address, &log).await.unwrap();
+        select_timeseries_with_limit_test(address).await.unwrap();
 
         // Tests selecting all timeseries with order
-        select_timeseries_with_order_test(address, &log).await.unwrap();
+        select_timeseries_with_order_test(address).await.unwrap();
 
         // Tests schema does not change
-        get_schema_no_new_values_test(address, &log).await.unwrap();
+        get_schema_no_new_values_test(address).await.unwrap();
 
         // Tests listing timeseries schema
-        timeseries_schema_list_test(address, &log).await.unwrap();
+        timeseries_schema_list_test(address).await.unwrap();
 
         // Tests listing timeseries
-        list_timeseries_test(address, &log).await.unwrap();
+        list_timeseries_test(address).await.unwrap();
 
         // Tests no changes are made when version is not updated
         database_version_update_idempotent_test(address).await.unwrap();
@@ -947,18 +947,23 @@ mod tests {
 
     async fn is_not_oximeter_cluster_test(
         address: SocketAddr,
-        log: &Logger,
     ) -> Result<(), Error> {
+        let logctx = test_setup_log("test_is_not_oximeter_cluster");
+        let log = &logctx.log;
+
         let client = Client::new(address, &log);
         assert!(!client.is_oximeter_cluster().await.unwrap());
         client.wipe_single_node_db().await?;
+        logctx.cleanup_successful();
         Ok(())
     }
 
     async fn insert_samples_test(
-        address: SocketAddr,
-        log: &Logger,
+        address: SocketAddr
     ) -> Result<(), Error> {
+        let logctx = test_setup_log("test_insert_samples");
+        let log = &logctx.log;
+
         let client = Client::new(address, &log);
         client
             .init_single_node_db()
@@ -973,6 +978,7 @@ mod tests {
         };
         client.insert_samples(&samples).await?;
         client.wipe_single_node_db().await?;
+        logctx.cleanup_successful();
         Ok(())
     }
 
@@ -998,8 +1004,10 @@ mod tests {
 
     async fn schema_mismatch_test(
         address: SocketAddr,
-        log: &Logger,
     ) -> Result<(), Error> {
+        let logctx = test_setup_log("test_schema_mismatch");
+        let log = &logctx.log;
+
         let client = Client::new(address, &log);
         client
             .init_single_node_db()
@@ -1022,13 +1030,16 @@ mod tests {
         let result = client.verify_sample_schema(&sample).await;
         assert!(matches!(result, Err(Error::SchemaMismatch { .. })));
         client.wipe_single_node_db().await?;
+        logctx.cleanup_successful();
         Ok(())
     }
 
     async fn schema_updated_test(
-        address: SocketAddr,
-        log: &Logger,
+        address: SocketAddr
     ) -> Result<(), Error> {
+        let logctx = test_setup_log("test_schema_updated");
+        let log = &logctx.log;
+
         let client = Client::new(address, &log);
         client
             .init_single_node_db()
@@ -1094,13 +1105,16 @@ mod tests {
         assert_eq!(schema.len(), 1);
         assert_eq!(expected_schema, schema[0]);
         client.wipe_single_node_db().await?;
+        logctx.cleanup_successful();
         Ok(())
     }
 
     async fn client_select_timeseries_one_test(
-        address: SocketAddr,
-        log: &Logger,
+        address: SocketAddr
     ) -> Result<(), Error> {
+        let logctx = test_setup_log("test_client_select_timeseries_one");
+        let log = &logctx.log;
+
         let client = Client::new(address, &log);
         client
             .init_single_node_db()
@@ -1178,13 +1192,16 @@ mod tests {
             .all(|field| field_cmp(field, sample.metric_fields()));
 
         client.wipe_single_node_db().await?;
+        logctx.cleanup_successful();
         Ok(())
     }
 
     async fn field_record_count_test(
         address: SocketAddr,
-        log: &Logger,
     ) -> Result<(), Error> {
+        let logctx = test_setup_log("test_field_record_count");
+        let log = &logctx.log;
+
         // This test verifies that the number of records in the field tables is as expected.
         //
         // Because of the schema change, inserting field records per field per unique timeseries,
@@ -1231,6 +1248,7 @@ mod tests {
         .await;
 
         client.wipe_single_node_db().await?;
+        logctx.cleanup_successful();
         Ok(())
     }
 
@@ -1242,9 +1260,11 @@ mod tests {
     // details. This test verifies that we get back _unquoted_ integers from the database.
     async fn unquoted_64bit_integers_test(
         address: SocketAddr,
-        log: &Logger,
     ) -> Result<(), Error> {
         use serde_json::Value;
+        let logctx = test_setup_log("test_unquoted_64bit_integers");
+        let log = &logctx.log;
+
         let client = Client::new(address, &log);
         client
             .init_single_node_db()
@@ -1260,13 +1280,16 @@ mod tests {
         assert_eq!(json["foo"], Value::Number(1u64.into()));
 
         client.wipe_single_node_db().await?;
+        logctx.cleanup_successful();
         Ok(())
     }
 
     async fn differentiate_by_timeseries_name_test(
         address: SocketAddr,
-        log: &Logger,
     ) -> Result<(), Error> {
+        let logctx = test_setup_log("test_differentiate_by_timeseries_name");
+        let log = &logctx.log;
+
         #[derive(Debug, Default, PartialEq, oximeter::Target)]
         struct MyTarget {
             id: i64,
@@ -1327,13 +1350,16 @@ mod tests {
         assert_eq!(timeseries.metric.name, "second_metric");
 
         client.wipe_single_node_db().await?;
+        logctx.cleanup_successful();
         Ok(())
     }
 
     async fn select_timeseries_with_select_one_test(
         address: SocketAddr,
-        log: &Logger,
     ) -> Result<(), Error> {
+        let logctx = test_setup_log("test_select_timeseries_with_select_one");
+        let log = &logctx.log;
+
         let (target, metrics, samples) = setup_select_test();
 
         let client = Client::new(address, &log);
@@ -1386,13 +1412,16 @@ mod tests {
         verify_metric(&timeseries.metric, metrics.get(0).unwrap());
 
         client.wipe_single_node_db().await?;
+        logctx.cleanup_successful();
         Ok(())
     }
 
     async fn select_timeseries_with_select_one_field_with_multiple_values_test(
         address: SocketAddr,
-        log: &Logger,
     ) -> Result<(), Error> {
+        let logctx = test_setup_log("test_select_timeseries_with_select_one_field_with_multiple_values");
+        let log = &logctx.log;
+
         let (target, metrics, samples) = setup_select_test();
 
         let client = Client::new(address, &log);
@@ -1451,13 +1480,16 @@ mod tests {
         }
 
         client.wipe_single_node_db().await?;
+        logctx.cleanup_successful();
         Ok(())
     }
 
     async fn select_timeseries_with_select_multiple_fields_with_multiple_values_test(
         address: SocketAddr,
-        log: &Logger,
     ) -> Result<(), Error> {
+        let logctx = test_setup_log("test_select_timeseries_with_select_multiple_fields_with_multiple_values");
+        let log = &logctx.log;
+
         let (target, metrics, samples) = setup_select_test();
 
         let client = Client::new(address, &log);
@@ -1524,13 +1556,16 @@ mod tests {
         }
 
         client.wipe_single_node_db().await?;
+        logctx.cleanup_successful();
         Ok(())
     }
 
     async fn select_timeseries_with_all_test(
         address: SocketAddr,
-        log: &Logger,
     ) -> Result<(), Error> {
+        let logctx = test_setup_log("test_select_timeseries_with_all");
+        let log = &logctx.log;
+
         let (target, metrics, samples) = setup_select_test();
 
         let client = Client::new(address, &log);
@@ -1582,13 +1617,16 @@ mod tests {
         }
 
         client.wipe_single_node_db().await?;
+        logctx.cleanup_successful();
         Ok(())
     }
 
     async fn select_timeseries_with_start_time_test(
-        address: SocketAddr,
-        log: &Logger,
+        address: SocketAddr
     ) -> Result<(), Error> {
+        let logctx = test_setup_log("test_select_timeseries_with_start_time");
+        let log = &logctx.log;
+
         let (_, metrics, samples) = setup_select_test();
 
         let client = Client::new(address, &log);
@@ -1630,13 +1668,16 @@ mod tests {
         }
 
         client.wipe_single_node_db().await?;
+        logctx.cleanup_successful();
         Ok(())
     }
 
     async fn select_timeseries_with_limit_test(
-        address: SocketAddr,
-        log: &Logger,
+        address: SocketAddr
     ) -> Result<(), Error> {
+        let logctx = test_setup_log("test_select_timeseries_with_limit");
+        let log = &logctx.log;
+
         let (_, _, samples) = setup_select_test();
         let client = Client::new(address, &log);
         client
@@ -1745,13 +1786,16 @@ mod tests {
         );
 
         client.wipe_single_node_db().await?;
+        logctx.cleanup_successful();
         Ok(())
     }
 
     async fn select_timeseries_with_order_test(
-        address: SocketAddr,
-        log: &Logger,
+        address: SocketAddr
     ) -> Result<(), Error> {
+        let logctx = test_setup_log("test_select_timeseries_with_order");
+        let log = &logctx.log;
+
         let (_, _, samples) = setup_select_test();
         let client = Client::new(address, &log);
         client
@@ -1843,13 +1887,16 @@ mod tests {
         );
 
         client.wipe_single_node_db().await?;
+        logctx.cleanup_successful();
         Ok(())
     }
 
     async fn get_schema_no_new_values_test(
         address: SocketAddr,
-        log: &Logger,
     ) -> Result<(), Error> {
+        let logctx = test_setup_log("test_get_schema_no_new_values");
+        let log = &logctx.log;
+
         let client = Client::new(address, &log);
         client
             .init_single_node_db()
@@ -1867,13 +1914,16 @@ mod tests {
         assert_eq!(&original_schema, &*schema, "Schema shouldn't change");
 
         client.wipe_single_node_db().await?;
+        logctx.cleanup_successful();
         Ok(())
     }
 
     async fn timeseries_schema_list_test(
         address: SocketAddr,
-        log: &Logger,
     ) -> Result<(), Error> {
+        let logctx = test_setup_log("test_timeseries_schema_list");
+        let log = &logctx.log;
+
         let client = Client::new(address, &log);
         client
             .init_single_node_db()
@@ -1901,13 +1951,16 @@ mod tests {
             "Expected the next page token to be None"
         );
         client.wipe_single_node_db().await?;
+        logctx.cleanup_successful();
         Ok(())
     }
 
     async fn list_timeseries_test(
-        address: SocketAddr,
-        log: &Logger,
+        address: SocketAddr
     ) -> Result<(), Error> {
+        let logctx = test_setup_log("test_list_timeseries");
+        let log = &logctx.log;
+
         let client = Client::new(address, &log);
         client
             .init_single_node_db()
@@ -1976,6 +2029,7 @@ mod tests {
         );
 
         client.wipe_single_node_db().await?;
+        logctx.cleanup_successful();
         Ok(())
     }
 
