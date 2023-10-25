@@ -114,6 +114,10 @@ mod inner {
 // don't actually want to use it. We allow them to opt out of  the use of the
 // free function here. We also explicitly opt-in where mocks are used.
 //
+// Note that this only works if the tests that use mocks and those that  don't
+// are run sequentially. However, this is how we do things in CI with nextest,
+// so there is no problem currently.
+//
 // We can remove all this when we get rid of the mocks.
 pub static USE_MOCKS: AtomicBool = AtomicBool::new(false);
 
