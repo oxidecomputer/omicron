@@ -246,3 +246,210 @@ impl Collector {
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::Collector;
+    use gateway_messages::SpPort;
+    use nexus_types::inventory::Collection;
+    use std::fmt::Write;
+    use std::sync::Arc;
+
+    fn dump_collection(collection: &Collection) -> String {
+        // Construct a stable, human-readable summary of the Collection
+        // contents.  We could use a `Debug` impl for this, but that's not quite
+        // right: when debugging, for example, we want fields like the ids, but
+        // these change each time and we don't want to include them here.
+        // `Serialize` has the same problem -- the set of fields to include
+        // depends on what the serialization is for.  It's easy enough to just
+        // print what we want here.
+        let mut s = String::new();
+        write!(&mut s, "baseboards:\n").unwrap();
+        for b in &collection.baseboards {
+            write!(
+                &mut s,
+                "    part {:?} serial {:?}\n",
+                b.part_number, b.serial_number
+            )
+            .unwrap();
+        }
+
+        write!(&mut s, "\ncabooses:\n").unwrap();
+        for c in &collection.cabooses {
+            write!(
+                &mut s,
+                "    board {:?} name {:?} version {:?} git_commit {:?}\n",
+                c.board, c.name, c.version, c.git_commit,
+            )
+            .unwrap();
+        }
+
+        // All we really need to check here is that we're reporting the right
+        // SPs, RoTs, and cabooses.  The actual SP data, RoT data, and caboose
+        // data comes straight from MGS.  And proper handling of that data is
+        // tested in the builder.
+        write!(&mut s, "\nSPs:\n").unwrap();
+        for (bb, sp) in &collection.sps {
+            write!(
+                &mut s,
+                "    baseboard part {:?} serial {:?} slot0 \
+                    caboose {} slot1 caboose {}\n",
+                bb.part_number,
+                bb.serial_number,
+                sp.slot0_caboose
+                    .as_ref()
+                    .map(|c| format!(
+                        "{:?}/{:?}",
+                        c.caboose.board, c.caboose.git_commit
+                    ))
+                    .as_deref()
+                    .unwrap_or("(none)"),
+                sp.slot1_caboose
+                    .as_ref()
+                    .map(|c| format!(
+                        "{:?}/{:?}",
+                        c.caboose.board, c.caboose.git_commit
+                    ))
+                    .as_deref()
+                    .unwrap_or("(none)"),
+            )
+            .unwrap();
+        }
+
+        write!(&mut s, "\nRoTs:\n").unwrap();
+        for (bb, rot) in &collection.rots {
+            write!(
+                &mut s,
+                "    baseboard part {:?} serial {:?} slot A \
+                    caboose {} slot B caboose {}\n",
+                bb.part_number,
+                bb.serial_number,
+                rot.slot_a_caboose
+                    .as_ref()
+                    .map(|c| format!(
+                        "{:?}/{:?}",
+                        c.caboose.board, c.caboose.git_commit
+                    ))
+                    .as_deref()
+                    .unwrap_or("(none)"),
+                rot.slot_b_caboose
+                    .as_ref()
+                    .map(|c| format!(
+                        "{:?}/{:?}",
+                        c.caboose.board, c.caboose.git_commit
+                    ))
+                    .as_deref()
+                    .unwrap_or("(none)"),
+            )
+            .unwrap();
+        }
+
+        write!(&mut s, "\nerrors:\n").unwrap();
+        for e in &collection.errors {
+            write!(&mut s, "error: {:#}\n", e).unwrap();
+        }
+
+        s
+    }
+
+    #[tokio::test]
+    async fn test_basic() {
+        // Set up the stock MGS test setup which includes a couple of fake SPs.
+        // Then run a collection against it.
+        let gwtestctx =
+            gateway_test_utils::setup::test_setup("test_basic", SpPort::One)
+                .await;
+        let log = &gwtestctx.logctx.log;
+        let mgs_url = format!("http://{}/", gwtestctx.client.bind_address);
+        let mgs_client =
+            Arc::new(gateway_client::Client::new(&mgs_url, log.clone()));
+        let collector =
+            Collector::new("test-suite", &[mgs_client], log.clone());
+        let collection = collector
+            .collect_all()
+            .await
+            .expect("failed to carry out collection");
+        assert!(collection.errors.is_empty());
+        assert_eq!(collection.collector, "test-suite");
+
+        let s = dump_collection(&collection);
+        expectorate::assert_contents("tests/output/collector_basic.txt", &s);
+
+        gwtestctx.teardown().await;
+    }
+
+    #[tokio::test]
+    async fn test_multi_mgs() {
+        // This is the same as the basic test, but we set up two different MGS
+        // instances and point the collector at both.  We should get the same
+        // result.
+        let gwtestctx1 = gateway_test_utils::setup::test_setup(
+            "test_multi_mgs_1",
+            SpPort::One,
+        )
+        .await;
+        let gwtestctx2 = gateway_test_utils::setup::test_setup(
+            "test_multi_mgs_2",
+            SpPort::Two,
+        )
+        .await;
+        let log = &gwtestctx1.logctx.log;
+        let mgs_clients = [&gwtestctx1, &gwtestctx2]
+            .into_iter()
+            .map(|g| {
+                let url = format!("http://{}/", g.client.bind_address);
+                let client = gateway_client::Client::new(&url, log.clone());
+                Arc::new(client)
+            })
+            .collect::<Vec<_>>();
+        let collector = Collector::new("test-suite", &mgs_clients, log.clone());
+        let collection = collector
+            .collect_all()
+            .await
+            .expect("failed to carry out collection");
+        assert!(collection.errors.is_empty());
+        assert_eq!(collection.collector, "test-suite");
+
+        let s = dump_collection(&collection);
+        expectorate::assert_contents("tests/output/collector_basic.txt", &s);
+
+        gwtestctx1.teardown().await;
+        gwtestctx2.teardown().await;
+    }
+
+    #[tokio::test]
+    async fn test_multi_mgs_failure() {
+        // This is similar to the multi-MGS test, but we don't actually set up
+        // the second MGS.  To the collector, it should look offline or
+        // otherwise non-functional.
+        let gwtestctx = gateway_test_utils::setup::test_setup(
+            "test_multi_mgs_2",
+            SpPort::Two,
+        )
+        .await;
+        let log = &gwtestctx.logctx.log;
+        let real_client = {
+            let url = format!("http://{}/", gwtestctx.client.bind_address);
+            let client = gateway_client::Client::new(&url, log.clone());
+            Arc::new(client)
+        };
+        let bad_client = {
+            // This IP range is guaranteed by RFC 6666 to discard traffic.
+            let url = format!("http://[100::1]:12345");
+            let client = gateway_client::Client::new(&url, log.clone());
+            Arc::new(client)
+        };
+        let mgs_clients = &[bad_client, real_client];
+        let collector = Collector::new("test-suite", mgs_clients, log.clone());
+        let collection = collector
+            .collect_all()
+            .await
+            .expect("failed to carry out collection");
+        assert_eq!(collection.collector, "test-suite");
+
+        let s = dump_collection(&collection);
+        expectorate::assert_contents("tests/output/collector_errors.txt", &s);
+
+        gwtestctx.teardown().await;
+    }
+}

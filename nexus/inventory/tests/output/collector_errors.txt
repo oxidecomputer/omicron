@@ -1,0 +1,26 @@
+baseboards:
+    part "FAKE_SIM_GIMLET" serial "SimGimlet00"
+    part "FAKE_SIM_GIMLET" serial "SimGimlet01"
+    part "FAKE_SIM_SIDECAR" serial "SimSidecar0"
+    part "FAKE_SIM_SIDECAR" serial "SimSidecar1"
+
+cabooses:
+    board "SimGimletRot" name "SimGimlet" version "0.0.1" git_commit "eeeeeeee"
+    board "SimGimletSp" name "SimGimlet" version "0.0.1" git_commit "ffffffff"
+    board "SimSidecarRot" name "SimSidecar" version "0.0.1" git_commit "eeeeeeee"
+    board "SimSidecarSp" name "SimSidecar" version "0.0.1" git_commit "ffffffff"
+
+SPs:
+    baseboard part "FAKE_SIM_GIMLET" serial "SimGimlet00" slot0 caboose "SimGimletSp"/"ffffffff" slot1 caboose "SimGimletSp"/"ffffffff"
+    baseboard part "FAKE_SIM_GIMLET" serial "SimGimlet01" slot0 caboose "SimGimletSp"/"ffffffff" slot1 caboose "SimGimletSp"/"ffffffff"
+    baseboard part "FAKE_SIM_SIDECAR" serial "SimSidecar0" slot0 caboose "SimSidecarSp"/"ffffffff" slot1 caboose "SimSidecarSp"/"ffffffff"
+    baseboard part "FAKE_SIM_SIDECAR" serial "SimSidecar1" slot0 caboose "SimSidecarSp"/"ffffffff" slot1 caboose "SimSidecarSp"/"ffffffff"
+
+RoTs:
+    baseboard part "FAKE_SIM_GIMLET" serial "SimGimlet00" slot A caboose "SimGimletRot"/"eeeeeeee" slot B caboose "SimGimletRot"/"eeeeeeee"
+    baseboard part "FAKE_SIM_GIMLET" serial "SimGimlet01" slot A caboose "SimGimletRot"/"eeeeeeee" slot B caboose "SimGimletRot"/"eeeeeeee"
+    baseboard part "FAKE_SIM_SIDECAR" serial "SimSidecar0" slot A caboose "SimSidecarRot"/"eeeeeeee" slot B caboose "SimSidecarRot"/"eeeeeeee"
+    baseboard part "FAKE_SIM_SIDECAR" serial "SimSidecar1" slot A caboose "SimSidecarRot"/"eeeeeeee" slot B caboose "SimSidecarRot"/"eeeeeeee"
+
+errors:
+error: MGS "http://[100::1]:12345": listing ignition targets: Communication Error: error sending request for url (http://[100::1]:12345/ignition): error trying to connect: tcp connect error: Network is unreachable (os error 128): error sending request for url (http://[100::1]:12345/ignition): error trying to connect: tcp connect error: Network is unreachable (os error 128): error trying to connect: tcp connect error: Network is unreachable (os error 128): tcp connect error: Network is unreachable (os error 128): Network is unreachable (os error 128)

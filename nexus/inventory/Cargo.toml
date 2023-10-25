@@ -14,3 +14,8 @@ nexus-types.workspace = true
 slog.workspace = true
 strum.workspace = true
 uuid.workspace = true
+
+[dev-dependencies]
+expectorate.workspace = true
+gateway-test-utils.workspace = true
+tokio.workspace = true

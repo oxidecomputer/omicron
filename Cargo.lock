@@ -4470,12 +4470,15 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "expectorate",
  "futures",
  "gateway-client",
  "gateway-messages",
+ "gateway-test-utils",
  "nexus-types",
  "slog",
  "strum",
+ "tokio",
  "uuid",
 ]
 
