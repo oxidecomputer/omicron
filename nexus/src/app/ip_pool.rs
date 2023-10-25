@@ -11,7 +11,6 @@ use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::fixed_data::FLEET_ID;
-// use nexus_db_queries::db::fixed_data::silo::INTERNAL_SILO_ID;
 use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::model::Name;
@@ -26,6 +25,7 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use ref_cast::RefCast;
+use uuid::Uuid;
 
 /// Helper to make it easier to 404 on attempts to manipulate internal pools
 fn not_found_from_lookup(pool_lookup: &lookup::IpPool<'_>) -> Error {
@@ -70,6 +70,20 @@ impl super::Nexus {
     ) -> CreateResult<db::model::IpPool> {
         let pool = db::model::IpPool::new(&pool_params.identity);
         self.db_datastore.ip_pool_create(opctx, pool).await
+    }
+
+    pub(crate) async fn ip_pool_association_list(
+        &self,
+        opctx: &OpContext,
+        pool_lookup: &lookup::IpPool<'_>,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<db::model::IpPoolResource> {
+        // TODO: is this the right action to check?
+        let (.., authz_pool) =
+            pool_lookup.lookup_for(authz::Action::ListChildren).await?;
+        self.db_datastore
+            .ip_pool_association_list(opctx, &authz_pool, pagparams)
+            .await
     }
 
     pub(crate) async fn ip_pool_associate_resource(

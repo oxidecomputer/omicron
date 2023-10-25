@@ -312,6 +312,31 @@ impl DataStore {
             })
     }
 
+    pub async fn ip_pool_association_list(
+        &self,
+        opctx: &OpContext,
+        authz_pool: &authz::IpPool,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<IpPoolResource> {
+        use db::schema::ip_pool;
+        use db::schema::ip_pool_resource;
+
+        paginated(
+            ip_pool_resource::table,
+            ip_pool_resource::ip_pool_id,
+            pagparams,
+        )
+        .inner_join(ip_pool::table)
+        .filter(ip_pool::id.eq(authz_pool.id()))
+        .filter(ip_pool::time_deleted.is_null())
+        .select(IpPoolResource::as_select())
+        .load_async::<IpPoolResource>(
+            &*self.pool_connection_authorized(opctx).await?,
+        )
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
     pub async fn ip_pool_associate_resource(
         &self,
         opctx: &OpContext,
@@ -558,6 +583,8 @@ mod test {
     use nexus_types::identity::Resource;
     use omicron_common::api::external::{Error, IdentityMetadataCreateParams};
     use omicron_test_utils::dev;
+
+    // TODO: add calls to the list endpoint throughout all this
 
     #[tokio::test]
     async fn test_default_ip_pools() {

@@ -246,9 +246,22 @@ pub struct IpPool {
     pub identity: IdentityMetadata,
 }
 
-// TODO: placeholder response for IP pool associate POST
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct IpPoolResource {}
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum IpPoolResourceType {
+    Fleet,
+    Silo,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct IpPoolResource {
+    // TODO: is including the pool ID redundant? it's convenient to have and
+    // makes this response a cohesive whole
+    pub ip_pool_id: Uuid,
+    pub resource_type: IpPoolResourceType,
+    pub resource_id: Uuid,
+    pub is_default: bool,
+}
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct IpPoolRange {

@@ -131,6 +131,7 @@ API operations found with tag "system/networking"
 OPERATION ID                             METHOD   URL PATH
 ip_pool_association_create               POST     /v1/system/ip-pools/{pool}/associations
 ip_pool_association_delete               DELETE   /v1/system/ip-pools/{pool}/associations
+ip_pool_association_list                 GET      /v1/system/ip-pools/{pool}/associations
 ip_pool_create                           POST     /v1/system/ip-pools
 ip_pool_delete                           DELETE   /v1/system/ip-pools/{pool}
 ip_pool_list                             GET      /v1/system/ip-pools

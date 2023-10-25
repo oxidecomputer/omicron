@@ -6,6 +6,7 @@
 
 use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
+use dropshot::ResultsPage;
 use http::method::Method;
 use http::StatusCode;
 use nexus_db_queries::db::datastore::SERVICE_IP_POOL_NAME;
@@ -31,6 +32,7 @@ use nexus_types::external_api::shared::Ipv6Range;
 use nexus_types::external_api::views::IpPool;
 use nexus_types::external_api::views::IpPoolRange;
 use nexus_types::external_api::views::IpPoolResource;
+use nexus_types::external_api::views::IpPoolResourceType;
 use nexus_types::external_api::views::Silo;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::NameOrId;
@@ -346,8 +348,12 @@ async fn test_ip_pool_service_no_cud(cptestctx: &ControlPlaneTestContext) {
 async fn test_ip_pool_with_silo(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    let _created_pool = create_pool(client, "p0").await;
-    let _created_pool = create_pool(client, "p1").await;
+    let p0 = create_pool(client, "p0").await;
+    let p1 = create_pool(client, "p1").await;
+
+    // there should be no associations
+    let assocs_p0 = get_associations(client, "p0").await;
+    assert_eq!(assocs_p0.items.len(), 0);
 
     // expect 404 on association if the specified silo doesn't exist
     let nonexistent_silo_id = Uuid::new_v4();
@@ -361,7 +367,7 @@ async fn test_ip_pool_with_silo(cptestctx: &ControlPlaneTestContext) {
         RequestBuilder::new(
             client,
             Method::POST,
-            "/v1/system/ip-pools/p1/associations",
+            "/v1/system/ip-pools/p0/associations",
         )
         .body(Some(&params))
         .expect_status(Some(StatusCode::NOT_FOUND)),
@@ -378,7 +384,7 @@ async fn test_ip_pool_with_silo(cptestctx: &ControlPlaneTestContext) {
         format!("not found: silo with id \"{nonexistent_silo_id}\"")
     );
 
-    // associate with silo that exists
+    // associate by name with silo that exists
     let params =
         params::IpPoolAssociationCreate::Silo(params::IpPoolAssociateSilo {
             // TODO: this is probably not the best silo ID to use
@@ -387,24 +393,33 @@ async fn test_ip_pool_with_silo(cptestctx: &ControlPlaneTestContext) {
         });
     let _: IpPoolResource = object_create(
         client,
-        &format!("/v1/system/ip-pools/p1/associations"),
+        &format!("/v1/system/ip-pools/p0/associations"),
         &params,
     )
     .await;
 
-    // TODO: test assocation worked, or at least comes back in association list
-
-    // get silo ID so we can test assocation by ID as well
+    // get silo ID so we can test association by ID as well
     let silo_url = format!("/v1/system/silos/{}", cptestctx.silo_name);
     let silo = NexusRequest::object_get(client, &silo_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute_and_parse_unwrap::<Silo>()
         .await;
+    let silo_id = silo.identity.id;
+
+    let assocs_p0 = get_associations(client, "p0").await;
+    let silo_assoc = IpPoolResource {
+        ip_pool_id: p0.identity.id,
+        resource_type: IpPoolResourceType::Silo,
+        resource_id: silo_id,
+        is_default: false,
+    };
+    assert_eq!(assocs_p0.items.len(), 1);
+    assert_eq!(assocs_p0.items[0], silo_assoc);
 
     // TODO: dissociate silo
     // TODO: confirm dissociation
 
-    // associate same silo by ID
+    // associate same silo to other pool by ID
     let params =
         params::IpPoolAssociationCreate::Silo(params::IpPoolAssociateSilo {
             silo: NameOrId::Id(silo.identity.id),
@@ -416,6 +431,14 @@ async fn test_ip_pool_with_silo(cptestctx: &ControlPlaneTestContext) {
         &params,
     )
     .await;
+
+    // association should look the same as the other one, except different pool ID
+    let assocs_p1 = get_associations(client, "p1").await;
+    assert_eq!(assocs_p1.items.len(), 1);
+    assert_eq!(
+        assocs_p1.items[0],
+        IpPoolResource { ip_pool_id: p1.identity.id, ..silo_assoc }
+    );
 
     // TODO: associating a resource that is already associated should be a noop
     // and return a success message
@@ -464,6 +487,17 @@ async fn test_ip_pool_pagination(cptestctx: &ControlPlaneTestContext) {
 /// helper to make tests less ugly
 fn get_names(pools: Vec<IpPool>) -> Vec<String> {
     pools.iter().map(|p| p.identity.name.to_string()).collect()
+}
+
+async fn get_associations(
+    client: &ClientTestContext,
+    id: &str,
+) -> ResultsPage<IpPoolResource> {
+    objects_list_page_authz::<IpPoolResource>(
+        client,
+        &format!("/v1/system/ip-pools/{}/associations", id),
+    )
+    .await
 }
 
 async fn create_pool(client: &ClientTestContext, name: &str) -> IpPool {

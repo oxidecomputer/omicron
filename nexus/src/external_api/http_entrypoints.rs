@@ -121,6 +121,7 @@ pub(crate) fn external_api() -> NexusApiDescription {
         // Operator-Accessible IP Pools API
         api.register(ip_pool_list)?;
         api.register(ip_pool_create)?;
+        api.register(ip_pool_association_list)?;
         api.register(ip_pool_association_create)?;
         api.register(ip_pool_association_delete)?;
         api.register(ip_pool_view)?;
@@ -1322,7 +1323,48 @@ async fn ip_pool_update(
 // across the board. What I really mean is "make available to" or "make availale
 // for use in"
 
-/// Associate an IP Pool with a silo or project
+/// List IP pool resource associations
+#[endpoint {
+    method = GET,
+    path = "/v1/system/ip-pools/{pool}/associations",
+    tags = ["system/networking"],
+}]
+async fn ip_pool_association_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::IpPoolPath>,
+    // paginating by resource_id because they're unique per pool. most robust
+    // option would be to paginate by a composite key representing the (pool,
+    // resource_type, resource)
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<views::IpPoolResource>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+
+        let query = query_params.into_inner();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+
+        let path = path_params.into_inner();
+        let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
+
+        let assocs = nexus
+            .ip_pool_association_list(&opctx, &pool_lookup, &pag_params)
+            .await?
+            .into_iter()
+            .map(|assoc| assoc.into())
+            .collect();
+
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            assocs,
+            &|_, x: &views::IpPoolResource| x.resource_id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Associate an IP Pool with a silo or the fleet
 #[endpoint {
     method = POST,
     path = "/v1/system/ip-pools/{pool}/associations",
@@ -1332,7 +1374,6 @@ async fn ip_pool_association_create(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::IpPoolPath>,
     resource_assoc: TypedBody<params::IpPoolAssociationCreate>,
-    // TODO: what does this return? Returning the association record seems silly
 ) -> Result<HttpResponseCreated<views::IpPoolResource>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
@@ -1341,10 +1382,10 @@ async fn ip_pool_association_create(
         let path = path_params.into_inner();
         let resource_assoc = resource_assoc.into_inner();
         let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
-        nexus
+        let assoc = nexus
             .ip_pool_associate_resource(&opctx, &pool_lookup, &resource_assoc)
             .await?;
-        Ok(HttpResponseCreated(views::IpPoolResource {}))
+        Ok(HttpResponseCreated(assoc.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

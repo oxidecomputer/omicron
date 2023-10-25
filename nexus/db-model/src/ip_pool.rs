@@ -97,6 +97,25 @@ pub struct IpPoolResource {
     pub resource_id: Uuid,
     pub is_default: bool,
 }
+impl From<IpPoolResourceType> for views::IpPoolResourceType {
+    fn from(typ: IpPoolResourceType) -> Self {
+        match typ {
+            IpPoolResourceType::Fleet => Self::Fleet,
+            IpPoolResourceType::Silo => Self::Silo,
+        }
+    }
+}
+
+impl From<IpPoolResource> for views::IpPoolResource {
+    fn from(assoc: IpPoolResource) -> Self {
+        Self {
+            ip_pool_id: assoc.ip_pool_id,
+            resource_type: assoc.resource_type.into(),
+            resource_id: assoc.resource_id,
+            is_default: assoc.is_default,
+        }
+    }
+}
 
 /// A range of IP addresses for an IP Pool.
 #[derive(Queryable, Insertable, Selectable, Clone, Debug)]
