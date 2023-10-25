@@ -139,6 +139,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         params: &params::SwitchPortSettingsCreate,
+        id: Option<Uuid>,
     ) -> CreateResult<SwitchPortSettingsCombinedResult> {
         use db::schema::{
             address_lot::dsl as address_lot_dsl,
@@ -171,7 +172,11 @@ impl DataStore {
         // Audit external networking database transaction usage
         conn.transaction_async(|conn| async move {
             // create the top level port settings object
-            let port_settings = SwitchPortSettings::new(&params.identity);
+            let port_settings = match id {
+                Some(id) => SwitchPortSettings::with_id(id, &params.identity),
+                None => SwitchPortSettings::new(&params.identity),
+            };
+            //let port_settings = SwitchPortSettings::new(&params.identity);
             let db_port_settings: SwitchPortSettings =
                 diesel::insert_into(port_settings_dsl::switch_port_settings)
                     .values(port_settings)
