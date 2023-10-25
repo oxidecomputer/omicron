@@ -3037,6 +3037,7 @@ mod test {
 
     // Returns the expectations for a new service to be created.
     fn expect_new_service() -> Vec<Box<dyn std::any::Any>> {
+        illumos_utils::USE_MOCKS.store(true, Ordering::SeqCst);
         // Create a VNIC
         let create_vnic_ctx = MockDladm::create_vnic_context();
         create_vnic_ctx.expect().return_once(
@@ -3079,7 +3080,7 @@ mod test {
         let wait_ctx = svc::wait_for_service_context();
         wait_ctx.expect().return_once(|_, _| Ok(()));
 
-        let execute_ctx = illumos_utils::execute_context();
+        let execute_ctx = illumos_utils::execute_helper_context();
         execute_ctx.expect().times(..).returning(|_| {
             Ok(std::process::Output {
                 status: std::process::ExitStatus::from_raw(0),

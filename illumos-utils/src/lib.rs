@@ -4,6 +4,8 @@
 
 //! Wrappers around illumos-specific commands.
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use cfg_if::cfg_if;
 
 pub mod addrobj;
@@ -93,7 +95,7 @@ mod inner {
 
     // Helper function for starting the process and checking the
     // exit code result.
-    pub fn execute(
+    pub fn execute_helper(
         command: &mut std::process::Command,
     ) -> Result<std::process::Output, ExecutionError> {
         let output = command.output().map_err(|err| {
@@ -105,6 +107,29 @@ mod inner {
         }
 
         Ok(output)
+    }
+}
+
+// Due to feature unification, the `testing` feature is enabled when some tests
+// don't actually want to use it. We allow them to opt out of  the use of the
+// free function here. We also explicitly opt-in where mocks are used.
+//
+// We can remove all this when we get rid of the mocks.
+pub static USE_MOCKS: AtomicBool = AtomicBool::new(false);
+
+pub fn execute(
+    command: &mut std::process::Command,
+) -> Result<std::process::Output, ExecutionError> {
+    cfg_if! {
+        if #[cfg(any(test, feature = "testing"))] {
+            if USE_MOCKS.load(Ordering::SeqCst) {
+                mock_inner::execute_helper(command)
+            } else {
+                inner::execute_helper(command)
+            }
+        } else {
+            inner::execute_helper(command)
+        }
     }
 }
 

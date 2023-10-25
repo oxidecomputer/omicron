@@ -606,6 +606,7 @@ mod tests {
 
     #[tokio::test]
     async fn add_u2_disk_while_not_in_normal_stage_and_ensure_it_gets_queued() {
+        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
         let logctx = test_setup_log(
             "add_u2_disk_while_not_in_normal_stage_and_ensure_it_gets_queued",
         );
@@ -630,6 +631,7 @@ mod tests {
 
     #[tokio::test]
     async fn ensure_u2_gets_added_to_resources() {
+        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
         let logctx = test_setup_log("ensure_u2_gets_added_to_resources");
         let (mut key_manager, key_requester) =
             KeyManager::new(&logctx.log, HardcodedSecretRetriever::default());
@@ -651,6 +653,7 @@ mod tests {
 
     #[tokio::test]
     async fn wait_for_bootdisk() {
+        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
         let logctx = test_setup_log("wait_for_bootdisk");
         let (mut key_manager, key_requester) =
             KeyManager::new(&logctx.log, HardcodedSecretRetriever::default());
@@ -677,6 +680,7 @@ mod tests {
 
     #[tokio::test]
     async fn queued_disks_get_added_as_resources() {
+        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
         let logctx = test_setup_log("queued_disks_get_added_as_resources");
         let (mut key_manager, key_requester) =
             KeyManager::new(&logctx.log, HardcodedSecretRetriever::default());
@@ -714,6 +718,7 @@ mod tests {
     /// This allows us to control timing precisely.
     #[tokio::test]
     async fn queued_disks_get_requeued_on_secret_retriever_error() {
+        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
         let logctx = test_setup_log(
             "queued_disks_get_requeued_on_secret_retriever_error",
         );
@@ -766,6 +771,7 @@ mod tests {
 
     #[tokio::test]
     async fn delete_disk_triggers_notification() {
+        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
         let logctx = test_setup_log("delete_disk_triggers_notification");
         let (mut key_manager, key_requester) =
             KeyManager::new(&logctx.log, HardcodedSecretRetriever::default());
@@ -806,6 +812,7 @@ mod tests {
 
     #[tokio::test]
     async fn ensure_using_exactly_these_disks() {
+        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
         let logctx = test_setup_log("ensure_using_exactly_these_disks");
         let (mut key_manager, key_requester) =
             KeyManager::new(&logctx.log, HardcodedSecretRetriever::default());
@@ -922,6 +929,7 @@ mod tests {
 
     #[tokio::test]
     async fn upsert_filesystem() {
+        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
         let logctx = test_setup_log("upsert_filesystem");
         let (mut key_manager, key_requester) =
             KeyManager::new(&logctx.log, HardcodedSecretRetriever::default());
