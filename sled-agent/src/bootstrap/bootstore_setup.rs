@@ -5,6 +5,8 @@
 //! Helpers for configuring and starting the bootstore during bootstrap agent
 //! startup.
 
+#![allow(clippy::result_large_err)]
+
 use super::config::BOOTSTORE_PORT;
 use super::server::StartError;
 use bootstore::schemes::v0 as bootstore;
