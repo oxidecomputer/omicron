@@ -509,7 +509,7 @@ impl<'a> EarlyNetworkSetup<'a> {
             {
                 dpd_port_settings.v4_routes.insert(
                     dst.to_string(),
-                    RouteSettingsV4 { link_id: link_id.0, nexthop, vid: None },
+                    vec![RouteSettingsV4 { link_id: link_id.0, nexthop }],
                 );
             }
             if let (IpNetwork::V6(dst), IpAddr::V6(nexthop)) =
@@ -517,7 +517,7 @@ impl<'a> EarlyNetworkSetup<'a> {
             {
                 dpd_port_settings.v6_routes.insert(
                     dst.to_string(),
-                    RouteSettingsV6 { link_id: link_id.0, nexthop, vid: None },
+                    vec![RouteSettingsV6 { link_id: link_id.0, nexthop }],
                 );
             }
         }

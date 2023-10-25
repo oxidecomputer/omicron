@@ -190,11 +190,8 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
                 {
                     Ok(_response) => {
                         let metadata = vec![format!(
-                            "configured {}/{}: ips {:#?}, routes {:#?}",
-                            *port_id,
-                            link_id.0,
-                            uplink.addresses,
-                            uplink.routes
+                            "configured {:?}/{}: ips {:#?}, routes {:#?}",
+                            port_id, link_id.0, uplink.addresses, uplink.routes
                         )];
                         StepSuccess::new((port_id, link_id))
                             .with_metadata(metadata)
@@ -790,7 +787,7 @@ fn build_port_settings(
         {
             port_settings.v4_routes.insert(
                 dst.to_string(),
-                RouteSettingsV4 { link_id: link_id.0, nexthop, vid: None },
+                vec![RouteSettingsV4 { link_id: link_id.0, nexthop }],
             );
         }
     }

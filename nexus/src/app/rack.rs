@@ -278,7 +278,9 @@ impl super::Nexus {
 
                     let qsfp_ports: Vec<Name> = all_ports
                         .iter()
-                        .filter(|port| port.starts_with("qsfp"))
+                        .filter(|port| {
+                            matches!(port, dpd_client::types::PortId::Qsfp(_))
+                        })
                         .map(|port| port.to_string().parse().unwrap())
                         .collect();
 
