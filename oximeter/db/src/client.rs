@@ -2717,6 +2717,94 @@ mod tests {
         Ok(())
     }
 
+    // Regression test for https://github.com/oxidecomputer/omicron/issues/4336.
+    //
+    // This tests that we can successfully query all extant datum types from the
+    // schema table. There may be no such values, but the query itself should
+    // succeed.
+    #[tokio::test]
+    async fn test_select_all_datum_types() {
+        use strum::IntoEnumIterator;
+        usdt::register_probes().unwrap();
+        let logctx = test_setup_log("test_update_schema_cache_on_new_sample");
+        let log = &logctx.log;
+
+        // Let the OS assign a port and discover it after ClickHouse starts
+        let mut db = ClickHouseInstance::new_single_node(0)
+            .await
+            .expect("Failed to start ClickHouse");
+        let address = SocketAddr::new("::1".parse().unwrap(), db.port());
+
+        let client = Client::new(address, &log);
+        client
+            .init_single_node_db()
+            .await
+            .expect("Failed to initialize timeseries database");
+
+        // Attempt to select all schema with each datum type.
+        for ty in oximeter::DatumType::iter() {
+            let sql = format!(
+                "SELECT COUNT() \
+                FROM {}.timeseries_schema WHERE \
+                datum_type = '{:?}'",
+                crate::DATABASE_NAME,
+                crate::model::DbDatumType::from(ty),
+            );
+            let res = client.execute_with_body(sql).await.unwrap();
+            let count = res.trim().parse::<usize>().unwrap();
+            assert_eq!(count, 0);
+        }
+        db.cleanup().await.expect("Failed to cleanup ClickHouse server");
+        logctx.cleanup_successful();
+    }
+
+    // Regression test for https://github.com/oxidecomputer/omicron/issues/4335.
+    //
+    // This tests that, when cache new schema but _fail_ to insert them, we also
+    // remove them from the internal cache.
+    #[tokio::test]
+    async fn test_new_schema_removed_when_not_inserted() {
+        usdt::register_probes().unwrap();
+        let logctx = test_setup_log("test_update_schema_cache_on_new_sample");
+        let log = &logctx.log;
+
+        // Let the OS assign a port and discover it after ClickHouse starts
+        let mut db = ClickHouseInstance::new_single_node(0)
+            .await
+            .expect("Failed to start ClickHouse");
+        let address = SocketAddr::new("::1".parse().unwrap(), db.port());
+
+        let client = Client::new(address, &log);
+        client
+            .init_single_node_db()
+            .await
+            .expect("Failed to initialize timeseries database");
+        let samples = [test_util::make_sample()];
+
+        // We're using the components of the `insert_samples()` method here,
+        // which has been refactored explicitly for this test. We need to insert
+        // the schema for this sample into the internal cache, which relies on
+        // access to the database (since they don't exist).
+        //
+        // First, insert the sample into the local cache. This method also
+        // checks the DB, since this schema doesn't exist in the cache.
+        let UnrolledSampleRows { new_schema, .. } =
+            client.unroll_samples(&samples).await;
+        assert_eq!(client.schema.lock().await.len(), 1);
+
+        // Next, we'll kill the database, and then try to insert the schema.
+        // That will fail, since the DB is now inaccessible.
+        db.cleanup().await.expect("failed to cleanup ClickHouse server");
+        let res = client.save_new_schema_or_remove(new_schema).await;
+        assert!(res.is_err(), "Should have failed since the DB is gone");
+        assert!(
+            client.schema.lock().await.is_empty(),
+            "Failed to remove new schema from the cache when \
+            they could not be inserted into the DB"
+        );
+        logctx.cleanup_successful();
+    }
+
     #[tokio::test]
     async fn test_build_replicated() {
         let logctx = test_setup_log("test_build_replicated");
