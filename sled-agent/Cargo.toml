@@ -49,7 +49,7 @@ oximeter-producer.workspace = true
 percent-encoding.workspace = true
 progenitor.workspace = true
 propolis-client = { workspace = true, features = [ "generated-migration" ] }
-propolis-server.workspace = true # Only used by the simulated sled agent
+propolis-mock-server.workspace = true # Only used by the simulated sled agent
 rand = { workspace = true, features = ["getrandom"] }
 reqwest = { workspace = true, features = ["rustls-tls", "stream"] }
 schemars = { workspace = true, features = [ "chrono", "uuid1" ] }

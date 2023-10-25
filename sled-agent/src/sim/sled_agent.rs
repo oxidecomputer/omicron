@@ -43,7 +43,7 @@ use illumos_utils::opte::params::{
 use nexus_client::types::PhysicalDiskKind;
 use omicron_common::address::PROPOLIS_PORT;
 use propolis_client::Client as PropolisClient;
-use propolis_server::mock_server::Context as PropolisContext;
+use propolis_mock_server::Context as PropolisContext;
 
 /// Simulates management of the control plane on a sled
 ///
@@ -640,11 +640,10 @@ impl SledAgent {
             ..Default::default()
         };
         let propolis_log = log.new(o!("component" => "propolis-server-mock"));
-        let private =
-            Arc::new(PropolisContext::new(Default::default(), propolis_log));
+        let private = Arc::new(PropolisContext::new(propolis_log));
         info!(log, "Starting mock propolis-server...");
         let dropshot_log = log.new(o!("component" => "dropshot"));
-        let mock_api = propolis_server::mock_server::api();
+        let mock_api = propolis_mock_server::api();
 
         let srv = dropshot::HttpServerStarter::new(
             &dropshot_config,
