@@ -12,11 +12,10 @@ use super::{
     ACTION_GENERATE_ID,
 };
 use crate::app::sagas::declare_saga_actions;
+use crate::app::{authn, authz, db};
 use crate::external_api::params;
-use nexus_db_queries::db::datastore::RegionAllocationStrategy;
 use nexus_db_queries::db::identity::{Asset, Resource};
 use nexus_db_queries::db::lookup::LookupPath;
-use nexus_db_queries::{authn, authz, db};
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::Error;
 use rand::{rngs::StdRng, RngCore, SeedableRng};
@@ -255,6 +254,9 @@ async fn sdc_alloc_regions(
         &sagactx,
         &params.serialized_authn,
     );
+
+    let strategy = &osagactx.nexus().default_region_allocation_strategy;
+
     let datasets_and_regions = osagactx
         .datastore()
         .region_allocate(
@@ -262,7 +264,7 @@ async fn sdc_alloc_regions(
             volume_id,
             &params.create_params.disk_source,
             params.create_params.size,
-            &RegionAllocationStrategy::Random(None),
+            &strategy,
         )
         .await
         .map_err(ActionError::action_failed)?;
@@ -830,9 +832,10 @@ pub(crate) mod test {
     };
     use async_bb8_diesel::{
         AsyncConnection, AsyncRunQueryDsl, AsyncSimpleConnection,
-        OptionalExtension,
     };
-    use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
+    use diesel::{
+        ExpressionMethods, OptionalExtension, QueryDsl, SelectableHelper,
+    };
     use dropshot::test_util::ClientTestContext;
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::{authn::saga::Serialized, db::datastore::DataStore};
@@ -921,7 +924,9 @@ pub(crate) mod test {
         dsl::disk
             .filter(dsl::time_deleted.is_null())
             .select(Disk::as_select())
-            .first_async::<Disk>(datastore.pool_for_tests().await.unwrap())
+            .first_async::<Disk>(
+                &*datastore.pool_connection_for_tests().await.unwrap(),
+            )
             .await
             .optional()
             .unwrap()
@@ -935,7 +940,9 @@ pub(crate) mod test {
         dsl::volume
             .filter(dsl::time_deleted.is_null())
             .select(Volume::as_select())
-            .first_async::<Volume>(datastore.pool_for_tests().await.unwrap())
+            .first_async::<Volume>(
+                &*datastore.pool_connection_for_tests().await.unwrap(),
+            )
             .await
             .optional()
             .unwrap()
@@ -951,7 +958,7 @@ pub(crate) mod test {
         dsl::virtual_provisioning_resource
             .select(VirtualProvisioningResource::as_select())
             .first_async::<VirtualProvisioningResource>(
-                datastore.pool_for_tests().await.unwrap(),
+                &*datastore.pool_connection_for_tests().await.unwrap(),
             )
             .await
             .optional()
@@ -966,7 +973,7 @@ pub(crate) mod test {
         use nexus_db_queries::db::schema::virtual_provisioning_collection::dsl;
 
         datastore
-            .pool_for_tests()
+            .pool_connection_for_tests()
             .await
             .unwrap()
             .transaction_async(|conn| async move {

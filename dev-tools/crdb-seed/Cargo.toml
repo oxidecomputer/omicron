@@ -1,0 +1,14 @@
+[package]
+name = "crdb-seed"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+readme = "README.md"
+
+[dependencies]
+anyhow.workspace = true
+dropshot.workspace = true
+omicron-test-utils = { workspace = true, features = ["seed-gen"] }
+slog.workspace = true
+tokio.workspace = true
+omicron-workspace-hack.workspace = true

@@ -5,11 +5,10 @@
 //! [`DataStore`] methods on [`Region`]s.
 
 use super::DataStore;
-use super::RegionAllocationStrategy;
 use super::RunnableQuery;
 use crate::context::OpContext;
 use crate::db;
-use crate::db::error::public_error_from_diesel_pool;
+use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
 use crate::db::lookup::LookupPath;
@@ -23,6 +22,7 @@ use omicron_common::api::external;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::backoff::{self, BackoffError};
+use omicron_common::nexus_config::RegionAllocationStrategy;
 use slog::Logger;
 use uuid::Uuid;
 
@@ -51,9 +51,11 @@ impl DataStore {
         volume_id: Uuid,
     ) -> Result<Vec<(Dataset, Region)>, Error> {
         Self::get_allocated_regions_query(volume_id)
-            .get_results_async::<(Dataset, Region)>(self.pool())
+            .get_results_async::<(Dataset, Region)>(
+                &*self.pool_connection_unauthorized().await?,
+            )
             .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     async fn get_block_size_from_disk_source(
@@ -136,9 +138,11 @@ impl DataStore {
                 extent_count,
                 allocation_strategy,
             )
-            .get_results_async(self.pool())
+            .get_results_async(&*self.pool_connection_authorized(&opctx).await?)
             .await
-            .map_err(|e| crate::db::queries::region_allocation::from_pool(e))?;
+            .map_err(|e| {
+                crate::db::queries::region_allocation::from_diesel(e)
+            })?;
 
         Ok(dataset_and_regions)
     }
@@ -168,8 +172,9 @@ impl DataStore {
         // transaction" error.
         let transaction = {
             |region_ids: Vec<Uuid>| async {
-                self.pool()
-                    .transaction(move |conn| {
+                self.pool_connection_unauthorized()
+                    .await?
+                    .transaction_async(|conn| async move {
                         use db::schema::dataset::dsl as dataset_dsl;
                         use db::schema::region::dsl as region_dsl;
 
@@ -177,7 +182,7 @@ impl DataStore {
                         let datasets = diesel::delete(region_dsl::region)
                             .filter(region_dsl::id.eq_any(region_ids))
                             .returning(region_dsl::dataset_id)
-                            .get_results::<Uuid>(conn)?;
+                            .get_results_async::<Uuid>(&conn).await?;
 
                         // Update datasets to which the regions belonged.
                         for dataset in datasets {
@@ -191,7 +196,7 @@ impl DataStore {
                                         * region_dsl::extent_count,
                                 ))
                                 .nullable()
-                                .get_result(conn)?;
+                                .get_result_async(&conn).await?;
 
                             let dataset_total_occupied_size: i64 = if let Some(
                                 dataset_total_occupied_size,
@@ -220,7 +225,7 @@ impl DataStore {
                                     dataset_dsl::size_used
                                         .eq(dataset_total_occupied_size),
                                 )
-                                .execute(conn)?;
+                                .execute_async(&conn).await?;
                         }
 
                         Ok(())
@@ -269,10 +274,10 @@ impl DataStore {
                         * region_dsl::extent_count,
                 ))
                 .nullable()
-                .get_result_async(self.pool())
+                .get_result_async(&*self.pool_connection_unauthorized().await?)
                 .await
                 .map_err(|e| {
-                    public_error_from_diesel_pool(e, ErrorHandler::Server)
+                    public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
 
         if let Some(total_occupied_size) = total_occupied_size {

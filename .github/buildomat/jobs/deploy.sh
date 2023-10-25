@@ -2,7 +2,7 @@
 #:
 #: name = "helios / deploy"
 #: variety = "basic"
-#: target = "lab-2.0-opte-0.23"
+#: target = "lab-2.0-opte-0.25"
 #: output_rules = [
 #:  "%/var/svc/log/oxide-sled-agent:default.log*",
 #:  "%/pool/ext/*/crypt/zone/oxz_*/root/var/svc/log/oxide-*.log*",
@@ -143,6 +143,7 @@ cd /opt/oxide/work
 
 ptime -m tar xvzf /input/package/work/package.tar.gz
 cp /input/package/work/zones/* out/
+mv out/omicron-nexus-single-sled.tar.gz out/omicron-nexus.tar.gz
 mkdir tests
 for p in /input/ci-tools/work/end-to-end-tests/*.gz; do
 	ptime -m gunzip < "$p" > "tests/$(basename "${p%.gz}")"
@@ -231,11 +232,11 @@ infra_ip_first = \"$UPLINK_IP\"
 		/^infra_ip_last/c\\
 infra_ip_last = \"$UPLINK_IP\"
 	}
-	/^\\[\\[rack_network_config.uplinks/,/^\$/ {
-		/^gateway_ip/c\\
-gateway_ip = \"$GATEWAY_IP\"
-		/^uplink_cidr/c\\
-uplink_cidr = \"$UPLINK_IP/32\"
+	/^\\[\\[rack_network_config.ports/,/^\$/ {
+		/^routes/c\\
+routes = \\[{nexthop = \"$GATEWAY_IP\", destination = \"0.0.0.0/0\"}\\]
+		/^addresses/c\\
+addresses = \\[\"$UPLINK_IP/32\"\\]
 	}
 " pkg/config-rss.toml
 diff -u pkg/config-rss.toml{~,} || true

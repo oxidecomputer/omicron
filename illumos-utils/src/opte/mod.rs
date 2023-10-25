@@ -25,6 +25,7 @@ pub use port_manager::PortTicket;
 use ipnetwork::IpNetwork;
 use macaddr::MacAddr6;
 pub use oxide_vpc::api::BoundaryServices;
+pub use oxide_vpc::api::DhcpCfg;
 pub use oxide_vpc::api::Vni;
 use std::net::IpAddr;
 

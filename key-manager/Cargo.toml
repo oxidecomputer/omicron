@@ -14,5 +14,5 @@ slog.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 zeroize.workspace = true
-omicron-workspace-hack = { version = "0.1", path = "../workspace-hack" }
+omicron-workspace-hack.workspace = true
 

@@ -44,7 +44,6 @@ macaddr.workspace = true
 nexus-client.workspace = true
 omicron-common.workspace = true
 once_cell.workspace = true
-oxide-vpc.workspace = true
 oximeter.workspace = true
 oximeter-producer.workspace = true
 percent-encoding.workspace = true
@@ -56,7 +55,7 @@ reqwest = { workspace = true, features = ["rustls-tls", "stream"] }
 schemars = { workspace = true, features = [ "chrono", "uuid1" ] }
 semver.workspace = true
 serde.workspace = true
-serde_json.workspace = true
+serde_json = {workspace = true, features = ["raw_value"]}
 sha3.workspace = true
 sled-agent-client.workspace = true
 sled-hardware.workspace = true
@@ -76,7 +75,7 @@ uuid.workspace = true
 zeroize.workspace = true
 zone.workspace = true
 static_assertions.workspace = true
-omicron-workspace-hack = { version = "0.1", path = "../workspace-hack" }
+omicron-workspace-hack.workspace = true
 
 [target.'cfg(target_os = "illumos")'.dependencies]
 opte-ioctl.workspace = true
@@ -95,6 +94,7 @@ serial_test.workspace = true
 subprocess.workspace = true
 slog-async.workspace = true
 slog-term.workspace = true
+tempfile.workspace = true
 
 illumos-utils = { workspace = true, features = ["testing"] }
 
@@ -119,3 +119,5 @@ machine-non-gimlet = []
 switch-asic = []
 switch-stub = []
 switch-softnpu = []
+rack-topology-single-sled = []
+rack-topology-multi-sled = []

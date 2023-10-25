@@ -13,9 +13,10 @@ omicron-common.workspace = true
 oximeter-macro-impl.workspace = true
 schemars = { workspace = true, features = [ "uuid1", "bytes", "chrono" ] }
 serde.workspace = true
+strum.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
-omicron-workspace-hack = { version = "0.1", path = "../../workspace-hack" }
+omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 approx.workspace = true

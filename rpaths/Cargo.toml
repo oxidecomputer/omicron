@@ -5,4 +5,4 @@ edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
-omicron-workspace-hack = { version = "0.1", path = "../workspace-hack" }
+omicron-workspace-hack.workspace = true

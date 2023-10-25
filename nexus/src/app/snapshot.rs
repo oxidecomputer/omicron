@@ -93,41 +93,43 @@ impl super::Nexus {
 
         // If there isn't a running propolis, Nexus needs to use the Crucible
         // Pantry to make this snapshot
-        let use_the_pantry = if let Some(attach_instance_id) =
+        let instance_and_sled = if let Some(attach_instance_id) =
             &db_disk.runtime_state.attach_instance_id
         {
-            let (.., db_instance) = LookupPath::new(opctx, &self.db_datastore)
-                .instance_id(*attach_instance_id)
-                .fetch_for(authz::Action::Read)
+            let (.., authz_instance) =
+                LookupPath::new(opctx, &self.db_datastore)
+                    .instance_id(*attach_instance_id)
+                    .lookup_for(authz::Action::Read)
+                    .await?;
+
+            let instance_state = self
+                .datastore()
+                .instance_fetch_with_vmm(&opctx, &authz_instance)
                 .await?;
 
-            let instance_state: InstanceState = db_instance.runtime().state.0;
-
-            match instance_state {
-                // If there's a propolis running, use that
-                InstanceState::Running |
-                // Rebooting doesn't deactivate the volume
-                InstanceState::Rebooting
-                => false,
-
-                // If there's definitely no propolis running, then use the
-                // pantry
-                InstanceState::Stopped | InstanceState::Destroyed => true,
-
-                // If there *may* be a propolis running, then fail: we can't
-                // know if that propolis has activated the Volume or not, or if
-                // it's in the process of deactivating.
-                _ => {
-                    return Err(
-                        Error::invalid_request(
-                            &format!("cannot snapshot attached disk for instance in state {}", instance_state)
-                        )
-                    );
-                }
+            match instance_state.vmm().as_ref() {
+                None => None,
+                Some(vmm) => match vmm.runtime.state.0 {
+                    // If the VM might be running, or it's rebooting (which
+                    // doesn't deactivate the volume), send the snapshot request
+                    // to the relevant VMM. Otherwise, there's no way to know if
+                    // the instance has attached the volume or is in the process
+                    // of detaching it, so bail.
+                    InstanceState::Running | InstanceState::Rebooting => {
+                        Some((*attach_instance_id, vmm.sled_id))
+                    }
+                    _ => {
+                        return Err(Error::invalid_request(&format!(
+                            "cannot snapshot attached disk for instance in \
+                            state {}",
+                            vmm.runtime.state.0
+                        )));
+                    }
+                },
             }
         } else {
             // This disk is not attached to an instance, use the pantry.
-            true
+            None
         };
 
         let saga_params = sagas::snapshot_create::Params {
@@ -135,7 +137,7 @@ impl super::Nexus {
             silo_id: authz_silo.id(),
             project_id: authz_project.id(),
             disk_id: authz_disk.id(),
-            use_the_pantry,
+            attached_instance_and_sled: instance_and_sled,
             create_params: params.clone(),
         };
 

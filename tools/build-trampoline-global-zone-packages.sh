@@ -12,7 +12,7 @@ out_dir="$(readlink -f "${2:-$tarball_src_dir}")"
 # Make sure needed packages exist
 deps=(
     "$tarball_src_dir"/installinator.tar
-    "$tarball_src_dir"/maghemite.tar
+    "$tarball_src_dir"/mg-ddm-gz.tar
 )
 for dep in "${deps[@]}"; do
     if [[ ! -e $dep ]]; then
@@ -44,7 +44,7 @@ cd -
 pkg_dir="$tmp_trampoline/root/opt/oxide/mg-ddm"
 mkdir -p "$pkg_dir"
 cd "$pkg_dir"
-tar -xvfz "$tarball_src_dir/maghemite.tar"
+tar -xvfz "$tarball_src_dir/mg-ddm-gz.tar"
 cd -
 
 # Create the final output and we're done

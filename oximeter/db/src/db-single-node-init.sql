@@ -1,5 +1,13 @@
 CREATE DATABASE IF NOT EXISTS oximeter;
 --
+CREATE TABLE IF NOT EXISTS oximeter.version
+(
+    value UInt64,
+    timestamp DateTime64(9, 'UTC')
+)
+ENGINE = MergeTree()
+ORDER BY (value, timestamp);
+--
 CREATE TABLE IF NOT EXISTS oximeter.measurements_bool
 (
     timeseries_name String,
