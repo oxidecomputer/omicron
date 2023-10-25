@@ -958,9 +958,7 @@ mod tests {
         Ok(())
     }
 
-    async fn insert_samples_test(
-        address: SocketAddr
-    ) -> Result<(), Error> {
+    async fn insert_samples_test(address: SocketAddr) -> Result<(), Error> {
         let logctx = test_setup_log("test_insert_samples");
         let log = &logctx.log;
 
@@ -1002,9 +1000,7 @@ mod tests {
         }
     }
 
-    async fn schema_mismatch_test(
-        address: SocketAddr,
-    ) -> Result<(), Error> {
+    async fn schema_mismatch_test(address: SocketAddr) -> Result<(), Error> {
         let logctx = test_setup_log("test_schema_mismatch");
         let log = &logctx.log;
 
@@ -1034,9 +1030,7 @@ mod tests {
         Ok(())
     }
 
-    async fn schema_updated_test(
-        address: SocketAddr
-    ) -> Result<(), Error> {
+    async fn schema_updated_test(address: SocketAddr) -> Result<(), Error> {
         let logctx = test_setup_log("test_schema_updated");
         let log = &logctx.log;
 
@@ -1110,7 +1104,7 @@ mod tests {
     }
 
     async fn client_select_timeseries_one_test(
-        address: SocketAddr
+        address: SocketAddr,
     ) -> Result<(), Error> {
         let logctx = test_setup_log("test_client_select_timeseries_one");
         let log = &logctx.log;
@@ -1196,9 +1190,7 @@ mod tests {
         Ok(())
     }
 
-    async fn field_record_count_test(
-        address: SocketAddr,
-    ) -> Result<(), Error> {
+    async fn field_record_count_test(address: SocketAddr) -> Result<(), Error> {
         let logctx = test_setup_log("test_field_record_count");
         let log = &logctx.log;
 
@@ -1419,7 +1411,9 @@ mod tests {
     async fn select_timeseries_with_select_one_field_with_multiple_values_test(
         address: SocketAddr,
     ) -> Result<(), Error> {
-        let logctx = test_setup_log("test_select_timeseries_with_select_one_field_with_multiple_values");
+        let logctx = test_setup_log(
+            "test_select_timeseries_with_select_one_field_with_multiple_values",
+        );
         let log = &logctx.log;
 
         let (target, metrics, samples) = setup_select_test();
@@ -1622,7 +1616,7 @@ mod tests {
     }
 
     async fn select_timeseries_with_start_time_test(
-        address: SocketAddr
+        address: SocketAddr,
     ) -> Result<(), Error> {
         let logctx = test_setup_log("test_select_timeseries_with_start_time");
         let log = &logctx.log;
@@ -1673,7 +1667,7 @@ mod tests {
     }
 
     async fn select_timeseries_with_limit_test(
-        address: SocketAddr
+        address: SocketAddr,
     ) -> Result<(), Error> {
         let logctx = test_setup_log("test_select_timeseries_with_limit");
         let log = &logctx.log;
@@ -1791,7 +1785,7 @@ mod tests {
     }
 
     async fn select_timeseries_with_order_test(
-        address: SocketAddr
+        address: SocketAddr,
     ) -> Result<(), Error> {
         let logctx = test_setup_log("test_select_timeseries_with_order");
         let log = &logctx.log;
@@ -1955,9 +1949,7 @@ mod tests {
         Ok(())
     }
 
-    async fn list_timeseries_test(
-        address: SocketAddr
-    ) -> Result<(), Error> {
+    async fn list_timeseries_test(address: SocketAddr) -> Result<(), Error> {
         let logctx = test_setup_log("test_list_timeseries");
         let log = &logctx.log;
 
@@ -2209,7 +2201,7 @@ mod tests {
             actual_row, inserted_row,
             "Actual and expected field rows do not match"
         );
-        //db.cleanup().await.expect("Failed to cleanup ClickHouse server");
+
         client.wipe_single_node_db().await?;
         logctx.cleanup_successful();
         Ok(())
@@ -2569,7 +2561,9 @@ mod tests {
             .count()
     }
 
-    async fn database_version_update_idempotent_test(address: SocketAddr) -> Result<(), Error> {
+    async fn database_version_update_idempotent_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
         let logctx = test_setup_log("test_database_version_update_idempotent");
         let log = &logctx.log;
 
@@ -2604,7 +2598,9 @@ mod tests {
         Ok(())
     }
 
-    async fn database_version_will_not_downgrade_test(address: SocketAddr) -> Result<(), Error> {
+    async fn database_version_will_not_downgrade_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
         let logctx = test_setup_log("test_database_version_will_not_downgrade");
         let log = &logctx.log;
 
@@ -2637,7 +2633,9 @@ mod tests {
         Ok(())
     }
 
-    async fn database_version_wipes_old_version_test(address: SocketAddr) -> Result<(), Error> {
+    async fn database_version_wipes_old_version_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
         let logctx = test_setup_log("test_database_version_wipes_old_version");
         let log = &logctx.log;
 
@@ -2671,7 +2669,9 @@ mod tests {
         Ok(())
     }
 
-    async fn update_schema_cache_on_new_sample_test(address: SocketAddr) -> Result<(), Error> {
+    async fn update_schema_cache_on_new_sample_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
         usdt::register_probes().unwrap();
         let logctx = test_setup_log("test_update_schema_cache_on_new_sample");
         let log = &logctx.log;
@@ -2734,16 +2734,23 @@ mod tests {
             .await
             .expect("Failed to initialize timeseries database");
 
-        // Wait to make sure data has been synchronised.
-        // TODO(https://github.com/oxidecomputer/omicron/issues/4001): Waiting for 5 secs is a bit sloppy,
-        // come up with a better way to do this.
-        sleep(Duration::from_secs(5)).await;
-
         // Verify database exists in node 2
         let client_2 = Client::new(cluster.replica_2.address.unwrap(), &log);
         assert!(client_2.is_oximeter_cluster().await.unwrap());
         let sql = String::from("SHOW DATABASES FORMAT JSONEachRow;");
         let result = client_2.execute_with_body(sql).await.unwrap();
+
+        // Try a few times to make sure data has been synchronised.
+        let tries = 5;
+        for _ in 0..tries {
+            if !result.contains("oximeter") {
+                sleep(Duration::from_secs(1)).await;
+                continue;
+            } else {
+                break;
+            }
+        }
+
         assert!(result.contains("oximeter"));
 
         // Insert row into one of the tables

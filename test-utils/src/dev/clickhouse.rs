@@ -337,78 +337,24 @@ impl ClickHouseCluster {
         let keeper_config =
             cur_dir.as_path().join("src/configs/keeper_config.xml");
 
-        // Start Keeper 1
-        let k1_port = 9181;
-        let k1_id = 1;
-
-        let k1 = ClickHouseInstance::new_keeper(
-            k1_port,
-            k1_id,
-            keeper_config.clone(),
-        )
-        .await
-        .map_err(|e| anyhow!("Failed to start ClickHouse keeper 1: {}", e))?;
-
-        // Start Keeper 2
-        let k2_port = 9182;
-        let k2_id = 2;
-
-        let k2 = ClickHouseInstance::new_keeper(
-            k2_port,
-            k2_id,
-            keeper_config.clone(),
-        )
-        .await
-        .map_err(|e| anyhow!("Failed to start ClickHouse keeper 2: {}", e))?;
-
-        // Start Keeper 3
-        let k3_port = 9183;
-        let k3_id = 3;
-
-        let k3 = ClickHouseInstance::new_keeper(k3_port, k3_id, keeper_config)
-            .await
-            .map_err(|e| {
-                anyhow!("Failed to start ClickHouse keeper 3: {}", e)
-            })?;
+        let keeper_amount = 3;
+        let mut keepers =
+            Self::new_keeper_set(keeper_amount, keeper_config).await?;
 
         // Start all replica nodes
         let cur_dir = std::env::current_dir().unwrap();
         let replica_config =
             cur_dir.as_path().join("src/configs/replica_config.xml");
 
-        // Start Replica 1
-        let r1_port = 8123;
-        let r1_tcp_port = 9001;
-        let r1_interserver_port = 9009;
-        let r1_name = String::from("oximeter_cluster node 1");
-        let r1_number = String::from("01");
-        let r1 = ClickHouseInstance::new_replicated(
-            r1_port,
-            r1_tcp_port,
-            r1_interserver_port,
-            r1_name,
-            r1_number,
-            replica_config.clone(),
-        )
-        .await
-        .map_err(|e| anyhow!("Failed to start ClickHouse node 1: {}", e))?;
+        let replica_amount = 2;
+        let mut replicas =
+            Self::new_replica_set(replica_amount, replica_config).await?;
 
-        // Start Replica 2
-        let r2_port = 8124;
-        let r2_tcp_port = 9002;
-        let r2_interserver_port = 9010;
-        let r2_name = String::from("oximeter_cluster node 2");
-        let r2_number = String::from("02");
-        let r2 = ClickHouseInstance::new_replicated(
-            r2_port,
-            r2_tcp_port,
-            r2_interserver_port,
-            r2_name,
-            r2_number,
-            replica_config,
-        )
-        .await
-        .map_err(|e| anyhow!("Failed to start ClickHouse node 2: {}", e))?;
+        let r1 = replicas.swap_remove(0);
+        let r2 = replicas.swap_remove(0);
+        let k1 = keepers.swap_remove(0);
+        let k2 = keepers.swap_remove(0);
+        let k3 = keepers.swap_remove(0);
 
         Ok(Self {
             replica_1: r1,
@@ -417,6 +363,61 @@ impl ClickHouseCluster {
             keeper_2: k2,
             keeper_3: k3,
         })
+    }
+
+    pub async fn new_keeper_set(
+        keeper_amount: u16,
+        config_path: PathBuf,
+    ) -> Result<Vec<ClickHouseInstance>, anyhow::Error> {
+        let mut keepers = vec![];
+
+        for i in 1..=keeper_amount {
+            let k_port = 9180 + i;
+            let k_id = i;
+
+            let k = ClickHouseInstance::new_keeper(
+                k_port,
+                k_id,
+                config_path.clone(),
+            )
+            .await
+            .map_err(|e| {
+                anyhow!("Failed to start ClickHouse keeper {}: {}", i, e)
+            })?;
+            keepers.push(k)
+        }
+
+        Ok(keepers)
+    }
+
+    pub async fn new_replica_set(
+        replica_amount: u16,
+        config_path: PathBuf,
+    ) -> Result<Vec<ClickHouseInstance>, anyhow::Error> {
+        let mut replicas = vec![];
+
+        for i in 1..=replica_amount {
+            let r_port = 8122 + i;
+            let r_tcp_port = 9000 + i;
+            let r_interserver_port = 9008 + i;
+            let r_name = format!("oximeter_cluster node {}", i);
+            let r_number = format!("0{}", i);
+            let r = ClickHouseInstance::new_replicated(
+                r_port,
+                r_tcp_port,
+                r_interserver_port,
+                r_name,
+                r_number,
+                config_path.clone(),
+            )
+            .await
+            .map_err(|e| {
+                anyhow!("Failed to start ClickHouse node {}: {}", i, e)
+            })?;
+            replicas.push(r)
+        }
+
+        Ok(replicas)
     }
 }
 
