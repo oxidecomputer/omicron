@@ -147,7 +147,8 @@ async fn cmd_nexus_background_tasks_show(
         client.bgtask_list().await.context("listing background tasks")?;
     // Convert the HashMap to a BTreeMap because we want the keys in sorted
     // order.
-    let mut tasks = response.into_inner().into_iter().collect::<BTreeMap<_, _>>();
+    let mut tasks =
+        response.into_inner().into_iter().collect::<BTreeMap<_, _>>();
 
     // We want to pick the order that we print some tasks intentionally.  Then
     // we want to print anything else that we find.
