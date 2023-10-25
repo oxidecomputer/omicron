@@ -684,7 +684,7 @@ impl DataStore {
                     .await?;
                 };
 
-                // Remove rows for service processors.
+                // Remove rows for roots of trust.
                 let nrots = {
                     use db::schema::inv_root_of_trust::dsl;
                     diesel::delete(
