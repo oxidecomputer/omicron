@@ -246,13 +246,20 @@ pub struct SwitchPortSettings {
 }
 
 impl SwitchPortSettings {
-    pub fn new(id: &external::IdentityMetadataCreateParams) -> Self {
+    pub fn new(meta: &external::IdentityMetadataCreateParams) -> Self {
         Self {
             identity: SwitchPortSettingsIdentity::new(
                 Uuid::new_v4(),
-                id.clone(),
+                meta.clone(),
             ),
         }
+    }
+
+    pub fn with_id(
+        id: Uuid,
+        meta: &external::IdentityMetadataCreateParams,
+    ) -> Self {
+        Self { identity: SwitchPortSettingsIdentity::new(id, meta.clone()) }
     }
 }
 

@@ -62,7 +62,7 @@ function ensure_softnpu_zone {
             --omicron-zone \
             --ports sc0_0,tfportrear0_0 \
             --ports sc0_1,tfportqsfp0_0 \
-            --sidecar-lite-branch omicron-tracking
+            --sidecar-lite-branch main
     }
     "$SOURCE_DIR"/scrimlet/softnpu-init.sh
     success "softnpu zone exists"

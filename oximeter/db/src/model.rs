@@ -42,7 +42,7 @@ use uuid::Uuid;
 ///
 /// TODO(#4271): The current implementation of versioning will wipe the metrics
 /// database if this number is incremented.
-pub const OXIMETER_VERSION: u64 = 1;
+pub const OXIMETER_VERSION: u64 = 2;
 
 // Wrapper type to represent a boolean in the database.
 //
