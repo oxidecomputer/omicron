@@ -940,6 +940,13 @@ mod tests {
         // Tests schema cache is updated when a new sample is inserted
         update_schema_cache_on_new_sample_test(address).await.unwrap();
 
+        // Tests that we can successfully query all extant datum types from the schema table.
+        select_all_datum_types_test(address).await.unwrap();
+
+        // Tests that, when cache new schema but _fail_ to insert them,
+        // we also remove them from the internal cache.
+        new_schema_removed_when_not_inserted_test(address).await.unwrap();
+
         // Tests for fields and measurements
         recall_field_value_bool_test(address).await.unwrap();
 
@@ -2796,18 +2803,13 @@ mod tests {
     // This tests that we can successfully query all extant datum types from the
     // schema table. There may be no such values, but the query itself should
     // succeed.
-    #[tokio::test]
-    async fn test_select_all_datum_types() {
+    async fn select_all_datum_types_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
         use strum::IntoEnumIterator;
         usdt::register_probes().unwrap();
         let logctx = test_setup_log("test_update_schema_cache_on_new_sample");
         let log = &logctx.log;
-
-        // Let the OS assign a port and discover it after ClickHouse starts
-        let mut db = ClickHouseInstance::new_single_node(0)
-            .await
-            .expect("Failed to start ClickHouse");
-        let address = SocketAddr::new("::1".parse().unwrap(), db.port());
 
         let client = Client::new(address, &log);
         client
@@ -2828,25 +2830,21 @@ mod tests {
             let count = res.trim().parse::<usize>().unwrap();
             assert_eq!(count, 0);
         }
-        db.cleanup().await.expect("Failed to cleanup ClickHouse server");
+        client.wipe_single_node_db().await?;
         logctx.cleanup_successful();
+        Ok(())
     }
 
     // Regression test for https://github.com/oxidecomputer/omicron/issues/4335.
     //
     // This tests that, when cache new schema but _fail_ to insert them, we also
     // remove them from the internal cache.
-    #[tokio::test]
-    async fn test_new_schema_removed_when_not_inserted() {
+    async fn new_schema_removed_when_not_inserted_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
         usdt::register_probes().unwrap();
         let logctx = test_setup_log("test_update_schema_cache_on_new_sample");
         let log = &logctx.log;
-
-        // Let the OS assign a port and discover it after ClickHouse starts
-        let mut db = ClickHouseInstance::new_single_node(0)
-            .await
-            .expect("Failed to start ClickHouse");
-        let address = SocketAddr::new("::1".parse().unwrap(), db.port());
 
         let client = Client::new(address, &log);
         client
@@ -2868,7 +2866,7 @@ mod tests {
 
         // Next, we'll kill the database, and then try to insert the schema.
         // That will fail, since the DB is now inaccessible.
-        db.cleanup().await.expect("failed to cleanup ClickHouse server");
+        client.wipe_single_node_db().await?;
         let res = client.save_new_schema_or_remove(new_schema).await;
         assert!(res.is_err(), "Should have failed since the DB is gone");
         assert!(
@@ -2877,6 +2875,7 @@ mod tests {
             they could not be inserted into the DB"
         );
         logctx.cleanup_successful();
+        Ok(())
     }
 
     #[tokio::test]
