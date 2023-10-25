@@ -11,6 +11,7 @@ use crate::helpers::rot_slot_id_to_u16;
 use crate::rot::RotSprocketExt;
 use crate::serial_number_padded;
 use crate::server;
+use crate::server::SimSpHandler;
 use crate::server::UdpServer;
 use crate::Responsiveness;
 use crate::SimulatedSp;
@@ -1019,6 +1020,15 @@ impl SpHandler for Handler {
         _buf: &mut [u8],
     ) -> std::result::Result<gateway_messages::RotResponse, SpError> {
         Err(SpError::RequestUnsupportedForSp)
+    }
+}
+
+impl SimSpHandler for Handler {
+    fn set_sp_should_fail_to_respond_signal(
+        &mut self,
+        _signal: Box<dyn FnOnce() + Send>,
+    ) {
+        // we don't yet implement simulated reset; ignore `signal`
     }
 }
 

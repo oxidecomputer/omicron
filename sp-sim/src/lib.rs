@@ -8,12 +8,14 @@ mod helpers;
 mod rot;
 mod server;
 mod sidecar;
+mod update;
 
 pub use anyhow::Result;
 use async_trait::async_trait;
 pub use config::Config;
 use gateway_messages::SpPort;
 pub use gimlet::Gimlet;
+pub use gimlet::SIM_GIMLET_BOARD;
 pub use server::logger;
 pub use sidecar::Sidecar;
 pub use slog::Logger;

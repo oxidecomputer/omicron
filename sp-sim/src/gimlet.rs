@@ -9,7 +9,9 @@ use crate::helpers::rot_slot_id_to_u16;
 use crate::rot::RotSprocketExt;
 use crate::serial_number_padded;
 use crate::server;
+use crate::server::SimSpHandler;
 use crate::server::UdpServer;
+use crate::update::SimSpUpdate;
 use crate::Responsiveness;
 use crate::SimulatedSp;
 use anyhow::{anyhow, bail, Context, Result};
@@ -26,7 +28,6 @@ use gateway_messages::SpError;
 use gateway_messages::SpPort;
 use gateway_messages::SpRequest;
 use gateway_messages::SpStateV2;
-use gateway_messages::UpdateId;
 use gateway_messages::{version, MessageKind};
 use gateway_messages::{ComponentDetails, Message, MgsError, StartupOptions};
 use gateway_messages::{DiscoverResponse, IgnitionState, PowerState};
@@ -36,7 +37,6 @@ use sprockets_rot::common::Ed25519PublicKey;
 use sprockets_rot::{RotSprocket, RotSprocketError};
 use std::cell::Cell;
 use std::collections::HashMap;
-use std::io::Cursor;
 use std::iter;
 use std::net::{SocketAddr, SocketAddrV6};
 use std::sync::{Arc, Mutex};
@@ -47,6 +47,8 @@ use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot;
 use tokio::sync::Mutex as TokioMutex;
 use tokio::task::{self, JoinHandle};
+
+pub const SIM_GIMLET_BOARD: &str = "SimGimletSp";
 
 pub struct Gimlet {
     rot: Mutex<RotSprocket>,
@@ -105,6 +107,13 @@ impl SimulatedSp for Gimlet {
 }
 
 impl Gimlet {
+    // TODO move to `SimulatedSp`
+    pub async fn last_update_data(&self) -> Option<Box<[u8]>> {
+        let handler = self.handler.as_ref()?;
+        let handler = handler.lock().await;
+        handler.update_state.last_update_data()
+    }
+
     pub async fn spawn(gimlet: &GimletConfig, log: Logger) -> Result<Self> {
         info!(log, "setting up simulated gimlet");
 
@@ -499,7 +508,15 @@ struct Handler {
     rot_active_slot: RotSlotId,
     power_state: PowerState,
     startup_options: StartupOptions,
-    update_state: UpdateState,
+    update_state: SimSpUpdate,
+    reset_pending: bool,
+
+    // To simulate an SP reset, we should (after doing whatever housekeeping we
+    // need to track the reset) intentionally _fail_ to respond to the request,
+    // simulating a `-> !` function on the SP that triggers a reset. To provide
+    // this, our caller will pass us a function to call if they should ignore
+    // whatever result we return and fail to respond at all.
+    should_fail_to_respond_signal: Option<Box<dyn FnOnce() + Send>>,
 }
 
 impl Handler {
@@ -533,7 +550,9 @@ impl Handler {
             rot_active_slot: RotSlotId::A,
             power_state: PowerState::A2,
             startup_options: StartupOptions::empty(),
-            update_state: UpdateState::NotPrepared,
+            update_state: SimSpUpdate::default(),
+            reset_pending: false,
+            should_fail_to_respond_signal: None,
         }
     }
 
@@ -855,12 +874,16 @@ impl SpHandler for Handler {
     ) -> Result<(), SpError> {
         warn!(
             &self.log,
-            "received update prepare request; not supported by simulated gimlet";
+            "received SP update prepare request";
             "sender" => %sender,
             "port" => ?port,
             "update" => ?update,
         );
-        Err(SpError::RequestUnsupportedForSp)
+        self.update_state.prepare(
+            SpComponent::SP_ITSELF,
+            update.id,
+            update.sp_image_size.try_into().unwrap(),
+        )
     }
 
     fn component_update_prepare(
@@ -877,14 +900,11 @@ impl SpHandler for Handler {
             "update" => ?update,
         );
 
-        self.update_state = UpdateState::Prepared {
-            component: update.component,
-            id: update.id,
-            data: Cursor::new(
-                vec![0u8; update.total_size as usize].into_boxed_slice(),
-            ),
-        };
-        Ok(())
+        self.update_state.prepare(
+            update.component,
+            update.id,
+            update.total_size.try_into().unwrap(),
+        )
     }
 
     fn update_status(
@@ -900,8 +920,7 @@ impl SpHandler for Handler {
             "port" => ?port,
             "component" => ?component,
         );
-        // TODO: check that component matches
-        Ok(self.update_state.to_message())
+        Ok(self.update_state.status())
     }
 
     fn update_chunk(
@@ -919,38 +938,7 @@ impl SpHandler for Handler {
             "offset" => chunk.offset,
             "length" => chunk_data.len(),
         );
-        match &mut self.update_state {
-            UpdateState::Prepared { id, data, .. } => {
-                // Ensure that the update ID is correct.
-                // TODO: component?
-                if chunk.id != *id {
-                    return Err(SpError::InvalidUpdateId { sp_update_id: *id });
-                };
-                if data.position() != chunk.offset as u64 {
-                    return Err(SpError::UpdateInProgress(
-                        self.update_state.to_message(),
-                    ));
-                }
-
-                std::io::Write::write_all(data, chunk_data).map_err(|error| {
-                    // Writing to an in-memory buffer can only fail if the update is too large.
-                    warn!(
-                        &self.log,
-                        "update is too large";
-                        "sender" => %sender,
-                        "port" => ?port,
-                        "offset" => chunk.offset,
-                        "length" => chunk_data.len(),
-                        "total_size" => data.get_ref().len(),
-                        "error" => %error,
-                    );
-                    SpError::UpdateIsTooLarge
-                })
-            }
-            UpdateState::NotPrepared | UpdateState::Aborted(_) => {
-                Err(SpError::UpdateNotPrepared)
-            }
-        }
+        self.update_state.ingest_chunk(chunk, chunk_data)
     }
 
     fn update_abort(
@@ -968,21 +956,7 @@ impl SpHandler for Handler {
             "component" => ?update_component,
             "id" => ?update_id,
         );
-        match &self.update_state {
-            UpdateState::NotPrepared => {
-                // Ignore this. TODO error here?
-            }
-            UpdateState::Prepared { id, .. } => {
-                if update_id != *id {
-                    return Err(SpError::InvalidUpdateId { sp_update_id: *id });
-                }
-                // TODO: check for component equality?
-                self.update_state = UpdateState::Aborted(update_id);
-            }
-            UpdateState::Aborted(_) => {}
-        }
-
-        Err(SpError::RequestUnsupportedForSp)
+        self.update_state.abort(update_id)
     }
 
     fn power_state(
@@ -1021,13 +995,18 @@ impl SpHandler for Handler {
         port: SpPort,
         component: SpComponent,
     ) -> Result<(), SpError> {
-        warn!(
-            &self.log, "received reset prepare request; not supported by simulated gimlet";
+        debug!(
+            &self.log, "received reset prepare request";
             "sender" => %sender,
             "port" => ?port,
             "component" => ?component,
         );
-        Err(SpError::RequestUnsupportedForSp)
+        if component == SpComponent::SP_ITSELF {
+            self.reset_pending = true;
+            Ok(())
+        } else {
+            Err(SpError::RequestUnsupportedForComponent)
+        }
     }
 
     fn reset_component_trigger(
@@ -1036,13 +1015,29 @@ impl SpHandler for Handler {
         port: SpPort,
         component: SpComponent,
     ) -> Result<(), SpError> {
-        warn!(
-            &self.log, "received reset trigger request; not supported by simulated gimlet";
+        debug!(
+            &self.log, "received reset trigger request";
             "sender" => %sender,
             "port" => ?port,
             "component" => ?component,
         );
-        Err(SpError::RequestUnsupportedForSp)
+        if component == SpComponent::SP_ITSELF {
+            if self.reset_pending {
+                self.update_state.sp_reset();
+                self.reset_pending = false;
+                if let Some(signal) = self.should_fail_to_respond_signal.take()
+                {
+                    // Instruct `server::handle_request()` to _not_ respond to
+                    // this request at all, simulating an SP actually resetting.
+                    signal();
+                }
+                Ok(())
+            } else {
+                Err(SpError::ResetComponentTriggerWithoutPrepare)
+            }
+        } else {
+            Err(SpError::RequestUnsupportedForComponent)
+        }
     }
 
     fn num_devices(&mut self, _: SocketAddrV6, _: SpPort) -> u32 {
@@ -1258,7 +1253,7 @@ impl SpHandler for Handler {
         buf: &mut [u8],
     ) -> std::result::Result<usize, SpError> {
         static SP_GITC: &[u8] = b"ffffffff";
-        static SP_BORD: &[u8] = b"SimGimletSp";
+        static SP_BORD: &[u8] = SIM_GIMLET_BOARD.as_bytes();
         static SP_NAME: &[u8] = b"SimGimlet";
         static SP_VERS: &[u8] = b"0.0.1";
 
@@ -1303,42 +1298,11 @@ impl SpHandler for Handler {
     }
 }
 
-enum UpdateState {
-    NotPrepared,
-    Prepared {
-        #[allow(unused)]
-        component: SpComponent,
-        id: UpdateId,
-        // data would ordinarily be a Cursor<Vec<u8>>, but that can grow and
-        // reallocate. We want to ensure that we don't receive any more data
-        // than originally promised, so use a Cursor<Box<[u8]>> to ensure that
-        // it never grows.
-        data: Cursor<Box<[u8]>>,
-    },
-    Aborted(UpdateId),
-}
-
-impl UpdateState {
-    fn to_message(&self) -> gateway_messages::UpdateStatus {
-        match self {
-            Self::NotPrepared => gateway_messages::UpdateStatus::None,
-            Self::Prepared { id, data, .. } => {
-                // If all the data has written, mark it as completed.
-                let bytes_received = data.position() as u32;
-                let total_size = data.get_ref().len() as u32;
-                if bytes_received == total_size {
-                    gateway_messages::UpdateStatus::Complete(*id)
-                } else {
-                    gateway_messages::UpdateStatus::InProgress(
-                        gateway_messages::UpdateInProgressStatus {
-                            id: *id,
-                            bytes_received,
-                            total_size,
-                        },
-                    )
-                }
-            }
-            Self::Aborted(id) => gateway_messages::UpdateStatus::Aborted(*id),
-        }
+impl SimSpHandler for Handler {
+    fn set_sp_should_fail_to_respond_signal(
+        &mut self,
+        signal: Box<dyn FnOnce() + Send>,
+    ) {
+        self.should_fail_to_respond_signal = Some(signal);
     }
 }

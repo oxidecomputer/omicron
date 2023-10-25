@@ -104,7 +104,9 @@ pub async fn test_setup_with_config(
     let localhost_port_0 = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0);
     let mut addresses = vec![localhost_port_0];
     if let Some(addr) = listen_addr {
-        addresses.push(addr);
+        if addr != localhost_port_0 {
+            addresses.push(addr);
+        }
     };
 
     // Use log settings from the server config and ignore log settings in
