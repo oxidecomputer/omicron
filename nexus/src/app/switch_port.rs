@@ -8,6 +8,8 @@
 use crate::app::sagas;
 use crate::external_api::params;
 use db::datastore::SwitchPortSettingsCombinedResult;
+use dropshot::HttpError;
+use http::StatusCode;
 use ipnetwork::IpNetwork;
 use nexus_db_model::{SwitchLinkFec, SwitchLinkSpeed};
 use nexus_db_queries::authn;
@@ -111,7 +113,16 @@ impl super::Nexus {
                 >(
                     saga_params,
                 )
-                .await?;
+                .await
+            .map_err(|e| {
+                    let msg = e.to_string();
+                    if msg.contains("bad request") {
+                        //return HttpError::for_client_error(None, StatusCode::BAD_REQUEST, msg.to_string())
+                        external::Error::invalid_request(&msg.to_string())
+                    } else {
+                        e
+                    }
+                })?;
         }
 
         Ok(result)

@@ -294,8 +294,20 @@ async fn spa_ensure_switch_port_settings(
         dpd_client.port_settings_apply(&port_id, &dpd_port_settings).await
     })
     .await
-    .map_err(|e| {
-        ActionError::action_failed(format!("dpd port settings apply {e}"))
+    .map_err(|e| match e {
+        progenitor_client::Error::ErrorResponse(ref er) => {
+            if er.status().is_client_error() {
+                ActionError::action_failed(format!(
+                    "bad request: dpd port settings apply {}",
+                    er.message,
+                ))
+            } else {
+                ActionError::action_failed(format!(
+                    "dpd port settings apply {e}"
+                ))
+            }
+        }
+        _ => ActionError::action_failed(format!("dpd port settings apply {e}")),
     })?;
 
     Ok(())

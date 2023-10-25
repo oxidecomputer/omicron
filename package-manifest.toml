@@ -473,8 +473,8 @@ only_for_targets.image = "standard"
 # 2. Copy dendrite.tar.gz from dendrite/out to omicron/out
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "c0cbc39b55fac54b95468304c497e00f3d3cf686"
-source.sha256 = "3706e0e8230b7f76407ec0acea9020b9efc7d6c78b74c304102fd8e62cac6760"
+source.commit = "f89b7767dbb8ba627f20be6455fc72d0e766636d"
+source.sha256 = "005528c8f06629862f0394f5544eec1b48fdfa0b59d5cb314563665746deacfa"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -498,8 +498,8 @@ only_for_targets.image = "standard"
 # 2. Copy the output zone image from dendrite/out to omicron/out
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "c0cbc39b55fac54b95468304c497e00f3d3cf686"
-source.sha256 = "f0847927f7d7197d9a5c4267a0bd0af609d18fd8d6d9b80755c370872c5297fa"
+source.commit = "f89b7767dbb8ba627f20be6455fc72d0e766636d"
+source.sha256 = "d0c6c80bcb1bf91bcff1e5f3fe7313cae342ede1bc6e55738bb42d20f6a7f1b3"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -516,8 +516,8 @@ only_for_targets.image = "standard"
 # 2. Copy dendrite.tar.gz from dendrite/out to omicron/out/dendrite-softnpu.tar.gz
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "c0cbc39b55fac54b95468304c497e00f3d3cf686"
-source.sha256 = "33b5897db1fe7b57d282531724ecd7bf74f5156f9aa23f10c6f0d9b54c38a987"
+source.commit = "f89b7767dbb8ba627f20be6455fc72d0e766636d"
+source.sha256 = "33b415086767299e9f476c122dd305eec72e8c671efd94275c9172592cb7d4ac"
 output.type = "zone"
 output.intermediate_only = true
 
