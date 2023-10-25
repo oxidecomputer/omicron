@@ -11,16 +11,34 @@ cabooses:
     board "SimSidecarSp" name "SimSidecar" version "0.0.1" git_commit "ffffffff"
 
 SPs:
-    baseboard part "FAKE_SIM_GIMLET" serial "SimGimlet00" slot0 caboose "SimGimletSp"/"ffffffff" slot1 caboose "SimGimletSp"/"ffffffff"
-    baseboard part "FAKE_SIM_GIMLET" serial "SimGimlet01" slot0 caboose "SimGimletSp"/"ffffffff" slot1 caboose "SimGimletSp"/"ffffffff"
-    baseboard part "FAKE_SIM_SIDECAR" serial "SimSidecar0" slot0 caboose "SimSidecarSp"/"ffffffff" slot1 caboose "SimSidecarSp"/"ffffffff"
-    baseboard part "FAKE_SIM_SIDECAR" serial "SimSidecar1" slot0 caboose "SimSidecarSp"/"ffffffff" slot1 caboose "SimSidecarSp"/"ffffffff"
+    baseboard part "FAKE_SIM_GIMLET" serial "SimGimlet00"
+    baseboard part "FAKE_SIM_GIMLET" serial "SimGimlet01"
+    baseboard part "FAKE_SIM_SIDECAR" serial "SimSidecar0"
+    baseboard part "FAKE_SIM_SIDECAR" serial "SimSidecar1"
 
 RoTs:
-    baseboard part "FAKE_SIM_GIMLET" serial "SimGimlet00" slot A caboose "SimGimletRot"/"eeeeeeee" slot B caboose "SimGimletRot"/"eeeeeeee"
-    baseboard part "FAKE_SIM_GIMLET" serial "SimGimlet01" slot A caboose "SimGimletRot"/"eeeeeeee" slot B caboose "SimGimletRot"/"eeeeeeee"
-    baseboard part "FAKE_SIM_SIDECAR" serial "SimSidecar0" slot A caboose "SimSidecarRot"/"eeeeeeee" slot B caboose "SimSidecarRot"/"eeeeeeee"
-    baseboard part "FAKE_SIM_SIDECAR" serial "SimSidecar1" slot A caboose "SimSidecarRot"/"eeeeeeee" slot B caboose "SimSidecarRot"/"eeeeeeee"
+    baseboard part "FAKE_SIM_GIMLET" serial "SimGimlet00"
+    baseboard part "FAKE_SIM_GIMLET" serial "SimGimlet01"
+    baseboard part "FAKE_SIM_SIDECAR" serial "SimSidecar0"
+    baseboard part "FAKE_SIM_SIDECAR" serial "SimSidecar1"
+
+cabooses found:
+    SpSlot0 baseboard part "FAKE_SIM_GIMLET" serial "SimGimlet00": board "SimGimletSp"
+    SpSlot0 baseboard part "FAKE_SIM_GIMLET" serial "SimGimlet01": board "SimGimletSp"
+    SpSlot0 baseboard part "FAKE_SIM_SIDECAR" serial "SimSidecar0": board "SimSidecarSp"
+    SpSlot0 baseboard part "FAKE_SIM_SIDECAR" serial "SimSidecar1": board "SimSidecarSp"
+    SpSlot1 baseboard part "FAKE_SIM_GIMLET" serial "SimGimlet00": board "SimGimletSp"
+    SpSlot1 baseboard part "FAKE_SIM_GIMLET" serial "SimGimlet01": board "SimGimletSp"
+    SpSlot1 baseboard part "FAKE_SIM_SIDECAR" serial "SimSidecar0": board "SimSidecarSp"
+    SpSlot1 baseboard part "FAKE_SIM_SIDECAR" serial "SimSidecar1": board "SimSidecarSp"
+    RotSlotA baseboard part "FAKE_SIM_GIMLET" serial "SimGimlet00": board "SimGimletRot"
+    RotSlotA baseboard part "FAKE_SIM_GIMLET" serial "SimGimlet01": board "SimGimletRot"
+    RotSlotA baseboard part "FAKE_SIM_SIDECAR" serial "SimSidecar0": board "SimSidecarRot"
+    RotSlotA baseboard part "FAKE_SIM_SIDECAR" serial "SimSidecar1": board "SimSidecarRot"
+    RotSlotB baseboard part "FAKE_SIM_GIMLET" serial "SimGimlet00": board "SimGimletRot"
+    RotSlotB baseboard part "FAKE_SIM_GIMLET" serial "SimGimlet01": board "SimGimletRot"
+    RotSlotB baseboard part "FAKE_SIM_SIDECAR" serial "SimSidecar0": board "SimSidecarRot"
+    RotSlotB baseboard part "FAKE_SIM_SIDECAR" serial "SimSidecar1": board "SimSidecarRot"
 
 errors:
 error: MGS "http://[100::1]:12345": listing ignition targets: Communication Error: error sending request for url (http://[100::1]:12345/ignition): error trying to connect: tcp connect error: Network is unreachable (os error 128): error sending request for url (http://[100::1]:12345/ignition): error trying to connect: tcp connect error: Network is unreachable (os error 128): error trying to connect: tcp connect error: Network is unreachable (os error 128): tcp connect error: Network is unreachable (os error 128): Network is unreachable (os error 128)

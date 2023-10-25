@@ -2783,7 +2783,6 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
- "strum",
  "uuid",
 ]
 
