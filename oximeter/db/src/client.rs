@@ -2634,4 +2634,45 @@ mod tests {
         db.cleanup().await.expect("Failed to cleanup ClickHouse server");
         logctx.cleanup_successful();
     }
+
+    // Regression test for https://github.com/oxidecomputer/omicron/issues/4336.
+    //
+    // This tests that we can successfully query all extant datum types from the
+    // schema table. There may be no such values, but the query itself should
+    // succeed.
+    #[tokio::test]
+    async fn test_select_all_datum_types() {
+        use strum::IntoEnumIterator;
+        usdt::register_probes().unwrap();
+        let logctx = test_setup_log("test_update_schema_cache_on_new_sample");
+        let log = &logctx.log;
+
+        // Let the OS assign a port and discover it after ClickHouse starts
+        let mut db = ClickHouseInstance::new_single_node(0)
+            .await
+            .expect("Failed to start ClickHouse");
+        let address = SocketAddr::new("::1".parse().unwrap(), db.port());
+
+        let client = Client::new(address, &log);
+        client
+            .init_single_node_db()
+            .await
+            .expect("Failed to initialize timeseries database");
+
+        // Attempt to select all schema with each datum type.
+        for ty in oximeter::DatumType::iter() {
+            let sql = format!(
+                "SELECT COUNT() \
+                FROM {}.timeseries_schema WHERE \
+                datum_type = '{:?}'",
+                crate::DATABASE_NAME,
+                crate::model::DbDatumType::from(ty),
+            );
+            let res = client.execute_with_body(sql).await.unwrap();
+            let count = res.trim().parse::<usize>().unwrap();
+            assert_eq!(count, 0);
+        }
+        db.cleanup().await.expect("Failed to cleanup ClickHouse server");
+        logctx.cleanup_successful();
+    }
 }
