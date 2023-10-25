@@ -301,7 +301,7 @@ ring = "0.16"
 rpassword = "7.2.0"
 rstest = "0.18.2"
 rustfmt-wrapper = "0.2"
-rustls = "0.21.7"
+rustls = "0.21.8"
 samael = { git = "https://github.com/njaremko/samael", features = ["xmlsec"], branch = "master" }
 schemars = "0.8.12"
 secrecy = "0.8.0"
