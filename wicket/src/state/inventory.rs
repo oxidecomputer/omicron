@@ -184,7 +184,7 @@ impl Component {
     }
 }
 
-// The component type and its slot.
+/// The component type and its slot.
 #[derive(
     Debug,
     Clone,
@@ -211,12 +211,13 @@ impl ComponentId {
     }
 }
 
+/// Prints the component type in standard case.
 impl Display for ComponentId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ComponentId::Sled(i) => write!(f, "sled {}", i),
             ComponentId::Switch(i) => write!(f, "switch {}", i),
-            ComponentId::Psc(i) => write!(f, "psc {}", i),
+            ComponentId::Psc(i) => write!(f, "PSC {}", i),
         }
     }
 }
@@ -262,5 +263,17 @@ impl PowerState {
             PowerState::A3 => "commanded off",
             PowerState::A4 => "mechanical off (unplugged)",
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn component_id_display() {
+        assert_eq!(ComponentId::Sled(0).to_string(), "sled 0");
+        assert_eq!(ComponentId::Switch(1).to_string(), "switch 1");
+        assert_eq!(ComponentId::Psc(2).to_string(), "PSC 2");
     }
 }
