@@ -1238,6 +1238,439 @@ mod tests {
         .await
         .unwrap();
 
+        // Tests that data can be inserted via the client
+        insert_samples_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        // Tests for a schema mismatch
+        schema_mismatch_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        // Tests for a schema update
+        schema_updated_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        // Tests for specific timeseries selection
+        client_select_timeseries_one_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        // Tests for specific timeseries selection
+        field_record_count_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        // ClickHouse regression test
+        unquoted_64bit_integers_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        // Tests to verify that we can distinguish between metrics by name
+        differentiate_by_timeseries_name_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        // Tests selecting a single timeseries
+        select_timeseries_with_select_one_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        // Tests selecting two timeseries
+        select_timeseries_with_select_one_field_with_multiple_values_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        // Tests selecting multiple timeseries
+        select_timeseries_with_select_multiple_fields_with_multiple_values_test(cluster.replica_1.address, InstallationType::Cluster).await.unwrap();
+
+        // Tests selecting all timeseries
+        select_timeseries_with_all_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        // Tests selecting all timeseries with start time
+        select_timeseries_with_start_time_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        // Tests selecting all timeseries with start time
+        select_timeseries_with_limit_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        // Tests selecting all timeseries with order
+        select_timeseries_with_order_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        // Tests schema does not change
+        get_schema_no_new_values_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        // Tests listing timeseries schema
+        timeseries_schema_list_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        // Tests listing timeseries
+        list_timeseries_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        // Tests no changes are made when version is not updated
+        database_version_update_idempotent_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        // Tests that downgrading is impossible
+        database_version_will_not_downgrade_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        // Tests old data is dropped if version is updated
+        database_version_wipes_old_version_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        // Tests schema cache is updated when a new sample is inserted
+        update_schema_cache_on_new_sample_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        // Tests that we can successfully query all extant datum types from the schema table.
+        select_all_datum_types_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        // Tests that, when cache new schema but _fail_ to insert them,
+        // we also remove them from the internal cache.
+        new_schema_removed_when_not_inserted_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        // Tests for fields and measurements
+        recall_field_value_bool_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        recall_field_value_u8_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        recall_field_value_i8_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        recall_field_value_u16_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        recall_field_value_i16_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        recall_field_value_u32_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        recall_field_value_i32_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        recall_field_value_u64_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        recall_field_value_i64_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        recall_field_value_string_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        recall_field_value_ipv4addr_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        recall_field_value_ipv6addr_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        recall_field_value_uuid_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        recall_measurement_bool_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        recall_measurement_i8_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        recall_measurement_u8_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        recall_measurement_i16_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        recall_measurement_u16_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        recall_measurement_i32_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        recall_measurement_u32_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        recall_measurement_i64_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        recall_measurement_u64_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        recall_measurement_f32_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        recall_measurement_f64_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        recall_measurement_cumulative_i64_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        recall_measurement_cumulative_u64_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        recall_measurement_cumulative_f64_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        recall_measurement_histogram_i8_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        recall_measurement_histogram_u8_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        recall_measurement_histogram_i16_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        recall_measurement_histogram_u16_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        recall_measurement_histogram_i32_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        recall_measurement_histogram_u32_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        recall_measurement_histogram_i64_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        recall_measurement_histogram_u64_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        recall_measurement_histogram_f64_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
         cluster
             .keeper_1
             .cleanup()
@@ -1325,7 +1758,6 @@ mod tests {
         assert!(result.contains("hiya"));
 
         client_1.wipe_replicated_db().await?;
-        // TODO: Verify data has been deleted in client 2
         logctx.cleanup_successful();
 
         // TODO(https://github.com/oxidecomputer/omicron/issues/4001): With distributed
@@ -1365,10 +1797,16 @@ mod tests {
         let log = &logctx.log;
 
         let client = Client::new(address, &log);
-        client
-            .init_single_node_db()
-            .await
-            .expect("Failed to initialize timeseries database");
+        match db_type {
+            InstallationType::SingleNode => client
+                .init_single_node_db()
+                .await
+                .expect("Failed to initialize timeseries database"),
+            InstallationType::Cluster => client
+                .init_replicated_db()
+                .await
+                .expect("Failed to initialize timeseries database"),
+        }
         let samples = {
             let mut s = Vec::with_capacity(8);
             for _ in 0..s.capacity() {
@@ -1377,7 +1815,12 @@ mod tests {
             s
         };
         client.insert_samples(&samples).await?;
-        client.wipe_single_node_db().await?;
+        match db_type {
+            InstallationType::SingleNode => {
+                client.wipe_single_node_db().await?
+            }
+            InstallationType::Cluster => client.wipe_replicated_db().await?,
+        }
         logctx.cleanup_successful();
         Ok(())
     }
@@ -1410,10 +1853,16 @@ mod tests {
         let log = &logctx.log;
 
         let client = Client::new(address, &log);
-        client
-            .init_single_node_db()
-            .await
-            .expect("Failed to initialize timeseries database");
+        match db_type {
+            InstallationType::SingleNode => client
+                .init_single_node_db()
+                .await
+                .expect("Failed to initialize timeseries database"),
+            InstallationType::Cluster => client
+                .init_replicated_db()
+                .await
+                .expect("Failed to initialize timeseries database"),
+        }
         let sample = test_util::make_sample();
         client.insert_samples(&[sample]).await.unwrap();
 
@@ -1430,7 +1879,12 @@ mod tests {
         let sample = Sample::new(&bad_name, &metric).unwrap();
         let result = client.verify_or_cache_sample_schema(&sample).await;
         assert!(matches!(result, Err(Error::SchemaMismatch { .. })));
-        client.wipe_single_node_db().await?;
+        match db_type {
+            InstallationType::SingleNode => {
+                client.wipe_single_node_db().await?
+            }
+            InstallationType::Cluster => client.wipe_replicated_db().await?,
+        }
         logctx.cleanup_successful();
         Ok(())
     }
@@ -1443,10 +1897,16 @@ mod tests {
         let log = &logctx.log;
 
         let client = Client::new(address, &log);
-        client
-            .init_single_node_db()
-            .await
-            .expect("Failed to initialize timeseries database");
+        match db_type {
+            InstallationType::SingleNode => client
+                .init_single_node_db()
+                .await
+                .expect("Failed to initialize timeseries database"),
+            InstallationType::Cluster => client
+                .init_replicated_db()
+                .await
+                .expect("Failed to initialize timeseries database"),
+        }
         let sample = test_util::make_sample();
 
         // Verify that this sample is considered new, i.e., we return rows to update the timeseries
@@ -1508,7 +1968,12 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(schema.len(), 1);
         assert_eq!(expected_schema, schema[0]);
-        client.wipe_single_node_db().await?;
+        match db_type {
+            InstallationType::SingleNode => {
+                client.wipe_single_node_db().await?
+            }
+            InstallationType::Cluster => client.wipe_replicated_db().await?,
+        }
         logctx.cleanup_successful();
         Ok(())
     }
@@ -1521,10 +1986,16 @@ mod tests {
         let log = &logctx.log;
 
         let client = Client::new(address, &log);
-        client
-            .init_single_node_db()
-            .await
-            .expect("Failed to initialize timeseries database");
+        match db_type {
+            InstallationType::SingleNode => client
+                .init_single_node_db()
+                .await
+                .expect("Failed to initialize timeseries database"),
+            InstallationType::Cluster => client
+                .init_replicated_db()
+                .await
+                .expect("Failed to initialize timeseries database"),
+        }
         let samples = test_util::generate_test_samples(2, 2, 2, 2);
         client.insert_samples(&samples).await?;
 
@@ -1596,7 +2067,12 @@ mod tests {
             .iter()
             .all(|field| field_cmp(field, sample.metric_fields()));
 
-        client.wipe_single_node_db().await?;
+        match db_type {
+            InstallationType::SingleNode => {
+                client.wipe_single_node_db().await?
+            }
+            InstallationType::Cluster => client.wipe_replicated_db().await?,
+        }
         logctx.cleanup_successful();
         Ok(())
     }
@@ -1613,10 +2089,16 @@ mod tests {
         // Because of the schema change, inserting field records per field per unique timeseries,
         // we'd like to exercise the logic of ClickHouse's replacing merge tree engine.
         let client = Client::new(address, &log);
-        client
-            .init_single_node_db()
-            .await
-            .expect("Failed to initialize timeseries database");
+        match db_type {
+            InstallationType::SingleNode => client
+                .init_single_node_db()
+                .await
+                .expect("Failed to initialize timeseries database"),
+            InstallationType::Cluster => client
+                .init_replicated_db()
+                .await
+                .expect("Failed to initialize timeseries database"),
+        }
         let samples = test_util::generate_test_samples(2, 2, 2, 2);
         client.insert_samples(&samples).await?;
 
@@ -1653,7 +2135,12 @@ mod tests {
         )
         .await;
 
-        client.wipe_single_node_db().await?;
+        match db_type {
+            InstallationType::SingleNode => {
+                client.wipe_single_node_db().await?
+            }
+            InstallationType::Cluster => client.wipe_replicated_db().await?,
+        }
         logctx.cleanup_successful();
         Ok(())
     }
@@ -1673,10 +2160,16 @@ mod tests {
         let log = &logctx.log;
 
         let client = Client::new(address, &log);
-        client
-            .init_single_node_db()
-            .await
-            .expect("Failed to initialize timeseries database");
+        match db_type {
+            InstallationType::SingleNode => client
+                .init_single_node_db()
+                .await
+                .expect("Failed to initialize timeseries database"),
+            InstallationType::Cluster => client
+                .init_replicated_db()
+                .await
+                .expect("Failed to initialize timeseries database"),
+        }
         let output = client
             .execute_with_body(
                 "SELECT toUInt64(1) AS foo FORMAT JSONEachRow;".to_string(),
@@ -1686,7 +2179,12 @@ mod tests {
         let json: Value = serde_json::from_str(&output).unwrap();
         assert_eq!(json["foo"], Value::Number(1u64.into()));
 
-        client.wipe_single_node_db().await?;
+        match db_type {
+            InstallationType::SingleNode => {
+                client.wipe_single_node_db().await?
+            }
+            InstallationType::Cluster => client.wipe_replicated_db().await?,
+        }
         logctx.cleanup_successful();
         Ok(())
     }
@@ -1717,10 +2215,16 @@ mod tests {
         }
 
         let client = Client::new(address, &log);
-        client
-            .init_single_node_db()
-            .await
-            .expect("Failed to initialize timeseries database");
+        match db_type {
+            InstallationType::SingleNode => client
+                .init_single_node_db()
+                .await
+                .expect("Failed to initialize timeseries database"),
+            InstallationType::Cluster => client
+                .init_replicated_db()
+                .await
+                .expect("Failed to initialize timeseries database"),
+        }
 
         let target = MyTarget::default();
         let first_metric = FirstMetric::default();
@@ -1757,7 +2261,12 @@ mod tests {
         assert_eq!(timeseries.target.name, "my_target");
         assert_eq!(timeseries.metric.name, "second_metric");
 
-        client.wipe_single_node_db().await?;
+        match db_type {
+            InstallationType::SingleNode => {
+                client.wipe_single_node_db().await?
+            }
+            InstallationType::Cluster => client.wipe_replicated_db().await?,
+        }
         logctx.cleanup_successful();
         Ok(())
     }
@@ -1772,10 +2281,16 @@ mod tests {
         let (target, metrics, samples) = setup_select_test();
 
         let client = Client::new(address, &log);
-        client
-            .init_single_node_db()
-            .await
-            .expect("Failed to initialize timeseries database");
+        match db_type {
+            InstallationType::SingleNode => client
+                .init_single_node_db()
+                .await
+                .expect("Failed to initialize timeseries database"),
+            InstallationType::Cluster => client
+                .init_replicated_db()
+                .await
+                .expect("Failed to initialize timeseries database"),
+        }
         client
             .insert_samples(&samples)
             .await
@@ -1820,7 +2335,12 @@ mod tests {
         verify_target(&timeseries.target, &target);
         verify_metric(&timeseries.metric, metrics.get(0).unwrap());
 
-        client.wipe_single_node_db().await?;
+        match db_type {
+            InstallationType::SingleNode => {
+                client.wipe_single_node_db().await?
+            }
+            InstallationType::Cluster => client.wipe_replicated_db().await?,
+        }
         logctx.cleanup_successful();
         Ok(())
     }
@@ -1837,10 +2357,16 @@ mod tests {
         let (target, metrics, samples) = setup_select_test();
 
         let client = Client::new(address, &log);
-        client
-            .init_single_node_db()
-            .await
-            .expect("Failed to initialize timeseries database");
+        match db_type {
+            InstallationType::SingleNode => client
+                .init_single_node_db()
+                .await
+                .expect("Failed to initialize timeseries database"),
+            InstallationType::Cluster => client
+                .init_replicated_db()
+                .await
+                .expect("Failed to initialize timeseries database"),
+        }
         client
             .insert_samples(&samples)
             .await
@@ -1891,7 +2417,12 @@ mod tests {
             verify_metric(&ts.metric, metric);
         }
 
-        client.wipe_single_node_db().await?;
+        match db_type {
+            InstallationType::SingleNode => {
+                client.wipe_single_node_db().await?
+            }
+            InstallationType::Cluster => client.wipe_replicated_db().await?,
+        }
         logctx.cleanup_successful();
         Ok(())
     }
@@ -1906,10 +2437,16 @@ mod tests {
         let (target, metrics, samples) = setup_select_test();
 
         let client = Client::new(address, &log);
-        client
-            .init_single_node_db()
-            .await
-            .expect("Failed to initialize timeseries database");
+        match db_type {
+            InstallationType::SingleNode => client
+                .init_single_node_db()
+                .await
+                .expect("Failed to initialize timeseries database"),
+            InstallationType::Cluster => client
+                .init_replicated_db()
+                .await
+                .expect("Failed to initialize timeseries database"),
+        }
         client
             .insert_samples(&samples)
             .await
@@ -1968,7 +2505,12 @@ mod tests {
             }
         }
 
-        client.wipe_single_node_db().await?;
+        match db_type {
+            InstallationType::SingleNode => {
+                client.wipe_single_node_db().await?
+            }
+            InstallationType::Cluster => client.wipe_replicated_db().await?,
+        }
         logctx.cleanup_successful();
         Ok(())
     }
@@ -1983,10 +2525,16 @@ mod tests {
         let (target, metrics, samples) = setup_select_test();
 
         let client = Client::new(address, &log);
-        client
-            .init_single_node_db()
-            .await
-            .expect("Failed to initialize timeseries database");
+        match db_type {
+            InstallationType::SingleNode => client
+                .init_single_node_db()
+                .await
+                .expect("Failed to initialize timeseries database"),
+            InstallationType::Cluster => client
+                .init_replicated_db()
+                .await
+                .expect("Failed to initialize timeseries database"),
+        }
         client
             .insert_samples(&samples)
             .await
@@ -2030,7 +2578,12 @@ mod tests {
             verify_metric(&ts.metric, metrics.get(i).unwrap());
         }
 
-        client.wipe_single_node_db().await?;
+        match db_type {
+            InstallationType::SingleNode => {
+                client.wipe_single_node_db().await?
+            }
+            InstallationType::Cluster => client.wipe_replicated_db().await?,
+        }
         logctx.cleanup_successful();
         Ok(())
     }
@@ -2045,10 +2598,16 @@ mod tests {
         let (_, metrics, samples) = setup_select_test();
 
         let client = Client::new(address, &log);
-        client
-            .init_single_node_db()
-            .await
-            .expect("Failed to initialize timeseries database");
+        match db_type {
+            InstallationType::SingleNode => client
+                .init_single_node_db()
+                .await
+                .expect("Failed to initialize timeseries database"),
+            InstallationType::Cluster => client
+                .init_replicated_db()
+                .await
+                .expect("Failed to initialize timeseries database"),
+        }
         client
             .insert_samples(&samples)
             .await
@@ -2082,7 +2641,12 @@ mod tests {
             }
         }
 
-        client.wipe_single_node_db().await?;
+        match db_type {
+            InstallationType::SingleNode => {
+                client.wipe_single_node_db().await?
+            }
+            InstallationType::Cluster => client.wipe_replicated_db().await?,
+        }
         logctx.cleanup_successful();
         Ok(())
     }
@@ -2096,10 +2660,16 @@ mod tests {
 
         let (_, _, samples) = setup_select_test();
         let client = Client::new(address, &log);
-        client
-            .init_single_node_db()
-            .await
-            .expect("Failed to initialize timeseries database");
+        match db_type {
+            InstallationType::SingleNode => client
+                .init_single_node_db()
+                .await
+                .expect("Failed to initialize timeseries database"),
+            InstallationType::Cluster => client
+                .init_replicated_db()
+                .await
+                .expect("Failed to initialize timeseries database"),
+        }
         client
             .insert_samples(&samples)
             .await
@@ -2201,7 +2771,12 @@ mod tests {
             timeseries.measurements
         );
 
-        client.wipe_single_node_db().await?;
+        match db_type {
+            InstallationType::SingleNode => {
+                client.wipe_single_node_db().await?
+            }
+            InstallationType::Cluster => client.wipe_replicated_db().await?,
+        }
         logctx.cleanup_successful();
         Ok(())
     }
@@ -2215,10 +2790,16 @@ mod tests {
 
         let (_, _, samples) = setup_select_test();
         let client = Client::new(address, &log);
-        client
-            .init_single_node_db()
-            .await
-            .expect("Failed to initialize timeseries database");
+        match db_type {
+            InstallationType::SingleNode => client
+                .init_single_node_db()
+                .await
+                .expect("Failed to initialize timeseries database"),
+            InstallationType::Cluster => client
+                .init_replicated_db()
+                .await
+                .expect("Failed to initialize timeseries database"),
+        }
         client
             .insert_samples(&samples)
             .await
@@ -2303,7 +2884,12 @@ mod tests {
             timeseries_asc.last().unwrap()
         );
 
-        client.wipe_single_node_db().await?;
+        match db_type {
+            InstallationType::SingleNode => {
+                client.wipe_single_node_db().await?
+            }
+            InstallationType::Cluster => client.wipe_replicated_db().await?,
+        }
         logctx.cleanup_successful();
         Ok(())
     }
@@ -2316,10 +2902,16 @@ mod tests {
         let log = &logctx.log;
 
         let client = Client::new(address, &log);
-        client
-            .init_single_node_db()
-            .await
-            .expect("Failed to initialize timeseries database");
+        match db_type {
+            InstallationType::SingleNode => client
+                .init_single_node_db()
+                .await
+                .expect("Failed to initialize timeseries database"),
+            InstallationType::Cluster => client
+                .init_replicated_db()
+                .await
+                .expect("Failed to initialize timeseries database"),
+        }
         let samples = test_util::generate_test_samples(2, 2, 2, 2);
         client.insert_samples(&samples).await?;
 
@@ -2331,7 +2923,12 @@ mod tests {
             .expect("Failed to get timeseries schema");
         assert_eq!(&original_schema, &*schema, "Schema shouldn't change");
 
-        client.wipe_single_node_db().await?;
+        match db_type {
+            InstallationType::SingleNode => {
+                client.wipe_single_node_db().await?
+            }
+            InstallationType::Cluster => client.wipe_replicated_db().await?,
+        }
         logctx.cleanup_successful();
         Ok(())
     }
@@ -2344,10 +2941,16 @@ mod tests {
         let log = &logctx.log;
 
         let client = Client::new(address, &log);
-        client
-            .init_single_node_db()
-            .await
-            .expect("Failed to initialize timeseries database");
+        match db_type {
+            InstallationType::SingleNode => client
+                .init_single_node_db()
+                .await
+                .expect("Failed to initialize timeseries database"),
+            InstallationType::Cluster => client
+                .init_replicated_db()
+                .await
+                .expect("Failed to initialize timeseries database"),
+        }
         let samples = test_util::generate_test_samples(2, 2, 2, 2);
         client.insert_samples(&samples).await?;
 
@@ -2369,7 +2972,12 @@ mod tests {
             result.next_page.is_none(),
             "Expected the next page token to be None"
         );
-        client.wipe_single_node_db().await?;
+        match db_type {
+            InstallationType::SingleNode => {
+                client.wipe_single_node_db().await?
+            }
+            InstallationType::Cluster => client.wipe_replicated_db().await?,
+        }
         logctx.cleanup_successful();
         Ok(())
     }
@@ -2382,10 +2990,16 @@ mod tests {
         let log = &logctx.log;
 
         let client = Client::new(address, &log);
-        client
-            .init_single_node_db()
-            .await
-            .expect("Failed to initialize timeseries database");
+        match db_type {
+            InstallationType::SingleNode => client
+                .init_single_node_db()
+                .await
+                .expect("Failed to initialize timeseries database"),
+            InstallationType::Cluster => client
+                .init_replicated_db()
+                .await
+                .expect("Failed to initialize timeseries database"),
+        }
         let samples = test_util::generate_test_samples(2, 2, 2, 2);
         client.insert_samples(&samples).await?;
 
@@ -2448,7 +3062,12 @@ mod tests {
             "Paginating should pick up where it left off"
         );
 
-        client.wipe_single_node_db().await?;
+        match db_type {
+            InstallationType::SingleNode => {
+                client.wipe_single_node_db().await?
+            }
+            InstallationType::Cluster => client.wipe_replicated_db().await?,
+        }
         logctx.cleanup_successful();
         Ok(())
     }
@@ -2599,10 +3218,16 @@ mod tests {
         let log = &logctx.log;
 
         let client = Client::new(address, log);
-        client
-            .init_single_node_db()
-            .await
-            .expect("Failed to initialize timeseries database");
+        match db_type {
+            InstallationType::SingleNode => client
+                .init_single_node_db()
+                .await
+                .expect("Failed to initialize timeseries database"),
+            InstallationType::Cluster => client
+                .init_replicated_db()
+                .await
+                .expect("Failed to initialize timeseries database"),
+        }
 
         // Insert a record from this field.
         const TIMESERIES_NAME: &str = "foo:bar";
@@ -2644,7 +3269,12 @@ mod tests {
             "Actual and expected field rows do not match"
         );
 
-        client.wipe_single_node_db().await?;
+        match db_type {
+            InstallationType::SingleNode => {
+                client.wipe_single_node_db().await?
+            }
+            InstallationType::Cluster => client.wipe_replicated_db().await?,
+        }
         logctx.cleanup_successful();
         Ok(())
     }
@@ -2976,10 +3606,16 @@ mod tests {
         let log = &logctx.log;
 
         let client = Client::new(address, log);
-        client
-            .init_single_node_db()
-            .await
-            .expect("Failed to initialize timeseries database");
+        match db_type {
+            InstallationType::SingleNode => client
+                .init_single_node_db()
+                .await
+                .expect("Failed to initialize timeseries database"),
+            InstallationType::Cluster => client
+                .init_replicated_db()
+                .await
+                .expect("Failed to initialize timeseries database"),
+        }
 
         // Insert a record from this datum.
         const TIMESERIES_NAME: &str = "foo:bar";
@@ -3046,7 +3682,12 @@ mod tests {
             actual_row, inserted_row,
             "Actual and expected measurement rows do not match"
         );
-        client.wipe_single_node_db().await?;
+        match db_type {
+            InstallationType::SingleNode => {
+                client.wipe_single_node_db().await?
+            }
+            InstallationType::Cluster => client.wipe_replicated_db().await?,
+        }
         logctx.cleanup_successful();
         Ok(())
     }
@@ -3096,7 +3737,12 @@ mod tests {
 
         assert_eq!(1, get_schema_count(&client).await);
 
-        client.wipe_single_node_db().await?;
+        match db_type {
+            InstallationType::SingleNode => {
+                client.wipe_single_node_db().await?
+            }
+            InstallationType::Cluster => client.wipe_replicated_db().await?,
+        }
         logctx.cleanup_successful();
         Ok(())
     }
@@ -3132,7 +3778,12 @@ mod tests {
             .await
             .expect_err("Should have failed, downgrades are not supported");
 
-        client.wipe_single_node_db().await?;
+        match db_type {
+            InstallationType::SingleNode => {
+                client.wipe_single_node_db().await?
+            }
+            InstallationType::Cluster => client.wipe_replicated_db().await?,
+        }
         logctx.cleanup_successful();
         Ok(())
     }
@@ -3169,7 +3820,12 @@ mod tests {
             .expect("Should have initialized database successfully");
         assert_eq!(0, get_schema_count(&client).await);
 
-        client.wipe_single_node_db().await?;
+        match db_type {
+            InstallationType::SingleNode => {
+                client.wipe_single_node_db().await?
+            }
+            InstallationType::Cluster => client.wipe_replicated_db().await?,
+        }
         logctx.cleanup_successful();
         Ok(())
     }
@@ -3183,10 +3839,16 @@ mod tests {
         let log = &logctx.log;
 
         let client = Client::new(address, &log);
-        client
-            .init_single_node_db()
-            .await
-            .expect("Failed to initialize timeseries database");
+        match db_type {
+            InstallationType::SingleNode => client
+                .init_single_node_db()
+                .await
+                .expect("Failed to initialize timeseries database"),
+            InstallationType::Cluster => client
+                .init_replicated_db()
+                .await
+                .expect("Failed to initialize timeseries database"),
+        }
         let samples = [test_util::make_sample()];
         client.insert_samples(&samples).await.unwrap();
 
@@ -3218,7 +3880,12 @@ mod tests {
             "Expected exactly 1 schema again"
         );
         assert_eq!(client.schema.lock().await.len(), 1);
-        client.wipe_single_node_db().await?;
+        match db_type {
+            InstallationType::SingleNode => {
+                client.wipe_single_node_db().await?
+            }
+            InstallationType::Cluster => client.wipe_replicated_db().await?,
+        }
         logctx.cleanup_successful();
         Ok(())
     }
@@ -3238,10 +3905,16 @@ mod tests {
         let log = &logctx.log;
 
         let client = Client::new(address, &log);
-        client
-            .init_single_node_db()
-            .await
-            .expect("Failed to initialize timeseries database");
+        match db_type {
+            InstallationType::SingleNode => client
+                .init_single_node_db()
+                .await
+                .expect("Failed to initialize timeseries database"),
+            InstallationType::Cluster => client
+                .init_replicated_db()
+                .await
+                .expect("Failed to initialize timeseries database"),
+        }
 
         // Attempt to select all schema with each datum type.
         for ty in oximeter::DatumType::iter() {
@@ -3256,7 +3929,12 @@ mod tests {
             let count = res.trim().parse::<usize>().unwrap();
             assert_eq!(count, 0);
         }
-        client.wipe_single_node_db().await?;
+        match db_type {
+            InstallationType::SingleNode => {
+                client.wipe_single_node_db().await?
+            }
+            InstallationType::Cluster => client.wipe_replicated_db().await?,
+        }
         logctx.cleanup_successful();
         Ok(())
     }
@@ -3274,10 +3952,16 @@ mod tests {
         let log = &logctx.log;
 
         let client = Client::new(address, &log);
-        client
-            .init_single_node_db()
-            .await
-            .expect("Failed to initialize timeseries database");
+        match db_type {
+            InstallationType::SingleNode => client
+                .init_single_node_db()
+                .await
+                .expect("Failed to initialize timeseries database"),
+            InstallationType::Cluster => client
+                .init_replicated_db()
+                .await
+                .expect("Failed to initialize timeseries database"),
+        }
         let samples = [test_util::make_sample()];
 
         // We're using the components of the `insert_samples()` method here,
@@ -3293,7 +3977,12 @@ mod tests {
 
         // Next, we'll kill the database, and then try to insert the schema.
         // That will fail, since the DB is now inaccessible.
-        client.wipe_single_node_db().await?;
+        match db_type {
+            InstallationType::SingleNode => {
+                client.wipe_single_node_db().await?
+            }
+            InstallationType::Cluster => client.wipe_replicated_db().await?,
+        }
         let res = client.save_new_schema_or_remove(new_schema).await;
         assert!(res.is_err(), "Should have failed since the DB is gone");
         assert!(
