@@ -665,7 +665,7 @@ CREATE TABLE IF NOT EXISTS oximeter.timeseries_schema ON CLUSTER oximeter_cluste
         'CumulativeF32' = 19,
         'HistogramI8' = 20,
         'HistogramU8' = 21,
-        'HistogramI16' = 23,
+        'HistogramI16' = 22,
         'HistogramU16' = 23,
         'HistogramI32' = 24,
         'HistogramU32' = 25,
