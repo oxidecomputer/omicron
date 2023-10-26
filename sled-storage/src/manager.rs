@@ -39,6 +39,7 @@ struct NewFilesystemRequest {
     responder: oneshot::Sender<Result<(), Error>>,
 }
 
+#[derive(Debug)]
 enum StorageRequest {
     AddDisk(RawDisk),
     RemoveDisk(RawDisk),
@@ -286,7 +287,9 @@ impl StorageManager {
     /// This is useful for testing/debugging
     pub async fn step(&mut self) -> Result<(), Error> {
         // The sending side should never disappear
-        let should_send_updates = match self.rx.recv().await.unwrap() {
+        let req = self.rx.recv().await.unwrap();
+        info!(self.log, "Received {:?}", req);
+        let should_send_updates = match req {
             StorageRequest::AddDisk(raw_disk) => {
                 self.add_disk(raw_disk).await?
             }

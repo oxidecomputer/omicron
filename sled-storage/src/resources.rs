@@ -83,9 +83,33 @@ impl StorageResources {
         true
     }
 
+    /// Delete a disk and its zpool
+    ///
+    /// Return true, if data was changed, false otherwise
+    ///
+    /// Note: We never allow removal of synthetic disks as they are only added
+    /// once.
+    #[cfg(not(test))]
+    pub(crate) fn remove_disk(&mut self, id: &DiskIdentity) -> bool {
+        if let Some((disk, _)) = self.disks.get(id) {
+            if disk.is_synthetic() {
+                return false;
+            }
+        } else {
+            return false;
+        }
+        // Safe to unwrap as we just checked the key existed above
+        Arc::make_mut(&mut self.disks).remove(id).unwrap();
+        true
+    }
+
     /// Delete a real disk and its zpool
     ///
     /// Return true, if data was changed, false otherwise
+    ///
+    /// Note: For testing purposes of this crate, we allow synthetic disks to
+    /// be deleted.
+    #[cfg(test)]
     pub(crate) fn remove_disk(&mut self, id: &DiskIdentity) -> bool {
         if !self.disks.contains_key(id) {
             return false;
