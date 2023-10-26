@@ -304,5 +304,16 @@ fn redact_variable(input: &str) -> String {
         .replace_all(&s, "<REDACTED DURATION>ms")
         .to_string();
 
+    let s = regex::Regex::new(
+        r"note: database schema version matches expected \(\d+\.\d+\.\d+\)",
+    )
+    .unwrap()
+    .replace_all(
+        &s,
+        "note: database schema version matches expected \
+        (<redacted database version>)",
+    )
+    .to_string();
+
     s
 }
