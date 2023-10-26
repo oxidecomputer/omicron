@@ -335,6 +335,7 @@ impl StorageManager {
     //
     // Return true if updates should be sent to watchers, false otherwise
     async fn add_queued_disks(&mut self) -> bool {
+        info!(self.log, "Attempting to add queued disks");
         self.state = StorageManagerState::Normal;
 
         let mut send_updates = false;

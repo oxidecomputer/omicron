@@ -422,6 +422,7 @@ impl ServiceManager {
         zone_bundler: ZoneBundler,
     ) -> Self {
         let log = log.new(o!("component" => "ServiceManager"));
+        info!(log, "Creating ServiceManager");
         Self {
             inner: Arc::new(ServiceManagerInner {
                 log: log.clone(),

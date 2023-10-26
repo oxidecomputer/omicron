@@ -16,12 +16,14 @@ use crate::bootstrap::bootstore_setup::{
     new_bootstore_config, poll_ddmd_for_bootstore_peer_update,
 };
 use crate::bootstrap::secret_retriever::LrtqOrHardcodedSecretRetriever;
+use crate::config::Config;
 use crate::hardware_monitor::{HardwareMonitor, HardwareMonitorHandle};
 use crate::storage_monitor::{StorageMonitor, StorageMonitorHandle};
 use crate::zone_bundle::{CleanupContext, ZoneBundler};
 use bootstore::schemes::v0 as bootstore;
 use key_manager::{KeyManager, StorageKeyRequester};
 use sled_hardware::{HardwareManager, SledMode};
+use sled_storage::disk::SyntheticDisk;
 use sled_storage::manager::{StorageHandle, StorageManager};
 use slog::{info, Logger};
 use std::net::Ipv6Addr;
@@ -64,6 +66,7 @@ pub async fn spawn_all_longrunning_tasks(
     log: &Logger,
     sled_mode: SledMode,
     global_zone_bootstrap_ip: Ipv6Addr,
+    config: &Config,
 ) -> LongRunningTaskHandles {
     let storage_key_requester = spawn_key_manager(log);
     let mut storage_manager =
@@ -78,9 +81,14 @@ pub async fn spawn_all_longrunning_tasks(
     let hardware_monitor =
         spawn_hardware_monitor(log, &hardware_manager, &storage_manager);
 
+    // Add some synthetic disks if necessary.
+    upsert_synthetic_zpools_if_needed(&log, &storage_manager, &config).await;
+
     // Wait for the boot disk so that we can work with any ledgers,
     // such as those needed by the bootstore and sled-agent
-    let _ = storage_manager.wait_for_boot_disk().await;
+    info!(log, "Waiting for boot disk");
+    let (disk_id, _) = storage_manager.wait_for_boot_disk().await;
+    info!(log, "Found boot disk {:?}", disk_id);
 
     let bootstore = spawn_bootstore_tasks(
         log,
@@ -158,6 +166,7 @@ fn spawn_hardware_monitor(
     hardware_manager: &HardwareManager,
     storage_handle: &StorageHandle,
 ) -> HardwareMonitorHandle {
+    info!(log, "Starting HardwareMonitor");
     let (mut monitor, handle) =
         HardwareMonitor::new(log, hardware_manager, storage_handle);
     tokio::spawn(async move {
@@ -181,10 +190,12 @@ async fn spawn_bootstore_tasks(
     .unwrap();
 
     // Create and spawn the bootstore
+    info!(log, "Starting Bootstore");
     let (mut node, node_handle) = bootstore::Node::new(config, log).await;
     tokio::spawn(async move { node.run().await });
 
     // Spawn a task for polling DDMD and updating bootstore with peer addresses
+    info!(log, "Starting Bootstore DDMD poller");
     let log = log.new(o!("component" => "bootstore_ddmd_poller"));
     let node_handle2 = node_handle.clone();
     tokio::spawn(async move {
@@ -199,6 +210,25 @@ fn spawn_zone_bundler_tasks(
     log: &Logger,
     storage_handle: &mut StorageHandle,
 ) -> ZoneBundler {
+    info!(log, "Starting ZoneBundler related tasks");
     let log = log.new(o!("component" => "ZoneBundler"));
     ZoneBundler::new(log, storage_handle.clone(), CleanupContext::default())
+}
+
+async fn upsert_synthetic_zpools_if_needed(
+    log: &Logger,
+    storage_manager: &StorageHandle,
+    config: &Config,
+) {
+    if let Some(pools) = &config.zpools {
+        for pool in pools {
+            info!(
+                log,
+                "Upserting synthetic zpool to Storage Manager: {}",
+                pool.to_string()
+            );
+            let disk = SyntheticDisk::new(pool.clone()).into();
+            storage_manager.upsert_disk(disk).await;
+        }
+    }
 }

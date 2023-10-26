@@ -34,8 +34,6 @@ use omicron_common::FileKv;
 use sled_hardware::underlay;
 use sled_hardware::DendriteAsic;
 use sled_hardware::SledMode;
-use sled_storage::disk::SyntheticDisk;
-use sled_storage::manager::StorageHandle;
 use slog::Drain;
 use slog::Logger;
 use std::net::IpAddr;
@@ -111,13 +109,6 @@ impl BootstrapAgentStartup {
             &base_log,
             sled_mode,
             startup_networking.global_zone_bootstrap_ip,
-        )
-        .await;
-
-        // Add some synthetic disks if necessary.
-        upsert_synthetic_zpools_if_needed(
-            &log,
-            &long_running_task_handles.storage_manager,
             &config,
         )
         .await;
@@ -273,24 +264,6 @@ fn ensure_zfs_ramdisk_dataset() -> Result<(), StartError> {
         None,
     )
     .map_err(StartError::EnsureZfsRamdiskDataset)
-}
-
-async fn upsert_synthetic_zpools_if_needed(
-    log: &Logger,
-    storage_manager: &StorageHandle,
-    config: &Config,
-) {
-    if let Some(pools) = &config.zpools {
-        for pool in pools {
-            info!(
-                log,
-                "Upserting synthetic zpool to Storage Manager: {}",
-                pool.to_string()
-            );
-            let disk = SyntheticDisk::new(pool.clone()).into();
-            storage_manager.upsert_disk(disk).await;
-        }
-    }
 }
 
 // Combine the `sled_mode` config with the build-time switch type to determine
