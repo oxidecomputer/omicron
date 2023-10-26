@@ -873,151 +873,347 @@ mod tests {
             .unwrap();
 
         // Tests that data can be inserted via the client
-        insert_samples_test(db.address).await.unwrap();
+        insert_samples_test(db.address, InstallationType::SingleNode)
+            .await
+            .unwrap();
 
         // Tests for a schema mismatch
-        schema_mismatch_test(db.address).await.unwrap();
+        schema_mismatch_test(db.address, InstallationType::SingleNode)
+            .await
+            .unwrap();
 
         // Tests for a schema update
-        schema_updated_test(db.address).await.unwrap();
+        schema_updated_test(db.address, InstallationType::SingleNode)
+            .await
+            .unwrap();
 
         // Tests for specific timeseries selection
-        client_select_timeseries_one_test(db.address).await.unwrap();
+        client_select_timeseries_one_test(
+            db.address,
+            InstallationType::SingleNode,
+        )
+        .await
+        .unwrap();
 
         // Tests for specific timeseries selection
-        field_record_count_test(db.address).await.unwrap();
+        field_record_count_test(db.address, InstallationType::SingleNode)
+            .await
+            .unwrap();
 
         // ClickHouse regression test
-        unquoted_64bit_integers_test(db.address).await.unwrap();
+        unquoted_64bit_integers_test(db.address, InstallationType::SingleNode)
+            .await
+            .unwrap();
 
         // Tests to verify that we can distinguish between metrics by name
-        differentiate_by_timeseries_name_test(db.address).await.unwrap();
+        differentiate_by_timeseries_name_test(
+            db.address,
+            InstallationType::SingleNode,
+        )
+        .await
+        .unwrap();
 
         // Tests selecting a single timeseries
-        select_timeseries_with_select_one_test(db.address).await.unwrap();
+        select_timeseries_with_select_one_test(
+            db.address,
+            InstallationType::SingleNode,
+        )
+        .await
+        .unwrap();
 
         // Tests selecting two timeseries
         select_timeseries_with_select_one_field_with_multiple_values_test(
             db.address,
+            InstallationType::SingleNode,
         )
         .await
         .unwrap();
 
         // Tests selecting multiple timeseries
-        select_timeseries_with_select_multiple_fields_with_multiple_values_test(db.address).await.unwrap();
+        select_timeseries_with_select_multiple_fields_with_multiple_values_test(db.address, InstallationType::SingleNode).await.unwrap();
 
         // Tests selecting all timeseries
-        select_timeseries_with_all_test(db.address).await.unwrap();
+        select_timeseries_with_all_test(
+            db.address,
+            InstallationType::SingleNode,
+        )
+        .await
+        .unwrap();
 
         // Tests selecting all timeseries with start time
-        select_timeseries_with_start_time_test(db.address).await.unwrap();
+        select_timeseries_with_start_time_test(
+            db.address,
+            InstallationType::SingleNode,
+        )
+        .await
+        .unwrap();
 
         // Tests selecting all timeseries with start time
-        select_timeseries_with_limit_test(db.address).await.unwrap();
+        select_timeseries_with_limit_test(
+            db.address,
+            InstallationType::SingleNode,
+        )
+        .await
+        .unwrap();
 
         // Tests selecting all timeseries with order
-        select_timeseries_with_order_test(db.address).await.unwrap();
+        select_timeseries_with_order_test(
+            db.address,
+            InstallationType::SingleNode,
+        )
+        .await
+        .unwrap();
 
         // Tests schema does not change
-        get_schema_no_new_values_test(db.address).await.unwrap();
+        get_schema_no_new_values_test(db.address, InstallationType::SingleNode)
+            .await
+            .unwrap();
 
         // Tests listing timeseries schema
-        timeseries_schema_list_test(db.address).await.unwrap();
+        timeseries_schema_list_test(db.address, InstallationType::SingleNode)
+            .await
+            .unwrap();
 
         // Tests listing timeseries
-        list_timeseries_test(db.address).await.unwrap();
+        list_timeseries_test(db.address, InstallationType::SingleNode)
+            .await
+            .unwrap();
 
         // Tests no changes are made when version is not updated
-        database_version_update_idempotent_test(db.address).await.unwrap();
+        database_version_update_idempotent_test(
+            db.address,
+            InstallationType::SingleNode,
+        )
+        .await
+        .unwrap();
 
         // Tests that downgrading is impossible
-        database_version_will_not_downgrade_test(db.address).await.unwrap();
+        database_version_will_not_downgrade_test(
+            db.address,
+            InstallationType::SingleNode,
+        )
+        .await
+        .unwrap();
 
         // Tests old data is dropped if version is updated
-        database_version_wipes_old_version_test(db.address).await.unwrap();
+        database_version_wipes_old_version_test(
+            db.address,
+            InstallationType::SingleNode,
+        )
+        .await
+        .unwrap();
 
         // Tests schema cache is updated when a new sample is inserted
-        update_schema_cache_on_new_sample_test(db.address).await.unwrap();
+        update_schema_cache_on_new_sample_test(
+            db.address,
+            InstallationType::SingleNode,
+        )
+        .await
+        .unwrap();
 
         // Tests that we can successfully query all extant datum types from the schema table.
-        select_all_datum_types_test(db.address).await.unwrap();
+        select_all_datum_types_test(db.address, InstallationType::SingleNode)
+            .await
+            .unwrap();
 
         // Tests that, when cache new schema but _fail_ to insert them,
         // we also remove them from the internal cache.
-        new_schema_removed_when_not_inserted_test(db.address).await.unwrap();
+        new_schema_removed_when_not_inserted_test(
+            db.address,
+            InstallationType::SingleNode,
+        )
+        .await
+        .unwrap();
 
         // Tests for fields and measurements
-        recall_field_value_bool_test(db.address).await.unwrap();
+        recall_field_value_bool_test(db.address, InstallationType::SingleNode)
+            .await
+            .unwrap();
 
-        recall_field_value_u8_test(db.address).await.unwrap();
+        recall_field_value_u8_test(db.address, InstallationType::SingleNode)
+            .await
+            .unwrap();
 
-        recall_field_value_i8_test(db.address).await.unwrap();
+        recall_field_value_i8_test(db.address, InstallationType::SingleNode)
+            .await
+            .unwrap();
 
-        recall_field_value_u16_test(db.address).await.unwrap();
+        recall_field_value_u16_test(db.address, InstallationType::SingleNode)
+            .await
+            .unwrap();
 
-        recall_field_value_i16_test(db.address).await.unwrap();
+        recall_field_value_i16_test(db.address, InstallationType::SingleNode)
+            .await
+            .unwrap();
 
-        recall_field_value_u32_test(db.address).await.unwrap();
+        recall_field_value_u32_test(db.address, InstallationType::SingleNode)
+            .await
+            .unwrap();
 
-        recall_field_value_i32_test(db.address).await.unwrap();
+        recall_field_value_i32_test(db.address, InstallationType::SingleNode)
+            .await
+            .unwrap();
 
-        recall_field_value_u64_test(db.address).await.unwrap();
+        recall_field_value_u64_test(db.address, InstallationType::SingleNode)
+            .await
+            .unwrap();
 
-        recall_field_value_i64_test(db.address).await.unwrap();
+        recall_field_value_i64_test(db.address, InstallationType::SingleNode)
+            .await
+            .unwrap();
 
-        recall_field_value_string_test(db.address).await.unwrap();
+        recall_field_value_string_test(
+            db.address,
+            InstallationType::SingleNode,
+        )
+        .await
+        .unwrap();
 
-        recall_field_value_ipv4addr_test(db.address).await.unwrap();
+        recall_field_value_ipv4addr_test(
+            db.address,
+            InstallationType::SingleNode,
+        )
+        .await
+        .unwrap();
 
-        recall_field_value_ipv6addr_test(db.address).await.unwrap();
+        recall_field_value_ipv6addr_test(
+            db.address,
+            InstallationType::SingleNode,
+        )
+        .await
+        .unwrap();
 
-        recall_field_value_uuid_test(db.address).await.unwrap();
+        recall_field_value_uuid_test(db.address, InstallationType::SingleNode)
+            .await
+            .unwrap();
 
-        recall_measurement_bool_test(db.address).await.unwrap();
+        recall_measurement_bool_test(db.address, InstallationType::SingleNode)
+            .await
+            .unwrap();
 
-        recall_measurement_i8_test(db.address).await.unwrap();
+        recall_measurement_i8_test(db.address, InstallationType::SingleNode)
+            .await
+            .unwrap();
 
-        recall_measurement_u8_test(db.address).await.unwrap();
+        recall_measurement_u8_test(db.address, InstallationType::SingleNode)
+            .await
+            .unwrap();
 
-        recall_measurement_i16_test(db.address).await.unwrap();
+        recall_measurement_i16_test(db.address, InstallationType::SingleNode)
+            .await
+            .unwrap();
 
-        recall_measurement_u16_test(db.address).await.unwrap();
+        recall_measurement_u16_test(db.address, InstallationType::SingleNode)
+            .await
+            .unwrap();
 
-        recall_measurement_i32_test(db.address).await.unwrap();
+        recall_measurement_i32_test(db.address, InstallationType::SingleNode)
+            .await
+            .unwrap();
 
-        recall_measurement_u32_test(db.address).await.unwrap();
+        recall_measurement_u32_test(db.address, InstallationType::SingleNode)
+            .await
+            .unwrap();
 
-        recall_measurement_i64_test(db.address).await.unwrap();
+        recall_measurement_i64_test(db.address, InstallationType::SingleNode)
+            .await
+            .unwrap();
 
-        recall_measurement_u64_test(db.address).await.unwrap();
+        recall_measurement_u64_test(db.address, InstallationType::SingleNode)
+            .await
+            .unwrap();
 
-        recall_measurement_f32_test(db.address).await.unwrap();
+        recall_measurement_f32_test(db.address, InstallationType::SingleNode)
+            .await
+            .unwrap();
 
-        recall_measurement_f64_test(db.address).await.unwrap();
+        recall_measurement_f64_test(db.address, InstallationType::SingleNode)
+            .await
+            .unwrap();
 
-        recall_measurement_cumulative_i64_test(db.address).await.unwrap();
+        recall_measurement_cumulative_i64_test(
+            db.address,
+            InstallationType::SingleNode,
+        )
+        .await
+        .unwrap();
 
-        recall_measurement_cumulative_u64_test(db.address).await.unwrap();
+        recall_measurement_cumulative_u64_test(
+            db.address,
+            InstallationType::SingleNode,
+        )
+        .await
+        .unwrap();
 
-        recall_measurement_cumulative_f64_test(db.address).await.unwrap();
+        recall_measurement_cumulative_f64_test(
+            db.address,
+            InstallationType::SingleNode,
+        )
+        .await
+        .unwrap();
 
-        recall_measurement_histogram_i8_test(db.address).await.unwrap();
+        recall_measurement_histogram_i8_test(
+            db.address,
+            InstallationType::SingleNode,
+        )
+        .await
+        .unwrap();
 
-        recall_measurement_histogram_u8_test(db.address).await.unwrap();
+        recall_measurement_histogram_u8_test(
+            db.address,
+            InstallationType::SingleNode,
+        )
+        .await
+        .unwrap();
 
-        recall_measurement_histogram_i16_test(db.address).await.unwrap();
+        recall_measurement_histogram_i16_test(
+            db.address,
+            InstallationType::SingleNode,
+        )
+        .await
+        .unwrap();
 
-        recall_measurement_histogram_u16_test(db.address).await.unwrap();
+        recall_measurement_histogram_u16_test(
+            db.address,
+            InstallationType::SingleNode,
+        )
+        .await
+        .unwrap();
 
-        recall_measurement_histogram_i32_test(db.address).await.unwrap();
+        recall_measurement_histogram_i32_test(
+            db.address,
+            InstallationType::SingleNode,
+        )
+        .await
+        .unwrap();
 
-        recall_measurement_histogram_u32_test(db.address).await.unwrap();
+        recall_measurement_histogram_u32_test(
+            db.address,
+            InstallationType::SingleNode,
+        )
+        .await
+        .unwrap();
 
-        recall_measurement_histogram_i64_test(db.address).await.unwrap();
+        recall_measurement_histogram_i64_test(
+            db.address,
+            InstallationType::SingleNode,
+        )
+        .await
+        .unwrap();
 
-        recall_measurement_histogram_u64_test(db.address).await.unwrap();
+        recall_measurement_histogram_u64_test(
+            db.address,
+            InstallationType::SingleNode,
+        )
+        .await
+        .unwrap();
 
-        recall_measurement_histogram_f64_test(db.address).await.unwrap();
+        recall_measurement_histogram_f64_test(
+            db.address,
+            InstallationType::SingleNode,
+        )
+        .await
+        .unwrap();
 
         db.cleanup().await.expect("Failed to cleanup ClickHouse server");
     }
@@ -1161,7 +1357,10 @@ mod tests {
         Ok(())
     }
 
-    async fn insert_samples_test(address: SocketAddr) -> Result<(), Error> {
+    async fn insert_samples_test(
+        address: SocketAddr,
+        db_type: InstallationType,
+    ) -> Result<(), Error> {
         let logctx = test_setup_log("test_insert_samples");
         let log = &logctx.log;
 
@@ -1203,7 +1402,10 @@ mod tests {
         }
     }
 
-    async fn schema_mismatch_test(address: SocketAddr) -> Result<(), Error> {
+    async fn schema_mismatch_test(
+        address: SocketAddr,
+        db_type: InstallationType,
+    ) -> Result<(), Error> {
         let logctx = test_setup_log("test_schema_mismatch");
         let log = &logctx.log;
 
@@ -1233,7 +1435,10 @@ mod tests {
         Ok(())
     }
 
-    async fn schema_updated_test(address: SocketAddr) -> Result<(), Error> {
+    async fn schema_updated_test(
+        address: SocketAddr,
+        db_type: InstallationType,
+    ) -> Result<(), Error> {
         let logctx = test_setup_log("test_schema_updated");
         let log = &logctx.log;
 
@@ -1310,6 +1515,7 @@ mod tests {
 
     async fn client_select_timeseries_one_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         let logctx = test_setup_log("test_client_select_timeseries_one");
         let log = &logctx.log;
@@ -1395,7 +1601,10 @@ mod tests {
         Ok(())
     }
 
-    async fn field_record_count_test(address: SocketAddr) -> Result<(), Error> {
+    async fn field_record_count_test(
+        address: SocketAddr,
+        db_type: InstallationType,
+    ) -> Result<(), Error> {
         let logctx = test_setup_log("test_field_record_count");
         let log = &logctx.log;
 
@@ -1457,6 +1666,7 @@ mod tests {
     // details. This test verifies that we get back _unquoted_ integers from the database.
     async fn unquoted_64bit_integers_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         use serde_json::Value;
         let logctx = test_setup_log("test_unquoted_64bit_integers");
@@ -1483,6 +1693,7 @@ mod tests {
 
     async fn differentiate_by_timeseries_name_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         let logctx = test_setup_log("test_differentiate_by_timeseries_name");
         let log = &logctx.log;
@@ -1553,6 +1764,7 @@ mod tests {
 
     async fn select_timeseries_with_select_one_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         let logctx = test_setup_log("test_select_timeseries_with_select_one");
         let log = &logctx.log;
@@ -1615,6 +1827,7 @@ mod tests {
 
     async fn select_timeseries_with_select_one_field_with_multiple_values_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         let logctx = test_setup_log(
             "test_select_timeseries_with_select_one_field_with_multiple_values",
@@ -1685,6 +1898,7 @@ mod tests {
 
     async fn select_timeseries_with_select_multiple_fields_with_multiple_values_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         let logctx = test_setup_log("test_select_timeseries_with_select_multiple_fields_with_multiple_values");
         let log = &logctx.log;
@@ -1761,6 +1975,7 @@ mod tests {
 
     async fn select_timeseries_with_all_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         let logctx = test_setup_log("test_select_timeseries_with_all");
         let log = &logctx.log;
@@ -1822,6 +2037,7 @@ mod tests {
 
     async fn select_timeseries_with_start_time_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         let logctx = test_setup_log("test_select_timeseries_with_start_time");
         let log = &logctx.log;
@@ -1873,6 +2089,7 @@ mod tests {
 
     async fn select_timeseries_with_limit_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         let logctx = test_setup_log("test_select_timeseries_with_limit");
         let log = &logctx.log;
@@ -1991,6 +2208,7 @@ mod tests {
 
     async fn select_timeseries_with_order_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         let logctx = test_setup_log("test_select_timeseries_with_order");
         let log = &logctx.log;
@@ -2092,6 +2310,7 @@ mod tests {
 
     async fn get_schema_no_new_values_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         let logctx = test_setup_log("test_get_schema_no_new_values");
         let log = &logctx.log;
@@ -2119,6 +2338,7 @@ mod tests {
 
     async fn timeseries_schema_list_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         let logctx = test_setup_log("test_timeseries_schema_list");
         let log = &logctx.log;
@@ -2154,7 +2374,10 @@ mod tests {
         Ok(())
     }
 
-    async fn list_timeseries_test(address: SocketAddr) -> Result<(), Error> {
+    async fn list_timeseries_test(
+        address: SocketAddr,
+        db_type: InstallationType,
+    ) -> Result<(), Error> {
         let logctx = test_setup_log("test_list_timeseries");
         let log = &logctx.log;
 
@@ -2232,126 +2455,140 @@ mod tests {
 
     async fn recall_field_value_bool_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         let field = FieldValue::Bool(true);
         let as_json = serde_json::Value::from(1_u64);
-        test_recall_field_value_impl(address, field, as_json).await?;
+        test_recall_field_value_impl(address, db_type, field, as_json).await?;
         Ok(())
     }
 
     async fn recall_field_value_u8_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         let field = FieldValue::U8(1);
         let as_json = serde_json::Value::from(1_u8);
-        test_recall_field_value_impl(address, field, as_json).await?;
+        test_recall_field_value_impl(address, db_type, field, as_json).await?;
         Ok(())
     }
 
     async fn recall_field_value_i8_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         let field = FieldValue::I8(1);
         let as_json = serde_json::Value::from(1_i8);
-        test_recall_field_value_impl(address, field, as_json).await?;
+        test_recall_field_value_impl(address, db_type, field, as_json).await?;
         Ok(())
     }
 
     async fn recall_field_value_u16_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         let field = FieldValue::U16(1);
         let as_json = serde_json::Value::from(1_u16);
-        test_recall_field_value_impl(address, field, as_json).await?;
+        test_recall_field_value_impl(address, db_type, field, as_json).await?;
         Ok(())
     }
 
     async fn recall_field_value_i16_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         let field = FieldValue::I16(1);
         let as_json = serde_json::Value::from(1_i16);
-        test_recall_field_value_impl(address, field, as_json).await?;
+        test_recall_field_value_impl(address, db_type, field, as_json).await?;
         Ok(())
     }
 
     async fn recall_field_value_u32_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         let field = FieldValue::U32(1);
         let as_json = serde_json::Value::from(1_u32);
-        test_recall_field_value_impl(address, field, as_json).await?;
+        test_recall_field_value_impl(address, db_type, field, as_json).await?;
         Ok(())
     }
 
     async fn recall_field_value_i32_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         let field = FieldValue::I32(1);
         let as_json = serde_json::Value::from(1_i32);
-        test_recall_field_value_impl(address, field, as_json).await?;
+        test_recall_field_value_impl(address, db_type, field, as_json).await?;
         Ok(())
     }
 
     async fn recall_field_value_u64_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         let field = FieldValue::U64(1);
         let as_json = serde_json::Value::from(1_u64);
-        test_recall_field_value_impl(address, field, as_json).await?;
+        test_recall_field_value_impl(address, db_type, field, as_json).await?;
         Ok(())
     }
 
     async fn recall_field_value_i64_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         let field = FieldValue::I64(1);
         let as_json = serde_json::Value::from(1_i64);
-        test_recall_field_value_impl(address, field, as_json).await?;
+        test_recall_field_value_impl(address, db_type, field, as_json).await?;
         Ok(())
     }
 
     async fn recall_field_value_string_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         let field = FieldValue::String("foo".into());
         let as_json = serde_json::Value::from("foo");
-        test_recall_field_value_impl(address, field, as_json).await?;
+        test_recall_field_value_impl(address, db_type, field, as_json).await?;
         Ok(())
     }
 
     async fn recall_field_value_ipv4addr_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         let field = FieldValue::from(Ipv4Addr::LOCALHOST);
         let as_json = serde_json::Value::from(
             Ipv4Addr::LOCALHOST.to_ipv6_mapped().to_string(),
         );
-        test_recall_field_value_impl(address, field, as_json).await?;
+        test_recall_field_value_impl(address, db_type, field, as_json).await?;
         Ok(())
     }
 
     async fn recall_field_value_ipv6addr_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         let field = FieldValue::from(Ipv6Addr::LOCALHOST);
         let as_json = serde_json::Value::from(Ipv6Addr::LOCALHOST.to_string());
-        test_recall_field_value_impl(address, field, as_json).await?;
+        test_recall_field_value_impl(address, db_type, field, as_json).await?;
         Ok(())
     }
 
     async fn recall_field_value_uuid_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         let id = Uuid::new_v4();
         let field = FieldValue::from(id);
         let as_json = serde_json::Value::from(id.to_string());
-        test_recall_field_value_impl(address, field, as_json).await?;
+        test_recall_field_value_impl(address, db_type, field, as_json).await?;
         Ok(())
     }
 
     async fn test_recall_field_value_impl(
         address: SocketAddr,
+        db_type: InstallationType,
         field_value: FieldValue,
         as_json: serde_json::Value,
     ) -> Result<(), Error> {
@@ -2414,149 +2651,192 @@ mod tests {
 
     async fn recall_measurement_bool_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         let datum = Datum::Bool(true);
         let as_json = serde_json::Value::from(1_u64);
-        test_recall_measurement_impl::<u8>(address, datum, None, as_json)
-            .await?;
+        test_recall_measurement_impl::<u8>(
+            address, db_type, datum, None, as_json,
+        )
+        .await?;
         Ok(())
     }
 
     async fn recall_measurement_i8_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         let datum = Datum::I8(1);
         let as_json = serde_json::Value::from(1_i8);
-        test_recall_measurement_impl::<u8>(address, datum, None, as_json)
-            .await?;
+        test_recall_measurement_impl::<u8>(
+            address, db_type, datum, None, as_json,
+        )
+        .await?;
         Ok(())
     }
 
     async fn recall_measurement_u8_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         let datum = Datum::U8(1);
         let as_json = serde_json::Value::from(1_u8);
-        test_recall_measurement_impl::<u8>(address, datum, None, as_json)
-            .await?;
+        test_recall_measurement_impl::<u8>(
+            address, db_type, datum, None, as_json,
+        )
+        .await?;
         Ok(())
     }
 
     async fn recall_measurement_i16_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         let datum = Datum::I16(1);
         let as_json = serde_json::Value::from(1_i16);
-        test_recall_measurement_impl::<u8>(address, datum, None, as_json)
-            .await?;
+        test_recall_measurement_impl::<u8>(
+            address, db_type, datum, None, as_json,
+        )
+        .await?;
         Ok(())
     }
 
     async fn recall_measurement_u16_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         let datum = Datum::U16(1);
         let as_json = serde_json::Value::from(1_u16);
-        test_recall_measurement_impl::<u8>(address, datum, None, as_json)
-            .await?;
+        test_recall_measurement_impl::<u8>(
+            address, db_type, datum, None, as_json,
+        )
+        .await?;
         Ok(())
     }
 
     async fn recall_measurement_i32_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         let datum = Datum::I32(1);
         let as_json = serde_json::Value::from(1_i32);
-        test_recall_measurement_impl::<u8>(address, datum, None, as_json)
-            .await?;
+        test_recall_measurement_impl::<u8>(
+            address, db_type, datum, None, as_json,
+        )
+        .await?;
         Ok(())
     }
 
     async fn recall_measurement_u32_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         let datum = Datum::U32(1);
         let as_json = serde_json::Value::from(1_u32);
-        test_recall_measurement_impl::<u8>(address, datum, None, as_json)
-            .await?;
+        test_recall_measurement_impl::<u8>(
+            address, db_type, datum, None, as_json,
+        )
+        .await?;
         Ok(())
     }
 
     async fn recall_measurement_i64_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         let datum = Datum::I64(1);
         let as_json = serde_json::Value::from(1_i64);
-        test_recall_measurement_impl::<u8>(address, datum, None, as_json)
-            .await?;
+        test_recall_measurement_impl::<u8>(
+            address, db_type, datum, None, as_json,
+        )
+        .await?;
         Ok(())
     }
 
     async fn recall_measurement_u64_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         let datum = Datum::U64(1);
         let as_json = serde_json::Value::from(1_u64);
-        test_recall_measurement_impl::<u8>(address, datum, None, as_json)
-            .await?;
+        test_recall_measurement_impl::<u8>(
+            address, db_type, datum, None, as_json,
+        )
+        .await?;
         Ok(())
     }
 
     async fn recall_measurement_f32_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         const VALUE: f32 = 1.1;
         let datum = Datum::F32(VALUE);
         // NOTE: This is intentionally an f64.
         let as_json = serde_json::Value::from(1.1_f64);
-        test_recall_measurement_impl::<u8>(address, datum, None, as_json)
-            .await?;
+        test_recall_measurement_impl::<u8>(
+            address, db_type, datum, None, as_json,
+        )
+        .await?;
         Ok(())
     }
 
     async fn recall_measurement_f64_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         const VALUE: f64 = 1.1;
         let datum = Datum::F64(VALUE);
         let as_json = serde_json::Value::from(VALUE);
-        test_recall_measurement_impl::<u8>(address, datum, None, as_json)
-            .await?;
+        test_recall_measurement_impl::<u8>(
+            address, db_type, datum, None, as_json,
+        )
+        .await?;
         Ok(())
     }
 
     async fn recall_measurement_cumulative_i64_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         let datum = Datum::CumulativeI64(1.into());
         let as_json = serde_json::Value::from(1_i64);
-        test_recall_measurement_impl::<u8>(address, datum, None, as_json)
-            .await?;
+        test_recall_measurement_impl::<u8>(
+            address, db_type, datum, None, as_json,
+        )
+        .await?;
         Ok(())
     }
 
     async fn recall_measurement_cumulative_u64_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         let datum = Datum::CumulativeU64(1.into());
         let as_json = serde_json::Value::from(1_u64);
-        test_recall_measurement_impl::<u8>(address, datum, None, as_json)
-            .await?;
+        test_recall_measurement_impl::<u8>(
+            address, db_type, datum, None, as_json,
+        )
+        .await?;
         Ok(())
     }
 
     async fn recall_measurement_cumulative_f64_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         let datum = Datum::CumulativeF64(1.1.into());
         let as_json = serde_json::Value::from(1.1_f64);
-        test_recall_measurement_impl::<u8>(address, datum, None, as_json)
-            .await?;
+        test_recall_measurement_impl::<u8>(
+            address, db_type, datum, None, as_json,
+        )
+        .await?;
         Ok(())
     }
 
     async fn histogram_test_impl<T>(
         address: SocketAddr,
+        db_type: InstallationType,
         hist: Histogram<T>,
     ) -> Result<(), Error>
     where
@@ -2569,72 +2849,86 @@ mod tests {
         let as_json = serde_json::Value::Array(
             counts.into_iter().map(Into::into).collect(),
         );
-        test_recall_measurement_impl(address, datum, Some(bins), as_json)
-            .await?;
+        test_recall_measurement_impl(
+            address,
+            db_type,
+            datum,
+            Some(bins),
+            as_json,
+        )
+        .await?;
         Ok(())
     }
 
     async fn recall_measurement_histogram_i8_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         let hist = Histogram::new(&[0i8, 1, 2]).unwrap();
-        histogram_test_impl(address, hist).await?;
+        histogram_test_impl(address, db_type, hist).await?;
         Ok(())
     }
 
     async fn recall_measurement_histogram_u8_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         let hist = Histogram::new(&[0u8, 1, 2]).unwrap();
-        histogram_test_impl(address, hist).await?;
+        histogram_test_impl(address, db_type, hist).await?;
         Ok(())
     }
 
     async fn recall_measurement_histogram_i16_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         let hist = Histogram::new(&[0i16, 1, 2]).unwrap();
-        histogram_test_impl(address, hist).await?;
+        histogram_test_impl(address, db_type, hist).await?;
         Ok(())
     }
 
     async fn recall_measurement_histogram_u16_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         let hist = Histogram::new(&[0u16, 1, 2]).unwrap();
-        histogram_test_impl(address, hist).await?;
+        histogram_test_impl(address, db_type, hist).await?;
         Ok(())
     }
 
     async fn recall_measurement_histogram_i32_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         let hist = Histogram::new(&[0i32, 1, 2]).unwrap();
-        histogram_test_impl(address, hist).await?;
+        histogram_test_impl(address, db_type, hist).await?;
         Ok(())
     }
 
     async fn recall_measurement_histogram_u32_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         let hist = Histogram::new(&[0u32, 1, 2]).unwrap();
-        histogram_test_impl(address, hist).await?;
+        histogram_test_impl(address, db_type, hist).await?;
         Ok(())
     }
 
     async fn recall_measurement_histogram_i64_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         let hist = Histogram::new(&[0i64, 1, 2]).unwrap();
-        histogram_test_impl(address, hist).await?;
+        histogram_test_impl(address, db_type, hist).await?;
         Ok(())
     }
 
     async fn recall_measurement_histogram_u64_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         let hist = Histogram::new(&[0u64, 1, 2]).unwrap();
-        histogram_test_impl(address, hist).await?;
+        histogram_test_impl(address, db_type, hist).await?;
         Ok(())
     }
 
@@ -2653,22 +2947,25 @@ mod tests {
     #[allow(dead_code)]
     async fn recall_measurement_histogram_f32_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         let hist = Histogram::new(&[0.1f32, 0.2, 0.3]).unwrap();
-        histogram_test_impl(address, hist).await?;
+        histogram_test_impl(address, db_type, hist).await?;
         Ok(())
     }
 
     async fn recall_measurement_histogram_f64_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         let hist = Histogram::new(&[0.1f64, 0.2, 0.3]).unwrap();
-        histogram_test_impl(address, hist).await?;
+        histogram_test_impl(address, db_type, hist).await?;
         Ok(())
     }
 
     async fn test_recall_measurement_impl<T: Into<serde_json::Value> + Copy>(
         address: SocketAddr,
+        db_type: InstallationType,
         datum: Datum,
         maybe_bins: Option<Vec<T>>,
         json_datum: serde_json::Value,
@@ -2768,6 +3065,7 @@ mod tests {
 
     async fn database_version_update_idempotent_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         let logctx = test_setup_log("test_database_version_update_idempotent");
         let log = &logctx.log;
@@ -2805,6 +3103,7 @@ mod tests {
 
     async fn database_version_will_not_downgrade_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         let logctx = test_setup_log("test_database_version_will_not_downgrade");
         let log = &logctx.log;
@@ -2840,6 +3139,7 @@ mod tests {
 
     async fn database_version_wipes_old_version_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         let logctx = test_setup_log("test_database_version_wipes_old_version");
         let log = &logctx.log;
@@ -2876,6 +3176,7 @@ mod tests {
 
     async fn update_schema_cache_on_new_sample_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         usdt::register_probes().unwrap();
         let logctx = test_setup_log("test_update_schema_cache_on_new_sample");
@@ -2929,6 +3230,7 @@ mod tests {
     // succeed.
     async fn select_all_datum_types_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         use strum::IntoEnumIterator;
         usdt::register_probes().unwrap();
@@ -2965,6 +3267,7 @@ mod tests {
     // remove them from the internal cache.
     async fn new_schema_removed_when_not_inserted_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         usdt::register_probes().unwrap();
         let logctx = test_setup_log("test_update_schema_cache_on_new_sample");
