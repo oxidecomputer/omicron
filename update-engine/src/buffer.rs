@@ -240,8 +240,13 @@ impl<S: StepSpec> EventStore<S> {
         // index.
         let root_event_index = RootEventIndex(event.event_index);
 
-        let actions =
-            self.recurse_for_step_event(&event, 0, None, root_event_index);
+        let actions = self.recurse_for_step_event(
+            &event,
+            0,
+            None,
+            root_event_index,
+            event.total_elapsed,
+        );
         if let Some(new_execution) = actions.new_execution {
             if new_execution.nest_level == 0 {
                 self.root_execution_id = Some(new_execution.execution_id);
@@ -312,6 +317,7 @@ impl<S: StepSpec> EventStore<S> {
         nest_level: usize,
         parent_sort_key: Option<&StepSortKey>,
         root_event_index: RootEventIndex,
+        root_total_elapsed: Duration,
     ) -> RecurseActions {
         let mut new_execution = None;
         let (step_key, progress_key) = match &event.kind {
@@ -365,6 +371,8 @@ impl<S: StepSpec> EventStore<S> {
                 let info = CompletionInfo {
                     attempt: *attempt,
                     outcome,
+                    root_total_elapsed,
+                    leaf_total_elapsed: event.total_elapsed,
                     step_elapsed: *step_elapsed,
                     attempt_elapsed: *attempt_elapsed,
                 };
@@ -405,6 +413,8 @@ impl<S: StepSpec> EventStore<S> {
                 let info = CompletionInfo {
                     attempt: *last_attempt,
                     outcome,
+                    root_total_elapsed,
+                    leaf_total_elapsed: event.total_elapsed,
                     step_elapsed: *step_elapsed,
                     attempt_elapsed: *attempt_elapsed,
                 };
@@ -432,6 +442,8 @@ impl<S: StepSpec> EventStore<S> {
                     total_attempts: *total_attempts,
                     message: message.clone(),
                     causes: causes.clone(),
+                    root_total_elapsed,
+                    leaf_total_elapsed: event.total_elapsed,
                     step_elapsed: *step_elapsed,
                     attempt_elapsed: *attempt_elapsed,
                 };
@@ -456,6 +468,8 @@ impl<S: StepSpec> EventStore<S> {
                 let info = AbortInfo {
                     attempt: *attempt,
                     message: message.clone(),
+                    root_total_elapsed,
+                    leaf_total_elapsed: event.total_elapsed,
                     step_elapsed: *step_elapsed,
                     attempt_elapsed: *attempt_elapsed,
                 };
@@ -481,6 +495,7 @@ impl<S: StepSpec> EventStore<S> {
                     nest_level + 1,
                     parent_sort_key.as_ref(),
                     root_event_index,
+                    root_total_elapsed,
                 );
                 if let Some(nested_new_execution) = &actions.new_execution {
                     // Add an edge from the parent node to the new execution's root node.
@@ -1164,6 +1179,8 @@ impl<S: StepSpec> StepStatus<S> {
 pub struct CompletionInfo {
     pub attempt: usize,
     pub outcome: StepOutcome<NestedSpec>,
+    pub root_total_elapsed: Duration,
+    pub leaf_total_elapsed: Duration,
     pub step_elapsed: Duration,
     pub attempt_elapsed: Duration,
 }
@@ -1179,11 +1196,23 @@ pub enum FailureReason {
     },
 }
 
+impl FailureReason {
+    /// Returns the [`FailureInfo`] if present.
+    pub fn info(&self) -> Option<&FailureInfo> {
+        match self {
+            Self::StepFailed(info) => Some(info),
+            Self::ParentFailed { .. } => None,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct FailureInfo {
     pub total_attempts: usize,
     pub message: String,
     pub causes: Vec<String>,
+    pub root_total_elapsed: Duration,
+    pub leaf_total_elapsed: Duration,
     pub step_elapsed: Duration,
     pub attempt_elapsed: Duration,
 }
@@ -1197,6 +1226,16 @@ pub enum AbortReason {
         /// The parent step key that was aborted.
         parent_step: StepKey,
     },
+}
+
+impl AbortReason {
+    /// Returns the [`AbortInfo`] if present.
+    pub fn info(&self) -> Option<&AbortInfo> {
+        match self {
+            Self::StepAborted(info) => Some(info),
+            Self::ParentAborted { .. } => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -1230,6 +1269,13 @@ pub enum WillNotBeRunReason {
 pub struct AbortInfo {
     pub attempt: usize,
     pub message: String,
+
+    /// The total elapsed time as reported by the root event.
+    pub root_total_elapsed: Duration,
+
+    /// The total elapsed time as reported by the leaf execution event, for
+    /// nested events.
+    pub leaf_total_elapsed: Duration,
     pub step_elapsed: Duration,
     pub attempt_elapsed: Duration,
 }
