@@ -29,7 +29,8 @@ use ratatui::widgets::{
 use slog::{info, o, Logger};
 use tui_tree_widget::{Tree, TreeItem, TreeState};
 use update_engine::{
-    AbortReason, ExecutionStatus, FailureReason, StepKey, WillNotBeRunReason,
+    AbortReason, ExecutionStatus, FailureReason, StepKey, TerminalKind,
+    WillNotBeRunReason,
 };
 use wicket_common::update_events::{
     EventBuffer, EventReport, ProgressEvent, StepOutcome, StepStatus,
@@ -1009,9 +1010,7 @@ impl UpdatePane {
                         }
 
                         ExecutionStatus::NotStarted
-                        | ExecutionStatus::Completed { .. }
-                        | ExecutionStatus::Failed { .. }
-                        | ExecutionStatus::Aborted { .. } => None,
+                        | ExecutionStatus::Terminal(_) => None,
                     }
                 } else {
                     None
@@ -1041,9 +1040,7 @@ impl UpdatePane {
                             associated with it",
                     );
                     match summary.execution_status {
-                        ExecutionStatus::Completed { .. }
-                        | ExecutionStatus::Failed { .. }
-                        | ExecutionStatus::Aborted { .. } => {
+                        ExecutionStatus::Terminal(_) => {
                             // If execution has reached a terminal
                             // state, we can clear it.
                             self.popup =
@@ -1888,7 +1885,7 @@ impl ComponentUpdateListState {
                 "root execution ID should have a summary associated with it",
             );
 
-            match summary.execution_status {
+            match &summary.execution_status {
                 ExecutionStatus::NotStarted => {
                     status_text.push(Span::styled(
                         "Update not started",
@@ -1913,47 +1910,63 @@ impl ComponentUpdateListState {
                     ));
                     Some(ComponentUpdateShowHelp::Running)
                 }
-                ExecutionStatus::Completed { .. } => {
-                    status_text
-                        .push(Span::styled("Update ", style::plain_text()));
-                    status_text.push(Span::styled(
-                        "completed",
-                        style::successful_update_bold(),
-                    ));
-                    Some(ComponentUpdateShowHelp::Completed)
-                }
-                ExecutionStatus::Failed { step_key } => {
-                    status_text
-                        .push(Span::styled("Update ", style::plain_text()));
-                    status_text.push(Span::styled(
-                        "failed",
-                        style::failed_update_bold(),
-                    ));
-                    status_text.push(Span::styled(
-                        format!(
-                            " at step {}/{}",
-                            step_key.index + 1,
-                            summary.total_steps,
-                        ),
-                        style::plain_text(),
-                    ));
-                    Some(ComponentUpdateShowHelp::Completed)
-                }
-                ExecutionStatus::Aborted { step_key } => {
-                    status_text
-                        .push(Span::styled("Update ", style::plain_text()));
-                    status_text.push(Span::styled(
-                        "aborted",
-                        style::failed_update_bold(),
-                    ));
-                    status_text.push(Span::styled(
-                        format!(
-                            " at step {}/{}",
-                            step_key.index + 1,
-                            summary.total_steps,
-                        ),
-                        style::plain_text(),
-                    ));
+                ExecutionStatus::Terminal(info) => {
+                    match info.kind {
+                        TerminalKind::Completed => {
+                            status_text.push(Span::styled(
+                                "Update ",
+                                style::plain_text(),
+                            ));
+                            status_text.push(Span::styled(
+                                "completed",
+                                style::successful_update_bold(),
+                            ));
+                        }
+                        TerminalKind::Failed => {
+                            status_text.push(Span::styled(
+                                "Update ",
+                                style::plain_text(),
+                            ));
+                            status_text.push(Span::styled(
+                                "failed",
+                                style::failed_update_bold(),
+                            ));
+                            status_text.push(Span::styled(
+                                format!(
+                                    " at step {}/{}",
+                                    info.step_key.index + 1,
+                                    summary.total_steps,
+                                ),
+                                style::plain_text(),
+                            ));
+                        }
+                        TerminalKind::Aborted => {
+                            status_text.push(Span::styled(
+                                "Update ",
+                                style::plain_text(),
+                            ));
+                            status_text.push(Span::styled(
+                                "aborted",
+                                style::failed_update_bold(),
+                            ));
+                            status_text.push(Span::styled(
+                                format!(
+                                    " at step {}/{}",
+                                    info.step_key.index + 1,
+                                    summary.total_steps,
+                                ),
+                                style::plain_text(),
+                            ));
+                        }
+                    }
+
+                    if let Some(total_elapsed) = info.root_total_elapsed {
+                        status_text.push(Span::styled(
+                            format!(" after {:.2?}", total_elapsed),
+                            style::plain_text(),
+                        ));
+                    }
+
                     Some(ComponentUpdateShowHelp::Completed)
                 }
             }
