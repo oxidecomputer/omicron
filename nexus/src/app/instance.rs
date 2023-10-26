@@ -1123,6 +1123,15 @@ impl super::Nexus {
                     //   resources will be reclaimed if the sled later reports
                     //   that the VMM is gone, however.)
                     _ => {
+                        // Grab the potentially updated runtime before bumping
+                        // the generation number.
+                        let (.., db_instance) =
+                            LookupPath::new(opctx, &self.db_datastore)
+                                .instance_id(db_instance.id())
+                                .fetch_for(authz::Action::Modify)
+                                .await?;
+
+                        // Update the instance state to failed
                         let new_runtime = db::model::InstanceRuntimeState {
                             nexus_state: db::model::InstanceState::new(
                                 InstanceState::Failed,
