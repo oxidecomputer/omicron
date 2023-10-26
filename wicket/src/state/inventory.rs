@@ -6,7 +6,6 @@
 
 use anyhow::anyhow;
 use once_cell::sync::Lazy;
-use ratatui::text::Text;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::Display;
@@ -205,24 +204,20 @@ pub enum ComponentId {
 }
 
 impl ComponentId {
-    pub fn name(&self) -> String {
-        self.to_string()
+    pub fn to_string_uppercase(&self) -> String {
+        let mut s = self.to_string();
+        s.make_ascii_uppercase();
+        s
     }
 }
 
 impl Display for ComponentId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ComponentId::Sled(i) => write!(f, "SLED {}", i),
-            ComponentId::Switch(i) => write!(f, "SWITCH {}", i),
-            ComponentId::Psc(i) => write!(f, "PSC {}", i),
+            ComponentId::Sled(i) => write!(f, "sled {}", i),
+            ComponentId::Switch(i) => write!(f, "switch {}", i),
+            ComponentId::Psc(i) => write!(f, "psc {}", i),
         }
-    }
-}
-
-impl From<ComponentId> for Text<'_> {
-    fn from(value: ComponentId) -> Self {
-        value.to_string().into()
     }
 }
 
