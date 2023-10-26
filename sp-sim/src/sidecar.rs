@@ -13,6 +13,7 @@ use crate::serial_number_padded;
 use crate::server;
 use crate::server::SimSpHandler;
 use crate::server::UdpServer;
+use crate::update::SimSpUpdate;
 use crate::Responsiveness;
 use crate::SimulatedSp;
 use anyhow::Result;
@@ -56,6 +57,8 @@ use tokio::sync::oneshot;
 use tokio::sync::Mutex as TokioMutex;
 use tokio::task;
 use tokio::task::JoinHandle;
+
+pub const SIM_SIDECAR_BOARD: &str = "SimSidecarSp";
 
 pub struct Sidecar {
     rot: Mutex<RotSprocket>,
@@ -110,6 +113,12 @@ impl SimulatedSp for Sidecar {
         request: RotRequestV1,
     ) -> Result<RotResponseV1, RotSprocketError> {
         self.rot.lock().unwrap().handle_deserialized(request)
+    }
+
+    async fn last_update_data(&self) -> Option<Box<[u8]>> {
+        let handler = self.handler.as_ref()?;
+        let handler = handler.lock().await;
+        handler.update_state.last_update_data()
     }
 }
 
@@ -302,6 +311,16 @@ struct Handler {
     ignition: FakeIgnition,
     rot_active_slot: RotSlotId,
     power_state: PowerState,
+
+    update_state: SimSpUpdate,
+    reset_pending: bool,
+
+    // To simulate an SP reset, we should (after doing whatever housekeeping we
+    // need to track the reset) intentionally _fail_ to respond to the request,
+    // simulating a `-> !` function on the SP that triggers a reset. To provide
+    // this, our caller will pass us a function to call if they should ignore
+    // whatever result we return and fail to respond at all.
+    should_fail_to_respond_signal: Option<Box<dyn FnOnce() + Send>>,
 }
 
 impl Handler {
@@ -332,6 +351,9 @@ impl Handler {
             ignition,
             rot_active_slot: RotSlotId::A,
             power_state: PowerState::A2,
+            update_state: SimSpUpdate::default(),
+            reset_pending: false,
+            should_fail_to_respond_signal: None,
         }
     }
 
@@ -629,14 +651,18 @@ impl SpHandler for Handler {
         port: SpPort,
         update: gateway_messages::SpUpdatePrepare,
     ) -> Result<(), SpError> {
-        warn!(
+        debug!(
             &self.log,
-            "received update prepare request; not supported by simulated sidecar";
+            "received update prepare request";
             "sender" => %sender,
             "port" => ?port,
             "update" => ?update,
         );
-        Err(SpError::RequestUnsupportedForSp)
+        self.update_state.prepare(
+            SpComponent::SP_ITSELF,
+            update.id,
+            update.sp_image_size.try_into().unwrap(),
+        )
     }
 
     fn component_update_prepare(
@@ -645,14 +671,18 @@ impl SpHandler for Handler {
         port: SpPort,
         update: gateway_messages::ComponentUpdatePrepare,
     ) -> Result<(), SpError> {
-        warn!(
+        debug!(
             &self.log,
-            "received update prepare request; not supported by simulated sidecar";
+            "received update prepare request";
             "sender" => %sender,
             "port" => ?port,
             "update" => ?update,
         );
-        Err(SpError::RequestUnsupportedForSp)
+        self.update_state.prepare(
+            update.component,
+            update.id,
+            update.total_size.try_into().unwrap(),
+        )
     }
 
     fn update_status(
@@ -661,14 +691,14 @@ impl SpHandler for Handler {
         port: SpPort,
         component: SpComponent,
     ) -> Result<gateway_messages::UpdateStatus, SpError> {
-        warn!(
+        debug!(
             &self.log,
-            "received update status request; not supported by simulated sidecar";
+            "received update status request";
             "sender" => %sender,
             "port" => ?port,
             "component" => ?component,
         );
-        Err(SpError::RequestUnsupportedForSp)
+        Ok(self.update_state.status())
     }
 
     fn update_chunk(
@@ -676,17 +706,17 @@ impl SpHandler for Handler {
         sender: SocketAddrV6,
         port: SpPort,
         chunk: gateway_messages::UpdateChunk,
-        data: &[u8],
+        chunk_data: &[u8],
     ) -> Result<(), SpError> {
-        warn!(
+        debug!(
             &self.log,
-            "received update chunk; not supported by simulated sidecar";
+            "received update chunk";
             "sender" => %sender,
             "port" => ?port,
             "offset" => chunk.offset,
-            "length" => data.len(),
+            "length" => chunk_data.len(),
         );
-        Err(SpError::RequestUnsupportedForSp)
+        self.update_state.ingest_chunk(chunk, chunk_data)
     }
 
     fn update_abort(
@@ -694,17 +724,17 @@ impl SpHandler for Handler {
         sender: SocketAddrV6,
         port: SpPort,
         component: SpComponent,
-        id: gateway_messages::UpdateId,
+        update_id: gateway_messages::UpdateId,
     ) -> Result<(), SpError> {
-        warn!(
+        debug!(
             &self.log,
             "received update abort; not supported by simulated sidecar";
             "sender" => %sender,
             "port" => ?port,
             "component" => ?component,
-            "id" => ?id,
+            "id" => ?update_id,
         );
-        Err(SpError::RequestUnsupportedForSp)
+        self.update_state.abort(update_id)
     }
 
     fn power_state(
@@ -743,13 +773,18 @@ impl SpHandler for Handler {
         port: SpPort,
         component: SpComponent,
     ) -> Result<(), SpError> {
-        warn!(
-            &self.log, "received reset prepare request; not supported by simulated sidecar";
+        debug!(
+            &self.log, "received reset prepare request";
             "sender" => %sender,
             "port" => ?port,
             "component" => ?component,
         );
-        Err(SpError::RequestUnsupportedForSp)
+        if component == SpComponent::SP_ITSELF {
+            self.reset_pending = true;
+            Ok(())
+        } else {
+            Err(SpError::RequestUnsupportedForComponent)
+        }
     }
 
     fn reset_component_trigger(
@@ -758,13 +793,29 @@ impl SpHandler for Handler {
         port: SpPort,
         component: SpComponent,
     ) -> Result<(), SpError> {
-        warn!(
-            &self.log, "received sys-reset trigger request; not supported by simulated sidecar";
+        debug!(
+            &self.log, "received sys-reset trigger request";
             "sender" => %sender,
             "port" => ?port,
             "component" => ?component,
         );
-        Err(SpError::RequestUnsupportedForSp)
+        if component == SpComponent::SP_ITSELF {
+            if self.reset_pending {
+                self.update_state.sp_reset();
+                self.reset_pending = false;
+                if let Some(signal) = self.should_fail_to_respond_signal.take()
+                {
+                    // Instruct `server::handle_request()` to _not_ respond to
+                    // this request at all, simulating an SP actually resetting.
+                    signal();
+                }
+                Ok(())
+            } else {
+                Err(SpError::ResetComponentTriggerWithoutPrepare)
+            }
+        } else {
+            Err(SpError::RequestUnsupportedForComponent)
+        }
     }
 
     fn num_devices(&mut self, _: SocketAddrV6, _: SpPort) -> u32 {
@@ -978,7 +1029,7 @@ impl SpHandler for Handler {
         buf: &mut [u8],
     ) -> std::result::Result<usize, SpError> {
         static SP_GITC: &[u8] = b"ffffffff";
-        static SP_BORD: &[u8] = b"SimSidecarSp";
+        static SP_BORD: &[u8] = SIM_SIDECAR_BOARD.as_bytes();
         static SP_NAME: &[u8] = b"SimSidecar";
         static SP_VERS: &[u8] = b"0.0.1";
 
@@ -1026,9 +1077,9 @@ impl SpHandler for Handler {
 impl SimSpHandler for Handler {
     fn set_sp_should_fail_to_respond_signal(
         &mut self,
-        _signal: Box<dyn FnOnce() + Send>,
+        signal: Box<dyn FnOnce() + Send>,
     ) {
-        // we don't yet implement simulated reset; ignore `signal`
+        self.should_fail_to_respond_signal = Some(signal);
     }
 }
 

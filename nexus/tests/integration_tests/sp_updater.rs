@@ -10,7 +10,9 @@ use hubtools::RawHubrisArchive;
 use hubtools::{CabooseBuilder, HubrisArchiveBuilder};
 use nexus_test_utils::test_setup;
 use omicron_nexus::TestInterfaces;
+use sp_sim::SimulatedSp;
 use sp_sim::SIM_GIMLET_BOARD;
+use sp_sim::SIM_SIDECAR_BOARD;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
@@ -30,12 +32,12 @@ fn make_fake_sp_image(board: &str) -> Vec<u8> {
 }
 
 #[tokio::test]
-async fn test_sp_updater_updates_gimlet() {
+async fn test_sp_updater_updates_sled() {
     // Start MGS + Sim SP.
     let (mgs_config, sp_sim_config) = mgs_setup::load_test_config();
     let mgs_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0);
     let mgs = mgs_setup::test_setup_with_config(
-        "test_sp_updater_drives_update",
+        "test_sp_updater_updates_sled",
         SpPort::One,
         mgs_config,
         &sp_sim_config,
@@ -44,7 +46,7 @@ async fn test_sp_updater_updates_gimlet() {
     .await;
 
     let cptestctx =
-        test_setup::<omicron_nexus::Server>("test_sp_updater_drives_update")
+        test_setup::<omicron_nexus::Server>("test_sp_updater_updates_sled")
             .await;
 
     let mgs_listen_addr = mgs
@@ -72,6 +74,65 @@ async fn test_sp_updater_updates_gimlet() {
     sp_updater.update([mgs_client]).await.expect("update failed");
 
     let last_update_image = mgs.simrack.gimlets[sp_slot as usize]
+        .last_update_data()
+        .await
+        .expect("simulated SP did not receive an update");
+
+    let hubris_archive = RawHubrisArchive::from_vec(hubris_archive).unwrap();
+
+    assert_eq!(
+        hubris_archive.image.data.as_slice(),
+        &*last_update_image,
+        "simulated SP update contents (len {}) \
+         do not match test generated fake image (len {})",
+        last_update_image.len(),
+        hubris_archive.image.data.len()
+    );
+}
+
+#[tokio::test]
+async fn test_sp_updater_updates_switch() {
+    // Start MGS + Sim SP.
+    let (mgs_config, sp_sim_config) = mgs_setup::load_test_config();
+    let mgs_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0);
+    let mgs = mgs_setup::test_setup_with_config(
+        "test_sp_updater_updates_switch",
+        SpPort::One,
+        mgs_config,
+        &sp_sim_config,
+        Some(mgs_addr),
+    )
+    .await;
+
+    let cptestctx =
+        test_setup::<omicron_nexus::Server>("test_sp_updater_updates_switch")
+            .await;
+
+    let mgs_listen_addr = mgs
+        .server
+        .dropshot_server_for_address(mgs_addr)
+        .expect("missing dropshot server for localhost address")
+        .local_addr();
+    let mgs_client = Arc::new(gateway_client::Client::new(
+        &format!("http://{mgs_listen_addr}"),
+        cptestctx.logctx.log.new(slog::o!("component" => "MgsClient")),
+    ));
+
+    let sp_type = SpType::Switch;
+    let sp_slot = 0;
+    let update_id = Uuid::new_v4();
+    let hubris_archive = make_fake_sp_image(SIM_SIDECAR_BOARD);
+
+    let sp_updater = cptestctx.server.apictx().nexus.sp_updater(
+        sp_type,
+        sp_slot,
+        update_id,
+        hubris_archive.clone(),
+    );
+
+    sp_updater.update([mgs_client]).await.expect("update failed");
+
+    let last_update_image = mgs.simrack.sidecars[sp_slot as usize]
         .last_update_data()
         .await
         .expect("simulated SP did not receive an update");

@@ -104,16 +104,15 @@ impl SimulatedSp for Gimlet {
     ) -> Result<RotResponseV1, RotSprocketError> {
         self.rot.lock().unwrap().handle_deserialized(request)
     }
-}
 
-impl Gimlet {
-    // TODO move to `SimulatedSp`
-    pub async fn last_update_data(&self) -> Option<Box<[u8]>> {
+    async fn last_update_data(&self) -> Option<Box<[u8]>> {
         let handler = self.handler.as_ref()?;
         let handler = handler.lock().await;
         handler.update_state.last_update_data()
     }
+}
 
+impl Gimlet {
     pub async fn spawn(gimlet: &GimletConfig, log: Logger) -> Result<Self> {
         info!(log, "setting up simulated gimlet");
 
@@ -872,7 +871,7 @@ impl SpHandler for Handler {
         port: SpPort,
         update: gateway_messages::SpUpdatePrepare,
     ) -> Result<(), SpError> {
-        warn!(
+        debug!(
             &self.log,
             "received SP update prepare request";
             "sender" => %sender,

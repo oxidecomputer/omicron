@@ -18,6 +18,7 @@ pub use gimlet::Gimlet;
 pub use gimlet::SIM_GIMLET_BOARD;
 pub use server::logger;
 pub use sidecar::Sidecar;
+pub use sidecar::SIM_SIDECAR_BOARD;
 pub use slog::Logger;
 pub use sprockets_rot::common::msgs::RotRequestV1;
 pub use sprockets_rot::common::msgs::RotResponseV1;
@@ -52,6 +53,11 @@ pub trait SimulatedSp {
         &self,
         request: RotRequestV1,
     ) -> Result<RotResponseV1, RotSprocketError>;
+
+    /// Get the last completed update delivered to this simulated SP.
+    ///
+    /// Only returns data after a simulated reset.
+    async fn last_update_data(&self) -> Option<Box<[u8]>>;
 }
 
 // Helper function to pad a simulated serial number (stored as a `String`) to
