@@ -171,7 +171,7 @@ crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", re
 crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "da534e73380f3cc53ca0de073e1ea862ae32109b" }
 curve25519-dalek = "4"
 datatest-stable = "0.2.3"
-display-error-chain = "0.1.1"
+display-error-chain = "0.2.0"
 ddm-admin-client = { path = "clients/ddm-admin-client" }
 db-macros = { path = "nexus/db-macros" }
 debug-ignore = "1.0.5"
