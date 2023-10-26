@@ -58,7 +58,7 @@ impl IgnitionPopup {
     ) -> PopupBuilder<'static> {
         PopupBuilder {
             header: Line::from(vec![Span::styled(
-                format!("IGNITION: {}", component.to_string_uppercase()),
+                format!("IGNITION: {}", component),
                 style::header(true),
             )]),
             body: Text {
