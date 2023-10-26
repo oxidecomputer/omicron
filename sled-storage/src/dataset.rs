@@ -63,7 +63,7 @@ static U2_EXPECTED_DATASETS: [ExpectedDataset; U2_EXPECTED_DATASET_COUNT] = [
         .compression(DUMP_DATASET_COMPRESSION),
 ];
 
-const M2_EXPECTED_DATASET_COUNT: usize = 5;
+const M2_EXPECTED_DATASET_COUNT: usize = 6;
 static M2_EXPECTED_DATASETS: [ExpectedDataset; M2_EXPECTED_DATASET_COUNT] = [
     // Stores software images.
     //
@@ -71,6 +71,10 @@ static M2_EXPECTED_DATASETS: [ExpectedDataset; M2_EXPECTED_DATASET_COUNT] = [
     ExpectedDataset::new(INSTALL_DATASET),
     // Stores crash dumps.
     ExpectedDataset::new(CRASH_DATASET),
+    // Backing store for OS data that should be persisted across reboots.
+    // Its children are selectively overlay mounted onto parts of the ramdisk
+    // root.
+    ExpectedDataset::new(M2_BACKING_DATASET),
     // Stores cluter configuration information.
     //
     // Should be duplicated to both M.2s.
