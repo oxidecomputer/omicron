@@ -4405,6 +4405,7 @@ dependencies = [
  "newtype_derive",
  "nexus-db-model",
  "nexus-defaults",
+ "nexus-inventory",
  "nexus-test-utils",
  "nexus-types",
  "omicron-common 0.1.0",

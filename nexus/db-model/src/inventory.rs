@@ -48,6 +48,16 @@ impl From<PowerState> for HwPowerState {
     }
 }
 
+impl From<HwPowerState> for PowerState {
+    fn from(value: HwPowerState) -> Self {
+        match value {
+            HwPowerState::A0 => PowerState::A0,
+            HwPowerState::A1 => PowerState::A1,
+            HwPowerState::A2 => PowerState::A2,
+        }
+    }
+}
+
 // See [`nexus_types::inventory::RotSlot`].
 impl_enum_type!(
     #[derive(SqlType, Debug, QueryId)]
@@ -72,6 +82,15 @@ impl From<RotSlot> for HwRotSlot {
     }
 }
 
+impl From<HwRotSlot> for RotSlot {
+    fn from(value: HwRotSlot) -> RotSlot {
+        match value {
+            HwRotSlot::A => RotSlot::A,
+            HwRotSlot::B => RotSlot::B,
+        }
+    }
+}
+
 // See [`nexus_types::inventory::CabooseWhich`].
 impl_enum_type!(
     #[derive(SqlType, Debug, QueryId)]
@@ -91,19 +110,24 @@ impl_enum_type!(
 
 impl From<nexus_types::inventory::CabooseWhich> for CabooseWhich {
     fn from(c: nexus_types::inventory::CabooseWhich) -> Self {
+        use nexus_types::inventory as nexus_inventory;
         match c {
-            nexus_types::inventory::CabooseWhich::SpSlot0 => {
-                CabooseWhich::SpSlot0
-            }
-            nexus_types::inventory::CabooseWhich::SpSlot1 => {
-                CabooseWhich::SpSlot1
-            }
-            nexus_types::inventory::CabooseWhich::RotSlotA => {
-                CabooseWhich::RotSlotA
-            }
-            nexus_types::inventory::CabooseWhich::RotSlotB => {
-                CabooseWhich::RotSlotB
-            }
+            nexus_inventory::CabooseWhich::SpSlot0 => CabooseWhich::SpSlot0,
+            nexus_inventory::CabooseWhich::SpSlot1 => CabooseWhich::SpSlot1,
+            nexus_inventory::CabooseWhich::RotSlotA => CabooseWhich::RotSlotA,
+            nexus_inventory::CabooseWhich::RotSlotB => CabooseWhich::RotSlotB,
+        }
+    }
+}
+
+impl From<CabooseWhich> for nexus_types::inventory::CabooseWhich {
+    fn from(row: CabooseWhich) -> Self {
+        use nexus_types::inventory as nexus_inventory;
+        match row {
+            CabooseWhich::SpSlot0 => nexus_inventory::CabooseWhich::SpSlot0,
+            CabooseWhich::SpSlot1 => nexus_inventory::CabooseWhich::SpSlot1,
+            CabooseWhich::RotSlotA => nexus_inventory::CabooseWhich::RotSlotA,
+            CabooseWhich::RotSlotB => nexus_inventory::CabooseWhich::RotSlotB,
         }
     }
 }
@@ -140,6 +164,16 @@ impl From<nexus_types::inventory::SpType> for SpType {
             nexus_types::inventory::SpType::Sled => SpType::Sled,
             nexus_types::inventory::SpType::Power => SpType::Power,
             nexus_types::inventory::SpType::Switch => SpType::Switch,
+        }
+    }
+}
+
+impl From<SpType> for nexus_types::inventory::SpType {
+    fn from(value: SpType) -> Self {
+        match value {
+            SpType::Sled => nexus_types::inventory::SpType::Sled,
+            SpType::Switch => nexus_types::inventory::SpType::Switch,
+            SpType::Power => nexus_types::inventory::SpType::Power,
         }
     }
 }
@@ -184,6 +218,15 @@ impl<'a> From<&'a BaseboardId> for HwBaseboardId {
     }
 }
 
+impl From<HwBaseboardId> for BaseboardId {
+    fn from(row: HwBaseboardId) -> Self {
+        BaseboardId {
+            part_number: row.part_number,
+            serial_number: row.serial_number,
+        }
+    }
+}
+
 /// See [`nexus_types::inventory::Caboose`].
 #[derive(
     Queryable,
@@ -213,6 +256,17 @@ impl<'a> From<&'a Caboose> for SwCaboose {
             git_commit: c.git_commit.clone(),
             name: c.name.clone(),
             version: c.version.clone(),
+        }
+    }
+}
+
+impl From<SwCaboose> for Caboose {
+    fn from(row: SwCaboose) -> Self {
+        Self {
+            board: row.board,
+            git_commit: row.git_commit,
+            name: row.name,
+            version: row.version,
         }
     }
 }
@@ -251,6 +305,20 @@ pub struct InvServiceProcessor {
     pub baseboard_revision: BaseboardRevision,
     pub hubris_archive_id: String,
     pub power_state: HwPowerState,
+}
+
+impl From<InvServiceProcessor> for nexus_types::inventory::ServiceProcessor {
+    fn from(row: InvServiceProcessor) -> Self {
+        Self {
+            time_collected: row.time_collected,
+            source: row.source,
+            sp_type: nexus_types::inventory::SpType::from(row.sp_type),
+            sp_slot: **row.sp_slot,
+            baseboard_revision: **row.baseboard_revision,
+            hubris_archive: row.hubris_archive_id,
+            power_state: PowerState::from(row.power_state),
+        }
+    }
 }
 
 /// Newtype wrapping the MGS-reported slot number for an SP
@@ -338,6 +406,27 @@ pub struct InvRootOfTrust {
     pub slot_boot_pref_persistent_pending: Option<HwRotSlot>,
     pub slot_a_sha3_256: Option<String>,
     pub slot_b_sha3_256: Option<String>,
+}
+
+impl From<InvRootOfTrust> for nexus_types::inventory::RotState {
+    fn from(row: InvRootOfTrust) -> Self {
+        Self {
+            time_collected: row.time_collected,
+            source: row.source,
+            active_slot: RotSlot::from(row.slot_active),
+            persistent_boot_preference: RotSlot::from(
+                row.slot_boot_pref_persistent,
+            ),
+            pending_persistent_boot_preference: row
+                .slot_boot_pref_persistent_pending
+                .map(RotSlot::from),
+            transient_boot_preference: row
+                .slot_boot_pref_transient
+                .map(RotSlot::from),
+            slot_a_sha3_256_digest: row.slot_a_sha3_256,
+            slot_b_sha3_256_digest: row.slot_b_sha3_256,
+        }
+    }
 }
 
 /// See [`nexus_types::inventory::CabooseFound`].

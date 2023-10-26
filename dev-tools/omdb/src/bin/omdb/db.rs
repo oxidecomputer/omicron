@@ -12,7 +12,7 @@
 //! would be the only consumer -- and in that case it's okay to query the
 //! database directly.
 
-// NOTE: eminates from Tabled macros
+// NOTE: emanates from Tabled macros
 #![allow(clippy::useless_vec)]
 
 use crate::Omdb;

@@ -20,4 +20,7 @@
 mod builder;
 mod collector;
 
+// only exposed for test code to construct collections
+pub use builder::CollectionBuilder;
+
 pub use collector::Collector;

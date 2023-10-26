@@ -35,12 +35,12 @@ use uuid::Uuid;
 /// database.
 ///
 /// See the documentation in the database schema for more background.
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 pub struct Collection {
     /// unique identifier for this collection
     pub id: Uuid,
     /// errors encountered during collection
-    pub errors: Vec<anyhow::Error>,
+    pub errors: Vec<String>,
     /// time the collection started
     pub time_started: DateTime<Utc>,
     /// time the collection eneded
@@ -73,6 +73,18 @@ pub struct Collection {
     /// In practice, these will be inserted into the `inv_caboose` table.
     pub cabooses_found:
         BTreeMap<CabooseWhich, BTreeMap<Arc<BaseboardId>, CabooseFound>>,
+}
+
+impl Collection {
+    pub fn caboose_for(
+        &self,
+        which: CabooseWhich,
+        baseboard_id: &BaseboardId,
+    ) -> Option<&CabooseFound> {
+        self.cabooses_found
+            .get(&which)
+            .and_then(|by_bb| by_bb.get(baseboard_id))
+    }
 }
 
 /// A unique baseboard id found during a collection

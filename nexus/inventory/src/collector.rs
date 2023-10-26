@@ -147,9 +147,7 @@ impl Collector {
             // get here for the first MGS client.  Assuming that one succeeds,
             // the other(s) will skip this loop.
             for which in CabooseWhich::iter() {
-                if self
-                    .in_progress
-                    .sp_found_caboose_already(&baseboard_id, which)
+                if self.in_progress.found_caboose_already(&baseboard_id, which)
                 {
                     continue;
                 }
@@ -181,7 +179,7 @@ impl Collector {
                     }
                     Ok(response) => response.into_inner(),
                 };
-                if let Err(error) = self.in_progress.found_sp_caboose(
+                if let Err(error) = self.in_progress.found_caboose(
                     &baseboard_id,
                     which,
                     client.baseurl(),
@@ -276,7 +274,7 @@ mod test {
 
         write!(&mut s, "\nerrors:\n").unwrap();
         for e in &collection.errors {
-            write!(&mut s, "error: {:#}\n", e).unwrap();
+            write!(&mut s, "error: {}\n", e).unwrap();
         }
 
         s
@@ -365,8 +363,8 @@ mod test {
         };
         let bad_client = {
             // This IP range is guaranteed by RFC 6666 to discard traffic.
-            let url = format!("http://[100::1]:12345");
-            let client = gateway_client::Client::new(&url, log.clone());
+            let url = "http://[100::1]:12345";
+            let client = gateway_client::Client::new(url, log.clone());
             Arc::new(client)
         };
         let mgs_clients = &[bad_client, real_client];

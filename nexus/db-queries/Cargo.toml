@@ -71,6 +71,7 @@ expectorate.workspace = true
 hyper-rustls.workspace = true
 internal-dns.workspace = true
 itertools.workspace = true
+nexus-inventory.workspace = true
 nexus-test-utils.workspace = true
 omicron-sled-agent.workspace = true
 omicron-test-utils.workspace = true
