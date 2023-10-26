@@ -844,6 +844,11 @@ mod tests {
     use tokio::time::sleep;
     use uuid::Uuid;
 
+    pub enum InstallationType {
+        Cluster,
+        SingleNode,
+    }
+
     // NOTE: Each test requires a clean slate. Because of this, tests run sequentially.
     //
     // This is at least partially because ClickHouse by default provides pretty weak consistency
@@ -854,185 +859,304 @@ mod tests {
 
     #[tokio::test]
     async fn test_single_node() {
-        let logctx = test_setup_log("test_single_node");
-        let log = &logctx.log;
-
         // Let the OS assign a port and discover it after ClickHouse starts
         let mut db = ClickHouseInstance::new_single_node(0)
             .await
             .expect("Failed to start ClickHouse");
-        let address = SocketAddr::new("::1".parse().unwrap(), db.port());
 
-        // Test bad database connection
+        // Tests that the expected error is returned on a wrong address
+        bad_db_connection_test().await.unwrap();
+
+        // Tests that a new client has started and it is not part of a cluster
+        is_oximeter_cluster_test(db.address, InstallationType::SingleNode)
+            .await
+            .unwrap();
+
+        // Tests that data can be inserted via the client
+        insert_samples_test(db.address).await.unwrap();
+
+        // Tests for a schema mismatch
+        schema_mismatch_test(db.address).await.unwrap();
+
+        // Tests for a schema update
+        schema_updated_test(db.address).await.unwrap();
+
+        // Tests for specific timeseries selection
+        client_select_timeseries_one_test(db.address).await.unwrap();
+
+        // Tests for specific timeseries selection
+        field_record_count_test(db.address).await.unwrap();
+
+        // ClickHouse regression test
+        unquoted_64bit_integers_test(db.address).await.unwrap();
+
+        // Tests to verify that we can distinguish between metrics by name
+        differentiate_by_timeseries_name_test(db.address).await.unwrap();
+
+        // Tests selecting a single timeseries
+        select_timeseries_with_select_one_test(db.address).await.unwrap();
+
+        // Tests selecting two timeseries
+        select_timeseries_with_select_one_field_with_multiple_values_test(
+            db.address,
+        )
+        .await
+        .unwrap();
+
+        // Tests selecting multiple timeseries
+        select_timeseries_with_select_multiple_fields_with_multiple_values_test(db.address).await.unwrap();
+
+        // Tests selecting all timeseries
+        select_timeseries_with_all_test(db.address).await.unwrap();
+
+        // Tests selecting all timeseries with start time
+        select_timeseries_with_start_time_test(db.address).await.unwrap();
+
+        // Tests selecting all timeseries with start time
+        select_timeseries_with_limit_test(db.address).await.unwrap();
+
+        // Tests selecting all timeseries with order
+        select_timeseries_with_order_test(db.address).await.unwrap();
+
+        // Tests schema does not change
+        get_schema_no_new_values_test(db.address).await.unwrap();
+
+        // Tests listing timeseries schema
+        timeseries_schema_list_test(db.address).await.unwrap();
+
+        // Tests listing timeseries
+        list_timeseries_test(db.address).await.unwrap();
+
+        // Tests no changes are made when version is not updated
+        database_version_update_idempotent_test(db.address).await.unwrap();
+
+        // Tests that downgrading is impossible
+        database_version_will_not_downgrade_test(db.address).await.unwrap();
+
+        // Tests old data is dropped if version is updated
+        database_version_wipes_old_version_test(db.address).await.unwrap();
+
+        // Tests schema cache is updated when a new sample is inserted
+        update_schema_cache_on_new_sample_test(db.address).await.unwrap();
+
+        // Tests that we can successfully query all extant datum types from the schema table.
+        select_all_datum_types_test(db.address).await.unwrap();
+
+        // Tests that, when cache new schema but _fail_ to insert them,
+        // we also remove them from the internal cache.
+        new_schema_removed_when_not_inserted_test(db.address).await.unwrap();
+
+        // Tests for fields and measurements
+        recall_field_value_bool_test(db.address).await.unwrap();
+
+        recall_field_value_u8_test(db.address).await.unwrap();
+
+        recall_field_value_i8_test(db.address).await.unwrap();
+
+        recall_field_value_u16_test(db.address).await.unwrap();
+
+        recall_field_value_i16_test(db.address).await.unwrap();
+
+        recall_field_value_u32_test(db.address).await.unwrap();
+
+        recall_field_value_i32_test(db.address).await.unwrap();
+
+        recall_field_value_u64_test(db.address).await.unwrap();
+
+        recall_field_value_i64_test(db.address).await.unwrap();
+
+        recall_field_value_string_test(db.address).await.unwrap();
+
+        recall_field_value_ipv4addr_test(db.address).await.unwrap();
+
+        recall_field_value_ipv6addr_test(db.address).await.unwrap();
+
+        recall_field_value_uuid_test(db.address).await.unwrap();
+
+        recall_measurement_bool_test(db.address).await.unwrap();
+
+        recall_measurement_i8_test(db.address).await.unwrap();
+
+        recall_measurement_u8_test(db.address).await.unwrap();
+
+        recall_measurement_i16_test(db.address).await.unwrap();
+
+        recall_measurement_u16_test(db.address).await.unwrap();
+
+        recall_measurement_i32_test(db.address).await.unwrap();
+
+        recall_measurement_u32_test(db.address).await.unwrap();
+
+        recall_measurement_i64_test(db.address).await.unwrap();
+
+        recall_measurement_u64_test(db.address).await.unwrap();
+
+        recall_measurement_f32_test(db.address).await.unwrap();
+
+        recall_measurement_f64_test(db.address).await.unwrap();
+
+        recall_measurement_cumulative_i64_test(db.address).await.unwrap();
+
+        recall_measurement_cumulative_u64_test(db.address).await.unwrap();
+
+        recall_measurement_cumulative_f64_test(db.address).await.unwrap();
+
+        recall_measurement_histogram_i8_test(db.address).await.unwrap();
+
+        recall_measurement_histogram_u8_test(db.address).await.unwrap();
+
+        recall_measurement_histogram_i16_test(db.address).await.unwrap();
+
+        recall_measurement_histogram_u16_test(db.address).await.unwrap();
+
+        recall_measurement_histogram_i32_test(db.address).await.unwrap();
+
+        recall_measurement_histogram_u32_test(db.address).await.unwrap();
+
+        recall_measurement_histogram_i64_test(db.address).await.unwrap();
+
+        recall_measurement_histogram_u64_test(db.address).await.unwrap();
+
+        recall_measurement_histogram_f64_test(db.address).await.unwrap();
+
+        db.cleanup().await.expect("Failed to cleanup ClickHouse server");
+    }
+
+    #[tokio::test]
+    async fn test_replicated() {
+        let mut cluster = ClickHouseCluster::new()
+            .await
+            .expect("Failed to initialise ClickHouse Cluster");
+
+        // Tests that the expected error is returned on a wrong address
+        bad_db_connection_test().await.unwrap();
+
+        // Tests data is replicated in a cluster
+        data_is_replicated_test(&cluster).await.unwrap();
+
+        // Tests that a new client has started and it is not part of a cluster
+        is_oximeter_cluster_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
+
+        cluster
+            .keeper_1
+            .cleanup()
+            .await
+            .expect("Failed to cleanup ClickHouse keeper 1");
+        cluster
+            .keeper_2
+            .cleanup()
+            .await
+            .expect("Failed to cleanup ClickHouse keeper 2");
+        cluster
+            .keeper_3
+            .cleanup()
+            .await
+            .expect("Failed to cleanup ClickHouse keeper 3");
+        cluster
+            .replica_1
+            .cleanup()
+            .await
+            .expect("Failed to cleanup ClickHouse server 1");
+        cluster
+            .replica_2
+            .cleanup()
+            .await
+            .expect("Failed to cleanup ClickHouse server 2");
+    }
+
+    async fn bad_db_connection_test() -> Result<(), Error> {
+        let logctx = test_setup_log("test_bad_db_connection");
+        let log = &logctx.log;
+
         let client = Client::new("127.0.0.1:443".parse().unwrap(), &log);
         assert!(matches!(
             client.ping().await,
             Err(Error::DatabaseUnavailable(_))
         ));
 
-        // Tests that a new client has started and it is not part of a cluster
-        is_not_oximeter_cluster_test(address).await.unwrap();
-
-        // Tests that data can be inserted via the client
-        insert_samples_test(address).await.unwrap();
-
-        // Tests for a schema mismatch
-        schema_mismatch_test(address).await.unwrap();
-
-        // Tests for a schema update
-        schema_updated_test(address).await.unwrap();
-
-        // Tests for specific timeseries selection
-        client_select_timeseries_one_test(address).await.unwrap();
-
-        // Tests for specific timeseries selection
-        field_record_count_test(address).await.unwrap();
-
-        // ClickHouse regression test
-        unquoted_64bit_integers_test(address).await.unwrap();
-
-        // Tests to verify that we can distinguish between metrics by name
-        differentiate_by_timeseries_name_test(address).await.unwrap();
-
-        // Tests selecting a single timeseries
-        select_timeseries_with_select_one_test(address).await.unwrap();
-
-        // Tests selecting two timeseries
-        select_timeseries_with_select_one_field_with_multiple_values_test(
-            address,
-        )
-        .await
-        .unwrap();
-
-        // Tests selecting multiple timeseries
-        select_timeseries_with_select_multiple_fields_with_multiple_values_test(address).await.unwrap();
-
-        // Tests selecting all timeseries
-        select_timeseries_with_all_test(address).await.unwrap();
-
-        // Tests selecting all timeseries with start time
-        select_timeseries_with_start_time_test(address).await.unwrap();
-
-        // Tests selecting all timeseries with start time
-        select_timeseries_with_limit_test(address).await.unwrap();
-
-        // Tests selecting all timeseries with order
-        select_timeseries_with_order_test(address).await.unwrap();
-
-        // Tests schema does not change
-        get_schema_no_new_values_test(address).await.unwrap();
-
-        // Tests listing timeseries schema
-        timeseries_schema_list_test(address).await.unwrap();
-
-        // Tests listing timeseries
-        list_timeseries_test(address).await.unwrap();
-
-        // Tests no changes are made when version is not updated
-        database_version_update_idempotent_test(address).await.unwrap();
-
-        // Tests that downgrading is impossible
-        database_version_will_not_downgrade_test(address).await.unwrap();
-
-        // Tests old data is dropped if version is updated
-        database_version_wipes_old_version_test(address).await.unwrap();
-
-        // Tests schema cache is updated when a new sample is inserted
-        update_schema_cache_on_new_sample_test(address).await.unwrap();
-
-        // Tests that we can successfully query all extant datum types from the schema table.
-        select_all_datum_types_test(address).await.unwrap();
-
-        // Tests that, when cache new schema but _fail_ to insert them,
-        // we also remove them from the internal cache.
-        new_schema_removed_when_not_inserted_test(address).await.unwrap();
-
-        // Tests for fields and measurements
-        recall_field_value_bool_test(address).await.unwrap();
-
-        recall_field_value_u8_test(address).await.unwrap();
-
-        recall_field_value_i8_test(address).await.unwrap();
-
-        recall_field_value_u16_test(address).await.unwrap();
-
-        recall_field_value_i16_test(address).await.unwrap();
-
-        recall_field_value_u32_test(address).await.unwrap();
-
-        recall_field_value_i32_test(address).await.unwrap();
-
-        recall_field_value_u64_test(address).await.unwrap();
-
-        recall_field_value_i64_test(address).await.unwrap();
-
-        recall_field_value_string_test(address).await.unwrap();
-
-        recall_field_value_ipv4addr_test(address).await.unwrap();
-
-        recall_field_value_ipv6addr_test(address).await.unwrap();
-
-        recall_field_value_uuid_test(address).await.unwrap();
-
-        recall_measurement_bool_test(address).await.unwrap();
-
-        recall_measurement_i8_test(address).await.unwrap();
-
-        recall_measurement_u8_test(address).await.unwrap();
-
-        recall_measurement_i16_test(address).await.unwrap();
-
-        recall_measurement_u16_test(address).await.unwrap();
-
-        recall_measurement_i32_test(address).await.unwrap();
-
-        recall_measurement_u32_test(address).await.unwrap();
-
-        recall_measurement_i64_test(address).await.unwrap();
-
-        recall_measurement_u64_test(address).await.unwrap();
-
-        recall_measurement_f32_test(address).await.unwrap();
-
-        recall_measurement_f64_test(address).await.unwrap();
-
-        recall_measurement_cumulative_i64_test(address).await.unwrap();
-
-        recall_measurement_cumulative_u64_test(address).await.unwrap();
-
-        recall_measurement_cumulative_f64_test(address).await.unwrap();
-
-        recall_measurement_histogram_i8_test(address).await.unwrap();
-
-        recall_measurement_histogram_u8_test(address).await.unwrap();
-
-        recall_measurement_histogram_i16_test(address).await.unwrap();
-
-        recall_measurement_histogram_u16_test(address).await.unwrap();
-
-        recall_measurement_histogram_i32_test(address).await.unwrap();
-
-        recall_measurement_histogram_u32_test(address).await.unwrap();
-
-        recall_measurement_histogram_i64_test(address).await.unwrap();
-
-        recall_measurement_histogram_u64_test(address).await.unwrap();
-
-        recall_measurement_histogram_f64_test(address).await.unwrap();
-
-        db.cleanup().await.expect("Failed to cleanup ClickHouse server");
         logctx.cleanup_successful();
+        Ok(())
     }
 
-    async fn is_not_oximeter_cluster_test(
+    async fn data_is_replicated_test(
+        cluster: &ClickHouseCluster,
+    ) -> Result<(), Error> {
+        let logctx = test_setup_log("test_data_is_replicated");
+        let log = &logctx.log;
+
+        // Create database in node 1
+        let client_1 = Client::new(cluster.replica_1.address, &log);
+        assert!(client_1.is_oximeter_cluster().await.unwrap());
+        client_1
+            .init_replicated_db()
+            .await
+            .expect("Failed to initialize timeseries database");
+
+        // Verify database exists in node 2
+        let client_2 = Client::new(cluster.replica_2.address, &log);
+        assert!(client_2.is_oximeter_cluster().await.unwrap());
+        let sql = String::from("SHOW DATABASES FORMAT JSONEachRow;");
+        let result = client_2.execute_with_body(sql).await.unwrap();
+
+        // Try a few times to make sure data has been synchronised.
+        let tries = 5;
+        for _ in 0..tries {
+            if !result.contains("oximeter") {
+                sleep(Duration::from_secs(1)).await;
+                continue;
+            } else {
+                break;
+            }
+        }
+
+        assert!(result.contains("oximeter"));
+
+        // Insert row into one of the tables
+        let sql = String::from(
+            "INSERT INTO oximeter.measurements_string (datum) VALUES ('hiya');",
+        );
+        client_2.execute_with_body(sql).await.unwrap();
+
+        let sql = String::from(
+            "SELECT * FROM oximeter.measurements_string FORMAT JSONEachRow;",
+        );
+        let result = client_2.execute_with_body(sql.clone()).await.unwrap();
+        assert!(result.contains("hiya"));
+
+        client_1.wipe_replicated_db().await?;
+        // TODO: Verify data has been deleted in client 2
+        logctx.cleanup_successful();
+
+        // TODO(https://github.com/oxidecomputer/omicron/issues/4001): With distributed
+        // engine, it can take a long time to sync the data. This means it's tricky to
+        // test that the data exists on both nodes.
+        Ok(())
+    }
+
+    async fn is_oximeter_cluster_test(
         address: SocketAddr,
+        db_type: InstallationType,
     ) -> Result<(), Error> {
         let logctx = test_setup_log("test_is_not_oximeter_cluster");
         let log = &logctx.log;
 
         let client = Client::new(address, &log);
-        assert!(!client.is_oximeter_cluster().await.unwrap());
-        client.wipe_single_node_db().await?;
+
+        match db_type {
+            InstallationType::Cluster => {
+                assert!(client.is_oximeter_cluster().await.unwrap());
+                client.wipe_replicated_db().await?;
+            }
+            InstallationType::SingleNode => {
+                assert!(!client.is_oximeter_cluster().await.unwrap());
+                client.wipe_single_node_db().await?;
+            }
+        }
         logctx.cleanup_successful();
         Ok(())
     }
@@ -2876,87 +3000,6 @@ mod tests {
         );
         logctx.cleanup_successful();
         Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_build_replicated() {
-        let logctx = test_setup_log("test_build_replicated");
-        let log = &logctx.log;
-
-        let mut cluster = ClickHouseCluster::new()
-            .await
-            .expect("Failed to initialise ClickHouse Cluster");
-
-        // Create database in node 1
-        let client_1 = Client::new(cluster.replica_1.address.unwrap(), &log);
-        assert!(client_1.is_oximeter_cluster().await.unwrap());
-        client_1
-            .init_replicated_db()
-            .await
-            .expect("Failed to initialize timeseries database");
-
-        // Verify database exists in node 2
-        let client_2 = Client::new(cluster.replica_2.address.unwrap(), &log);
-        assert!(client_2.is_oximeter_cluster().await.unwrap());
-        let sql = String::from("SHOW DATABASES FORMAT JSONEachRow;");
-        let result = client_2.execute_with_body(sql).await.unwrap();
-
-        // Try a few times to make sure data has been synchronised.
-        let tries = 5;
-        for _ in 0..tries {
-            if !result.contains("oximeter") {
-                sleep(Duration::from_secs(1)).await;
-                continue;
-            } else {
-                break;
-            }
-        }
-
-        assert!(result.contains("oximeter"));
-
-        // Insert row into one of the tables
-        let sql = String::from(
-            "INSERT INTO oximeter.measurements_string (datum) VALUES ('hiya');",
-        );
-        client_2.execute_with_body(sql).await.unwrap();
-
-        let sql = String::from(
-            "SELECT * FROM oximeter.measurements_string FORMAT JSONEachRow;",
-        );
-        let result = client_2.execute_with_body(sql.clone()).await.unwrap();
-        assert!(result.contains("hiya"));
-
-        // TODO(https://github.com/oxidecomputer/omicron/issues/4001): With distributed
-        // engine, it can take a long time to sync the data. This means it's tricky to
-        // test that the data exists on both nodes.
-
-        cluster
-            .keeper_1
-            .cleanup()
-            .await
-            .expect("Failed to cleanup ClickHouse keeper 1");
-        cluster
-            .keeper_2
-            .cleanup()
-            .await
-            .expect("Failed to cleanup ClickHouse keeper 2");
-        cluster
-            .keeper_3
-            .cleanup()
-            .await
-            .expect("Failed to cleanup ClickHouse keeper 3");
-        cluster
-            .replica_1
-            .cleanup()
-            .await
-            .expect("Failed to cleanup ClickHouse server 1");
-        cluster
-            .replica_2
-            .cleanup()
-            .await
-            .expect("Failed to cleanup ClickHouse server 2");
-
-        logctx.cleanup_successful();
     }
 
     // Testing helper functions

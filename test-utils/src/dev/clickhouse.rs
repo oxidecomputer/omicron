@@ -32,7 +32,7 @@ pub struct ClickHouseInstance {
     // The HTTP port the server is listening on
     port: u16,
     // The address the server is listening on
-    pub address: Option<SocketAddr>,
+    pub address: SocketAddr,
     // Full list of command-line arguments
     args: Vec<String>,
     // Subprocess handle
@@ -109,11 +109,13 @@ impl ClickHouseInstance {
         let data_path = data_dir.path().to_path_buf();
         let port = wait_for_port(log_path).await?;
 
+        let address = SocketAddr::new("::1".parse().unwrap(), port);
+
         Ok(Self {
             data_dir: Some(data_dir),
             data_path,
             port,
-            address: None,
+            address: address,
             args,
             child: Some(child),
         })
@@ -183,7 +185,7 @@ impl ClickHouseInstance {
                 data_dir: Some(data_dir),
                 data_path,
                 port,
-                address: Some(address),
+                address: address,
                 args,
                 child: Some(child),
             }),
@@ -252,6 +254,7 @@ impl ClickHouseInstance {
             })?;
 
         let data_path = data_dir.path().to_path_buf();
+        let address = SocketAddr::new("127.0.0.1".parse().unwrap(), port);
 
         let result = wait_for_ready(log_path).await;
         match result {
@@ -259,7 +262,7 @@ impl ClickHouseInstance {
                 data_dir: Some(data_dir),
                 data_path,
                 port,
-                address: None,
+                address: address,
                 args,
                 child: Some(child),
             }),
