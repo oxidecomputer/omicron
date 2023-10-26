@@ -30,7 +30,9 @@ use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use diesel::result::Error as DieselError;
 use diesel::upsert::excluded;
+use ipnetwork::IpNetwork;
 use nexus_db_model::DnsGroup;
 use nexus_db_model::DnsZone;
 use nexus_db_model::ExternalIp;
@@ -60,6 +62,7 @@ use uuid::Uuid;
 #[derive(Clone)]
 pub struct RackInit {
     pub rack_id: Uuid,
+    pub rack_subnet: IpNetwork,
     pub services: Vec<internal_params::ServicePutRequest>,
     pub datasets: Vec<Dataset>,
     pub service_ip_pool_ranges: Vec<IpRange>,
@@ -79,7 +82,7 @@ enum RackInitError {
     AddingNic(Error),
     ServiceInsert(Error),
     DatasetInsert { err: AsyncInsertError, zpool_id: Uuid },
-    RackUpdate { err: async_bb8_diesel::ConnectionError, rack_id: Uuid },
+    RackUpdate { err: DieselError, rack_id: Uuid },
     DnsSerialization(Error),
     Silo(Error),
     RoleAssignment(Error),
@@ -137,7 +140,7 @@ impl From<TxnError> for Error {
                     err
                 ))
             }
-            TxnError::Connection(e) => {
+            TxnError::Database(e) => {
                 Error::internal_error(&format!("Transaction error: {}", e))
             }
         }
@@ -187,6 +190,28 @@ impl DataStore {
                     ),
                 )
             })
+    }
+
+    pub async fn update_rack_subnet(
+        &self,
+        opctx: &OpContext,
+        rack: &Rack,
+    ) -> Result<(), Error> {
+        debug!(
+            opctx.log,
+            "updating rack subnet for rack {} to {:#?}",
+            rack.id(),
+            rack.rack_subnet
+        );
+        use db::schema::rack::dsl;
+        diesel::update(dsl::rack)
+            .filter(dsl::id.eq(rack.id()))
+            .set(dsl::rack_subnet.eq(rack.rack_subnet))
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(())
     }
 
     // The following methods which return a `TxnError` take a `conn` parameter
@@ -631,7 +656,7 @@ impl DataStore {
             .await
             .map_err(|error: TxnError| match error {
                 TransactionError::CustomError(err) => err,
-                TransactionError::Connection(e) => {
+                TransactionError::Database(e) => {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 }
             })
@@ -680,6 +705,7 @@ mod test {
         fn default() -> Self {
             RackInit {
                 rack_id: Uuid::parse_str(nexus_test_utils::RACK_UUID).unwrap(),
+                rack_subnet: nexus_test_utils::RACK_SUBNET.parse().unwrap(),
                 services: vec![],
                 datasets: vec![],
                 service_ip_pool_ranges: vec![],

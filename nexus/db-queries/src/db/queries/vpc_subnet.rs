@@ -11,6 +11,7 @@ use chrono::{DateTime, Utc};
 use diesel::pg::Pg;
 use diesel::prelude::*;
 use diesel::query_builder::*;
+use diesel::result::Error as DieselError;
 use diesel::sql_types;
 use omicron_common::api::external;
 use ref_cast::RefCast;
@@ -28,14 +29,9 @@ pub enum SubnetError {
 impl SubnetError {
     /// Construct a `SubnetError` from a Diesel error, catching the desired
     /// cases and building useful errors.
-    pub fn from_diesel(
-        e: async_bb8_diesel::ConnectionError,
-        subnet: &VpcSubnet,
-    ) -> Self {
+    pub fn from_diesel(e: DieselError, subnet: &VpcSubnet) -> Self {
         use crate::db::error;
-        use async_bb8_diesel::ConnectionError;
         use diesel::result::DatabaseErrorKind;
-        use diesel::result::Error;
         const IPV4_OVERLAP_ERROR_MESSAGE: &str =
             r#"null value in column "ipv4_block" violates not-null constraint"#;
         const IPV6_OVERLAP_ERROR_MESSAGE: &str =
@@ -43,26 +39,26 @@ impl SubnetError {
         const NAME_CONFLICT_CONSTRAINT: &str = "vpc_subnet_vpc_id_name_key";
         match e {
             // Attempt to insert overlapping IPv4 subnet
-            ConnectionError::Query(Error::DatabaseError(
+            DieselError::DatabaseError(
                 DatabaseErrorKind::NotNullViolation,
                 ref info,
-            )) if info.message() == IPV4_OVERLAP_ERROR_MESSAGE => {
+            ) if info.message() == IPV4_OVERLAP_ERROR_MESSAGE => {
                 SubnetError::OverlappingIpRange(subnet.ipv4_block.0 .0.into())
             }
 
             // Attempt to insert overlapping IPv6 subnet
-            ConnectionError::Query(Error::DatabaseError(
+            DieselError::DatabaseError(
                 DatabaseErrorKind::NotNullViolation,
                 ref info,
-            )) if info.message() == IPV6_OVERLAP_ERROR_MESSAGE => {
+            ) if info.message() == IPV6_OVERLAP_ERROR_MESSAGE => {
                 SubnetError::OverlappingIpRange(subnet.ipv6_block.0 .0.into())
             }
 
             // Conflicting name for the subnet within a VPC
-            ConnectionError::Query(Error::DatabaseError(
+            DieselError::DatabaseError(
                 DatabaseErrorKind::UniqueViolation,
                 ref info,
-            )) if info.constraint_name() == Some(NAME_CONFLICT_CONSTRAINT) => {
+            ) if info.constraint_name() == Some(NAME_CONFLICT_CONSTRAINT) => {
                 SubnetError::External(error::public_error_from_diesel(
                     e,
                     error::ErrorHandler::Conflict(

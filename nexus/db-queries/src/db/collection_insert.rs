@@ -10,7 +10,7 @@
 //! 3) inserts the child resource row
 
 use super::pool::DbConnection;
-use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionError};
+use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::associations::HasTable;
 use diesel::helper_types::*;
 use diesel::pg::Pg;
@@ -18,6 +18,7 @@ use diesel::prelude::*;
 use diesel::query_builder::*;
 use diesel::query_dsl::methods as query_methods;
 use diesel::query_source::Table;
+use diesel::result::Error as DieselError;
 use diesel::sql_types::SingleValue;
 use nexus_db_model::DatastoreCollectionConfig;
 use std::fmt::Debug;
@@ -170,7 +171,7 @@ pub enum AsyncInsertError {
     /// The collection that the query was inserting into does not exist
     CollectionNotFound,
     /// Other database error
-    DatabaseError(ConnectionError),
+    DatabaseError(DieselError),
 }
 
 impl<ResourceType, ISR, C> InsertIntoCollectionStatement<ResourceType, ISR, C>
@@ -238,14 +239,11 @@ where
 
     /// Translate from diesel errors into AsyncInsertError, handling the
     /// intentional division-by-zero error in the CTE.
-    fn translate_async_error(err: ConnectionError) -> AsyncInsertError {
-        match err {
-            ConnectionError::Query(err)
-                if Self::error_is_division_by_zero(&err) =>
-            {
-                AsyncInsertError::CollectionNotFound
-            }
-            other => AsyncInsertError::DatabaseError(other),
+    fn translate_async_error(err: DieselError) -> AsyncInsertError {
+        if Self::error_is_division_by_zero(&err) {
+            AsyncInsertError::CollectionNotFound
+        } else {
+            AsyncInsertError::DatabaseError(err)
         }
     }
 }

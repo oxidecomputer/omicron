@@ -20,6 +20,7 @@ use diesel::query_builder::AstPass;
 use diesel::query_builder::Query;
 use diesel::query_builder::QueryFragment;
 use diesel::query_builder::QueryId;
+use diesel::result::Error as DieselError;
 use diesel::sql_types;
 use diesel::Column;
 use diesel::Expression;
@@ -42,7 +43,7 @@ const REALLOCATION_WITH_DIFFERENT_IP_SENTINEL: &'static str =
     "Reallocation of IP with different value";
 
 /// Translates a generic pool error to an external error.
-pub fn from_diesel(e: async_bb8_diesel::ConnectionError) -> external::Error {
+pub fn from_diesel(e: DieselError) -> external::Error {
     use crate::db::error;
 
     let sentinels = [REALLOCATION_WITH_DIFFERENT_IP_SENTINEL];

@@ -190,7 +190,9 @@ impl DataStore {
             authz_instance.id(),
             authz_disk.id(),
             instance::table.into_boxed().filter(
-                instance::dsl::state.eq_any(ok_to_attach_instance_states),
+                instance::dsl::state
+                    .eq_any(ok_to_attach_instance_states)
+                    .and(instance::dsl::active_propolis_id.is_null()),
             ),
             disk::table.into_boxed().filter(
                 disk::dsl::disk_state.eq_any(ok_to_attach_disk_state_labels),
@@ -230,7 +232,15 @@ impl DataStore {
                         // why we did not attach.
                         api::external::DiskState::Creating |
                         api::external::DiskState::Detached => {
-                            match collection.runtime_state.state.state() {
+                            if collection.runtime_state.propolis_id.is_some() {
+                                return Err(
+                                    Error::invalid_request(
+                                        "cannot attach disk: instance is not \
+                                        fully stopped"
+                                    )
+                                );
+                            }
+                            match collection.runtime_state.nexus_state.state() {
                                 // Ok-to-be-attached instance states:
                                 api::external::InstanceState::Creating |
                                 api::external::InstanceState::Stopped => {
@@ -254,7 +264,7 @@ impl DataStore {
                                 _ => {
                                     Err(Error::invalid_request(&format!(
                                         "cannot attach disk to instance in {} state",
-                                        collection.runtime_state.state.state(),
+                                        collection.runtime_state.nexus_state.state(),
                                     )))
                                 }
                             }
@@ -320,7 +330,9 @@ impl DataStore {
             authz_disk.id(),
             instance::table
                 .into_boxed()
-                .filter(instance::dsl::state.eq_any(ok_to_detach_instance_states)),
+                .filter(instance::dsl::state
+                        .eq_any(ok_to_detach_instance_states)
+                        .and(instance::dsl::active_propolis_id.is_null())),
             disk::table
                 .into_boxed()
                 .filter(disk::dsl::disk_state.eq_any(ok_to_detach_disk_state_labels)),
@@ -361,7 +373,15 @@ impl DataStore {
                         // Ok-to-detach disk states: Inspect the state to infer
                         // why we did not detach.
                         api::external::DiskState::Attached(id) if id == authz_instance.id() => {
-                            match collection.runtime_state.state.state() {
+                            if collection.runtime_state.propolis_id.is_some() {
+                                return Err(
+                                    Error::invalid_request(
+                                        "cannot attach disk: instance is not \
+                                        fully stopped"
+                                    )
+                                );
+                            }
+                            match collection.runtime_state.nexus_state.state() {
                                 // Ok-to-be-detached instance states:
                                 api::external::InstanceState::Creating |
                                 api::external::InstanceState::Stopped => {
@@ -375,7 +395,7 @@ impl DataStore {
                                 _ => {
                                     Err(Error::invalid_request(&format!(
                                         "cannot detach disk from instance in {} state",
-                                        collection.runtime_state.state.state(),
+                                        collection.runtime_state.nexus_state.state(),
                                     )))
                                 }
                             }

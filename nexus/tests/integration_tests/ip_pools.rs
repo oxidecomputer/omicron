@@ -889,7 +889,11 @@ async fn test_ip_range_delete_with_allocated_external_ip_fails(
     .expect("Failed to stop instance");
 
     // Simulate the transition, wait until it is in fact stopped.
-    let sa = nexus.instance_sled_by_id(&instance.identity.id).await.unwrap();
+    let sa = nexus
+        .instance_sled_by_id(&instance.identity.id)
+        .await
+        .unwrap()
+        .expect("running instance should be on a sled");
     sa.instance_finish_transition(instance.identity.id).await;
 
     // Delete the instance

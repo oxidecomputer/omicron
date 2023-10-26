@@ -368,7 +368,7 @@ fn ensure_zfs_key_directory_exists(log: &Logger) -> Result<(), StartError> {
 }
 
 fn ensure_zfs_ramdisk_dataset() -> Result<(), StartError> {
-    let zoned = true;
+    let zoned = false;
     let do_format = true;
     let encryption_details = None;
     let quota = None;
@@ -381,6 +381,7 @@ fn ensure_zfs_ramdisk_dataset() -> Result<(), StartError> {
         do_format,
         encryption_details,
         quota,
+        None,
     )
     .map_err(StartError::EnsureZfsRamdiskDataset)
 }

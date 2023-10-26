@@ -245,15 +245,7 @@ struct NextVni {
 
 impl NextVni {
     fn new(vni: Vni) -> Self {
-        let base_u32 = u32::from(vni.0);
-        // The valid range is [0, 1 << 24], so the maximum shift is whatever
-        // gets us to 1 << 24, and the minimum is whatever gets us back to the
-        // minimum guest VNI.
-        let max_shift = i64::from(external::Vni::MAX_VNI - base_u32);
-        let min_shift = i64::from(
-            -i32::try_from(base_u32 - external::Vni::MIN_GUEST_VNI)
-                .expect("Expected a valid VNI at this point"),
-        );
+        let VniShifts { min_shift, max_shift } = VniShifts::new(vni);
         let generator =
             DefaultShiftGenerator { base: vni, max_shift, min_shift };
         let inner = NextItem::new_unscoped(generator);
@@ -278,3 +270,208 @@ impl NextVni {
 }
 
 delegate_query_fragment_impl!(NextVni);
+
+// Helper type to compute the shift for a `NextItem` query to find VNIs.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct VniShifts {
+    // The minimum `ShiftGenerator` shift.
+    min_shift: i64,
+    // The maximum `ShiftGenerator` shift.
+    max_shift: i64,
+}
+
+/// Restrict the search for a VNI to a small range.
+///
+/// VNIs are pretty sparsely allocated (the number of VPCs), and the range is
+/// quite large (24 bits). To avoid memory issues, we'll restrict a search
+/// for an available VNI to a small range starting from the random starting
+/// VNI.
+//
+// NOTE: This is very small for tests, to ensure we can accurately test the
+// failure mode where there are no available VNIs.
+#[cfg(not(test))]
+pub const MAX_VNI_SEARCH_RANGE_SIZE: u32 = 2048;
+#[cfg(test)]
+pub const MAX_VNI_SEARCH_RANGE_SIZE: u32 = 10;
+
+// Ensure that we cannot search a range that extends beyond the valid guest VNI
+// range.
+static_assertions::const_assert!(
+    MAX_VNI_SEARCH_RANGE_SIZE
+        <= (external::Vni::MAX_VNI - external::Vni::MIN_GUEST_VNI)
+);
+
+impl VniShifts {
+    fn new(vni: Vni) -> Self {
+        let base_u32 = u32::from(vni.0);
+        let range_end = base_u32 + MAX_VNI_SEARCH_RANGE_SIZE;
+
+        // Clamp the maximum shift at the distance to the maximum allowed VNI,
+        // or the maximum of the range.
+        let max_shift = i64::from(
+            (external::Vni::MAX_VNI - base_u32).min(MAX_VNI_SEARCH_RANGE_SIZE),
+        );
+
+        // And any remaining part of the range wraps around starting at the
+        // beginning.
+        let min_shift = -i64::from(
+            range_end.checked_sub(external::Vni::MAX_VNI).unwrap_or(0),
+        );
+        Self { min_shift, max_shift }
+    }
+}
+
+/// An iterator yielding sequential starting VNIs.
+///
+/// The VPC insertion query requires a search for the next available VNI, using
+/// the `NextItem` query. We limit the search for each query to avoid memory
+/// issues on any one query. If we fail to find a VNI, we need to search the
+/// next range. This iterator yields the starting positions for the `NextItem`
+/// query, so that the entire range can be search in chunks until a free VNI is
+/// found.
+//
+// NOTE: It's technically possible for this to lead to searching the very
+// initial portion of the range twice. If we end up wrapping around so that the
+// last position yielded by this iterator is `start - x`, then we'll end up
+// searching from `start - x` to `start + (MAX_VNI_SEARCH_RANGE_SIZE - x)`, and
+// so search those first few after `start` again. This is both innocuous and
+// really unlikely.
+#[derive(Clone, Copy, Debug)]
+pub struct VniSearchIter {
+    start: u32,
+    current: u32,
+    has_wrapped: bool,
+}
+
+impl VniSearchIter {
+    pub const STEP_SIZE: u32 = MAX_VNI_SEARCH_RANGE_SIZE;
+
+    /// Create a search range, starting from the provided VNI.
+    pub fn new(start: external::Vni) -> Self {
+        let start = u32::from(start);
+        Self { start, current: start, has_wrapped: false }
+    }
+}
+
+impl std::iter::Iterator for VniSearchIter {
+    type Item = external::Vni;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // If we've wrapped around and the computed position is beyond where we
+        // started, then the ite
+        if self.has_wrapped && self.current > self.start {
+            return None;
+        }
+
+        // Compute the next position.
+        //
+        // Make sure we wrap around to the mininum guest VNI. Note that we
+        // consider the end of the range inclusively, so we subtract one in the
+        // offset below to end up _at_ the min guest VNI.
+        let mut next = self.current + MAX_VNI_SEARCH_RANGE_SIZE;
+        if next > external::Vni::MAX_VNI {
+            next -= external::Vni::MAX_VNI;
+            next += external::Vni::MIN_GUEST_VNI - 1;
+            self.has_wrapped = true;
+        }
+        let current = self.current;
+        self.current = next;
+        Some(external::Vni::try_from(current).unwrap())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::external;
+    use super::Vni;
+    use super::VniSearchIter;
+    use super::VniShifts;
+    use super::MAX_VNI_SEARCH_RANGE_SIZE;
+
+    // Ensure that when the search range lies entirely within the range of VNIs,
+    // we search from the start VNI through the maximum allowed range size.
+    #[test]
+    fn test_vni_shift_no_wrapping() {
+        let vni = Vni(external::Vni::try_from(2048).unwrap());
+        let VniShifts { min_shift, max_shift } = VniShifts::new(vni);
+        assert_eq!(min_shift, 0);
+        assert_eq!(max_shift, i64::from(MAX_VNI_SEARCH_RANGE_SIZE));
+        assert_eq!(max_shift - min_shift, i64::from(MAX_VNI_SEARCH_RANGE_SIZE));
+    }
+
+    // Ensure that we wrap correctly, when the starting VNI happens to land
+    // quite close to the end of the allowed range.
+    #[test]
+    fn test_vni_shift_with_wrapping() {
+        let offset = 5;
+        let vni =
+            Vni(external::Vni::try_from(external::Vni::MAX_VNI - offset)
+                .unwrap());
+        let VniShifts { min_shift, max_shift } = VniShifts::new(vni);
+        assert_eq!(min_shift, -i64::from(MAX_VNI_SEARCH_RANGE_SIZE - offset));
+        assert_eq!(max_shift, i64::from(offset));
+        assert_eq!(max_shift - min_shift, i64::from(MAX_VNI_SEARCH_RANGE_SIZE));
+    }
+
+    #[test]
+    fn test_vni_search_iter_steps() {
+        let start = external::Vni::try_from(2048).unwrap();
+        let mut it = VniSearchIter::new(start);
+        let next = it.next().unwrap();
+        assert_eq!(next, start);
+        let next = it.next().unwrap();
+        assert_eq!(
+            next,
+            external::Vni::try_from(
+                u32::from(start) + MAX_VNI_SEARCH_RANGE_SIZE
+            )
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn test_vni_search_iter_full_count() {
+        let start =
+            external::Vni::try_from(external::Vni::MIN_GUEST_VNI).unwrap();
+
+        let last = VniSearchIter::new(start).last().unwrap();
+        println!("{:?}", last);
+
+        pub const fn div_ceil(x: u32, y: u32) -> u32 {
+            let d = x / y;
+            let r = x % y;
+            if r > 0 && y > 0 {
+                d + 1
+            } else {
+                d
+            }
+        }
+        const N_EXPECTED: u32 = div_ceil(
+            external::Vni::MAX_VNI - external::Vni::MIN_GUEST_VNI,
+            MAX_VNI_SEARCH_RANGE_SIZE,
+        );
+        let count = u32::try_from(VniSearchIter::new(start).count()).unwrap();
+        assert_eq!(count, N_EXPECTED);
+    }
+
+    #[test]
+    fn test_vni_search_iter_wrapping() {
+        // Start from just before the end of the range.
+        let start =
+            external::Vni::try_from(external::Vni::MAX_VNI - 1).unwrap();
+        let mut it = VniSearchIter::new(start);
+
+        // We should yield that start position first.
+        let next = it.next().unwrap();
+        assert_eq!(next, start);
+
+        // The next value should be wrapped around to the beginning.
+        //
+        // Subtract 2 because we _include_ the max VNI in the search range.
+        let next = it.next().unwrap();
+        assert_eq!(
+            u32::from(next),
+            external::Vni::MIN_GUEST_VNI + MAX_VNI_SEARCH_RANGE_SIZE - 2
+        );
+    }
+}

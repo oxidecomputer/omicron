@@ -6,9 +6,9 @@
 
 use crate::common::instance::{
     Action as InstanceAction, InstanceStates, ObservedPropolisState,
-    PublishedInstanceState,
+    PublishedVmmState,
 };
-use crate::instance_manager::InstanceTicket;
+use crate::instance_manager::{InstanceManagerServices, InstanceTicket};
 use crate::nexus::NexusClientWithResolver;
 use crate::params::ZoneBundleCause;
 use crate::params::ZoneBundleMetadata;
@@ -22,17 +22,20 @@ use crate::zone_bundle::BundleError;
 use crate::zone_bundle::ZoneBundler;
 use anyhow::anyhow;
 use backoff::BackoffError;
+use chrono::Utc;
 use futures::lock::{Mutex, MutexGuard};
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
-use illumos_utils::opte::PortManager;
+use illumos_utils::opte::{DhcpCfg, PortManager};
 use illumos_utils::running_zone::{InstalledZone, RunningZone};
 use illumos_utils::svc::wait_for_service;
 use illumos_utils::zone::Zones;
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use omicron_common::address::NEXUS_INTERNAL_PORT;
 use omicron_common::address::PROPOLIS_PORT;
-use omicron_common::api::internal::nexus::InstanceRuntimeState;
+use omicron_common::api::internal::nexus::{
+    InstanceRuntimeState, SledInstanceState, VmmRuntimeState,
+};
 use omicron_common::api::internal::shared::{
     NetworkInterface, SourceNatConfig,
 };
@@ -45,7 +48,6 @@ use slog::Logger;
 use std::net::IpAddr;
 use std::net::{SocketAddr, SocketAddrV6};
 use std::sync::Arc;
-use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 #[derive(thiserror::Error, Debug)]
@@ -88,6 +90,10 @@ pub enum Error {
 
     #[error(transparent)]
     Opte(#[from] illumos_utils::opte::Error),
+
+    /// Issued by `impl TryFrom<&[u8]> for oxide_vpc::api::DomainName`
+    #[error("Invalid hostname: {0}")]
+    InvalidHostname(&'static str),
 
     #[error("Error resolving DNS name: {0}")]
     ResolveError(#[from] internal_dns::resolver::ResolveError),
@@ -171,32 +177,8 @@ enum Reaction {
 struct RunningState {
     // Connection to Propolis.
     client: Arc<PropolisClient>,
-    // Handle to task monitoring for Propolis state changes.
-    monitor_task: Option<JoinHandle<()>>,
     // Handle to the zone.
     running_zone: RunningZone,
-}
-
-impl Drop for RunningState {
-    fn drop(&mut self) {
-        if let Some(task) = self.monitor_task.take() {
-            // NOTE: We'd prefer to actually await the task, since it
-            // will be completed at this point, but async drop doesn't exist.
-            //
-            // At a minimum, this implementation ensures the background task
-            // is not executing after RunningState terminates.
-            //
-            // "InstanceManager" contains...
-            //      ... "Instance", which contains...
-            //      ... "InstanceInner", which contains...
-            //      ... "RunningState", which owns the "monitor_task".
-            //
-            // The "monitor_task" removes the instance from the
-            // "InstanceManager", triggering it's eventual drop.
-            // When this happens, the "monitor_task" exits anyway.
-            task.abort()
-        }
-    }
 }
 
 // Named type for values returned during propolis zone creation
@@ -229,6 +211,7 @@ struct InstanceInner {
     source_nat: SourceNatConfig,
     external_ips: Vec<IpAddr>,
     firewall_rules: Vec<VpcFirewallRule>,
+    dhcp_config: DhcpCfg,
 
     // Disk related properties
     // TODO: replace `propolis_client::handmade::*` with properly-modeled local types
@@ -263,15 +246,15 @@ impl InstanceInner {
         &self.propolis_id
     }
 
-    async fn publish_state_to_nexus(&self) -> Result<(), Error> {
+    async fn publish_state_to_nexus(&self) {
         // Retry until Nexus acknowledges that it has applied this state update.
         // Note that Nexus may receive this call but then fail while reacting
         // to it. If that failure is transient, Nexus expects this routine to
         // retry the state update.
-        backoff::retry_notify(
+        let result = backoff::retry_notify(
             backoff::retry_policy_internal_service(),
             || async {
-                let state = self.state.current().clone();
+                let state = self.state.sled_instance_state();
                 info!(self.log, "Publishing instance state update to Nexus";
                     "instance_id" => %self.id(),
                     "state" => ?state,
@@ -330,9 +313,15 @@ impl InstanceInner {
                       "retry_after" => ?delay);
             },
         )
-        .await?;
+        .await;
 
-        Ok(())
+        if let Err(e) = result {
+            error!(
+                self.log,
+                "Failed to publish state to Nexus, will not retry: {:?}", e;
+                "instance_id" => %self.id()
+            );
+        }
     }
 
     /// Processes a Propolis state change observed by the Propolis monitoring
@@ -365,28 +354,26 @@ impl InstanceInner {
         let action = self.state.apply_propolis_observation(state);
         info!(
             self.log,
-            "New state: {:?}, action: {:?}",
-            self.state.current().run_state,
-            action
+            "updated state after observing Propolis state change";
+            "propolis_id" => %self.state.propolis_id(),
+            "new_instance_state" => ?self.state.instance(),
+            "new_vmm_state" => ?self.state.vmm()
         );
 
-        // Publish the updated instance state to Nexus. The callee retries
-        // transient errors. If an error is permanent, log a message but
-        // continue monitoring so that the monitor will continue to take
-        // actions in response to future Propolis state changes.
-        if let Err(e) = self.publish_state_to_nexus().await {
-            let state = self.state.current();
-            error!(self.log,
-                   "Failed to publish state to Nexus, will not retry: {:?}", e;
-                   "instance_id" => %self.id(),
-                   "state" => ?state);
-        }
+        // If the zone is now safe to terminate, tear it down and discard the
+        // instance ticket before returning and publishing the new instance
+        // state to Nexus. This ensures that the instance is actually gone from
+        // the sled when Nexus receives the state update saying it's actually
+        // destroyed.
+        match action {
+            Some(InstanceAction::Destroy) => {
+                info!(self.log, "terminating VMM that has exited";
+                      "instance_id" => %self.id());
 
-        // Take the next action, if any.
-        if let Some(action) = action {
-            self.take_action(action).await
-        } else {
-            Ok(Reaction::Continue)
+                self.terminate().await?;
+                Ok(Reaction::Terminate)
+            }
+            None => Ok(Reaction::Continue),
         }
     }
 
@@ -434,7 +421,7 @@ impl InstanceInner {
         let migrate = match migrate {
             Some(params) => {
                 let migration_id =
-                    self.state.current().migration_id.ok_or_else(|| {
+                    self.state.instance().migration_id.ok_or_else(|| {
                         Error::Migration(anyhow!("Missing Migration UUID"))
                     })?;
                 Some(propolis_client::api::InstanceMigrateInitiateRequest {
@@ -485,47 +472,24 @@ impl InstanceInner {
         self.propolis_ensure(&client, &running_zone, migrate).await?;
 
         // Monitor propolis for state changes in the background.
+        //
+        // This task exits after its associated Propolis has been terminated
+        // (either because the task observed a message from Propolis saying that
+        // it exited or because the Propolis server was terminated by other
+        // means).
         let monitor_client = client.clone();
-        let monitor_task = Some(tokio::task::spawn(async move {
+        let _monitor_task = tokio::task::spawn(async move {
             let r = instance.monitor_state_task(monitor_client).await;
             let log = &instance.inner.lock().await.log;
             match r {
                 Err(e) => warn!(log, "State monitoring task failed: {}", e),
                 Ok(()) => info!(log, "State monitoring task complete"),
             }
-        }));
+        });
 
-        self.running_state =
-            Some(RunningState { client, monitor_task, running_zone });
+        self.running_state = Some(RunningState { client, running_zone });
 
         Ok(())
-    }
-
-    async fn take_action(
-        &self,
-        action: InstanceAction,
-    ) -> Result<Reaction, Error> {
-        info!(self.log, "Taking action: {:#?}", action);
-        let requested_state = match action {
-            InstanceAction::Run => {
-                propolis_client::api::InstanceStateRequested::Run
-            }
-            InstanceAction::Stop => {
-                propolis_client::api::InstanceStateRequested::Stop
-            }
-            InstanceAction::Reboot => {
-                propolis_client::api::InstanceStateRequested::Reboot
-            }
-            InstanceAction::Destroy => {
-                // Unlike the other actions, which update the Propolis state,
-                // the "destroy" action indicates that the service should be
-                // terminated.
-                info!(self.log, "take_action: Taking the Destroy action");
-                return Ok(Reaction::Terminate);
-            }
-        };
-        self.propolis_state_put(requested_state).await?;
-        Ok(Reaction::Continue)
     }
 
     /// Immediately terminates this instance's Propolis zone and cleans up any
@@ -547,6 +511,10 @@ impl InstanceInner {
                 self.log,
                 "Instance::terminate() called with no running state"
             );
+
+            // Ensure the instance is removed from the instance manager's table
+            // so that a new instance can take its place.
+            self.instance_ticket.terminate();
             return Ok(());
         };
 
@@ -599,59 +567,116 @@ pub struct Instance {
     inner: Arc<Mutex<InstanceInner>>,
 }
 
+#[derive(Debug)]
+pub(crate) struct InstanceInitialState {
+    pub hardware: InstanceHardware,
+    pub instance_runtime: InstanceRuntimeState,
+    pub vmm_runtime: VmmRuntimeState,
+    pub propolis_addr: SocketAddr,
+}
+
 impl Instance {
     /// Creates a new (not yet running) instance object.
     ///
-    /// Arguments:
+    /// # Arguments
+    ///
     /// * `log`: Logger for dumping debug information.
     /// * `id`: UUID of the instance to be created.
-    /// * `initial`: State of the instance at initialization time.
-    /// * `vnic_allocator`: A unique (to the sled) ID generator to
-    /// refer to a VNIC. (This exists because of a restriction on VNIC name
-    /// lengths, otherwise the UUID would be used instead).
-    /// * `port_manager`: Handle to the object responsible for managing OPTE
-    /// ports.
-    /// * `nexus_client`: Connection to Nexus, used for sending notifications.
-    // TODO: This arg list is getting a little long; can we clean this up?
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
+    /// * `propolis_id`: UUID for the VMM to be created.
+    /// * `ticket`: A ticket that ensures this instance is a member of its
+    ///   instance manager's tracking table.
+    /// * `state`: The initial state of this instance.
+    /// * `services`: A set of instance manager-provided services.
+    pub(crate) fn new(
         log: Logger,
         id: Uuid,
+        propolis_id: Uuid,
         ticket: InstanceTicket,
-        initial: InstanceHardware,
-        vnic_allocator: VnicAllocator<Etherstub>,
-        port_manager: PortManager,
-        nexus_client: NexusClientWithResolver,
-        storage: StorageResources,
-        zone_bundler: ZoneBundler,
+        state: InstanceInitialState,
+        services: InstanceManagerServices,
     ) -> Result<Self, Error> {
-        info!(log, "Instance::new w/initial HW: {:?}", initial);
+        info!(log, "initializing new Instance";
+              "instance_id" => %id,
+              "propolis_id" => %propolis_id,
+              "state" => ?state);
+
+        let InstanceInitialState {
+            hardware,
+            instance_runtime,
+            vmm_runtime,
+            propolis_addr,
+        } = state;
+
+        let InstanceManagerServices {
+            nexus_client,
+            vnic_allocator,
+            port_manager,
+            storage,
+            zone_bundler,
+        } = services;
+
+        let mut dhcp_config = DhcpCfg {
+            hostname: Some(
+                hardware
+                    .properties
+                    .hostname
+                    .parse()
+                    .map_err(Error::InvalidHostname)?,
+            ),
+            host_domain: hardware
+                .dhcp_config
+                .host_domain
+                .map(|domain| domain.parse())
+                .transpose()
+                .map_err(Error::InvalidHostname)?,
+            domain_search_list: hardware
+                .dhcp_config
+                .search_domains
+                .into_iter()
+                .map(|domain| domain.parse())
+                .collect::<Result<_, _>>()
+                .map_err(Error::InvalidHostname)?,
+            dns4_servers: Vec::new(),
+            dns6_servers: Vec::new(),
+        };
+        for ip in hardware.dhcp_config.dns_servers {
+            match ip {
+                IpAddr::V4(ip) => dhcp_config.dns4_servers.push(ip.into()),
+                IpAddr::V6(ip) => dhcp_config.dns6_servers.push(ip.into()),
+            }
+        }
+
         let instance = InstanceInner {
             log: log.new(o!("instance_id" => id.to_string())),
             // NOTE: Mostly lies.
             properties: propolis_client::api::InstanceProperties {
                 id,
-                name: initial.runtime.hostname.clone(),
+                name: hardware.properties.hostname.clone(),
                 description: "Test description".to_string(),
                 image_id: Uuid::nil(),
                 bootrom_id: Uuid::nil(),
                 // TODO: Align the byte type w/propolis.
-                memory: initial.runtime.memory.to_whole_mebibytes(),
+                memory: hardware.properties.memory.to_whole_mebibytes(),
                 // TODO: we should probably make propolis aligned with
                 // InstanceCpuCount here, to avoid any casting...
-                vcpus: initial.runtime.ncpus.0 as u8,
+                vcpus: hardware.properties.ncpus.0 as u8,
             },
-            propolis_id: initial.runtime.propolis_id,
-            propolis_ip: initial.runtime.propolis_addr.unwrap().ip(),
+            propolis_id,
+            propolis_ip: propolis_addr.ip(),
             vnic_allocator,
             port_manager,
-            requested_nics: initial.nics,
-            source_nat: initial.source_nat,
-            external_ips: initial.external_ips,
-            firewall_rules: initial.firewall_rules,
-            requested_disks: initial.disks,
-            cloud_init_bytes: initial.cloud_init_bytes,
-            state: InstanceStates::new(initial.runtime),
+            requested_nics: hardware.nics,
+            source_nat: hardware.source_nat,
+            external_ips: hardware.external_ips,
+            firewall_rules: hardware.firewall_rules,
+            dhcp_config,
+            requested_disks: hardware.disks,
+            cloud_init_bytes: hardware.cloud_init_bytes,
+            state: InstanceStates::new(
+                instance_runtime,
+                vmm_runtime,
+                propolis_id,
+            ),
             running_state: None,
             nexus_client,
             storage,
@@ -686,9 +711,9 @@ impl Instance {
         }
     }
 
-    pub async fn current_state(&self) -> InstanceRuntimeState {
+    pub async fn current_state(&self) -> SledInstanceState {
         let inner = self.inner.lock().await;
-        inner.state.current().clone()
+        inner.state.sled_instance_state()
     }
 
     /// Ensures that a Propolis process exists for this instance, then sends it
@@ -712,25 +737,6 @@ impl Instance {
                 .await?;
         } else {
             let setup_result: Result<(), Error> = 'setup: {
-                // If there's no Propolis yet, and this instance is not being
-                // initialized via migration, immediately send a state update to
-                // Nexus to reflect that the instance is starting (so that the
-                // external API will display this state while the zone is being
-                // started).
-                //
-                // Migration targets don't do this because the instance is still
-                // logically running (on the source) while the target Propolis
-                // is being launched.
-                if migration_params.is_none() {
-                    info!(&inner.log, "Ensuring new instance");
-                    inner.state.transition(PublishedInstanceState::Starting);
-                    if let Err(e) = inner.publish_state_to_nexus().await {
-                        break 'setup Err(e);
-                    }
-                } else {
-                    info!(&inner.log, "Ensuring new instance (migration)");
-                }
-
                 // Set up the Propolis zone and the objects associated with it.
                 let setup = match self.setup_propolis_locked(inner).await {
                     Ok(setup) => setup,
@@ -757,9 +763,12 @@ impl Instance {
             // start a migration target simply leaves the VM running untouched
             // on the source.
             if migration_params.is_none() && setup_result.is_err() {
-                error!(&inner.log, "instance setup failed: {:?}", setup_result);
-                inner.state.transition(PublishedInstanceState::Failed);
-                inner.publish_state_to_nexus().await?;
+                error!(&inner.log, "vmm setup failed: {:?}", setup_result);
+
+                // This case is morally equivalent to starting Propolis and then
+                // rudely terminating it before asking it to do anything. Update
+                // the VMM and instance states accordingly.
+                inner.state.terminate_rudely();
             }
             setup_result?;
         }
@@ -780,7 +789,7 @@ impl Instance {
     pub async fn put_state(
         &self,
         state: crate::params::InstanceStateRequested,
-    ) -> Result<InstanceRuntimeState, Error> {
+    ) -> Result<SledInstanceState, Error> {
         use propolis_client::api::InstanceStateRequested as PropolisRequest;
         let mut inner = self.inner.lock().await;
         let (propolis_state, next_published) = match state {
@@ -800,11 +809,12 @@ impl Instance {
                 // "Destroyed" state and return it to the caller.
                 if inner.running_state.is_none() {
                     inner.terminate().await?;
-                    (None, Some(PublishedInstanceState::Stopped))
+                    inner.state.terminate_rudely();
+                    (None, None)
                 } else {
                     (
                         Some(PropolisRequest::Stop),
-                        Some(PublishedInstanceState::Stopping),
+                        Some(PublishedVmmState::Stopping),
                     )
                 }
             }
@@ -814,7 +824,7 @@ impl Instance {
                 }
                 (
                     Some(PropolisRequest::Reboot),
-                    Some(PublishedInstanceState::Rebooting),
+                    Some(PublishedVmmState::Rebooting),
                 )
             }
         };
@@ -823,43 +833,43 @@ impl Instance {
             inner.propolis_state_put(p).await?;
         }
         if let Some(s) = next_published {
-            inner.state.transition(s);
+            inner.state.transition_vmm(s, Utc::now());
         }
-        Ok(inner.state.current().clone())
+        Ok(inner.state.sled_instance_state())
     }
 
     pub async fn put_migration_ids(
         &self,
         old_runtime: &InstanceRuntimeState,
         migration_ids: &Option<InstanceMigrationSourceParams>,
-    ) -> Result<InstanceRuntimeState, Error> {
+    ) -> Result<SledInstanceState, Error> {
         let mut inner = self.inner.lock().await;
 
         // Check that the instance's current generation matches the one the
         // caller expects to transition from. This helps Nexus ensure that if
         // multiple migration sagas launch at Propolis generation N, then only
         // one of them will successfully set the instance's migration IDs.
-        if inner.state.current().propolis_gen != old_runtime.propolis_gen {
+        if inner.state.instance().gen != old_runtime.gen {
             // Allow this transition for idempotency if the instance is
             // already in the requested goal state.
             if inner.state.migration_ids_already_set(old_runtime, migration_ids)
             {
-                return Ok(inner.state.current().clone());
+                return Ok(inner.state.sled_instance_state());
             }
 
             return Err(Error::Transition(
                 omicron_common::api::external::Error::Conflict {
                     internal_message: format!(
-                        "wrong Propolis ID generation: expected {}, got {}",
-                        inner.state.current().propolis_gen,
-                        old_runtime.propolis_gen
+                        "wrong instance state generation: expected {}, got {}",
+                        inner.state.instance().gen,
+                        old_runtime.gen
                     ),
                 },
             ));
         }
 
-        inner.state.set_migration_ids(migration_ids);
-        Ok(inner.state.current().clone())
+        inner.state.set_migration_ids(migration_ids, Utc::now());
+        Ok(inner.state.sled_instance_state())
     }
 
     async fn setup_propolis_locked(
@@ -879,6 +889,7 @@ impl Instance {
                 snat,
                 external_ips,
                 &inner.firewall_rules,
+                inner.dhcp_config.clone(),
             )?;
             opte_ports.push(port);
         }
@@ -979,7 +990,6 @@ impl Instance {
         info!(inner.log, "Propolis SMF service is online");
 
         let server_addr = SocketAddr::new(inner.propolis_ip, PROPOLIS_PORT);
-        inner.state.current_mut().propolis_addr = Some(server_addr);
 
         // We use a custom client builder here because the default progenitor
         // one has a timeout of 15s but we want to be able to wait indefinitely.
@@ -1000,11 +1010,15 @@ impl Instance {
 
     /// Rudely terminates this instance's Propolis (if it has one) and
     /// immediately transitions the instance to the Destroyed state.
-    pub async fn terminate(&self) -> Result<InstanceRuntimeState, Error> {
+    pub async fn terminate(&self) -> Result<SledInstanceState, Error> {
         let mut inner = self.inner.lock().await;
         inner.terminate().await?;
-        inner.state.transition(PublishedInstanceState::Stopped);
-        Ok(inner.state.current().clone())
+
+        // Rude termination is safe here because this routine took the lock
+        // before terminating the zone, which will cause any pending
+        // observations from the instance state monitor to be
+        inner.state.terminate_rudely();
+        Ok(inner.state.sled_instance_state())
     }
 
     // Monitors propolis until explicitly told to disconnect.
@@ -1031,17 +1045,16 @@ impl Instance {
                 // stabilize that state across this entire operation.
                 let mut inner = self.inner.lock().await;
                 let observed = ObservedPropolisState::new(
-                    inner.state.current(),
+                    inner.state.instance(),
                     &response,
                 );
-                inner.observe_state(&observed).await?
+                let reaction = inner.observe_state(&observed).await?;
+                inner.publish_state_to_nexus().await;
+                reaction
             };
 
-            match reaction {
-                Reaction::Continue => {}
-                Reaction::Terminate => {
-                    return self.terminate().await.map(|_| ());
-                }
+            if let Reaction::Terminate = reaction {
+                return Ok(());
             }
 
             // Update the generation number we're asking for, to ensure the

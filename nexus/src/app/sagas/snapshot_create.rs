@@ -130,7 +130,7 @@ pub(crate) struct Params {
     pub silo_id: Uuid,
     pub project_id: Uuid,
     pub disk_id: Uuid,
-    pub use_the_pantry: bool,
+    pub attached_instance_and_sled: Option<(Uuid, Uuid)>,
     pub create_params: params::SnapshotCreate,
 }
 
@@ -251,7 +251,8 @@ impl NexusSaga for SagaSnapshotCreate {
         // (DB) Tracks virtual resource provisioning.
         builder.append(space_account_action());
 
-        if !params.use_the_pantry {
+        let use_the_pantry = params.attached_instance_and_sled.is_none();
+        if !use_the_pantry {
             // (Sleds) If the disk is attached to an instance, send a
             // snapshot request to sled-agent to create a ZFS snapshot.
             builder.append(send_snapshot_request_to_sled_agent_action());
@@ -283,7 +284,7 @@ impl NexusSaga for SagaSnapshotCreate {
         // (DB) Mark snapshot as "ready"
         builder.append(finalize_snapshot_record_action());
 
-        if params.use_the_pantry {
+        if use_the_pantry {
             // (Pantry) Set the state back to Detached
             //
             // This has to be the last saga node! Otherwise, concurrent
@@ -669,67 +670,47 @@ async fn ssc_send_snapshot_request_to_sled_agent(
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
-
     let snapshot_id = sagactx.lookup::<Uuid>("snapshot_id")?;
 
-    // Find if this disk is attached to an instance
-    let (.., disk) = LookupPath::new(&opctx, &osagactx.datastore())
-        .disk_id(params.disk_id)
-        .fetch()
+    // If this node was reached, the saga initiator thought the disk was
+    // attached to an instance that was running on a specific sled. Contact that
+    // sled and ask it to initiate a snapshot. Note that this is best-effort:
+    // the instance may have stopped (or may be have stopped, had the disk
+    // detached, and resumed running on the same sled) while the saga was
+    // executing.
+    let (instance_id, sled_id) =
+        params.attached_instance_and_sled.ok_or_else(|| {
+            ActionError::action_failed(Error::internal_error(
+                "snapshot saga in send_snapshot_request_to_sled_agent but no \
+                instance/sled pair was provided",
+            ))
+        })?;
+
+    info!(log, "asking for disk snapshot from Propolis via sled agent";
+          "disk_id" => %params.disk_id,
+          "instance_id" => %instance_id,
+          "sled_id" => %sled_id);
+
+    let sled_agent_client = osagactx
+        .nexus()
+        .sled_client(&sled_id)
         .await
         .map_err(ActionError::action_failed)?;
 
-    match disk.runtime().attach_instance_id {
-        Some(instance_id) => {
-            info!(log, "disk {} instance is {}", disk.id(), instance_id);
-
-            // Get the instance's sled agent client
-            let (.., instance) = LookupPath::new(&opctx, &osagactx.datastore())
-                .instance_id(instance_id)
-                .fetch()
-                .await
-                .map_err(ActionError::action_failed)?;
-
-            let sled_agent_client = osagactx
-                .nexus()
-                .instance_sled(&instance)
-                .await
-                .map_err(ActionError::action_failed)?;
-
-            info!(log, "instance {} sled agent created ok", instance_id);
-
-            // Send a snapshot request to propolis through sled agent
-            retry_until_known_result(log, || async {
-                sled_agent_client
-                    .instance_issue_disk_snapshot_request(
-                        &instance.id(),
-                        &disk.id(),
-                        &InstanceIssueDiskSnapshotRequestBody { snapshot_id },
-                    )
-                    .await
-            })
+    retry_until_known_result(log, || async {
+        sled_agent_client
+            .instance_issue_disk_snapshot_request(
+                &instance_id,
+                &params.disk_id,
+                &InstanceIssueDiskSnapshotRequestBody { snapshot_id },
+            )
             .await
-            .map_err(|e| e.to_string())
-            .map_err(ActionError::action_failed)?;
-            Ok(())
-        }
+    })
+    .await
+    .map_err(|e| e.to_string())
+    .map_err(ActionError::action_failed)?;
 
-        None => {
-            // This branch shouldn't be seen unless there's a detach that occurs
-            // after the saga starts.
-            error!(log, "disk {} not attached to an instance!", disk.id());
-
-            Err(ActionError::action_failed(Error::ServiceUnavailable {
-                internal_message:
-                    "disk detached after snapshot_create saga started!"
-                        .to_string(),
-            }))
-        }
-    }
+    Ok(())
 }
 
 async fn ssc_send_snapshot_request_to_sled_agent_undo(
@@ -1280,6 +1261,7 @@ async fn ssc_start_running_snapshot(
                 snapshot_id,
                 snapshot_addr,
                 volume_references: 0, // to be filled later
+                deleting: false,
             })
             .await
             .map_err(ActionError::action_failed)?;
@@ -1565,12 +1547,14 @@ mod test {
 
     use crate::app::saga::create_saga_dag;
     use crate::app::sagas::test_helpers;
-    use crate::app::test_interfaces::TestInterfaces;
     use crate::external_api::shared::IpRange;
-    use async_bb8_diesel::{AsyncRunQueryDsl, OptionalExtension};
-    use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
+    use async_bb8_diesel::AsyncRunQueryDsl;
+    use diesel::{
+        ExpressionMethods, OptionalExtension, QueryDsl, SelectableHelper,
+    };
     use dropshot::test_util::ClientTestContext;
     use nexus_db_queries::context::OpContext;
+    use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
     use nexus_db_queries::db::DataStore;
     use nexus_test_utils::resource_helpers::create_disk;
     use nexus_test_utils::resource_helpers::create_ip_pool;
@@ -1807,14 +1791,14 @@ mod test {
         project_id: Uuid,
         disk_id: Uuid,
         disk: NameOrId,
-        use_the_pantry: bool,
+        instance_and_sled: Option<(Uuid, Uuid)>,
     ) -> Params {
         Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             silo_id,
             project_id,
             disk_id,
-            use_the_pantry,
+            attached_instance_and_sled: instance_and_sled,
             create_params: params::SnapshotCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "my-snapshot".parse().expect("Invalid disk name"),
@@ -1863,7 +1847,7 @@ mod test {
             project_id,
             disk_id,
             Name::from_str(DISK_NAME).unwrap().into(),
-            true,
+            None,
         );
         let dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
         let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
@@ -1938,7 +1922,7 @@ mod test {
         cptestctx: &ControlPlaneTestContext,
         client: &ClientTestContext,
         disks_to_attach: Vec<InstanceDiskAttachment>,
-    ) {
+    ) -> InstanceAndActiveVmm {
         let instances_url = format!("/v1/instances?project={}", PROJECT_NAME,);
         let instance: Instance = object_create(
             client,
@@ -1963,11 +1947,49 @@ mod test {
         )
         .await;
 
-        // cannot snapshot attached disk for instance in state starting
+        // Read out the instance's assigned sled, then poke the instance to get
+        // it from the Starting state to the Running state so the test disk can
+        // be snapshotted.
         let nexus = &cptestctx.server.apictx().nexus;
-        let sa =
-            nexus.instance_sled_by_id(&instance.identity.id).await.unwrap();
+        let opctx = test_opctx(&cptestctx);
+        let (.., authz_instance) = LookupPath::new(&opctx, nexus.datastore())
+            .instance_id(instance.identity.id)
+            .lookup_for(authz::Action::Read)
+            .await
+            .unwrap();
+
+        let instance_state = nexus
+            .datastore()
+            .instance_fetch_with_vmm(&opctx, &authz_instance)
+            .await
+            .unwrap();
+
+        let sled_id = instance_state
+            .sled_id()
+            .expect("starting instance should have a sled");
+        let sa = nexus.sled_client(&sled_id).await.unwrap();
+
         sa.instance_finish_transition(instance.identity.id).await;
+        let instance_state = nexus
+            .datastore()
+            .instance_fetch_with_vmm(&opctx, &authz_instance)
+            .await
+            .unwrap();
+
+        let new_state = instance_state
+            .vmm()
+            .as_ref()
+            .expect("running instance should have a sled")
+            .runtime
+            .state
+            .0;
+
+        assert_eq!(
+            new_state,
+            omicron_common::api::external::InstanceState::Running
+        );
+
+        instance_state
     }
 
     #[nexus_test(server = crate::Server)]
@@ -2050,8 +2072,8 @@ mod test {
                         // since this is just a test, bypass the normal
                         // attachment machinery and just update the disk's
                         // database record directly.
-                        if !use_the_pantry {
-                            setup_test_instance(
+                        let instance_and_sled = if !use_the_pantry {
+                            let state = setup_test_instance(
                                 cptestctx,
                                 client,
                                 vec![params::InstanceDiskAttachment::Attach(
@@ -2062,7 +2084,15 @@ mod test {
                                 )],
                             )
                             .await;
-                        }
+
+                            let sled_id = state
+                                .sled_id()
+                                .expect("running instance should have a vmm");
+
+                            Some((state.instance().id(), sled_id))
+                        } else {
+                            None
+                        };
 
                         new_test_params(
                             &opctx,
@@ -2070,7 +2100,7 @@ mod test {
                             project_id,
                             disk_id,
                             Name::from_str(DISK_NAME).unwrap().into(),
-                            use_the_pantry,
+                            instance_and_sled,
                         )
                     }
                 })
@@ -2166,8 +2196,8 @@ mod test {
             project_id,
             disk_id,
             Name::from_str(DISK_NAME).unwrap().into(),
-            // set use_the_pantry to true, disk is unattached at time of saga creation
-            true,
+            // The disk isn't attached at this time, so don't supply a sled.
+            None,
         );
 
         let dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
@@ -2230,8 +2260,8 @@ mod test {
             project_id,
             disk_id,
             Name::from_str(DISK_NAME).unwrap().into(),
-            // set use_the_pantry to true, disk is unattached at time of saga creation
-            true,
+            // The disk isn't attached at this time, so don't supply a sled.
+            None,
         );
 
         let dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
@@ -2269,14 +2299,23 @@ mod test {
         let silo_id = authz_silo.id();
         let project_id = authz_project.id();
 
+        // Synthesize an instance ID to pass to the saga, but use the default
+        // test sled ID. This will direct a snapshot request to the simulated
+        // sled agent specifying an instance it knows nothing about, which is
+        // equivalent to creating an instance, attaching the test disk, creating
+        // the saga, stopping the instance, detaching the disk, and then letting
+        // the saga run.
+        let fake_instance_id = Uuid::new_v4();
+        let fake_sled_id =
+            Uuid::parse_str(nexus_test_utils::SLED_AGENT_UUID).unwrap();
+
         let params = new_test_params(
             &opctx,
             silo_id,
             project_id,
             disk_id,
             Name::from_str(DISK_NAME).unwrap().into(),
-            // set use_the_pantry to true, disk is attached at time of saga creation
-            false,
+            Some((fake_instance_id, fake_sled_id)),
         );
 
         let dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
@@ -2300,19 +2339,10 @@ mod test {
             .await
             .expect("failed to detach disk"));
 
-        // Actually run the saga
+        // Actually run the saga. This should fail.
         let output = nexus.run_saga(runnable_saga).await;
 
-        // Expect to see 503
-        match output {
-            Err(e) => {
-                assert!(matches!(e, Error::ServiceUnavailable { .. }));
-            }
-
-            Ok(_) => {
-                assert!(false);
-            }
-        }
+        assert!(output.is_err());
 
         // Attach the disk to an instance, then rerun the saga
         populate_ip_pool(
@@ -2328,7 +2358,7 @@ mod test {
         )
         .await;
 
-        setup_test_instance(
+        let instance_state = setup_test_instance(
             cptestctx,
             client,
             vec![params::InstanceDiskAttachment::Attach(
@@ -2339,6 +2369,10 @@ mod test {
         )
         .await;
 
+        let sled_id = instance_state
+            .sled_id()
+            .expect("running instance should have a vmm");
+
         // Rerun the saga
         let params = new_test_params(
             &opctx,
@@ -2346,8 +2380,7 @@ mod test {
             project_id,
             disk_id,
             Name::from_str(DISK_NAME).unwrap().into(),
-            // set use_the_pantry to false, disk is attached at time of saga creation
-            false,
+            Some((instance_state.instance().id(), sled_id)),
         );
 
         let dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();

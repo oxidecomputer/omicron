@@ -11,7 +11,6 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
-use crate::db::error::diesel_result_optional;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
@@ -60,16 +59,15 @@ macro_rules! generate_fn_to_ensure_none_in_project {
             ) -> DeleteResult {
                 use db::schema::$i;
 
-                let maybe_label = diesel_result_optional(
-                    $i::dsl::$i
-                        .filter($i::dsl::project_id.eq(authz_project.id()))
-                        .filter($i::dsl::time_deleted.is_null())
-                        .select($i::dsl::$label)
-                        .limit(1)
-                        .first_async::<$label_ty>(&*self.pool_connection_authorized(opctx).await?)
-                        .await,
-                )
-                .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+                let maybe_label = $i::dsl::$i
+                    .filter($i::dsl::project_id.eq(authz_project.id()))
+                    .filter($i::dsl::time_deleted.is_null())
+                    .select($i::dsl::$label)
+                    .limit(1)
+                    .first_async::<$label_ty>(&*self.pool_connection_authorized(opctx).await?)
+                    .await
+                    .optional()
+                    .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
                 if let Some(label) = maybe_label {
                     let object = stringify!($i).replace('_', " ");
@@ -193,7 +191,7 @@ impl DataStore {
             .await
             .map_err(|e| match e {
                 TransactionError::CustomError(e) => e,
-                TransactionError::Connection(e) => {
+                TransactionError::Database(e) => {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 }
             })?;
@@ -270,7 +268,7 @@ impl DataStore {
             .await
             .map_err(|e| match e {
                 TxnError::CustomError(e) => e,
-                TxnError::Connection(e) => {
+                TxnError::Database(e) => {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 }
             })?;

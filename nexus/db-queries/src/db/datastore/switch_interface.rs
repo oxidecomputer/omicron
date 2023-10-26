@@ -14,7 +14,7 @@ use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
 use crate::db::model::LoopbackAddress;
 use crate::db::pagination::paginated;
-use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl, ConnectionError};
+use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl};
 use diesel::result::Error as DieselError;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use ipnetwork::IpNetwork;
@@ -65,8 +65,8 @@ impl DataStore {
                             LoopbackAddressCreateError::ReserveBlock(err),
                         )
                     }
-                    ReserveBlockTxnError::Connection(err) => {
-                        TxnError::Connection(err)
+                    ReserveBlockTxnError::Database(err) => {
+                        TxnError::Database(err)
                     }
                 })?;
 
@@ -103,16 +103,14 @@ impl DataStore {
                     ReserveBlockError::AddressNotInLot,
                 ),
             ) => Error::invalid_request("address not in lot"),
-            TxnError::Connection(e) => match e {
-                ConnectionError::Query(DieselError::DatabaseError(_, _)) => {
-                    public_error_from_diesel(
-                        e,
-                        ErrorHandler::Conflict(
-                            ResourceType::LoopbackAddress,
-                            &format!("lo {}", inet),
-                        ),
-                    )
-                }
+            TxnError::Database(e) => match e {
+                DieselError::DatabaseError(_, _) => public_error_from_diesel(
+                    e,
+                    ErrorHandler::Conflict(
+                        ResourceType::LoopbackAddress,
+                        &format!("lo {}", inet),
+                    ),
+                ),
                 _ => public_error_from_diesel(e, ErrorHandler::Server),
             },
         })

@@ -4,7 +4,6 @@
 
 //! Error handling and conversions.
 
-use async_bb8_diesel::ConnectionError;
 use diesel::result::DatabaseErrorInformation;
 use diesel::result::DatabaseErrorKind as DieselErrorKind;
 use diesel::result::Error as DieselError;
@@ -25,16 +24,8 @@ pub enum TransactionError<T> {
     ///
     /// This error covers failure due to accessing the DB pool or errors
     /// propagated from the DB itself.
-    #[error("Connection error: {0}")]
-    Connection(#[from] async_bb8_diesel::ConnectionError),
-}
-
-// Maps a "diesel error" into a "pool error", which
-// is already contained within the error type.
-impl<T> From<DieselError> for TransactionError<T> {
-    fn from(err: DieselError) -> Self {
-        Self::Connection(ConnectionError::Query(err))
-    }
+    #[error("Database error: {0}")]
+    Database(#[from] DieselError),
 }
 
 impl From<PublicError> for TransactionError<PublicError> {
@@ -50,8 +41,9 @@ impl<T> TransactionError<T> {
     /// [1]: https://www.cockroachlabs.com/docs/v23.1/transaction-retry-error-reference#client-side-retry-handling
     pub fn retry_transaction(&self) -> bool {
         match &self {
-            TransactionError::Connection(ConnectionError::Query(
-                DieselError::DatabaseError(kind, boxed_error_information),
+            Self::Database(DieselError::DatabaseError(
+                kind,
+                boxed_error_information,
             )) => match kind {
                 DieselErrorKind::SerializationFailure => {
                     return boxed_error_information
@@ -93,19 +85,6 @@ fn format_database_error(
     rv
 }
 
-/// Like [`diesel::result::OptionalExtension<T>::optional`]. This turns Ok(v)
-/// into Ok(Some(v)), Err("NotFound") into Ok(None), and leave all other values
-/// unchanged.
-pub fn diesel_result_optional<T>(
-    result: Result<T, ConnectionError>,
-) -> Result<Option<T>, ConnectionError> {
-    match result {
-        Ok(v) => Ok(Some(v)),
-        Err(ConnectionError::Query(DieselError::NotFound)) => Ok(None),
-        Err(e) => Err(e),
-    }
-}
-
 /// Allows the caller to handle user-facing errors, and provide additional
 /// context which may be used to populate more informative errors.
 ///
@@ -142,41 +121,27 @@ pub enum ErrorHandler<'a> {
 /// [`ErrorHandler`] may be used to add additional handlers for the error
 /// being returned.
 pub fn public_error_from_diesel(
-    error: ConnectionError,
+    error: DieselError,
     handler: ErrorHandler<'_>,
 ) -> PublicError {
-    match error {
-        ConnectionError::Connection(error) => PublicError::unavail(&format!(
-            "Failed to access connection pool: {}",
+    match handler {
+        ErrorHandler::NotFoundByResource(resource) => {
+            public_error_from_diesel_lookup(
+                error,
+                resource.resource_type(),
+                resource.lookup_type(),
+            )
+        }
+        ErrorHandler::NotFoundByLookup(resource_type, lookup_type) => {
+            public_error_from_diesel_lookup(error, resource_type, &lookup_type)
+        }
+        ErrorHandler::Conflict(resource_type, object_name) => {
+            public_error_from_diesel_create(error, resource_type, object_name)
+        }
+        ErrorHandler::Server => PublicError::internal_error(&format!(
+            "unexpected database error: {:#}",
             error
         )),
-        ConnectionError::Query(error) => match handler {
-            ErrorHandler::NotFoundByResource(resource) => {
-                public_error_from_diesel_lookup(
-                    error,
-                    resource.resource_type(),
-                    resource.lookup_type(),
-                )
-            }
-            ErrorHandler::NotFoundByLookup(resource_type, lookup_type) => {
-                public_error_from_diesel_lookup(
-                    error,
-                    resource_type,
-                    &lookup_type,
-                )
-            }
-            ErrorHandler::Conflict(resource_type, object_name) => {
-                public_error_from_diesel_create(
-                    error,
-                    resource_type,
-                    object_name,
-                )
-            }
-            ErrorHandler::Server => PublicError::internal_error(&format!(
-                "unexpected database error: {:#}",
-                error
-            )),
-        },
     }
 }
 

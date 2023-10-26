@@ -42,6 +42,7 @@ async fn test_omdb_usage_errors() {
         &["db", "dns", "names"],
         &["db", "services"],
         &["db", "network"],
+        &["mgs"],
         &["nexus"],
         &["nexus", "background-tasks"],
         &["sled-agent"],
@@ -58,10 +59,16 @@ async fn test_omdb_usage_errors() {
 
 #[nexus_test]
 async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
+    let gwtestctx = gateway_test_utils::setup::test_setup(
+        "test_omdb_success_case",
+        gateway_messages::SpPort::One,
+    )
+    .await;
     let cmd_path = path_to_executable(CMD_OMDB);
     let postgres_url = cptestctx.database.listen_url();
     let nexus_internal_url =
         format!("http://{}/", cptestctx.internal_client.bind_address);
+    let mgs_url = format!("http://{}/", gwtestctx.client.bind_address);
     let mut output = String::new();
     let invocations: &[&[&'static str]] = &[
         &["db", "dns", "show"],
@@ -70,6 +77,7 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         &["db", "services", "list-instances"],
         &["db", "services", "list-by-sled"],
         &["db", "sleds"],
+        &["mgs", "inventory"],
         &["nexus", "background-tasks", "doc"],
         &["nexus", "background-tasks", "show"],
         // We can't easily test the sled agent output because that's only
@@ -81,9 +89,14 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         println!("running commands with args: {:?}", args);
         let p = postgres_url.to_string();
         let u = nexus_internal_url.clone();
+        let g = mgs_url.clone();
         do_run(
             &mut output,
-            move |exec| exec.env("OMDB_DB_URL", &p).env("OMDB_NEXUS_URL", &u),
+            move |exec| {
+                exec.env("OMDB_DB_URL", &p)
+                    .env("OMDB_NEXUS_URL", &u)
+                    .env("OMDB_MGS_URL", &g)
+            },
             &cmd_path,
             args,
         )
@@ -91,6 +104,7 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
     }
 
     assert_contents("tests/successes.out", &output);
+    gwtestctx.teardown().await;
 }
 
 /// Verify that we properly deal with cases where:

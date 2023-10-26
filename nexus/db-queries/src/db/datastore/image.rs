@@ -19,6 +19,7 @@ use nexus_db_model::Name;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
+use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
@@ -231,5 +232,41 @@ impl DataStore {
                 )
             })?;
         Ok(image)
+    }
+
+    pub async fn silo_image_delete(
+        &self,
+        opctx: &OpContext,
+        authz_image: &authz::SiloImage,
+        image: SiloImage,
+    ) -> DeleteResult {
+        opctx.authorize(authz::Action::Delete, authz_image).await?;
+        self.image_delete(opctx, image.into()).await
+    }
+
+    pub async fn project_image_delete(
+        &self,
+        opctx: &OpContext,
+        authz_image: &authz::ProjectImage,
+        image: ProjectImage,
+    ) -> DeleteResult {
+        opctx.authorize(authz::Action::Delete, authz_image).await?;
+        self.image_delete(opctx, image.into()).await
+    }
+
+    async fn image_delete(
+        &self,
+        opctx: &OpContext,
+        image: Image,
+    ) -> DeleteResult {
+        use db::schema::image::dsl;
+        diesel::update(dsl::image)
+            .filter(dsl::id.eq(image.id()))
+            .set(dsl::time_deleted.eq(Utc::now()))
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(())
     }
 }

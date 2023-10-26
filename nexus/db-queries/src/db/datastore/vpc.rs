@@ -10,7 +10,6 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
-use crate::db::error::diesel_result_optional;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
@@ -35,12 +34,15 @@ use crate::db::model::VpcUpdate;
 use crate::db::model::{Ipv4Net, Ipv6Net};
 use crate::db::pagination::paginated;
 use crate::db::queries::vpc::InsertVpcQuery;
+use crate::db::queries::vpc::VniSearchIter;
 use crate::db::queries::vpc_subnet::FilterConflictingVpcSubnetRangesQuery;
 use crate::db::queries::vpc_subnet::SubnetError;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use diesel::result::DatabaseErrorKind;
+use diesel::result::Error as DieselError;
 use ipnetwork::IpNetwork;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
@@ -86,18 +88,23 @@ impl DataStore {
             SERVICES_VPC.clone(),
             Some(Vni(ExternalVni::SERVICES_VNI)),
         );
-        let authz_vpc = self
+        let authz_vpc = match self
             .project_create_vpc_raw(opctx, &authz_project, vpc_query)
             .await
-            .map(|(authz_vpc, _)| authz_vpc)
-            .or_else(|e| match e {
-                Error::ObjectAlreadyExists { .. } => Ok(authz::Vpc::new(
-                    authz_project.clone(),
-                    *SERVICES_VPC_ID,
-                    LookupType::ByName(SERVICES_VPC.identity.name.to_string()),
-                )),
-                _ => Err(e),
-            })?;
+        {
+            Ok(None) => {
+                let msg = "VNI exhaustion detected when creating built-in VPCs";
+                error!(opctx.log, "{}", msg);
+                Err(Error::internal_error(msg))
+            }
+            Ok(Some((authz_vpc, _))) => Ok(authz_vpc),
+            Err(Error::ObjectAlreadyExists { .. }) => Ok(authz::Vpc::new(
+                authz_project.clone(),
+                *SERVICES_VPC_ID,
+                LookupType::ByName(SERVICES_VPC.identity.name.to_string()),
+            )),
+            Err(e) => Err(e),
+        }?;
 
         // Also add the system router and internet gateway route
 
@@ -288,22 +295,65 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_project: &authz::Project,
-        vpc: IncompleteVpc,
+        mut vpc: IncompleteVpc,
     ) -> Result<(authz::Vpc, Vpc), Error> {
-        self.project_create_vpc_raw(
-            opctx,
-            authz_project,
-            InsertVpcQuery::new(vpc),
-        )
-        .await
+        // Generate an iterator that allows us to search the entire space of
+        // VNIs for this VPC, in manageable chunks to limit memory usage.
+        let vnis = VniSearchIter::new(vpc.vni.0);
+        for (i, vni) in vnis.enumerate() {
+            vpc.vni = Vni(vni);
+            let id = usdt::UniqueId::new();
+            crate::probes::vni__search__range__start!(|| {
+                (&id, u32::from(vni), VniSearchIter::STEP_SIZE)
+            });
+            match self
+                .project_create_vpc_raw(
+                    opctx,
+                    authz_project,
+                    InsertVpcQuery::new(vpc.clone()),
+                )
+                .await
+            {
+                Ok(Some((authz_vpc, vpc))) => {
+                    crate::probes::vni__search__range__found!(|| {
+                        (&id, u32::from(vpc.vni.0))
+                    });
+                    return Ok((authz_vpc, vpc));
+                }
+                Err(e) => return Err(e),
+                Ok(None) => {
+                    crate::probes::vni__search__range__empty!(|| (&id));
+                    debug!(
+                        opctx.log,
+                        "No VNIs available within current search range, retrying";
+                        "attempt" => i,
+                        "vpc_name" => %vpc.identity.name,
+                        "start_vni" => ?vni,
+                    );
+                }
+            }
+        }
+
+        // We've failed to find a VNI after searching the entire range, so we'll
+        // return a 503 at this point.
+        error!(
+            opctx.log,
+            "failed to find a VNI after searching entire range";
+        );
+        Err(Error::unavail("Failed to find a free VNI for this VPC"))
     }
 
+    // Internal implementation for creating a VPC.
+    //
+    // This returns an optional VPC. If it is None, then we failed to insert a
+    // VPC specifically because there are no available VNIs. All other errors
+    // are returned in the `Result::Err` variant.
     async fn project_create_vpc_raw(
         &self,
         opctx: &OpContext,
         authz_project: &authz::Project,
         vpc_query: InsertVpcQuery,
-    ) -> Result<(authz::Vpc, Vpc), Error> {
+    ) -> Result<Option<(authz::Vpc, Vpc)>, Error> {
         use db::schema::vpc::dsl;
 
         assert_eq!(authz_project.id(), vpc_query.vpc.project_id);
@@ -313,30 +363,48 @@ impl DataStore {
         let project_id = vpc_query.vpc.project_id;
 
         let conn = self.pool_connection_authorized(opctx).await?;
-        let vpc: Vpc = Project::insert_resource(
+        let result: Result<Vpc, _> = Project::insert_resource(
             project_id,
             diesel::insert_into(dsl::vpc).values(vpc_query),
         )
         .insert_and_get_result_async(&conn)
-        .await
-        .map_err(|e| match e {
-            AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
-                type_name: ResourceType::Project,
-                lookup_type: LookupType::ById(project_id),
-            },
-            AsyncInsertError::DatabaseError(e) => public_error_from_diesel(
-                e,
-                ErrorHandler::Conflict(ResourceType::Vpc, name.as_str()),
-            ),
-        })?;
-        Ok((
-            authz::Vpc::new(
-                authz_project.clone(),
-                vpc.id(),
-                LookupType::ByName(vpc.name().to_string()),
-            ),
-            vpc,
-        ))
+        .await;
+        match result {
+            Ok(vpc) => Ok(Some((
+                authz::Vpc::new(
+                    authz_project.clone(),
+                    vpc.id(),
+                    LookupType::ByName(vpc.name().to_string()),
+                ),
+                vpc,
+            ))),
+            Err(AsyncInsertError::CollectionNotFound) => {
+                Err(Error::ObjectNotFound {
+                    type_name: ResourceType::Project,
+                    lookup_type: LookupType::ById(project_id),
+                })
+            }
+            Err(AsyncInsertError::DatabaseError(
+                DieselError::DatabaseError(
+                    DatabaseErrorKind::NotNullViolation,
+                    info,
+                ),
+            )) if info
+                .message()
+                .starts_with("null value in column \"vni\"") =>
+            {
+                // We failed the non-null check on the VNI column, which means
+                // we could not find a valid VNI in our search range. Return
+                // None instead to signal the error.
+                Ok(None)
+            }
+            Err(AsyncInsertError::DatabaseError(e)) => {
+                Err(public_error_from_diesel(
+                    e,
+                    ErrorHandler::Conflict(ResourceType::Vpc, name.as_str()),
+                ))
+            }
+        }
     }
 
     pub async fn project_update_vpc(
@@ -389,19 +457,18 @@ impl DataStore {
         // but we can't have NICs be a child of both tables at this point, and
         // we need to prevent VPC Subnets from being deleted while they have
         // NICs in them as well.
-        if diesel_result_optional(
-            vpc_subnet::dsl::vpc_subnet
-                .filter(vpc_subnet::dsl::vpc_id.eq(authz_vpc.id()))
-                .filter(vpc_subnet::dsl::time_deleted.is_null())
-                .select(vpc_subnet::dsl::id)
-                .limit(1)
-                .first_async::<Uuid>(
-                    &*self.pool_connection_authorized(opctx).await?,
-                )
-                .await,
-        )
-        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
-        .is_some()
+        if vpc_subnet::dsl::vpc_subnet
+            .filter(vpc_subnet::dsl::vpc_id.eq(authz_vpc.id()))
+            .filter(vpc_subnet::dsl::time_deleted.is_null())
+            .select(vpc_subnet::dsl::id)
+            .limit(1)
+            .first_async::<Uuid>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
+            .is_some()
         {
             return Err(Error::InvalidRequest {
                 message: String::from(
@@ -556,7 +623,7 @@ impl DataStore {
                 TxnError::CustomError(
                     FirewallUpdateError::CollectionNotFound,
                 ) => Error::not_found_by_id(ResourceType::Vpc, &authz_vpc.id()),
-                TxnError::Connection(e) => public_error_from_diesel(
+                TxnError::Database(e) => public_error_from_diesel(
                     e,
                     ErrorHandler::NotFoundByResource(authz_vpc),
                 ),
@@ -574,7 +641,7 @@ impl DataStore {
         // Sleds to notify when firewall rules change.
         use db::schema::{
             instance, instance_network_interface, service,
-            service_network_interface, sled,
+            service_network_interface, sled, vmm,
         };
 
         let instance_query = instance_network_interface::table
@@ -583,10 +650,15 @@ impl DataStore {
                     .on(instance::id
                         .eq(instance_network_interface::instance_id)),
             )
-            .inner_join(sled::table.on(sled::id.eq(instance::active_sled_id)))
+            .inner_join(
+                vmm::table
+                    .on(vmm::id.nullable().eq(instance::active_propolis_id)),
+            )
+            .inner_join(sled::table.on(sled::id.eq(vmm::sled_id)))
             .filter(instance_network_interface::vpc_id.eq(vpc_id))
             .filter(instance_network_interface::time_deleted.is_null())
             .filter(instance::time_deleted.is_null())
+            .filter(vmm::time_deleted.is_null())
             .select(Sled::as_select());
 
         let service_query = service_network_interface::table
@@ -700,17 +772,16 @@ impl DataStore {
         let conn = self.pool_connection_authorized(opctx).await?;
 
         // Verify there are no child network interfaces in this VPC Subnet
-        if diesel_result_optional(
-            network_interface::dsl::network_interface
-                .filter(network_interface::dsl::subnet_id.eq(authz_subnet.id()))
-                .filter(network_interface::dsl::time_deleted.is_null())
-                .select(network_interface::dsl::id)
-                .limit(1)
-                .first_async::<Uuid>(&*conn)
-                .await,
-        )
-        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
-        .is_some()
+        if network_interface::dsl::network_interface
+            .filter(network_interface::dsl::subnet_id.eq(authz_subnet.id()))
+            .filter(network_interface::dsl::time_deleted.is_null())
+            .select(network_interface::dsl::id)
+            .limit(1)
+            .first_async::<Uuid>(&*conn)
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
+            .is_some()
         {
             return Err(Error::InvalidRequest {
                 message: String::from(
@@ -1088,5 +1159,236 @@ impl DataStore {
                     ),
                 )
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::datastore::datastore_test;
+    use crate::db::model::Project;
+    use crate::db::queries::vpc::MAX_VNI_SEARCH_RANGE_SIZE;
+    use nexus_test_utils::db::test_setup_database;
+    use nexus_types::external_api::params;
+    use omicron_common::api::external;
+    use omicron_test_utils::dev;
+    use slog::info;
+
+    // Test that we detect the right error condition and return None when we
+    // fail to insert a VPC due to VNI exhaustion.
+    //
+    // This is a bit awkward, but we'll test this by inserting a bunch of VPCs,
+    // and checking that we get the expected error response back from the
+    // `project_create_vpc_raw` call.
+    #[tokio::test]
+    async fn test_project_create_vpc_raw_returns_none_on_vni_exhaustion() {
+        usdt::register_probes().unwrap();
+        let logctx = dev::test_setup_log(
+            "test_project_create_vpc_raw_returns_none_on_vni_exhaustion",
+        );
+        let log = &logctx.log;
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        // Create a project.
+        let project_params = params::ProjectCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "project".parse().unwrap(),
+                description: String::from("test project"),
+            },
+        };
+        let project = Project::new(Uuid::new_v4(), project_params);
+        let (authz_project, _) = datastore
+            .project_create(&opctx, project)
+            .await
+            .expect("failed to create project");
+
+        let starting_vni = 2048;
+        let description = String::from("test vpc");
+        for vni in 0..=MAX_VNI_SEARCH_RANGE_SIZE {
+            // Create an incomplete VPC and make sure it has the next available
+            // VNI.
+            let name: external::Name = format!("vpc{vni}").parse().unwrap();
+            let mut incomplete_vpc = IncompleteVpc::new(
+                Uuid::new_v4(),
+                authz_project.id(),
+                Uuid::new_v4(),
+                params::VpcCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: name.clone(),
+                        description: description.clone(),
+                    },
+                    ipv6_prefix: None,
+                    dns_name: name.clone(),
+                },
+            )
+            .expect("failed to create incomplete VPC");
+            let this_vni =
+                Vni(external::Vni::try_from(starting_vni + vni).unwrap());
+            incomplete_vpc.vni = this_vni;
+            info!(
+                log,
+                "creating initial VPC";
+                "index" => vni,
+                "vni" => ?this_vni,
+            );
+            let query = InsertVpcQuery::new(incomplete_vpc);
+            let (_, db_vpc) = datastore
+                .project_create_vpc_raw(&opctx, &authz_project, query)
+                .await
+                .expect("failed to create initial set of VPCs")
+                .expect("expected an actual VPC");
+            info!(
+                log,
+                "created VPC";
+                "vpc" => ?db_vpc,
+            );
+        }
+
+        // At this point, we've filled all the VNIs starting from 2048. Let's
+        // try to allocate one more, also starting from that position. This
+        // should fail, because we've explicitly filled the entire range we'll
+        // search above.
+        let name: external::Name = "dead-vpc".parse().unwrap();
+        let mut incomplete_vpc = IncompleteVpc::new(
+            Uuid::new_v4(),
+            authz_project.id(),
+            Uuid::new_v4(),
+            params::VpcCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: name.clone(),
+                    description: description.clone(),
+                },
+                ipv6_prefix: None,
+                dns_name: name.clone(),
+            },
+        )
+        .expect("failed to create incomplete VPC");
+        let this_vni = Vni(external::Vni::try_from(starting_vni).unwrap());
+        incomplete_vpc.vni = this_vni;
+        info!(
+            log,
+            "creating VPC when all VNIs are allocated";
+            "vni" => ?this_vni,
+        );
+        let query = InsertVpcQuery::new(incomplete_vpc);
+        let Ok(None) = datastore
+            .project_create_vpc_raw(&opctx, &authz_project, query)
+            .await
+        else {
+            panic!("Expected Ok(None) when creating a VPC without any available VNIs");
+        };
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    // Test that we appropriately retry when there are no available VNIs.
+    //
+    // This is a bit awkward, but we'll test this by inserting a bunch of VPCs,
+    // and then check that we correctly retry
+    #[tokio::test]
+    async fn test_project_create_vpc_retries() {
+        usdt::register_probes().unwrap();
+        let logctx = dev::test_setup_log("test_project_create_vpc_retries");
+        let log = &logctx.log;
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        // Create a project.
+        let project_params = params::ProjectCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "project".parse().unwrap(),
+                description: String::from("test project"),
+            },
+        };
+        let project = Project::new(Uuid::new_v4(), project_params);
+        let (authz_project, _) = datastore
+            .project_create(&opctx, project)
+            .await
+            .expect("failed to create project");
+
+        let starting_vni = 2048;
+        let description = String::from("test vpc");
+        for vni in 0..=MAX_VNI_SEARCH_RANGE_SIZE {
+            // Create an incomplete VPC and make sure it has the next available
+            // VNI.
+            let name: external::Name = format!("vpc{vni}").parse().unwrap();
+            let mut incomplete_vpc = IncompleteVpc::new(
+                Uuid::new_v4(),
+                authz_project.id(),
+                Uuid::new_v4(),
+                params::VpcCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: name.clone(),
+                        description: description.clone(),
+                    },
+                    ipv6_prefix: None,
+                    dns_name: name.clone(),
+                },
+            )
+            .expect("failed to create incomplete VPC");
+            let this_vni =
+                Vni(external::Vni::try_from(starting_vni + vni).unwrap());
+            incomplete_vpc.vni = this_vni;
+            info!(
+                log,
+                "creating initial VPC";
+                "index" => vni,
+                "vni" => ?this_vni,
+            );
+            let query = InsertVpcQuery::new(incomplete_vpc);
+            let (_, db_vpc) = datastore
+                .project_create_vpc_raw(&opctx, &authz_project, query)
+                .await
+                .expect("failed to create initial set of VPCs")
+                .expect("expected an actual VPC");
+            info!(
+                log,
+                "created VPC";
+                "vpc" => ?db_vpc,
+            );
+        }
+
+        // Similar to the above test, we've fill all available VPCs starting at
+        // `starting_vni`. Let's attempt to allocate one beginning there, which
+        // _should_ fail and be internally retried. Note that we're using
+        // `project_create_vpc()` here instead of the raw version, to check that
+        // retry logic.
+        let name: external::Name = "dead-at-first-vpc".parse().unwrap();
+        let mut incomplete_vpc = IncompleteVpc::new(
+            Uuid::new_v4(),
+            authz_project.id(),
+            Uuid::new_v4(),
+            params::VpcCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: name.clone(),
+                    description: description.clone(),
+                },
+                ipv6_prefix: None,
+                dns_name: name.clone(),
+            },
+        )
+        .expect("failed to create incomplete VPC");
+        let this_vni = Vni(external::Vni::try_from(starting_vni).unwrap());
+        incomplete_vpc.vni = this_vni;
+        info!(
+            log,
+            "creating VPC when all VNIs are allocated";
+            "vni" => ?this_vni,
+        );
+        match datastore
+            .project_create_vpc(&opctx, &authz_project, incomplete_vpc.clone())
+            .await
+        {
+            Ok((_, vpc)) => {
+                assert_eq!(vpc.id(), incomplete_vpc.identity.id);
+                let expected_vni = starting_vni + MAX_VNI_SEARCH_RANGE_SIZE + 1;
+                assert_eq!(u32::from(vpc.vni.0), expected_vni);
+                info!(log, "successfully created VPC after retries"; "vpc" => ?vpc);
+            }
+            Err(e) => panic!("Unexpected error when inserting VPC: {e}"),
+        };
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
     }
 }

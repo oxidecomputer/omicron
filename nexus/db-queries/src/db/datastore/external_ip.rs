@@ -143,10 +143,9 @@ impl DataStore {
     ) -> CreateResult<ExternalIp> {
         let explicit_ip = data.explicit_ip().is_some();
         NextExternalIp::new(data).get_result_async(conn).await.map_err(|e| {
-            use async_bb8_diesel::ConnectionError::Query;
             use diesel::result::Error::NotFound;
             match e {
-                Query(NotFound) => {
+                NotFound => {
                     if explicit_ip {
                         Error::invalid_request(
                             "Requested external IP address not available",
