@@ -11,6 +11,7 @@ use crate::nexus::NexusClientWithResolver;
 use derive_more::From;
 use futures::stream::FuturesOrdered;
 use futures::FutureExt;
+use futures::StreamExt;
 use nexus_client::types::PhysicalDiskDeleteRequest;
 use nexus_client::types::PhysicalDiskPutRequest;
 use nexus_client::types::ZpoolPutRequest;
@@ -116,6 +117,11 @@ impl StorageMonitor {
     pub async fn run(&mut self) {
         loop {
             tokio::select! {
+                _ = self.nexus_notifications.next(),
+                    if !self.nexus_notifications.is_empty() =>
+                {
+                    debug!(self.log, "Processing nexus notification");
+                }
                 resources = self.storage_manager.wait_for_changes() => {
                     info!(
                         self.log,
