@@ -50,6 +50,8 @@ use nexus_db_model::Volume;
 use nexus_db_model::Zpool;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
+use nexus_db_queries::db::datastore::read_only_resources_associated_with_volume;
+use nexus_db_queries::db::datastore::CrucibleTargets;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::lookup::LookupPath;
@@ -62,6 +64,7 @@ use nexus_types::internal_api::params::Srv;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Generation;
 use omicron_common::postgres_config::PostgresConfigWithUrl;
+use sled_agent_client::types::VolumeConstructionRequest;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::collections::HashSet;
@@ -1423,7 +1426,9 @@ async fn cmd_db_validate_volume_references(
     // Then, for each, make sure that the `volume_references` matches what is in
     // the volume table
     for region_snapshot in region_snapshots {
-        let matching_volumes = {
+        let matching_volumes: Vec<Volume> = {
+            let snapshot_addr = region_snapshot.snapshot_addr.clone();
+
             let matching_volumes = datastore
                 .pool_connection_for_tests()
                 .await?
@@ -1432,8 +1437,7 @@ async fn cmd_db_validate_volume_references(
                     // full table scan
                     conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
 
-                    let pattern =
-                        format!("%{}%", &region_snapshot.snapshot_addr);
+                    let pattern = format!("%{}%", &snapshot_addr);
 
                     use db::schema::volume::dsl;
                     dsl::volume
@@ -1448,8 +1452,26 @@ async fn cmd_db_validate_volume_references(
                 String::from("finding matching volumes")
             });
 
-            matching_volumes.len()
+            matching_volumes
         };
+
+        // The Crucible Agent will reuse ports for regions and running snapshots
+        // when they're deleted. Check that the matching volume construction requests
+        // reference this snapshot addr as a read-only target.
+        let matching_volumes = matching_volumes
+            .into_iter()
+            .filter(|volume| {
+                let vcr: VolumeConstructionRequest =
+                    serde_json::from_str(&volume.data()).unwrap();
+
+                let mut targets = CrucibleTargets::default();
+                read_only_resources_associated_with_volume(&vcr, &mut targets);
+
+                targets
+                    .read_only_targets
+                    .contains(&region_snapshot.snapshot_addr)
+            })
+            .count();
 
         if matching_volumes != region_snapshot.volume_references as usize {
             eprintln!(
