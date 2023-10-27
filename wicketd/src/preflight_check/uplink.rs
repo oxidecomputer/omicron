@@ -17,12 +17,13 @@ use dpd_client::ClientState as DpdClientState;
 use either::Either;
 use illumos_utils::zone::SVCCFG;
 use illumos_utils::PFEXEC;
+use ipnetwork::IpNetwork;
 use omicron_common::address::DENDRITE_PORT;
+use omicron_common::api::internal::shared::PortConfigV1;
 use omicron_common::api::internal::shared::PortFec as OmicronPortFec;
 use omicron_common::api::internal::shared::PortSpeed as OmicronPortSpeed;
 use omicron_common::api::internal::shared::RackNetworkConfig;
 use omicron_common::api::internal::shared::SwitchLocation;
-use omicron_common::api::internal::shared::UplinkConfig;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -32,7 +33,6 @@ use slog::Logger;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::net::IpAddr;
-use std::net::Ipv4Addr;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -66,8 +66,6 @@ const CHRONYD: &str = "/usr/sbin/chronyd";
 const IPADM: &str = "/usr/sbin/ipadm";
 const ROUTE: &str = "/usr/sbin/route";
 
-const DPD_DEFAULT_IPV4_CIDR: &str = "0.0.0.0/0";
-
 pub(super) async fn run_local_uplink_preflight_check(
     network_config: RackNetworkConfig,
     dns_servers: Vec<IpAddr>,
@@ -90,7 +88,7 @@ pub(super) async fn run_local_uplink_preflight_check(
     let mut engine = UpdateEngine::new(log, sender);
 
     for uplink in network_config
-        .uplinks
+        .ports
         .iter()
         .filter(|uplink| uplink.switch == our_switch_location)
     {
@@ -131,7 +129,7 @@ pub(super) async fn run_local_uplink_preflight_check(
 fn add_steps_for_single_local_uplink_preflight_check<'a>(
     engine: &mut UpdateEngine<'a>,
     dpd_client: &'a DpdClient,
-    uplink: &'a UplinkConfig,
+    uplink: &'a PortConfigV1,
     dns_servers: &'a [IpAddr],
     ntp_servers: &'a [String],
     dns_name_to_query: Option<&'a str>,
@@ -153,7 +151,7 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
     // Timeout we give to chronyd during the NTP check, in seconds.
     const CHRONYD_CHECK_TIMEOUT_SECS: &str = "30";
 
-    let registrar = engine.for_component(uplink.uplink_port.clone());
+    let registrar = engine.for_component(uplink.port.clone());
 
     let prev_step = registrar
         .new_step(
@@ -162,7 +160,7 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
             |_cx| async {
                 // Check that the port name is valid and that it has no links
                 // configured already.
-                let port_id = PortId::from_str(&uplink.uplink_port)
+                let port_id = PortId::from_str(&uplink.port)
                     .map_err(UplinkPreflightTerminalError::InvalidPortName)?;
                 let links = dpd_client
                     .link_list(&port_id)
@@ -192,11 +190,8 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
                 {
                     Ok(_response) => {
                         let metadata = vec![format!(
-                            "configured {}/{}: ip {}, gateway {}",
-                            *port_id,
-                            link_id.0,
-                            uplink.uplink_cidr,
-                            uplink.gateway_ip
+                            "configured {:?}/{}: ips {:#?}, routes {:#?}",
+                            port_id, link_id.0, uplink.addresses, uplink.routes
                         )];
                         StepSuccess::new((port_id, link_id))
                             .with_metadata(metadata)
@@ -298,93 +293,99 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
                 // Tell the `uplink` service about the IP address we created on
                 // the switch when configuring the uplink.
                 let uplink_property =
-                    UplinkProperty(format!("uplinks/{}_0", uplink.uplink_port));
-                let uplink_cidr = uplink.uplink_cidr.to_string();
+                    UplinkProperty(format!("uplinks/{}_0", uplink.port));
 
-                if let Err(err) = execute_command(&[
-                    SVCCFG,
-                    "-s",
-                    UPLINK_SMF_NAME,
-                    "addpropvalue",
-                    &uplink_property.0,
-                    "astring:",
-                    &uplink_cidr,
-                ])
-                .await
-                {
-                    return StepWarning::new(
-                        Err(L2Failure::UplinkAddProperty(level1)),
-                        format!("could not add uplink property: {err}"),
-                    )
-                    .into();
-                };
-
-                if let Err(err) = execute_command(&[
-                    SVCCFG,
-                    "-s",
-                    UPLINK_DEFAULT_SMF_NAME,
-                    "refresh",
-                ])
-                .await
-                {
-                    return StepWarning::new(
-                        Err(L2Failure::UplinkRefresh(level1, uplink_property)),
-                        format!("could not add uplink property: {err}"),
-                    )
-                    .into();
-                };
-
-                // Wait for the `uplink` service to create the IP address.
-                let start_waiting_addr = Instant::now();
-                'waiting_for_addr: loop {
-                    let ipadm_out = match execute_command(&[
-                        IPADM,
-                        "show-addr",
-                        "-p",
-                        "-o",
-                        "addr",
+                for addr in &uplink.addresses {
+                    let uplink_cidr = addr.to_string();
+                    if let Err(err) = execute_command(&[
+                        SVCCFG,
+                        "-s",
+                        UPLINK_SMF_NAME,
+                        "addpropvalue",
+                        &uplink_property.0,
+                        "astring:",
+                        &uplink_cidr,
                     ])
                     .await
                     {
-                        Ok(stdout) => stdout,
-                        Err(err) => {
-                            return StepWarning::new(
-                                Err(L2Failure::RunIpadm(
-                                    level1,
-                                    uplink_property,
-                                )),
-                                format!("failed running ipadm: {err}"),
-                            )
-                            .into();
-                        }
+                        return StepWarning::new(
+                            Err(L2Failure::UplinkAddProperty(level1)),
+                            format!("could not add uplink property: {err}"),
+                        )
+                        .into();
                     };
 
-                    for line in ipadm_out.split('\n') {
-                        if line == uplink_cidr {
-                            break 'waiting_for_addr;
-                        }
-                    }
-
-                    // We did not find `uplink_cidr` in the output of ipadm;
-                    // sleep a bit and try again, unless we've been waiting too
-                    // long already.
-                    if start_waiting_addr.elapsed() < UPLINK_SVC_WAIT_TIMEOUT {
-                        tokio::time::sleep(UPLINK_SVC_RETRY_DELAY).await;
-                    } else {
+                    if let Err(err) = execute_command(&[
+                        SVCCFG,
+                        "-s",
+                        UPLINK_DEFAULT_SMF_NAME,
+                        "refresh",
+                    ])
+                    .await
+                    {
                         return StepWarning::new(
-                            Err(L2Failure::WaitingForHostAddr(
+                            Err(L2Failure::UplinkRefresh(
                                 level1,
                                 uplink_property,
                             )),
-                            format!(
-                                "timed out waiting for `uplink` to \
-                                 create {uplink_cidr}"
-                            ),
+                            format!("could not add uplink property: {err}"),
                         )
                         .into();
+                    };
+
+                    // Wait for the `uplink` service to create the IP address.
+                    let start_waiting_addr = Instant::now();
+                    'waiting_for_addr: loop {
+                        let ipadm_out = match execute_command(&[
+                            IPADM,
+                            "show-addr",
+                            "-p",
+                            "-o",
+                            "addr",
+                        ])
+                        .await
+                        {
+                            Ok(stdout) => stdout,
+                            Err(err) => {
+                                return StepWarning::new(
+                                    Err(L2Failure::RunIpadm(
+                                        level1,
+                                        uplink_property,
+                                    )),
+                                    format!("failed running ipadm: {err}"),
+                                )
+                                .into();
+                            }
+                        };
+
+                        for line in ipadm_out.split('\n') {
+                            if line == uplink_cidr {
+                                break 'waiting_for_addr;
+                            }
+                        }
+
+                        // We did not find `uplink_cidr` in the output of ipadm;
+                        // sleep a bit and try again, unless we've been waiting too
+                        // long already.
+                        if start_waiting_addr.elapsed()
+                            < UPLINK_SVC_WAIT_TIMEOUT
+                        {
+                            tokio::time::sleep(UPLINK_SVC_RETRY_DELAY).await;
+                        } else {
+                            return StepWarning::new(
+                                Err(L2Failure::WaitingForHostAddr(
+                                    level1,
+                                    uplink_property,
+                                )),
+                                format!(
+                                    "timed out waiting for `uplink` to \
+                                 create {uplink_cidr}"
+                                ),
+                            )
+                            .into();
+                        }
                     }
                 }
-
                 let metadata =
                     vec![format!("configured {}", uplink_property.0)];
                 StepSuccess::new(Ok(L2Success { level1, uplink_property }))
@@ -410,27 +411,29 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
                     }
                 };
 
-                // Add the gateway as the default route in illumos.
-                if let Err(err) = execute_command(&[
-                    ROUTE,
-                    "add",
-                    "-inet",
-                    "default",
-                    &uplink.gateway_ip.to_string(),
-                ])
-                .await
-                {
-                    return StepWarning::new(
-                        Err(RoutingFailure::HostDefaultRoute(level2)),
-                        format!("could not add default route: {err}"),
-                    )
-                    .into();
-                };
+                for r in &uplink.routes {
+                    // Add the gateway as the default route in illumos.
+                    if let Err(err) = execute_command(&[
+                        ROUTE,
+                        "add",
+                        "-inet",
+                        &r.destination.to_string(),
+                        &r.nexthop.to_string(),
+                    ])
+                    .await
+                    {
+                        return StepWarning::new(
+                            Err(RoutingFailure::HostDefaultRoute(level2)),
+                            format!("could not add default route: {err}"),
+                        )
+                        .into();
+                    };
+                }
 
                 StepSuccess::new(Ok(RoutingSuccess { level2 }))
                     .with_metadata(vec![format!(
-                        "added default route to {}",
-                        uplink.gateway_ip
+                        "added routes {:#?}",
+                        uplink.routes,
                     )])
                     .into()
             },
@@ -595,21 +598,24 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
                     }
                 };
 
-                if remove_host_route {
-                    execute_command(&[
-                        ROUTE,
-                        "delete",
-                        "-inet",
-                        "default",
-                        &uplink.gateway_ip.to_string(),
-                    ])
-                    .await
-                    .map_err(|err| {
-                        UplinkPreflightTerminalError::RemoveHostRoute {
-                            err,
-                            gateway_ip: uplink.gateway_ip,
-                        }
-                    })?;
+                for r in &uplink.routes {
+                    if remove_host_route {
+                        execute_command(&[
+                            ROUTE,
+                            "delete",
+                            "-inet",
+                            &r.destination.to_string(),
+                            &r.nexthop.to_string(),
+                        ])
+                        .await
+                        .map_err(|err| {
+                            UplinkPreflightTerminalError::RemoveHostRoute {
+                                err,
+                                destination: r.destination,
+                                nexthop: r.nexthop,
+                            }
+                        })?;
+                    }
                 }
 
                 StepSuccess::new(Ok(level2)).into()
@@ -730,7 +736,7 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
 }
 
 fn build_port_settings(
-    uplink: &UplinkConfig,
+    uplink: &PortConfigV1,
     link_id: &LinkId,
 ) -> PortSettings {
     // Map from omicron_common types to dpd_client types
@@ -758,10 +764,12 @@ fn build_port_settings(
         v6_routes: HashMap::new(),
     };
 
+    let addrs = uplink.addresses.iter().map(|a| a.ip()).collect();
+
     port_settings.links.insert(
         link_id.to_string(),
         LinkSettings {
-            addrs: vec![IpAddr::V4(uplink.uplink_cidr.ip())],
+            addrs,
             params: LinkCreate {
                 // TODO we should take these parameters too
                 // https://github.com/oxidecomputer/omicron/issues/3061
@@ -773,14 +781,16 @@ fn build_port_settings(
         },
     );
 
-    port_settings.v4_routes.insert(
-        DPD_DEFAULT_IPV4_CIDR.parse().unwrap(),
-        RouteSettingsV4 {
-            link_id: link_id.0,
-            nexthop: uplink.gateway_ip,
-            vid: uplink.uplink_vid,
-        },
-    );
+    for r in &uplink.routes {
+        if let (IpNetwork::V4(dst), IpAddr::V4(nexthop)) =
+            (r.destination, r.nexthop)
+        {
+            port_settings.v4_routes.insert(
+                dst.to_string(),
+                vec![RouteSettingsV4 { link_id: link_id.0, nexthop }],
+            );
+        }
+    }
 
     port_settings
 }
@@ -890,8 +900,10 @@ pub(crate) enum UplinkPreflightTerminalError {
         err: DpdError,
         port_id: PortId,
     },
-    #[error("failed to remove host OS route to gateway {gateway_ip}: {err}")]
-    RemoveHostRoute { err: String, gateway_ip: Ipv4Addr },
+    #[error(
+        "failed to remove host OS route {destination} -> {nexthop}: {err}"
+    )]
+    RemoveHostRoute { err: String, destination: IpNetwork, nexthop: IpAddr },
     #[error("failed to remove uplink SMF property {property:?}: {err}")]
     RemoveSmfProperty { property: String, err: String },
     #[error("failed to refresh uplink service config: {0}")]

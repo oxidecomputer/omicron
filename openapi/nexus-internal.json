@@ -843,6 +843,53 @@
           "serial_number"
         ]
       },
+      "BgpConfig": {
+        "type": "object",
+        "properties": {
+          "asn": {
+            "description": "The autonomous system number for the BGP configuration.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "originate": {
+            "description": "The set of prefixes for the BGP router to originate.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Ipv4Network"
+            }
+          }
+        },
+        "required": [
+          "asn",
+          "originate"
+        ]
+      },
+      "BgpPeerConfig": {
+        "type": "object",
+        "properties": {
+          "addr": {
+            "description": "Address of the peer.",
+            "type": "string",
+            "format": "ipv4"
+          },
+          "asn": {
+            "description": "The autonomous sysetm number of the router the peer belongs to.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "port": {
+            "description": "Switch port the peer is reachable on.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "addr",
+          "asn",
+          "port"
+        ]
+      },
       "BinRangedouble": {
         "description": "A type storing a range over `T`.\n\nThis type supports ranges similar to the `RangeTo`, `Range` and `RangeFrom` types in the standard library. Those cover `(..end)`, `(start..end)`, and `(start..)` respectively.",
         "oneOf": [
@@ -3729,6 +3776,26 @@
           }
         ]
       },
+      "IpNetwork": {
+        "oneOf": [
+          {
+            "title": "v4",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv4Network"
+              }
+            ]
+          },
+          {
+            "title": "v6",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv6Network"
+              }
+            ]
+          }
+        ]
+      },
       "IpRange": {
         "oneOf": [
           {
@@ -3832,6 +3899,10 @@
           "first",
           "last"
         ]
+      },
+      "Ipv6Network": {
+        "type": "string",
+        "pattern": "^(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\")[/](12[0-8]|1[0-1][0-9]|[0-9]?[0-9])$"
       },
       "Ipv6Range": {
         "description": "A non-decreasing IPv6 address range, inclusive of both ends.\n\nThe first address must be less than or equal to the last address.",
@@ -4176,6 +4247,69 @@
       "PhysicalDiskPutResponse": {
         "type": "object"
       },
+      "PortConfigV1": {
+        "type": "object",
+        "properties": {
+          "addresses": {
+            "description": "This port's addresses.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpNetwork"
+            }
+          },
+          "bgp_peers": {
+            "description": "BGP peers on this port",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BgpPeerConfig"
+            }
+          },
+          "port": {
+            "description": "Nmae of the port this config applies to.",
+            "type": "string"
+          },
+          "routes": {
+            "description": "The set of routes associated with this port.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouteConfig"
+            }
+          },
+          "switch": {
+            "description": "Switch the port belongs to.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SwitchLocation"
+              }
+            ]
+          },
+          "uplink_port_fec": {
+            "description": "Port forward error correction type.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PortFec"
+              }
+            ]
+          },
+          "uplink_port_speed": {
+            "description": "Port speed.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PortSpeed"
+              }
+            ]
+          }
+        },
+        "required": [
+          "addresses",
+          "bgp_peers",
+          "port",
+          "routes",
+          "switch",
+          "uplink_port_fec",
+          "uplink_port_speed"
+        ]
+      },
       "PortFec": {
         "description": "Switchport FEC options",
         "type": "string",
@@ -4406,7 +4540,7 @@
             "description": "Initial rack network configuration",
             "allOf": [
               {
-                "$ref": "#/components/schemas/RackNetworkConfig"
+                "$ref": "#/components/schemas/RackNetworkConfigV1"
               }
             ]
           },
@@ -4437,10 +4571,17 @@
           "services"
         ]
       },
-      "RackNetworkConfig": {
+      "RackNetworkConfigV1": {
         "description": "Initial network configuration",
         "type": "object",
         "properties": {
+          "bgp": {
+            "description": "BGP configurations for connecting the rack to external networks",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BgpConfig"
+            }
+          },
           "infra_ip_first": {
             "description": "First ip address to be used for configuring network infrastructure",
             "type": "string",
@@ -4451,18 +4592,23 @@
             "type": "string",
             "format": "ipv4"
           },
-          "uplinks": {
+          "ports": {
             "description": "Uplinks for connecting the rack to external networks",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/UplinkConfig"
+              "$ref": "#/components/schemas/PortConfigV1"
             }
+          },
+          "rack_subnet": {
+            "$ref": "#/components/schemas/Ipv6Network"
           }
         },
         "required": [
+          "bgp",
           "infra_ip_first",
           "infra_ip_last",
-          "uplinks"
+          "ports",
+          "rack_subnet"
         ]
       },
       "RecoverySiloConfig": {
@@ -4482,6 +4628,28 @@
           "silo_name",
           "user_name",
           "user_password_hash"
+        ]
+      },
+      "RouteConfig": {
+        "type": "object",
+        "properties": {
+          "destination": {
+            "description": "The destination of the route.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpNetwork"
+              }
+            ]
+          },
+          "nexthop": {
+            "description": "The nexthop/gateway address.",
+            "type": "string",
+            "format": "ip"
+          }
+        },
+        "required": [
+          "destination",
+          "nexthop"
         ]
       },
       "Saga": {
@@ -4960,6 +5128,20 @@
             "required": [
               "type"
             ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "mgd"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
           }
         ]
       },
@@ -5227,67 +5409,6 @@
       },
       "SwitchPutResponse": {
         "type": "object"
-      },
-      "UplinkConfig": {
-        "type": "object",
-        "properties": {
-          "gateway_ip": {
-            "description": "Gateway address",
-            "type": "string",
-            "format": "ipv4"
-          },
-          "switch": {
-            "description": "Switch to use for uplink",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SwitchLocation"
-              }
-            ]
-          },
-          "uplink_cidr": {
-            "description": "IP Address and prefix (e.g., `192.168.0.1/16`) to apply to switchport (must be in infra_ip pool)",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Ipv4Network"
-              }
-            ]
-          },
-          "uplink_port": {
-            "description": "Switchport to use for external connectivity",
-            "type": "string"
-          },
-          "uplink_port_fec": {
-            "description": "Forward Error Correction setting for the uplink port",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/PortFec"
-              }
-            ]
-          },
-          "uplink_port_speed": {
-            "description": "Speed for the Switchport",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/PortSpeed"
-              }
-            ]
-          },
-          "uplink_vid": {
-            "nullable": true,
-            "description": "VLAN id to use for uplink",
-            "type": "integer",
-            "format": "uint16",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "gateway_ip",
-          "switch",
-          "uplink_cidr",
-          "uplink_port",
-          "uplink_port_fec",
-          "uplink_port_speed"
-        ]
       },
       "UserId": {
         "title": "A name unique within the parent collection",

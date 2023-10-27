@@ -23,6 +23,8 @@ progenitor::generate_api!(
     }),
     replace = {
         Ipv4Network = ipnetwork::Ipv4Network,
+        Ipv6Network = ipnetwork::Ipv6Network,
+        IpNetwork = ipnetwork::IpNetwork,
         MacAddr = omicron_common::api::external::MacAddr,
         Name = omicron_common::api::external::Name,
         NewPasswordHash = omicron_passwords::NewPasswordHash,

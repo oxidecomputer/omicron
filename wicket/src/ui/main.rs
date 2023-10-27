@@ -23,7 +23,7 @@ use wicketd_client::types::GetLocationResponse;
 /// This structure allows us to maintain similar styling and navigation
 /// throughout wicket with a minimum of code.
 ///
-/// Specific functionality is put inside [`Pane`]s, which can be customized
+/// Specific functionality is put inside Panes, which can be customized
 /// as needed.
 pub struct MainScreen {
     #[allow(unused)]

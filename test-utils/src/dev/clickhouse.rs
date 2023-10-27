@@ -8,7 +8,8 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
+use std::net::SocketAddr;
 use tempfile::{Builder, TempDir};
 use thiserror::Error;
 use tokio::{
@@ -20,8 +21,7 @@ use tokio::{
 use crate::dev::poll;
 
 // Timeout used when starting up ClickHouse subprocess.
-// build-and-test (ubuntu-20.04) needs a little longer to get going
-const CLICKHOUSE_TIMEOUT: Duration = Duration::from_secs(90);
+const CLICKHOUSE_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// A `ClickHouseInstance` is used to start and manage a ClickHouse single node server process.
 #[derive(Debug)]
@@ -31,10 +31,22 @@ pub struct ClickHouseInstance {
     data_path: PathBuf,
     // The HTTP port the server is listening on
     port: u16,
+    // The address the server is listening on
+    pub address: Option<SocketAddr>,
     // Full list of command-line arguments
     args: Vec<String>,
     // Subprocess handle
     child: Option<tokio::process::Child>,
+}
+
+/// A `ClickHouseCluster` is used to start and manage a 2 replica 3 keeper ClickHouse cluster.
+#[derive(Debug)]
+pub struct ClickHouseCluster {
+    pub replica_1: ClickHouseInstance,
+    pub replica_2: ClickHouseInstance,
+    pub keeper_1: ClickHouseInstance,
+    pub keeper_2: ClickHouseInstance,
+    pub keeper_3: ClickHouseInstance,
 }
 
 #[derive(Debug, Error)]
@@ -101,6 +113,7 @@ impl ClickHouseInstance {
             data_dir: Some(data_dir),
             data_path,
             port,
+            address: None,
             args,
             child: Some(child),
         })
@@ -162,6 +175,7 @@ impl ClickHouseInstance {
             })?;
 
         let data_path = data_dir.path().to_path_buf();
+        let address = SocketAddr::new("127.0.0.1".parse().unwrap(), port);
 
         let result = wait_for_ready(log_path).await;
         match result {
@@ -169,6 +183,7 @@ impl ClickHouseInstance {
                 data_dir: Some(data_dir),
                 data_path,
                 port,
+                address: Some(address),
                 args,
                 child: Some(child),
             }),
@@ -244,6 +259,7 @@ impl ClickHouseInstance {
                 data_dir: Some(data_dir),
                 data_path,
                 port,
+                address: None,
                 args,
                 child: Some(child),
             }),
@@ -311,6 +327,97 @@ impl Drop for ClickHouseInstance {
                 let _ = dir.close();
             }
         }
+    }
+}
+
+impl ClickHouseCluster {
+    pub async fn new() -> Result<Self, anyhow::Error> {
+        // Start all Keeper coordinator nodes
+        let cur_dir = std::env::current_dir().unwrap();
+        let keeper_config =
+            cur_dir.as_path().join("src/configs/keeper_config.xml");
+
+        let keeper_amount = 3;
+        let mut keepers =
+            Self::new_keeper_set(keeper_amount, keeper_config).await?;
+
+        // Start all replica nodes
+        let cur_dir = std::env::current_dir().unwrap();
+        let replica_config =
+            cur_dir.as_path().join("src/configs/replica_config.xml");
+
+        let replica_amount = 2;
+        let mut replicas =
+            Self::new_replica_set(replica_amount, replica_config).await?;
+
+        let r1 = replicas.swap_remove(0);
+        let r2 = replicas.swap_remove(0);
+        let k1 = keepers.swap_remove(0);
+        let k2 = keepers.swap_remove(0);
+        let k3 = keepers.swap_remove(0);
+
+        Ok(Self {
+            replica_1: r1,
+            replica_2: r2,
+            keeper_1: k1,
+            keeper_2: k2,
+            keeper_3: k3,
+        })
+    }
+
+    pub async fn new_keeper_set(
+        keeper_amount: u16,
+        config_path: PathBuf,
+    ) -> Result<Vec<ClickHouseInstance>, anyhow::Error> {
+        let mut keepers = vec![];
+
+        for i in 1..=keeper_amount {
+            let k_port = 9180 + i;
+            let k_id = i;
+
+            let k = ClickHouseInstance::new_keeper(
+                k_port,
+                k_id,
+                config_path.clone(),
+            )
+            .await
+            .map_err(|e| {
+                anyhow!("Failed to start ClickHouse keeper {}: {}", i, e)
+            })?;
+            keepers.push(k)
+        }
+
+        Ok(keepers)
+    }
+
+    pub async fn new_replica_set(
+        replica_amount: u16,
+        config_path: PathBuf,
+    ) -> Result<Vec<ClickHouseInstance>, anyhow::Error> {
+        let mut replicas = vec![];
+
+        for i in 1..=replica_amount {
+            let r_port = 8122 + i;
+            let r_tcp_port = 9000 + i;
+            let r_interserver_port = 9008 + i;
+            let r_name = format!("oximeter_cluster node {}", i);
+            let r_number = format!("0{}", i);
+            let r = ClickHouseInstance::new_replicated(
+                r_port,
+                r_tcp_port,
+                r_interserver_port,
+                r_name,
+                r_number,
+                config_path.clone(),
+            )
+            .await
+            .map_err(|e| {
+                anyhow!("Failed to start ClickHouse node {}: {}", i, e)
+            })?;
+            replicas.push(r)
+        }
+
+        Ok(replicas)
     }
 }
 
