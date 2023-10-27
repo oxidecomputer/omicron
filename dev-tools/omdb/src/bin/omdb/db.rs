@@ -248,7 +248,7 @@ enum NetworkCommands {
 #[derive(Debug, Args)]
 struct ValidateArgs {
     #[command(subcommand)]
-    command:ValidateCommands,
+    command: ValidateCommands,
 }
 
 #[derive(Debug, Subcommand)]
