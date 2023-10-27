@@ -2860,7 +2860,7 @@ mod tests {
     // For some reason when the value is an f64 it inserts in both measurements_f32
     // and measurements_f64 tables. This behaviour is unexpected, and should be investigated
     //
-    // See {githublink} for more details.
+    // See https://github.com/oxidecomputer/omicron/pull/4372 for more details.
     #[allow(dead_code)]
     async fn recall_measurement_f32_test(client: &Client) -> Result<(), Error> {
         const VALUE: f32 = 1.1;
