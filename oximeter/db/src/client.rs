@@ -370,16 +370,20 @@ impl Client {
         Ok(res.contains("oximeter_cluster"))
     }
 
-    // Verifies that the schema for a sample matches the schema in the database.
+    // Verifies that the schema for a sample matches the schema in the database,
+    // or cache a new one internally.
     //
     // If the schema exists in the database, and the sample matches that schema, `None` is
     // returned. If the schema does not match, an Err is returned (the caller skips the sample in
-    // this case). If the schema does not _exist_ in the database, Some(schema) is returned, so
-    // that the caller can insert it into the database at the appropriate time.
-    async fn verify_sample_schema(
+    // this case). If the schema does not _exist_ in the database,
+    // Some((timeseries_name, schema)) is returned, so that the caller can
+    // insert it into the database at the appropriate time. Note that the schema
+    // is added to the internal cache, but not inserted into the DB at this
+    // time.
+    async fn verify_or_cache_sample_schema(
         &self,
         sample: &Sample,
-    ) -> Result<Option<String>, Error> {
+    ) -> Result<Option<(TimeseriesName, String)>, Error> {
         let sample_schema = model::schema_for(sample);
         let name = sample_schema.timeseries_name.clone();
         let mut schema = self.schema.lock().await;
@@ -413,13 +417,15 @@ impl Client {
                 }
             }
             Entry::Vacant(entry) => {
+                let name = entry.key().clone();
                 entry.insert(sample_schema.clone());
-                Ok(Some(
+                Ok(Some((
+                    name,
                     serde_json::to_string(&model::DbTimeseriesSchema::from(
                         sample_schema,
                     ))
                     .expect("Failed to convert schema to DB model"),
-                ))
+                )))
             }
         }
     }
@@ -476,7 +482,6 @@ impl Client {
         Ok(timeseries_by_key.into_values().collect())
     }
 
-    // Initialize ClickHouse with the database and metric table schema.
     // Execute a generic SQL statement.
     //
     // TODO-robustness This currently does no validation of the statement.
@@ -568,6 +573,161 @@ impl Client {
         }
         Ok(())
     }
+
+    // Unroll each sample into its consituent rows, after verifying the schema.
+    //
+    // Note that this also inserts the schema into the internal cache, if it
+    // does not already exist there.
+    async fn unroll_samples(&self, samples: &[Sample]) -> UnrolledSampleRows {
+        let mut seen_timeseries = BTreeSet::new();
+        let mut rows = BTreeMap::new();
+        let mut new_schema = BTreeMap::new();
+
+        for sample in samples.iter() {
+            match self.verify_or_cache_sample_schema(sample).await {
+                Err(_) => {
+                    // Skip the sample, but otherwise do nothing. The error is logged in the above
+                    // call.
+                    continue;
+                }
+                Ok(None) => {}
+                Ok(Some((name, schema))) => {
+                    debug!(
+                        self.log,
+                        "new timeseries schema";
+                        "timeseries_name" => %name,
+                        "schema" => %schema
+                    );
+                    new_schema.insert(name, schema);
+                }
+            }
+
+            // Key on both the timeseries name and key, as timeseries may actually share keys.
+            let key = (
+                sample.timeseries_name.as_str(),
+                crate::timeseries_key(&sample),
+            );
+            if !seen_timeseries.contains(&key) {
+                for (table_name, table_rows) in model::unroll_field_rows(sample)
+                {
+                    rows.entry(table_name)
+                        .or_insert_with(Vec::new)
+                        .extend(table_rows);
+                }
+            }
+
+            let (table_name, measurement_row) =
+                model::unroll_measurement_row(sample);
+
+            rows.entry(table_name)
+                .or_insert_with(Vec::new)
+                .push(measurement_row);
+
+            seen_timeseries.insert(key);
+        }
+
+        UnrolledSampleRows { new_schema, rows }
+    }
+
+    // Save new schema to the database, or remove them from the cache on
+    // failure.
+    //
+    // This attempts to insert the provided schema into the timeseries schema
+    // table. If that fails, those schema are _also_ removed from the internal
+    // cache.
+    //
+    // TODO-robustness There's still a race possible here. If two distinct clients receive new
+    // but conflicting schema, they will both try to insert those at some point into the schema
+    // tables. It's not clear how to handle this, since ClickHouse provides no transactions.
+    // This is unlikely to happen at this point, because the design is such that there will be
+    // a single `oximeter` instance, which has one client object, connected to a single
+    // ClickHouse server. But once we start replicating data, the window within which the race
+    // can occur is much larger, since it includes the time it takes ClickHouse to replicate
+    // data between nodes.
+    //
+    // NOTE: This is an issue even in the case where the schema don't conflict. Two clients may
+    // receive a sample with a new schema, and both would then try to insert that schema.
+    async fn save_new_schema_or_remove(
+        &self,
+        new_schema: BTreeMap<TimeseriesName, String>,
+    ) -> Result<(), Error> {
+        if !new_schema.is_empty() {
+            debug!(
+                self.log,
+                "inserting {} new timeseries schema",
+                new_schema.len()
+            );
+            const APPROX_ROW_SIZE: usize = 64;
+            let mut body = String::with_capacity(
+                APPROX_ROW_SIZE + APPROX_ROW_SIZE * new_schema.len(),
+            );
+            body.push_str("INSERT INTO ");
+            body.push_str(crate::DATABASE_NAME);
+            body.push_str(".timeseries_schema FORMAT JSONEachRow\n");
+            for row_data in new_schema.values() {
+                body.push_str(row_data);
+                body.push_str("\n");
+            }
+
+            // Try to insert the schema.
+            //
+            // If this fails, be sure to remove the schema we've added from the
+            // internal cache. Since we check the internal cache first for
+            // schema, if we fail here but _don't_ remove the schema, we'll
+            // never end up inserting the schema, but we will insert samples.
+            if let Err(e) = self.execute(body).await {
+                debug!(
+                    self.log,
+                    "failed to insert new schema, removing from cache";
+                    "error" => ?e,
+                );
+                let mut schema = self.schema.lock().await;
+                for name in new_schema.keys() {
+                    schema
+                        .remove(name)
+                        .expect("New schema should have been cached");
+                }
+                return Err(e);
+            }
+        }
+        Ok(())
+    }
+
+    // Insert unrolled sample rows into the corresponding tables.
+    async fn insert_unrolled_samples(
+        &self,
+        rows: BTreeMap<String, Vec<String>>,
+    ) -> Result<(), Error> {
+        for (table_name, rows) in rows {
+            let body = format!(
+                "INSERT INTO {table_name} FORMAT JSONEachRow\n{row_data}\n",
+                table_name = table_name,
+                row_data = rows.join("\n")
+            );
+            // TODO-robustness We've verified the schema, so this is likely a transient failure.
+            // But we may want to check the actual error condition, and, if possible, continue
+            // inserting any remaining data.
+            self.execute(body).await?;
+            debug!(
+                self.log,
+                "inserted rows into table";
+                "n_rows" => rows.len(),
+                "table_name" => table_name,
+            );
+        }
+
+        // TODO-correctness We'd like to return all errors to clients here, and there may be as
+        // many as one per sample. It's not clear how to structure this in a way that's useful.
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+struct UnrolledSampleRows {
+    // The timeseries schema rows, keyed by timeseries name.
+    new_schema: BTreeMap<TimeseriesName, String>,
+    // The rows to insert in all the other tables, keyed by the table name.
+    rows: BTreeMap<String, Vec<String>>,
 }
 
 /// A trait allowing a [`Client`] to write data into the timeseries database.
@@ -599,98 +759,10 @@ impl DbWrite for Client {
     /// Insert the given samples into the database.
     async fn insert_samples(&self, samples: &[Sample]) -> Result<(), Error> {
         debug!(self.log, "unrolling {} total samples", samples.len());
-        let mut seen_timeseries = BTreeSet::new();
-        let mut rows = BTreeMap::new();
-        let mut new_schema = Vec::new();
-
-        for sample in samples.iter() {
-            match self.verify_sample_schema(sample).await {
-                Err(_) => {
-                    // Skip the sample, but otherwise do nothing. The error is logged in the above
-                    // call.
-                    continue;
-                }
-                Ok(schema) => {
-                    if let Some(schema) = schema {
-                        debug!(self.log, "new timeseries schema"; "schema" => ?schema);
-                        new_schema.push(schema);
-                    }
-                }
-            }
-
-            // Key on both the timeseries name and key, as timeseries may actually share keys.
-            let key = (
-                sample.timeseries_name.as_str(),
-                crate::timeseries_key(&sample),
-            );
-            if !seen_timeseries.contains(&key) {
-                for (table_name, table_rows) in model::unroll_field_rows(sample)
-                {
-                    rows.entry(table_name)
-                        .or_insert_with(Vec::new)
-                        .extend(table_rows);
-                }
-            }
-
-            let (table_name, measurement_row) =
-                model::unroll_measurement_row(sample);
-
-            rows.entry(table_name)
-                .or_insert_with(Vec::new)
-                .push(measurement_row);
-
-            seen_timeseries.insert(key);
-        }
-
-        // Insert the new schema into the database
-        //
-        // TODO-robustness There's still a race possible here. If two distinct clients receive new
-        // but conflicting schema, they will both try to insert those at some point into the schema
-        // tables. It's not clear how to handle this, since ClickHouse provides no transactions.
-        // This is unlikely to happen at this point, because the design is such that there will be
-        // a single `oximeter` instance, which has one client object, connected to a single
-        // ClickHouse server. But once we start replicating data, the window within which the race
-        // can occur is much larger, since it includes the time it takes ClickHouse to replicate
-        // data between nodes.
-        //
-        // NOTE: This is an issue even in the case where the schema don't conflict. Two clients may
-        // receive a sample with a new schema, and both would then try to insert that schema.
-        if !new_schema.is_empty() {
-            debug!(
-                self.log,
-                "inserting {} new timeseries schema",
-                new_schema.len()
-            );
-            let body = format!(
-                "INSERT INTO {db_name}.timeseries_schema FORMAT JSONEachRow\n{row_data}\n",
-                db_name = crate::DATABASE_NAME,
-                row_data = new_schema.join("\n"),
-            );
-            self.execute(body).await?;
-        }
-
-        // Insert the actual target/metric field rows and measurement rows.
-        for (table_name, rows) in rows {
-            let body = format!(
-                "INSERT INTO {table_name} FORMAT JSONEachRow\n{row_data}\n",
-                table_name = table_name,
-                row_data = rows.join("\n")
-            );
-            // TODO-robustness We've verified the schema, so this is likely a transient failure.
-            // But we may want to check the actual error condition, and, if possible, continue
-            // inserting any remaining data.
-            self.execute(body).await?;
-            debug!(
-                self.log,
-                "inserted {} rows into table {}",
-                rows.len(),
-                table_name
-            );
-        }
-
-        // TODO-correctness We'd like to return all errors to clients here, and there may be as
-        // many as one per sample. It's not clear how to structure this in a way that's useful.
-        Ok(())
+        let UnrolledSampleRows { new_schema, rows } =
+            self.unroll_samples(samples).await;
+        self.save_new_schema_or_remove(new_schema).await?;
+        self.insert_unrolled_samples(rows).await
     }
 
     /// Initialize the replicated telemetry database, creating tables as needed.
@@ -727,7 +799,7 @@ impl DbWrite for Client {
     /// Wipe the ClickHouse database entirely from a replicated set up.
     async fn wipe_replicated_db(&self) -> Result<(), Error> {
         debug!(self.log, "wiping ClickHouse database");
-        let sql = include_str!("./db-wipe-single-node.sql").to_string();
+        let sql = include_str!("./db-wipe-replicated.sql").to_string();
         self.execute(sql).await
     }
 }
@@ -756,7 +828,9 @@ mod tests {
     use crate::query::field_table_name;
     use crate::query::measurement_table_name;
     use chrono::Utc;
-    use omicron_test_utils::dev::clickhouse::ClickHouseInstance;
+    use omicron_test_utils::dev::clickhouse::{
+        ClickHouseCluster, ClickHouseInstance,
+    };
     use omicron_test_utils::dev::test_setup_log;
     use oximeter::histogram::Histogram;
     use oximeter::test_util;
@@ -764,16 +838,13 @@ mod tests {
     use oximeter::FieldValue;
     use oximeter::Metric;
     use oximeter::Target;
-    use slog::o;
     use std::net::Ipv4Addr;
     use std::net::Ipv6Addr;
     use std::time::Duration;
     use tokio::time::sleep;
     use uuid::Uuid;
 
-    // NOTE: It's important that each test run the ClickHouse server with different ports.
-    // The tests each require a clean slate. Previously, we ran the tests in a different thread,
-    // but we now use a different instance of the server to avoid conflicts.
+    // NOTE: Each test requires a clean slate. Because of this, tests run sequentially.
     //
     // This is at least partially because ClickHouse by default provides pretty weak consistency
     // guarantees. There are options that allow controlling consistency behavior, but we've not yet
@@ -782,8 +853,8 @@ mod tests {
     // TODO-robustness TODO-correctness: Figure out the ClickHouse options we need.
 
     #[tokio::test]
-    async fn test_build_client() {
-        let logctx = test_setup_log("test_build_client");
+    async fn test_single_node() {
+        let logctx = test_setup_log("test_single_node");
         let log = &logctx.log;
 
         // Let the OS assign a port and discover it after ClickHouse starts
@@ -792,143 +863,183 @@ mod tests {
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new("::1".parse().unwrap(), db.port());
 
-        let client = Client::new(address, &log);
-        assert!(!client.is_oximeter_cluster().await.unwrap());
+        // Test bad database connection
+        let client = Client::new("127.0.0.1:443".parse().unwrap(), &log);
+        assert!(matches!(
+            client.ping().await,
+            Err(Error::DatabaseUnavailable(_))
+        ));
 
-        client.wipe_single_node_db().await.unwrap();
+        // Tests that a new client has started and it is not part of a cluster
+        is_not_oximeter_cluster_test(address).await.unwrap();
+
+        // Tests that data can be inserted via the client
+        insert_samples_test(address).await.unwrap();
+
+        // Tests for a schema mismatch
+        schema_mismatch_test(address).await.unwrap();
+
+        // Tests for a schema update
+        schema_updated_test(address).await.unwrap();
+
+        // Tests for specific timeseries selection
+        client_select_timeseries_one_test(address).await.unwrap();
+
+        // Tests for specific timeseries selection
+        field_record_count_test(address).await.unwrap();
+
+        // ClickHouse regression test
+        unquoted_64bit_integers_test(address).await.unwrap();
+
+        // Tests to verify that we can distinguish between metrics by name
+        differentiate_by_timeseries_name_test(address).await.unwrap();
+
+        // Tests selecting a single timeseries
+        select_timeseries_with_select_one_test(address).await.unwrap();
+
+        // Tests selecting two timeseries
+        select_timeseries_with_select_one_field_with_multiple_values_test(
+            address,
+        )
+        .await
+        .unwrap();
+
+        // Tests selecting multiple timeseries
+        select_timeseries_with_select_multiple_fields_with_multiple_values_test(address).await.unwrap();
+
+        // Tests selecting all timeseries
+        select_timeseries_with_all_test(address).await.unwrap();
+
+        // Tests selecting all timeseries with start time
+        select_timeseries_with_start_time_test(address).await.unwrap();
+
+        // Tests selecting all timeseries with start time
+        select_timeseries_with_limit_test(address).await.unwrap();
+
+        // Tests selecting all timeseries with order
+        select_timeseries_with_order_test(address).await.unwrap();
+
+        // Tests schema does not change
+        get_schema_no_new_values_test(address).await.unwrap();
+
+        // Tests listing timeseries schema
+        timeseries_schema_list_test(address).await.unwrap();
+
+        // Tests listing timeseries
+        list_timeseries_test(address).await.unwrap();
+
+        // Tests no changes are made when version is not updated
+        database_version_update_idempotent_test(address).await.unwrap();
+
+        // Tests that downgrading is impossible
+        database_version_will_not_downgrade_test(address).await.unwrap();
+
+        // Tests old data is dropped if version is updated
+        database_version_wipes_old_version_test(address).await.unwrap();
+
+        // Tests schema cache is updated when a new sample is inserted
+        update_schema_cache_on_new_sample_test(address).await.unwrap();
+
+        // Tests that we can successfully query all extant datum types from the schema table.
+        select_all_datum_types_test(address).await.unwrap();
+
+        // Tests that, when cache new schema but _fail_ to insert them,
+        // we also remove them from the internal cache.
+        new_schema_removed_when_not_inserted_test(address).await.unwrap();
+
+        // Tests for fields and measurements
+        recall_field_value_bool_test(address).await.unwrap();
+
+        recall_field_value_u8_test(address).await.unwrap();
+
+        recall_field_value_i8_test(address).await.unwrap();
+
+        recall_field_value_u16_test(address).await.unwrap();
+
+        recall_field_value_i16_test(address).await.unwrap();
+
+        recall_field_value_u32_test(address).await.unwrap();
+
+        recall_field_value_i32_test(address).await.unwrap();
+
+        recall_field_value_u64_test(address).await.unwrap();
+
+        recall_field_value_i64_test(address).await.unwrap();
+
+        recall_field_value_string_test(address).await.unwrap();
+
+        recall_field_value_ipv4addr_test(address).await.unwrap();
+
+        recall_field_value_ipv6addr_test(address).await.unwrap();
+
+        recall_field_value_uuid_test(address).await.unwrap();
+
+        recall_measurement_bool_test(address).await.unwrap();
+
+        recall_measurement_i8_test(address).await.unwrap();
+
+        recall_measurement_u8_test(address).await.unwrap();
+
+        recall_measurement_i16_test(address).await.unwrap();
+
+        recall_measurement_u16_test(address).await.unwrap();
+
+        recall_measurement_i32_test(address).await.unwrap();
+
+        recall_measurement_u32_test(address).await.unwrap();
+
+        recall_measurement_i64_test(address).await.unwrap();
+
+        recall_measurement_u64_test(address).await.unwrap();
+
+        recall_measurement_f32_test(address).await.unwrap();
+
+        recall_measurement_f64_test(address).await.unwrap();
+
+        recall_measurement_cumulative_i64_test(address).await.unwrap();
+
+        recall_measurement_cumulative_u64_test(address).await.unwrap();
+
+        recall_measurement_cumulative_f64_test(address).await.unwrap();
+
+        recall_measurement_histogram_i8_test(address).await.unwrap();
+
+        recall_measurement_histogram_u8_test(address).await.unwrap();
+
+        recall_measurement_histogram_i16_test(address).await.unwrap();
+
+        recall_measurement_histogram_u16_test(address).await.unwrap();
+
+        recall_measurement_histogram_i32_test(address).await.unwrap();
+
+        recall_measurement_histogram_u32_test(address).await.unwrap();
+
+        recall_measurement_histogram_i64_test(address).await.unwrap();
+
+        recall_measurement_histogram_u64_test(address).await.unwrap();
+
+        recall_measurement_histogram_f64_test(address).await.unwrap();
+
         db.cleanup().await.expect("Failed to cleanup ClickHouse server");
         logctx.cleanup_successful();
     }
 
-    #[tokio::test]
-    // TODO(https://github.com/oxidecomputer/omicron/issues/4001): This job fails intermittently
-    // on the ubuntu CI job with "Failed to detect ClickHouse subprocess within timeout"
-    #[ignore]
-    async fn test_build_replicated() {
-        let logctx = test_setup_log("test_build_replicated");
+    async fn is_not_oximeter_cluster_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let logctx = test_setup_log("test_is_not_oximeter_cluster");
         let log = &logctx.log;
 
-        // Start all Keeper coordinator nodes
-        let cur_dir = std::env::current_dir().unwrap();
-        let keeper_config =
-            cur_dir.as_path().join("src/configs/keeper_config.xml");
-
-        // Start Keeper 1
-        let k1_port = 9181;
-        let k1_id = 1;
-
-        let mut k1 = ClickHouseInstance::new_keeper(
-            k1_port,
-            k1_id,
-            keeper_config.clone(),
-        )
-        .await
-        .expect("Failed to start ClickHouse keeper 1");
-
-        // Start Keeper 2
-        let k2_port = 9182;
-        let k2_id = 2;
-
-        let mut k2 = ClickHouseInstance::new_keeper(
-            k2_port,
-            k2_id,
-            keeper_config.clone(),
-        )
-        .await
-        .expect("Failed to start ClickHouse keeper 2");
-
-        // Start Keeper 3
-        let k3_port = 9183;
-        let k3_id = 3;
-
-        let mut k3 =
-            ClickHouseInstance::new_keeper(k3_port, k3_id, keeper_config)
-                .await
-                .expect("Failed to start ClickHouse keeper 3");
-
-        // Start all replica nodes
-        let cur_dir = std::env::current_dir().unwrap();
-        let replica_config =
-            cur_dir.as_path().join("src/configs/replica_config.xml");
-
-        // Start Replica 1
-        let r1_port = 8123;
-        let r1_tcp_port = 9000;
-        let r1_interserver_port = 9009;
-        let r1_name = String::from("oximeter_cluster node 1");
-        let r1_number = String::from("01");
-        let mut db_1 = ClickHouseInstance::new_replicated(
-            r1_port,
-            r1_tcp_port,
-            r1_interserver_port,
-            r1_name,
-            r1_number,
-            replica_config.clone(),
-        )
-        .await
-        .expect("Failed to start ClickHouse node 1");
-        let r1_address =
-            SocketAddr::new("127.0.0.1".parse().unwrap(), db_1.port());
-
-        // Start Replica 2
-        let r2_port = 8124;
-        let r2_tcp_port = 9001;
-        let r2_interserver_port = 9010;
-        let r2_name = String::from("oximeter_cluster node 2");
-        let r2_number = String::from("02");
-        let mut db_2 = ClickHouseInstance::new_replicated(
-            r2_port,
-            r2_tcp_port,
-            r2_interserver_port,
-            r2_name,
-            r2_number,
-            replica_config,
-        )
-        .await
-        .expect("Failed to start ClickHouse node 2");
-        let r2_address =
-            SocketAddr::new("127.0.0.1".parse().unwrap(), db_2.port());
-
-        // Create database in node 1
-        let client_1 = Client::new(r1_address, &log);
-        assert!(client_1.is_oximeter_cluster().await.unwrap());
-        client_1
-            .init_replicated_db()
-            .await
-            .expect("Failed to initialize timeseries database");
-
-        // Wait to make sure data has been synchronised.
-        // TODO(https://github.com/oxidecomputer/omicron/issues/4001): Waiting for 5 secs is a bit sloppy,
-        // come up with a better way to do this.
-        sleep(Duration::from_secs(5)).await;
-
-        // Verify database exists in node 2
-        let client_2 = Client::new(r2_address, &log);
-        assert!(client_2.is_oximeter_cluster().await.unwrap());
-        let sql = String::from("SHOW DATABASES FORMAT JSONEachRow;");
-
-        let result = client_2.execute_with_body(sql).await.unwrap();
-        assert!(result.contains("oximeter"));
-
-        k1.cleanup().await.expect("Failed to cleanup ClickHouse keeper 1");
-        k2.cleanup().await.expect("Failed to cleanup ClickHouse keeper 2");
-        k3.cleanup().await.expect("Failed to cleanup ClickHouse keeper 3");
-        db_1.cleanup().await.expect("Failed to cleanup ClickHouse server 1");
-        db_2.cleanup().await.expect("Failed to cleanup ClickHouse server 2");
-
+        let client = Client::new(address, &log);
+        assert!(!client.is_oximeter_cluster().await.unwrap());
+        client.wipe_single_node_db().await?;
         logctx.cleanup_successful();
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_client_insert() {
-        let logctx = test_setup_log("test_client_insert");
+    async fn insert_samples_test(address: SocketAddr) -> Result<(), Error> {
+        let logctx = test_setup_log("test_insert_samples");
         let log = &logctx.log;
-
-        // Let the OS assign a port and discover it after ClickHouse starts
-        let mut db = ClickHouseInstance::new_single_node(0)
-            .await
-            .expect("Failed to start ClickHouse");
-        let address = SocketAddr::new("::1".parse().unwrap(), db.port());
 
         let client = Client::new(address, &log);
         client
@@ -942,9 +1053,10 @@ mod tests {
             }
             s
         };
-        client.insert_samples(&samples).await.unwrap();
-        db.cleanup().await.expect("Failed to cleanup ClickHouse server");
+        client.insert_samples(&samples).await?;
+        client.wipe_single_node_db().await?;
         logctx.cleanup_successful();
+        Ok(())
     }
 
     // This is a target with the same name as that in `lib.rs` used for other tests, but with a
@@ -967,454 +1079,9 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_recall_field_value_bool() {
-        let field = FieldValue::Bool(true);
-        let as_json = serde_json::Value::from(1_u64);
-        test_recall_field_value_impl(field, as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_field_value_u8() {
-        let field = FieldValue::U8(1);
-        let as_json = serde_json::Value::from(1_u8);
-        test_recall_field_value_impl(field, as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_field_value_i8() {
-        let field = FieldValue::I8(1);
-        let as_json = serde_json::Value::from(1_i8);
-        test_recall_field_value_impl(field, as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_field_value_u16() {
-        let field = FieldValue::U16(1);
-        let as_json = serde_json::Value::from(1_u16);
-        test_recall_field_value_impl(field, as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_field_value_i16() {
-        let field = FieldValue::I16(1);
-        let as_json = serde_json::Value::from(1_i16);
-        test_recall_field_value_impl(field, as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_field_value_u32() {
-        let field = FieldValue::U32(1);
-        let as_json = serde_json::Value::from(1_u32);
-        test_recall_field_value_impl(field, as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_field_value_i32() {
-        let field = FieldValue::I32(1);
-        let as_json = serde_json::Value::from(1_i32);
-        test_recall_field_value_impl(field, as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_field_value_u64() {
-        let field = FieldValue::U64(1);
-        let as_json = serde_json::Value::from(1_u64);
-        test_recall_field_value_impl(field, as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_field_value_i64() {
-        let field = FieldValue::I64(1);
-        let as_json = serde_json::Value::from(1_i64);
-        test_recall_field_value_impl(field, as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_field_value_string() {
-        let field = FieldValue::String("foo".into());
-        let as_json = serde_json::Value::from("foo");
-        test_recall_field_value_impl(field, as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_field_value_ipv4addr() {
-        let field = FieldValue::from(Ipv4Addr::LOCALHOST);
-        let as_json = serde_json::Value::from(
-            Ipv4Addr::LOCALHOST.to_ipv6_mapped().to_string(),
-        );
-        test_recall_field_value_impl(field, as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_field_value_ipv6addr() {
-        let field = FieldValue::from(Ipv6Addr::LOCALHOST);
-        let as_json = serde_json::Value::from(Ipv6Addr::LOCALHOST.to_string());
-        test_recall_field_value_impl(field, as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_field_value_uuid() {
-        let id = Uuid::new_v4();
-        let field = FieldValue::from(id);
-        let as_json = serde_json::Value::from(id.to_string());
-        test_recall_field_value_impl(field, as_json).await;
-    }
-
-    async fn test_recall_field_value_impl(
-        field_value: FieldValue,
-        as_json: serde_json::Value,
-    ) {
-        let logctx = test_setup_log(
-            format!("test_recall_field_value_{}", field_value.field_type())
-                .as_str(),
-        );
-        let log = &logctx.log;
-
-        // Let the OS assign a port and discover it after ClickHouse starts
-        let mut db = ClickHouseInstance::new_single_node(0)
-            .await
-            .expect("Failed to start ClickHouse");
-        let address = SocketAddr::new("::1".parse().unwrap(), db.port());
-
-        let client = Client::new(address, log);
-        client
-            .init_single_node_db()
-            .await
-            .expect("Failed to initialize timeseries database");
-
-        // Insert a record from this field.
-        const TIMESERIES_NAME: &str = "foo:bar";
-        const TIMESERIES_KEY: u64 = 101;
-        const FIELD_NAME: &str = "baz";
-
-        let mut inserted_row = serde_json::Map::new();
-        inserted_row
-            .insert("timeseries_name".to_string(), TIMESERIES_NAME.into());
-        inserted_row
-            .insert("timeseries_key".to_string(), TIMESERIES_KEY.into());
-        inserted_row.insert("field_name".to_string(), FIELD_NAME.into());
-        inserted_row.insert("field_value".to_string(), as_json);
-        let inserted_row = serde_json::Value::from(inserted_row);
-
-        let row = serde_json::to_string(&inserted_row).unwrap();
-        let field_table = field_table_name(field_value.field_type());
-        let insert_sql = format!(
-            "INSERT INTO oximeter.{field_table} FORMAT JSONEachRow {row}"
-        );
-        client.execute(insert_sql).await.expect("Failed to insert field row");
-
-        // Select it exactly back out.
-        let select_sql = format!(
-            "SELECT * FROM oximeter.{} LIMIT 1 FORMAT {};",
-            field_table_name(field_value.field_type()),
-            crate::DATABASE_SELECT_FORMAT,
-        );
-        let body = client
-            .execute_with_body(select_sql)
-            .await
-            .expect("Failed to select field row");
-        let actual_row: serde_json::Value = serde_json::from_str(&body)
-            .expect("Failed to parse field row JSON");
-        println!("{actual_row:?}");
-        println!("{inserted_row:?}");
-        assert_eq!(
-            actual_row, inserted_row,
-            "Actual and expected field rows do not match"
-        );
-        db.cleanup().await.expect("Failed to cleanup ClickHouse server");
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn test_recall_measurement_bool() {
-        let datum = Datum::Bool(true);
-        let as_json = serde_json::Value::from(1_u64);
-        test_recall_measurement_impl::<u8>(datum, None, as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_measurement_i8() {
-        let datum = Datum::I8(1);
-        let as_json = serde_json::Value::from(1_i8);
-        test_recall_measurement_impl::<u8>(datum, None, as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_measurement_u8() {
-        let datum = Datum::U8(1);
-        let as_json = serde_json::Value::from(1_u8);
-        test_recall_measurement_impl::<u8>(datum, None, as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_measurement_i16() {
-        let datum = Datum::I16(1);
-        let as_json = serde_json::Value::from(1_i16);
-        test_recall_measurement_impl::<u8>(datum, None, as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_measurement_u16() {
-        let datum = Datum::U16(1);
-        let as_json = serde_json::Value::from(1_u16);
-        test_recall_measurement_impl::<u8>(datum, None, as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_measurement_i32() {
-        let datum = Datum::I32(1);
-        let as_json = serde_json::Value::from(1_i32);
-        test_recall_measurement_impl::<u8>(datum, None, as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_measurement_u32() {
-        let datum = Datum::U32(1);
-        let as_json = serde_json::Value::from(1_u32);
-        test_recall_measurement_impl::<u8>(datum, None, as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_measurement_i64() {
-        let datum = Datum::I64(1);
-        let as_json = serde_json::Value::from(1_i64);
-        test_recall_measurement_impl::<u8>(datum, None, as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_measurement_u64() {
-        let datum = Datum::U64(1);
-        let as_json = serde_json::Value::from(1_u64);
-        test_recall_measurement_impl::<u8>(datum, None, as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_measurement_f32() {
-        const VALUE: f32 = 1.1;
-        let datum = Datum::F32(VALUE);
-        // NOTE: This is intentionally an f64.
-        let as_json = serde_json::Value::from(1.1_f64);
-        test_recall_measurement_impl::<u8>(datum, None, as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_measurement_f64() {
-        const VALUE: f64 = 1.1;
-        let datum = Datum::F64(VALUE);
-        let as_json = serde_json::Value::from(VALUE);
-        test_recall_measurement_impl::<u8>(datum, None, as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_measurement_cumulative_i64() {
-        let datum = Datum::CumulativeI64(1.into());
-        let as_json = serde_json::Value::from(1_i64);
-        test_recall_measurement_impl::<u8>(datum, None, as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_measurement_cumulative_u64() {
-        let datum = Datum::CumulativeU64(1.into());
-        let as_json = serde_json::Value::from(1_u64);
-        test_recall_measurement_impl::<u8>(datum, None, as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_measurement_cumulative_f64() {
-        let datum = Datum::CumulativeF64(1.1.into());
-        let as_json = serde_json::Value::from(1.1_f64);
-        test_recall_measurement_impl::<u8>(datum, None, as_json).await;
-    }
-
-    async fn histogram_test_impl<T>(hist: Histogram<T>)
-    where
-        T: oximeter::histogram::HistogramSupport,
-        Datum: From<oximeter::histogram::Histogram<T>>,
-        serde_json::Value: From<T>,
-    {
-        let (bins, counts) = hist.to_arrays();
-        let datum = Datum::from(hist);
-        let as_json = serde_json::Value::Array(
-            counts.into_iter().map(Into::into).collect(),
-        );
-        test_recall_measurement_impl(datum, Some(bins), as_json).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_measurement_histogram_i8() {
-        let hist = Histogram::new(&[0i8, 1, 2]).unwrap();
-        histogram_test_impl(hist).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_measurement_histogram_u8() {
-        let hist = Histogram::new(&[0u8, 1, 2]).unwrap();
-        histogram_test_impl(hist).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_measurement_histogram_i16() {
-        let hist = Histogram::new(&[0i16, 1, 2]).unwrap();
-        histogram_test_impl(hist).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_measurement_histogram_u16() {
-        let hist = Histogram::new(&[0u16, 1, 2]).unwrap();
-        histogram_test_impl(hist).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_measurement_histogram_i32() {
-        let hist = Histogram::new(&[0i32, 1, 2]).unwrap();
-        histogram_test_impl(hist).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_measurement_histogram_u32() {
-        let hist = Histogram::new(&[0u32, 1, 2]).unwrap();
-        histogram_test_impl(hist).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_measurement_histogram_i64() {
-        let hist = Histogram::new(&[0i64, 1, 2]).unwrap();
-        histogram_test_impl(hist).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_measurement_histogram_u64() {
-        let hist = Histogram::new(&[0u64, 1, 2]).unwrap();
-        histogram_test_impl(hist).await;
-    }
-
-    // NOTE: This test is ignored intentionally.
-    //
-    // We're using the JSONEachRow format to return data, which loses precision
-    // for floating point values. This means we return the _double_ 0.1 from
-    // the database as a `Value::Number`, which fails to compare equal to the
-    // `Value::Number(0.1f32 as f64)` we sent in. That's because 0.1 is not
-    // exactly representable in an `f32`, but it's close enough that ClickHouse
-    // prints `0.1` in the result, which converts to a slightly different `f64`
-    // than `0.1_f32 as f64` does.
-    //
-    // See https://github.com/oxidecomputer/omicron/issues/4059 for related
-    // discussion.
-    #[tokio::test]
-    #[ignore]
-    async fn test_recall_measurement_histogram_f32() {
-        let hist = Histogram::new(&[0.1f32, 0.2, 0.3]).unwrap();
-        histogram_test_impl(hist).await;
-    }
-
-    #[tokio::test]
-    async fn test_recall_measurement_histogram_f64() {
-        let hist = Histogram::new(&[0.1f64, 0.2, 0.3]).unwrap();
-        histogram_test_impl(hist).await;
-    }
-
-    async fn test_recall_measurement_impl<T: Into<serde_json::Value> + Copy>(
-        datum: Datum,
-        maybe_bins: Option<Vec<T>>,
-        json_datum: serde_json::Value,
-    ) {
-        let logctx = test_setup_log(
-            format!("test_recall_measurement_{}", datum.datum_type()).as_str(),
-        );
-        let log = &logctx.log;
-
-        // Let the OS assign a port and discover it after ClickHouse starts
-        let mut db = ClickHouseInstance::new_single_node(0)
-            .await
-            .expect("Failed to start ClickHouse");
-        let address = SocketAddr::new("::1".parse().unwrap(), db.port());
-
-        let client = Client::new(address, log);
-        client
-            .init_single_node_db()
-            .await
-            .expect("Failed to initialize timeseries database");
-
-        // Insert a record from this datum.
-        const TIMESERIES_NAME: &str = "foo:bar";
-        const TIMESERIES_KEY: u64 = 101;
-        let mut inserted_row = serde_json::Map::new();
-        inserted_row
-            .insert("timeseries_name".to_string(), TIMESERIES_NAME.into());
-        inserted_row
-            .insert("timeseries_key".to_string(), TIMESERIES_KEY.into());
-        inserted_row.insert(
-            "timestamp".to_string(),
-            Utc::now()
-                .format(crate::DATABASE_TIMESTAMP_FORMAT)
-                .to_string()
-                .into(),
-        );
-
-        // Insert the start time and possibly bins.
-        if let Some(start_time) = datum.start_time() {
-            inserted_row.insert(
-                "start_time".to_string(),
-                start_time
-                    .format(crate::DATABASE_TIMESTAMP_FORMAT)
-                    .to_string()
-                    .into(),
-            );
-        }
-        if let Some(bins) = &maybe_bins {
-            let bins = serde_json::Value::Array(
-                bins.iter().copied().map(Into::into).collect(),
-            );
-            inserted_row.insert("bins".to_string(), bins);
-            inserted_row.insert("counts".to_string(), json_datum);
-        } else {
-            inserted_row.insert("datum".to_string(), json_datum);
-        }
-        let inserted_row = serde_json::Value::from(inserted_row);
-
-        let measurement_table = measurement_table_name(datum.datum_type());
-        let row = serde_json::to_string(&inserted_row).unwrap();
-        let insert_sql = format!(
-            "INSERT INTO oximeter.{measurement_table} FORMAT JSONEachRow {row}",
-        );
-        client
-            .execute(insert_sql)
-            .await
-            .expect("Failed to insert measurement row");
-
-        // Select it exactly back out.
-        let select_sql = format!(
-            "SELECT * FROM oximeter.{} LIMIT 1 FORMAT {};",
-            measurement_table,
-            crate::DATABASE_SELECT_FORMAT,
-        );
-        let body = client
-            .execute_with_body(select_sql)
-            .await
-            .expect("Failed to select measurement row");
-        let actual_row: serde_json::Value = serde_json::from_str(&body)
-            .expect("Failed to parse measurement row JSON");
-        println!("{actual_row:?}");
-        println!("{inserted_row:?}");
-        assert_eq!(
-            actual_row, inserted_row,
-            "Actual and expected measurement rows do not match"
-        );
-        db.cleanup().await.expect("Failed to cleanup ClickHouse server");
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn test_schema_mismatch() {
+    async fn schema_mismatch_test(address: SocketAddr) -> Result<(), Error> {
         let logctx = test_setup_log("test_schema_mismatch");
         let log = &logctx.log;
-
-        // Let the OS assign a port and discover it after ClickHouse starts
-        let mut db = ClickHouseInstance::new_single_node(0)
-            .await
-            .expect("Failed to start ClickHouse");
-        let address = SocketAddr::new("::1".parse().unwrap(), db.port());
 
         let client = Client::new(address, &log);
         client
@@ -1435,150 +1102,16 @@ mod tests {
             datum: 1,
         };
         let sample = Sample::new(&bad_name, &metric).unwrap();
-        let result = client.verify_sample_schema(&sample).await;
+        let result = client.verify_or_cache_sample_schema(&sample).await;
         assert!(matches!(result, Err(Error::SchemaMismatch { .. })));
-        db.cleanup().await.expect("Failed to cleanup ClickHouse server");
+        client.wipe_single_node_db().await?;
         logctx.cleanup_successful();
+        Ok(())
     }
 
-    // Returns the number of timeseries schemas being used.
-    async fn get_schema_count(client: &Client) -> usize {
-        client
-            .execute_with_body(
-                "SELECT * FROM oximeter.timeseries_schema FORMAT JSONEachRow;",
-            )
-            .await
-            .expect("Failed to SELECT from database")
-            .lines()
-            .count()
-    }
-
-    #[tokio::test]
-    async fn test_database_version_update_idempotent() {
-        let logctx = test_setup_log("test_database_version_update_idempotent");
+    async fn schema_updated_test(address: SocketAddr) -> Result<(), Error> {
+        let logctx = test_setup_log("test_schema_updated");
         let log = &logctx.log;
-
-        let mut db = ClickHouseInstance::new_single_node(0)
-            .await
-            .expect("Failed to start ClickHouse");
-        let address = SocketAddr::new("::1".parse().unwrap(), db.port());
-
-        let replicated = false;
-
-        // Initialize the database...
-        let client = Client::new(address, &log);
-        client
-            .initialize_db_with_version(replicated, model::OXIMETER_VERSION)
-            .await
-            .expect("Failed to initialize timeseries database");
-
-        // Insert data here so we can verify it still exists later.
-        //
-        // The values here don't matter much, we just want to check that
-        // the database data hasn't been dropped.
-        assert_eq!(0, get_schema_count(&client).await);
-        let sample = test_util::make_sample();
-        client.insert_samples(&[sample.clone()]).await.unwrap();
-        assert_eq!(1, get_schema_count(&client).await);
-
-        // Re-initialize the database, see that our data still exists
-        client
-            .initialize_db_with_version(replicated, model::OXIMETER_VERSION)
-            .await
-            .expect("Failed to initialize timeseries database");
-
-        assert_eq!(1, get_schema_count(&client).await);
-
-        db.cleanup().await.expect("Failed to cleanup ClickHouse server");
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn test_database_version_will_not_downgrade() {
-        let logctx = test_setup_log("test_database_version_will_not_downgrade");
-        let log = &logctx.log;
-
-        let mut db = ClickHouseInstance::new_single_node(0)
-            .await
-            .expect("Failed to start ClickHouse");
-        let address = SocketAddr::new("::1".parse().unwrap(), db.port());
-
-        let replicated = false;
-
-        // Initialize the database
-        let client = Client::new(address, &log);
-        client
-            .initialize_db_with_version(replicated, model::OXIMETER_VERSION)
-            .await
-            .expect("Failed to initialize timeseries database");
-
-        // Bump the version of the database to a "too new" version
-        client
-            .insert_version(model::OXIMETER_VERSION + 1)
-            .await
-            .expect("Failed to insert very new DB version");
-
-        // Expect a failure re-initializing the client.
-        //
-        // This will attempt to initialize the client with "version =
-        // model::OXIMETER_VERSION", which is "too old".
-        client
-            .initialize_db_with_version(replicated, model::OXIMETER_VERSION)
-            .await
-            .expect_err("Should have failed, downgrades are not supported");
-
-        db.cleanup().await.expect("Failed to cleanup ClickHouse server");
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn test_database_version_wipes_old_version() {
-        let logctx = test_setup_log("test_database_version_wipes_old_version");
-        let log = &logctx.log;
-        let mut db = ClickHouseInstance::new_single_node(0)
-            .await
-            .expect("Failed to start ClickHouse");
-        let address = SocketAddr::new("::1".parse().unwrap(), db.port());
-
-        let replicated = false;
-
-        // Initialize the Client
-        let client = Client::new(address, &log);
-        client
-            .initialize_db_with_version(replicated, model::OXIMETER_VERSION)
-            .await
-            .expect("Failed to initialize timeseries database");
-
-        // Insert data here so we can remove it later.
-        //
-        // The values here don't matter much, we just want to check that
-        // the database data gets dropped later.
-        assert_eq!(0, get_schema_count(&client).await);
-        let sample = test_util::make_sample();
-        client.insert_samples(&[sample.clone()]).await.unwrap();
-        assert_eq!(1, get_schema_count(&client).await);
-
-        // If we try to upgrade to a newer version, we'll drop old data.
-        client
-            .initialize_db_with_version(replicated, model::OXIMETER_VERSION + 1)
-            .await
-            .expect("Should have initialized database successfully");
-        assert_eq!(0, get_schema_count(&client).await);
-
-        db.cleanup().await.expect("Failed to cleanup ClickHouse server");
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn test_schema_update() {
-        let logctx = test_setup_log("test_schema_update");
-        let log = &logctx.log;
-
-        // Let the OS assign a port and discover it after ClickHouse starts
-        let mut db = ClickHouseInstance::new_single_node(0)
-            .await
-            .expect("Failed to start ClickHouse");
-        let address = SocketAddr::new("::1".parse().unwrap(), db.port());
 
         let client = Client::new(address, &log);
         client
@@ -1589,11 +1122,12 @@ mod tests {
 
         // Verify that this sample is considered new, i.e., we return rows to update the timeseries
         // schema table.
-        let result = client.verify_sample_schema(&sample).await.unwrap();
+        let result =
+            client.verify_or_cache_sample_schema(&sample).await.unwrap();
         assert!(
-            matches!(result, Some(_)),
-            "When verifying a new sample, the rows to be inserted should be returned"
-        );
+                matches!(result, Some(_)),
+                "When verifying a new sample, the rows to be inserted should be returned"
+            );
 
         // Clear the internal caches of seen schema
         client.schema.lock().await.clear();
@@ -1615,14 +1149,15 @@ mod tests {
             )
             .clone();
         assert_eq!(
-            actual_schema,
-            expected_schema,
-            "The timeseries schema for a new sample was not correctly inserted into internal cache",
-        );
+                actual_schema,
+                expected_schema,
+                "The timeseries schema for a new sample was not correctly inserted into internal cache",
+            );
 
         // This should no longer return a new row to be inserted for the schema of this sample, as
         // any schema have been included above.
-        let result = client.verify_sample_schema(&sample).await.unwrap();
+        let result =
+            client.verify_or_cache_sample_schema(&sample).await.unwrap();
         assert!(
             matches!(result, None),
             "After inserting new schema, it should no longer be considered new"
@@ -1644,47 +1179,25 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(schema.len(), 1);
         assert_eq!(expected_schema, schema[0]);
-
-        db.cleanup().await.expect("Failed to cleanup ClickHouse server");
+        client.wipe_single_node_db().await?;
         logctx.cleanup_successful();
+        Ok(())
     }
 
-    async fn setup_filter_testcase() -> (ClickHouseInstance, Client, Vec<Sample>)
-    {
-        let log = slog::Logger::root(slog_dtrace::Dtrace::new().0, o!());
-
-        // Let the OS assign a port and discover it after ClickHouse starts
-        let db = ClickHouseInstance::new_single_node(0)
-            .await
-            .expect("Failed to start ClickHouse");
-        let address = SocketAddr::new("::1".parse().unwrap(), db.port());
+    async fn client_select_timeseries_one_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let logctx = test_setup_log("test_client_select_timeseries_one");
+        let log = &logctx.log;
 
         let client = Client::new(address, &log);
         client
             .init_single_node_db()
             .await
             .expect("Failed to initialize timeseries database");
+        let samples = test_util::generate_test_samples(2, 2, 2, 2);
+        client.insert_samples(&samples).await?;
 
-        // Create sample data
-        let (n_projects, n_instances, n_cpus, n_samples) = (2, 2, 2, 2);
-        let samples = test_util::generate_test_samples(
-            n_projects,
-            n_instances,
-            n_cpus,
-            n_samples,
-        );
-        assert_eq!(
-            samples.len(),
-            n_projects * n_instances * n_cpus * n_samples
-        );
-
-        client.insert_samples(&samples).await.unwrap();
-        (db, client, samples)
-    }
-
-    #[tokio::test]
-    async fn test_client_select_timeseries_one() {
-        let (mut db, client, samples) = setup_filter_testcase().await;
         let sample = samples.first().unwrap();
         let target_fields = sample.target_fields().collect::<Vec<_>>();
         let metric_fields = sample.metric_fields().collect::<Vec<_>>();
@@ -1752,16 +1265,27 @@ mod tests {
             .fields
             .iter()
             .all(|field| field_cmp(field, sample.metric_fields()));
-        db.cleanup().await.expect("Failed to cleanup ClickHouse server");
+
+        client.wipe_single_node_db().await?;
+        logctx.cleanup_successful();
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_field_record_count() {
+    async fn field_record_count_test(address: SocketAddr) -> Result<(), Error> {
+        let logctx = test_setup_log("test_field_record_count");
+        let log = &logctx.log;
+
         // This test verifies that the number of records in the field tables is as expected.
         //
         // Because of the schema change, inserting field records per field per unique timeseries,
         // we'd like to exercise the logic of ClickHouse's replacing merge tree engine.
-        let (mut db, client, samples) = setup_filter_testcase().await;
+        let client = Client::new(address, &log);
+        client
+            .init_single_node_db()
+            .await
+            .expect("Failed to initialize timeseries database");
+        let samples = test_util::generate_test_samples(2, 2, 2, 2);
+        client.insert_samples(&samples).await?;
 
         async fn assert_table_count(
             client: &Client,
@@ -1795,7 +1319,10 @@ mod tests {
             samples.len(),
         )
         .await;
-        db.cleanup().await.expect("Failed to cleanup ClickHouse server");
+
+        client.wipe_single_node_db().await?;
+        logctx.cleanup_successful();
+        Ok(())
     }
 
     // Regression test verifying that integers are returned in the expected format from the
@@ -1804,10 +1331,18 @@ mod tests {
     // By default, ClickHouse _quotes_ 64-bit integers, which is apparently to support JavaScript
     // implementations of JSON. See https://github.com/ClickHouse/ClickHouse/issues/2375 for
     // details. This test verifies that we get back _unquoted_ integers from the database.
-    #[tokio::test]
-    async fn test_unquoted_64bit_integers() {
+    async fn unquoted_64bit_integers_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
         use serde_json::Value;
-        let (mut db, client, _) = setup_filter_testcase().await;
+        let logctx = test_setup_log("test_unquoted_64bit_integers");
+        let log = &logctx.log;
+
+        let client = Client::new(address, &log);
+        client
+            .init_single_node_db()
+            .await
+            .expect("Failed to initialize timeseries database");
         let output = client
             .execute_with_body(
                 "SELECT toUInt64(1) AS foo FORMAT JSONEachRow;".to_string(),
@@ -1816,23 +1351,18 @@ mod tests {
             .unwrap();
         let json: Value = serde_json::from_str(&output).unwrap();
         assert_eq!(json["foo"], Value::Number(1u64.into()));
-        db.cleanup().await.expect("Failed to cleanup ClickHouse server");
-    }
 
-    #[tokio::test]
-    async fn test_bad_database_connection() {
-        let logctx = test_setup_log("test_bad_database_connection");
-        let log = &logctx.log;
-        let client = Client::new("127.0.0.1:443".parse().unwrap(), &log);
-        assert!(matches!(
-            client.ping().await,
-            Err(Error::DatabaseUnavailable(_))
-        ));
+        client.wipe_single_node_db().await?;
         logctx.cleanup_successful();
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_differentiate_by_timeseries_name() {
+    async fn differentiate_by_timeseries_name_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let logctx = test_setup_log("test_differentiate_by_timeseries_name");
+        let log = &logctx.log;
+
         #[derive(Debug, Default, PartialEq, oximeter::Target)]
         struct MyTarget {
             id: i64,
@@ -1850,15 +1380,6 @@ mod tests {
         struct SecondMetric {
             datum: i64,
         }
-
-        let logctx = test_setup_log("test_differentiate_by_timeseries_name");
-        let log = &logctx.log;
-
-        // Let the OS assign a port and discover it after ClickHouse starts
-        let db = ClickHouseInstance::new_single_node(0)
-            .await
-            .expect("Failed to start ClickHouse");
-        let address = SocketAddr::new("::1".parse().unwrap(), db.port());
 
         let client = Client::new(address, &log);
         client
@@ -1900,66 +1421,20 @@ mod tests {
         );
         assert_eq!(timeseries.target.name, "my_target");
         assert_eq!(timeseries.metric.name, "second_metric");
+
+        client.wipe_single_node_db().await?;
         logctx.cleanup_successful();
+        Ok(())
     }
 
-    #[derive(Debug, Clone, oximeter::Target)]
-    struct Service {
-        name: String,
-        id: uuid::Uuid,
-    }
-    #[derive(Debug, Clone, oximeter::Metric)]
-    struct RequestLatency {
-        route: String,
-        method: String,
-        status_code: i64,
-        #[datum]
-        latency: f64,
-    }
+    async fn select_timeseries_with_select_one_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let logctx = test_setup_log("test_select_timeseries_with_select_one");
+        let log = &logctx.log;
 
-    const SELECT_TEST_ID: &str = "4fa827ea-38bb-c37e-ac2d-f8432ca9c76e";
-    fn setup_select_test() -> (Service, Vec<RequestLatency>, Vec<Sample>) {
-        // One target
-        let id = SELECT_TEST_ID.parse().unwrap();
-        let target = Service { name: "oximeter".to_string(), id };
-
-        // Many metrics
-        let routes = &["/a", "/b"];
-        let methods = &["GET", "POST"];
-        let status_codes = &[200, 204, 500];
-
-        // Two samples each
-        let n_timeseries = routes.len() * methods.len() * status_codes.len();
-        let mut metrics = Vec::with_capacity(n_timeseries);
-        let mut samples = Vec::with_capacity(n_timeseries * 2);
-        for (route, method, status_code) in
-            itertools::iproduct!(routes, methods, status_codes)
-        {
-            let metric = RequestLatency {
-                route: route.to_string(),
-                method: method.to_string(),
-                status_code: *status_code,
-                latency: 0.0,
-            };
-            samples.push(Sample::new(&target, &metric).unwrap());
-            samples.push(Sample::new(&target, &metric).unwrap());
-            metrics.push(metric);
-        }
-        (target, metrics, samples)
-    }
-
-    async fn test_select_timeseries_with_impl(
-        criteria: &[&str],
-        start_time: Option<query::Timestamp>,
-        end_time: Option<query::Timestamp>,
-        test_fn: impl Fn(&Service, &[RequestLatency], &[Sample], &[Timeseries]),
-    ) {
         let (target, metrics, samples) = setup_select_test();
-        let mut db = ClickHouseInstance::new_single_node(0)
-            .await
-            .expect("Failed to start ClickHouse");
-        let address = SocketAddr::new("::1".parse().unwrap(), db.port());
-        let log = Logger::root(slog::Discard, o!());
+
         let client = Client::new(address, &log);
         client
             .init_single_node_db()
@@ -1969,13 +1444,19 @@ mod tests {
             .insert_samples(&samples)
             .await
             .expect("Failed to insert samples");
+
         let timeseries_name = "service:request_latency";
+        // This set of criteria should select exactly one timeseries, with two measurements.
+        // The target is the same in all cases, but we're looking for the first of the metrics, and
+        // the first two samples/measurements.
+        let criteria =
+            &["name==oximeter", "route==/a", "method==GET", "status_code==200"];
         let mut timeseries = client
             .select_timeseries_with(
                 timeseries_name,
                 criteria,
-                start_time,
-                end_time,
+                None,
+                None,
                 None,
                 None,
             )
@@ -1992,232 +1473,32 @@ mod tests {
                 .cmp(&second.measurements[0].timestamp())
         });
 
-        test_fn(&target, &metrics, &samples, &timeseries);
+        assert_eq!(timeseries.len(), 1, "Expected one timeseries");
+        let timeseries = timeseries.get(0).unwrap();
+        assert_eq!(
+            timeseries.measurements.len(),
+            2,
+            "Expected exactly two measurements"
+        );
+        verify_measurements(&timeseries.measurements, &samples[..2]);
+        verify_target(&timeseries.target, &target);
+        verify_metric(&timeseries.metric, metrics.get(0).unwrap());
 
-        db.cleanup().await.expect("Failed to cleanup database");
+        client.wipe_single_node_db().await?;
+        logctx.cleanup_successful();
+        Ok(())
     }
 
-    // Small helper to go from a mulidimensional index to a flattened array index.
-    fn unravel_index(idx: &[usize; 4]) -> usize {
-        let strides = [12, 6, 2, 1];
-        let mut index = 0;
-        for (i, stride) in idx.iter().rev().zip(strides.iter().rev()) {
-            index += i * stride;
-        }
-        index
-    }
-
-    #[test]
-    fn test_unravel_index() {
-        assert_eq!(unravel_index(&[0, 0, 0, 0]), 0);
-        assert_eq!(unravel_index(&[0, 0, 1, 0]), 2);
-        assert_eq!(unravel_index(&[1, 0, 0, 0]), 12);
-        assert_eq!(unravel_index(&[1, 0, 0, 1]), 13);
-        assert_eq!(unravel_index(&[1, 0, 1, 0]), 14);
-        assert_eq!(unravel_index(&[1, 1, 2, 1]), 23);
-    }
-
-    fn verify_measurements(
-        measurements: &[oximeter::Measurement],
-        samples: &[Sample],
-    ) {
-        for (measurement, sample) in measurements.iter().zip(samples.iter()) {
-            assert_eq!(
-                measurement, &sample.measurement,
-                "Mismatch between retrieved and expected measurement",
-            );
-        }
-    }
-
-    fn verify_target(actual: &crate::Target, expected: &Service) {
-        assert_eq!(actual.name, expected.name());
-        for (field_name, field_value) in expected
-            .field_names()
-            .into_iter()
-            .zip(expected.field_values().into_iter())
-        {
-            let actual_field = actual
-                .fields
-                .iter()
-                .find(|f| f.name == *field_name)
-                .expect("Missing field in recovered timeseries target");
-            assert_eq!(
-                actual_field.value, field_value,
-                "Incorrect field value in timeseries target"
-            );
-        }
-    }
-
-    fn verify_metric(actual: &crate::Metric, expected: &RequestLatency) {
-        assert_eq!(actual.name, expected.name());
-        for (field_name, field_value) in expected
-            .field_names()
-            .into_iter()
-            .zip(expected.field_values().into_iter())
-        {
-            let actual_field = actual
-                .fields
-                .iter()
-                .find(|f| f.name == *field_name)
-                .expect("Missing field in recovered timeseries metric");
-            assert_eq!(
-                actual_field.value, field_value,
-                "Incorrect field value in timeseries metric"
-            );
-        }
-    }
-
-    #[tokio::test]
-    async fn test_select_timeseries_with_select_one() {
-        // This set of criteria should select exactly one timeseries, with two measurements.
-        // The target is the same in all cases, but we're looking for the first of the metrics, and
-        // the first two samples/measurements.
-        let criteria =
-            &["name==oximeter", "route==/a", "method==GET", "status_code==200"];
-        fn test_fn(
-            target: &Service,
-            metrics: &[RequestLatency],
-            samples: &[Sample],
-            timeseries: &[Timeseries],
-        ) {
-            assert_eq!(timeseries.len(), 1, "Expected one timeseries");
-            let timeseries = timeseries.get(0).unwrap();
-            assert_eq!(
-                timeseries.measurements.len(),
-                2,
-                "Expected exactly two measurements"
-            );
-            verify_measurements(&timeseries.measurements, &samples[..2]);
-            verify_target(&timeseries.target, target);
-            verify_metric(&timeseries.metric, metrics.get(0).unwrap());
-        }
-        test_select_timeseries_with_impl(criteria, None, None, test_fn).await;
-    }
-
-    #[tokio::test]
-    async fn test_select_timeseries_with_select_one_field_with_multiple_values()
-    {
-        // This set of criteria should select the last two metrics, and so the last two
-        // timeseries. The target is the same in all cases.
-        let criteria =
-            &["name==oximeter", "route==/a", "method==GET", "status_code>200"];
-        fn test_fn(
-            target: &Service,
-            metrics: &[RequestLatency],
-            samples: &[Sample],
-            timeseries: &[Timeseries],
-        ) {
-            assert_eq!(timeseries.len(), 2, "Expected two timeseries");
-            for (i, ts) in timeseries.iter().enumerate() {
-                assert_eq!(
-                    ts.measurements.len(),
-                    2,
-                    "Expected exactly two measurements"
-                );
-
-                // Metrics 1..3 in the third axis, status code.
-                let sample_start = unravel_index(&[0, 0, i + 1, 0]);
-                let sample_end = sample_start + 2;
-                verify_measurements(
-                    &ts.measurements,
-                    &samples[sample_start..sample_end],
-                );
-                verify_target(&ts.target, target);
-            }
-
-            for (ts, metric) in timeseries.iter().zip(metrics[1..3].iter()) {
-                verify_metric(&ts.metric, metric);
-            }
-        }
-        test_select_timeseries_with_impl(criteria, None, None, test_fn).await;
-    }
-
-    #[tokio::test]
-    async fn test_select_timeseries_with_select_multiple_fields_with_multiple_values(
-    ) {
-        // This is non-selective for the route, which is the "second axis", and has two values for
-        // the third axis, status code. There should be a total of 4 timeseries, since there are
-        // two methods and two possible status codes.
-        let criteria = &["name==oximeter", "route==/a", "status_code>200"];
-        fn test_fn(
-            target: &Service,
-            metrics: &[RequestLatency],
-            samples: &[Sample],
-            timeseries: &[Timeseries],
-        ) {
-            assert_eq!(timeseries.len(), 4, "Expected four timeseries");
-            let indices = &[(0, 1), (0, 2), (1, 1), (1, 2)];
-            for (i, ts) in timeseries.iter().enumerate() {
-                assert_eq!(
-                    ts.measurements.len(),
-                    2,
-                    "Expected exactly two measurements"
-                );
-
-                // Metrics 0..2 in the second axis, method
-                // Metrics 1..3 in the third axis, status code.
-                let (i0, i1) = indices[i];
-                let sample_start = unravel_index(&[0, i0, i1, 0]);
-                let sample_end = sample_start + 2;
-                verify_measurements(
-                    &ts.measurements,
-                    &samples[sample_start..sample_end],
-                );
-                verify_target(&ts.target, target);
-            }
-
-            let mut ts_iter = timeseries.iter();
-            for i in 0..2 {
-                for j in 1..3 {
-                    let ts = ts_iter.next().unwrap();
-                    let metric = metrics.get(i * 3 + j).unwrap();
-                    verify_metric(&ts.metric, metric);
-                }
-            }
-        }
-        test_select_timeseries_with_impl(criteria, None, None, test_fn).await;
-    }
-
-    #[tokio::test]
-    async fn test_select_timeseries_with_all() {
-        // We're selecting all timeseries/samples here.
-        let criteria = &[];
-        fn test_fn(
-            target: &Service,
-            metrics: &[RequestLatency],
-            samples: &[Sample],
-            timeseries: &[Timeseries],
-        ) {
-            assert_eq!(timeseries.len(), 12, "Expected 12 timeseries");
-            for (i, ts) in timeseries.iter().enumerate() {
-                assert_eq!(
-                    ts.measurements.len(),
-                    2,
-                    "Expected exactly two measurements"
-                );
-
-                let sample_start = i * 2;
-                let sample_end = sample_start + 2;
-                verify_measurements(
-                    &ts.measurements,
-                    &samples[sample_start..sample_end],
-                );
-                verify_target(&ts.target, target);
-                verify_metric(&ts.metric, metrics.get(i).unwrap());
-            }
-        }
-        test_select_timeseries_with_impl(criteria, None, None, test_fn).await;
-    }
-
-    #[tokio::test]
-    async fn test_select_timeseries_with_start_time() {
-        let (_, metrics, samples) = setup_select_test();
-        let mut db = ClickHouseInstance::new_single_node(0)
-            .await
-            .expect("Failed to start ClickHouse");
-        let address = SocketAddr::new("::1".parse().unwrap(), db.port());
-        let logctx = test_setup_log("test_select_timeseries_with_start_time");
+    async fn select_timeseries_with_select_one_field_with_multiple_values_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let logctx = test_setup_log(
+            "test_select_timeseries_with_select_one_field_with_multiple_values",
+        );
         let log = &logctx.log;
+
+        let (target, metrics, samples) = setup_select_test();
+
         let client = Client::new(address, &log);
         client
             .init_single_node_db()
@@ -2227,11 +1508,218 @@ mod tests {
             .insert_samples(&samples)
             .await
             .expect("Failed to insert samples");
+
+        let timeseries_name = "service:request_latency";
+        // This set of criteria should select the last two metrics, and so the last two
+        // timeseries. The target is the same in all cases.
+        let criteria =
+            &["name==oximeter", "route==/a", "method==GET", "status_code>200"];
+        let mut timeseries = client
+            .select_timeseries_with(
+                timeseries_name,
+                criteria,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("Failed to select timeseries");
+
+        timeseries.sort_by(|first, second| {
+            first.measurements[0]
+                .timestamp()
+                .cmp(&second.measurements[0].timestamp())
+        });
+
+        assert_eq!(timeseries.len(), 2, "Expected two timeseries");
+        for (i, ts) in timeseries.iter().enumerate() {
+            assert_eq!(
+                ts.measurements.len(),
+                2,
+                "Expected exactly two measurements"
+            );
+
+            // Metrics 1..3 in the third axis, status code.
+            let sample_start = unravel_index(&[0, 0, i + 1, 0]);
+            let sample_end = sample_start + 2;
+            verify_measurements(
+                &ts.measurements,
+                &samples[sample_start..sample_end],
+            );
+            verify_target(&ts.target, &target);
+        }
+
+        for (ts, metric) in timeseries.iter().zip(metrics[1..3].iter()) {
+            verify_metric(&ts.metric, metric);
+        }
+
+        client.wipe_single_node_db().await?;
+        logctx.cleanup_successful();
+        Ok(())
+    }
+
+    async fn select_timeseries_with_select_multiple_fields_with_multiple_values_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let logctx = test_setup_log("test_select_timeseries_with_select_multiple_fields_with_multiple_values");
+        let log = &logctx.log;
+
+        let (target, metrics, samples) = setup_select_test();
+
+        let client = Client::new(address, &log);
+        client
+            .init_single_node_db()
+            .await
+            .expect("Failed to initialize timeseries database");
+        client
+            .insert_samples(&samples)
+            .await
+            .expect("Failed to insert samples");
+
+        let timeseries_name = "service:request_latency";
+        // This is non-selective for the route, which is the "second axis", and has two values for
+        // the third axis, status code. There should be a total of 4 timeseries, since there are
+        // two methods and two possible status codes.
+        let criteria = &["name==oximeter", "route==/a", "status_code>200"];
+        let mut timeseries = client
+            .select_timeseries_with(
+                timeseries_name,
+                criteria,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("Failed to select timeseries");
+
+        timeseries.sort_by(|first, second| {
+            first.measurements[0]
+                .timestamp()
+                .cmp(&second.measurements[0].timestamp())
+        });
+
+        assert_eq!(timeseries.len(), 4, "Expected four timeseries");
+        let indices = &[(0, 1), (0, 2), (1, 1), (1, 2)];
+        for (i, ts) in timeseries.iter().enumerate() {
+            assert_eq!(
+                ts.measurements.len(),
+                2,
+                "Expected exactly two measurements"
+            );
+
+            // Metrics 0..2 in the second axis, method
+            // Metrics 1..3 in the third axis, status code.
+            let (i0, i1) = indices[i];
+            let sample_start = unravel_index(&[0, i0, i1, 0]);
+            let sample_end = sample_start + 2;
+            verify_measurements(
+                &ts.measurements,
+                &samples[sample_start..sample_end],
+            );
+            verify_target(&ts.target, &target);
+        }
+
+        let mut ts_iter = timeseries.iter();
+        for i in 0..2 {
+            for j in 1..3 {
+                let ts = ts_iter.next().unwrap();
+                let metric = metrics.get(i * 3 + j).unwrap();
+                verify_metric(&ts.metric, metric);
+            }
+        }
+
+        client.wipe_single_node_db().await?;
+        logctx.cleanup_successful();
+        Ok(())
+    }
+
+    async fn select_timeseries_with_all_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let logctx = test_setup_log("test_select_timeseries_with_all");
+        let log = &logctx.log;
+
+        let (target, metrics, samples) = setup_select_test();
+
+        let client = Client::new(address, &log);
+        client
+            .init_single_node_db()
+            .await
+            .expect("Failed to initialize timeseries database");
+        client
+            .insert_samples(&samples)
+            .await
+            .expect("Failed to insert samples");
+
+        let timeseries_name = "service:request_latency";
+        let mut timeseries = client
+            .select_timeseries_with(
+                timeseries_name,
+                // We're selecting all timeseries/samples here.
+                &[],
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("Failed to select timeseries");
+
+        timeseries.sort_by(|first, second| {
+            first.measurements[0]
+                .timestamp()
+                .cmp(&second.measurements[0].timestamp())
+        });
+
+        assert_eq!(timeseries.len(), 12, "Expected 12 timeseries");
+        for (i, ts) in timeseries.iter().enumerate() {
+            assert_eq!(
+                ts.measurements.len(),
+                2,
+                "Expected exactly two measurements"
+            );
+
+            let sample_start = i * 2;
+            let sample_end = sample_start + 2;
+            verify_measurements(
+                &ts.measurements,
+                &samples[sample_start..sample_end],
+            );
+            verify_target(&ts.target, &target);
+            verify_metric(&ts.metric, metrics.get(i).unwrap());
+        }
+
+        client.wipe_single_node_db().await?;
+        logctx.cleanup_successful();
+        Ok(())
+    }
+
+    async fn select_timeseries_with_start_time_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let logctx = test_setup_log("test_select_timeseries_with_start_time");
+        let log = &logctx.log;
+
+        let (_, metrics, samples) = setup_select_test();
+
+        let client = Client::new(address, &log);
+        client
+            .init_single_node_db()
+            .await
+            .expect("Failed to initialize timeseries database");
+        client
+            .insert_samples(&samples)
+            .await
+            .expect("Failed to insert samples");
+
         let timeseries_name = "service:request_latency";
         let start_time = samples[samples.len() / 2].measurement.timestamp();
         let mut timeseries = client
             .select_timeseries_with(
                 timeseries_name,
+                // We're selecting all timeseries/samples here.
                 &[],
                 Some(query::Timestamp::Exclusive(start_time)),
                 None,
@@ -2240,30 +1728,32 @@ mod tests {
             )
             .await
             .expect("Failed to select timeseries");
+
         timeseries.sort_by(|first, second| {
             first.measurements[0]
                 .timestamp()
                 .cmp(&second.measurements[0].timestamp())
         });
+
         assert_eq!(timeseries.len(), metrics.len() / 2);
         for ts in timeseries.iter() {
             for meas in ts.measurements.iter() {
                 assert!(meas.timestamp() > start_time);
             }
         }
-        db.cleanup().await.expect("Failed to cleanup database");
+
+        client.wipe_single_node_db().await?;
         logctx.cleanup_successful();
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_select_timeseries_with_limit() {
-        let (_, _, samples) = setup_select_test();
-        let mut db = ClickHouseInstance::new_single_node(0)
-            .await
-            .expect("Failed to start ClickHouse");
-        let address = SocketAddr::new("::1".parse().unwrap(), db.port());
+    async fn select_timeseries_with_limit_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
         let logctx = test_setup_log("test_select_timeseries_with_limit");
         let log = &logctx.log;
+
+        let (_, _, samples) = setup_select_test();
         let client = Client::new(address, &log);
         client
             .init_single_node_db()
@@ -2273,12 +1763,11 @@ mod tests {
             .insert_samples(&samples)
             .await
             .expect("Failed to insert samples");
-        let timeseries_name = "service:request_latency";
 
-        // So we have to define criteria that resolve to a single timeseries
+        let timeseries_name = "service:request_latency";
+        // We have to define criteria that resolve to a single timeseries
         let criteria =
             &["name==oximeter", "route==/a", "method==GET", "status_code==200"];
-
         // First, query without a limit. We should see all the results.
         let all_measurements = &client
             .select_timeseries_with(
@@ -2371,19 +1860,18 @@ mod tests {
             timeseries.measurements
         );
 
-        db.cleanup().await.expect("Failed to cleanup database");
+        client.wipe_single_node_db().await?;
         logctx.cleanup_successful();
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_select_timeseries_with_order() {
-        let (_, _, samples) = setup_select_test();
-        let mut db = ClickHouseInstance::new_single_node(0)
-            .await
-            .expect("Failed to start ClickHouse");
-        let address = SocketAddr::new("::1".parse().unwrap(), db.port());
+    async fn select_timeseries_with_order_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
         let logctx = test_setup_log("test_select_timeseries_with_order");
         let log = &logctx.log;
+
+        let (_, _, samples) = setup_select_test();
         let client = Client::new(address, &log);
         client
             .init_single_node_db()
@@ -2393,13 +1881,12 @@ mod tests {
             .insert_samples(&samples)
             .await
             .expect("Failed to insert samples");
-        let timeseries_name = "service:request_latency";
 
+        let timeseries_name = "service:request_latency";
         // Limits only work with a single timeseries, so we have to use criteria
         // that resolve to a single timeseries
         let criteria =
             &["name==oximeter", "route==/a", "method==GET", "status_code==200"];
-
         // First, query without an order. We should see all the results in ascending order.
         let all_measurements = &client
             .select_timeseries_with(
@@ -2474,13 +1961,25 @@ mod tests {
             timeseries_asc.last().unwrap()
         );
 
-        db.cleanup().await.expect("Failed to cleanup database");
+        client.wipe_single_node_db().await?;
         logctx.cleanup_successful();
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_get_schema_no_new_values() {
-        let (mut db, client, _) = setup_filter_testcase().await;
+    async fn get_schema_no_new_values_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let logctx = test_setup_log("test_get_schema_no_new_values");
+        let log = &logctx.log;
+
+        let client = Client::new(address, &log);
+        client
+            .init_single_node_db()
+            .await
+            .expect("Failed to initialize timeseries database");
+        let samples = test_util::generate_test_samples(2, 2, 2, 2);
+        client.insert_samples(&samples).await?;
+
         let original_schema = client.schema.lock().await.clone();
         let mut schema = client.schema.lock().await;
         client
@@ -2488,14 +1987,26 @@ mod tests {
             .await
             .expect("Failed to get timeseries schema");
         assert_eq!(&original_schema, &*schema, "Schema shouldn't change");
-        db.cleanup().await.expect("Failed to cleanup database");
+
+        client.wipe_single_node_db().await?;
+        logctx.cleanup_successful();
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_timeseries_schema_list() {
-        use std::convert::TryInto;
+    async fn timeseries_schema_list_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let logctx = test_setup_log("test_timeseries_schema_list");
+        let log = &logctx.log;
 
-        let (mut db, client, _) = setup_filter_testcase().await;
+        let client = Client::new(address, &log);
+        client
+            .init_single_node_db()
+            .await
+            .expect("Failed to initialize timeseries database");
+        let samples = test_util::generate_test_samples(2, 2, 2, 2);
+        client.insert_samples(&samples).await?;
+
         let limit = 100u32.try_into().unwrap();
         let page = dropshot::WhichPage::First(dropshot::EmptyScanParams {});
         let result = client.timeseries_schema_list(&page, limit).await.unwrap();
@@ -2514,14 +2025,23 @@ mod tests {
             result.next_page.is_none(),
             "Expected the next page token to be None"
         );
-        db.cleanup().await.expect("Failed to cleanup database");
+        client.wipe_single_node_db().await?;
+        logctx.cleanup_successful();
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_list_timeseries() {
-        use std::convert::TryInto;
+    async fn list_timeseries_test(address: SocketAddr) -> Result<(), Error> {
+        let logctx = test_setup_log("test_list_timeseries");
+        let log = &logctx.log;
 
-        let (mut db, client, _) = setup_filter_testcase().await;
+        let client = Client::new(address, &log);
+        client
+            .init_single_node_db()
+            .await
+            .expect("Failed to initialize timeseries database");
+        let samples = test_util::generate_test_samples(2, 2, 2, 2);
+        client.insert_samples(&samples).await?;
+
         let limit = 7u32.try_into().unwrap();
         let params = crate::TimeseriesScanParams {
             timeseries_name: TimeseriesName::try_from(
@@ -2580,20 +2100,662 @@ mod tests {
             result.items[0].metric, last_timeseries.metric,
             "Paginating should pick up where it left off"
         );
-        db.cleanup().await.expect("Failed to cleanup database");
+
+        client.wipe_single_node_db().await?;
+        logctx.cleanup_successful();
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_update_schema_cache_on_new_sample() {
+    async fn recall_field_value_bool_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let field = FieldValue::Bool(true);
+        let as_json = serde_json::Value::from(1_u64);
+        test_recall_field_value_impl(address, field, as_json).await?;
+        Ok(())
+    }
+
+    async fn recall_field_value_u8_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let field = FieldValue::U8(1);
+        let as_json = serde_json::Value::from(1_u8);
+        test_recall_field_value_impl(address, field, as_json).await?;
+        Ok(())
+    }
+
+    async fn recall_field_value_i8_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let field = FieldValue::I8(1);
+        let as_json = serde_json::Value::from(1_i8);
+        test_recall_field_value_impl(address, field, as_json).await?;
+        Ok(())
+    }
+
+    async fn recall_field_value_u16_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let field = FieldValue::U16(1);
+        let as_json = serde_json::Value::from(1_u16);
+        test_recall_field_value_impl(address, field, as_json).await?;
+        Ok(())
+    }
+
+    async fn recall_field_value_i16_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let field = FieldValue::I16(1);
+        let as_json = serde_json::Value::from(1_i16);
+        test_recall_field_value_impl(address, field, as_json).await?;
+        Ok(())
+    }
+
+    async fn recall_field_value_u32_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let field = FieldValue::U32(1);
+        let as_json = serde_json::Value::from(1_u32);
+        test_recall_field_value_impl(address, field, as_json).await?;
+        Ok(())
+    }
+
+    async fn recall_field_value_i32_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let field = FieldValue::I32(1);
+        let as_json = serde_json::Value::from(1_i32);
+        test_recall_field_value_impl(address, field, as_json).await?;
+        Ok(())
+    }
+
+    async fn recall_field_value_u64_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let field = FieldValue::U64(1);
+        let as_json = serde_json::Value::from(1_u64);
+        test_recall_field_value_impl(address, field, as_json).await?;
+        Ok(())
+    }
+
+    async fn recall_field_value_i64_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let field = FieldValue::I64(1);
+        let as_json = serde_json::Value::from(1_i64);
+        test_recall_field_value_impl(address, field, as_json).await?;
+        Ok(())
+    }
+
+    async fn recall_field_value_string_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let field = FieldValue::String("foo".into());
+        let as_json = serde_json::Value::from("foo");
+        test_recall_field_value_impl(address, field, as_json).await?;
+        Ok(())
+    }
+
+    async fn recall_field_value_ipv4addr_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let field = FieldValue::from(Ipv4Addr::LOCALHOST);
+        let as_json = serde_json::Value::from(
+            Ipv4Addr::LOCALHOST.to_ipv6_mapped().to_string(),
+        );
+        test_recall_field_value_impl(address, field, as_json).await?;
+        Ok(())
+    }
+
+    async fn recall_field_value_ipv6addr_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let field = FieldValue::from(Ipv6Addr::LOCALHOST);
+        let as_json = serde_json::Value::from(Ipv6Addr::LOCALHOST.to_string());
+        test_recall_field_value_impl(address, field, as_json).await?;
+        Ok(())
+    }
+
+    async fn recall_field_value_uuid_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let id = Uuid::new_v4();
+        let field = FieldValue::from(id);
+        let as_json = serde_json::Value::from(id.to_string());
+        test_recall_field_value_impl(address, field, as_json).await?;
+        Ok(())
+    }
+
+    async fn test_recall_field_value_impl(
+        address: SocketAddr,
+        field_value: FieldValue,
+        as_json: serde_json::Value,
+    ) -> Result<(), Error> {
+        let logctx = test_setup_log(
+            format!("test_recall_field_value_{}", field_value.field_type())
+                .as_str(),
+        );
+        let log = &logctx.log;
+
+        let client = Client::new(address, log);
+        client
+            .init_single_node_db()
+            .await
+            .expect("Failed to initialize timeseries database");
+
+        // Insert a record from this field.
+        const TIMESERIES_NAME: &str = "foo:bar";
+        const TIMESERIES_KEY: u64 = 101;
+        const FIELD_NAME: &str = "baz";
+
+        let mut inserted_row = serde_json::Map::new();
+        inserted_row
+            .insert("timeseries_name".to_string(), TIMESERIES_NAME.into());
+        inserted_row
+            .insert("timeseries_key".to_string(), TIMESERIES_KEY.into());
+        inserted_row.insert("field_name".to_string(), FIELD_NAME.into());
+        inserted_row.insert("field_value".to_string(), as_json);
+        let inserted_row = serde_json::Value::from(inserted_row);
+
+        let row = serde_json::to_string(&inserted_row).unwrap();
+        let field_table = field_table_name(field_value.field_type());
+        let insert_sql = format!(
+            "INSERT INTO oximeter.{field_table} FORMAT JSONEachRow {row}"
+        );
+        client.execute(insert_sql).await.expect("Failed to insert field row");
+
+        // Select it exactly back out.
+        let select_sql = format!(
+            "SELECT * FROM oximeter.{} LIMIT 1 FORMAT {};",
+            field_table_name(field_value.field_type()),
+            crate::DATABASE_SELECT_FORMAT,
+        );
+        let body = client
+            .execute_with_body(select_sql)
+            .await
+            .expect("Failed to select field row");
+        let actual_row: serde_json::Value = serde_json::from_str(&body)
+            .expect("Failed to parse field row JSON");
+        println!("{actual_row:?}");
+        println!("{inserted_row:?}");
+        assert_eq!(
+            actual_row, inserted_row,
+            "Actual and expected field rows do not match"
+        );
+
+        client.wipe_single_node_db().await?;
+        logctx.cleanup_successful();
+        Ok(())
+    }
+
+    async fn recall_measurement_bool_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let datum = Datum::Bool(true);
+        let as_json = serde_json::Value::from(1_u64);
+        test_recall_measurement_impl::<u8>(address, datum, None, as_json)
+            .await?;
+        Ok(())
+    }
+
+    async fn recall_measurement_i8_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let datum = Datum::I8(1);
+        let as_json = serde_json::Value::from(1_i8);
+        test_recall_measurement_impl::<u8>(address, datum, None, as_json)
+            .await?;
+        Ok(())
+    }
+
+    async fn recall_measurement_u8_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let datum = Datum::U8(1);
+        let as_json = serde_json::Value::from(1_u8);
+        test_recall_measurement_impl::<u8>(address, datum, None, as_json)
+            .await?;
+        Ok(())
+    }
+
+    async fn recall_measurement_i16_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let datum = Datum::I16(1);
+        let as_json = serde_json::Value::from(1_i16);
+        test_recall_measurement_impl::<u8>(address, datum, None, as_json)
+            .await?;
+        Ok(())
+    }
+
+    async fn recall_measurement_u16_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let datum = Datum::U16(1);
+        let as_json = serde_json::Value::from(1_u16);
+        test_recall_measurement_impl::<u8>(address, datum, None, as_json)
+            .await?;
+        Ok(())
+    }
+
+    async fn recall_measurement_i32_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let datum = Datum::I32(1);
+        let as_json = serde_json::Value::from(1_i32);
+        test_recall_measurement_impl::<u8>(address, datum, None, as_json)
+            .await?;
+        Ok(())
+    }
+
+    async fn recall_measurement_u32_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let datum = Datum::U32(1);
+        let as_json = serde_json::Value::from(1_u32);
+        test_recall_measurement_impl::<u8>(address, datum, None, as_json)
+            .await?;
+        Ok(())
+    }
+
+    async fn recall_measurement_i64_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let datum = Datum::I64(1);
+        let as_json = serde_json::Value::from(1_i64);
+        test_recall_measurement_impl::<u8>(address, datum, None, as_json)
+            .await?;
+        Ok(())
+    }
+
+    async fn recall_measurement_u64_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let datum = Datum::U64(1);
+        let as_json = serde_json::Value::from(1_u64);
+        test_recall_measurement_impl::<u8>(address, datum, None, as_json)
+            .await?;
+        Ok(())
+    }
+
+    async fn recall_measurement_f32_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        const VALUE: f32 = 1.1;
+        let datum = Datum::F32(VALUE);
+        // NOTE: This is intentionally an f64.
+        let as_json = serde_json::Value::from(1.1_f64);
+        test_recall_measurement_impl::<u8>(address, datum, None, as_json)
+            .await?;
+        Ok(())
+    }
+
+    async fn recall_measurement_f64_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        const VALUE: f64 = 1.1;
+        let datum = Datum::F64(VALUE);
+        let as_json = serde_json::Value::from(VALUE);
+        test_recall_measurement_impl::<u8>(address, datum, None, as_json)
+            .await?;
+        Ok(())
+    }
+
+    async fn recall_measurement_cumulative_i64_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let datum = Datum::CumulativeI64(1.into());
+        let as_json = serde_json::Value::from(1_i64);
+        test_recall_measurement_impl::<u8>(address, datum, None, as_json)
+            .await?;
+        Ok(())
+    }
+
+    async fn recall_measurement_cumulative_u64_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let datum = Datum::CumulativeU64(1.into());
+        let as_json = serde_json::Value::from(1_u64);
+        test_recall_measurement_impl::<u8>(address, datum, None, as_json)
+            .await?;
+        Ok(())
+    }
+
+    async fn recall_measurement_cumulative_f64_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let datum = Datum::CumulativeF64(1.1.into());
+        let as_json = serde_json::Value::from(1.1_f64);
+        test_recall_measurement_impl::<u8>(address, datum, None, as_json)
+            .await?;
+        Ok(())
+    }
+
+    async fn histogram_test_impl<T>(
+        address: SocketAddr,
+        hist: Histogram<T>,
+    ) -> Result<(), Error>
+    where
+        T: oximeter::histogram::HistogramSupport,
+        Datum: From<oximeter::histogram::Histogram<T>>,
+        serde_json::Value: From<T>,
+    {
+        let (bins, counts) = hist.to_arrays();
+        let datum = Datum::from(hist);
+        let as_json = serde_json::Value::Array(
+            counts.into_iter().map(Into::into).collect(),
+        );
+        test_recall_measurement_impl(address, datum, Some(bins), as_json)
+            .await?;
+        Ok(())
+    }
+
+    async fn recall_measurement_histogram_i8_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let hist = Histogram::new(&[0i8, 1, 2]).unwrap();
+        histogram_test_impl(address, hist).await?;
+        Ok(())
+    }
+
+    async fn recall_measurement_histogram_u8_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let hist = Histogram::new(&[0u8, 1, 2]).unwrap();
+        histogram_test_impl(address, hist).await?;
+        Ok(())
+    }
+
+    async fn recall_measurement_histogram_i16_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let hist = Histogram::new(&[0i16, 1, 2]).unwrap();
+        histogram_test_impl(address, hist).await?;
+        Ok(())
+    }
+
+    async fn recall_measurement_histogram_u16_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let hist = Histogram::new(&[0u16, 1, 2]).unwrap();
+        histogram_test_impl(address, hist).await?;
+        Ok(())
+    }
+
+    async fn recall_measurement_histogram_i32_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let hist = Histogram::new(&[0i32, 1, 2]).unwrap();
+        histogram_test_impl(address, hist).await?;
+        Ok(())
+    }
+
+    async fn recall_measurement_histogram_u32_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let hist = Histogram::new(&[0u32, 1, 2]).unwrap();
+        histogram_test_impl(address, hist).await?;
+        Ok(())
+    }
+
+    async fn recall_measurement_histogram_i64_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let hist = Histogram::new(&[0i64, 1, 2]).unwrap();
+        histogram_test_impl(address, hist).await?;
+        Ok(())
+    }
+
+    async fn recall_measurement_histogram_u64_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let hist = Histogram::new(&[0u64, 1, 2]).unwrap();
+        histogram_test_impl(address, hist).await?;
+        Ok(())
+    }
+
+    // NOTE: This test is ignored intentionally.
+    //
+    // We're using the JSONEachRow format to return data, which loses precision
+    // for floating point values. This means we return the _double_ 0.1 from
+    // the database as a `Value::Number`, which fails to compare equal to the
+    // `Value::Number(0.1f32 as f64)` we sent in. That's because 0.1 is not
+    // exactly representable in an `f32`, but it's close enough that ClickHouse
+    // prints `0.1` in the result, which converts to a slightly different `f64`
+    // than `0.1_f32 as f64` does.
+    //
+    // See https://github.com/oxidecomputer/omicron/issues/4059 for related
+    // discussion.
+    #[allow(dead_code)]
+    async fn recall_measurement_histogram_f32_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let hist = Histogram::new(&[0.1f32, 0.2, 0.3]).unwrap();
+        histogram_test_impl(address, hist).await?;
+        Ok(())
+    }
+
+    async fn recall_measurement_histogram_f64_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let hist = Histogram::new(&[0.1f64, 0.2, 0.3]).unwrap();
+        histogram_test_impl(address, hist).await?;
+        Ok(())
+    }
+
+    async fn test_recall_measurement_impl<T: Into<serde_json::Value> + Copy>(
+        address: SocketAddr,
+        datum: Datum,
+        maybe_bins: Option<Vec<T>>,
+        json_datum: serde_json::Value,
+    ) -> Result<(), Error> {
+        let logctx = test_setup_log(
+            format!("test_recall_measurement_{}", datum.datum_type()).as_str(),
+        );
+        let log = &logctx.log;
+
+        let client = Client::new(address, log);
+        client
+            .init_single_node_db()
+            .await
+            .expect("Failed to initialize timeseries database");
+
+        // Insert a record from this datum.
+        const TIMESERIES_NAME: &str = "foo:bar";
+        const TIMESERIES_KEY: u64 = 101;
+        let mut inserted_row = serde_json::Map::new();
+        inserted_row
+            .insert("timeseries_name".to_string(), TIMESERIES_NAME.into());
+        inserted_row
+            .insert("timeseries_key".to_string(), TIMESERIES_KEY.into());
+        inserted_row.insert(
+            "timestamp".to_string(),
+            Utc::now()
+                .format(crate::DATABASE_TIMESTAMP_FORMAT)
+                .to_string()
+                .into(),
+        );
+
+        // Insert the start time and possibly bins.
+        if let Some(start_time) = datum.start_time() {
+            inserted_row.insert(
+                "start_time".to_string(),
+                start_time
+                    .format(crate::DATABASE_TIMESTAMP_FORMAT)
+                    .to_string()
+                    .into(),
+            );
+        }
+        if let Some(bins) = &maybe_bins {
+            let bins = serde_json::Value::Array(
+                bins.iter().copied().map(Into::into).collect(),
+            );
+            inserted_row.insert("bins".to_string(), bins);
+            inserted_row.insert("counts".to_string(), json_datum);
+        } else {
+            inserted_row.insert("datum".to_string(), json_datum);
+        }
+        let inserted_row = serde_json::Value::from(inserted_row);
+
+        let measurement_table = measurement_table_name(datum.datum_type());
+        let row = serde_json::to_string(&inserted_row).unwrap();
+        let insert_sql = format!(
+            "INSERT INTO oximeter.{measurement_table} FORMAT JSONEachRow {row}",
+        );
+        client
+            .execute(insert_sql)
+            .await
+            .expect("Failed to insert measurement row");
+
+        // Select it exactly back out.
+        let select_sql = format!(
+            "SELECT * FROM oximeter.{} LIMIT 1 FORMAT {};",
+            measurement_table,
+            crate::DATABASE_SELECT_FORMAT,
+        );
+        let body = client
+            .execute_with_body(select_sql)
+            .await
+            .expect("Failed to select measurement row");
+        let actual_row: serde_json::Value = serde_json::from_str(&body)
+            .expect("Failed to parse measurement row JSON");
+        println!("{actual_row:?}");
+        println!("{inserted_row:?}");
+        assert_eq!(
+            actual_row, inserted_row,
+            "Actual and expected measurement rows do not match"
+        );
+        client.wipe_single_node_db().await?;
+        logctx.cleanup_successful();
+        Ok(())
+    }
+
+    // Returns the number of timeseries schemas being used.
+    async fn get_schema_count(client: &Client) -> usize {
+        client
+            .execute_with_body(
+                "SELECT * FROM oximeter.timeseries_schema FORMAT JSONEachRow;",
+            )
+            .await
+            .expect("Failed to SELECT from database")
+            .lines()
+            .count()
+    }
+
+    async fn database_version_update_idempotent_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let logctx = test_setup_log("test_database_version_update_idempotent");
+        let log = &logctx.log;
+
+        let replicated = false;
+
+        // Initialize the database...
+        let client = Client::new(address, &log);
+        client
+            .initialize_db_with_version(replicated, model::OXIMETER_VERSION)
+            .await
+            .expect("Failed to initialize timeseries database");
+
+        // Insert data here so we can verify it still exists later.
+        //
+        // The values here don't matter much, we just want to check that
+        // the database data hasn't been dropped.
+        assert_eq!(0, get_schema_count(&client).await);
+        let sample = test_util::make_sample();
+        client.insert_samples(&[sample.clone()]).await.unwrap();
+        assert_eq!(1, get_schema_count(&client).await);
+
+        // Re-initialize the database, see that our data still exists
+        client
+            .initialize_db_with_version(replicated, model::OXIMETER_VERSION)
+            .await
+            .expect("Failed to initialize timeseries database");
+
+        assert_eq!(1, get_schema_count(&client).await);
+
+        client.wipe_single_node_db().await?;
+        logctx.cleanup_successful();
+        Ok(())
+    }
+
+    async fn database_version_will_not_downgrade_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let logctx = test_setup_log("test_database_version_will_not_downgrade");
+        let log = &logctx.log;
+
+        let replicated = false;
+
+        // Initialize the database
+        let client = Client::new(address, &log);
+        client
+            .initialize_db_with_version(replicated, model::OXIMETER_VERSION)
+            .await
+            .expect("Failed to initialize timeseries database");
+
+        // Bump the version of the database to a "too new" version
+        client
+            .insert_version(model::OXIMETER_VERSION + 1)
+            .await
+            .expect("Failed to insert very new DB version");
+
+        // Expect a failure re-initializing the client.
+        //
+        // This will attempt to initialize the client with "version =
+        // model::OXIMETER_VERSION", which is "too old".
+        client
+            .initialize_db_with_version(replicated, model::OXIMETER_VERSION)
+            .await
+            .expect_err("Should have failed, downgrades are not supported");
+
+        client.wipe_single_node_db().await?;
+        logctx.cleanup_successful();
+        Ok(())
+    }
+
+    async fn database_version_wipes_old_version_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        let logctx = test_setup_log("test_database_version_wipes_old_version");
+        let log = &logctx.log;
+
+        let replicated = false;
+
+        // Initialize the Client
+        let client = Client::new(address, &log);
+        client
+            .initialize_db_with_version(replicated, model::OXIMETER_VERSION)
+            .await
+            .expect("Failed to initialize timeseries database");
+
+        // Insert data here so we can remove it later.
+        //
+        // The values here don't matter much, we just want to check that
+        // the database data gets dropped later.
+        assert_eq!(0, get_schema_count(&client).await);
+        let sample = test_util::make_sample();
+        client.insert_samples(&[sample.clone()]).await.unwrap();
+        assert_eq!(1, get_schema_count(&client).await);
+
+        // If we try to upgrade to a newer version, we'll drop old data.
+        client
+            .initialize_db_with_version(replicated, model::OXIMETER_VERSION + 1)
+            .await
+            .expect("Should have initialized database successfully");
+        assert_eq!(0, get_schema_count(&client).await);
+
+        client.wipe_single_node_db().await?;
+        logctx.cleanup_successful();
+        Ok(())
+    }
+
+    async fn update_schema_cache_on_new_sample_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
         usdt::register_probes().unwrap();
         let logctx = test_setup_log("test_update_schema_cache_on_new_sample");
         let log = &logctx.log;
-
-        // Let the OS assign a port and discover it after ClickHouse starts
-        let mut db = ClickHouseInstance::new_single_node(0)
-            .await
-            .expect("Failed to start ClickHouse");
-        let address = SocketAddr::new("::1".parse().unwrap(), db.port());
 
         let client = Client::new(address, &log);
         client
@@ -2631,8 +2793,9 @@ mod tests {
             "Expected exactly 1 schema again"
         );
         assert_eq!(client.schema.lock().await.len(), 1);
-        db.cleanup().await.expect("Failed to cleanup ClickHouse server");
+        client.wipe_single_node_db().await?;
         logctx.cleanup_successful();
+        Ok(())
     }
 
     // Regression test for https://github.com/oxidecomputer/omicron/issues/4336.
@@ -2640,18 +2803,13 @@ mod tests {
     // This tests that we can successfully query all extant datum types from the
     // schema table. There may be no such values, but the query itself should
     // succeed.
-    #[tokio::test]
-    async fn test_select_all_datum_types() {
+    async fn select_all_datum_types_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
         use strum::IntoEnumIterator;
         usdt::register_probes().unwrap();
         let logctx = test_setup_log("test_update_schema_cache_on_new_sample");
         let log = &logctx.log;
-
-        // Let the OS assign a port and discover it after ClickHouse starts
-        let mut db = ClickHouseInstance::new_single_node(0)
-            .await
-            .expect("Failed to start ClickHouse");
-        let address = SocketAddr::new("::1".parse().unwrap(), db.port());
 
         let client = Client::new(address, &log);
         client
@@ -2672,7 +2830,249 @@ mod tests {
             let count = res.trim().parse::<usize>().unwrap();
             assert_eq!(count, 0);
         }
-        db.cleanup().await.expect("Failed to cleanup ClickHouse server");
+        client.wipe_single_node_db().await?;
         logctx.cleanup_successful();
+        Ok(())
+    }
+
+    // Regression test for https://github.com/oxidecomputer/omicron/issues/4335.
+    //
+    // This tests that, when cache new schema but _fail_ to insert them, we also
+    // remove them from the internal cache.
+    async fn new_schema_removed_when_not_inserted_test(
+        address: SocketAddr,
+    ) -> Result<(), Error> {
+        usdt::register_probes().unwrap();
+        let logctx = test_setup_log("test_update_schema_cache_on_new_sample");
+        let log = &logctx.log;
+
+        let client = Client::new(address, &log);
+        client
+            .init_single_node_db()
+            .await
+            .expect("Failed to initialize timeseries database");
+        let samples = [test_util::make_sample()];
+
+        // We're using the components of the `insert_samples()` method here,
+        // which has been refactored explicitly for this test. We need to insert
+        // the schema for this sample into the internal cache, which relies on
+        // access to the database (since they don't exist).
+        //
+        // First, insert the sample into the local cache. This method also
+        // checks the DB, since this schema doesn't exist in the cache.
+        let UnrolledSampleRows { new_schema, .. } =
+            client.unroll_samples(&samples).await;
+        assert_eq!(client.schema.lock().await.len(), 1);
+
+        // Next, we'll kill the database, and then try to insert the schema.
+        // That will fail, since the DB is now inaccessible.
+        client.wipe_single_node_db().await?;
+        let res = client.save_new_schema_or_remove(new_schema).await;
+        assert!(res.is_err(), "Should have failed since the DB is gone");
+        assert!(
+            client.schema.lock().await.is_empty(),
+            "Failed to remove new schema from the cache when \
+            they could not be inserted into the DB"
+        );
+        logctx.cleanup_successful();
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_build_replicated() {
+        let logctx = test_setup_log("test_build_replicated");
+        let log = &logctx.log;
+
+        let mut cluster = ClickHouseCluster::new()
+            .await
+            .expect("Failed to initialise ClickHouse Cluster");
+
+        // Create database in node 1
+        let client_1 = Client::new(cluster.replica_1.address.unwrap(), &log);
+        assert!(client_1.is_oximeter_cluster().await.unwrap());
+        client_1
+            .init_replicated_db()
+            .await
+            .expect("Failed to initialize timeseries database");
+
+        // Verify database exists in node 2
+        let client_2 = Client::new(cluster.replica_2.address.unwrap(), &log);
+        assert!(client_2.is_oximeter_cluster().await.unwrap());
+        let sql = String::from("SHOW DATABASES FORMAT JSONEachRow;");
+        let result = client_2.execute_with_body(sql).await.unwrap();
+
+        // Try a few times to make sure data has been synchronised.
+        let tries = 5;
+        for _ in 0..tries {
+            if !result.contains("oximeter") {
+                sleep(Duration::from_secs(1)).await;
+                continue;
+            } else {
+                break;
+            }
+        }
+
+        assert!(result.contains("oximeter"));
+
+        // Insert row into one of the tables
+        let sql = String::from(
+            "INSERT INTO oximeter.measurements_string (datum) VALUES ('hiya');",
+        );
+        client_2.execute_with_body(sql).await.unwrap();
+
+        let sql = String::from(
+            "SELECT * FROM oximeter.measurements_string FORMAT JSONEachRow;",
+        );
+        let result = client_2.execute_with_body(sql.clone()).await.unwrap();
+        assert!(result.contains("hiya"));
+
+        // TODO(https://github.com/oxidecomputer/omicron/issues/4001): With distributed
+        // engine, it can take a long time to sync the data. This means it's tricky to
+        // test that the data exists on both nodes.
+
+        cluster
+            .keeper_1
+            .cleanup()
+            .await
+            .expect("Failed to cleanup ClickHouse keeper 1");
+        cluster
+            .keeper_2
+            .cleanup()
+            .await
+            .expect("Failed to cleanup ClickHouse keeper 2");
+        cluster
+            .keeper_3
+            .cleanup()
+            .await
+            .expect("Failed to cleanup ClickHouse keeper 3");
+        cluster
+            .replica_1
+            .cleanup()
+            .await
+            .expect("Failed to cleanup ClickHouse server 1");
+        cluster
+            .replica_2
+            .cleanup()
+            .await
+            .expect("Failed to cleanup ClickHouse server 2");
+
+        logctx.cleanup_successful();
+    }
+
+    // Testing helper functions
+
+    #[derive(Debug, Clone, oximeter::Target)]
+    struct Service {
+        name: String,
+        id: uuid::Uuid,
+    }
+    #[derive(Debug, Clone, oximeter::Metric)]
+    struct RequestLatency {
+        route: String,
+        method: String,
+        status_code: i64,
+        #[datum]
+        latency: f64,
+    }
+
+    const SELECT_TEST_ID: &str = "4fa827ea-38bb-c37e-ac2d-f8432ca9c76e";
+    fn setup_select_test() -> (Service, Vec<RequestLatency>, Vec<Sample>) {
+        // One target
+        let id = SELECT_TEST_ID.parse().unwrap();
+        let target = Service { name: "oximeter".to_string(), id };
+
+        // Many metrics
+        let routes = &["/a", "/b"];
+        let methods = &["GET", "POST"];
+        let status_codes = &[200, 204, 500];
+
+        // Two samples each
+        let n_timeseries = routes.len() * methods.len() * status_codes.len();
+        let mut metrics = Vec::with_capacity(n_timeseries);
+        let mut samples = Vec::with_capacity(n_timeseries * 2);
+        for (route, method, status_code) in
+            itertools::iproduct!(routes, methods, status_codes)
+        {
+            let metric = RequestLatency {
+                route: route.to_string(),
+                method: method.to_string(),
+                status_code: *status_code,
+                latency: 0.0,
+            };
+            samples.push(Sample::new(&target, &metric).unwrap());
+            samples.push(Sample::new(&target, &metric).unwrap());
+            metrics.push(metric);
+        }
+        (target, metrics, samples)
+    }
+
+    // Small helper to go from a multidimensional index to a flattened array index.
+    fn unravel_index(idx: &[usize; 4]) -> usize {
+        let strides = [12, 6, 2, 1];
+        let mut index = 0;
+        for (i, stride) in idx.iter().rev().zip(strides.iter().rev()) {
+            index += i * stride;
+        }
+        index
+    }
+
+    #[test]
+    fn test_unravel_index() {
+        assert_eq!(unravel_index(&[0, 0, 0, 0]), 0);
+        assert_eq!(unravel_index(&[0, 0, 1, 0]), 2);
+        assert_eq!(unravel_index(&[1, 0, 0, 0]), 12);
+        assert_eq!(unravel_index(&[1, 0, 0, 1]), 13);
+        assert_eq!(unravel_index(&[1, 0, 1, 0]), 14);
+        assert_eq!(unravel_index(&[1, 1, 2, 1]), 23);
+    }
+
+    fn verify_measurements(
+        measurements: &[oximeter::Measurement],
+        samples: &[Sample],
+    ) {
+        for (measurement, sample) in measurements.iter().zip(samples.iter()) {
+            assert_eq!(
+                measurement, &sample.measurement,
+                "Mismatch between retrieved and expected measurement",
+            );
+        }
+    }
+
+    fn verify_target(actual: &crate::Target, expected: &Service) {
+        assert_eq!(actual.name, expected.name());
+        for (field_name, field_value) in expected
+            .field_names()
+            .into_iter()
+            .zip(expected.field_values().into_iter())
+        {
+            let actual_field = actual
+                .fields
+                .iter()
+                .find(|f| f.name == *field_name)
+                .expect("Missing field in recovered timeseries target");
+            assert_eq!(
+                actual_field.value, field_value,
+                "Incorrect field value in timeseries target"
+            );
+        }
+    }
+
+    fn verify_metric(actual: &crate::Metric, expected: &RequestLatency) {
+        assert_eq!(actual.name, expected.name());
+        for (field_name, field_value) in expected
+            .field_names()
+            .into_iter()
+            .zip(expected.field_values().into_iter())
+        {
+            let actual_field = actual
+                .fields
+                .iter()
+                .find(|f| f.name == *field_name)
+                .expect("Missing field in recovered timeseries metric");
+            assert_eq!(
+                actual_field.value, field_value,
+                "Incorrect field value in timeseries metric"
+            );
+        }
     }
 }

@@ -8,6 +8,8 @@
 use crate::app::sagas;
 use crate::external_api::params;
 use db::datastore::SwitchPortSettingsCombinedResult;
+use dropshot::HttpError;
+use http::StatusCode;
 use ipnetwork::IpNetwork;
 use nexus_db_model::{SwitchLinkFec, SwitchLinkSpeed};
 use nexus_db_queries::authn;
@@ -51,7 +53,9 @@ impl super::Nexus {
             .await
         {
             Ok(id) => self.switch_port_settings_update(opctx, id, params).await,
-            Err(_) => self.switch_port_settings_create(opctx, params).await,
+            Err(_) => {
+                self.switch_port_settings_create(opctx, params, None).await
+            }
         }
     }
 
@@ -59,8 +63,9 @@ impl super::Nexus {
         self: &Arc<Self>,
         opctx: &OpContext,
         params: params::SwitchPortSettingsCreate,
+        id: Option<Uuid>,
     ) -> CreateResult<SwitchPortSettingsCombinedResult> {
-        self.db_datastore.switch_port_settings_create(opctx, &params).await
+        self.db_datastore.switch_port_settings_create(opctx, &params, id).await
     }
 
     pub(crate) async fn switch_port_settings_update(
@@ -80,7 +85,11 @@ impl super::Nexus {
 
         // create new settings
         let result = self
-            .switch_port_settings_create(opctx, new_settings.clone())
+            .switch_port_settings_create(
+                opctx,
+                new_settings.clone(),
+                Some(switch_port_settings_id),
+            )
             .await?;
 
         // run the port settings apply saga for each port referencing the
@@ -104,7 +113,16 @@ impl super::Nexus {
                 >(
                     saga_params,
                 )
-                .await?;
+                .await
+            .map_err(|e| {
+                    let msg = e.to_string();
+                    if msg.contains("bad request") {
+                        //return HttpError::for_client_error(None, StatusCode::BAD_REQUEST, msg.to_string())
+                        external::Error::invalid_request(&msg.to_string())
+                    } else {
+                        e
+                    }
+                })?;
         }
 
         Ok(result)
