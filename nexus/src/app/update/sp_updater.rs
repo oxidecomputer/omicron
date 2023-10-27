@@ -104,17 +104,14 @@ impl SpUpdater {
                     mgs_clients.rotate_left(i);
                     return Ok(val);
                 }
+                // If we have an error communicating with an MGS instance
+                // (timeout, unexpected connection close, etc.), we'll move on
+                // and try the next MGS client. If this was the last client,
+                // we'll stash the error in `last_err` and return it below the
+                // loop.
                 Err(GatewayClientError::CommunicationError(err)) => {
-                    // Does this look like an error that means we should try the
-                    // next MGS client?
-                    if err.is_connect() || err.is_timeout() {
-                        last_err = Some(err);
-                        continue;
-                    } else {
-                        return Err(GatewayClientError::CommunicationError(
-                            err,
-                        ));
-                    }
+                    last_err = Some(err);
+                    continue;
                 }
                 Err(err) => return Err(err),
             }
