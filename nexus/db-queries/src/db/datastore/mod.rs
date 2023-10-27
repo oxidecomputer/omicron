@@ -94,6 +94,7 @@ pub use db_metadata::{
 };
 pub use dns::DnsVersionUpdateBuilder;
 pub use instance::InstanceAndActiveVmm;
+pub use inventory::DataStoreInventoryTest;
 pub use rack::RackInit;
 pub use silo::Discoverability;
 pub use switch_port::SwitchPortSettingsCombinedResult;

@@ -30,7 +30,7 @@ use diesel::BoolExpressionMethods;
 use diesel::ExpressionMethods;
 use diesel::JoinOnDsl;
 use diesel::NullableExpressionMethods;
-use nexus_db_model::CabooseWhich;
+use gateway_client::types::SpType;
 use nexus_db_model::Dataset;
 use nexus_db_model::Disk;
 use nexus_db_model::DnsGroup;
@@ -40,21 +40,17 @@ use nexus_db_model::DnsZone;
 use nexus_db_model::ExternalIp;
 use nexus_db_model::HwBaseboardId;
 use nexus_db_model::Instance;
-use nexus_db_model::InvCaboose;
 use nexus_db_model::InvCollection;
-use nexus_db_model::InvCollectionError;
-use nexus_db_model::InvRootOfTrust;
-use nexus_db_model::InvServiceProcessor;
 use nexus_db_model::Project;
 use nexus_db_model::Region;
 use nexus_db_model::Sled;
-use nexus_db_model::SpType;
 use nexus_db_model::SwCaboose;
 use nexus_db_model::Vmm;
 use nexus_db_model::Zpool;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::datastore::DataStoreConnection;
+use nexus_db_queries::db::datastore::DataStoreInventoryTest;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::lookup::LookupPath;
@@ -63,6 +59,8 @@ use nexus_db_queries::db::DataStore;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params::DnsRecord;
 use nexus_types::internal_api::params::Srv;
+use nexus_types::inventory::CabooseWhich;
+use nexus_types::inventory::Collection;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Generation;
 use omicron_common::postgres_config::PostgresConfigWithUrl;
@@ -450,13 +448,21 @@ where
     D: Display,
 {
     if items.len() == usize::try_from(limit.get()).unwrap() {
-        eprintln!(
-            "WARN: {}: found {} items (the limit).  There may be more items \
-            that were ignored.  Consider overriding with --fetch-limit.",
-            context(),
-            items.len(),
-        );
+        limit_error(limit, context);
     }
+}
+
+fn limit_error<F, D>(limit: NonZeroU32, context: F)
+where
+    F: FnOnce() -> D,
+    D: Display,
+{
+    eprintln!(
+        "WARN: {}: found {} items (the limit).  There may be more items \
+            that were ignored.  Consider overriding with --fetch-limit.",
+        context(),
+        limit,
+    );
 }
 
 /// Returns pagination parameters to fetch the first page of results for a
@@ -1472,7 +1478,7 @@ async fn cmd_db_inventory(
         }) => cmd_db_inventory_collections_list(&conn, limit).await,
         InventoryCommands::Collections(CollectionsArgs {
             command: CollectionsCommands::Show(CollectionsShowArgs { id }),
-        }) => cmd_db_inventory_collections_show(&conn, id, limit).await,
+        }) => cmd_db_inventory_collections_show(datastore, id, limit).await,
     }
 }
 
@@ -1632,50 +1638,21 @@ async fn cmd_db_inventory_collections_list(
 }
 
 async fn cmd_db_inventory_collections_show(
-    conn: &DataStoreConnection<'_>,
+    datastore: &DataStore,
     id: Uuid,
     limit: NonZeroU32,
 ) -> Result<(), anyhow::Error> {
-    inv_collection_print(conn, id).await?;
-    let nerrors = inv_collection_print_errors(conn, id, limit).await?;
+    let (collection, incomplete) = datastore
+        .inventory_collection_read_best_effort(id, limit)
+        .await
+        .context("reading collection")?;
+    if incomplete {
+        limit_error(limit, || "loading collection");
+    }
 
-    // Load all the baseboards.  We could select only the baseboards referenced
-    // by this collection.  But it's simpler to fetch everything.  And it's
-    // uncommon enough at this point to have unreferenced baseboards that it's
-    // worth calling them out.
-    let baseboard_ids = {
-        use db::schema::hw_baseboard_id::dsl;
-        let baseboard_ids = dsl::hw_baseboard_id
-            .limit(i64::from(u32::from(limit)))
-            .select(HwBaseboardId::as_select())
-            .load_async(&**conn)
-            .await
-            .context("loading baseboard ids")?;
-        check_limit(&baseboard_ids, limit, || "loading baseboard ids");
-        baseboard_ids.into_iter().map(|b| (b.id, b)).collect::<BTreeMap<_, _>>()
-    };
-
-    // Similarly, load cabooses that are referenced by this collection.
-    let cabooses = {
-        use db::schema::inv_caboose::dsl as inv_dsl;
-        use db::schema::sw_caboose::dsl as sw_dsl;
-        let unique_cabooses = inv_dsl::inv_caboose
-            .filter(inv_dsl::inv_collection_id.eq(id))
-            .select(inv_dsl::sw_caboose_id)
-            .distinct();
-        let cabooses = sw_dsl::sw_caboose
-            .filter(sw_dsl::id.eq_any(unique_cabooses))
-            .limit(i64::from(u32::from(limit)))
-            .select(SwCaboose::as_select())
-            .load_async(&**conn)
-            .await
-            .context("loading cabooses")?;
-        check_limit(&cabooses, limit, || "loading cabooses");
-        cabooses.into_iter().map(|c| (c.id, c)).collect::<BTreeMap<_, _>>()
-    };
-
-    inv_collection_print_devices(conn, id, limit, &baseboard_ids, &cabooses)
-        .await?;
+    inv_collection_print(&collection).await?;
+    let nerrors = inv_collection_print_errors(&collection).await?;
+    inv_collection_print_devices(&collection).await?;
 
     if nerrors > 0 {
         eprintln!(
@@ -1690,29 +1667,13 @@ async fn cmd_db_inventory_collections_show(
 }
 
 async fn inv_collection_print(
-    conn: &DataStoreConnection<'_>,
-    id: Uuid,
+    collection: &Collection,
 ) -> Result<(), anyhow::Error> {
-    use db::schema::inv_collection::dsl;
-    let collections = dsl::inv_collection
-        .filter(dsl::id.eq(id))
-        .limit(2)
-        .select(InvCollection::as_select())
-        .load_async(&**conn)
-        .await
-        .context("loading collection")?;
-    anyhow::ensure!(
-        collections.len() == 1,
-        "expected exactly one collection with id {}, found {}",
-        id,
-        collections.len()
-    );
-    let c = collections.into_iter().next().unwrap();
-    println!("collection: {}", c.id);
+    println!("collection: {}", collection.id);
     println!(
         "collector:  {}{}",
-        c.collector,
-        if c.collector.parse::<Uuid>().is_ok() {
+        collection.collector,
+        if collection.collector.parse::<Uuid>().is_ok() {
             " (likely a Nexus instance)"
         } else {
             ""
@@ -1720,106 +1681,42 @@ async fn inv_collection_print(
     );
     println!(
         "started:    {}",
-        humantime::format_rfc3339_millis(c.time_started.into())
+        humantime::format_rfc3339_millis(collection.time_started.into())
     );
     println!(
         "done:       {}",
-        humantime::format_rfc3339_millis(c.time_done.into())
+        humantime::format_rfc3339_millis(collection.time_done.into())
     );
 
     Ok(())
 }
 
 async fn inv_collection_print_errors(
-    conn: &DataStoreConnection<'_>,
-    id: Uuid,
-    limit: NonZeroU32,
+    collection: &Collection,
 ) -> Result<u32, anyhow::Error> {
-    use db::schema::inv_collection_error::dsl;
-    let errors = dsl::inv_collection_error
-        .filter(dsl::inv_collection_id.eq(id))
-        .limit(i64::from(u32::from(limit)))
-        .select(InvCollectionError::as_select())
-        .load_async(&**conn)
-        .await
-        .context("loading collection errors")?;
-    check_limit(&errors, limit, || "loading collection errors");
-
-    println!("errors:     {}", errors.len());
-    for e in &errors {
-        println!("  error {}: {}", e.idx, e.message);
+    println!("errors:     {}", collection.errors.len());
+    for (index, message) in collection.errors.iter().enumerate() {
+        println!("  error {}: {}", index, message);
     }
 
-    Ok(errors
+    Ok(collection
+        .errors
         .len()
         .try_into()
         .expect("could not convert error count into u32 (yikes)"))
 }
 
 async fn inv_collection_print_devices(
-    conn: &DataStoreConnection<'_>,
-    id: Uuid,
-    limit: NonZeroU32,
-    baseboard_ids: &BTreeMap<Uuid, HwBaseboardId>,
-    sw_cabooses: &BTreeMap<Uuid, SwCaboose>,
+    collection: &Collection,
 ) -> Result<(), anyhow::Error> {
-    // Load the service processors, grouped by baseboard id.
-    let sps: BTreeMap<Uuid, InvServiceProcessor> = {
-        use db::schema::inv_service_processor::dsl;
-        let sps = dsl::inv_service_processor
-            .filter(dsl::inv_collection_id.eq(id))
-            .limit(i64::from(u32::from(limit)))
-            .select(InvServiceProcessor::as_select())
-            .load_async(&**conn)
-            .await
-            .context("loading service processors")?;
-        check_limit(&sps, limit, || "loading service processors");
-        sps.into_iter().map(|s| (s.hw_baseboard_id, s)).collect()
-    };
-
-    // Load the roots of trust, grouped by baseboard id.
-    let rots: BTreeMap<Uuid, InvRootOfTrust> = {
-        use db::schema::inv_root_of_trust::dsl;
-        let rots = dsl::inv_root_of_trust
-            .filter(dsl::inv_collection_id.eq(id))
-            .limit(i64::from(u32::from(limit)))
-            .select(InvRootOfTrust::as_select())
-            .load_async(&**conn)
-            .await
-            .context("loading roots of trust")?;
-        check_limit(&rots, limit, || "loading roots of trust");
-        rots.into_iter().map(|s| (s.hw_baseboard_id, s)).collect()
-    };
-
-    // Load cabooses found, grouped by baseboard id.
-    let inv_cabooses = {
-        use db::schema::inv_caboose::dsl;
-        let cabooses_found = dsl::inv_caboose
-            .filter(dsl::inv_collection_id.eq(id))
-            .limit(i64::from(u32::from(limit)))
-            .select(InvCaboose::as_select())
-            .load_async(&**conn)
-            .await
-            .context("loading cabooses found")?;
-        check_limit(&cabooses_found, limit, || "loading cabooses found");
-
-        let mut cabooses: BTreeMap<Uuid, Vec<InvCaboose>> = BTreeMap::new();
-        for ic in cabooses_found {
-            cabooses
-                .entry(ic.hw_baseboard_id)
-                .or_insert_with(Vec::new)
-                .push(ic);
-        }
-        cabooses
-    };
-
     // Assemble a list of baseboard ids, sorted first by device type (sled,
     // switch, power), then by slot number.  This is the order in which we will
     // print everything out.
-    let mut sorted_baseboard_ids: Vec<_> = sps.keys().cloned().collect();
+    let mut sorted_baseboard_ids: Vec<_> =
+        collection.sps.keys().cloned().collect();
     sorted_baseboard_ids.sort_by(|s1, s2| {
-        let sp1 = sps.get(s1).unwrap();
-        let sp2 = sps.get(s2).unwrap();
+        let sp1 = collection.sps.get(s1).unwrap();
+        let sp2 = collection.sps.get(s2).unwrap();
         sp1.sp_type.cmp(&sp2.sp_type).then(sp1.sp_slot.cmp(&sp2.sp_slot))
     });
 
@@ -1827,9 +1724,9 @@ async fn inv_collection_print_devices(
     for baseboard_id in &sorted_baseboard_ids {
         // This unwrap should not fail because the collection we're iterating
         // over came from the one we're looking into now.
-        let sp = sps.get(baseboard_id).unwrap();
-        let baseboard = baseboard_ids.get(baseboard_id);
-        let rot = rots.get(baseboard_id);
+        let sp = collection.sps.get(baseboard_id).unwrap();
+        let baseboard = collection.baseboards.get(baseboard_id);
+        let rot = collection.rots.get(baseboard_id);
 
         println!("");
         match baseboard {
@@ -1860,91 +1757,64 @@ async fn inv_collection_print_devices(
         println!("");
         println!("    found at: {} from {}", sp.time_collected, sp.source);
 
-        println!("    cabooses:");
-        if let Some(my_inv_cabooses) = inv_cabooses.get(baseboard_id) {
-            #[derive(Tabled)]
-            #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
-            struct CabooseRow<'a> {
-                slot: &'static str,
-                board: &'a str,
-                name: &'a str,
-                version: &'a str,
-                git_commit: &'a str,
-            }
-            let mut nbugs = 0;
-            let rows = my_inv_cabooses.iter().map(|ic| {
-                let slot = match ic.which {
-                    CabooseWhich::SpSlot0 => " SP slot 0",
-                    CabooseWhich::SpSlot1 => " SP slot 1",
-                    CabooseWhich::RotSlotA => "RoT slot A",
-                    CabooseWhich::RotSlotB => "RoT slot B",
-                };
-
-                let (board, name, version, git_commit) =
-                    match sw_cabooses.get(&ic.sw_caboose_id) {
-                        None => {
-                            nbugs += 1;
-                            ("-", "-", "-", "-")
-                        }
-                        Some(c) => (
-                            c.board.as_str(),
-                            c.name.as_str(),
-                            c.version.as_str(),
-                            c.git_commit.as_str(),
-                        ),
-                    };
-
-                CabooseRow { slot, board, name, version, git_commit }
-            });
-
-            let table = tabled::Table::new(rows)
-                .with(tabled::settings::Style::empty())
-                .with(tabled::settings::Padding::new(0, 1, 0, 0))
-                .to_string();
-
-            println!("{}", textwrap::indent(&table.to_string(), "        "));
-
-            if nbugs > 0 {
-                // Similar to above, if we don't have the sw_caboose for some
-                // inv_caboose, then it's a bug in either this tool (if we
-                // failed to fetch it) or the inventory system (if it failed to
-                // insert it).
-                println!(
-                    "error: at least one caboose above was missing data \
-                    -- this is a bug"
-                );
-            }
+        #[derive(Tabled)]
+        #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+        struct CabooseRow<'a> {
+            slot: String,
+            board: &'a str,
+            name: &'a str,
+            version: &'a str,
+            git_commit: &'a str,
         }
 
+        println!("    cabooses:");
+        let caboose_rows: Vec<_> = CabooseWhich::iter()
+            .filter_map(|c| {
+                collection.caboose_for(c, baseboard_id).map(|d| (c, d))
+            })
+            .map(|(c, found_caboose)| CabooseRow {
+                slot: format!("{:?}", c),
+                board: &found_caboose.caboose.board,
+                name: &found_caboose.caboose.name,
+                version: &found_caboose.caboose.version,
+                git_commit: &found_caboose.caboose.git_commit,
+            })
+            .collect();
+        let table = tabled::Table::new(caboose_rows)
+            .with(tabled::settings::Style::empty())
+            .with(tabled::settings::Padding::new(0, 1, 0, 0))
+            .to_string();
+        println!("{}", textwrap::indent(&table.to_string(), "        "));
+
         if let Some(rot) = rot {
-            println!("    RoT: active slot: slot {:?}", rot.slot_active);
+            println!("    RoT: active slot: slot {:?}", rot.active_slot);
             println!(
                 "    RoT: persistent boot preference: slot {:?}",
-                rot.slot_active
+                rot.persistent_boot_preference,
             );
             println!(
                 "    RoT: pending persistent boot preference: {}",
-                rot.slot_boot_pref_persistent_pending
+                rot.pending_persistent_boot_preference
                     .map(|s| format!("slot {:?}", s))
                     .unwrap_or_else(|| String::from("-"))
             );
             println!(
                 "    RoT: transient boot preference: {}",
-                rot.slot_boot_pref_transient
+                rot.transient_boot_preference
                     .map(|s| format!("slot {:?}", s))
                     .unwrap_or_else(|| String::from("-"))
             );
 
             println!(
                 "    RoT: slot A SHA3-256: {}",
-                rot.slot_a_sha3_256
+                rot.slot_a_sha3_256_digest
                     .clone()
                     .unwrap_or_else(|| String::from("-"))
             );
 
             println!(
                 "    RoT: slot B SHA3-256: {}",
-                rot.slot_b_sha3_256
+                rot.slot_b_sha3_256_digest
                     .clone()
                     .unwrap_or_else(|| String::from("-"))
             );
@@ -1954,49 +1824,35 @@ async fn inv_collection_print_devices(
     }
 
     println!("");
-    for unused_baseboard in baseboard_ids
+    for sp_missing_rot in collection
+        .sps
         .keys()
         .collect::<BTreeSet<_>>()
-        .difference(&sps.keys().collect::<BTreeSet<_>>())
-    {
-        // It's not a bug in either omdb or the inventory system to find a
-        // baseboard not referenced in the collection.  It might just mean a
-        // sled was removed from the system.  But at this point it's uncommon
-        // enough to call out.
-        let b = baseboard_ids.get(unused_baseboard).unwrap();
-        eprintln!(
-            "note: baseboard previously found, but not in this \
-            collection: part {} serial {}",
-            b.part_number, b.serial_number
-        );
-    }
-    for sp_missing_rot in sps
-        .keys()
-        .collect::<BTreeSet<_>>()
-        .difference(&rots.keys().collect::<BTreeSet<_>>())
+        .difference(&collection.rots.keys().collect::<BTreeSet<_>>())
     {
         // It's not a bug in either omdb or the inventory system to find an SP
         // with no RoT.  It just means that when we collected inventory from the
         // SP, it couldn't communicate with its RoT.
-        let sp = sps.get(sp_missing_rot).unwrap();
+        let sp = collection.sps.get(*sp_missing_rot).unwrap();
         println!(
             "warning: found SP with no RoT: {:?} slot {}",
             sp.sp_type, sp.sp_slot
         );
     }
-    for rot_missing_sp in rots
+
+    for rot_missing_sp in collection
+        .rots
         .keys()
         .collect::<BTreeSet<_>>()
-        .difference(&sps.keys().collect::<BTreeSet<_>>())
+        .difference(&collection.sps.keys().collect::<BTreeSet<_>>())
     {
         // It *is* a bug in the inventory system (or omdb) to find an RoT with
         // no SP, since we get the RoT information from the SP in the first
         // place.
-        let rot = rots.get(rot_missing_sp).unwrap();
         println!(
             "error: found RoT with no SP: \
             hw_baseboard_id {:?} -- this is a bug",
-            rot.hw_baseboard_id
+            rot_missing_sp
         );
     }
 

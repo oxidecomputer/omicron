@@ -288,13 +288,19 @@ impl CollectionBuilder {
 /// when round-tripping through the database.  That's rather inconvenient.
 fn now() -> DateTime<Utc> {
     let ts = Utc::now();
-    ts - std::time::Duration::from_nanos(u64::from(ts.timestamp_subsec_nanos()))
+    let nanosecs = ts.timestamp_subsec_nanos();
+    let micros = ts.timestamp_subsec_micros();
+    let only_nanos = nanosecs - micros * 1000;
+    ts - std::time::Duration::from_nanos(u64::from(only_nanos))
 }
 
 #[cfg(test)]
 mod test {
     use super::now;
     use super::CollectionBuilder;
+    use crate::examples::representative;
+    use crate::examples::sp_state;
+    use crate::examples::Representative;
     use gateway_client::types::PowerState;
     use gateway_client::types::RotSlot;
     use gateway_client::types::RotState;
@@ -304,7 +310,6 @@ mod test {
     use nexus_types::inventory::BaseboardId;
     use nexus_types::inventory::Caboose;
     use nexus_types::inventory::CabooseWhich;
-    use strum::IntoEnumIterator;
 
     // Verify the contents of an empty collection.
     #[test]
@@ -342,240 +347,19 @@ mod test {
     #[test]
     fn test_basic() {
         let time_before = now();
-        let mut builder = CollectionBuilder::new("test_basic");
-
-        // an ordinary, working sled
-        let sled1_bb = builder
-            .found_sp_state(
-                "fake MGS 1",
-                SpType::Sled,
-                3,
-                SpState {
-                    base_mac_address: [0; 6],
-                    hubris_archive_id: String::from("hubris1"),
-                    model: String::from("model1"),
-                    power_state: PowerState::A0,
-                    revision: 0,
-                    rot: RotState::Enabled {
-                        active: RotSlot::A,
-                        pending_persistent_boot_preference: None,
-                        persistent_boot_preference: RotSlot::A,
-                        slot_a_sha3_256_digest: Some(String::from(
-                            "slotAdigest1",
-                        )),
-                        slot_b_sha3_256_digest: Some(String::from(
-                            "slotBdigest1",
-                        )),
-                        transient_boot_preference: None,
-                    },
-                    serial_number: String::from("s1"),
-                },
-            )
-            .unwrap();
-
-        // another ordinary sled with different values for ordinary fields
-        let sled2_bb = builder
-            .found_sp_state(
-                "fake MGS 2",
-                SpType::Sled,
-                4,
-                SpState {
-                    base_mac_address: [1; 6],
-                    hubris_archive_id: String::from("hubris2"),
-                    model: String::from("model2"),
-                    power_state: PowerState::A2,
-                    revision: 1,
-                    rot: RotState::Enabled {
-                        active: RotSlot::B,
-                        pending_persistent_boot_preference: Some(RotSlot::A),
-                        persistent_boot_preference: RotSlot::A,
-                        slot_a_sha3_256_digest: Some(String::from(
-                            "slotAdigest2",
-                        )),
-                        slot_b_sha3_256_digest: Some(String::from(
-                            "slotBdigest2",
-                        )),
-                        transient_boot_preference: Some(RotSlot::B),
-                    },
-                    // same serial number, which is okay because it's a
-                    // different model number
-                    serial_number: String::from("s1"),
-                },
-            )
-            .unwrap();
-
-        // a switch
-        let switch1_bb = builder
-            .found_sp_state(
-                "fake MGS 2",
-                SpType::Switch,
-                0,
-                SpState {
-                    base_mac_address: [2; 6],
-                    hubris_archive_id: String::from("hubris3"),
-                    model: String::from("model3"),
-                    power_state: PowerState::A1,
-                    revision: 2,
-                    rot: RotState::Enabled {
-                        active: RotSlot::B,
-                        pending_persistent_boot_preference: None,
-                        persistent_boot_preference: RotSlot::A,
-                        slot_a_sha3_256_digest: Some(String::from(
-                            "slotAdigest3",
-                        )),
-                        slot_b_sha3_256_digest: Some(String::from(
-                            "slotBdigest3",
-                        )),
-                        transient_boot_preference: None,
-                    },
-                    // same serial number, which is okay because it's a
-                    // different model number
-                    serial_number: String::from("s1"),
-                },
-            )
-            .unwrap();
-
-        // a PSC
-        let psc_bb = builder
-            .found_sp_state(
-                "fake MGS 1",
-                SpType::Power,
-                1,
-                SpState {
-                    base_mac_address: [3; 6],
-                    hubris_archive_id: String::from("hubris4"),
-                    model: String::from("model4"),
-                    power_state: PowerState::A2,
-                    revision: 3,
-                    rot: RotState::Enabled {
-                        active: RotSlot::B,
-                        pending_persistent_boot_preference: None,
-                        persistent_boot_preference: RotSlot::A,
-                        slot_a_sha3_256_digest: Some(String::from(
-                            "slotAdigest4",
-                        )),
-                        slot_b_sha3_256_digest: Some(String::from(
-                            "slotBdigest4",
-                        )),
-                        transient_boot_preference: None,
-                    },
-                    serial_number: String::from("s2"),
-                },
-            )
-            .unwrap();
-
-        // a sled with no RoT state or other optional fields
-        let sled3_bb = builder
-            .found_sp_state(
-                "fake MGS 1",
-                SpType::Sled,
-                5,
-                SpState {
-                    base_mac_address: [4; 6],
-                    hubris_archive_id: String::from("hubris5"),
-                    model: String::from("model1"),
-                    power_state: PowerState::A2,
-                    revision: 1,
-                    rot: RotState::CommunicationFailed {
-                        message: String::from("test suite injected error"),
-                    },
-                    serial_number: String::from("s2"),
-                },
-            )
-            .unwrap();
-
-        // Report some cabooses.
-
-        // We'll use the same cabooses for most of these components, although
-        // that's not possible in a real system.  We deliberately construct a
-        // new value each time to make sure the builder correctly normalizes it.
-        let common_caboose_baseboards = [&sled1_bb, &sled2_bb, &switch1_bb];
-        for bb in &common_caboose_baseboards {
-            for which in CabooseWhich::iter() {
-                assert!(!builder.found_caboose_already(bb, which));
-                let _ = builder
-                    .found_caboose(
-                        bb,
-                        which,
-                        "test suite",
-                        SpComponentCaboose {
-                            board: String::from("board1"),
-                            git_commit: String::from("git_commit1"),
-                            name: String::from("name1"),
-                            version: String::from("version1"),
-                        },
-                    )
-                    .unwrap();
-                assert!(builder.found_caboose_already(bb, which));
-            }
-        }
-
-        // For the PSC, use different cabooses for both slots of both the SP and
-        // RoT, just to exercise that we correctly keep track of different
-        // cabooses.
-        let _ = builder
-            .found_caboose(
-                &psc_bb,
-                CabooseWhich::SpSlot0,
-                "test suite",
-                SpComponentCaboose {
-                    board: String::from("psc_sp_0"),
-                    git_commit: String::from("psc_sp_0"),
-                    name: String::from("psc_sp_0"),
-                    version: String::from("psc_sp_0"),
-                },
-            )
-            .unwrap();
-        let _ = builder
-            .found_caboose(
-                &psc_bb,
-                CabooseWhich::SpSlot1,
-                "test suite",
-                SpComponentCaboose {
-                    board: String::from("psc_sp_1"),
-                    git_commit: String::from("psc_sp_1"),
-                    name: String::from("psc_sp_1"),
-                    version: String::from("psc_sp_1"),
-                },
-            )
-            .unwrap();
-        let _ = builder
-            .found_caboose(
-                &psc_bb,
-                CabooseWhich::RotSlotA,
-                "test suite",
-                SpComponentCaboose {
-                    board: String::from("psc_rot_a"),
-                    git_commit: String::from("psc_rot_a"),
-                    name: String::from("psc_rot_a"),
-                    version: String::from("psc_rot_a"),
-                },
-            )
-            .unwrap();
-        let _ = builder
-            .found_caboose(
-                &psc_bb,
-                CabooseWhich::RotSlotB,
-                "test suite",
-                SpComponentCaboose {
-                    board: String::from("psc_rot_b"),
-                    git_commit: String::from("psc_rot_b"),
-                    name: String::from("psc_rot_b"),
-                    version: String::from("psc_rot_b"),
-                },
-            )
-            .unwrap();
-
-        // We deliberately provide no cabooses for sled3.
-
-        // Finish the collection and verify the basics.
+        let Representative {
+            builder,
+            sleds: [sled1_bb, sled2_bb, sled3_bb],
+            switch,
+            psc,
+        } = representative();
         let collection = builder.build();
         let time_after = now();
         println!("{:#?}", collection);
         assert!(time_before <= collection.time_started);
         assert!(collection.time_started <= collection.time_done);
         assert!(collection.time_done <= time_after);
-        assert_eq!(collection.collector, "test_basic");
+        assert_eq!(collection.collector, "example");
 
         // Verify the one error that ought to have been produced for the SP with
         // no RoT information.
@@ -588,7 +372,7 @@ mod test {
 
         // Verify the baseboard ids found.
         let expected_baseboards =
-            &[&sled1_bb, &sled2_bb, &sled3_bb, &switch1_bb, &psc_bb];
+            &[&sled1_bb, &sled2_bb, &sled3_bb, &switch, &psc];
         for bb in expected_baseboards {
             assert!(collection.baseboards.contains(*bb));
         }
@@ -616,11 +400,12 @@ mod test {
         }
 
         // Verify the common caboose.
+        let common_caboose_baseboards = [&sled1_bb, &sled2_bb, &switch];
         let common_caboose = Caboose {
-            board: String::from("board1"),
-            git_commit: String::from("git_commit1"),
-            name: String::from("name1"),
-            version: String::from("version1"),
+            board: String::from("board_1"),
+            git_commit: String::from("git_commit_1"),
+            name: String::from("name_1"),
+            version: String::from("version_1"),
         };
         for bb in &common_caboose_baseboards {
             let _ = collection.sps.get(*bb).unwrap();
@@ -690,14 +475,14 @@ mod test {
         assert_eq!(rot.transient_boot_preference, Some(RotSlot::B));
 
         // switch
-        let sp = collection.sps.get(&switch1_bb).unwrap();
+        let sp = collection.sps.get(&switch).unwrap();
         assert_eq!(sp.source, "fake MGS 2");
         assert_eq!(sp.sp_type, SpType::Switch);
         assert_eq!(sp.sp_slot, 0);
         assert_eq!(sp.baseboard_revision, 2);
         assert_eq!(sp.hubris_archive, "hubris3");
         assert_eq!(sp.power_state, PowerState::A1);
-        let rot = collection.rots.get(&switch1_bb).unwrap();
+        let rot = collection.rots.get(&switch).unwrap();
         assert_eq!(rot.active_slot, RotSlot::B);
         assert_eq!(rot.pending_persistent_boot_preference, None);
         assert_eq!(rot.persistent_boot_preference, RotSlot::A);
@@ -712,14 +497,14 @@ mod test {
         assert_eq!(rot.transient_boot_preference, None);
 
         // PSC
-        let sp = collection.sps.get(&psc_bb).unwrap();
+        let sp = collection.sps.get(&psc).unwrap();
         assert_eq!(sp.source, "fake MGS 1");
         assert_eq!(sp.sp_type, SpType::Power);
         assert_eq!(sp.sp_slot, 1);
         assert_eq!(sp.baseboard_revision, 3);
         assert_eq!(sp.hubris_archive, "hubris4");
         assert_eq!(sp.power_state, PowerState::A2);
-        let rot = collection.rots.get(&psc_bb).unwrap();
+        let rot = collection.rots.get(&psc).unwrap();
         assert_eq!(rot.active_slot, RotSlot::B);
         assert_eq!(rot.pending_persistent_boot_preference, None);
         assert_eq!(rot.persistent_boot_preference, RotSlot::A);
@@ -735,29 +520,29 @@ mod test {
 
         // The PSC has four different cabooses!
         let c = &collection
-            .caboose_for(CabooseWhich::SpSlot0, &psc_bb)
+            .caboose_for(CabooseWhich::SpSlot0, &psc)
             .unwrap()
             .caboose;
-        assert_eq!(c.board, "psc_sp_0");
+        assert_eq!(c.board, "board_psc_sp_0");
         assert!(collection.cabooses.contains(c));
         let c = &collection
-            .caboose_for(CabooseWhich::SpSlot1, &psc_bb)
+            .caboose_for(CabooseWhich::SpSlot1, &psc)
             .unwrap()
             .caboose;
         assert!(collection.cabooses.contains(c));
-        assert_eq!(c.board, "psc_sp_1");
+        assert_eq!(c.board, "board_psc_sp_1");
         let c = &collection
-            .caboose_for(CabooseWhich::RotSlotA, &psc_bb)
+            .caboose_for(CabooseWhich::RotSlotA, &psc)
             .unwrap()
             .caboose;
         assert!(collection.cabooses.contains(c));
-        assert_eq!(c.board, "psc_rot_a");
+        assert_eq!(c.board, "board_psc_rot_a");
         let c = &collection
-            .caboose_for(CabooseWhich::RotSlotB, &psc_bb)
+            .caboose_for(CabooseWhich::RotSlotB, &psc)
             .unwrap()
             .caboose;
         assert!(collection.cabooses.contains(c));
-        assert_eq!(c.board, "psc_rot_b");
+        assert_eq!(c.board, "board_psc_rot_b");
 
         // Verify the reported SP state for sled3, which did not have a healthy
         // RoT, nor any cabooses.
@@ -872,22 +657,7 @@ mod test {
             "fake MGS 1",
             SpType::Sled,
             u32::from(u16::MAX) + 1,
-            SpState {
-                base_mac_address: [0; 6],
-                hubris_archive_id: String::from("hubris1"),
-                model: String::from("model1"),
-                power_state: PowerState::A0,
-                revision: 1,
-                rot: RotState::Enabled {
-                    active: RotSlot::A,
-                    pending_persistent_boot_preference: None,
-                    persistent_boot_preference: RotSlot::A,
-                    slot_a_sha3_256_digest: None,
-                    slot_b_sha3_256_digest: None,
-                    transient_boot_preference: None,
-                },
-                serial_number: String::from("s2"),
-            },
+            sp_state("1"),
         );
         assert_eq!(sled2_sp, None);
 

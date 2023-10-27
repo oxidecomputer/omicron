@@ -69,6 +69,7 @@ omicron-workspace-hack.workspace = true
 assert_matches.workspace = true
 expectorate.workspace = true
 hyper-rustls.workspace = true
+gateway-client.workspace = true
 internal-dns.workspace = true
 itertools.workspace = true
 nexus-inventory.workspace = true

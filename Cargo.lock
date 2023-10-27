@@ -4392,6 +4392,7 @@ dependencies = [
  "dropshot",
  "expectorate",
  "futures",
+ "gateway-client",
  "headers",
  "hex",
  "http",

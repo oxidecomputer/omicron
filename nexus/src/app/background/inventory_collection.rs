@@ -130,3 +130,83 @@ async fn inventory_activate(
 
     Ok(collection)
 }
+
+#[cfg(test)]
+mod test {
+    use crate::app::background::common::BackgroundTask;
+    use crate::app::background::inventory_collection::InventoryCollector;
+    use nexus_db_queries::context::OpContext;
+    use nexus_db_queries::db::datastore::DataStoreInventoryTest;
+    use nexus_test_utils_macros::nexus_test;
+    use omicron_test_utils::dev::poll;
+
+    type ControlPlaneTestContext =
+        nexus_test_utils::ControlPlaneTestContext<crate::Server>;
+
+    // Test that each activation creates a new collection and that we prune old
+    // collections, too.
+    #[nexus_test(server = crate::Server)]
+    async fn test_basic(cptestctx: &ControlPlaneTestContext) {
+        let nexus = &cptestctx.server.apictx().nexus;
+        let datastore = nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
+
+        // Nexus starts our very background task, so we should find a collection
+        // in the database before too long.
+        let mut last_collections =
+            poll::wait_for_condition::<_, anyhow::Error, _, _>(
+                || async {
+                    let collections = datastore
+                        .inventory_collections()
+                        .await
+                        .map_err(poll::CondCheckError::Failed)?;
+                    if collections.is_empty() {
+                        Err(poll::CondCheckError::NotYet)
+                    } else {
+                        Ok(collections)
+                    }
+                },
+                &std::time::Duration::from_millis(50),
+                &std::time::Duration::from_secs(15),
+            )
+            .await
+            .expect("background task did not populate initial collection");
+
+        let resolver = internal_dns::resolver::Resolver::new_from_addrs(
+            cptestctx.logctx.log.clone(),
+            &[cptestctx.internal_dns.dns_server.local_address()],
+        )
+        .unwrap();
+
+        // Now we'll create our own copy of the background task and activate it
+        // a bunch and make sure that it always creates a new collection and
+        // does not allow a backlog to accumulate.
+        let nkeep = 3;
+        let mut task =
+            InventoryCollector::new(datastore.clone(), resolver, "me", nkeep);
+        let nkeep = usize::try_from(nkeep).unwrap();
+        for i in 0..10 {
+            let _ = task.activate(&opctx).await;
+            let collections = datastore.inventory_collections().await.unwrap();
+            println!(
+                "iter {}: last = {:?}, current = {:?}",
+                i, last_collections, collections
+            );
+
+            let expected_from_last: Vec<_> = if last_collections.len() <= nkeep
+            {
+                last_collections
+            } else {
+                last_collections.into_iter().skip(1).collect()
+            };
+            let expected_from_current: Vec<_> =
+                collections.iter().rev().skip(1).rev().cloned().collect();
+            assert_eq!(expected_from_last, expected_from_current);
+            assert_eq!(collections.len(), std::cmp::min(i + 2, nkeep + 1));
+            last_collections = collections;
+        }
+    }
+}

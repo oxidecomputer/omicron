@@ -19,6 +19,7 @@
 
 mod builder;
 mod collector;
+pub mod examples;
 
 // only exposed for test code to construct collections
 pub use builder::CollectionBuilder;
