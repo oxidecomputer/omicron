@@ -1441,7 +1441,13 @@ async fn cmd_db_validate_volume_references(
                     let pattern = format!("%{}%", &snapshot_addr);
 
                     use db::schema::volume::dsl;
+
+                    // Find all volumes that have not been deleted that contain
+                    // this snapshot_addr. If a Volume has been soft deleted,
+                    // then the region snapshot record should have had its
+                    // volume references column updated accordingly.
                     dsl::volume
+                        .filter(dsl::time_deleted.is_null())
                         .filter(dsl::data.like(pattern))
                         .select(Volume::as_select())
                         .get_results_async(&conn)
