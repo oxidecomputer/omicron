@@ -117,7 +117,6 @@ impl StorageMonitor {
     /// This should be spawned into a tokio task
     pub async fn run(&mut self) {
         loop {
-            info!(self.log, "looping again");
             tokio::select! {
                 res = self.nexus_notifications.next(),
                     if !self.nexus_notifications.is_empty() =>

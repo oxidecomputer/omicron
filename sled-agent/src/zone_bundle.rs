@@ -257,7 +257,6 @@ impl Inner {
     async fn bundle_directories(&self) -> Vec<Utf8PathBuf> {
         let resources = self.storage_handle.get_latest_resources().await;
         let expected = resources.all_zone_bundle_directories();
-        println!("dirs = {:?}", expected);
         let mut out = Vec::with_capacity(expected.len());
         for each in expected.into_iter() {
             if tokio::fs::create_dir_all(&each).await.is_ok() {
