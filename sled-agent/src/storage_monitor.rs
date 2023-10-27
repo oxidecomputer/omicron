@@ -116,11 +116,12 @@ impl StorageMonitor {
     /// This should be spawned into a tokio task
     pub async fn run(&mut self) {
         loop {
+            info!(self.log, "looping again");
             tokio::select! {
-                _ = self.nexus_notifications.next(),
+                res = self.nexus_notifications.next(),
                     if !self.nexus_notifications.is_empty() =>
                 {
-                    debug!(self.log, "Processing nexus notification");
+                    info!(self.log, "Nexus notification complete: {:?}", res);
                 }
                 resources = self.storage_manager.wait_for_changes() => {
                     info!(
@@ -134,7 +135,7 @@ impl StorageMonitor {
                     info!(
                         self.log,
                         "Received storage monitor message";
-                        "msg" => ?msg
+                        "monitor_msg" => ?msg
                     );
                     self.handle_monitor_msg(msg).await;
                 }
@@ -227,7 +228,8 @@ impl StorageMonitor {
                             })?;
                     }
                 }
-                Ok(())
+                let msg = format!("{:?}", disk);
+                Ok(msg)
             }
         };
 
@@ -235,11 +237,14 @@ impl StorageMonitor {
         // This notification is often invoked before Nexus has started
         // running, so avoid flagging any errors as concerning until some
         // time has passed.
-        let log_post_failure = move |_, call_count, total_duration| {
+        let log_post_failure = move |err, call_count, total_duration| {
             if call_count == 0 {
-                info!(log, "failed to notify nexus about {disk2:?}");
+                info!(log, "failed to notify nexus about {disk2:?}";
+                    "err" => ?err
+                );
             } else if total_duration > std::time::Duration::from_secs(30) {
                 warn!(log, "failed to notify nexus about {disk2:?}";
+                    "err" => ?err,
                     "total duration" => ?total_duration);
             }
         };
@@ -275,18 +280,21 @@ impl StorageMonitor {
                     .map_err(|e| {
                         backoff::BackoffError::transient(e.to_string())
                     })?;
-                Ok(())
+                let msg = format!("{:?}", zpool_request);
+                Ok(msg)
             }
         };
 
         let log = self.log.clone();
         let name = pool.name.clone();
         let disk = pool.parent.clone();
-        let log_post_failure = move |_, call_count, total_duration| {
+        let log_post_failure = move |err, call_count, total_duration| {
             if call_count == 0 {
-                info!(log, "failed to notify nexus about a new pool {name} on disk {disk:?}");
+                info!(log, "failed to notify nexus about a new pool {name} on disk {disk:?}";
+                    "err" => ?err);
             } else if total_duration > std::time::Duration::from_secs(30) {
                 warn!(log, "failed to notify nexus about a new pool {name} on disk {disk:?}";
+                    "err" => ?err,
                     "total duration" => ?total_duration);
             }
         };
@@ -303,7 +311,7 @@ impl StorageMonitor {
 
 // The type of a future which is used to send a notification to Nexus.
 type NotifyFut =
-    Pin<Box<dyn futures::Future<Output = Result<(), String>> + Send>>;
+    Pin<Box<dyn futures::Future<Output = Result<String, String>> + Send>>;
 
 struct NexusUpdates {
     disk_puts: Vec<PhysicalDiskPutRequest>,
