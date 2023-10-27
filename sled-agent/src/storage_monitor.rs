@@ -17,6 +17,7 @@ use nexus_client::types::PhysicalDiskPutRequest;
 use nexus_client::types::ZpoolPutRequest;
 use omicron_common::api::external::ByteCount;
 use omicron_common::backoff;
+use omicron_common::disk::DiskIdentity;
 use sled_storage::manager::StorageHandle;
 use sled_storage::pool::Pool;
 use sled_storage::resources::StorageResources;
@@ -329,6 +330,27 @@ fn compute_resource_diffs(
     let mut disk_deletes = vec![];
     let mut zpool_puts = vec![];
 
+    let mut put_pool = |disk_id: &DiskIdentity, updated_pool: &Pool| {
+        match ByteCount::try_from(updated_pool.info.size()) {
+            Ok(size) => zpool_puts.push((
+                updated_pool.clone(),
+                ZpoolPutRequest {
+                    size: size.into(),
+                    disk_model: disk_id.model.clone(),
+                    disk_serial: disk_id.serial.clone(),
+                    disk_vendor: disk_id.vendor.clone(),
+                },
+            )),
+            Err(err) => {
+                error!(
+                    log,
+                    "Error parsing pool size";
+                    "name" => updated_pool.name.to_string(),
+                    "err" => ?err);
+            }
+        }
+    };
+
     // Diff the existing resources with the update to see what has changed
     // This loop finds disks and pools that were modified or deleted
     for (disk_id, (disk, pool)) in current.disks.iter() {
@@ -344,22 +366,7 @@ fn compute_resource_diffs(
                     });
                 }
                 if pool != updated_pool {
-                    match ByteCount::try_from(pool.info.size()) {
-                        Ok(size) => zpool_puts.push((
-                            pool.clone(),
-                            ZpoolPutRequest {
-                                size: size.into(),
-                                disk_model: disk_id.model.clone(),
-                                disk_serial: disk_id.serial.clone(),
-                                disk_vendor: disk_id.vendor.clone(),
-                            },
-                        )),
-                        Err(err) => error!(
-                            log, 
-                            "Error parsing pool size";
-                            "name" => pool.name.to_string(),
-                            "err" => ?err),
-                    }
+                    put_pool(disk_id, updated_pool);
                 }
             }
             None => disk_deletes.push(PhysicalDiskDeleteRequest {
@@ -373,7 +380,7 @@ fn compute_resource_diffs(
 
     // Diff the existing resources with the update to see what has changed
     // This loop finds new disks and pools
-    for (disk_id, (updated_disk, _)) in updated.disks.iter() {
+    for (disk_id, (updated_disk, updated_pool)) in updated.disks.iter() {
         if !current.disks.contains_key(disk_id) {
             disk_puts.push(PhysicalDiskPutRequest {
                 sled_id: *sled_id,
@@ -382,6 +389,7 @@ fn compute_resource_diffs(
                 vendor: disk_id.vendor.clone(),
                 variant: updated_disk.variant().into(),
             });
+            put_pool(disk_id, updated_pool);
         }
     }
 
