@@ -6,7 +6,7 @@ NAME ID SIZE STATE ATTACHED_TO
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
-note: database schema version matches expected (8.0.0)
+note: database schema version matches expected (<redacted database version>)
 =============================================
 EXECUTING COMMAND: omdb ["db", "dns", "show"]
 termination: Exited(0)
@@ -56,7 +56,7 @@ ID NAME STATE PROPOLIS_ID SLED_ID HOST_SERIAL
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
-note: database schema version matches expected (8.0.0)
+note: database schema version matches expected (<redacted database version>)
 =============================================
 EXECUTING COMMAND: omdb ["db", "services", "list-instances"]
 termination: Exited(0)
