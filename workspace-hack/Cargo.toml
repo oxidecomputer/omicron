@@ -36,13 +36,13 @@ diesel = { version = "2.1.1", features = ["chrono", "i-implement-a-third-party-b
 digest = { version = "0.10.7", features = ["mac", "oid", "std"] }
 either = { version = "1.9.0" }
 flate2 = { version = "1.0.28" }
-futures = { version = "0.3.28" }
-futures-channel = { version = "0.3.28", features = ["sink"] }
-futures-core = { version = "0.3.28" }
-futures-io = { version = "0.3.28", default-features = false, features = ["std"] }
-futures-sink = { version = "0.3.28" }
-futures-task = { version = "0.3.28", default-features = false, features = ["std"] }
-futures-util = { version = "0.3.28", features = ["channel", "io", "sink"] }
+futures = { version = "0.3.29" }
+futures-channel = { version = "0.3.29", features = ["sink"] }
+futures-core = { version = "0.3.29" }
+futures-io = { version = "0.3.29", default-features = false, features = ["std"] }
+futures-sink = { version = "0.3.29" }
+futures-task = { version = "0.3.29", default-features = false, features = ["std"] }
+futures-util = { version = "0.3.29", features = ["channel", "io", "sink"] }
 gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "2739c18e80697aa6bc235c935176d14b4d757ee9", features = ["std"] }
 generic-array = { version = "0.14.7", default-features = false, features = ["more_lengths", "zeroize"] }
 getrandom = { version = "0.2.10", default-features = false, features = ["js", "rdrand", "std"] }
@@ -128,13 +128,13 @@ diesel = { version = "2.1.1", features = ["chrono", "i-implement-a-third-party-b
 digest = { version = "0.10.7", features = ["mac", "oid", "std"] }
 either = { version = "1.9.0" }
 flate2 = { version = "1.0.28" }
-futures = { version = "0.3.28" }
-futures-channel = { version = "0.3.28", features = ["sink"] }
-futures-core = { version = "0.3.28" }
-futures-io = { version = "0.3.28", default-features = false, features = ["std"] }
-futures-sink = { version = "0.3.28" }
-futures-task = { version = "0.3.28", default-features = false, features = ["std"] }
-futures-util = { version = "0.3.28", features = ["channel", "io", "sink"] }
+futures = { version = "0.3.29" }
+futures-channel = { version = "0.3.29", features = ["sink"] }
+futures-core = { version = "0.3.29" }
+futures-io = { version = "0.3.29", default-features = false, features = ["std"] }
+futures-sink = { version = "0.3.29" }
+futures-task = { version = "0.3.29", default-features = false, features = ["std"] }
+futures-util = { version = "0.3.29", features = ["channel", "io", "sink"] }
 gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "2739c18e80697aa6bc235c935176d14b4d757ee9", features = ["std"] }
 generic-array = { version = "0.14.7", default-features = false, features = ["more_lengths", "zeroize"] }
 getrandom = { version = "0.2.10", default-features = false, features = ["js", "rdrand", "std"] }
