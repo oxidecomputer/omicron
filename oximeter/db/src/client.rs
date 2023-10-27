@@ -1025,200 +1025,9 @@ mod tests {
         .unwrap();
 
         // Tests for fields and measurements
-        recall_of_all_fields_test(
-            db.address,
-            InstallationType::SingleNode,
-        )
-        .await
-        .unwrap();
-//        recall_field_value_bool_test(db.address, InstallationType::SingleNode)
-//            .await
-//            .unwrap();
-//
-//        recall_field_value_u8_test(db.address, InstallationType::SingleNode)
-//            .await
-//            .unwrap();
-//
-//        recall_field_value_i8_test(db.address, InstallationType::SingleNode)
-//            .await
-//            .unwrap();
-//
-//        recall_field_value_u16_test(db.address, InstallationType::SingleNode)
-//            .await
-//            .unwrap();
-//
-//        recall_field_value_i16_test(db.address, InstallationType::SingleNode)
-//            .await
-//            .unwrap();
-//
-//        recall_field_value_u32_test(db.address, InstallationType::SingleNode)
-//            .await
-//            .unwrap();
-//
-//        recall_field_value_i32_test(db.address, InstallationType::SingleNode)
-//            .await
-//            .unwrap();
-//
-//        recall_field_value_u64_test(db.address, InstallationType::SingleNode)
-//            .await
-//            .unwrap();
-//
-//        recall_field_value_i64_test(db.address, InstallationType::SingleNode)
-//            .await
-//            .unwrap();
-//
-//        recall_field_value_string_test(
-//            db.address,
-//            InstallationType::SingleNode,
-//        )
-//        .await
-//        .unwrap();
-//
-//        recall_field_value_ipv4addr_test(
-//            db.address,
-//            InstallationType::SingleNode,
-//        )
-//        .await
-//        .unwrap();
-//
-//        recall_field_value_ipv6addr_test(
-//            db.address,
-//            InstallationType::SingleNode,
-//        )
-//        .await
-//        .unwrap();
-//
-//        recall_field_value_uuid_test(db.address, InstallationType::SingleNode)
-//            .await
-//            .unwrap();
-//
-//        recall_measurement_bool_test(db.address, InstallationType::SingleNode)
-//            .await
-//            .unwrap();
-//
-//        recall_measurement_i8_test(db.address, InstallationType::SingleNode)
-//            .await
-//            .unwrap();
-//
-//        recall_measurement_u8_test(db.address, InstallationType::SingleNode)
-//            .await
-//            .unwrap();
-//
-//        recall_measurement_i16_test(db.address, InstallationType::SingleNode)
-//            .await
-//            .unwrap();
-//
-//        recall_measurement_u16_test(db.address, InstallationType::SingleNode)
-//            .await
-//            .unwrap();
-//
-//        recall_measurement_i32_test(db.address, InstallationType::SingleNode)
-//            .await
-//            .unwrap();
-//
-//        recall_measurement_u32_test(db.address, InstallationType::SingleNode)
-//            .await
-//            .unwrap();
-//
-//        recall_measurement_i64_test(db.address, InstallationType::SingleNode)
-//            .await
-//            .unwrap();
-//
-//        recall_measurement_u64_test(db.address, InstallationType::SingleNode)
-//            .await
-//            .unwrap();
-//
-//        recall_measurement_f32_test(db.address, InstallationType::SingleNode)
-//            .await
-//            .unwrap();
-//
-//        recall_measurement_f64_test(db.address, InstallationType::SingleNode)
-//            .await
-//            .unwrap();
-//
-//        recall_measurement_cumulative_i64_test(
-//            db.address,
-//            InstallationType::SingleNode,
-//        )
-//        .await
-//        .unwrap();
-//
-//        recall_measurement_cumulative_u64_test(
-//            db.address,
-//            InstallationType::SingleNode,
-//        )
-//        .await
-//        .unwrap();
-//
-//        recall_measurement_cumulative_f64_test(
-//            db.address,
-//            InstallationType::SingleNode,
-//        )
-//        .await
-//        .unwrap();
-//
-//        recall_measurement_histogram_i8_test(
-//            db.address,
-//            InstallationType::SingleNode,
-//        )
-//        .await
-//        .unwrap();
-//
-//        recall_measurement_histogram_u8_test(
-//            db.address,
-//            InstallationType::SingleNode,
-//        )
-//        .await
-//        .unwrap();
-//
-//        recall_measurement_histogram_i16_test(
-//            db.address,
-//            InstallationType::SingleNode,
-//        )
-//        .await
-//        .unwrap();
-//
-//        recall_measurement_histogram_u16_test(
-//            db.address,
-//            InstallationType::SingleNode,
-//        )
-//        .await
-//        .unwrap();
-//
-//        recall_measurement_histogram_i32_test(
-//            db.address,
-//            InstallationType::SingleNode,
-//        )
-//        .await
-//        .unwrap();
-//
-//        recall_measurement_histogram_u32_test(
-//            db.address,
-//            InstallationType::SingleNode,
-//        )
-//        .await
-//        .unwrap();
-//
-//        recall_measurement_histogram_i64_test(
-//            db.address,
-//            InstallationType::SingleNode,
-//        )
-//        .await
-//        .unwrap();
-//
-//        recall_measurement_histogram_u64_test(
-//            db.address,
-//            InstallationType::SingleNode,
-//        )
-//        .await
-//        .unwrap();
-//
-//        recall_measurement_histogram_f64_test(
-//            db.address,
-//            InstallationType::SingleNode,
-//        )
-//        .await
-//        .unwrap();
+        recall_of_all_fields_test(db.address, InstallationType::SingleNode)
+            .await
+            .unwrap();
 
         db.cleanup().await.expect("Failed to cleanup ClickHouse server");
     }
@@ -1229,7 +1038,7 @@ mod tests {
             .await
             .expect("Failed to initialise ClickHouse Cluster");
 
-//        // Tests that the expected error is returned on a wrong address
+        // Tests that the expected error is returned on a wrong address
         bad_db_connection_test().await.unwrap();
 
         // Tests data is replicated in a cluster
@@ -1430,260 +1239,6 @@ mod tests {
         )
         .await
         .unwrap();
-
-//        recall_field_value_bool_test(
-//            cluster.replica_1.address,
-//            InstallationType::Cluster,
-//        )
-//        .await
-//        .unwrap();
-//
-//        recall_field_value_u8_test(
-//            cluster.replica_1.address,
-//            InstallationType::Cluster,
-//        )
-//        .await
-//        .unwrap();
-//
-//        recall_field_value_i8_test(
-//            cluster.replica_1.address,
-//            InstallationType::Cluster,
-//        )
-//        .await
-//        .unwrap();
-//
-//        recall_field_value_u16_test(
-//            cluster.replica_1.address,
-//            InstallationType::Cluster,
-//        )
-//        .await
-//        .unwrap();
-//
-//        recall_field_value_i16_test(
-//            cluster.replica_1.address,
-//            InstallationType::Cluster,
-//        )
-//        .await
-//        .unwrap();
-//
-//        recall_field_value_u32_test(
-//            cluster.replica_1.address,
-//            InstallationType::Cluster,
-//        )
-//        .await
-//        .unwrap();
-//
-//        recall_field_value_i32_test(
-//            cluster.replica_1.address,
-//            InstallationType::Cluster,
-//        )
-//        .await
-//        .unwrap();
-//
-//        recall_field_value_u64_test(
-//            cluster.replica_1.address,
-//            InstallationType::Cluster,
-//        )
-//        .await
-//        .unwrap();
-//
-//        recall_field_value_i64_test(
-//            cluster.replica_1.address,
-//            InstallationType::Cluster,
-//        )
-//        .await
-//        .unwrap();
-//
-//        recall_field_value_string_test(
-//            cluster.replica_1.address,
-//            InstallationType::Cluster,
-//        )
-//        .await
-//        .unwrap();
-//
-//        recall_field_value_ipv4addr_test(
-//            cluster.replica_1.address,
-//            InstallationType::Cluster,
-//        )
-//        .await
-//        .unwrap();
-//
-//        recall_field_value_ipv6addr_test(
-//            cluster.replica_1.address,
-//            InstallationType::Cluster,
-//        )
-//        .await
-//        .unwrap();
-//
-//        recall_field_value_uuid_test(
-//            cluster.replica_1.address,
-//            InstallationType::Cluster,
-//        )
-//        .await
-//        .unwrap();
-
-// --------------------------------------------------------
-
-//        recall_measurement_bool_test(
-//            cluster.replica_1.address,
-//            InstallationType::Cluster,
-//        )
-//        .await
-//        .unwrap();
-//
-//        recall_measurement_i8_test(
-//            cluster.replica_1.address,
-//            InstallationType::Cluster,
-//        )
-//        .await
-//        .unwrap();
-//
-//        recall_measurement_u8_test(
-//            cluster.replica_1.address,
-//            InstallationType::Cluster,
-//        )
-//        .await
-//        .unwrap();
-//
-//        recall_measurement_i16_test(
-//            cluster.replica_1.address,
-//            InstallationType::Cluster,
-//        )
-//        .await
-//        .unwrap();
-//
-//        recall_measurement_u16_test(
-//            cluster.replica_1.address,
-//            InstallationType::Cluster,
-//        )
-//        .await
-//        .unwrap();
-//
-//        recall_measurement_i32_test(
-//            cluster.replica_1.address,
-//            InstallationType::Cluster,
-//        )
-//        .await
-//        .unwrap();
-//
-//        recall_measurement_u32_test(
-//            cluster.replica_1.address,
-//            InstallationType::Cluster,
-//        )
-//        .await
-//        .unwrap();
-//
-//        recall_measurement_i64_test(
-//            cluster.replica_1.address,
-//            InstallationType::Cluster,
-//        )
-//        .await
-//        .unwrap();
-//
-//        recall_measurement_u64_test(
-//            cluster.replica_1.address,
-//            InstallationType::Cluster,
-//        )
-//        .await
-//        .unwrap();
-//
-//        recall_measurement_f32_test(
-//            cluster.replica_1.address,
-//            InstallationType::Cluster,
-//        )
-//        .await
-//        .unwrap();
-//
-//        recall_measurement_f64_test(
-//            cluster.replica_1.address,
-//            InstallationType::Cluster,
-//        )
-//        .await
-//        .unwrap();
-//
-//        recall_measurement_cumulative_i64_test(
-//            cluster.replica_1.address,
-//            InstallationType::Cluster,
-//        )
-//        .await
-//        .unwrap();
-//
-//        recall_measurement_cumulative_u64_test(
-//            cluster.replica_1.address,
-//            InstallationType::Cluster,
-//        )
-//        .await
-//        .unwrap();
-//
-//        recall_measurement_cumulative_f64_test(
-//            cluster.replica_1.address,
-//            InstallationType::Cluster,
-//        )
-//        .await
-//        .unwrap();
-//
-//        recall_measurement_histogram_i8_test(
-//            cluster.replica_1.address,
-//            InstallationType::Cluster,
-//        )
-//        .await
-//        .unwrap();
-//
-//        recall_measurement_histogram_u8_test(
-//            cluster.replica_1.address,
-//            InstallationType::Cluster,
-//        )
-//        .await
-//        .unwrap();
-//
-//        recall_measurement_histogram_i16_test(
-//            cluster.replica_1.address,
-//            InstallationType::Cluster,
-//        )
-//        .await
-//        .unwrap();
-//
-//        recall_measurement_histogram_u16_test(
-//            cluster.replica_1.address,
-//            InstallationType::Cluster,
-//        )
-//        .await
-//        .unwrap();
-//
-//        recall_measurement_histogram_i32_test(
-//            cluster.replica_1.address,
-//            InstallationType::Cluster,
-//        )
-//        .await
-//        .unwrap();
-//
-//        recall_measurement_histogram_u32_test(
-//            cluster.replica_1.address,
-//            InstallationType::Cluster,
-//        )
-//        .await
-//        .unwrap();
-//
-//        recall_measurement_histogram_i64_test(
-//            cluster.replica_1.address,
-//            InstallationType::Cluster,
-//        )
-//        .await
-//        .unwrap();
-//
-//        recall_measurement_histogram_u64_test(
-//            cluster.replica_1.address,
-//            InstallationType::Cluster,
-//        )
-//        .await
-//        .unwrap();
-//
-//        recall_measurement_histogram_f64_test(
-//            cluster.replica_1.address,
-//            InstallationType::Cluster,
-//        )
-//        .await
-//        .unwrap();
 
         cluster
             .keeper_1
@@ -3087,8 +2642,6 @@ mod tests {
     }
 
     async fn recall_field_value_bool_test(
-        // address: SocketAddr,
-        // db_type: InstallationType,
         client: &Client,
     ) -> Result<(), Error> {
         let field = FieldValue::Bool(true);
@@ -3097,88 +2650,56 @@ mod tests {
         Ok(())
     }
 
-    async fn recall_field_value_u8_test(
-        // address: SocketAddr,
-        // db_type: InstallationType,
-        client: &Client,
-    ) -> Result<(), Error> {
+    async fn recall_field_value_u8_test(client: &Client) -> Result<(), Error> {
         let field = FieldValue::U8(1);
         let as_json = serde_json::Value::from(1_u8);
         test_recall_field_value_impl(field, as_json, client).await?;
         Ok(())
     }
 
-    async fn recall_field_value_i8_test(
-        // address: SocketAddr,
-        // db_type: InstallationType,
-        client: &Client,
-    ) -> Result<(), Error> {
+    async fn recall_field_value_i8_test(client: &Client) -> Result<(), Error> {
         let field = FieldValue::I8(1);
         let as_json = serde_json::Value::from(1_i8);
         test_recall_field_value_impl(field, as_json, client).await?;
         Ok(())
     }
 
-    async fn recall_field_value_u16_test(
-        // address: SocketAddr,
-        // db_type: InstallationType,
-        client: &Client,
-    ) -> Result<(), Error> {
+    async fn recall_field_value_u16_test(client: &Client) -> Result<(), Error> {
         let field = FieldValue::U16(1);
         let as_json = serde_json::Value::from(1_u16);
         test_recall_field_value_impl(field, as_json, client).await?;
         Ok(())
     }
 
-    async fn recall_field_value_i16_test(
-        // address: SocketAddr,
-        // db_type: InstallationType,
-        client: &Client,
-    ) -> Result<(), Error> {
+    async fn recall_field_value_i16_test(client: &Client) -> Result<(), Error> {
         let field = FieldValue::I16(1);
         let as_json = serde_json::Value::from(1_i16);
         test_recall_field_value_impl(field, as_json, client).await?;
         Ok(())
     }
 
-    async fn recall_field_value_u32_test(
-        // address: SocketAddr,
-        // db_type: InstallationType,
-        client: &Client,
-    ) -> Result<(), Error> {
+    async fn recall_field_value_u32_test(client: &Client) -> Result<(), Error> {
         let field = FieldValue::U32(1);
         let as_json = serde_json::Value::from(1_u32);
         test_recall_field_value_impl(field, as_json, client).await?;
         Ok(())
     }
 
-    async fn recall_field_value_i32_test(
-        // address: SocketAddr,
-        // db_type: InstallationType,
-        client: &Client,
-    ) -> Result<(), Error> {
+    async fn recall_field_value_i32_test(client: &Client) -> Result<(), Error> {
         let field = FieldValue::I32(1);
         let as_json = serde_json::Value::from(1_i32);
         test_recall_field_value_impl(field, as_json, client).await?;
         Ok(())
     }
 
-    async fn recall_field_value_u64_test(
-        // address: SocketAddr,
-        // db_type: InstallationType,
-        client: &Client,
-    ) -> Result<(), Error> {
+    async fn recall_field_value_u64_test(client: &Client) -> Result<(), Error> {
         let field = FieldValue::U64(1);
         let as_json = serde_json::Value::from(1_u64);
         test_recall_field_value_impl(field, as_json, client).await?;
         Ok(())
     }
 
-    async fn recall_field_value_i64_test(
-        // address: SocketAddr,
-        // db_type: InstallationType,
-        client: &Client,
-    ) -> Result<(), Error> {
+    async fn recall_field_value_i64_test(client: &Client) -> Result<(), Error> {
         let field = FieldValue::I64(1);
         let as_json = serde_json::Value::from(1_i64);
         test_recall_field_value_impl(field, as_json, client).await?;
@@ -3186,8 +2707,6 @@ mod tests {
     }
 
     async fn recall_field_value_string_test(
-        // address: SocketAddr,
-        // db_type: InstallationType,
         client: &Client,
     ) -> Result<(), Error> {
         let field = FieldValue::String("foo".into());
@@ -3196,22 +2715,7 @@ mod tests {
         Ok(())
     }
 
-//    async fn recall_field_value_ipv4addr_test(
-//        // address: SocketAddr,
-//        // db_type: InstallationType,
-//        client: &Client,
-//    ) -> Result<(), Error> {
-//        let field = FieldValue::from(Ipv4Addr::LOCALHOST);
-//        let as_json = serde_json::Value::from(
-//            Ipv4Addr::LOCALHOST.to_ipv6_mapped().to_string(),
-//        );
-//        test_recall_field_value_impl(field, as_json, client).await?;
-//        Ok(())
-//    }
-
     async fn recall_field_value_ipv6addr_test(
-        // address: SocketAddr,
-        // db_type: InstallationType,
         client: &Client,
     ) -> Result<(), Error> {
         let field = FieldValue::from(Ipv6Addr::LOCALHOST);
@@ -3221,8 +2725,6 @@ mod tests {
     }
 
     async fn recall_field_value_uuid_test(
-        // address: SocketAddr,
-        // db_type: InstallationType,
         client: &Client,
     ) -> Result<(), Error> {
         let id = Uuid::new_v4();
@@ -3233,30 +2735,10 @@ mod tests {
     }
 
     async fn test_recall_field_value_impl(
-    //    address: SocketAddr,
-    //    db_type: InstallationType,
         field_value: FieldValue,
         as_json: serde_json::Value,
         client: &Client,
     ) -> Result<(), Error> {
-//        let logctx = test_setup_log(
-//            format!("test_recall_field_value_{}", field_value.field_type())
-//                .as_str(),
-//        );
-//        let log = &logctx.log;
-//
-//        let client = Client::new(address, log);
-//        match db_type {
-//            InstallationType::SingleNode => client
-//                .init_single_node_db()
-//                .await
-//                .expect("Failed to initialize timeseries database"),
-//            InstallationType::Cluster => client
-//                .init_replicated_db()
-//                .await
-//                .expect("Failed to initialize timeseries database"),
-//        }
-
         // Insert a record from this field.
         const TIMESERIES_NAME: &str = "foo:bar";
         const TIMESERIES_KEY: u64 = 101;
@@ -3296,140 +2778,80 @@ mod tests {
             actual_row, inserted_row,
             "Actual and expected field rows do not match"
         );
-
-   //    match db_type {
-   //        InstallationType::SingleNode => {
-   //            client.wipe_single_node_db().await?
-   //        }
-   //        InstallationType::Cluster => client.wipe_replicated_db().await?,
-   //    }
-   //     logctx.cleanup_successful();
         Ok(())
     }
 
     async fn recall_measurement_bool_test(
-    //    address: SocketAddr,
-    //    db_type: InstallationType,
-    client: &Client,
+        client: &Client,
     ) -> Result<(), Error> {
         let datum = Datum::Bool(true);
         let as_json = serde_json::Value::from(1_u64);
-        test_recall_measurement_impl::<u8>(
-             datum, None, as_json, client
-        )
-        .await?;
+        test_recall_measurement_impl::<u8>(datum, None, as_json, client)
+            .await?;
         Ok(())
     }
 
-    async fn recall_measurement_i8_test(
-        //    address: SocketAddr,
-    //    db_type: InstallationType,
-    client: &Client,
-    ) -> Result<(), Error> {
+    async fn recall_measurement_i8_test(client: &Client) -> Result<(), Error> {
         let datum = Datum::I8(1);
         let as_json = serde_json::Value::from(1_i8);
-        test_recall_measurement_impl::<u8>(
-             datum, None, as_json, client,
-        )
-        .await?;
+        test_recall_measurement_impl::<u8>(datum, None, as_json, client)
+            .await?;
         Ok(())
     }
 
-    async fn recall_measurement_u8_test(
-        //    address: SocketAddr,
-    //    db_type: InstallationType,
-    client: &Client,
-    ) -> Result<(), Error> {
+    async fn recall_measurement_u8_test(client: &Client) -> Result<(), Error> {
         let datum = Datum::U8(1);
         let as_json = serde_json::Value::from(1_u8);
-        test_recall_measurement_impl::<u8>(
-             datum, None, as_json, client,
-        )
-        .await?;
+        test_recall_measurement_impl::<u8>(datum, None, as_json, client)
+            .await?;
         Ok(())
     }
 
-    async fn recall_measurement_i16_test(
-        //    address: SocketAddr,
-    //    db_type: InstallationType,
-    client: &Client,
-    ) -> Result<(), Error> {
+    async fn recall_measurement_i16_test(client: &Client) -> Result<(), Error> {
         let datum = Datum::I16(1);
         let as_json = serde_json::Value::from(1_i16);
-        test_recall_measurement_impl::<u8>(
-             datum, None, as_json, client,
-        )
-        .await?;
+        test_recall_measurement_impl::<u8>(datum, None, as_json, client)
+            .await?;
         Ok(())
     }
 
-    async fn recall_measurement_u16_test(
-        //    address: SocketAddr,
-    //    db_type: InstallationType,
-    client: &Client,
-    ) -> Result<(), Error> {
+    async fn recall_measurement_u16_test(client: &Client) -> Result<(), Error> {
         let datum = Datum::U16(1);
         let as_json = serde_json::Value::from(1_u16);
-        test_recall_measurement_impl::<u8>(
-             datum, None, as_json, client,
-        )
-        .await?;
+        test_recall_measurement_impl::<u8>(datum, None, as_json, client)
+            .await?;
         Ok(())
     }
 
-    async fn recall_measurement_i32_test(
-        //    address: SocketAddr,
-    //    db_type: InstallationType,
-    client: &Client,
-    ) -> Result<(), Error> {
+    async fn recall_measurement_i32_test(client: &Client) -> Result<(), Error> {
         let datum = Datum::I32(1);
         let as_json = serde_json::Value::from(1_i32);
-        test_recall_measurement_impl::<u8>(
-             datum, None, as_json, client,
-        )
-        .await?;
+        test_recall_measurement_impl::<u8>(datum, None, as_json, client)
+            .await?;
         Ok(())
     }
 
-    async fn recall_measurement_u32_test(
-        //    address: SocketAddr,
-    //    db_type: InstallationType,
-    client: &Client,
-    ) -> Result<(), Error> {
+    async fn recall_measurement_u32_test(client: &Client) -> Result<(), Error> {
         let datum = Datum::U32(1);
         let as_json = serde_json::Value::from(1_u32);
-        test_recall_measurement_impl::<u8>(
-             datum, None, as_json, client,
-        )
-        .await?;
+        test_recall_measurement_impl::<u8>(datum, None, as_json, client)
+            .await?;
         Ok(())
     }
 
-    async fn recall_measurement_i64_test(
-        //    address: SocketAddr,
-    //    db_type: InstallationType,
-    client: &Client,
-    ) -> Result<(), Error> {
+    async fn recall_measurement_i64_test(client: &Client) -> Result<(), Error> {
         let datum = Datum::I64(1);
         let as_json = serde_json::Value::from(1_i64);
-        test_recall_measurement_impl::<u8>(
-             datum, None, as_json, client,
-        )
-        .await?;
+        test_recall_measurement_impl::<u8>(datum, None, as_json, client)
+            .await?;
         Ok(())
     }
 
-    async fn recall_measurement_u64_test(
-        //    address: SocketAddr,
-    //    db_type: InstallationType,
-    client: &Client,
-    ) -> Result<(), Error> {
+    async fn recall_measurement_u64_test(client: &Client) -> Result<(), Error> {
         let datum = Datum::U64(1);
         let as_json = serde_json::Value::from(1_u64);
-        test_recall_measurement_impl::<u8>(
-             datum, None, as_json, client,
-        )
-        .await?;
+        test_recall_measurement_impl::<u8>(datum, None, as_json, client)
+            .await?;
         Ok(())
     }
 
@@ -3437,86 +2859,60 @@ mod tests {
     //
     // For some reason when the value is an f64 it inserts in both measurements_f32
     // and measurements_f64 tables. This behaviour is unexpected, and should be investigated
-    // 
+    //
     // See {githublink} for more details.
     #[allow(dead_code)]
-    async fn recall_measurement_f32_test(
-        //    address: SocketAddr,
-    //    db_type: InstallationType,
-    client: &Client,
-    ) -> Result<(), Error> {
+    async fn recall_measurement_f32_test(client: &Client) -> Result<(), Error> {
         const VALUE: f32 = 1.1;
         let datum = Datum::F32(VALUE);
         // NOTE: This is intentionally an f64.
         let as_json = serde_json::Value::from(1.1_f64);
-        test_recall_measurement_impl::<u8>(
-             datum, None, as_json, client,
-        )
-        .await?;
+        test_recall_measurement_impl::<u8>(datum, None, as_json, client)
+            .await?;
         Ok(())
     }
 
-    async fn recall_measurement_f64_test(
-        //    address: SocketAddr,
-    //    db_type: InstallationType,
-    client: &Client,
-    ) -> Result<(), Error> {
+    async fn recall_measurement_f64_test(client: &Client) -> Result<(), Error> {
         const VALUE: f64 = 1.1;
         let datum = Datum::F64(VALUE);
         let as_json = serde_json::Value::from(VALUE);
-        test_recall_measurement_impl::<u8>(
-             datum, None, as_json, client,
-        )
-        .await?;
+        test_recall_measurement_impl::<u8>(datum, None, as_json, client)
+            .await?;
         Ok(())
     }
 
     async fn recall_measurement_cumulative_i64_test(
-        //    address: SocketAddr,
-    //    db_type: InstallationType,
-    client: &Client,
+        client: &Client,
     ) -> Result<(), Error> {
         let datum = Datum::CumulativeI64(1.into());
         let as_json = serde_json::Value::from(1_i64);
-        test_recall_measurement_impl::<u8>(
-             datum, None, as_json, client,
-        )
-        .await?;
+        test_recall_measurement_impl::<u8>(datum, None, as_json, client)
+            .await?;
         Ok(())
     }
 
     async fn recall_measurement_cumulative_u64_test(
-        //    address: SocketAddr,
-    //    db_type: InstallationType,
-    client: &Client,
+        client: &Client,
     ) -> Result<(), Error> {
         let datum = Datum::CumulativeU64(1.into());
         let as_json = serde_json::Value::from(1_u64);
-        test_recall_measurement_impl::<u8>(
-             datum, None, as_json, client,
-        )
-        .await?;
+        test_recall_measurement_impl::<u8>(datum, None, as_json, client)
+            .await?;
         Ok(())
     }
 
     async fn recall_measurement_cumulative_f64_test(
-        //    address: SocketAddr,
-    //    db_type: InstallationType,
-    client: &Client,
+        client: &Client,
     ) -> Result<(), Error> {
         let datum = Datum::CumulativeF64(1.1.into());
         let as_json = serde_json::Value::from(1.1_f64);
-        test_recall_measurement_impl::<u8>(
-             datum, None, as_json, client,
-        )
-        .await?;
+        test_recall_measurement_impl::<u8>(datum, None, as_json, client)
+            .await?;
         Ok(())
     }
 
     async fn histogram_test_impl<T>(
-        //    address: SocketAddr,
-    //    db_type: InstallationType,
-    client: &Client,
+        client: &Client,
         hist: Histogram<T>,
     ) -> Result<(), Error>
     where
@@ -3529,93 +2925,72 @@ mod tests {
         let as_json = serde_json::Value::Array(
             counts.into_iter().map(Into::into).collect(),
         );
-        test_recall_measurement_impl(
-            datum,
-            Some(bins),
-            as_json,
-            client,
-        )
-        .await?;
+        test_recall_measurement_impl(datum, Some(bins), as_json, client)
+            .await?;
         Ok(())
     }
 
     async fn recall_measurement_histogram_i8_test(
-//    address: SocketAddr,
-    //    db_type: InstallationType,
-    client: &Client,
+        client: &Client,
     ) -> Result<(), Error> {
         let hist = Histogram::new(&[0i8, 1, 2]).unwrap();
-        histogram_test_impl(client, hist ).await?;
+        histogram_test_impl(client, hist).await?;
         Ok(())
     }
 
     async fn recall_measurement_histogram_u8_test(
-//    address: SocketAddr,
-    //    db_type: InstallationType,
-    client: &Client,
+        client: &Client,
     ) -> Result<(), Error> {
         let hist = Histogram::new(&[0u8, 1, 2]).unwrap();
-        histogram_test_impl(client, hist ).await?;
+        histogram_test_impl(client, hist).await?;
         Ok(())
     }
 
     async fn recall_measurement_histogram_i16_test(
-//    address: SocketAddr,
-    //    db_type: InstallationType,
-    client: &Client,
+        client: &Client,
     ) -> Result<(), Error> {
         let hist = Histogram::new(&[0i16, 1, 2]).unwrap();
-        histogram_test_impl(client, hist ).await?;
+        histogram_test_impl(client, hist).await?;
         Ok(())
     }
 
     async fn recall_measurement_histogram_u16_test(
-//    address: SocketAddr,
-    //    db_type: InstallationType,
-    client: &Client,
+        client: &Client,
     ) -> Result<(), Error> {
         let hist = Histogram::new(&[0u16, 1, 2]).unwrap();
-        histogram_test_impl(client, hist ).await?;
+        histogram_test_impl(client, hist).await?;
         Ok(())
     }
 
     async fn recall_measurement_histogram_i32_test(
-//    address: SocketAddr,
-    //    db_type: InstallationType,
-    client: &Client,
+        client: &Client,
     ) -> Result<(), Error> {
         let hist = Histogram::new(&[0i32, 1, 2]).unwrap();
-        histogram_test_impl(client, hist ).await?;
+        histogram_test_impl(client, hist).await?;
         Ok(())
     }
 
     async fn recall_measurement_histogram_u32_test(
-//    address: SocketAddr,
-    //    db_type: InstallationType,
-    client: &Client,
+        client: &Client,
     ) -> Result<(), Error> {
         let hist = Histogram::new(&[0u32, 1, 2]).unwrap();
-        histogram_test_impl(client, hist ).await?;
+        histogram_test_impl(client, hist).await?;
         Ok(())
     }
 
     async fn recall_measurement_histogram_i64_test(
-//    address: SocketAddr,
-    //    db_type: InstallationType,
-    client: &Client,
+        client: &Client,
     ) -> Result<(), Error> {
         let hist = Histogram::new(&[0i64, 1, 2]).unwrap();
-        histogram_test_impl(client, hist ).await?;
+        histogram_test_impl(client, hist).await?;
         Ok(())
     }
 
     async fn recall_measurement_histogram_u64_test(
-//    address: SocketAddr,
-    //    db_type: InstallationType,
-    client: &Client,
+        client: &Client,
     ) -> Result<(), Error> {
         let hist = Histogram::new(&[0u64, 1, 2]).unwrap();
-        histogram_test_impl(client, hist ).await?;
+        histogram_test_impl(client, hist).await?;
         Ok(())
     }
 
@@ -3633,9 +3008,7 @@ mod tests {
     // discussion.
     #[allow(dead_code)]
     async fn recall_measurement_histogram_f32_test(
-       //    address: SocketAddr,
-    //    db_type: InstallationType,
-    client: &Client,
+        client: &Client,
     ) -> Result<(), Error> {
         let hist = Histogram::new(&[0.1f32, 0.2, 0.3]).unwrap();
         histogram_test_impl(client, hist).await?;
@@ -3643,9 +3016,7 @@ mod tests {
     }
 
     async fn recall_measurement_histogram_f64_test(
-       //    address: SocketAddr,
-    //    db_type: InstallationType,
-    client: &Client,
+        client: &Client,
     ) -> Result<(), Error> {
         let hist = Histogram::new(&[0.1f64, 0.2, 0.3]).unwrap();
         histogram_test_impl(client, hist).await?;
@@ -3653,30 +3024,11 @@ mod tests {
     }
 
     async fn test_recall_measurement_impl<T: Into<serde_json::Value> + Copy>(
-    //    address: SocketAddr,
-    //    db_type: InstallationType,
         datum: Datum,
         maybe_bins: Option<Vec<T>>,
         json_datum: serde_json::Value,
         client: &Client,
     ) -> Result<(), Error> {
-//        let logctx = test_setup_log(
-//            format!("test_recall_measurement_{}", datum.datum_type()).as_str(),
-//        );
-//        let log = &logctx.log;
-//
-//        let client = Client::new(address, log);
-//        match db_type {
-//            InstallationType::SingleNode => client
-//                .init_single_node_db()
-//                .await
-//                .expect("Failed to initialize timeseries database"),
-//            InstallationType::Cluster => client
-//                .init_replicated_db()
-//                .await
-//                .expect("Failed to initialize timeseries database"),
-//        }
-
         // Insert a record from this datum.
         const TIMESERIES_NAME: &str = "foo:bar";
         const TIMESERIES_KEY: u64 = 101;
@@ -3743,13 +3095,6 @@ mod tests {
             actual_row, inserted_row,
             "Actual and expected measurement rows do not match"
         );
-//        match db_type {
-//            InstallationType::SingleNode => {
-//                client.wipe_single_node_db().await?
-//            }
-//            InstallationType::Cluster => client.wipe_replicated_db().await?,
-//        }
-//        logctx.cleanup_successful();
         Ok(())
     }
 
@@ -3765,10 +3110,11 @@ mod tests {
             .count()
     }
 
-    async fn recall_of_all_fields_test(address: SocketAddr, db_type: InstallationType) -> Result<(), Error> {
-        let logctx = test_setup_log(
-            "test_recall_of_all_fields",
-        );
+    async fn recall_of_all_fields_test(
+        address: SocketAddr,
+        db_type: InstallationType,
+    ) -> Result<(), Error> {
+        let logctx = test_setup_log("test_recall_of_all_fields");
         let log = &logctx.log;
 
         let client = Client::new(address, log);
@@ -3783,210 +3129,73 @@ mod tests {
                 .expect("Failed to initialize timeseries database"),
         }
 
-        recall_measurement_bool_test(
-            &client,
-        )
-        .await
-        .unwrap();
+        recall_measurement_bool_test(&client).await.unwrap();
 
-        recall_measurement_i8_test(
-            &client,
-        )
-        .await
-        .unwrap();
+        recall_measurement_i8_test(&client).await.unwrap();
 
-        recall_measurement_u8_test(
-            &client,
-        )
-        .await
-        .unwrap();
+        recall_measurement_u8_test(&client).await.unwrap();
 
-        recall_measurement_i16_test(
-            &client,
-        )
-        .await
-        .unwrap();
+        recall_measurement_i16_test(&client).await.unwrap();
 
-        recall_measurement_u16_test(
-            &client,
-        )
-        .await
-        .unwrap();
+        recall_measurement_u16_test(&client).await.unwrap();
 
-        recall_measurement_i32_test(
-            &client,
-        )
-        .await
-        .unwrap();
+        recall_measurement_i32_test(&client).await.unwrap();
 
-        recall_measurement_u32_test(
-            &client,
-        )
-        .await
-        .unwrap();
+        recall_measurement_u32_test(&client).await.unwrap();
 
-        recall_measurement_i64_test(
-            &client,
-        )
-        .await
-        .unwrap();
+        recall_measurement_i64_test(&client).await.unwrap();
 
-        recall_measurement_u64_test(
-            &client,
-        )
-        .await
-        .unwrap();
+        recall_measurement_u64_test(&client).await.unwrap();
 
-        recall_measurement_f64_test(
-            &client,
-        )
-        .await
-        .unwrap();
+        recall_measurement_f64_test(&client).await.unwrap();
 
-        recall_measurement_cumulative_i64_test(
-            &client,
-        )
-        .await
-        .unwrap();
+        recall_measurement_cumulative_i64_test(&client).await.unwrap();
 
-        recall_measurement_cumulative_u64_test(
-            &client,
-        )
-        .await
-        .unwrap();
+        recall_measurement_cumulative_u64_test(&client).await.unwrap();
 
-        recall_measurement_cumulative_f64_test(
-            &client,
-        )
-        .await
-        .unwrap();
+        recall_measurement_cumulative_f64_test(&client).await.unwrap();
 
-        recall_measurement_histogram_i8_test(
-            &client,
-        )
-        .await
-        .unwrap();
+        recall_measurement_histogram_i8_test(&client).await.unwrap();
 
-        recall_measurement_histogram_u8_test(
-            &client,
-        )
-        .await
-        .unwrap();
+        recall_measurement_histogram_u8_test(&client).await.unwrap();
 
-        recall_measurement_histogram_i16_test(
-            &client,
-        )
-        .await
-        .unwrap();
+        recall_measurement_histogram_i16_test(&client).await.unwrap();
 
-        recall_measurement_histogram_u16_test(
-            &client,
-        )
-        .await
-        .unwrap();
+        recall_measurement_histogram_u16_test(&client).await.unwrap();
 
-        recall_measurement_histogram_i32_test(
-            &client,
-        )
-        .await
-        .unwrap();
+        recall_measurement_histogram_i32_test(&client).await.unwrap();
 
-        recall_measurement_histogram_u32_test(
-            &client,
-        )
-        .await
-        .unwrap();
+        recall_measurement_histogram_u32_test(&client).await.unwrap();
 
-        recall_measurement_histogram_i64_test(
-            &client,
-        )
-        .await
-        .unwrap();
+        recall_measurement_histogram_i64_test(&client).await.unwrap();
 
-        recall_measurement_histogram_u64_test(
-            &client,
-        )
-        .await
-        .unwrap();
+        recall_measurement_histogram_u64_test(&client).await.unwrap();
 
-        recall_measurement_histogram_f64_test(
-            &client,
-        )
-        .await
-        .unwrap();
+        recall_measurement_histogram_f64_test(&client).await.unwrap();
 
-        recall_field_value_bool_test(
-            &client
-        )
-        .await
-        .unwrap();
+        recall_field_value_bool_test(&client).await.unwrap();
 
-        recall_field_value_u8_test(
-            &client
-        )
-        .await
-        .unwrap();
+        recall_field_value_u8_test(&client).await.unwrap();
 
-        recall_field_value_i8_test(
-            &client
-        )
-        .await
-        .unwrap();
+        recall_field_value_i8_test(&client).await.unwrap();
 
-        recall_field_value_u16_test(
-            &client
-        )
-        .await
-        .unwrap();
+        recall_field_value_u16_test(&client).await.unwrap();
 
-        recall_field_value_i16_test(
-            &client
-        )
-        .await
-        .unwrap();
+        recall_field_value_i16_test(&client).await.unwrap();
 
-        recall_field_value_u32_test(
-            &client
-        )
-        .await
-        .unwrap();
+        recall_field_value_u32_test(&client).await.unwrap();
 
-        recall_field_value_i32_test(
-            &client
-        )
-        .await
-        .unwrap();
+        recall_field_value_i32_test(&client).await.unwrap();
 
-        recall_field_value_u64_test(
-            &client
-        )
-        .await
-        .unwrap();
+        recall_field_value_u64_test(&client).await.unwrap();
 
-        recall_field_value_i64_test(
-            &client
-        )
-        .await
-        .unwrap();
+        recall_field_value_i64_test(&client).await.unwrap();
 
-        recall_field_value_string_test(
-            &client
-        )
-        .await
-        .unwrap();
+        recall_field_value_string_test(&client).await.unwrap();
 
-        recall_field_value_ipv6addr_test(
-            &client
-        )
-        .await
-        .unwrap();
+        recall_field_value_ipv6addr_test(&client).await.unwrap();
 
-        recall_field_value_uuid_test(
-            &client
-        )
-        .await
-        .unwrap();
-
+        recall_field_value_uuid_test(&client).await.unwrap();
 
         match db_type {
             InstallationType::SingleNode => {
