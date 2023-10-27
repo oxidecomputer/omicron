@@ -45,6 +45,7 @@ use nexus_db_model::Project;
 use nexus_db_model::Region;
 use nexus_db_model::RegionSnapshot;
 use nexus_db_model::Sled;
+use nexus_db_model::Snapshot;
 use nexus_db_model::Vmm;
 use nexus_db_model::Volume;
 use nexus_db_model::Zpool;
@@ -1547,7 +1548,6 @@ async fn cmd_db_find_deleted_region_snapshots(
         use crucible_agent_client::types::RegionId;
         use crucible_agent_client::types::State;
         use crucible_agent_client::Client as CrucibleAgentClient;
-        // types::{CreateRegion, RegionId, State as RegionState},
 
         let url = format!("http://{}", dataset.address());
         let client = CrucibleAgentClient::new(&url);
@@ -1585,13 +1585,51 @@ async fn cmd_db_find_deleted_region_snapshots(
                             // currently exist in the list of snapshots for this
                             // region. This record should be deleted.
 
-                            eprintln!(
-                                "region snapshot {} {} {} at {} was deleted, please remove its record",
-                                region_snapshot.dataset_id,
-                                region_snapshot.region_id,
-                                region_snapshot.snapshot_id,
-                                dataset.address(),
-                            );
+                            // Before recommending anything, validate the higher
+                            // level Snapshot object too: it should have been
+                            // destroyed.
+
+                            let snapshot: Snapshot = {
+                                use db::schema::snapshot::dsl;
+
+                                dsl::snapshot
+                                    .filter(
+                                        dsl::id.eq(region_snapshot.snapshot_id),
+                                    )
+                                    .select(Snapshot::as_select())
+                                    .first_async(
+                                        &*datastore
+                                            .pool_connection_for_tests()
+                                            .await?,
+                                    )
+                                    .await?
+                            };
+
+                            if snapshot.time_deleted().is_some() {
+                                // This is ok - Nexus currently soft-deletes its
+                                // resource records.
+
+                                eprintln!(
+                                    "region snapshot {} {} {} at {} was deleted, please remove its record",
+                                    region_snapshot.dataset_id,
+                                    region_snapshot.region_id,
+                                    region_snapshot.snapshot_id,
+                                    dataset.address(),
+                                );
+                            } else {
+                                // If the higher level Snapshot was _not_
+                                // deleted, this is a Nexus bug: something told
+                                // the Agent to delete the snapshot when the
+                                // higher level Snapshot was not deleted!
+
+                                eprintln!(
+                                    "NEXUS BUG: region snapshot {} {} {} at {} was deleted, but the higher level snapshot was not!",
+                                    region_snapshot.dataset_id,
+                                    region_snapshot.region_id,
+                                    region_snapshot.snapshot_id,
+                                    dataset.address(),
+                                );
+                            }
                         }
 
                         State::Requested
