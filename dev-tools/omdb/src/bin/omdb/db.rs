@@ -19,7 +19,9 @@ use crate::Omdb;
 use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Context;
+use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::AsyncSimpleConnection;
 use chrono::SecondsFormat;
 use clap::Args;
 use clap::Subcommand;
@@ -30,6 +32,7 @@ use diesel::BoolExpressionMethods;
 use diesel::ExpressionMethods;
 use diesel::JoinOnDsl;
 use diesel::NullableExpressionMethods;
+use diesel::TextExpressionMethods;
 use nexus_db_model::Dataset;
 use nexus_db_model::Disk;
 use nexus_db_model::DnsGroup;
@@ -40,8 +43,10 @@ use nexus_db_model::ExternalIp;
 use nexus_db_model::Instance;
 use nexus_db_model::Project;
 use nexus_db_model::Region;
+use nexus_db_model::RegionSnapshot;
 use nexus_db_model::Sled;
 use nexus_db_model::Vmm;
+use nexus_db_model::Volume;
 use nexus_db_model::Zpool;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
@@ -50,6 +55,7 @@ use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::model::ServiceKind;
 use nexus_db_queries::db::DataStore;
+use nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params::DnsRecord;
 use nexus_types::internal_api::params::Srv;
@@ -113,7 +119,8 @@ pub struct DbArgs {
     /// limit to apply to queries that fetch rows
     #[clap(
         long = "fetch-limit",
-        default_value_t = NonZeroU32::new(500).unwrap()
+        default_value_t = NonZeroU32::new(500).unwrap(),
+        env("OMDB_FETCH_LIMIT"),
     )]
     fetch_limit: NonZeroU32,
 
@@ -136,6 +143,8 @@ enum DbCommands {
     Instances,
     /// Print information about the network
     Network(NetworkArgs),
+    /// Validate the contents of the database
+    Validate(ValidateArgs),
 }
 
 #[derive(Debug, Args)]
@@ -234,6 +243,21 @@ struct NetworkArgs {
 enum NetworkCommands {
     /// List external IPs
     ListEips,
+}
+
+#[derive(Debug, Args)]
+struct ValidateArgs {
+    #[command(subcommand)]
+    command:ValidateCommands,
+}
+
+#[derive(Debug, Subcommand)]
+enum ValidateCommands {
+    /// Validate each `volume_references` column in the region snapshots table
+    ValidateVolumeReferences,
+
+    /// Find region snapshots that the corresponding Crucible agent says were deleted
+    FindDeletedRegionSnapshots,
 }
 
 impl DbArgs {
@@ -341,6 +365,21 @@ impl DbArgs {
             }) => {
                 cmd_db_eips(&opctx, &datastore, self.fetch_limit, *verbose)
                     .await
+            }
+            DbCommands::Validate(ValidateArgs {
+                command: ValidateCommands::ValidateVolumeReferences,
+            }) => {
+                cmd_db_validate_volume_references(&datastore, self.fetch_limit)
+                    .await
+            }
+            DbCommands::Validate(ValidateArgs {
+                command: ValidateCommands::FindDeletedRegionSnapshots,
+            }) => {
+                cmd_db_find_deleted_region_snapshots(
+                    &datastore,
+                    self.fetch_limit,
+                )
+                .await
             }
         }
     }
@@ -1348,6 +1387,226 @@ async fn cmd_db_eips(
         .to_string();
 
     println!("{}", table);
+
+    Ok(())
+}
+
+/// Validate the `volume_references` column of the region snapshots table
+async fn cmd_db_validate_volume_references(
+    datastore: &DataStore,
+    limit: NonZeroU32,
+) -> Result<(), anyhow::Error> {
+    // First, get all region snapshot records
+    let region_snapshots: Vec<RegionSnapshot> = {
+        let region_snapshots: Vec<RegionSnapshot> = datastore
+            .pool_connection_for_tests()
+            .await?
+            .transaction_async(|conn| async move {
+                // Selecting all region snapshots requires a full table scan
+                conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
+
+                use db::schema::region_snapshot::dsl;
+                dsl::region_snapshot
+                    .select(RegionSnapshot::as_select())
+                    .get_results_async(&conn)
+                    .await
+            })
+            .await?;
+
+        check_limit(&region_snapshots, limit, || {
+            String::from("listing region snapshots")
+        });
+
+        region_snapshots
+    };
+
+    // Then, for each, make sure that the `volume_references` matches what is in
+    // the volume table
+    for region_snapshot in region_snapshots {
+        let matching_volumes = {
+            let matching_volumes = datastore
+                .pool_connection_for_tests()
+                .await?
+                .transaction_async(|conn| async move {
+                    // Selecting all volumes based on the data column requires a
+                    // full table scan
+                    conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
+
+                    let pattern =
+                        format!("%{}%", &region_snapshot.snapshot_addr);
+
+                    use db::schema::volume::dsl;
+                    dsl::volume
+                        .filter(dsl::data.like(pattern))
+                        .select(Volume::as_select())
+                        .get_results_async(&conn)
+                        .await
+                })
+                .await?;
+
+            check_limit(&matching_volumes, limit, || {
+                String::from("finding matching volumes")
+            });
+
+            matching_volumes.len()
+        };
+
+        if matching_volumes != region_snapshot.volume_references as usize {
+            eprintln!(
+                "region snapshot {} {} {} has {} volume references when it should be {}!",
+                region_snapshot.dataset_id,
+                region_snapshot.region_id,
+                region_snapshot.snapshot_id,
+                region_snapshot.volume_references,
+                matching_volumes,
+            );
+        } else {
+            // The volume references are correct, but additionally check to see
+            // deleting is true when matching_volumes is 0. Be careful: in the
+            // snapshot create saga, the region snapshot record is created
+            // before the snapshot's volume is inserted into the DB. There's a
+            // time between these operations that this function would flag that
+            // this region snapshot should have `deleting` set to true.
+
+            if matching_volumes == 0 && !region_snapshot.deleting {
+                eprintln!(
+                    "region snapshot {} {} {} has 0 volume references but deleting is false!",
+                    region_snapshot.dataset_id,
+                    region_snapshot.region_id,
+                    region_snapshot.snapshot_id,
+                );
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn cmd_db_find_deleted_region_snapshots(
+    datastore: &DataStore,
+    limit: NonZeroU32,
+) -> Result<(), anyhow::Error> {
+    // First, get all region snapshot records (with their corresponding dataset)
+    let datasets_and_region_snapshots: Vec<(Dataset, RegionSnapshot)> = {
+        let datasets_region_snapshots: Vec<(Dataset, RegionSnapshot)> =
+            datastore
+                .pool_connection_for_tests()
+                .await?
+                .transaction_async(|conn| async move {
+                    // Selecting all datasets and region snapshots requires a full table scan
+                    conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
+
+                    use db::schema::dataset::dsl as dataset_dsl;
+                    use db::schema::region_snapshot::dsl;
+
+                    dsl::region_snapshot
+                        .inner_join(
+                            dataset_dsl::dataset
+                                .on(dsl::dataset_id.eq(dataset_dsl::id)),
+                        )
+                        .select((
+                            Dataset::as_select(),
+                            RegionSnapshot::as_select(),
+                        ))
+                        .get_results_async(&conn)
+                        .await
+                })
+                .await?;
+
+        check_limit(&datasets_region_snapshots, limit, || {
+            String::from("listing datasets and region snapshots")
+        });
+
+        datasets_region_snapshots
+    };
+
+    // Then, for each one, reconcile with the corresponding Crucible Agent
+    for (dataset, region_snapshot) in datasets_and_region_snapshots {
+        use crucible_agent_client::types::RegionId;
+        use crucible_agent_client::types::State;
+        use crucible_agent_client::Client as CrucibleAgentClient;
+        // types::{CreateRegion, RegionId, State as RegionState},
+
+        let url = format!("http://{}", dataset.address());
+        let client = CrucibleAgentClient::new(&url);
+
+        let actual_region_snapshots = client
+            .region_get_snapshots(&RegionId(
+                region_snapshot.region_id.to_string(),
+            ))
+            .await?;
+
+        // Print a message if the Agent says that the snapshot was deleted
+
+        let snapshot_id = region_snapshot.snapshot_id.to_string();
+
+        if actual_region_snapshots
+            .snapshots
+            .iter()
+            .any(|x| x.name == snapshot_id)
+        {
+            // A snapshot currently exists, matching the database entry
+        } else {
+            // In this branch, there's a database entry for a snapshot that was
+            // deleted. Due to how the snapshot create saga is currently
+            // written, a database entry would not have been created unless a
+            // snapshot was successfully made: unless that saga changes, we can
+            // be reasonably sure that this snapshot existed at some point.
+
+            match actual_region_snapshots.running_snapshots.get(&snapshot_id) {
+                Some(running_snapshot) => {
+                    match running_snapshot.state {
+                        State::Destroyed | State::Failed => {
+                            // In this branch, we can be sure a snapshot previously
+                            // existed and was deleted: a running snapshot was made
+                            // from it, then deleted, and the snapshot does not
+                            // currently exist in the list of snapshots for this
+                            // region. This record should be deleted.
+
+                            eprintln!(
+                                "region snapshot {} {} {} at {} was deleted, please remove its record",
+                                region_snapshot.dataset_id,
+                                region_snapshot.region_id,
+                                region_snapshot.snapshot_id,
+                                dataset.address(),
+                            );
+                        }
+
+                        State::Requested
+                        | State::Created
+                        | State::Tombstoned => {
+                            // The agent is in a bad state: we did not find the
+                            // snapshot in the list of snapshots for this
+                            // region, but either:
+                            //
+                            // - there's a requested or existing running
+                            //   snapshot for it, or
+                            //
+                            // - there's a running snapshot that should have
+                            //   been completely deleted before the snapshot
+                            //   itself was deleted.
+                            //
+                            // This should have never been allowed to happen by
+                            // the Agent, so it's a bug.
+
+                            eprintln!(
+                                "region snapshot {} {} {} at {} was deleted but has a running snapshot in state {:?}! This is a bug in the Agent",
+                                region_snapshot.dataset_id,
+                                region_snapshot.region_id,
+                                region_snapshot.snapshot_id,
+                                dataset.address(),
+                                running_snapshot.state,
+                            );
+                        }
+                    }
+                }
+
+                None => {
+                    // A running snapshot never existed for this snapshot
+                }
+            }
+        }
+    }
 
     Ok(())
 }

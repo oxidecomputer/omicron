@@ -12,6 +12,7 @@ anyhow.workspace = true
 async-bb8-diesel.workspace = true
 chrono.workspace = true
 clap.workspace = true
+crucible-agent-client.workspace = true
 diesel.workspace = true
 dropshot.workspace = true
 futures.workspace = true
@@ -39,10 +40,10 @@ tokio = { workspace = true, features = [ "full" ] }
 uuid.workspace = true
 ipnetwork.workspace = true
 omicron-workspace-hack.workspace = true
+nexus-test-utils.workspace = true
 
 [dev-dependencies]
 expectorate.workspace = true
-nexus-test-utils.workspace = true
 nexus-test-utils-macros.workspace = true
 omicron-nexus.workspace = true
 omicron-test-utils.workspace = true
