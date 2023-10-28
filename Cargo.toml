@@ -270,7 +270,7 @@ oximeter-collector = { path = "oximeter/collector" }
 oximeter-instruments = { path = "oximeter/instruments" }
 oximeter-macro-impl = { path = "oximeter/oximeter-macro-impl" }
 oximeter-producer = { path = "oximeter/producer" }
-p256 = "0.11"
+p256 = "0.13"
 parse-display = "0.7.0"
 partial-io = { version = "0.5.4", features = ["proptest1", "tokio1"] }
 paste = "1.0.14"
