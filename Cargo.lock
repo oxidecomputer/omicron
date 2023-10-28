@@ -838,9 +838,9 @@ dependencies = [
 
 [[package]]
 name = "cancel-safe-futures"
-version = "0.1.2"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "84f4df1b54bc954b71be3baaa0771d7fbfebc0b291d2875892f49287f3b5c73d"
+checksum = "97eb3167cc49e8a4c1be907817009850b8b9693b225092d0f9b00fa9de076e4e"
 dependencies = [
  "futures-core",
  "futures-sink",
@@ -9474,7 +9474,7 @@ version = "1.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97fee6b57c6a41524a810daee9286c02d7752c4253064d0b05472833a438f675"
 dependencies = [
- "cfg-if 0.1.10",
+ "cfg-if 1.0.0",
  "rand 0.8.5",
  "static_assertions",
 ]
