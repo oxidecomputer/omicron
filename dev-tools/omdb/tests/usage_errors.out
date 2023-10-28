@@ -195,21 +195,6 @@ Usage: omdb db dns names <GROUP> <VERSION>
 
 For more information, try '--help'.
 =============================================
-EXECUTING COMMAND: omdb ["db", "instances"]
-termination: Exited(1)
----------------------------------------------
-stdout:
----------------------------------------------
-stderr:
-note: database URL not specified.  Will search DNS.
-note: (override with --db-url or OMDB_DB_URL)
-note: using DNS server for subnet fd00:1122:3344::/48
-note: (if this is not right, use --dns-server to specify an alternate DNS server)
-Error: looking up Cockroach in DNS
-
-Caused by:
-    proto error: io error: No route to host (os error 148)
-=============================================
 EXECUTING COMMAND: omdb ["db", "services"]
 termination: Exited(2)
 ---------------------------------------------

@@ -41,7 +41,6 @@ async fn test_omdb_usage_errors() {
         &["db", "dns"],
         &["db", "dns", "diff"],
         &["db", "dns", "names"],
-        &["db", "instances"],
         &["db", "services"],
         &["db", "snapshots"],
         &["db", "network"],
