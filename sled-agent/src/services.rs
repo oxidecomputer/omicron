@@ -676,6 +676,11 @@ impl ServiceManager {
                         device: "tofino".to_string(),
                     });
                 }
+                ServiceType::Dendrite {
+                    asic: DendriteAsic::SoftNpuPropolisDevice,
+                } => {
+                    devices.push("/dev/tty03".into());
+                }
                 _ => (),
             }
         }
@@ -741,7 +746,7 @@ impl ServiceManager {
 
         for svc in &req.services {
             match &svc.details {
-                ServiceType::Tfport { pkt_source } => {
+                ServiceType::Tfport { pkt_source, asic: _ } => {
                     // The tfport service requires a MAC device to/from which sidecar
                     // packets may be multiplexed.  If the link isn't present, don't
                     // bother trying to start the zone.
@@ -772,9 +777,13 @@ impl ServiceManager {
                             }
 
                             Err(_) => {
-                                return Err(Error::MissingDevice {
-                                    device: link.to_string(),
-                                });
+                                if let SidecarRevision::SoftZone(_) =
+                                    self.inner.sidecar_revision
+                                {
+                                    return Err(Error::MissingDevice {
+                                        device: link.to_string(),
+                                    });
+                                }
                             }
                         }
                     }
@@ -1815,14 +1824,21 @@ impl ServiceManager {
                             "config/port_config",
                             "/opt/oxide/dendrite/misc/model_config.toml",
                         )?,
-                        DendriteAsic::SoftNpu => {
-                            smfh.setprop("config/mgmt", "uds")?;
-                            smfh.setprop(
-                                "config/uds_path",
-                                "/opt/softnpu/stuff",
-                            )?;
+                        asic @ (DendriteAsic::SoftNpuZone
+                        | DendriteAsic::SoftNpuPropolisDevice) => {
+                            if asic == &DendriteAsic::SoftNpuZone {
+                                smfh.setprop("config/mgmt", "uds")?;
+                                smfh.setprop(
+                                    "config/uds_path",
+                                    "/opt/softnpu/stuff",
+                                )?;
+                            }
+                            if asic == &DendriteAsic::SoftNpuPropolisDevice {
+                                smfh.setprop("config/mgmt", "uart")?;
+                            }
                             let s = match self.inner.sidecar_revision {
-                                SidecarRevision::Soft(ref s) => s,
+                                SidecarRevision::SoftZone(ref s) => s,
+                                SidecarRevision::SoftPropolis(ref s) => s,
                                 _ => {
                                     return Err(Error::SidecarRevision(
                                         anyhow::anyhow!(
@@ -1847,7 +1863,7 @@ impl ServiceManager {
                     };
                     smfh.refresh()?;
                 }
-                ServiceType::Tfport { pkt_source } => {
+                ServiceType::Tfport { pkt_source, asic } => {
                     info!(self.inner.log, "Setting up tfport service");
 
                     let is_gimlet = is_gimlet().map_err(|e| {
@@ -1880,6 +1896,12 @@ impl ServiceManager {
                                 prefix.net().network().to_string(),
                             )?;
                         }
+                        smfh.setprop("config/pkt_source", pkt_source)?;
+                    }
+                    if asic == &DendriteAsic::SoftNpuZone {
+                        smfh.setprop("config/flags", "--sync-only")?;
+                    }
+                    if asic == &DendriteAsic::SoftNpuPropolisDevice {
                         smfh.setprop("config/pkt_source", pkt_source)?;
                     }
                     smfh.setprop(
@@ -2509,7 +2531,10 @@ impl ServiceManager {
                 vec![
                     ServiceType::Dendrite { asic: DendriteAsic::TofinoAsic },
                     ServiceType::ManagementGatewayService,
-                    ServiceType::Tfport { pkt_source: "tfpkt0".to_string() },
+                    ServiceType::Tfport {
+                        pkt_source: "tfpkt0".to_string(),
+                        asic: DendriteAsic::TofinoAsic,
+                    },
                     ServiceType::Uplink,
                     ServiceType::Wicketd { baseboard },
                     ServiceType::Mgd,
@@ -2517,11 +2542,31 @@ impl ServiceManager {
                 ]
             }
 
+            SledMode::Scrimlet {
+                asic: asic @ DendriteAsic::SoftNpuPropolisDevice,
+            } => {
+                data_links = vec!["vioif0".to_owned()];
+                vec![
+                    ServiceType::Dendrite { asic },
+                    ServiceType::ManagementGatewayService,
+                    ServiceType::Uplink,
+                    ServiceType::Wicketd { baseboard },
+                    ServiceType::Mgd,
+                    ServiceType::MgDdm { mode: "transit".to_string() },
+                    ServiceType::Tfport {
+                        pkt_source: "vioif0".to_string(),
+                        asic,
+                    },
+                    ServiceType::SpSim,
+                ]
+            }
+
             // Sled is a scrimlet but is not running the real tofino driver.
             SledMode::Scrimlet {
-                asic: asic @ (DendriteAsic::TofinoStub | DendriteAsic::SoftNpu),
+                asic:
+                    asic @ (DendriteAsic::TofinoStub | DendriteAsic::SoftNpuZone),
             } => {
-                if let DendriteAsic::SoftNpu = asic {
+                if let DendriteAsic::SoftNpuZone = asic {
                     let softnpu_filesystem = zone::Fs {
                         ty: "lofs".to_string(),
                         dir: "/opt/softnpu/stuff".to_string(),
@@ -2538,7 +2583,10 @@ impl ServiceManager {
                     ServiceType::Wicketd { baseboard },
                     ServiceType::Mgd,
                     ServiceType::MgDdm { mode: "transit".to_string() },
-                    ServiceType::Tfport { pkt_source: "tfpkt0".to_string() },
+                    ServiceType::Tfport {
+                        pkt_source: "tfpkt0".to_string(),
+                        asic,
+                    },
                     ServiceType::SpSim,
                 ]
             }
