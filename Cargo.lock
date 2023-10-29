@@ -4409,7 +4409,7 @@ dependencies = [
  "oso",
  "oximeter 0.1.0",
  "paste",
- "pem",
+ "pem 1.1.1",
  "petgraph",
  "pq-sys",
  "rand 0.8.5",
@@ -5096,7 +5096,7 @@ dependencies = [
  "oximeter-producer 0.1.0",
  "parse-display",
  "paste",
- "pem",
+ "pem 1.1.1",
  "petgraph",
  "pq-sys",
  "pretty_assertions",
@@ -5357,7 +5357,7 @@ dependencies = [
  "libc",
  "omicron-common 0.1.0",
  "omicron-workspace-hack",
- "pem",
+ "pem 1.1.1",
  "rcgen",
  "regex",
  "reqwest",
@@ -6104,6 +6104,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a8835c273a76a90455d7344889b0964598e3316e2a79ede8e36f16bdcf2228b8"
 dependencies = [
  "base64 0.13.1",
+]
+
+[[package]]
+name = "pem"
+version = "3.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3163d2912b7c3b52d651a055f2c7eec9ba5cd22d26ef75b8dd3a59980b185923"
+dependencies = [
+ "base64 0.21.5",
+ "serde",
 ]
 
 [[package]]
@@ -6944,11 +6954,11 @@ dependencies = [
 
 [[package]]
 name = "rcgen"
-version = "0.10.0"
+version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ffbe84efe2f38dea12e9bfc1f65377fdf03e53a18cb3b995faedf7934c7e785b"
+checksum = "52c4f3084aa3bc7dfbba4eff4fab2a54db4324965d8872ab933565e6fbd83bc6"
 dependencies = [
- "pem",
+ "pem 3.0.2",
  "ring 0.16.20",
  "time",
  "yasna",
@@ -9198,7 +9208,7 @@ dependencies = [
  "log",
  "olpc-cjson",
  "path-absolutize",
- "pem",
+ "pem 1.1.1",
  "percent-encoding",
  "reqwest",
  "ring 0.16.20",
