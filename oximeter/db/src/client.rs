@@ -1320,18 +1320,21 @@ mod tests {
         );
         client_2.execute_with_body(sql).await.unwrap();
 
+        // Make sure replicas are synched
+        let sql = String::from(
+            "SYSTEM SYNC REPLICA oximeter.measurements_string_local;",
+        );
+        client_2.execute_with_body(sql).await.unwrap();
+
+        // Make sure data exists in the other replica
         let sql = String::from(
             "SELECT * FROM oximeter.measurements_string FORMAT JSONEachRow;",
         );
-        let result = client_2.execute_with_body(sql.clone()).await.unwrap();
+        let result = client_1.execute_with_body(sql).await.unwrap();
         assert!(result.contains("hiya"));
 
         client_1.wipe_replicated_db().await?;
         logctx.cleanup_successful();
-
-        // TODO(https://github.com/oxidecomputer/omicron/issues/4001): With distributed
-        // engine, it can take a long time to sync the data. This means it's tricky to
-        // test that the data exists on both nodes.
         Ok(())
     }
 
