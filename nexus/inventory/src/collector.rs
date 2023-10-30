@@ -274,7 +274,13 @@ mod test {
 
         write!(&mut s, "\nerrors:\n").unwrap();
         for e in &collection.errors {
-            write!(&mut s, "error: {}\n", e).unwrap();
+            // Some error strings have OS error numbers in them.  We want to
+            // ignore those, particularly for CI, which runs these tests on
+            // multiple OSes.
+            let message = regex::Regex::new(r"os error \d+")
+                .unwrap()
+                .replace_all(&e, "os error <<redacted>>");
+            write!(&mut s, "error: {}\n", message).unwrap();
         }
 
         s

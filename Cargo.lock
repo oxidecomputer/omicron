@@ -4467,6 +4467,7 @@ dependencies = [
  "gateway-test-utils",
  "nexus-types",
  "omicron-workspace-hack",
+ "regex",
  "slog",
  "strum",
  "tokio",
