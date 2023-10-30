@@ -71,9 +71,9 @@ ppv-lite86 = { version = "0.2.17", default-features = false, features = ["simd",
 predicates = { version = "3.0.4" }
 rand = { version = "0.8.5", features = ["min_const_gen", "small_rng"] }
 rand_chacha = { version = "0.3.1" }
-regex = { version = "1.9.5" }
-regex-automata = { version = "0.3.8", default-features = false, features = ["dfa-onepass", "dfa-search", "hybrid", "meta", "nfa-backtrack", "perf-inline", "perf-literal", "unicode"] }
-regex-syntax = { version = "0.7.5" }
+regex = { version = "1.10.2" }
+regex-automata = { version = "0.4.3", default-features = false, features = ["dfa-onepass", "hybrid", "meta", "nfa-backtrack", "perf-inline", "perf-literal", "unicode"] }
+regex-syntax = { version = "0.8.2" }
 reqwest = { version = "0.11.20", features = ["blocking", "json", "rustls-tls", "stream"] }
 ring = { version = "0.16.20", features = ["std"] }
 schemars = { version = "0.8.13", features = ["bytes", "chrono", "uuid1"] }
@@ -163,9 +163,9 @@ ppv-lite86 = { version = "0.2.17", default-features = false, features = ["simd",
 predicates = { version = "3.0.4" }
 rand = { version = "0.8.5", features = ["min_const_gen", "small_rng"] }
 rand_chacha = { version = "0.3.1" }
-regex = { version = "1.9.5" }
-regex-automata = { version = "0.3.8", default-features = false, features = ["dfa-onepass", "dfa-search", "hybrid", "meta", "nfa-backtrack", "perf-inline", "perf-literal", "unicode"] }
-regex-syntax = { version = "0.7.5" }
+regex = { version = "1.10.2" }
+regex-automata = { version = "0.4.3", default-features = false, features = ["dfa-onepass", "hybrid", "meta", "nfa-backtrack", "perf-inline", "perf-literal", "unicode"] }
+regex-syntax = { version = "0.8.2" }
 reqwest = { version = "0.11.20", features = ["blocking", "json", "rustls-tls", "stream"] }
 ring = { version = "0.16.20", features = ["std"] }
 schemars = { version = "0.8.13", features = ["bytes", "chrono", "uuid1"] }
