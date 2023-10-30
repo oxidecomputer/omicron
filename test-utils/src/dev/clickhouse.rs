@@ -9,7 +9,7 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context};
-use std::net::SocketAddr;
+use std::net::{SocketAddr, Ipv4Addr, Ipv6Addr, IpAddr};
 use tempfile::{Builder, TempDir};
 use thiserror::Error;
 use tokio::{
@@ -109,7 +109,7 @@ impl ClickHouseInstance {
         let data_path = data_dir.path().to_path_buf();
         let port = wait_for_port(log_path).await?;
 
-        let address = SocketAddr::new("::1".parse().unwrap(), port);
+        let address = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), port);
 
         Ok(Self {
             data_dir: Some(data_dir),
@@ -177,7 +177,7 @@ impl ClickHouseInstance {
             })?;
 
         let data_path = data_dir.path().to_path_buf();
-        let address = SocketAddr::new("127.0.0.1".parse().unwrap(), port);
+        let address = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
 
         let result = wait_for_ready(log_path).await;
         match result {
