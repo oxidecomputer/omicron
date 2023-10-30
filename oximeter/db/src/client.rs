@@ -848,6 +848,32 @@ mod tests {
         SingleNode,
     }
 
+    impl InstallationType {
+        pub async fn init_db(&self, client: &Client) -> Result<(), Error> {
+            match *self {
+                InstallationType::SingleNode => client
+                    .init_single_node_db()
+                    .await
+                    .expect("Failed to initialize timeseries database"),
+                InstallationType::Cluster => client
+                    .init_replicated_db()
+                    .await
+                    .expect("Failed to initialize timeseries database"),
+            }
+            Ok(())
+        }
+
+        pub async fn wipe_db(&self, client: &Client) -> Result<(), Error> {
+            match *self {
+                InstallationType::SingleNode => {
+                    client.wipe_single_node_db().await.expect("Failed to remove timeseries database")
+                }
+                InstallationType::Cluster => client.wipe_replicated_db().await.expect("Failed to remove timeseries database"),
+            }
+            Ok(())
+        }
+    }
+
     // NOTE: Each test requires a clean slate. Because of this, tests run sequentially.
     //
     // This is at least partially because ClickHouse by default provides pretty weak consistency
@@ -1044,7 +1070,7 @@ mod tests {
         // Tests data is replicated in a cluster
         data_is_replicated_test(&cluster).await.unwrap();
 
-        // Tests that a new client has started and it is not part of a cluster
+        // Tests that a new client has started and it is part of a cluster
         is_oximeter_cluster_test(
             cluster.replica_1.address,
             InstallationType::Cluster,
@@ -1125,7 +1151,12 @@ mod tests {
         .unwrap();
 
         // Tests selecting multiple timeseries
-        select_timeseries_with_select_multiple_fields_with_multiple_values_test(cluster.replica_1.address, InstallationType::Cluster).await.unwrap();
+        select_timeseries_with_select_multiple_fields_with_multiple_values_test(
+            cluster.replica_1.address,
+            InstallationType::Cluster,
+        )
+        .await
+        .unwrap();
 
         // Tests selecting all timeseries
         select_timeseries_with_all_test(
@@ -1299,11 +1330,12 @@ mod tests {
         let client_2 = Client::new(cluster.replica_2.address, &log);
         assert!(client_2.is_oximeter_cluster().await.unwrap());
         let sql = String::from("SHOW DATABASES FORMAT JSONEachRow;");
-        let result = client_2.execute_with_body(sql).await.unwrap();
 
         // Try a few times to make sure data has been synchronised.
+        let mut result = String::from("");
         let tries = 5;
         for _ in 0..tries {
+            result = client_2.execute_with_body(sql.clone()).await.unwrap();
             if !result.contains("oximeter") {
                 sleep(Duration::from_secs(1)).await;
                 continue;
@@ -1342,7 +1374,7 @@ mod tests {
         address: SocketAddr,
         db_type: InstallationType,
     ) -> Result<(), Error> {
-        let logctx = test_setup_log("test_is_not_oximeter_cluster");
+        let logctx = test_setup_log("test_is_oximeter_cluster");
         let log = &logctx.log;
 
         let client = Client::new(address, &log);
@@ -2858,13 +2890,6 @@ mod tests {
         Ok(())
     }
 
-    // NOTE: This test is ignored intentionally.
-    //
-    // For some reason when the value is an f64 it inserts in both measurements_f32
-    // and measurements_f64 tables. This behaviour is unexpected, and should be investigated
-    //
-    // See https://github.com/oxidecomputer/omicron/pull/4372 for more details.
-    #[allow(dead_code)]
     async fn recall_measurement_f32_test(client: &Client) -> Result<(), Error> {
         const VALUE: f32 = 1.1;
         let datum = Datum::F32(VALUE);
@@ -3121,16 +3146,7 @@ mod tests {
         let log = &logctx.log;
 
         let client = Client::new(address, log);
-        match db_type {
-            InstallationType::SingleNode => client
-                .init_single_node_db()
-                .await
-                .expect("Failed to initialize timeseries database"),
-            InstallationType::Cluster => client
-                .init_replicated_db()
-                .await
-                .expect("Failed to initialize timeseries database"),
-        }
+        db_type.init_db(&client).await.unwrap();
 
         recall_measurement_bool_test(&client).await.unwrap();
 
@@ -3149,6 +3165,8 @@ mod tests {
         recall_measurement_i64_test(&client).await.unwrap();
 
         recall_measurement_u64_test(&client).await.unwrap();
+
+        recall_measurement_f32_test(&client).await.unwrap();
 
         recall_measurement_f64_test(&client).await.unwrap();
 
@@ -3200,12 +3218,7 @@ mod tests {
 
         recall_field_value_uuid_test(&client).await.unwrap();
 
-        match db_type {
-            InstallationType::SingleNode => {
-                client.wipe_single_node_db().await?
-            }
-            InstallationType::Cluster => client.wipe_replicated_db().await?,
-        }
+        db_type.wipe_db(&client).await.unwrap();
         logctx.cleanup_successful();
         Ok(())
     }
@@ -3243,12 +3256,7 @@ mod tests {
 
         assert_eq!(1, get_schema_count(&client).await);
 
-        match db_type {
-            InstallationType::SingleNode => {
-                client.wipe_single_node_db().await?
-            }
-            InstallationType::Cluster => client.wipe_replicated_db().await?,
-        }
+        db_type.wipe_db(&client).await.unwrap();
         logctx.cleanup_successful();
         Ok(())
     }
