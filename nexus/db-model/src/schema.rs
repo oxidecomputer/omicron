@@ -1237,7 +1237,7 @@ joinable!(ip_pool_range -> ip_pool (ip_pool_id));
 
 allow_tables_to_appear_in_same_query!(inv_collection, inv_collection_error);
 joinable!(inv_collection_error -> inv_collection (inv_collection_id));
-allow_tables_to_appear_in_same_query!(sw_caboose, inv_caboose);
+allow_tables_to_appear_in_same_query!(hw_baseboard_id, sw_caboose, inv_caboose);
 
 allow_tables_to_appear_in_same_query!(
     dataset,
