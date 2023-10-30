@@ -103,6 +103,7 @@ impl BackgroundTasks {
                 resolver,
                 &nexus_id.to_string(),
                 config.inventory.nkeep,
+                config.inventory.disable,
             );
             let task = driver.register(
                 String::from("inventory_collection"),

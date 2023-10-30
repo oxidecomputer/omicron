@@ -363,6 +363,12 @@ pub struct InventoryConfig {
     /// This is a very coarse mechanism to keep the system from overwhelming
     /// itself with inventory data.
     pub nkeep: u32,
+
+    /// disable inventory collection altogether
+    ///
+    /// This is an emergency lever for support / operations.  It should never be
+    /// necessary.
+    pub disable: bool,
 }
 
 /// Configuration for a nexus server
@@ -615,6 +621,7 @@ mod test {
             external_endpoints.period_secs = 9
             inventory.period_secs = 10
             inventory.nkeep = 11
+            inventory.disable = false
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -703,6 +710,7 @@ mod test {
                         inventory: InventoryConfig {
                             period_secs: Duration::from_secs(10),
                             nkeep: 11,
+                            disable: false,
                         }
                     },
                     default_region_allocation_strategy:
@@ -758,6 +766,7 @@ mod test {
             external_endpoints.period_secs = 9
             inventory.period_secs = 10
             inventory.nkeep = 3
+            inventory.disable = false
             [default_region_allocation_strategy]
             type = "random"
             "##,

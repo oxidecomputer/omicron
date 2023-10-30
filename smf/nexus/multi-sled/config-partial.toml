@@ -43,6 +43,8 @@ external_endpoints.period_secs = 60
 inventory.period_secs = 600
 # Maximum number of past collections to keep in the database
 inventory.nkeep = 3
+# Disable inventory collection altogether (for emergencies)
+inventory.disable = false
 
 [default_region_allocation_strategy]
 # by default, allocate across 3 distinct sleds

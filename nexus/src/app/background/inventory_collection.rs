@@ -5,6 +5,7 @@
 //! Background task for reading inventory for the rack
 
 use super::common::BackgroundTask;
+use anyhow::ensure;
 use anyhow::Context;
 use futures::future::BoxFuture;
 use futures::FutureExt;
@@ -21,6 +22,7 @@ pub struct InventoryCollector {
     resolver: internal_dns::resolver::Resolver,
     creator: String,
     nkeep: u32,
+    disable: bool,
 }
 
 impl InventoryCollector {
@@ -29,12 +31,14 @@ impl InventoryCollector {
         resolver: internal_dns::resolver::Resolver,
         creator: &str,
         nkeep: u32,
+        disable: bool,
     ) -> InventoryCollector {
         InventoryCollector {
             datastore,
             resolver,
             creator: creator.to_owned(),
             nkeep,
+            disable,
         }
     }
 }
@@ -55,6 +59,7 @@ impl BackgroundTask for InventoryCollector {
                 &self.resolver,
                 &self.creator,
                 self.nkeep,
+                self.disable,
             )
             .await
             .context("failed to collect inventory")
@@ -88,7 +93,12 @@ async fn inventory_activate(
     resolver: &internal_dns::resolver::Resolver,
     creator: &str,
     nkeep: u32,
+    disabled: bool,
 ) -> Result<Collection, anyhow::Error> {
+    // If we're disabled, don't do anything.  (This switch is only intended for
+    // unforeseen production emergencies.)
+    ensure!(!disabled, "disabled by explicit configuration");
+
     // Prune old collections.  We do this first, here, to ensure that we never
     // develop an unbounded backlog of collections.  (If this process were done
     // by a separate task, it would be possible for the backlog to grow
@@ -185,8 +195,13 @@ mod test {
         // a bunch and make sure that it always creates a new collection and
         // does not allow a backlog to accumulate.
         let nkeep = 3;
-        let mut task =
-            InventoryCollector::new(datastore.clone(), resolver, "me", nkeep);
+        let mut task = InventoryCollector::new(
+            datastore.clone(),
+            resolver.clone(),
+            "me",
+            nkeep,
+            false,
+        );
         let nkeep = usize::try_from(nkeep).unwrap();
         for i in 0..10 {
             let _ = task.activate(&opctx).await;
@@ -208,5 +223,18 @@ mod test {
             assert_eq!(collections.len(), std::cmp::min(i + 2, nkeep + 1));
             last_collections = collections;
         }
+
+        // Create a disabled task and make sure that does nothing.
+        let mut task = InventoryCollector::new(
+            datastore.clone(),
+            resolver,
+            "disabled",
+            3,
+            true,
+        );
+        let previous = datastore.inventory_collections().await.unwrap();
+        let _ = task.activate(&opctx).await;
+        let latest = datastore.inventory_collections().await.unwrap();
+        assert_eq!(previous, latest);
     }
 }
