@@ -29,7 +29,8 @@ use ratatui::widgets::{
 use slog::{info, o, Logger};
 use tui_tree_widget::{Tree, TreeItem, TreeState};
 use update_engine::{
-    AbortReason, ExecutionStatus, FailureReason, StepKey, WillNotBeRunReason,
+    AbortReason, ExecutionStatus, FailureReason, StepKey, TerminalKind,
+    WillNotBeRunReason,
 };
 use wicket_common::update_events::{
     EventBuffer, EventReport, ProgressEvent, StepOutcome, StepStatus,
@@ -180,7 +181,7 @@ impl UpdatePane {
             tree_state,
             items: ALL_COMPONENT_IDS
                 .iter()
-                .map(|id| TreeItem::new(*id, vec![]))
+                .map(|id| TreeItem::new(id.to_string_uppercase(), vec![]))
                 .collect(),
             help: vec![
                 ("Expand", "<e>"),
@@ -531,7 +532,10 @@ impl UpdatePane {
     ) {
         let popup_builder = PopupBuilder {
             header: Line::from(vec![Span::styled(
-                format!("START UPDATE: {}", state.rack_state.selected),
+                format!(
+                    "START UPDATE: {}",
+                    state.rack_state.selected.to_string_uppercase()
+                ),
                 style::header(true),
             )]),
             body: Text::from(vec![Line::from(vec![Span::styled(
@@ -561,7 +565,10 @@ impl UpdatePane {
     ) {
         let popup_builder = PopupBuilder {
             header: Line::from(vec![Span::styled(
-                format!("START UPDATE: {}", state.rack_state.selected),
+                format!(
+                    "START UPDATE: {}",
+                    state.rack_state.selected.to_string_uppercase()
+                ),
                 style::header(true),
             )]),
             body: Text::from(vec![Line::from(vec![Span::styled(
@@ -594,7 +601,10 @@ impl UpdatePane {
 
         let popup_builder = PopupBuilder {
             header: Line::from(vec![Span::styled(
-                format!("START UPDATE FAILED: {}", state.rack_state.selected),
+                format!(
+                    "START UPDATE FAILED: {}",
+                    state.rack_state.selected.to_string_uppercase()
+                ),
                 style::failed_update(),
             )]),
             body,
@@ -635,7 +645,10 @@ impl UpdatePane {
 
         let popup_builder = PopupBuilder {
             header: Line::from(vec![Span::styled(
-                format!("ABORT UPDATE: {}", state.rack_state.selected),
+                format!(
+                    "ABORT UPDATE: {}",
+                    state.rack_state.selected.to_string_uppercase()
+                ),
                 style::header(true),
             )]),
             body,
@@ -662,7 +675,10 @@ impl UpdatePane {
     ) {
         let popup_builder = PopupBuilder {
             header: Line::from(vec![Span::styled(
-                format!("ABORT UPDATE: {}", state.rack_state.selected),
+                format!(
+                    "ABORT UPDATE: {}",
+                    state.rack_state.selected.to_string_uppercase()
+                ),
                 style::header(true),
             )]),
             body: Text::from(vec![Line::from(vec![Span::styled(
@@ -695,7 +711,10 @@ impl UpdatePane {
 
         let popup_builder = PopupBuilder {
             header: Line::from(vec![Span::styled(
-                format!("ABORT UPDATE FAILED: {}", state.rack_state.selected),
+                format!(
+                    "ABORT UPDATE FAILED: {}",
+                    state.rack_state.selected.to_string_uppercase()
+                ),
                 style::failed_update(),
             )]),
             body,
@@ -721,7 +740,10 @@ impl UpdatePane {
     ) {
         let popup_builder = PopupBuilder {
             header: Line::from(vec![Span::styled(
-                format!("CLEAR UPDATE STATE: {}", state.rack_state.selected),
+                format!(
+                    "CLEAR UPDATE STATE: {}",
+                    state.rack_state.selected.to_string_uppercase()
+                ),
                 style::header(true),
             )]),
             body: Text::from(vec![Line::from(vec![Span::styled(
@@ -756,7 +778,7 @@ impl UpdatePane {
             header: Line::from(vec![Span::styled(
                 format!(
                     "CLEAR UPDATE STATE FAILED: {}",
-                    state.rack_state.selected
+                    state.rack_state.selected.to_string_uppercase()
                 ),
                 style::failed_update(),
             )]),
@@ -830,7 +852,7 @@ impl UpdatePane {
                         })
                     })
                     .collect();
-                TreeItem::new(*id, children)
+                TreeItem::new(id.to_string_uppercase(), children)
             })
             .collect();
     }
@@ -988,9 +1010,7 @@ impl UpdatePane {
                         }
 
                         ExecutionStatus::NotStarted
-                        | ExecutionStatus::Completed { .. }
-                        | ExecutionStatus::Failed { .. }
-                        | ExecutionStatus::Aborted { .. } => None,
+                        | ExecutionStatus::Terminal(_) => None,
                     }
                 } else {
                     None
@@ -1020,9 +1040,7 @@ impl UpdatePane {
                             associated with it",
                     );
                     match summary.execution_status {
-                        ExecutionStatus::Completed { .. }
-                        | ExecutionStatus::Failed { .. }
-                        | ExecutionStatus::Aborted { .. } => {
+                        ExecutionStatus::Terminal(_) => {
                             // If execution has reached a terminal
                             // state, we can clear it.
                             self.popup =
@@ -1107,7 +1125,11 @@ impl UpdatePane {
                     // `overview` pane.
                     let command = self.ignition.selected_command();
                     let selected = state.rack_state.selected;
-                    info!(self.log, "Sending {command:?} to {selected}");
+                    info!(
+                        self.log,
+                        "Sending {command:?} to {}",
+                        selected.to_string_uppercase()
+                    );
                     self.popup = None;
                     Some(Action::Ignition(selected, command))
                 }
@@ -1378,7 +1400,10 @@ impl UpdatePane {
         // Draw the title/tab bar
         let title_bar = Paragraph::new(Line::from(vec![
             Span::styled("UPDATE STATUS / ", border_style),
-            Span::styled(state.rack_state.selected.to_string(), header_style),
+            Span::styled(
+                state.rack_state.selected.to_string_uppercase(),
+                header_style,
+            ),
         ]))
         .block(block.clone());
         frame.render_widget(title_bar, self.title_rect);
@@ -1860,7 +1885,7 @@ impl ComponentUpdateListState {
                 "root execution ID should have a summary associated with it",
             );
 
-            match summary.execution_status {
+            match &summary.execution_status {
                 ExecutionStatus::NotStarted => {
                     status_text.push(Span::styled(
                         "Update not started",
@@ -1885,47 +1910,63 @@ impl ComponentUpdateListState {
                     ));
                     Some(ComponentUpdateShowHelp::Running)
                 }
-                ExecutionStatus::Completed { .. } => {
-                    status_text
-                        .push(Span::styled("Update ", style::plain_text()));
-                    status_text.push(Span::styled(
-                        "completed",
-                        style::successful_update_bold(),
-                    ));
-                    Some(ComponentUpdateShowHelp::Completed)
-                }
-                ExecutionStatus::Failed { step_key } => {
-                    status_text
-                        .push(Span::styled("Update ", style::plain_text()));
-                    status_text.push(Span::styled(
-                        "failed",
-                        style::failed_update_bold(),
-                    ));
-                    status_text.push(Span::styled(
-                        format!(
-                            " at step {}/{}",
-                            step_key.index + 1,
-                            summary.total_steps,
-                        ),
-                        style::plain_text(),
-                    ));
-                    Some(ComponentUpdateShowHelp::Completed)
-                }
-                ExecutionStatus::Aborted { step_key } => {
-                    status_text
-                        .push(Span::styled("Update ", style::plain_text()));
-                    status_text.push(Span::styled(
-                        "aborted",
-                        style::failed_update_bold(),
-                    ));
-                    status_text.push(Span::styled(
-                        format!(
-                            " at step {}/{}",
-                            step_key.index + 1,
-                            summary.total_steps,
-                        ),
-                        style::plain_text(),
-                    ));
+                ExecutionStatus::Terminal(info) => {
+                    match info.kind {
+                        TerminalKind::Completed => {
+                            status_text.push(Span::styled(
+                                "Update ",
+                                style::plain_text(),
+                            ));
+                            status_text.push(Span::styled(
+                                "completed",
+                                style::successful_update_bold(),
+                            ));
+                        }
+                        TerminalKind::Failed => {
+                            status_text.push(Span::styled(
+                                "Update ",
+                                style::plain_text(),
+                            ));
+                            status_text.push(Span::styled(
+                                "failed",
+                                style::failed_update_bold(),
+                            ));
+                            status_text.push(Span::styled(
+                                format!(
+                                    " at step {}/{}",
+                                    info.step_key.index + 1,
+                                    summary.total_steps,
+                                ),
+                                style::plain_text(),
+                            ));
+                        }
+                        TerminalKind::Aborted => {
+                            status_text.push(Span::styled(
+                                "Update ",
+                                style::plain_text(),
+                            ));
+                            status_text.push(Span::styled(
+                                "aborted",
+                                style::failed_update_bold(),
+                            ));
+                            status_text.push(Span::styled(
+                                format!(
+                                    " at step {}/{}",
+                                    info.step_key.index + 1,
+                                    summary.total_steps,
+                                ),
+                                style::plain_text(),
+                            ));
+                        }
+                    }
+
+                    if let Some(total_elapsed) = info.root_total_elapsed {
+                        status_text.push(Span::styled(
+                            format!(" after {:.2?}", total_elapsed),
+                            style::plain_text(),
+                        ));
+                    }
+
                     Some(ComponentUpdateShowHelp::Completed)
                 }
             }

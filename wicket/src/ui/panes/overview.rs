@@ -343,7 +343,7 @@ impl Control for InventoryView {
         let title_bar = Paragraph::new(Line::from(vec![
             Span::styled("OXIDE RACK / ", border_style),
             Span::styled(
-                state.rack_state.selected.to_string(),
+                state.rack_state.selected.to_string_uppercase(),
                 component_style,
             ),
         ]))

@@ -92,12 +92,14 @@ pub async fn ensure_seed_tarball_exists(
         );
     }
 
-    // XXX: we aren't considering cross-user permissions for this file. Might be
-    // worth setting more restrictive permissions on it, or using a per-user
-    // cache dir.
+    // If possible, try for a per-user folder in the temp dir
+    // to avoid clashes on shared build environments.
+    let crdb_base = std::env::var("USER")
+        .map(|user| format!("crdb-base-{user}"))
+        .unwrap_or("crdb-base".into());
     let base_seed_dir = Utf8PathBuf::from_path_buf(std::env::temp_dir())
         .expect("Not a UTF-8 path")
-        .join("crdb-base");
+        .join(crdb_base);
     std::fs::create_dir_all(&base_seed_dir).unwrap();
     let mut desired_seed_tar = base_seed_dir.join(digest_unique_to_schema());
     desired_seed_tar.set_extension("tar");

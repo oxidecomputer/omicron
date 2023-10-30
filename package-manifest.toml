@@ -381,10 +381,10 @@ only_for_targets.image = "standard"
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "657d985247b41e38aac2e271c7ce8bc9ea81f4b6"
+source.commit = "da534e73380f3cc53ca0de073e1ea862ae32109b"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible.sha256.txt
-source.sha256 = "010281ff5c3a0807c9e770d79264c954816a055aa482988d81e85ed98242e454"
+source.sha256 = "572ac3b19e51b4e476266a62c2b7e06eff81c386cb48247c4b9f9b1e2ee81895"
 output.type = "zone"
 
 [package.crucible-pantry]
@@ -392,10 +392,10 @@ service_name = "crucible_pantry"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "657d985247b41e38aac2e271c7ce8bc9ea81f4b6"
+source.commit = "da534e73380f3cc53ca0de073e1ea862ae32109b"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible-pantry.sha256.txt
-source.sha256 = "809936edff2957e761e49667d5477e34b7a862050b4e082a59fdc95096d3bdd5"
+source.sha256 = "812269958e18f54d72bc10bb4fb81f26c084cf762da7fd98e63d58c689be9ad1"
 output.type = "zone"
 
 # Refer to
@@ -406,13 +406,13 @@ service_name = "propolis-server"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "propolis"
-source.commit = "334df299a56cd0d33e1227ed4ce4d2fe7478d541"
+source.commit = "4019eb10fc2f4ba9bf210d0461dc6292b68309c2"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/propolis/image/<commit>/propolis-server.sha256.txt
-source.sha256 = "531e0654de94b6e805836c35aa88b8a1ac691184000a03976e2b7825061e904e"
+source.sha256 = "aa1d9dc5c9117c100f9636901e8eec6679d7dfbf869c46b7f2873585f94a1b89"
 output.type = "zone"
 
-[package.maghemite]
+[package.mg-ddm-gz]
 service_name = "mg-ddm"
 # Note: unlike every other package, `maghemite` is not restricted to either the
 # "standard" or "trampoline" image; it is included in both.
@@ -422,10 +422,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "12703675393459e74139f8140e0b3c4c4f129d5d"
+source.commit = "d7169a61fd8833b3a1e6f46d897ca3295b2a28b6"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/maghemite.sha256.txt
-source.sha256 = "e57fe791ee898d59890c5779fbd4dce598250fb6ed53832024212bcdeec0cc5b"
+source.sha256 = "d871406ed926571efebdab248de08d4f1ca6c31d4f9a691ce47b186474165c57"
 output.type = "tarball"
 
 [package.mg-ddm]
@@ -438,10 +438,25 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "12703675393459e74139f8140e0b3c4c4f129d5d"
+source.commit = "d7169a61fd8833b3a1e6f46d897ca3295b2a28b6"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "3aa0d32b1d2b6be7091b9c665657296e924a86a00ca38756e9f45a1e629fd92b"
+source.sha256 = "85ec05a8726989b5cb0a567de6b0855f6f84b6f3409ac99ccaf372be5821e45d"
+output.type = "zone"
+output.intermediate_only = true
+
+[package.mgd]
+service_name = "mgd"
+source.type = "prebuilt"
+source.repo = "maghemite"
+# Updating the commit hash here currently requires also updating
+# `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
+# building `ddm-admin-client` (which will instruct you to update
+# `tools/maghemite_openapi_version`).
+source.commit = "d7169a61fd8833b3a1e6f46d897ca3295b2a28b6"
+# The SHA256 digest is automatically posted to:
+# https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
+source.sha256 = "452dfb3491e1b6d4df6be1cb689921f59623aed082e47606a78c0f44d918f66a"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -458,8 +473,8 @@ only_for_targets.image = "standard"
 # 2. Copy dendrite.tar.gz from dendrite/out to omicron/out
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "7712104585266a2898da38c1345210ad26f9e71d"
-source.sha256 = "486b0b016c0df06947810b90f3a3dd40423f0ee6f255ed079dc8e5618c9a7281"
+source.commit = "343e3a572cc02efe3f8b68f9affd008623a33966"
+source.sha256 = "0808f331741e02d55e199847579dfd01f3658b21c7122cef8c3f9279f43dbab0"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -483,8 +498,8 @@ only_for_targets.image = "standard"
 # 2. Copy the output zone image from dendrite/out to omicron/out
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "7712104585266a2898da38c1345210ad26f9e71d"
-source.sha256 = "76ff76d3526323c3fcbe2351cf9fbda4840e0dc11cd0eb6b71a3e0bd36c5e5e8"
+source.commit = "343e3a572cc02efe3f8b68f9affd008623a33966"
+source.sha256 = "c359de1be5073a484d86d4c58e8656a36002ce1dc38506f97b730e21615ccae1"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -501,8 +516,8 @@ only_for_targets.image = "standard"
 # 2. Copy dendrite.tar.gz from dendrite/out to omicron/out/dendrite-softnpu.tar.gz
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "7712104585266a2898da38c1345210ad26f9e71d"
-source.sha256 = "b8e5c176070f9bc9ea0028de1999c77d66ea3438913664163975964effe4481b"
+source.commit = "343e3a572cc02efe3f8b68f9affd008623a33966"
+source.sha256 = "110bfbfb2cf3d3471f3e3a64d26129c7a02f6c5857f9623ebb99690728c3b2ff"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -534,6 +549,7 @@ source.packages = [
   "wicketd.tar.gz",
   "wicket.tar.gz",
   "mg-ddm.tar.gz",
+  "mgd.tar.gz",
   "switch_zone_setup.tar.gz",
   "xcvradm.tar.gz"
 ]
@@ -555,6 +571,7 @@ source.packages = [
   "wicketd.tar.gz",
   "wicket.tar.gz",
   "mg-ddm.tar.gz",
+  "mgd.tar.gz",
   "switch_zone_setup.tar.gz",
   "sp-sim-stub.tar.gz"
 ]
@@ -576,6 +593,7 @@ source.packages = [
   "wicketd.tar.gz",
   "wicket.tar.gz",
   "mg-ddm.tar.gz",
+  "mgd.tar.gz",
   "switch_zone_setup.tar.gz",
   "sp-sim-softnpu.tar.gz"
 ]

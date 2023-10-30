@@ -5,6 +5,7 @@
 //! HTTP entrypoint functions for the sled agent's exposed API
 
 use super::sled_agent::SledAgent;
+use crate::bootstrap::early_networking::EarlyNetworkConfig;
 use crate::params::{
     CleanupContextUpdate, DiskEnsureBody, InstanceEnsureBody,
     InstancePutMigrationIdsBody, InstancePutStateBody,
@@ -14,6 +15,7 @@ use crate::params::{
 };
 use crate::sled_agent::Error as SledAgentError;
 use crate::zone_bundle;
+use bootstore::schemes::v0::NetworkConfig;
 use camino::Utf8PathBuf;
 use dropshot::{
     endpoint, ApiDescription, FreeformBody, HttpError, HttpResponseCreated,
@@ -24,9 +26,10 @@ use illumos_utils::opte::params::{
     DeleteVirtualNetworkInterfaceHost, SetVirtualNetworkInterfaceHost,
 };
 use omicron_common::api::external::Error;
-use omicron_common::api::internal::nexus::DiskRuntimeState;
-use omicron_common::api::internal::nexus::SledInstanceState;
-use omicron_common::api::internal::nexus::UpdateArtifactId;
+use omicron_common::api::internal::nexus::{
+    DiskRuntimeState, SledInstanceState, UpdateArtifactId,
+};
+use omicron_common::api::internal::shared::SwitchPorts;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -62,6 +65,9 @@ pub fn api() -> SledApiDescription {
         api.register(update_artifact)?;
         api.register(vpc_firewall_rules_put)?;
         api.register(zpools_get)?;
+        api.register(uplink_ensure)?;
+        api.register(read_network_bootstore_config_cache)?;
+        api.register(write_network_bootstore_config)?;
 
         Ok(())
     }
@@ -629,4 +635,74 @@ async fn timesync_get(
 ) -> Result<HttpResponseOk<TimeSync>, HttpError> {
     let sa = rqctx.context();
     Ok(HttpResponseOk(sa.timesync_get().await.map_err(|e| Error::from(e))?))
+}
+
+#[endpoint {
+    method = POST,
+    path = "/switch-ports",
+}]
+async fn uplink_ensure(
+    rqctx: RequestContext<SledAgent>,
+    body: TypedBody<SwitchPorts>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let sa = rqctx.context();
+    sa.ensure_scrimlet_host_ports(body.into_inner().uplinks).await?;
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+/// This API endpoint is only reading the local sled agent's view of the
+/// bootstore. The boostore is a distributed data store that is eventually
+/// consistent. Reads from individual nodes may not represent the latest state.
+#[endpoint {
+    method = GET,
+    path = "/network-bootstore-config",
+}]
+async fn read_network_bootstore_config_cache(
+    rqctx: RequestContext<SledAgent>,
+) -> Result<HttpResponseOk<EarlyNetworkConfig>, HttpError> {
+    let sa = rqctx.context();
+    let bs = sa.bootstore();
+
+    let config = bs.get_network_config().await.map_err(|e| {
+        HttpError::for_internal_error(format!("failed to get bootstore: {e}"))
+    })?;
+
+    let config = match config {
+        Some(config) => EarlyNetworkConfig::try_from(config).map_err(|e| {
+            HttpError::for_internal_error(format!(
+                "deserialize early network config: {e}"
+            ))
+        })?,
+        None => {
+            return Err(HttpError::for_unavail(
+                None,
+                "early network config does not exist yet".into(),
+            ));
+        }
+    };
+
+    Ok(HttpResponseOk(config))
+}
+
+#[endpoint {
+    method = PUT,
+    path = "/network-bootstore-config",
+}]
+async fn write_network_bootstore_config(
+    rqctx: RequestContext<SledAgent>,
+    body: TypedBody<EarlyNetworkConfig>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let sa = rqctx.context();
+    let bs = sa.bootstore();
+    let config = body.into_inner();
+
+    bs.update_network_config(NetworkConfig::from(config)).await.map_err(
+        |e| {
+            HttpError::for_internal_error(format!(
+                "failed to write updated config to boot store: {e}"
+            ))
+        },
+    )?;
+
+    Ok(HttpResponseUpdatedNoContent())
 }

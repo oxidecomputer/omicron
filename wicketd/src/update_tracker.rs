@@ -18,18 +18,23 @@ use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::ensure;
 use anyhow::Context;
+use base64::Engine;
 use display_error_chain::DisplayErrorChain;
 use dropshot::HttpError;
+use futures::TryFutureExt;
 use gateway_client::types::HostPhase2Progress;
 use gateway_client::types::HostPhase2RecoveryImageId;
 use gateway_client::types::HostStartupOptions;
 use gateway_client::types::InstallinatorImageId;
 use gateway_client::types::PowerState;
+use gateway_client::types::RotCfpaSlot;
 use gateway_client::types::SpComponentFirmwareSlot;
 use gateway_client::types::SpIdentifier;
 use gateway_client::types::SpType;
 use gateway_client::types::SpUpdateStatus;
 use gateway_messages::SpComponent;
+use gateway_messages::ROT_PAGE_SIZE;
+use hubtools::RawHubrisArchive;
 use installinator_common::InstallinatorCompletionMetadata;
 use installinator_common::InstallinatorSpec;
 use installinator_common::M2Slot;
@@ -52,11 +57,13 @@ use std::sync::Mutex as StdMutex;
 use std::time::Duration;
 use std::time::Instant;
 use thiserror::Error;
+use tokio::io::AsyncReadExt;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::sync::watch;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
+use tokio_util::io::StreamReader;
 use update_engine::events::ProgressUnits;
 use update_engine::AbortHandle;
 use update_engine::StepSpec;
@@ -768,19 +775,13 @@ impl UpdateDriver {
         }
 
         let (rot_a, rot_b, sp_artifacts) = match update_cx.sp.type_ {
-            SpType::Sled => (
-                plan.gimlet_rot_a.clone(),
-                plan.gimlet_rot_b.clone(),
-                &plan.gimlet_sp,
-            ),
-            SpType::Power => {
-                (plan.psc_rot_a.clone(), plan.psc_rot_b.clone(), &plan.psc_sp)
+            SpType::Sled => {
+                (&plan.gimlet_rot_a, &plan.gimlet_rot_b, &plan.gimlet_sp)
             }
-            SpType::Switch => (
-                plan.sidecar_rot_a.clone(),
-                plan.sidecar_rot_b.clone(),
-                &plan.sidecar_sp,
-            ),
+            SpType::Power => (&plan.psc_rot_a, &plan.psc_rot_b, &plan.psc_sp),
+            SpType::Switch => {
+                (&plan.sidecar_rot_a, &plan.sidecar_rot_b, &plan.sidecar_sp)
+            }
         };
 
         let rot_registrar = engine.for_component(UpdateComponent::Rot);
@@ -790,16 +791,15 @@ impl UpdateDriver {
         // currently executing; we must update the _other_ slot. We also want to
         // know its current version (so we can skip updating if we only need to
         // update the SP and/or host).
-        let rot_interrogation =
-            rot_registrar
-                .new_step(
-                    UpdateStepId::InterrogateRot,
-                    "Checking current RoT version and active slot",
-                    |_cx| async move {
-                        update_cx.interrogate_rot(rot_a, rot_b).await
-                    },
-                )
-                .register();
+        let rot_interrogation = rot_registrar
+            .new_step(
+                UpdateStepId::InterrogateRot,
+                "Checking current RoT version and active slot",
+                move |_cx| async move {
+                    update_cx.interrogate_rot(rot_a, rot_b).await
+                },
+            )
+            .register();
 
         // The SP only has one updateable firmware slot ("the inactive bank").
         // We want to ask about slot 0 (the active slot)'s current version, and
@@ -1553,8 +1553,8 @@ impl UpdateContext {
 
     async fn interrogate_rot(
         &self,
-        rot_a: ArtifactIdData,
-        rot_b: ArtifactIdData,
+        rot_a: &[ArtifactIdData],
+        rot_b: &[ArtifactIdData],
     ) -> Result<StepResult<RotInterrogation>, UpdateTerminalError> {
         let rot_active_slot = self
             .get_component_active_slot(SpComponent::ROT.const_as_str())
@@ -1565,7 +1565,7 @@ impl UpdateContext {
 
         // Flip these around: if 0 (A) is active, we want to
         // update 1 (B), and vice versa.
-        let (active_slot_name, slot_to_update, artifact_to_apply) =
+        let (active_slot_name, slot_to_update, available_artifacts) =
             match rot_active_slot {
                 0 => ('A', 1, rot_b),
                 1 => ('B', 0, rot_a),
@@ -1577,6 +1577,176 @@ impl UpdateContext {
                     })
                 }
             };
+
+        // Read the CMPA and currently-active CFPA so we can find the
+        // correctly-signed artifact.
+        let base64_decode_rot_page = |data: String| {
+            // Even though we know `data` should decode to exactly
+            // `ROT_PAGE_SIZE` bytes, the base64 crate requires an output buffer
+            // of at least `decoded_len_estimate`. Allocate such a buffer here,
+            // then we'll copy to the fixed-size array we need after confirming
+            // the number of decoded bytes;
+            let mut output_buf =
+                vec![0; base64::decoded_len_estimate(data.len())];
+
+            let n = base64::engine::general_purpose::STANDARD
+                .decode_slice(&data, &mut output_buf)
+                .with_context(|| {
+                    format!("failed to decode base64 string: {data:?}")
+                })?;
+            if n != ROT_PAGE_SIZE {
+                bail!(
+                    "incorrect len ({n}, expected {ROT_PAGE_SIZE}) \
+                     after decoding base64 string: {data:?}",
+                );
+            }
+            let mut page = [0; ROT_PAGE_SIZE];
+            page.copy_from_slice(&output_buf[..n]);
+            Ok(page)
+        };
+
+        // We may be talking to an SP / RoT that doesn't yet know how to give us
+        // its CMPA. If we hit a protocol version error here, we can fall back
+        // to our old behavior of requiring exactly 1 RoT artifact.
+        let mut artifact_to_apply = None;
+
+        let cmpa = match self
+            .mgs_client
+            .sp_rot_cmpa_get(
+                self.sp.type_,
+                self.sp.slot,
+                SpComponent::ROT.const_as_str(),
+            )
+            .await
+        {
+            Ok(response) => {
+                let data = response.into_inner().base64_data;
+                Some(base64_decode_rot_page(data).map_err(|error| {
+                    UpdateTerminalError::GetRotCmpaFailed { error }
+                })?)
+            }
+            // TODO is there a better way to check the _specific_ error response
+            // we get here? We only have a couple of strings; we could check the
+            // error string contents for something like "WrongVersion", but
+            // that's pretty fragile. Instead we'll treat any error response
+            // here as a "fallback to previous behavior".
+            Err(err @ gateway_client::Error::ErrorResponse(_)) => {
+                if available_artifacts.len() == 1 {
+                    info!(
+                        self.log,
+                        "Failed to get RoT CMPA page; \
+                         using only available RoT artifact";
+                        "err" => %err,
+                    );
+                    artifact_to_apply = Some(available_artifacts[0].clone());
+                    None
+                } else {
+                    error!(
+                        self.log,
+                        "Failed to get RoT CMPA; unable to choose from \
+                         multiple available RoT artifacts";
+                        "err" => %err,
+                        "num_rot_artifacts" => available_artifacts.len(),
+                    );
+                    return Err(UpdateTerminalError::GetRotCmpaFailed {
+                        error: err.into(),
+                    });
+                }
+            }
+            // For any other error (e.g., comms failures), just fail as normal.
+            Err(err) => {
+                return Err(UpdateTerminalError::GetRotCmpaFailed {
+                    error: err.into(),
+                });
+            }
+        };
+
+        // If we were able to fetch the CMPA, we also need to fetch the CFPA and
+        // then find the correct RoT artifact. If we weren't able to fetch the
+        // CMPA, we either already set `artifact_to_apply` to the one-and-only
+        // RoT artifact available, or we returned a terminal error.
+        if let Some(cmpa) = cmpa {
+            let cfpa = self
+                .mgs_client
+                .sp_rot_cfpa_get(
+                    self.sp.type_,
+                    self.sp.slot,
+                    SpComponent::ROT.const_as_str(),
+                    &gateway_client::types::GetCfpaParams {
+                        slot: RotCfpaSlot::Active,
+                    },
+                )
+                .await
+                .map_err(|err| UpdateTerminalError::GetRotCfpaFailed {
+                    error: err.into(),
+                })
+                .and_then(|response| {
+                    let data = response.into_inner().base64_data;
+                    base64_decode_rot_page(data).map_err(|error| {
+                        UpdateTerminalError::GetRotCfpaFailed { error }
+                    })
+                })?;
+
+            // Loop through our possible artifacts and find the first (we only
+            // expect one!) that verifies against the RoT's CMPA/CFPA.
+            for artifact in available_artifacts {
+                let image = artifact
+                    .data
+                    .reader_stream()
+                    .and_then(|stream| async {
+                        let mut buf =
+                            Vec::with_capacity(artifact.data.file_size());
+                        StreamReader::new(stream)
+                            .read_to_end(&mut buf)
+                            .await
+                            .context("I/O error reading extracted archive")?;
+                        Ok(buf)
+                    })
+                    .await
+                    .map_err(|error| {
+                        UpdateTerminalError::FailedFindingSignedRotImage {
+                            error,
+                        }
+                    })?;
+                let archive =
+                    RawHubrisArchive::from_vec(image).map_err(|err| {
+                        UpdateTerminalError::FailedFindingSignedRotImage {
+                            error: anyhow::Error::new(err).context(format!(
+                                "failed to read hubris archive for {:?}",
+                                artifact.id
+                            )),
+                        }
+                    })?;
+                match archive.verify(&cmpa, &cfpa) {
+                    Ok(()) => {
+                        info!(
+                            self.log, "RoT archive verification success";
+                            "name" => artifact.id.name.as_str(),
+                            "version" => %artifact.id.version,
+                            "kind" => ?artifact.id.kind,
+                        );
+                        artifact_to_apply = Some(artifact.clone());
+                        break;
+                    }
+                    Err(err) => {
+                        // We log this but don't fail - we want to continue
+                        // looking for a verifiable artifact.
+                        info!(
+                            self.log, "RoT archive verification failed";
+                            "artifact" => ?artifact.id,
+                            "err" => %DisplayErrorChain::new(&err),
+                        );
+                    }
+                }
+            }
+        }
+
+        // Ensure we found a valid RoT artifact.
+        let artifact_to_apply = artifact_to_apply.ok_or_else(|| {
+            UpdateTerminalError::FailedFindingSignedRotImage {
+                error: anyhow!("no RoT image found with valid CMPA/CFPA"),
+            }
+        })?;
 
         // Read the caboose of the currently-active slot.
         let caboose = self

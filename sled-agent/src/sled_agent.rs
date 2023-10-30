@@ -38,7 +38,9 @@ use omicron_common::api::external::Vni;
 use omicron_common::api::internal::nexus::{
     SledInstanceState, VmmRuntimeState,
 };
-use omicron_common::api::internal::shared::RackNetworkConfig;
+use omicron_common::api::internal::shared::{
+    HostPortConfig, RackNetworkConfig,
+};
 use omicron_common::api::{
     internal::nexus::DiskRuntimeState, internal::nexus::InstanceRuntimeState,
     internal::nexus::UpdateArtifactId,
@@ -237,6 +239,9 @@ struct SledAgentInner {
 
     // Object managing zone bundles.
     zone_bundler: zone_bundle::ZoneBundler,
+
+    // A handle to the bootstore.
+    bootstore: bootstore::NodeHandle,
 }
 
 impl SledAgentInner {
@@ -407,7 +412,7 @@ impl SledAgent {
                 EarlyNetworkConfig::try_from(serialized_config)
                     .map_err(|err| BackoffError::transient(err.to_string()))?;
 
-            Ok(early_network_config.rack_network_config)
+            Ok(early_network_config.body.rack_network_config)
         };
         let rack_network_config: Option<RackNetworkConfig> =
             retry_notify::<_, String, _, _, _, _>(
@@ -458,6 +463,7 @@ impl SledAgent {
                 nexus_request_queue: NexusRequestQueue::new(),
                 rack_network_config,
                 zone_bundler,
+                bootstore: bootstore.clone(),
             }),
             log: log.clone(),
         };
@@ -769,7 +775,7 @@ impl SledAgent {
 
     /// Idempotently ensures that a given instance is registered with this sled,
     /// i.e., that it can be addressed by future calls to
-    /// [`instance_ensure_state`].
+    /// [`Self::instance_ensure_state`].
     pub async fn instance_ensure_registered(
         &self,
         instance_id: Uuid,
@@ -917,5 +923,20 @@ impl SledAgent {
     /// Gets the sled's current time synchronization state
     pub async fn timesync_get(&self) -> Result<TimeSync, Error> {
         self.inner.services.timesync_get().await.map_err(Error::from)
+    }
+
+    pub async fn ensure_scrimlet_host_ports(
+        &self,
+        uplinks: Vec<HostPortConfig>,
+    ) -> Result<(), Error> {
+        self.inner
+            .services
+            .ensure_scrimlet_host_ports(uplinks)
+            .await
+            .map_err(Error::from)
+    }
+
+    pub fn bootstore(&self) -> bootstore::NodeHandle {
+        self.inner.bootstore.clone()
     }
 }
