@@ -7,21 +7,24 @@ This directory describes the schema(s) used by CockroachDB.
 
 We use the following conventions:
 
-* `schema/crdb/VERSION/up.sql`: The necessary idempotent migrations to transition from the
-  previous version of CockroachDB to this version. These migrations will always be placed
-  within one transaction per file.
-** If more than one change is needed per version, any number of files starting with `up`
-   and ending with `.sql` may be used. These files will be sorted in lexicographic order
-   before being executed, and each will be executed in a separate transaction.
-** CockroachDB documentation recommends the following: "Execute schema changes... in a single
-   explicit transaction consisting of the single schema change statement".
-   Practically this means: If you want to change multiple tables, columns,
-   types, indices, or constraints, do so in separate files.
-** More information can be found here: https://www.cockroachlabs.com/docs/stable/online-schema-changes
-* `schema/crdb/dbinit.sql`: The necessary operations to create the latest version
-  of the schema. Should be equivalent to running all `up.sql` migrations, in-order.
-* `schema/crdb/dbwipe.sql`: The necessary operations to delete the latest version
-  of the schema.
+* `schema/crdb/VERSION/up.sql`: The necessary idempotent migrations to
+  transition from the previous version of CockroachDB to this version. These
+  migrations will always be placed within one transaction per file.
+** If more than one change is needed per version, any number of files starting
+   with `up` and ending with `.sql` may be used. These files will be sorted in
+   lexicographic order before being executed, and each will be executed in a
+   separate transaction.
+** CockroachDB documentation recommends the following: "Execute schema
+   changes... in a single explicit transaction consisting of the single schema
+   change statement".  Practically this means: If you want to change multiple
+   tables, columns, types, indices, or constraints, do so in separate files.
+** More information can be found here:
+   https://www.cockroachlabs.com/docs/stable/online-schema-changes
+* `schema/crdb/dbinit.sql`: The necessary operations to create the latest
+  version of the schema. Should be equivalent to running all `up.sql`
+  migrations, in-order.
+* `schema/crdb/dbwipe.sql`: The necessary operations to delete the latest
+  version of the schema.
 
 Note that to upgrade from version N to version N+2, we always need to apply the
 N+1 upgrade first, before applying the N+2 upgrade. This simplifies our model
@@ -53,11 +56,15 @@ Assumptions:
 
 Process:
 
-* Choose a `NEW_VERSION` number. This should almost certainly be a major version bump over `OLD_VERSION`.
-* Add a file to `schema/crdb/NEW_VERSION/up.sql` with your changes to the schema.
+* Choose a `NEW_VERSION` number. This should almost certainly be a major
+  version bump over `OLD_VERSION`.
+* Add a file to `schema/crdb/NEW_VERSION/up.sql` with your changes to the
+  schema.
 ** This file should validate the expected current version transactionally.
-** This file should only issue a single schema-modifying statement per transaction.
-** This file should not issue any data-modifying operations within the schema-modifying transactions.
+** This file should only issue a single schema-modifying statement per
+   transaction.
+** This file should not issue any data-modifying operations within the
+   schema-modifying transactions.
 * Update `schema/crdb/dbinit.sql` to match what the database should look like
   after your update is applied. Don't forget to update the version field of
   `db_metadata` at the bottom of the file!
@@ -68,7 +75,8 @@ Process:
 SQL Validation, via Automated Tests:
 
 * The `SCHEMA_VERSION` matches the version used in `dbinit.sql`
-* The combination of all `up.sql` files results in the same schema as `dbinit.sql`
+* The combination of all `up.sql` files results in the same schema as
+  `dbinit.sql`
 * All `up.sql` files can be applied twice without error
 
 ==== Handling common schema changes
@@ -79,9 +87,9 @@ our schema comparison tools intentionally ignore these values. As a result,
 when performing schema changes, the order of new tables and constraints should
 generally not be important.
 
-As convention, however, we recommend keeping the `db_metadata` file at the end of
-`dbinit.sql`, so that the database does not contain a version until it is fully
-populated.
+As convention, however, we recommend keeping the `db_metadata` file at the end
+of `dbinit.sql`, so that the database does not contain a version until it is
+fully populated.
 
 ==== Adding new source tables to an existing view
 
