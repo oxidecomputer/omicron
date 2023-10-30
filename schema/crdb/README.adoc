@@ -10,18 +10,19 @@ We use the following conventions:
 * `schema/crdb/VERSION/up*.sql`: Files containing the necessary idempotent
   statements to transition from the previous version of the database schema to
   this version.  All of the statements in a given file will be executed
-  together in one transaction; however, only one statement should appear in
-  each file.  More on this below.
+  together in one transaction; however, usually only one statement should
+  appear in each file.  More on this below.
 ** If there's only one statement required, we put it into `up.sql`.
 ** If more than one change is needed, any number of files starting with `up`
    and ending with `.sql` may be used. These files will be sorted in
    lexicographic order before being executed.  Each will be executed in a
    separate transaction.
-** CockroachDB documentation recommends the following: "Execute schema changes
-   ... in an explicit transaction consisting of the single schema change
-   statement.".  Practically this means: If you want to change multiple tables,
-   columns, types, indices, or constraints, do so in separate files.  See
-   https://www.cockroachlabs.com/docs/stable/online-schema-changes for more.
+** CockroachDB documentation recommends the following: "Execute schema
+   changes ... in an explicit transaction consisting of the single schema
+   change statement.".  Practically this means: If you want to change multiple
+   tables, columns, types, indices, or constraints, do so in separate files.
+   See https://www.cockroachlabs.com/docs/stable/online-schema-changes for
+   more.
 * `schema/crdb/dbinit.sql`: The necessary operations to create the latest
   version of the schema. Should be equivalent to running all `up.sql`
   migrations, in-order.
