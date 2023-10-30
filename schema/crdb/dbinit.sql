@@ -2515,14 +2515,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.bootstore_keys (
 );
 
 /*
- * The `sled_instance` view's definition needs to be modified in a separate
- * transaction from the transaction that created it.
- */
-
-COMMIT;
-BEGIN;
-
-/*
  * Hardware/software inventory
  *
  * See RFD 433 for details.  Here are the highlights.
@@ -2736,6 +2728,15 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_caboose (
     PRIMARY KEY (inv_collection_id, hw_baseboard_id, which)
 );
 
+/*******************************************************************/
+
+/*
+ * The `sled_instance` view's definition needs to be modified in a separate
+ * transaction from the transaction that created it.
+ */
+
+COMMIT;
+BEGIN;
 
 /*******************************************************************/
 
@@ -2837,7 +2838,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '8.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '9.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
