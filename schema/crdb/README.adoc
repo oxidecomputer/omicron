@@ -89,7 +89,7 @@ SQL Validation, via Automated Tests:
   `dbinit.sql`
 * All `up.sql` files can be applied twice without error
 
-==== Handling common schema changes
+==== General notes
 
 CockroachDB's representation of the schema includes some opaque
 internally-generated fields that are order dependent, like the names of
