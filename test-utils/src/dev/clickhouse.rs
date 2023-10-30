@@ -9,7 +9,7 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context};
-use std::net::{SocketAddr, Ipv4Addr, Ipv6Addr, IpAddr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use tempfile::{Builder, TempDir};
 use thiserror::Error;
 use tokio::{

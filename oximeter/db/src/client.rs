@@ -865,10 +865,14 @@ mod tests {
 
         pub async fn wipe_db(&self, client: &Client) -> Result<(), Error> {
             match *self {
-                InstallationType::SingleNode => {
-                    client.wipe_single_node_db().await.expect("Failed to remove timeseries database")
-                }
-                InstallationType::Cluster => client.wipe_replicated_db().await.expect("Failed to remove timeseries database"),
+                InstallationType::SingleNode => client
+                    .wipe_single_node_db()
+                    .await
+                    .expect("Failed to remove timeseries database"),
+                InstallationType::Cluster => client
+                    .wipe_replicated_db()
+                    .await
+                    .expect("Failed to remove timeseries database"),
             }
             Ok(())
         }
@@ -3054,7 +3058,7 @@ mod tests {
             .await
             .expect_err("Should have failed, downgrades are not supported");
 
-            db_type.wipe_db(&client).await.unwrap();
+        db_type.wipe_db(&client).await.unwrap();
         logctx.cleanup_successful();
         Ok(())
     }
