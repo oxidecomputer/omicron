@@ -17,6 +17,7 @@ use crate::SimulatedSp;
 use anyhow::{anyhow, bail, Context, Result};
 use async_trait::async_trait;
 use futures::future;
+use futures::Future;
 use gateway_messages::ignition::{self, LinkEvents};
 use gateway_messages::sp_impl::SpHandler;
 use gateway_messages::sp_impl::{BoundsChecked, DeviceDescription};
@@ -39,12 +40,14 @@ use std::cell::Cell;
 use std::collections::HashMap;
 use std::iter;
 use std::net::{SocketAddr, SocketAddrV6};
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tokio::select;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot;
+use tokio::sync::watch;
 use tokio::sync::Mutex as TokioMutex;
 use tokio::task::{self, JoinHandle};
 
@@ -56,9 +59,9 @@ pub struct Gimlet {
     local_addrs: Option<[SocketAddrV6; 2]>,
     handler: Option<Arc<TokioMutex<Handler>>>,
     serial_console_addrs: HashMap<String, SocketAddrV6>,
-    commands:
-        mpsc::UnboundedSender<(Command, oneshot::Sender<CommandResponse>)>,
+    commands: mpsc::UnboundedSender<Command>,
     inner_tasks: Vec<JoinHandle<()>>,
+    responses_sent_count: Option<watch::Receiver<usize>>,
 }
 
 impl Drop for Gimlet {
@@ -92,8 +95,7 @@ impl SimulatedSp for Gimlet {
 
     async fn set_responsiveness(&self, r: Responsiveness) {
         let (tx, rx) = oneshot::channel();
-        if let Ok(()) = self.commands.send((Command::SetResponsiveness(r), tx))
-        {
+        if let Ok(()) = self.commands.send(Command::SetResponsiveness(r, tx)) {
             rx.await.unwrap();
         }
     }
@@ -110,6 +112,29 @@ impl SimulatedSp for Gimlet {
         let handler = handler.lock().await;
         handler.update_state.last_update_data()
     }
+
+    async fn current_update_status(&self) -> gateway_messages::UpdateStatus {
+        let Some(handler) = self.handler.as_ref() else {
+            return gateway_messages::UpdateStatus::None;
+        };
+
+        handler.lock().await.update_state.status()
+    }
+
+    fn responses_sent_count(&self) -> Option<watch::Receiver<usize>> {
+        self.responses_sent_count.clone()
+    }
+
+    async fn install_udp_throttler(&self) -> mpsc::UnboundedSender<usize> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let (resp_tx, resp_rx) = oneshot::channel();
+        if let Ok(()) =
+            self.commands.send(Command::SetThrottler(Some(rx), resp_tx))
+        {
+            resp_rx.await.unwrap();
+        }
+        tx
+    }
 }
 
 impl Gimlet {
@@ -123,43 +148,44 @@ impl Gimlet {
         let mut inner_tasks = Vec::new();
         let (commands, commands_rx) = mpsc::unbounded_channel();
 
-        let (local_addrs, handler) = if let Some(bind_addrs) =
-            gimlet.common.bind_addrs
-        {
-            // bind to our two local "KSZ" ports
-            assert_eq!(bind_addrs.len(), 2); // gimlet SP always has 2 ports
-            let servers = future::try_join(
-                UdpServer::new(
-                    bind_addrs[0],
-                    gimlet.common.multicast_addr,
-                    &log,
-                ),
-                UdpServer::new(
-                    bind_addrs[1],
-                    gimlet.common.multicast_addr,
-                    &log,
-                ),
-            )
-            .await?;
-            let servers = [servers.0, servers.1];
+        let (local_addrs, handler, responses_sent_count) =
+            if let Some(bind_addrs) = gimlet.common.bind_addrs {
+                // bind to our two local "KSZ" ports
+                assert_eq!(bind_addrs.len(), 2); // gimlet SP always has 2 ports
+                let servers = future::try_join(
+                    UdpServer::new(
+                        bind_addrs[0],
+                        gimlet.common.multicast_addr,
+                        &log,
+                    ),
+                    UdpServer::new(
+                        bind_addrs[1],
+                        gimlet.common.multicast_addr,
+                        &log,
+                    ),
+                )
+                .await?;
+                let servers = [servers.0, servers.1];
 
-            for component_config in &gimlet.common.components {
-                let id = component_config.id.as_str();
-                let component = SpComponent::try_from(id)
-                    .map_err(|_| anyhow!("component id {:?} too long", id))?;
-
-                if let Some(addr) = component_config.serial_console {
-                    let listener =
-                        TcpListener::bind(addr).await.with_context(|| {
-                            format!("failed to bind to {}", addr)
+                for component_config in &gimlet.common.components {
+                    let id = component_config.id.as_str();
+                    let component =
+                        SpComponent::try_from(id).map_err(|_| {
+                            anyhow!("component id {:?} too long", id)
                         })?;
-                    info!(
-                        log, "bound fake serial console to TCP port";
-                        "addr" => %addr,
-                        "component" => ?component,
-                    );
 
-                    serial_console_addrs.insert(
+                    if let Some(addr) = component_config.serial_console {
+                        let listener =
+                            TcpListener::bind(addr).await.with_context(
+                                || format!("failed to bind to {}", addr),
+                            )?;
+                        info!(
+                            log, "bound fake serial console to TCP port";
+                            "addr" => %addr,
+                            "component" => ?component,
+                        );
+
+                        serial_console_addrs.insert(
                         component
                             .as_str()
                             .with_context(|| "non-utf8 component")?
@@ -177,43 +203,46 @@ impl Gimlet {
                             })?,
                     );
 
-                    let (tx, rx) = mpsc::unbounded_channel();
-                    incoming_console_tx.insert(component, tx);
+                        let (tx, rx) = mpsc::unbounded_channel();
+                        incoming_console_tx.insert(component, tx);
 
-                    let serial_console = SerialConsoleTcpTask::new(
-                        component,
-                        listener,
-                        rx,
-                        [
-                            Arc::clone(servers[0].socket()),
-                            Arc::clone(servers[1].socket()),
-                        ],
-                        Arc::clone(&attached_mgs),
-                        log.new(slog::o!("serial-console" => id.to_string())),
-                    );
-                    inner_tasks.push(task::spawn(async move {
-                        serial_console.run().await
-                    }));
+                        let serial_console = SerialConsoleTcpTask::new(
+                            component,
+                            listener,
+                            rx,
+                            [
+                                Arc::clone(servers[0].socket()),
+                                Arc::clone(servers[1].socket()),
+                            ],
+                            Arc::clone(&attached_mgs),
+                            log.new(
+                                slog::o!("serial-console" => id.to_string()),
+                            ),
+                        );
+                        inner_tasks.push(task::spawn(async move {
+                            serial_console.run().await
+                        }));
+                    }
                 }
-            }
-            let local_addrs =
-                [servers[0].local_addr(), servers[1].local_addr()];
-            let (inner, handler) = UdpTask::new(
-                servers,
-                gimlet.common.components.clone(),
-                attached_mgs,
-                gimlet.common.serial_number.clone(),
-                incoming_console_tx,
-                commands_rx,
-                log,
-            );
-            inner_tasks
-                .push(task::spawn(async move { inner.run().await.unwrap() }));
+                let local_addrs =
+                    [servers[0].local_addr(), servers[1].local_addr()];
+                let (inner, handler, responses_sent_count) = UdpTask::new(
+                    servers,
+                    gimlet.common.components.clone(),
+                    attached_mgs,
+                    gimlet.common.serial_number.clone(),
+                    incoming_console_tx,
+                    commands_rx,
+                    log,
+                );
+                inner_tasks.push(task::spawn(async move {
+                    inner.run().await.unwrap()
+                }));
 
-            (Some(local_addrs), Some(handler))
-        } else {
-            (None, None)
-        };
+                (Some(local_addrs), Some(handler), Some(responses_sent_count))
+            } else {
+                (None, None, None)
+            };
 
         let (manufacturing_public_key, rot) =
             RotSprocket::bootstrap_from_config(&gimlet.common);
@@ -225,6 +254,7 @@ impl Gimlet {
             serial_console_addrs,
             commands,
             inner_tasks,
+            responses_sent_count,
         })
     }
 
@@ -401,19 +431,18 @@ impl SerialConsoleTcpTask {
 }
 
 enum Command {
-    SetResponsiveness(Responsiveness),
+    SetResponsiveness(Responsiveness, oneshot::Sender<Ack>),
+    SetThrottler(Option<mpsc::UnboundedReceiver<usize>>, oneshot::Sender<Ack>),
 }
 
-enum CommandResponse {
-    SetResponsivenessAck,
-}
+struct Ack;
 
 struct UdpTask {
     udp0: UdpServer,
     udp1: UdpServer,
     handler: Arc<TokioMutex<Handler>>,
-    commands:
-        mpsc::UnboundedReceiver<(Command, oneshot::Sender<CommandResponse>)>,
+    commands: mpsc::UnboundedReceiver<Command>,
+    responses_sent_count: watch::Sender<usize>,
 }
 
 impl UdpTask {
@@ -423,12 +452,9 @@ impl UdpTask {
         attached_mgs: Arc<Mutex<Option<(SpComponent, SpPort, SocketAddrV6)>>>,
         serial_number: String,
         incoming_serial_console: HashMap<SpComponent, UnboundedSender<Vec<u8>>>,
-        commands: mpsc::UnboundedReceiver<(
-            Command,
-            oneshot::Sender<CommandResponse>,
-        )>,
+        commands: mpsc::UnboundedReceiver<Command>,
         log: Logger,
-    ) -> (Self, Arc<TokioMutex<Handler>>) {
+    ) -> (Self, Arc<TokioMutex<Handler>>, watch::Receiver<usize>) {
         let [udp0, udp1] = servers;
         let handler = Arc::new(TokioMutex::new(Handler::new(
             serial_number,
@@ -437,15 +463,40 @@ impl UdpTask {
             incoming_serial_console,
             log,
         )));
-        (Self { udp0, udp1, handler: Arc::clone(&handler), commands }, handler)
+        let responses_sent_count = watch::Sender::new(0);
+        let responses_sent_count_rx = responses_sent_count.subscribe();
+        (
+            Self {
+                udp0,
+                udp1,
+                handler: Arc::clone(&handler),
+                commands,
+                responses_sent_count,
+            },
+            handler,
+            responses_sent_count_rx,
+        )
     }
 
     async fn run(mut self) -> Result<()> {
         let mut out_buf = [0; gateway_messages::MAX_SERIALIZED_SIZE];
         let mut responsiveness = Responsiveness::Responsive;
+        let mut throttle_count = usize::MAX;
+        let mut throttler: Option<mpsc::UnboundedReceiver<usize>> = None;
         loop {
+            let incr_throttle_count: Pin<
+                Box<dyn Future<Output = Option<usize>> + Send>,
+            > = if let Some(throttler) = throttler.as_mut() {
+                Box::pin(throttler.recv())
+            } else {
+                Box::pin(future::pending())
+            };
             select! {
-                recv0 = self.udp0.recv_from() => {
+                Some(n) = incr_throttle_count => {
+                    throttle_count = throttle_count.saturating_add(n);
+                }
+
+                recv0 = self.udp0.recv_from(), if throttle_count > 0 => {
                     if let Some((resp, addr)) = server::handle_request(
                         &mut *self.handler.lock().await,
                         recv0,
@@ -453,11 +504,13 @@ impl UdpTask {
                         responsiveness,
                         SpPort::One,
                     ).await? {
+                        throttle_count -= 1;
                         self.udp0.send_to(resp, addr).await?;
+                        self.responses_sent_count.send_modify(|n| *n += 1);
                     }
                 }
 
-                recv1 = self.udp1.recv_from() => {
+                recv1 = self.udp1.recv_from(), if throttle_count > 0 => {
                     if let Some((resp, addr)) = server::handle_request(
                         &mut *self.handler.lock().await,
                         recv1,
@@ -465,21 +518,36 @@ impl UdpTask {
                         responsiveness,
                         SpPort::Two,
                     ).await? {
+                        throttle_count -= 1;
                         self.udp1.send_to(resp, addr).await?;
+                        self.responses_sent_count.send_modify(|n| *n += 1);
                     }
                 }
 
                 command = self.commands.recv() => {
                     // if sending half is gone, we're about to be killed anyway
-                    let (command, tx) = match command {
-                        Some((command, tx)) => (command, tx),
+                    let command = match command {
+                        Some(command) => command,
                         None => return Ok(()),
                     };
 
                     match command {
-                        Command::SetResponsiveness(r) => {
+                        Command::SetResponsiveness(r, tx) => {
                             responsiveness = r;
-                            tx.send(CommandResponse::SetResponsivenessAck)
+                            tx.send(Ack)
+                                .map_err(|_| "receiving half died").unwrap();
+                        }
+                        Command::SetThrottler(thr, tx) => {
+                            throttler = thr;
+
+                            // Either immediately start throttling, or
+                            // immediately stop throttling.
+                            if throttler.is_some() {
+                                throttle_count = 0;
+                            } else {
+                                throttle_count = usize::MAX;
+                            }
+                            tx.send(Ack)
                                 .map_err(|_| "receiving half died").unwrap();
                         }
                     }

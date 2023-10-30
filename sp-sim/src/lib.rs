@@ -24,6 +24,8 @@ pub use sprockets_rot::common::msgs::RotRequestV1;
 pub use sprockets_rot::common::msgs::RotResponseV1;
 use sprockets_rot::common::Ed25519PublicKey;
 pub use sprockets_rot::RotSprocketError;
+use tokio::sync::mpsc;
+use tokio::sync::watch;
 use std::net::SocketAddrV6;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -58,6 +60,39 @@ pub trait SimulatedSp {
     ///
     /// Only returns data after a simulated reset.
     async fn last_update_data(&self) -> Option<Box<[u8]>>;
+
+    /// Get the current update status, just as would be returned by an MGS
+    /// request to get the update status.
+    async fn current_update_status(&self) -> gateway_messages::UpdateStatus;
+
+    /// Get a watch channel on which this simulated SP will publish a
+    /// monotonically increasing count of how many responses it has successfully
+    /// sent.
+    ///
+    /// Returns `None` if called before the SP has set up its sockets to handle
+    /// requests.
+    fn responses_sent_count(&self) -> Option<watch::Receiver<usize>>;
+
+    /// Inject a UDP-level "throttler" on this simualted SP.
+    ///
+    /// If this method is not called, the SP will handle requests as they come
+    /// in.
+    ///
+    /// When this method is called, it will set its "throttle count" to zero.
+    /// When the trottle count is zero, the SP will not accept incoming UDP
+    /// packets. When a value is sent on the channel returned by this method,
+    /// that value will be added to the throttle count. When the SP successfully
+    /// sends a response to a message, the throttle count will be decremented by
+    /// one.
+    ///
+    /// Two example use cases for this method are that a caller could:
+    ///
+    /// * Artificially slow down the simulated SP (e.g., increment the throttle
+    ///   count by N every M millis)
+    /// * Force the simulated SP to single-step message (e.g., by incrementing
+    ///   the throttle count by 1 and then waiting for a message to be received,
+    ///   which can be observed via `responses_sent_count`)
+    async fn install_udp_throttler(&self) -> mpsc::UnboundedSender<usize>;
 }
 
 // Helper function to pad a simulated serial number (stored as a `String`) to

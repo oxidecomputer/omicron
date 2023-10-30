@@ -18,6 +18,7 @@ use crate::Responsiveness;
 use crate::SimulatedSp;
 use anyhow::Result;
 use async_trait::async_trait;
+use futures::Future;
 use futures::future;
 use gateway_messages::ignition;
 use gateway_messages::ignition::IgnitionError;
@@ -49,11 +50,13 @@ use sprockets_rot::RotSprocket;
 use sprockets_rot::RotSprocketError;
 use std::iter;
 use std::net::SocketAddrV6;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::Mutex;
 use tokio::select;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
+use tokio::sync::watch;
 use tokio::sync::Mutex as TokioMutex;
 use tokio::task;
 use tokio::task::JoinHandle;
@@ -65,9 +68,9 @@ pub struct Sidecar {
     manufacturing_public_key: Ed25519PublicKey,
     local_addrs: Option<[SocketAddrV6; 2]>,
     handler: Option<Arc<TokioMutex<Handler>>>,
-    commands:
-        mpsc::UnboundedSender<(Command, oneshot::Sender<CommandResponse>)>,
+    commands: mpsc::UnboundedSender<Command>,
     inner_task: Option<JoinHandle<()>>,
+    responses_sent_count: Option<watch::Receiver<usize>>,
 }
 
 impl Drop for Sidecar {
@@ -102,7 +105,7 @@ impl SimulatedSp for Sidecar {
     async fn set_responsiveness(&self, r: Responsiveness) {
         let (tx, rx) = oneshot::channel();
         self.commands
-            .send((Command::SetResponsiveness(r), tx))
+            .send(Command::SetResponsiveness(r, tx))
             .map_err(|_| "sidecar task died unexpectedly")
             .unwrap();
         rx.await.unwrap();
@@ -120,6 +123,29 @@ impl SimulatedSp for Sidecar {
         let handler = handler.lock().await;
         handler.update_state.last_update_data()
     }
+
+    async fn current_update_status(&self) -> gateway_messages::UpdateStatus {
+        let Some(handler) = self.handler.as_ref() else {
+            return gateway_messages::UpdateStatus::None;
+        };
+
+        handler.lock().await.update_state.status()
+    }
+
+    fn responses_sent_count(&self) -> Option<watch::Receiver<usize>> {
+        self.responses_sent_count.clone()
+    }
+
+    async fn install_udp_throttler(&self) -> mpsc::UnboundedSender<usize> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let (resp_tx, resp_rx) = oneshot::channel();
+        if let Ok(()) =
+            self.commands.send(Command::SetThrottler(Some(rx), resp_tx))
+        {
+            resp_rx.await.unwrap();
+        }
+        tx
+    }
 }
 
 impl Sidecar {
@@ -132,7 +158,7 @@ impl Sidecar {
 
         let (commands, commands_rx) = mpsc::unbounded_channel();
 
-        let (local_addrs, inner_task, handler) =
+        let (local_addrs, inner_task, handler, responses_sent_count) =
             if let Some(bind_addrs) = sidecar.common.bind_addrs {
                 // bind to our two local "KSZ" ports
                 assert_eq!(bind_addrs.len(), 2);
@@ -153,7 +179,7 @@ impl Sidecar {
                 let local_addrs =
                     [servers[0].local_addr(), servers[1].local_addr()];
 
-                let (inner, handler) = Inner::new(
+                let (inner, handler, responses_sent_count) = Inner::new(
                     servers,
                     sidecar.common.components.clone(),
                     sidecar.common.serial_number.clone(),
@@ -164,9 +190,14 @@ impl Sidecar {
                 let inner_task =
                     task::spawn(async move { inner.run().await.unwrap() });
 
-                (Some(local_addrs), Some(inner_task), Some(handler))
+                (
+                    Some(local_addrs),
+                    Some(inner_task),
+                    Some(handler),
+                    Some(responses_sent_count),
+                )
             } else {
-                (None, None, None)
+                (None, None, None, None)
             };
 
         let (manufacturing_public_key, rot) =
@@ -178,40 +209,36 @@ impl Sidecar {
             handler,
             commands,
             inner_task,
+            responses_sent_count,
         })
     }
 
     pub async fn current_ignition_state(&self) -> Vec<IgnitionState> {
         let (tx, rx) = oneshot::channel();
         self.commands
-            .send((Command::CurrentIgnitionState, tx))
+            .send(Command::CurrentIgnitionState(tx))
             .map_err(|_| "sidecar task died unexpectedly")
             .unwrap();
-        match rx.await.unwrap() {
-            CommandResponse::CurrentIgnitionState(state) => state,
-            other => panic!("unexpected response {:?}", other),
-        }
+        rx.await.unwrap()
     }
 }
 
 #[derive(Debug)]
 enum Command {
-    CurrentIgnitionState,
-    SetResponsiveness(Responsiveness),
+    CurrentIgnitionState(oneshot::Sender<Vec<IgnitionState>>),
+    SetResponsiveness(Responsiveness, oneshot::Sender<Ack>),
+    SetThrottler(Option<mpsc::UnboundedReceiver<usize>>, oneshot::Sender<Ack>),
 }
 
 #[derive(Debug)]
-enum CommandResponse {
-    CurrentIgnitionState(Vec<IgnitionState>),
-    SetResponsivenessAck,
-}
+struct Ack;
 
 struct Inner {
     handler: Arc<TokioMutex<Handler>>,
     udp0: UdpServer,
     udp1: UdpServer,
-    commands:
-        mpsc::UnboundedReceiver<(Command, oneshot::Sender<CommandResponse>)>,
+    commands: mpsc::UnboundedReceiver<Command>,
+    responses_sent_count: watch::Sender<usize>,
 }
 
 impl Inner {
@@ -220,12 +247,9 @@ impl Inner {
         components: Vec<SpComponentConfig>,
         serial_number: String,
         ignition: FakeIgnition,
-        commands: mpsc::UnboundedReceiver<(
-            Command,
-            oneshot::Sender<CommandResponse>,
-        )>,
+        commands: mpsc::UnboundedReceiver<Command>,
         log: Logger,
-    ) -> (Self, Arc<TokioMutex<Handler>>) {
+    ) -> (Self, Arc<TokioMutex<Handler>>, watch::Receiver<usize>) {
         let [udp0, udp1] = servers;
         let handler = Arc::new(TokioMutex::new(Handler::new(
             serial_number,
@@ -233,15 +257,40 @@ impl Inner {
             ignition,
             log,
         )));
-        (Self { handler: Arc::clone(&handler), udp0, udp1, commands }, handler)
+        let responses_sent_count = watch::Sender::new(0);
+        let responses_sent_count_rx = responses_sent_count.subscribe();
+        (
+            Self {
+                handler: Arc::clone(&handler),
+                udp0,
+                udp1,
+                commands,
+                responses_sent_count,
+            },
+            handler,
+            responses_sent_count_rx,
+        )
     }
 
     async fn run(mut self) -> Result<()> {
         let mut out_buf = [0; gateway_messages::MAX_SERIALIZED_SIZE];
         let mut responsiveness = Responsiveness::Responsive;
+        let mut throttle_count = usize::MAX;
+        let mut throttler: Option<mpsc::UnboundedReceiver<usize>> = None;
         loop {
+            let incr_throttle_count: Pin<
+                Box<dyn Future<Output = Option<usize>> + Send>,
+            > = if let Some(throttler) = throttler.as_mut() {
+                Box::pin(throttler.recv())
+            } else {
+                Box::pin(future::pending())
+            };
             select! {
-                recv0 = self.udp0.recv_from() => {
+                Some(n) = incr_throttle_count => {
+                    throttle_count = throttle_count.saturating_add(n);
+                }
+
+                recv0 = self.udp0.recv_from(), if throttle_count > 0 => {
                     if let Some((resp, addr)) = server::handle_request(
                         &mut *self.handler.lock().await,
                         recv0,
@@ -249,11 +298,13 @@ impl Inner {
                         responsiveness,
                         SpPort::One,
                     ).await? {
+                        throttle_count -= 1;
                         self.udp0.send_to(resp, addr).await?;
+                        self.responses_sent_count.send_modify(|n| *n += 1);
                     }
                 }
 
-                recv1 = self.udp1.recv_from() => {
+                recv1 = self.udp1.recv_from(), if throttle_count > 0 => {
                     if let Some((resp, addr)) = server::handle_request(
                         &mut *self.handler.lock().await,
                         recv1,
@@ -261,31 +312,45 @@ impl Inner {
                         responsiveness,
                         SpPort::Two,
                     ).await? {
+                        throttle_count -= 1;
                         self.udp1.send_to(resp, addr).await?;
+                        self.responses_sent_count.send_modify(|n| *n += 1);
                     }
                 }
 
                 command = self.commands.recv() => {
                     // if sending half is gone, we're about to be killed anyway
-                    let (command, tx) = match command {
-                        Some((command, tx)) => (command, tx),
+                    let command = match command {
+                        Some(command) => command,
                         None => return Ok(()),
                     };
 
                     match command {
-                        Command::CurrentIgnitionState => {
-                            tx.send(CommandResponse::CurrentIgnitionState(
-                                self.handler
-                                    .lock()
-                                    .await
-                                    .ignition
-                                    .state
-                                    .clone()
-                            )).map_err(|_| "receiving half died").unwrap();
+                        Command::CurrentIgnitionState(tx) => {
+                            tx.send(self.handler
+                                .lock()
+                                .await
+                                .ignition
+                                .state
+                                .clone()
+                            ).map_err(|_| "receiving half died").unwrap();
                         }
-                        Command::SetResponsiveness(r) => {
+                        Command::SetResponsiveness(r, tx) => {
                             responsiveness = r;
-                            tx.send(CommandResponse::SetResponsivenessAck)
+                            tx.send(Ack)
+                                .map_err(|_| "receiving half died").unwrap();
+                        }
+                        Command::SetThrottler(thr, tx) => {
+                            throttler = thr;
+
+                            // Either immediately start throttling, or
+                            // immediately stop throttling.
+                            if throttler.is_some() {
+                                throttle_count = 0;
+                            } else {
+                                throttle_count = usize::MAX;
+                            }
+                            tx.send(Ack)
                                 .map_err(|_| "receiving half died").unwrap();
                         }
                     }

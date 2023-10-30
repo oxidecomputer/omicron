@@ -12,6 +12,7 @@ use slog::Logger;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::watch;
 use uuid::Uuid;
 
 type GatewayClientError = gateway_client::Error<gateway_client::types::Error>;
@@ -27,8 +28,19 @@ pub enum SpUpdateError {
     FailedToComplete(String),
 }
 
+// TODO-cleanup Probably share this with other update implementations?
+#[derive(Debug, PartialEq, Clone)]
+pub enum UpdateProgress {
+    Started,
+    Preparing { progress: Option<f64> },
+    InProgress { progress: Option<f64> },
+    Complete,
+    Failed(String),
+}
+
 pub struct SpUpdater {
     log: Logger,
+    progress: watch::Sender<Option<UpdateProgress>>,
     sp_type: SpType,
     sp_slot: u32,
     update_id: Uuid,
@@ -50,7 +62,12 @@ impl SpUpdater {
             "sp_slot" => sp_slot,
             "update_id" => format!("{update_id}"),
         ));
-        Self { log, sp_type, sp_slot, update_id, sp_hubris_archive }
+        let progress = watch::Sender::new(None);
+        Self { log, progress, sp_type, sp_slot, update_id, sp_hubris_archive }
+    }
+
+    pub fn progress_watcher(&self) -> watch::Receiver<Option<UpdateProgress>> {
+        self.progress.subscribe()
     }
 
     /// TODO
@@ -144,6 +161,8 @@ impl SpUpdater {
             )
             .await?;
 
+        self.progress.send_replace(Some(UpdateProgress::Started));
+
         info!(
             self.log, "SP update started";
             "mgs_addr" => client.baseurl(),
@@ -181,72 +200,115 @@ impl SpUpdater {
                 .await?
                 .into_inner();
 
-            match update_status {
-                SpUpdateStatus::Preparing { id, .. }
-                | SpUpdateStatus::InProgress { id, .. } => {
+            // The majority of possible update statuses indicate failure; we'll
+            // handle the small number of non-failure cases by either
+            // `continue`ing or `return`ing; all other branches will give us an
+            // error string that we can report.
+            let error_message = match update_status {
+                // For `Preparing` and `InProgress`, we could check the progress
+                // information returned by these steps and try to check that
+                // we're still _making_ progress, but every Nexus instance needs
+                // to do that anyway in case we (or the MGS instance delivering
+                // the update) crash, so we'll omit that check here. Instead, we
+                // just sleep and we'll poll again shortly.
+                SpUpdateStatus::Preparing { id, progress } => {
                     if id == self.update_id {
-                        // We could check the progress information returned by
-                        // these steps (currently omitted via `..`) and try to
-                        // check that we're still _making_ progress, but every
-                        // Nexus instance needs to do that anyway in case we (or
-                        // the MGS instance delivering the update) crash, so
-                        // we'll omit that check here. Instead, we just sleep
-                        // and we'll poll again shortly.
+                        let progress = progress.and_then(|progress| {
+                            if progress.current > progress.total {
+                                warn!(
+                                    self.log, "nonsense SP preparing progress";
+                                    "current" => progress.current,
+                                    "total" => progress.total,
+                                );
+                                None
+                            } else if progress.total == 0 {
+                                None
+                            } else {
+                                Some(
+                                    f64::from(progress.current)
+                                        / f64::from(progress.total),
+                                )
+                            }
+                        });
+                        self.progress.send_replace(Some(
+                            UpdateProgress::Preparing { progress },
+                        ));
                         tokio::time::sleep(STATUS_POLL_INTERVAL).await;
+                        continue;
                     } else {
-                        return Err(SpUpdateError::FailedToComplete(format!(
-                            "different update is now in progress ({id})"
-                        )));
+                        format!("different update is now preparing ({id})")
+                    }
+                }
+                SpUpdateStatus::InProgress {
+                    id,
+                    bytes_received,
+                    total_bytes,
+                } => {
+                    if id == self.update_id {
+                        let progress = if bytes_received > total_bytes {
+                            warn!(
+                                self.log, "nonsense SP progress";
+                                "bytes_received" => bytes_received,
+                                "total_bytes" => total_bytes,
+                            );
+                            None
+                        } else if total_bytes == 0 {
+                            None
+                        } else {
+                            Some(
+                                f64::from(bytes_received)
+                                    / f64::from(total_bytes),
+                            )
+                        };
+                        self.progress.send_replace(Some(
+                            UpdateProgress::InProgress { progress },
+                        ));
+                        tokio::time::sleep(STATUS_POLL_INTERVAL).await;
+                        continue;
+                    } else {
+                        format!("different update is now in progress ({id})")
                     }
                 }
                 SpUpdateStatus::Complete { id } => {
                     if id == self.update_id {
+                        self.progress.send_replace(Some(
+                            UpdateProgress::InProgress { progress: Some(1.0) },
+                        ));
                         return Ok(());
                     } else {
-                        return Err(SpUpdateError::FailedToComplete(format!(
-                            "different update is now in complete ({id})"
-                        )));
+                        format!("different update is now in complete ({id})")
                     }
                 }
                 SpUpdateStatus::None => {
-                    return Err(SpUpdateError::FailedToComplete(
-                        "update status lost (did the SP reset?)".to_string(),
-                    ));
+                    "update status lost (did the SP reset?)".to_string()
                 }
                 SpUpdateStatus::Aborted { id } => {
                     if id == self.update_id {
-                        return Err(SpUpdateError::FailedToComplete(
-                            "update was aborted".to_string(),
-                        ));
+                        "update was aborted".to_string()
                     } else {
-                        return Err(SpUpdateError::FailedToComplete(format!(
-                            "different update is now in complete ({id})"
-                        )));
+                        format!("different update is now in complete ({id})")
                     }
                 }
                 SpUpdateStatus::Failed { code, id } => {
                     if id == self.update_id {
-                        return Err(SpUpdateError::FailedToComplete(format!(
-                            "update failed (error code {code})"
-                        )));
+                        format!("update failed (error code {code})")
                     } else {
-                        return Err(SpUpdateError::FailedToComplete(format!(
-                            "different update failed ({id})"
-                        )));
+                        format!("different update failed ({id})")
                     }
                 }
                 SpUpdateStatus::RotError { id, message } => {
                     if id == self.update_id {
-                        return Err(SpUpdateError::FailedToComplete(format!(
-                            "update failed (rot error: {message})"
-                        )));
+                        format!("update failed (rot error: {message})")
                     } else {
-                        return Err(SpUpdateError::FailedToComplete(format!(
-                            "different update failed with rot error ({id})"
-                        )));
+                        format!("different update failed with rot error ({id})")
                     }
                 }
-            }
+            };
+
+            self.progress.send_replace(Some(UpdateProgress::Failed(
+                error_message.clone(),
+            )));
+            return Err(SpUpdateError::FailedToComplete(error_message));
         }
     }
 
@@ -262,6 +324,7 @@ impl SpUpdater {
             )
             .await?;
 
+        self.progress.send_replace(Some(UpdateProgress::Complete));
         info!(
             self.log, "SP update complete";
             "mgs_addr" => client.baseurl(),

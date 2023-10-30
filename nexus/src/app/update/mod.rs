@@ -28,7 +28,7 @@ use uuid::Uuid;
 
 mod sp_updater;
 
-pub use sp_updater::{SpUpdateError, SpUpdater};
+pub use sp_updater::{SpUpdateError, SpUpdater, UpdateProgress};
 
 static BASE_ARTIFACT_DIR: &str = "/var/tmp/oxide_artifacts";
 
