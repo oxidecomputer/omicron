@@ -122,19 +122,23 @@ impl<S: StepSpec> EventBuffer<S> {
     ///
     /// This report can be serialized and sent over the wire.
     pub fn generate_report(&self) -> EventReport<S> {
-        self.generate_report_since(None)
+        self.generate_report_since(&mut None)
     }
 
+    /// Generates an [`EventReport`] for this buffer, updating `last_seen` to a
+    /// new value for incremental report generation.
+    ///
+    /// This report can be serialized and sent over the wire.
     pub fn generate_report_since(
         &self,
-        mut last_seen: Option<usize>,
+        last_seen: &mut Option<usize>,
     ) -> EventReport<S> {
         // Gather step events across all keys.
         let mut step_events = Vec::new();
         let mut progress_events = Vec::new();
         for (_, step_data) in self.steps().as_slice() {
             step_events
-                .extend(step_data.step_events_since_impl(last_seen).cloned());
+                .extend(step_data.step_events_since_impl(*last_seen).cloned());
             progress_events
                 .extend(step_data.step_status.progress_event().cloned());
         }
@@ -145,14 +149,14 @@ impl<S: StepSpec> EventBuffer<S> {
         if let Some(last) = step_events.last() {
             // Only update last_seen if there are new step events (otherwise it
             // stays the same).
-            last_seen = Some(last.event_index);
+            *last_seen = Some(last.event_index);
         }
 
         EventReport {
             step_events,
             progress_events,
             root_execution_id: self.root_execution_id(),
-            last_seen,
+            last_seen: *last_seen,
         }
     }
 
@@ -1783,7 +1787,7 @@ mod tests {
             for (i, event) in self.generated_events.iter().enumerate() {
                 for time in 0..times {
                     (event_fn)(&mut buffer, event);
-                    let report = buffer.generate_report_since(last_seen);
+                    let report = buffer.generate_report_since(&mut last_seen);
                     let is_last_event = i == self.generated_events.len() - 1;
                     self.assert_general_properties(
                         &buffer,
@@ -1798,7 +1802,6 @@ mod tests {
                     })
                     .unwrap();
                     reported_step_events.extend(report.step_events);
-                    last_seen = report.last_seen;
 
                     // Ensure that the last root index was updated for this
                     // event's corresponding steps, but not for any others.
@@ -1814,7 +1817,8 @@ mod tests {
 
                     // Call last_seen without feeding a new event in to ensure that
                     // a report with no step events is produced.
-                    let report = buffer.generate_report_since(last_seen);
+                    let mut last_seen_2 = last_seen;
+                    let report = buffer.generate_report_since(&mut last_seen_2);
                     ensure!(
                         report.step_events.is_empty(),
                         "{description}, at index {i} (time {time}),\
@@ -1893,16 +1897,12 @@ mod tests {
             for (i, event) in self.generated_events.iter().enumerate() {
                 let event_added = (event_fn)(&mut buffer, event);
 
-                let report = match last_seen_opt {
+                let report = match &mut last_seen_opt {
                     Some(last_seen) => buffer.generate_report_since(last_seen),
                     None => buffer.generate_report(),
                 };
 
                 let is_last_event = i == self.generated_events.len() - 1;
-                if let Some(last_seen) = &mut last_seen_opt {
-                    *last_seen = report.last_seen;
-                }
-
                 self.assert_general_properties(&buffer, &report, is_last_event)
                     .with_context(|| {
                         format!(
