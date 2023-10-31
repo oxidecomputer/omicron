@@ -169,17 +169,25 @@ impl DataStore {
         opctx: &OpContext,
         external_ip: &ExternalIp,
     ) -> DeleteResult {
-        use db::schema::ipv4_nat_entry::dsl;
-        let now = Utc::now();
-        let updated_rows = diesel::update(dsl::ipv4_nat_entry)
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::external_address.eq(external_ip.ip))
-            .filter(dsl::first_port.eq(external_ip.first_port))
-            .filter(dsl::last_port.eq(external_ip.last_port))
-            .set(dsl::time_deleted.eq(now))
-            .execute_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        let updated_rows = sql_query(
+            "
+            UPDATE omicron.public.ipv4_nat_entry
+            SET
+            version_removed = nextval('omicron.public.ipv4_nat_version'),
+            time_deleted = now()
+            WHERE time_deleted IS NULL
+            AND version_removed IS NULL
+            AND external_address = $1
+            AND first_port = $2
+            AND last_port = $3
+            ",
+        )
+        .bind::<Inet, _>(external_ip.ip)
+        .bind::<Integer, _>(external_ip.first_port)
+        .bind::<Integer, _>(external_ip.last_port)
+        .execute_async(&*self.pool_connection_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         if updated_rows == 0 {
             return Err(Error::ObjectNotFound {
