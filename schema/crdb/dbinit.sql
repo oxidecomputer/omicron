@@ -2624,7 +2624,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS caboose_properties
 /* Inventory Collections */
 
 -- list of all collections
-CREATE TABLE IF NOT EXISTS inv_collection (
+CREATE TABLE IF NOT EXISTS omicron.public.inv_collection (
     id UUID PRIMARY KEY,
     time_started TIMESTAMPTZ NOT NULL,
     time_done TIMESTAMPTZ NOT NULL,
