@@ -3491,7 +3491,7 @@ mod tests {
     ) -> Result<(), Error> {
         use strum::IntoEnumIterator;
         usdt::register_probes().unwrap();
-        let logctx = test_setup_log("test_update_schema_cache_on_new_sample");
+        let logctx = test_setup_log("test_select_all_datum_types");
         let log = &logctx.log;
 
         let client = Client::new(address, &log);
@@ -4013,5 +4013,44 @@ mod tests {
             ),
         );
         assert!(Client::verify_schema_upgrades(&map).is_err());
+    }
+
+    // Regression test for https://github.com/oxidecomputer/omicron/issues/4369.
+    //
+    // This tests that we can successfully query all extant field types from the
+    // schema table. There may be no such values, but the query itself should
+    // succeed.
+    #[tokio::test]
+    async fn test_select_all_field_types() {
+        use strum::IntoEnumIterator;
+        usdt::register_probes().unwrap();
+        let logctx = test_setup_log("test_select_all_field_types");
+        let log = &logctx.log;
+
+        let mut db = ClickHouseInstance::new_single_node(0)
+            .await
+            .expect("Failed to start ClickHouse");
+        let address = SocketAddr::new(Ipv6Addr::LOCALHOST.into(), db.port());
+        let client = Client::new(address, &log);
+        client
+            .init_single_node_db()
+            .await
+            .expect("Failed to initialize timeseries database");
+
+        // Attempt to select all schema with each field type.
+        for ty in oximeter::FieldType::iter() {
+            let sql = format!(
+                "SELECT COUNT() \
+                FROM {}.timeseries_schema \
+                WHERE arrayFirstIndex(x -> x = '{:?}', fields.type) > 0;",
+                crate::DATABASE_NAME,
+                crate::model::DbFieldType::from(ty),
+            );
+            let res = client.execute_with_body(sql).await.unwrap();
+            let count = res.trim().parse::<usize>().unwrap();
+            assert_eq!(count, 0);
+        }
+        db.cleanup().await.expect("Failed to cleanup ClickHouse server");
+        logctx.cleanup_successful();
     }
 }
