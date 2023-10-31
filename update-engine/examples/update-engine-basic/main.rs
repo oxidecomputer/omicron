@@ -50,6 +50,7 @@ impl App {
         let display_style = match self.display_style {
             DisplayStyleOpt::ProgressBar => DisplayStyle::ProgressBar,
             DisplayStyleOpt::Line => DisplayStyle::Line,
+            DisplayStyleOpt::Group => DisplayStyle::Group,
             DisplayStyleOpt::Auto => {
                 if std::io::stdout().is_terminal() {
                     DisplayStyle::ProgressBar
@@ -123,6 +124,7 @@ impl App {
 enum DisplayStyleOpt {
     ProgressBar,
     Line,
+    Group,
     #[default]
     Auto,
 }
@@ -131,6 +133,7 @@ enum DisplayStyleOpt {
 enum DisplayStyle {
     ProgressBar,
     Line,
+    Group,
 }
 
 /// Context shared across steps. This forms the lifetime "'a" defined by the

@@ -13,7 +13,7 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use owo_colors::OwoColorize;
 use tokio::{sync::mpsc, task::JoinHandle};
 use update_engine::{
-    display::{LineDisplay, LineDisplayStyles},
+    display::{GroupDisplay, LineDisplay, LineDisplayStyles},
     events::ProgressCounter,
 };
 
@@ -34,14 +34,18 @@ pub(crate) fn make_displayer(
 ) -> (JoinHandle<Result<()>>, mpsc::Sender<Event>) {
     let (sender, receiver) = mpsc::channel(512);
     let log = log.clone();
-    let join_handle = match display_style {
-        DisplayStyle::ProgressBar => tokio::task::spawn(async move {
-            display_progress_bar(&log, receiver).await
-        }),
-        DisplayStyle::Line => tokio::task::spawn(async move {
-            display_line(&log, receiver, prefix).await
-        }),
-    };
+    let join_handle =
+        match display_style {
+            DisplayStyle::ProgressBar => tokio::task::spawn(async move {
+                display_progress_bar(&log, receiver).await
+            }),
+            DisplayStyle::Line => tokio::task::spawn(async move {
+                display_line(&log, receiver, prefix).await
+            }),
+            DisplayStyle::Group => tokio::task::spawn(async move {
+                display_group(&log, receiver).await
+            }),
+        };
 
     (join_handle, sender)
 }
@@ -67,6 +71,71 @@ async fn display_line(
         buffer.add_event(event);
         display.write_event_buffer(&buffer)?;
     }
+
+    Ok(())
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
+enum GroupDisplayKey {
+    Example,
+    Other,
+}
+
+async fn display_group(
+    log: &slog::Logger,
+    mut receiver: mpsc::Receiver<Event>,
+) -> Result<()> {
+    slog::info!(log, "setting up display");
+
+    let mut display = GroupDisplay::new(
+        [
+            (GroupDisplayKey::Example, "example"),
+            (GroupDisplayKey::Other, "other"),
+        ],
+        std::io::stdout(),
+    );
+    // For now, always colorize. TODO: figure out whether colorization should be
+    // done based on always/auto/never etc.
+    if supports_color::on(supports_color::Stream::Stdout).is_some() {
+        display.set_styles(LineDisplayStyles::colorized());
+    }
+
+    display.set_progress_interval(Duration::from_millis(50));
+
+    let mut example_buffer = EventBuffer::default();
+    let mut example_buffer_last_seen = None;
+    let mut other_buffer = EventBuffer::default();
+    let mut other_buffer_last_seen = None;
+
+    let mut interval = tokio::time::interval(Duration::from_secs(2));
+    interval.tick().await;
+
+    loop {
+        tokio::select! {
+            _ = interval.tick() => {
+                // Print out status lines every 2 seconds.
+                display.write_stats("Status")?;
+            }
+            event = receiver.recv() => {
+                let Some(event) = event else { break };
+                example_buffer.add_event(event.clone());
+                other_buffer.add_event(event);
+
+                display.add_event_report(
+                    &GroupDisplayKey::Example,
+                    example_buffer.generate_report_since(&mut example_buffer_last_seen),
+                )?;
+                display.add_event_report(
+                    &GroupDisplayKey::Other,
+                    other_buffer.generate_report_since(&mut other_buffer_last_seen),
+                )?;
+                display.write_events()?;
+            }
+        }
+    }
+
+    // Print status at the end.
+    display.write_stats("Summary")?;
 
     Ok(())
 }

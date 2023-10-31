@@ -9671,6 +9671,7 @@ dependencies = [
  "swrite",
  "tokio",
  "tokio-stream",
+ "unicode-width",
  "uuid",
 ]
 

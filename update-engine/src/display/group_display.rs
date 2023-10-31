@@ -6,14 +6,18 @@
 
 use std::{borrow::Borrow, collections::BTreeMap, fmt, time::Duration};
 
+use owo_colors::OwoColorize;
+use swrite::{swrite, SWrite};
+use unicode_width::UnicodeWidthStr;
+
 use crate::{
     errors::UnknownReportKey, events::EventReport, EventBuffer,
-    ExecutionTerminalInfo, StepSpec,
+    ExecutionTerminalInfo, StepSpec, TerminalKind,
 };
 
 use super::{
     line_display_shared::LineDisplayFormatter, LineDisplayShared,
-    LineDisplayStyles,
+    LineDisplayStyles, HEADER_WIDTH,
 };
 
 /// A displayer that simultaneously manages and shows line-based output for
@@ -23,7 +27,10 @@ use super::{
 /// is called to obtain the prefix, and `Eq + Ord` is used for keys.
 #[derive(Debug)]
 pub struct GroupDisplay<K, W, S: StepSpec> {
+    // We don't need to add any buffering here because we already write data to
+    // the writer in a line-buffered fashion (see Self::write_events).
     writer: W,
+    max_width: usize,
     single_states: BTreeMap<K, SingleState<S>>,
     formatter: LineDisplayFormatter,
     stats: GroupDisplayStats,
@@ -34,17 +41,34 @@ impl<K: Eq + Ord, W: std::io::Write, S: StepSpec> GroupDisplay<K, W, S> {
     /// prefixes.
     ///
     /// The function passed in is expected to create a writer.
-    pub fn new(
-        keys_and_prefixes: impl IntoIterator<Item = (K, String)>,
+    pub fn new<Str>(
+        keys_and_prefixes: impl IntoIterator<Item = (K, Str)>,
         writer: W,
-    ) -> Self {
+    ) -> Self
+    where
+        Str: Into<String>,
+    {
+        // Right-align prefixes to their maximum width -- this helps keep the
+        // output organized.
+        let mut max_width = 0;
+        let keys_and_prefixes: Vec<_> = keys_and_prefixes
+            .into_iter()
+            .map(|(k, prefix)| {
+                let prefix = prefix.into();
+                max_width =
+                    max_width.max(UnicodeWidthStr::width(prefix.as_str()));
+                (k, prefix)
+            })
+            .collect();
         let single_states: BTreeMap<_, _> = keys_and_prefixes
             .into_iter()
-            .map(|(k, prefix)| (k, SingleState::new(prefix)))
+            .map(|(k, prefix)| (k, SingleState::new(prefix, max_width)))
             .collect();
+
         let not_started = single_states.len();
         Self {
             writer,
+            max_width,
             single_states,
             formatter: LineDisplayFormatter::new(),
             stats: GroupDisplayStats::new(not_started),
@@ -114,6 +138,17 @@ impl<K: Eq + Ord, W: std::io::Write, S: StepSpec> GroupDisplay<K, W, S> {
         }
     }
 
+    /// Writes a "Status" or "Summary" line to the writer with statistics.
+    pub fn write_stats(&mut self, header: &str) -> std::io::Result<()> {
+        // Add a prefix which is equal to the maximum width of the prefixes.
+        // [prefix 00:00:00] takes up self.max_width + 9 characters inside the
+        // brackets.
+        let total_width = self.max_width + 9;
+        let mut line = format!("[{:total_width$}] ", "");
+        self.stats.format_line(&mut line, header, &self.formatter);
+        writeln!(self.writer, "{line}")
+    }
+
     /// Writes all pending events to the writer.
     pub fn write_events(&mut self) -> std::io::Result<()> {
         let mut lines = Vec::new();
@@ -134,36 +169,48 @@ impl<K: Eq + Ord, W: std::io::Write, S: StepSpec> GroupDisplay<K, W, S> {
 
 #[derive(Clone, Copy, Debug)]
 pub struct GroupDisplayStats {
+    /// The total number of reports.
+    pub total: usize,
+
     /// The number of reports that have not yet started.
     pub not_started: usize,
 
     /// The number of reports that are currently running.
     pub running: usize,
 
-    /// The number of reports that have successfully completed.
+    /// The number of reports that indicate successful completion.
     pub completed: usize,
 
-    /// The number of reports that have failed.
+    /// The number of reports that indicate failure.
     pub failed: usize,
 
-    /// The number of reports that have been aborted.
+    /// The number of reports that indicate being aborted.
     pub aborted: usize,
 
     /// The number of reports where we didn't receive a final state and it got
     /// overwritten by another report.
+    ///
+    /// Overwritten reports are considered failures since we don't know what
+    /// happened.
     pub overwritten: usize,
 }
 
 impl GroupDisplayStats {
-    fn new(not_started: usize) -> Self {
+    fn new(total: usize) -> Self {
         Self {
+            total,
+            not_started: total,
             completed: 0,
             failed: 0,
             aborted: 0,
             overwritten: 0,
             running: 0,
-            not_started,
         }
+    }
+
+    /// Returns the number of terminal reports.
+    pub fn terminal_count(&self) -> usize {
+        self.completed + self.failed + self.aborted + self.overwritten
     }
 
     /// Returns true if all reports have reached a terminal state.
@@ -171,20 +218,85 @@ impl GroupDisplayStats {
         self.not_started == 0 && self.running == 0
     }
 
+    /// Returns true if there are any failures.
+    pub fn has_failures(&self) -> bool {
+        self.failed > 0 || self.aborted > 0 || self.overwritten > 0
+    }
+
     fn apply_result(&mut self, result: AddEventReportResult) {
         // Process result.after first to avoid integer underflow.
         match result.after {
             SingleStateTag::NotStarted => self.not_started += 1,
             SingleStateTag::Running => self.running += 1,
-            SingleStateTag::Terminal => self.completed += 1,
+            SingleStateTag::Terminal(TerminalKind::Completed) => {
+                self.completed += 1
+            }
+            SingleStateTag::Terminal(TerminalKind::Failed) => self.failed += 1,
+            SingleStateTag::Terminal(TerminalKind::Aborted) => {
+                self.aborted += 1
+            }
             SingleStateTag::Overwritten => self.overwritten += 1,
         }
 
         match result.before {
             SingleStateTag::NotStarted => self.not_started -= 1,
             SingleStateTag::Running => self.running -= 1,
-            SingleStateTag::Terminal => self.completed -= 1,
+            SingleStateTag::Terminal(TerminalKind::Completed) => {
+                self.completed -= 1
+            }
+            SingleStateTag::Terminal(TerminalKind::Failed) => self.failed -= 1,
+            SingleStateTag::Terminal(TerminalKind::Aborted) => {
+                self.aborted -= 1
+            }
             SingleStateTag::Overwritten => self.overwritten -= 1,
+        }
+    }
+
+    fn format_line(
+        &self,
+        line: &mut String,
+        header: &str,
+        formatter: &LineDisplayFormatter,
+    ) {
+        let header_style = if self.has_failures() {
+            formatter.styles().error_style
+        } else {
+            formatter.styles().progress_style
+        };
+
+        swrite!(line, "{:>HEADER_WIDTH$} ", header.style(header_style));
+        let terminal_count = self.terminal_count();
+        swrite!(
+            line,
+            "{terminal_count}/{}: {} running, {} {}",
+            self.total,
+            self.running.style(formatter.styles().meta_style),
+            self.completed.style(formatter.styles().meta_style),
+            "completed".style(formatter.styles().progress_style),
+        );
+        if self.failed > 0 {
+            swrite!(
+                line,
+                ", {} {}",
+                self.failed.style(formatter.styles().meta_style),
+                "failed".style(formatter.styles().error_style),
+            );
+        }
+        if self.aborted > 0 {
+            swrite!(
+                line,
+                ", {} {}",
+                self.aborted.style(formatter.styles().meta_style),
+                "aborted".style(formatter.styles().error_style),
+            );
+        }
+        if self.overwritten > 0 {
+            swrite!(
+                line,
+                ", {} {}",
+                self.overwritten.style(formatter.styles().meta_style),
+                "overwritten".style(formatter.styles().error_style),
+            );
         }
     }
 }
@@ -197,7 +309,9 @@ struct SingleState<S: StepSpec> {
 }
 
 impl<S: StepSpec> SingleState<S> {
-    fn new(prefix: String) -> Self {
+    fn new(prefix: String, max_width: usize) -> Self {
+        // Right-align the prefix to the maximum width.
+        let prefix = format!("{:>max_width$}", prefix);
         Self {
             shared: LineDisplayShared::new(),
             kind: SingleStateKind::NotStarted { displayed: false },
@@ -219,11 +333,11 @@ impl<S: StepSpec> SingleState<S> {
             }
             SingleStateKind::Running { .. } => SingleStateTag::Running,
 
-            SingleStateKind::Terminal { .. } => {
+            SingleStateKind::Terminal { info, .. } => {
                 // Once we've reached a terminal state, we don't record any more
                 // events.
                 return AddEventReportResult::unchanged(
-                    SingleStateTag::Terminal,
+                    SingleStateTag::Terminal(info.kind),
                 );
             }
             SingleStateKind::Overwritten { .. } => {
@@ -257,11 +371,12 @@ impl<S: StepSpec> SingleState<S> {
             // Grab the event buffer to store it in the terminal state.
             let event_buffer =
                 std::mem::replace(event_buffer, EventBuffer::new(0));
+            let terminal_kind = info.kind;
             self.kind = SingleStateKind::Terminal {
                 info,
                 pending_event_buffer: Some(event_buffer),
             };
-            SingleStateTag::Terminal
+            SingleStateTag::Terminal(terminal_kind)
         } else {
             SingleStateTag::Running
         };
@@ -365,6 +480,6 @@ impl AddEventReportResult {
 enum SingleStateTag {
     NotStarted,
     Running,
-    Terminal,
+    Terminal(TerminalKind),
     Overwritten,
 }

@@ -17,8 +17,8 @@ use swrite::{swrite, SWrite as _};
 
 use crate::{
     events::{
-        LowPriorityStepEventKind, ProgressEvent, StepEvent, StepInfo,
-        StepOutcome,
+        LowPriorityStepEventKind, ProgressCounter, ProgressEvent, StepEvent,
+        StepInfo, StepOutcome,
     },
     AbortInfo, AbortReason, CompletionInfo, EventBuffer, EventBufferStepData,
     ExecutionTerminalInfo, FailureInfo, FailureReason, NestedSpec,
@@ -27,7 +27,9 @@ use crate::{
 
 use super::LineDisplayStyles;
 
-const HEADER_WIDTH: usize = 9;
+// This is chosen to leave enough room for all possible headers: "Completed" at
+// 9 characters is the longest.
+pub(super) const HEADER_WIDTH: usize = 9;
 
 #[derive(Debug)]
 pub(super) struct LineDisplayShared {
@@ -514,20 +516,14 @@ impl LineDisplayShared {
 
             let (before, after) = match progress_event.kind.progress_counter() {
                 Some(counter) => {
-                    let progress_str = match counter.total {
-                        Some(total) => {
-                            format!("{}/{}", counter.current, total)
-                        }
-                        None => format!("{}", counter.current),
-                    };
+                    let progress_str = format_progress_counter(counter);
                     (
                         format!(
                             "{:>HEADER_WIDTH$} ",
                             "Progress".style(formatter.styles.progress_style)
                         ),
                         format!(
-                            "{progress_str} {} after {:.2?}",
-                            counter.units,
+                            "{progress_str} after {:.2?}",
                             leaf_attempt_elapsed
                                 .style(formatter.styles.meta_style),
                         ),
@@ -582,6 +578,24 @@ impl LineDisplayShared {
     }
 }
 
+fn format_progress_counter(counter: &ProgressCounter) -> String {
+    match counter.total {
+        Some(total) => {
+            // Show a percentage value. Correct alignment requires converting to
+            // a string in the middle like this.
+            let percent = (counter.current as f64 / total as f64) * 100.0;
+            // <12.34> is 5 characters wide.
+            let percent_width = 5;
+            let counter_width = total.to_string().len();
+            format!(
+                "{:>percent_width$.2}% ({:>counter_width$}/{} {})",
+                percent, counter.current, total, counter.units,
+            )
+        }
+        None => format!("{} {}", counter.current, counter.units),
+    }
+}
+
 /// State that tracks line display formatting.
 ///
 /// Each `LineDisplay` and `GroupDisplay` has one of these.
@@ -597,6 +611,11 @@ impl LineDisplayFormatter {
             styles: LineDisplayStyles::default(),
             progress_interval: Duration::from_secs(1),
         }
+    }
+
+    #[inline]
+    pub(super) fn styles(&self) -> &LineDisplayStyles {
+        &self.styles
     }
 
     #[inline]
@@ -895,5 +914,30 @@ impl fmt::Display for AsLetters {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_format_progress_counter() {
+        let tests = vec![
+            (ProgressCounter::new(5, 20, "units"), "25.00% ( 5/20 units)"),
+            (ProgressCounter::new(0, 20, "bytes"), " 0.00% ( 0/20 bytes)"),
+            (ProgressCounter::new(20, 20, "cubes"), "100.00% (20/20 cubes)"),
+            // NaN is a weird case that is a buggy update engine impl in practice
+            (ProgressCounter::new(0, 0, "units"), "  NaN% (0/0 units)"),
+            (ProgressCounter::current(5, "units"), "5 units"),
+        ];
+        for (input, output) in tests {
+            assert_eq!(
+                format_progress_counter(&input),
+                output,
+                "format matches for input: {:?}",
+                input
+            );
+        }
     }
 }

@@ -120,7 +120,7 @@ impl LineDisplayStyles {
         let mut ret = Self::default();
         ret.prefix_style = Style::new().bold();
         ret.meta_style = Style::new().bold();
-        ret.step_name_style = Style::new();
+        ret.step_name_style = Style::new().cyan();
         ret.progress_style = Style::new().bold().green();
         ret.progress_message_style = Style::new().green();
         ret.warning_style = Style::new().bold().yellow();
