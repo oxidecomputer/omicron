@@ -9,7 +9,7 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context};
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use tempfile::{Builder, TempDir};
 use thiserror::Error;
 use tokio::{
@@ -163,21 +163,21 @@ impl ClickHouseInstance {
             .env("CH_USER_LOCAL_DIR", access_path)
             .env("CH_FORMAT_SCHEMA_PATH", format_schemas_path)
             .env("CH_REPLICA_NUMBER", r_number)
-            // There seems to be a bug using ipv6 with a replicated set up
-            // when installing all servers and coordinator nodes on the same
-            // server. For this reason we will be using ipv4 for testing.
-            .env("CH_REPLICA_HOST_01", "127.0.0.1")
-            .env("CH_REPLICA_HOST_02", "127.0.0.1")
-            .env("CH_KEEPER_HOST_01", "127.0.0.1")
-            .env("CH_KEEPER_HOST_02", "127.0.0.1")
-            .env("CH_KEEPER_HOST_03", "127.0.0.1")
+            .env("CH_REPLICA_HOST_01", "::1")
+            .env("CH_REPLICA_HOST_02", "::1")
+            // ClickHouse servers have a small quirk, where when defining keeper hosts as ipV6
+            // localhost addresses in the configuration file, they must be wrapped in square brackets.
+            // Otherwise, when running any query, a "Service not found" error appears.
+            .env("CH_KEEPER_HOST_01", "[::1]")
+            .env("CH_KEEPER_HOST_02", "[::1]")
+            .env("CH_KEEPER_HOST_03", "[::1]")
             .spawn()
             .with_context(|| {
                 format!("failed to spawn `clickhouse` (with args: {:?})", &args)
             })?;
 
         let data_path = data_dir.path().to_path_buf();
-        let address = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
+        let address = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), port);
 
         let result = wait_for_ready(log_path).await;
         match result {
@@ -239,12 +239,9 @@ impl ClickHouseInstance {
             .env("CH_KEEPER_ID_01", "1")
             .env("CH_KEEPER_ID_02", "2")
             .env("CH_KEEPER_ID_03", "3")
-            // There seems to be a bug using ipv6 and localhost with a replicated
-            // set up when installing all servers and coordinator nodes on the same
-            // server. For this reason we will be using ipv4 for testing.
-            .env("CH_KEEPER_HOST_01", "127.0.0.1")
-            .env("CH_KEEPER_HOST_02", "127.0.0.1")
-            .env("CH_KEEPER_HOST_03", "127.0.0.1")
+            .env("CH_KEEPER_HOST_01", "::1")
+            .env("CH_KEEPER_HOST_02", "::1")
+            .env("CH_KEEPER_HOST_03", "::1")
             .spawn()
             .with_context(|| {
                 format!(
@@ -254,7 +251,7 @@ impl ClickHouseInstance {
             })?;
 
         let data_path = data_dir.path().to_path_buf();
-        let address = SocketAddr::new("127.0.0.1".parse().unwrap(), port);
+        let address = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), port);
 
         let result = wait_for_ready(log_path).await;
         match result {
