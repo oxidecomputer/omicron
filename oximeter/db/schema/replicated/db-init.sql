@@ -667,7 +667,14 @@ CREATE TABLE IF NOT EXISTS oximeter.timeseries_schema ON CLUSTER oximeter_cluste
             'I64' = 2,
             'IpAddr' = 3,
             'String' = 4,
-            'Uuid' = 6
+            'Uuid' = 6,
+            'I8' = 7,
+            'U8' = 8,
+            'I16' = 9,
+            'U16' = 10,
+            'I32' = 11,
+            'U32' = 12,
+            'U64' = 13
         ),
         source Enum(
             'Target' = 1,
