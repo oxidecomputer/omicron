@@ -165,7 +165,7 @@ impl ClickHouseInstance {
             .env("CH_REPLICA_NUMBER", r_number)
             .env("CH_REPLICA_HOST_01", "::1")
             .env("CH_REPLICA_HOST_02", "::1")
-            // ClickHouse servers have a small quirk, where when setting the keeper hosts as IPv6 localhost 
+            // ClickHouse servers have a small quirk, where when setting the keeper hosts as IPv6 localhost
             // addresses in the replica configuration file, they must be wrapped in square brackets
             // Otherwise, when running any query, a "Service not found" error appears.
             .env("CH_KEEPER_HOST_01", "[::1]")
