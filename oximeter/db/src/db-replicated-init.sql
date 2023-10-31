@@ -652,7 +652,25 @@ CREATE TABLE IF NOT EXISTS oximeter.timeseries_schema ON CLUSTER oximeter_cluste
         'CumulativeI64' = 6,
         'CumulativeF64' = 7,
         'HistogramI64' = 8,
-        'HistogramF64' = 9
+        'HistogramF64' = 9,
+        'I8' = 10,
+        'U8' = 11,
+        'I16' = 12,
+        'U16' = 13,
+        'I32' = 14,
+        'U32' = 15,
+        'U64' = 16,
+        'F32' = 17,
+        'CumulativeU64' = 18,
+        'CumulativeF32' = 19,
+        'HistogramI8' = 20,
+        'HistogramU8' = 21,
+        'HistogramI16' = 22,
+        'HistogramU16' = 23,
+        'HistogramI32' = 24,
+        'HistogramU32' = 25,
+        'HistogramU64' = 26,
+        'HistogramF32' = 27
     ),
     created DateTime64(9, 'UTC')
 )

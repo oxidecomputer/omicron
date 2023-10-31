@@ -40,7 +40,10 @@ use nexus_db_model::ExternalIp;
 use nexus_db_model::Instance;
 use nexus_db_model::Project;
 use nexus_db_model::Region;
+use nexus_db_model::RegionSnapshot;
 use nexus_db_model::Sled;
+use nexus_db_model::Snapshot;
+use nexus_db_model::SnapshotState;
 use nexus_db_model::Vmm;
 use nexus_db_model::Zpool;
 use nexus_db_queries::context::OpContext;
@@ -58,6 +61,7 @@ use omicron_common::api::external::Generation;
 use omicron_common::postgres_config::PostgresConfigWithUrl;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt::Display;
 use std::num::NonZeroU32;
@@ -136,6 +140,8 @@ enum DbCommands {
     Instances,
     /// Print information about the network
     Network(NetworkArgs),
+    /// Print information about snapshots
+    Snapshots(SnapshotArgs),
 }
 
 #[derive(Debug, Args)]
@@ -236,6 +242,26 @@ enum NetworkCommands {
     ListEips,
 }
 
+#[derive(Debug, Args)]
+struct SnapshotArgs {
+    #[command(subcommand)]
+    command: SnapshotCommands,
+}
+
+#[derive(Debug, Subcommand)]
+enum SnapshotCommands {
+    /// Get info for a specific snapshot
+    Info(SnapshotInfoArgs),
+    /// Summarize current snapshots
+    List,
+}
+
+#[derive(Debug, Args)]
+struct SnapshotInfoArgs {
+    /// The UUID of the snapshot
+    uuid: Uuid,
+}
+
 impl DbArgs {
     /// Run a `omdb db` subcommand.
     pub(crate) async fn run_cmd(
@@ -333,7 +359,7 @@ impl DbArgs {
                 cmd_db_sleds(&opctx, &datastore, self.fetch_limit).await
             }
             DbCommands::Instances => {
-                cmd_db_instances(&datastore, self.fetch_limit).await
+                cmd_db_instances(&opctx, &datastore, self.fetch_limit).await
             }
             DbCommands::Network(NetworkArgs {
                 command: NetworkCommands::ListEips,
@@ -342,6 +368,12 @@ impl DbArgs {
                 cmd_db_eips(&opctx, &datastore, self.fetch_limit, *verbose)
                     .await
             }
+            DbCommands::Snapshots(SnapshotArgs {
+                command: SnapshotCommands::Info(uuid),
+            }) => cmd_db_snapshot_info(&opctx, &datastore, uuid).await,
+            DbCommands::Snapshots(SnapshotArgs {
+                command: SnapshotCommands::List,
+            }) => cmd_db_snapshot_list(&datastore, self.fetch_limit).await,
         }
     }
 }
@@ -480,6 +512,8 @@ async fn cmd_db_disk_info(
         disk_name: String,
         instance_name: String,
         propolis_zone: String,
+        volume_id: String,
+        disk_state: String,
     }
 
     // The rows describing the downstairs regions for this disk/volume
@@ -513,7 +547,7 @@ async fn cmd_db_disk_info(
 
     // If the disk is attached to an instance, show information
     // about that instance.
-    if let Some(instance_uuid) = disk.runtime().attach_instance_id {
+    let usr = if let Some(instance_uuid) = disk.runtime().attach_instance_id {
         // Get the instance this disk is attached to
         use db::schema::instance::dsl as instance_dsl;
         use db::schema::vmm::dsl as vmm_dsl;
@@ -540,7 +574,7 @@ async fn cmd_db_disk_info(
 
         let instance_name = instance.instance().name().to_string();
         let disk_name = disk.name().to_string();
-        let usr = if instance.vmm().is_some() {
+        if instance.vmm().is_some() {
             let propolis_id =
                 instance.instance().runtime().propolis_id.unwrap();
             let my_sled_id = instance.sled_id().unwrap();
@@ -556,27 +590,32 @@ async fn cmd_db_disk_info(
                 disk_name,
                 instance_name,
                 propolis_zone: format!("oxz_propolis-server_{}", propolis_id),
+                volume_id: disk.volume_id.to_string(),
+                disk_state: disk.runtime_state.disk_state.to_string(),
             }
         } else {
             UpstairsRow {
                 host_serial: NOT_ON_SLED_MSG.to_string(),
-                propolis_zone: NO_ACTIVE_PROPOLIS_MSG.to_string(),
                 disk_name,
                 instance_name,
+                propolis_zone: NO_ACTIVE_PROPOLIS_MSG.to_string(),
+                volume_id: disk.volume_id.to_string(),
+                disk_state: disk.runtime_state.disk_state.to_string(),
             }
-        };
-        rows.push(usr);
+        }
     } else {
         // If the disk is not attached to anything, just print empty
         // fields.
-        let usr = UpstairsRow {
+        UpstairsRow {
             host_serial: "-".to_string(),
             disk_name: disk.name().to_string(),
             instance_name: "-".to_string(),
             propolis_zone: "-".to_string(),
-        };
-        rows.push(usr);
-    }
+            volume_id: disk.volume_id.to_string(),
+            disk_state: disk.runtime_state.disk_state.to_string(),
+        }
+    };
+    rows.push(usr);
 
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())
@@ -630,19 +669,25 @@ async fn cmd_db_disk_physical(
     limit: NonZeroU32,
     args: &DiskPhysicalArgs,
 ) -> Result<(), anyhow::Error> {
+    let conn = datastore.pool_connection_for_tests().await?;
+
     // We start by finding any zpools that are using the physical disk.
     use db::schema::zpool::dsl as zpool_dsl;
     let zpools = zpool_dsl::zpool
         .filter(zpool_dsl::time_deleted.is_null())
         .filter(zpool_dsl::physical_disk_id.eq(args.uuid))
         .select(Zpool::as_select())
-        .load_async(&*datastore.pool_connection_for_tests().await?)
+        .load_async(&*conn)
         .await
         .context("loading zpool from pysical disk id")?;
 
     let mut sled_ids = HashSet::new();
     let mut dataset_ids = HashSet::new();
 
+    if zpools.is_empty() {
+        println!("Found no zpools on physical disk UUID {}", args.uuid);
+        return Ok(());
+    }
     // The current plan is a single zpool per physical disk, so we expect that
     // this will have a single item.  However, If single zpool per disk ever
     // changes, this code will still work.
@@ -656,7 +701,7 @@ async fn cmd_db_disk_physical(
             .filter(dataset_dsl::time_deleted.is_null())
             .filter(dataset_dsl::pool_id.eq(zp.id()))
             .select(Dataset::as_select())
-            .load_async(&*datastore.pool_connection_for_tests().await?)
+            .load_async(&*conn)
             .await
             .context("loading dataset")?;
 
@@ -681,6 +726,7 @@ async fn cmd_db_disk_physical(
             my_sled.serial_number()
         );
     }
+    println!("DATASETS: {:?}", dataset_ids);
 
     let mut volume_ids = HashSet::new();
     // Now, take the list of datasets we found and search all the regions
@@ -691,7 +737,7 @@ async fn cmd_db_disk_physical(
         let regions = region_dsl::region
             .filter(region_dsl::dataset_id.eq(did))
             .select(Region::as_select())
-            .load_async(&*datastore.pool_connection_for_tests().await?)
+            .load_async(&*conn)
             .await
             .context("loading region")?;
 
@@ -701,7 +747,7 @@ async fn cmd_db_disk_physical(
     }
 
     // At this point, we have a list of volume IDs that contain a region
-    // that is part of a dataset on a pool on our disk.  The final step is
+    // that is part of a dataset on a pool on our disk.  The next step is
     // to find the virtual disks associated with these volume IDs and
     // display information about those disks.
     use db::schema::disk::dsl;
@@ -710,7 +756,7 @@ async fn cmd_db_disk_physical(
         .filter(dsl::volume_id.eq_any(volume_ids))
         .limit(i64::from(u32::from(limit)))
         .select(Disk::as_select())
-        .load_async(&*datastore.pool_connection_for_tests().await?)
+        .load_async(&*conn)
         .await
         .context("loading disks")?;
 
@@ -719,7 +765,7 @@ async fn cmd_db_disk_physical(
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct DiskRow {
-        name: String,
+        disk_name: String,
         id: String,
         state: String,
         instance_name: String,
@@ -738,7 +784,7 @@ async fn cmd_db_disk_physical(
                     .filter(instance_dsl::id.eq(instance_uuid))
                     .limit(1)
                     .select(Instance::as_select())
-                    .load_async(&*datastore.pool_connection_for_tests().await?)
+                    .load_async(&*conn)
                     .await
                     .context("loading requested instance")?;
 
@@ -752,13 +798,82 @@ async fn cmd_db_disk_physical(
             };
 
         rows.push(DiskRow {
-            name: disk.name().to_string(),
+            disk_name: disk.name().to_string(),
             id: disk.id().to_string(),
             state: disk.runtime().disk_state,
             instance_name,
         });
     }
 
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
+
+    // Collect the region_snapshots associated with the dataset IDs
+    use db::schema::region_snapshot::dsl as region_snapshot_dsl;
+    let region_snapshots = region_snapshot_dsl::region_snapshot
+        .filter(region_snapshot_dsl::dataset_id.eq_any(dataset_ids))
+        .limit(i64::from(u32::from(limit)))
+        .select(RegionSnapshot::as_select())
+        .load_async(&*conn)
+        .await
+        .context("loading region snapshots")?;
+
+    check_limit(&region_snapshots, limit, || {
+        "listing region snapshots".to_string()
+    });
+
+    // The row describing the region_snapshot.
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct RegionSnapshotRow {
+        dataset_id: String,
+        region_id: String,
+        snapshot_id: String,
+        volume_references: String,
+    }
+    let mut rsnap = Vec::new();
+
+    // From each region snapshot:
+    // Collect the snapshot IDs for later use.
+    // Display the region snapshot rows.
+    let mut snapshot_ids = HashSet::new();
+    for rs in region_snapshots {
+        snapshot_ids.insert(rs.snapshot_id);
+        let rs = RegionSnapshotRow {
+            dataset_id: rs.dataset_id.to_string(),
+            region_id: rs.region_id.to_string(),
+            snapshot_id: rs.snapshot_id.to_string(),
+            volume_references: rs.volume_references.to_string(),
+        };
+        rsnap.push(rs);
+    }
+    let table = tabled::Table::new(rsnap)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
+
+    // Get the snapshots from the list of IDs we built above.
+    // Display information about those snapshots.
+    use db::schema::snapshot::dsl as snapshot_dsl;
+    let snapshots = snapshot_dsl::snapshot
+        .filter(snapshot_dsl::time_deleted.is_null())
+        .filter(snapshot_dsl::id.eq_any(snapshot_ids))
+        .limit(i64::from(u32::from(limit)))
+        .select(Snapshot::as_select())
+        .load_async(&*conn)
+        .await
+        .context("loading snapshots")?;
+
+    check_limit(&snapshots, limit, || "listing snapshots".to_string());
+
+    let rows =
+        snapshots.into_iter().map(|snapshot| SnapshotRow::from(snapshot));
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())
         .with(tabled::settings::Padding::new(0, 1, 0, 0))
@@ -778,6 +893,154 @@ struct ServiceInstanceRow {
     instance_id: Uuid,
     addr: String,
     sled_serial: String,
+}
+
+// Snapshots
+fn format_snapshot(state: &SnapshotState) -> impl Display {
+    match state {
+        SnapshotState::Creating => "creating".to_string(),
+        SnapshotState::Ready => "ready".to_string(),
+        SnapshotState::Faulted => "faulted".to_string(),
+        SnapshotState::Destroyed => "destroyed".to_string(),
+    }
+}
+
+// The row describing the snapshot
+#[derive(Tabled)]
+#[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+struct SnapshotRow {
+    snap_name: String,
+    id: String,
+    state: String,
+    size: String,
+    source_disk_id: String,
+    source_volume_id: String,
+    destination_volume_id: String,
+}
+
+impl From<Snapshot> for SnapshotRow {
+    fn from(s: Snapshot) -> Self {
+        SnapshotRow {
+            snap_name: s.name().to_string(),
+            id: s.id().to_string(),
+            state: format_snapshot(&s.state).to_string(),
+            size: s.size.to_string(),
+            source_disk_id: s.disk_id.to_string(),
+            source_volume_id: s.volume_id.to_string(),
+            destination_volume_id: s.destination_volume_id.to_string(),
+        }
+    }
+}
+
+/// Run `omdb db snapshot list`.
+async fn cmd_db_snapshot_list(
+    datastore: &DataStore,
+    limit: NonZeroU32,
+) -> Result<(), anyhow::Error> {
+    let ctx = || "listing snapshots".to_string();
+
+    use db::schema::snapshot::dsl;
+    let snapshots = dsl::snapshot
+        .filter(dsl::time_deleted.is_null())
+        .limit(i64::from(u32::from(limit)))
+        .select(Snapshot::as_select())
+        .load_async(&*datastore.pool_connection_for_tests().await?)
+        .await
+        .context("loading snapshots")?;
+
+    check_limit(&snapshots, limit, ctx);
+
+    let rows =
+        snapshots.into_iter().map(|snapshot| SnapshotRow::from(snapshot));
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
+
+    Ok(())
+}
+
+/// Run `omdb db snapshot info <UUID>`.
+async fn cmd_db_snapshot_info(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    args: &SnapshotInfoArgs,
+) -> Result<(), anyhow::Error> {
+    // The rows describing the downstairs regions for this snapshot/volume
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct DownstairsRow {
+        host_serial: String,
+        region: String,
+        zone: String,
+        physical_disk: String,
+    }
+
+    use db::schema::snapshot::dsl as snapshot_dsl;
+    let snapshots = snapshot_dsl::snapshot
+        .filter(snapshot_dsl::id.eq(args.uuid))
+        .limit(1)
+        .select(Snapshot::as_select())
+        .load_async(&*datastore.pool_connection_for_tests().await?)
+        .await
+        .context("loading requested snapshot")?;
+
+    let mut dest_volume_ids = Vec::new();
+    let rows = snapshots.into_iter().map(|snapshot| {
+        dest_volume_ids.push(snapshot.destination_volume_id);
+        SnapshotRow::from(snapshot)
+    });
+    if rows.len() == 0 {
+        bail!("No snapshout with UUID: {} found", args.uuid);
+    }
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
+
+    for vol_id in dest_volume_ids {
+        // Get the dataset backing this volume.
+        let regions = datastore.get_allocated_regions(vol_id).await?;
+
+        let mut rows = Vec::with_capacity(3);
+        for (dataset, region) in regions {
+            let my_pool_id = dataset.pool_id;
+            let (_, my_zpool) = LookupPath::new(opctx, datastore)
+                .zpool_id(my_pool_id)
+                .fetch()
+                .await
+                .context("failed to look up zpool")?;
+
+            let my_sled_id = my_zpool.sled_id;
+
+            let (_, my_sled) = LookupPath::new(opctx, datastore)
+                .sled_id(my_sled_id)
+                .fetch()
+                .await
+                .context("failed to look up sled")?;
+
+            rows.push(DownstairsRow {
+                host_serial: my_sled.serial_number().to_string(),
+                region: region.id().to_string(),
+                zone: format!("oxz_crucible_{}", dataset.id()),
+                physical_disk: my_zpool.physical_disk_id.to_string(),
+            });
+        }
+
+        let table = tabled::Table::new(rows)
+            .with(tabled::settings::Style::empty())
+            .with(tabled::settings::Padding::new(0, 1, 0, 0))
+            .to_string();
+
+        println!("{}", table);
+    }
+
+    Ok(())
 }
 
 /// Run `omdb db services list-instances`.
@@ -947,25 +1210,17 @@ async fn cmd_db_sleds(
 #[derive(Tabled)]
 #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
 struct CustomerInstanceRow {
-    id: Uuid,
+    id: String,
+    name: String,
     state: String,
     propolis_id: MaybePropolisId,
     sled_id: MaybeSledId,
-}
-
-impl From<InstanceAndActiveVmm> for CustomerInstanceRow {
-    fn from(i: InstanceAndActiveVmm) -> Self {
-        CustomerInstanceRow {
-            id: i.instance().id(),
-            state: format!("{:?}", i.effective_state()),
-            propolis_id: (&i).into(),
-            sled_id: (&i).into(),
-        }
-    }
+    host_serial: String,
 }
 
 /// Run `omdb db instances`: list data about customer VMs.
 async fn cmd_db_instances(
+    opctx: &OpContext,
     datastore: &DataStore,
     limit: NonZeroU32,
 ) -> Result<(), anyhow::Error> {
@@ -990,7 +1245,42 @@ async fn cmd_db_instances(
     let ctx = || "listing instances".to_string();
     check_limit(&instances, limit, ctx);
 
-    let rows = instances.into_iter().map(|i| CustomerInstanceRow::from(i));
+    let mut rows = Vec::new();
+    let mut h_to_s: HashMap<Uuid, String> = HashMap::new();
+
+    for i in instances {
+        let host_serial = if i.vmm().is_some() {
+            if let std::collections::hash_map::Entry::Vacant(e) =
+                h_to_s.entry(i.sled_id().unwrap())
+            {
+                let (_, my_sled) = LookupPath::new(opctx, datastore)
+                    .sled_id(i.sled_id().unwrap())
+                    .fetch()
+                    .await
+                    .context("failed to look up sled")?;
+
+                let host_serial = my_sled.serial_number().to_string();
+                e.insert(host_serial.to_string());
+                host_serial.to_string()
+            } else {
+                h_to_s.get(&i.sled_id().unwrap()).unwrap().to_string()
+            }
+        } else {
+            "-".to_string()
+        };
+
+        let cir = CustomerInstanceRow {
+            id: i.instance().id().to_string(),
+            name: i.instance().name().to_string(),
+            state: i.effective_state().to_string(),
+            propolis_id: (&i).into(),
+            sled_id: (&i).into(),
+            host_serial,
+        };
+
+        rows.push(cir);
+    }
+
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())
         .with(tabled::settings::Padding::new(0, 1, 0, 0))
