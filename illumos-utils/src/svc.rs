@@ -11,6 +11,10 @@ use omicron_common::backoff;
 
 #[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
 mod inner {
+    use slog::{warn, Logger};
+
+    use crate::PFEXEC;
+
     use super::*;
 
     // TODO(https://www.illumos.org/issues/13837): This is a hack;
@@ -27,10 +31,19 @@ mod inner {
     pub async fn wait_for_service<'a, 'b>(
         zone: Option<&'a str>,
         fmri: &'b str,
+        log: Logger,
     ) -> Result<(), Error> {
         let name = smf::PropertyName::new("restarter", "state").unwrap();
 
-        let log_notification_failure = |_error, _delay| {};
+        let log_notification_failure = |error, delay| {
+            warn!(
+                log,
+                "wait for service {:?} failed: {}. retry in {:?}",
+                zone,
+                error,
+                delay
+            );
+        };
         backoff::retry_notify(
             backoff::retry_policy_local(),
             || async {
@@ -47,6 +60,22 @@ mod inner {
                         == &smf::PropertyValue::Astring("online".to_string())
                     {
                         return Ok(());
+                    } else {
+                        if let Some(zname) = zone {
+                            if let Err(out) =
+                                tokio::process::Command::new(PFEXEC)
+                                    .env_clear()
+                                    .arg("svcadm")
+                                    .arg("-z")
+                                    .arg(zname)
+                                    .arg("clear")
+                                    .arg("*")
+                                    .output()
+                                    .await
+                            {
+                                warn!(log, "clearing service maintenance failed: {out}");
+                            };
+                        }
                     }
                 }
                 return Err(backoff::BackoffError::transient(

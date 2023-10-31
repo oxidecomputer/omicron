@@ -3118,7 +3118,7 @@ mod test {
 
         // Wait for the networking service.
         let wait_ctx = svc::wait_for_service_context();
-        wait_ctx.expect().return_once(|_, _| Ok(()));
+        wait_ctx.expect().return_once(|_, _, _| Ok(()));
 
         // Import the manifest, enable the service
         let execute_ctx = illumos_utils::execute_context();
