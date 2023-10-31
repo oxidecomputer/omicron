@@ -65,7 +65,7 @@ async fn display_line(
     display.set_progress_interval(Duration::from_millis(50));
     while let Some(event) = receiver.recv().await {
         buffer.add_event(event);
-        display.display_event_buffer(&buffer)?;
+        display.write_event_buffer(&buffer)?;
     }
 
     Ok(())

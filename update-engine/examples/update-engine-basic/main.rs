@@ -194,9 +194,30 @@ impl ExampleContext {
                      ({num_bytes} bytes)",
                     );
 
-                    // Try a second time, and this time go all the way to 100%.
+                    // Try a second time, and this time go to 80%.
                     let mut buf_list = BufList::new();
-                    for i in 0..10 {
+                    for i in 0..8 {
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                        cx.send_progress(StepProgress::with_current_and_total(
+                            num_bytes * i / 10,
+                            num_bytes,
+                            ProgressUnits::BYTES,
+                            serde_json::Value::Null,
+                        ))
+                        .await;
+                        buf_list.push_chunk(&b"downloaded-data"[..]);
+                    }
+
+                    // Now indicate a progress reset.
+                    cx.send_progress(StepProgress::reset(
+                        serde_json::Value::Null,
+                        "Progress reset",
+                    ))
+                    .await;
+
+                    // Try again.
+                    let mut buf_list = BufList::new();
+                    for i in 0..8 {
                         tokio::time::sleep(Duration::from_millis(100)).await;
                         cx.send_progress(StepProgress::with_current_and_total(
                             num_bytes * i / 10,

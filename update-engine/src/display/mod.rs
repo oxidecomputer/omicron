@@ -9,11 +9,13 @@
 //! Currently implemented are:
 //!
 //! * [`LineDisplay`]: a line-oriented display suitable for the command line.
-//! * [`GroupLineDisplay`]: manages state and shows the results of several
+//! * [`GroupDisplay`]: manages state and shows the results of several
 //!   [`LineDisplay`]s at once.
 
-mod group_line_display;
+mod group_display;
 mod line_display;
+mod line_display_shared;
 
-pub use group_line_display::GroupLineDisplay;
+pub use group_display::GroupDisplay;
 pub use line_display::{LineDisplay, LineDisplayStyles};
+use line_display_shared::*;

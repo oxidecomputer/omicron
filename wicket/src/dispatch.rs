@@ -78,11 +78,11 @@ pub(crate) struct GlobalOpts {
 }
 
 impl GlobalOpts {
-    /// Returns true if color should be used.
+    /// Returns true if color should be used on standard error.
     pub(crate) fn use_color(&self) -> bool {
         match self.color {
             ColorChoice::Auto => {
-                supports_color::on_cached(supports_color::Stream::Stdout)
+                supports_color::on_cached(supports_color::Stream::Stderr)
                     .is_some()
             }
             ColorChoice::Always => true,

@@ -7,7 +7,6 @@
 use anyhow::{bail, Result};
 use omicron_common::api::internal::nexus::KnownArtifactKind;
 use once_cell::sync::Lazy;
-use ratatui::text::Text;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::Display;
@@ -173,7 +172,7 @@ impl Component {
     }
 }
 
-// The component type and its slot.
+/// The component type and its slot.
 #[derive(
     Debug,
     Clone,
@@ -253,38 +252,21 @@ impl ComponentId {
         }
     }
 
-    pub fn to_string_standard_case(&self) -> String {
-        match self {
-            ComponentId::Sled(i) => format!("sled {}", i),
-            ComponentId::Switch(i) => format!("switch {}", i),
-            ComponentId::Psc(i) => format!("PSC {}", i),
-        }
+    pub fn to_string_uppercase(&self) -> String {
+        let mut s = self.to_string();
+        s.make_ascii_uppercase();
+        s
     }
 }
 
-/// Prints the component type in all caps.
-///
-/// # Examples
-///
-/// ```
-/// use wicketd::state::inventory::ComponentId;
-/// assert_eq!(ComponentId::Sled(0).to_string(), "SLED 0");
-/// assert_eq!(ComponentId::Switch(0).to_string(), "SWITCH 0");
-/// assert_eq!(ComponentId::Psc(0).to_string(), "PSC 0");
-/// ```
+/// Prints the component type in standard case.
 impl Display for ComponentId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ComponentId::Sled(i) => write!(f, "SLED {}", i),
-            ComponentId::Switch(i) => write!(f, "SWITCH {}", i),
+            ComponentId::Sled(i) => write!(f, "sled {}", i),
+            ComponentId::Switch(i) => write!(f, "switch {}", i),
             ComponentId::Psc(i) => write!(f, "PSC {}", i),
         }
-    }
-}
-
-impl From<ComponentId> for Text<'_> {
-    fn from(value: ComponentId) -> Self {
-        value.to_string().into()
     }
 }
 
@@ -329,5 +311,17 @@ impl PowerState {
             PowerState::A3 => "commanded off",
             PowerState::A4 => "mechanical off (unplugged)",
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn component_id_display() {
+        assert_eq!(ComponentId::Sled(0).to_string(), "sled 0");
+        assert_eq!(ComponentId::Switch(1).to_string(), "switch 1");
+        assert_eq!(ComponentId::Psc(2).to_string(), "PSC 2");
     }
 }

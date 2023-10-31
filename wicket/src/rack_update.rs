@@ -8,7 +8,6 @@
 
 use std::{
     collections::{BTreeMap, BTreeSet},
-    io::Stdout,
     net::SocketAddrV6,
     time::Duration,
 };
@@ -16,11 +15,8 @@ use std::{
 use anyhow::{bail, Context, Result};
 use clap::{Args, Subcommand};
 use slog::Logger;
-use update_engine::{
-    display::{LineDisplay, LineDisplayStyles},
-    ExecutionTerminalStatus,
-};
-use wicket_common::update_events::{EventBuffer, EventReport};
+use update_engine::display::{GroupDisplay, LineDisplayStyles};
+use wicket_common::update_events::EventReport;
 use wicketd_client::types::{StartUpdateOptions, StartUpdateParams};
 
 use crate::{
@@ -171,14 +167,15 @@ async fn do_attach_to_updates(
     global_opts: GlobalOpts,
 ) -> Result<()> {
     // Maintain state for each update ID.
-    let mut states: BTreeMap<_, _> = update_ids
-        .iter()
-        .map(|id| (*id, AttachState::new(*id, global_opts.use_color())))
-        .collect();
-    let mut results = AttachResults::default();
+    let mut display = GroupDisplay::new_with_display(
+        update_ids.iter().copied(),
+        std::io::stderr(),
+    );
+    if global_opts.use_color() {
+        display.set_styles(LineDisplayStyles::colorized());
+    }
 
-    // results.terminal is always a subset of the keys in states.
-    while states.len() > results.terminal.len() {
+    while !display.stats().is_terminal() {
         // TODO: Ideally we'd not fetch the full event report each time and just
         // get diffs from the last report. The capability for this exists in the
         // update-engine, it just needs to be plumbed through the API.
@@ -201,165 +198,23 @@ async fn do_attach_to_updates(
 
         let event_reports = response.into_inner().event_reports;
         let event_reports = parse_event_report_map(&log, event_reports);
+
         // TODO: parallelize this computation?
         for (id, event_report) in event_reports {
-            let Some(state) = states.get_mut(&id) else {
-                // We were never interested in this component ID, so ignore this
-                // report.
-                continue;
-            };
-            state.add_event_report(event_report);
+            // If display.add_event_report errors out, we received a report for
+            // a component we weren't interested in.
+            _ = display.add_event_report(&id, event_report);
         }
 
         // Print out status for each component ID at the end -- do it here so
         // that we also consider components for which we haven't seen status
         // yet.
-        for (id, state) in &mut states {
-            state.display_and_update()?;
-            if let AttachStateKind::Terminal = state.kind {
-                terminal.insert(*id);
-            }
-        }
+        display.write_events()?;
     }
 
     slog::info!(log, "All updates completed"; "num_updates" => update_ids.len());
 
     Ok(())
-}
-
-struct AttachState {
-    kind: AttachStateKind,
-    line_display: LineDisplay<Stdout>,
-}
-
-impl AttachState {
-    fn new(id: ComponentId, use_color: bool) -> AttachState {
-        let mut line_display = LineDisplay::new(std::io::stdout());
-        if use_color {
-            line_display.set_styles(LineDisplayStyles::colorized());
-        }
-
-        line_display.set_prefix(id.to_string_standard_case());
-        AttachState {
-            kind: AttachStateKind::NotStarted { displayed: false },
-            line_display,
-        }
-    }
-
-    /// Adds an event report.
-    fn add_event_report(&mut self, event_report: EventReport) {
-        let was_running = match &self.kind {
-            AttachStateKind::NotStarted { .. } => {
-                self.kind = AttachStateKind::Running {
-                    event_buffer: EventBuffer::new(8),
-                };
-                false
-            }
-            AttachStateKind::Running { .. } => true,
-            AttachStateKind::Terminal { .. }
-            | AttachStateKind::Overwritten { .. } => {
-                // This update has already completed -- assume that the event
-                // buffer is for a new update, which we don't show.
-                return;
-            }
-        };
-
-        let AttachStateKind::Running { event_buffer } = &mut self.kind else {
-            unreachable!("other branches were handled above");
-        };
-
-        if let Some(root_execution_id) = event_buffer.root_execution_id() {
-            if event_report.root_execution_id != Some(root_execution_id) {
-                // The report is for a different execution ID -- assume that
-                // this event is completed and mark our current execution as
-                // completed.
-                self.kind = AttachStateKind::Overwritten { displayed: false };
-                return;
-            }
-        }
-
-        event_buffer.add_event_report(event_report);
-    }
-
-    /// Displays the latest state that must be shown, and updates internal state
-    /// accordingly. Returns true if this has been marked completed.
-    fn display_and_update(&mut self) -> std::io::Result<()> {
-        match &mut self.kind {
-            AttachStateKind::NotStarted { displayed } => {
-                if !*displayed {
-                    self.line_display
-                        .println("Update not started, waiting...")?;
-                    *displayed = true;
-                }
-            }
-            AttachStateKind::Running { event_buffer } => {
-                self.line_display.display_event_buffer(event_buffer)?;
-                // Is this update done?
-                if let Some((status, total_elapsed)) =
-                    event_buffer.root_terminal_status()
-                {
-                    self.line_display
-                        .print_terminal_status(&status, total_elapsed)?;
-                    self.kind = AttachStateKind::Terminal { status };
-                }
-            }
-            AttachStateKind::Terminal { .. } => {
-                // Nothing to do, the terminal status was already printed above.
-            }
-            AttachStateKind::Overwritten { displayed } => {
-                if !*displayed {
-                    self.line_display.println(
-                        "Update overwritten (a different update was started)\
-                                assuming failure",
-                    )?;
-                    *displayed = true;
-                }
-            }
-        }
-
-        Ok(())
-    }
-}
-
-#[derive(Debug)]
-enum AttachStateKind {
-    NotStarted { displayed: bool },
-    Running { event_buffer: EventBuffer },
-    Terminal { status: ExecutionTerminalStatus },
-    Overwritten { displayed: bool },
-}
-
-struct AttachResult
-
-#[derive(Debug, Default)]
-struct AttachResults {
-    terminal: BTreeSet<ComponentId>,
-    stats: AttachStats,
-}
-
-#[derive(Debug, Default)]
-struct AttachStats {
-    /// The number of updates currently running.
-    running: usize,
-
-    /// The number of components for which the update was completed.
-    completed: usize,
-
-    /// The number of components for which the update failed.
-    failed: usize,
-
-    /// The number of components for which the update was aborted.
-    aborted: usize,
-}
-
-impl Stats {
-    fn record(&mut self, status: &ExecutionTerminalStatus) {
-        match status {
-            ExecutionTerminalStatus::Completed { .. } => self.completed += 1,
-            ExecutionTerminalStatus::Failed { .. } => self.failed += 1,
-            ExecutionTerminalStatus::Aborted { .. } => self.aborted += 1,
-        }
-    }
 }
 
 /// Command-line arguments for selecting component IDs.

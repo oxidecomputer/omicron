@@ -109,13 +109,7 @@ impl<S: StepSpec> EventBuffer<S> {
     /// Returns information about terminal status for this buffer's root
     /// execution ID, or None if the execution has not started or is currently
     /// running.
-    ///
-    /// Returns a pair of the terminal status and the total elapsed time. The
-    /// elapsed time may not be present if execution was interrupted in a way
-    /// that we never received a terminal event.
-    pub fn root_terminal_status(
-        &self,
-    ) -> Option<(ExecutionTerminalStatus, Option<Duration>)> {
+    pub fn root_terminal_info(&self) -> Option<ExecutionTerminalInfo> {
         let Some(root_execution_id) = self.root_execution_id() else {
             return None;
         };
@@ -125,8 +119,8 @@ impl<S: StepSpec> EventBuffer<S> {
             .get(&root_execution_id)
             .expect("root execution ID must always be present in summary")
             .execution_status
-            .terminal_status()
-            .map(|(status, total_elapsed)| (status.clone(), total_elapsed))
+            .terminal_info()
+            .cloned()
     }
 
     /// Returns information about each step, as currently tracked by the buffer,
@@ -1342,7 +1336,12 @@ pub enum WillNotBeRunReason {
 pub struct AbortInfo {
     pub attempt: usize,
     pub message: String,
+
+    /// The total elapsed time as reported by the root event.
     pub root_total_elapsed: Duration,
+
+    /// The total elapsed time as reported by the leaf execution event, for
+    /// nested events.
     pub leaf_total_elapsed: Duration,
     pub step_elapsed: Duration,
     pub attempt_elapsed: Duration,
@@ -1376,28 +1375,60 @@ impl ExecutionSummary {
                     execution_status = ExecutionStatus::Running { step_key };
                 }
                 StepStatus::Completed { info } => {
-                    execution_status = ExecutionStatus::Terminal {
-                        status: ExecutionTerminalStatus::Completed { step_key },
-                        total_elapsed: info
-                            .as_ref()
-                            .map(|info| info.leaf_total_elapsed),
+                    let (root_total_elapsed, leaf_total_elapsed) = match info {
+                        Some(info) => (
+                            Some(info.root_total_elapsed),
+                            Some(info.leaf_total_elapsed),
+                        ),
+                        None => (None, None),
                     };
+
+                    let terminal_status = ExecutionTerminalInfo {
+                        kind: TerminalKind::Completed,
+                        root_total_elapsed,
+                        leaf_total_elapsed,
+                        step_key,
+                    };
+                    execution_status =
+                        ExecutionStatus::Terminal(terminal_status);
                 }
                 StepStatus::Failed { reason } => {
-                    execution_status = ExecutionStatus::Terminal {
-                        status: ExecutionTerminalStatus::Failed { step_key },
-                        total_elapsed: reason
-                            .info()
-                            .map(|info| info.leaf_total_elapsed),
+                    let (root_total_elapsed, leaf_total_elapsed) =
+                        match reason.info() {
+                            Some(info) => (
+                                Some(info.root_total_elapsed),
+                                Some(info.leaf_total_elapsed),
+                            ),
+                            None => (None, None),
+                        };
+
+                    let terminal_status = ExecutionTerminalInfo {
+                        kind: TerminalKind::Failed,
+                        root_total_elapsed,
+                        leaf_total_elapsed,
+                        step_key,
                     };
+                    execution_status =
+                        ExecutionStatus::Terminal(terminal_status);
                 }
                 StepStatus::Aborted { reason, .. } => {
-                    execution_status = ExecutionStatus::Terminal {
-                        status: ExecutionTerminalStatus::Aborted { step_key },
-                        total_elapsed: reason
-                            .info()
-                            .map(|info| info.leaf_total_elapsed),
+                    let (root_total_elapsed, leaf_total_elapsed) =
+                        match reason.info() {
+                            Some(info) => (
+                                Some(info.root_total_elapsed),
+                                Some(info.leaf_total_elapsed),
+                            ),
+                            None => (None, None),
+                        };
+
+                    let terminal_status = ExecutionTerminalInfo {
+                        kind: TerminalKind::Aborted,
+                        root_total_elapsed,
+                        leaf_total_elapsed,
+                        step_key,
                     };
+                    execution_status =
+                        ExecutionStatus::Terminal(terminal_status);
                 }
                 StepStatus::WillNotBeRun { .. } => {
                     // Ignore steps that will not be run -- a prior step failed.
@@ -1435,7 +1466,7 @@ impl StepSortKey {
 /// Status about a single execution ID.
 ///
 /// Part of [`ExecutionSummary`].
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ExecutionStatus {
     /// This execution has not been started yet.
     NotStarted,
@@ -1449,43 +1480,49 @@ pub enum ExecutionStatus {
     },
 
     /// Execution has finished.
-    Terminal {
-        /// The terminal status for this execution.
-        status: ExecutionTerminalStatus,
-
-        /// Total elapsed time for this execution.
-        ///
-        /// The total elapsed time may not be available if execution was interrupted.
-        total_elapsed: Option<Duration>,
-    },
+    Terminal(ExecutionTerminalInfo),
 }
 
 /// Terminal status about a single execution ID.
 ///
 /// Part of [`ExecutionStatus`].
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ExecutionTerminalInfo {
+    /// The way in which this execution reached a terminal state.
+    pub kind: TerminalKind,
+
+    /// Total elapsed time (root) for this execution.
+    ///
+    /// The total elapsed time may not be available if execution was interrupted
+    /// and we inferred that it was terminated.
+    pub root_total_elapsed: Option<Duration>,
+
+    /// Total elapsed time (leaf) for this execution.
+    ///
+    /// The total elapsed time may not be available if execution was interrupted
+    /// and we inferred that it was terminated.
+    pub leaf_total_elapsed: Option<Duration>,
+
+    /// The step key that was running when this execution was terminated.
+    ///
+    /// * For completed executions, this is the last step that completed.
+    /// * For failed or aborted executions, this is the step that failed.
+    /// * For aborted executions, this is the step that was running when the
+    ///   abort happened.
+    pub step_key: StepKey,
+}
+
+/// The way in which an execution was terminated.
+///
+/// Part of [`ExecutionStatus`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ExecutionTerminalStatus {
+pub enum TerminalKind {
     /// This execution completed running.
-    Completed {
-        /// The last step that completed.
-        step_key: StepKey,
-    },
-
+    Completed,
     /// This execution failed.
-    Failed {
-        /// The step key that failed.
-        ///
-        /// Use [`EventBuffer::get`] to get more information about this step.
-        step_key: StepKey,
-    },
-
+    Failed,
     /// This execution was aborted.
-    Aborted {
-        /// The step that was running when the abort happened.
-        ///
-        /// Use [`EventBuffer::get`] to get more information about this step.
-        step_key: StepKey,
-    },
+    Aborted,
 }
 
 impl ExecutionStatus {
@@ -1494,14 +1531,10 @@ impl ExecutionStatus {
     ///
     /// The time elapsed might be None if the execution was interrupted and
     /// completion information wasn't available.
-    pub fn terminal_status(
-        &self,
-    ) -> Option<(&ExecutionTerminalStatus, Option<Duration>)> {
+    pub fn terminal_info(&self) -> Option<&ExecutionTerminalInfo> {
         match self {
             Self::NotStarted | Self::Running { .. } => None,
-            Self::Terminal { status, total_elapsed } => {
-                Some((status, *total_elapsed))
-            }
+            Self::Terminal(info) => Some(info),
         }
     }
 }
@@ -2089,11 +2122,9 @@ mod tests {
             if is_last_event {
                 ensure!(
                     matches!(
-                        summary[&root_execution_id].execution_status,
-                        ExecutionStatus::Terminal {
-                            status: ExecutionTerminalStatus::Completed { .. },
-                            ..
-                        },
+                        &summary[&root_execution_id].execution_status,
+                        ExecutionStatus::Terminal(info)
+                            if info.kind == TerminalKind::Completed
                     ),
                     "this is the last event so ExecutionStatus must be completed"
                 );
@@ -2108,11 +2139,9 @@ mod tests {
                     .expect("this is the first nested engine");
                 ensure!(
                     matches!(
-                        nested_summary.execution_status,
-                        ExecutionStatus::Terminal {
-                            status: ExecutionTerminalStatus::Failed { .. },
-                            ..
-                        },
+                        &nested_summary.execution_status,
+                        ExecutionStatus::Terminal(info)
+                            if info.kind == TerminalKind::Failed
                     ),
                     "for this engine, the ExecutionStatus must be failed"
                 );
@@ -2122,11 +2151,9 @@ mod tests {
                     .expect("this is the second nested engine");
                 ensure!(
                     matches!(
-                        nested_summary.execution_status,
-                        ExecutionStatus::Terminal {
-                            status: ExecutionTerminalStatus::Completed { .. },
-                            ..
-                        },
+                        &nested_summary.execution_status,
+                        ExecutionStatus::Terminal(info)
+                            if info.kind == TerminalKind::Completed
                     ),
                     "for this engine, the ExecutionStatus must be succeeded"
                 );
