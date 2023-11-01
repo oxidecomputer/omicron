@@ -8,14 +8,13 @@ use wicket_common::update_events::{
     UpdateStepId,
 };
 
-use crate::rack_update::parse_event_report_map;
 use crate::{events::EventReportMap, ui::defaults::style};
 
-use super::{ComponentId, ALL_COMPONENT_IDS};
+use super::{ComponentId, ParsableComponentId, ALL_COMPONENT_IDS};
 use omicron_common::api::internal::nexus::KnownArtifactKind;
 use serde::{Deserialize, Serialize};
-use slog::Logger;
-use std::collections::BTreeMap;
+use slog::{warn, Logger};
+use std::collections::{BTreeMap, HashSet};
 use std::fmt::Display;
 use wicketd_client::types::{ArtifactId, SemverVersion};
 
@@ -103,17 +102,33 @@ impl RackUpdateState {
             }
         }
 
-        let reports = parse_event_report_map(logger, reports);
-        // Reset all component IDs that aren't in the event report map.
-        for (id, item) in &mut self.items {
-            if !reports.contains_key(id) {
-                item.reset();
+        let mut updated_component_ids = HashSet::new();
+
+        for (sp_type, logs) in reports {
+            for (i, log) in logs {
+                let Ok(id) = ComponentId::try_from(ParsableComponentId {
+                    sp_type: &sp_type,
+                    i: &i,
+                }) else {
+                    warn!(
+                        logger,
+                        "Invalid ComponentId in EventReport: {} {}",
+                        &sp_type,
+                        &i
+                    );
+                    continue;
+                };
+                let item_state = self.items.get_mut(&id).unwrap();
+                item_state.update(log);
+                updated_component_ids.insert(id);
             }
         }
 
-        for (id, report) in reports {
-            let item_state = self.items.get_mut(&id).unwrap();
-            item_state.update(report);
+        // Reset all component IDs that weren't updated.
+        for (id, item) in &mut self.items {
+            if !updated_component_ids.contains(id) {
+                item.reset();
+            }
         }
     }
 }

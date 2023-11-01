@@ -106,23 +106,6 @@ impl<S: StepSpec> EventBuffer<S> {
         self.event_store.root_execution_id
     }
 
-    /// Returns information about terminal status for this buffer's root
-    /// execution ID, or None if the execution has not started or is currently
-    /// running.
-    pub fn root_terminal_info(&self) -> Option<ExecutionTerminalInfo> {
-        let Some(root_execution_id) = self.root_execution_id() else {
-            return None;
-        };
-
-        let summary = self.steps().summarize();
-        summary
-            .get(&root_execution_id)
-            .expect("root execution ID must always be present in summary")
-            .execution_status
-            .terminal_info()
-            .cloned()
-    }
-
     /// Returns information about each step, as currently tracked by the buffer,
     /// in order of when the events were first defined.
     pub fn steps(&self) -> EventBufferSteps<'_, S> {
@@ -265,7 +248,6 @@ impl<S: StepSpec> EventStore<S> {
             &event,
             0,
             None,
-            None,
             root_event_index,
             event.total_elapsed,
         );
@@ -273,29 +255,6 @@ impl<S: StepSpec> EventStore<S> {
             if new_execution.nest_level == 0 {
                 self.root_execution_id = Some(new_execution.execution_id);
             }
-            // If there's a parent key, then what's the child index?
-            let parent_key_and_child_index =
-                if let Some(parent_key) = new_execution.parent_key {
-                    match self.map.get_mut(&parent_key) {
-                        Some(parent_data) => {
-                            let child_index = parent_data.child_executions_seen;
-                            parent_data.child_executions_seen += 1;
-                            Some((parent_key, child_index))
-                        }
-                        None => {
-                            // This should never happen -- it indicates that the
-                            // parent key was unknown. This can happen if we
-                            // didn't receive an event regarding a parent
-                            // execution being started.
-                            //
-                            // TODO: This should probably be an error that gets
-                            // bubbled up to callers.
-                            None
-                        }
-                    }
-                } else {
-                    None
-                };
             let total_steps = new_execution.steps_to_add.len();
             for (new_step_key, new_step, sort_key) in new_execution.steps_to_add
             {
@@ -304,7 +263,6 @@ impl<S: StepSpec> EventStore<S> {
                 self.map.entry(new_step_key).or_insert_with(|| {
                     EventBufferStepData::new(
                         new_step,
-                        parent_key_and_child_index,
                         sort_key,
                         new_execution.nest_level,
                         total_steps,
@@ -361,7 +319,6 @@ impl<S: StepSpec> EventStore<S> {
         &mut self,
         event: &StepEvent<S2>,
         nest_level: usize,
-        parent_key: Option<StepKey>,
         parent_sort_key: Option<&StepSortKey>,
         root_event_index: RootEventIndex,
         root_total_elapsed: Duration,
@@ -390,7 +347,6 @@ impl<S: StepSpec> EventStore<S> {
                 }
                 new_execution = Some(NewExecutionAction {
                     execution_id: event.execution_id,
-                    parent_key,
                     nest_level,
                     steps_to_add,
                 });
@@ -541,7 +497,6 @@ impl<S: StepSpec> EventStore<S> {
                 let actions = self.recurse_for_step_event(
                     nested_event,
                     nest_level + 1,
-                    Some(parent_key),
                     parent_sort_key.as_ref(),
                     root_event_index,
                     root_total_elapsed,
@@ -786,9 +741,6 @@ struct NewExecutionAction {
     // An execution ID corresponding to a new run, if seen.
     execution_id: ExecutionId,
 
-    // The parent key for this execution, if this is a nested step.
-    parent_key: Option<StepKey>,
-
     // The nest level for this execution.
     nest_level: usize,
 
@@ -850,18 +802,12 @@ impl<'buf, S: StepSpec> EventBufferSteps<'buf, S> {
 #[derive_where(Clone, Debug)]
 pub struct EventBufferStepData<S: StepSpec> {
     step_info: StepInfo<NestedSpec>,
-    parent_key_and_child_index: Option<(StepKey, usize)>,
-
     sort_key: StepSortKey,
     // XXX: nest_level and total_steps are common to each execution, but are
-    // stored separately here. These should likely move into
-    // EventBufferExecutionData.
+    // stored separately here. Should we store them in a separate map
+    // indexed by execution ID?
     nest_level: usize,
     total_steps: usize,
-
-    // The number of child executions seen so far.
-    child_executions_seen: usize,
-
     // Invariant: stored in order sorted by leaf event index.
     high_priority: Vec<StepEvent<S>>,
     step_status: StepStatus<S>,
@@ -873,7 +819,6 @@ pub struct EventBufferStepData<S: StepSpec> {
 impl<S: StepSpec> EventBufferStepData<S> {
     fn new(
         step_info: StepInfo<NestedSpec>,
-        parent_key_and_child_index: Option<(StepKey, usize)>,
         sort_key: StepSortKey,
         nest_level: usize,
         total_steps: usize,
@@ -881,11 +826,9 @@ impl<S: StepSpec> EventBufferStepData<S> {
     ) -> Self {
         Self {
             step_info,
-            parent_key_and_child_index,
             sort_key,
             nest_level,
             total_steps,
-            child_executions_seen: 0,
             high_priority: Vec::new(),
             step_status: StepStatus::NotStarted,
             last_root_event_index: root_event_index,
@@ -898,11 +841,6 @@ impl<S: StepSpec> EventBufferStepData<S> {
     }
 
     #[inline]
-    pub fn parent_key_and_child_index(&self) -> Option<(StepKey, usize)> {
-        self.parent_key_and_child_index
-    }
-
-    #[inline]
     pub fn nest_level(&self) -> usize {
         self.nest_level
     }
@@ -910,11 +848,6 @@ impl<S: StepSpec> EventBufferStepData<S> {
     #[inline]
     pub fn total_steps(&self) -> usize {
         self.total_steps
-    }
-
-    #[inline]
-    pub fn child_executions_seen(&self) -> usize {
-        self.child_executions_seen
     }
 
     #[inline]
@@ -1527,20 +1460,6 @@ pub enum TerminalKind {
     Failed,
     /// This execution was aborted.
     Aborted,
-}
-
-impl ExecutionStatus {
-    /// Returns the terminal status and the total amount of time elapsed, or
-    /// None if the execution has not reached a terminal state.
-    ///
-    /// The time elapsed might be None if the execution was interrupted and
-    /// completion information wasn't available.
-    pub fn terminal_info(&self) -> Option<&ExecutionTerminalInfo> {
-        match self {
-            Self::NotStarted | Self::Running { .. } => None,
-            Self::Terminal(info) => Some(info),
-        }
-    }
 }
 
 /// Keys for the event tree.

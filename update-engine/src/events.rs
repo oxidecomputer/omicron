@@ -194,68 +194,6 @@ impl<S: StepSpec> StepEvent<S> {
         }
     }
 
-    /// Converts this event into the corresponding low-priority (leaf) step
-    /// event, recursing into nested events as necessary.
-    ///
-    /// Returns None if this is not a low-priority event.
-    pub fn to_low_priority(&self) -> Option<LowPriorityStepEvent> {
-        let step_and_kind = match &self.kind {
-            StepEventKind::NoStepsDefined
-            | StepEventKind::ExecutionStarted { .. }
-            | StepEventKind::StepCompleted { .. }
-            | StepEventKind::ExecutionCompleted { .. }
-            | StepEventKind::ExecutionFailed { .. }
-            | StepEventKind::ExecutionAborted { .. }
-            | StepEventKind::Unknown => None,
-            StepEventKind::ProgressReset {
-                step,
-                attempt,
-                metadata,
-                step_elapsed,
-                attempt_elapsed,
-                message,
-            } => {
-                let step = step.clone().into_generic();
-                let kind = LowPriorityStepEventKind::ProgressReset {
-                    attempt: *attempt,
-                    metadata: serde_json::to_value(metadata)
-                        .unwrap_or_else(|_| serde_json::Value::Null),
-                    step_elapsed: *step_elapsed,
-                    attempt_elapsed: *attempt_elapsed,
-                    message: message.clone(),
-                };
-                Some((step, kind))
-            }
-            StepEventKind::AttemptRetry {
-                step,
-                next_attempt,
-                step_elapsed,
-                attempt_elapsed,
-                message,
-            } => {
-                let step = step.clone().into_generic();
-                let kind = LowPriorityStepEventKind::AttemptRetry {
-                    next_attempt: *next_attempt,
-                    step_elapsed: *step_elapsed,
-                    attempt_elapsed: *attempt_elapsed,
-                    message: message.clone(),
-                };
-                Some((step, kind))
-            }
-            StepEventKind::Nested { event, .. } => {
-                return event.to_low_priority();
-            }
-        };
-
-        step_and_kind.map(|(step, kind)| LowPriorityStepEvent {
-            leaf_execution_id: self.execution_id,
-            leaf_event_index: self.event_index,
-            leaf_total_elapsed: self.total_elapsed,
-            step,
-            kind,
-        })
-    }
-
     /// Returns the execution ID for the leaf event, recursing into nested
     /// events if necessary.
     pub fn leaf_execution_id(&self) -> ExecutionId {
@@ -882,69 +820,6 @@ pub enum StepEventPriority {
     High,
 }
 
-/// A low-priority step event.
-///
-/// Returned by [`StepEventKind::to_low_priority`].
-#[derive(Clone, Debug)]
-pub struct LowPriorityStepEvent {
-    /// The leaf execution ID.
-    pub leaf_execution_id: ExecutionId,
-
-    /// The leaf event index.
-    pub leaf_event_index: usize,
-
-    /// The total time elapsed for the leaf event.
-    pub leaf_total_elapsed: Duration,
-
-    /// Information about the leaf step.
-    pub step: StepInfoWithMetadata<NestedSpec>,
-
-    /// The kind of low-priority event this is.
-    pub kind: LowPriorityStepEventKind,
-}
-
-/// A kind of low-priority step event.
-///
-/// Part of [`LowPriorityStepEvent::kind`].
-#[derive(Clone, Debug)]
-pub enum LowPriorityStepEventKind {
-    /// Progress was reset along an attempt, and this attempt is going down a
-    /// different path.
-    ProgressReset {
-        /// The current attempt number.
-        attempt: usize,
-
-        /// Progress-related metadata associated with this attempt.
-        metadata: serde_json::Value,
-
-        /// Total time elapsed since the start of the step. Includes prior
-        /// attempts.
-        step_elapsed: Duration,
-
-        /// The amount of time this attempt has taken so far.
-        attempt_elapsed: Duration,
-
-        /// A message assocaited with the reset.
-        message: Cow<'static, str>,
-    },
-
-    /// An attempt failed and this step is being retried.
-    AttemptRetry {
-        /// The attempt number for the next attempt.
-        next_attempt: usize,
-
-        /// Total time elapsed since the start of the step. Includes prior
-        /// attempts.
-        step_elapsed: Duration,
-
-        /// The amount of time the previous attempt took.
-        attempt_elapsed: Duration,
-
-        /// A message associated with the retry.
-        message: Cow<'static, str>,
-    },
-}
-
 #[derive(Deserialize, Serialize, JsonSchema)]
 #[derive_where(Clone, Debug, Eq, PartialEq)]
 #[serde(bound = "", rename_all = "snake_case", tag = "kind")]
@@ -1268,8 +1143,6 @@ impl<S: StepSpec> ProgressEventKind<S> {
 
     /// Returns `step_elapsed` for the leaf event, recursing into nested events
     /// as necessary.
-    ///
-    /// Returns None for unknown events.
     pub fn leaf_step_elapsed(&self) -> Option<Duration> {
         match self {
             ProgressEventKind::WaitingForProgress { step_elapsed, .. }
@@ -1278,25 +1151,6 @@ impl<S: StepSpec> ProgressEventKind<S> {
             }
             ProgressEventKind::Nested { event, .. } => {
                 event.kind.leaf_step_elapsed()
-            }
-            ProgressEventKind::Unknown => None,
-        }
-    }
-
-    /// Returns `attempt_elapsed` for the leaf event, recursing into nested
-    /// events as necessary.
-    ///
-    /// Returns None for unknown events.
-    pub fn leaf_attempt_elapsed(&self) -> Option<Duration> {
-        match self {
-            ProgressEventKind::WaitingForProgress {
-                attempt_elapsed, ..
-            }
-            | ProgressEventKind::Progress { attempt_elapsed, .. } => {
-                Some(*attempt_elapsed)
-            }
-            ProgressEventKind::Nested { event, .. } => {
-                event.kind.leaf_attempt_elapsed()
             }
             ProgressEventKind::Unknown => None,
         }
