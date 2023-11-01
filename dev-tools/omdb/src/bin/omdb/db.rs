@@ -284,8 +284,10 @@ enum ValidateCommands {
     /// Validate each `volume_references` column in the region snapshots table
     ValidateVolumeReferences,
 
-    /// Find region snapshots that the corresponding Crucible agent says were deleted
-    FindDeletedRegionSnapshots,
+    /// Find either region snapshots Nexus knows about that the corresponding
+    /// Crucible agent says were deleted, or region snapshots that Nexus doesn't
+    /// know about.
+    ValidateRegionSnapshots,
 }
 
 impl DbArgs {
@@ -407,13 +409,10 @@ impl DbArgs {
                     .await
             }
             DbCommands::Validate(ValidateArgs {
-                command: ValidateCommands::FindDeletedRegionSnapshots,
+                command: ValidateCommands::ValidateRegionSnapshots,
             }) => {
-                cmd_db_find_deleted_region_snapshots(
-                    &datastore,
-                    self.fetch_limit,
-                )
-                .await
+                cmd_db_validate_region_snapshots(&datastore, self.fetch_limit)
+                    .await
             }
         }
     }
@@ -1818,10 +1817,13 @@ async fn cmd_db_validate_volume_references(
     Ok(())
 }
 
-async fn cmd_db_find_deleted_region_snapshots(
+async fn cmd_db_validate_region_snapshots(
     datastore: &DataStore,
     limit: NonZeroU32,
 ) -> Result<(), anyhow::Error> {
+    let mut regions_to_snapshots_map: BTreeMap<Uuid, HashSet<Uuid>> =
+        BTreeMap::default();
+
     // First, get all region snapshot records (with their corresponding dataset)
     let datasets_and_region_snapshots: Vec<(Dataset, RegionSnapshot)> = {
         let datasets_region_snapshots: Vec<(Dataset, RegionSnapshot)> =
@@ -1867,8 +1869,14 @@ async fn cmd_db_find_deleted_region_snapshots(
 
     let mut rows = Vec::new();
 
-    // Then, for each one, reconcile with the corresponding Crucible Agent
+    // Then, for each one, reconcile with the corresponding Crucible Agent: do
+    // the region_snapshot records match reality?
     for (dataset, region_snapshot) in datasets_and_region_snapshots {
+        regions_to_snapshots_map
+            .entry(region_snapshot.region_id)
+            .or_default()
+            .insert(region_snapshot.snapshot_id);
+
         use crucible_agent_client::types::RegionId;
         use crucible_agent_client::types::State;
         use crucible_agent_client::Client as CrucibleAgentClient;
@@ -1881,8 +1889,6 @@ async fn cmd_db_find_deleted_region_snapshots(
                 region_snapshot.region_id.to_string(),
             ))
             .await?;
-
-        // Print a message if the Agent says that the snapshot was deleted
 
         let snapshot_id = region_snapshot.snapshot_id.to_string();
 
@@ -1992,6 +1998,97 @@ async fn cmd_db_find_deleted_region_snapshots(
 
                 None => {
                     // A running snapshot never existed for this snapshot
+                }
+            }
+        }
+    }
+
+    // Second, get all regions
+    let datasets_and_regions: Vec<(Dataset, Region)> = {
+        let datasets_and_regions: Vec<(Dataset, Region)> = datastore
+            .pool_connection_for_tests()
+            .await?
+            .transaction_async(|conn| async move {
+                // Selecting all datasets and regions requires a full table scan
+                conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
+
+                use db::schema::dataset::dsl as dataset_dsl;
+                use db::schema::region::dsl;
+
+                dsl::region
+                    .inner_join(
+                        dataset_dsl::dataset
+                            .on(dsl::dataset_id.eq(dataset_dsl::id)),
+                    )
+                    .select((Dataset::as_select(), Region::as_select()))
+                    .get_results_async(&conn)
+                    .await
+            })
+            .await?;
+
+        check_limit(&datasets_and_regions, limit, || {
+            String::from("listing datasets and regions")
+        });
+
+        datasets_and_regions
+    };
+
+    // Reconcile with the Crucible agents: are there snapshots that Nexus does
+    // not know about?
+    for (dataset, region) in datasets_and_regions {
+        use crucible_agent_client::types::RegionId;
+        use crucible_agent_client::types::State;
+        use crucible_agent_client::Client as CrucibleAgentClient;
+
+        let url = format!("http://{}", dataset.address());
+        let client = CrucibleAgentClient::new(&url);
+
+        let actual_region_snapshots = client
+            .region_get_snapshots(&RegionId(region.id().to_string()))
+            .await?;
+
+        let default = HashSet::default();
+        let nexus_region_snapshots: &HashSet<Uuid> =
+            regions_to_snapshots_map.get(&region.id()).unwrap_or(&default);
+
+        for actual_region_snapshot in &actual_region_snapshots.snapshots {
+            let snapshot_id: Uuid = actual_region_snapshot.name.parse()?;
+            if !nexus_region_snapshots.contains(&snapshot_id) {
+                rows.push(Row {
+                    dataset_id: dataset.id(),
+                    region_id: region.id(),
+                    snapshot_id,
+                    dataset_addr: dataset.address(),
+                    error: String::from(
+                        "Nexus does not know about this snapshot!",
+                    ),
+                });
+            }
+        }
+
+        for (_, actual_region_running_snapshot) in
+            &actual_region_snapshots.running_snapshots
+        {
+            let snapshot_id: Uuid =
+                actual_region_running_snapshot.name.parse()?;
+
+            match actual_region_running_snapshot.state {
+                State::Destroyed | State::Failed | State::Tombstoned => {
+                    // don't check, Nexus would consider this gone
+                }
+
+                State::Requested | State::Created => {
+                    if !nexus_region_snapshots.contains(&snapshot_id) {
+                        rows.push(Row {
+                            dataset_id: dataset.id(),
+                            region_id: region.id(),
+                            snapshot_id,
+                            dataset_addr: dataset.address(),
+                            error: String::from(
+                                "Nexus does not know about this running snapshot!"
+                            ),
+                        });
+                    }
                 }
             }
         }
