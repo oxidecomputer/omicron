@@ -1424,6 +1424,16 @@ async fn cmd_db_validate_volume_references(
         region_snapshots
     };
 
+    #[derive(Tabled)]
+    struct Row {
+        dataset_id: Uuid,
+        region_id: Uuid,
+        snapshot_id: Uuid,
+        error: String,
+    }
+
+    let mut rows = Vec::new();
+
     // Then, for each, make sure that the `volume_references` matches what is in
     // the volume table
     for region_snapshot in region_snapshots {
@@ -1481,14 +1491,15 @@ async fn cmd_db_validate_volume_references(
             .count();
 
         if matching_volumes != region_snapshot.volume_references as usize {
-            eprintln!(
-                "region snapshot {} {} {} has {} volume references when it should be {}!",
-                region_snapshot.dataset_id,
-                region_snapshot.region_id,
-                region_snapshot.snapshot_id,
-                region_snapshot.volume_references,
-                matching_volumes,
-            );
+            rows.push(Row {
+                dataset_id: region_snapshot.dataset_id,
+                region_id: region_snapshot.region_id,
+                snapshot_id: region_snapshot.snapshot_id,
+                error: format!(
+                    "record has {} volume references when it should be {}!",
+                    region_snapshot.volume_references, matching_volumes,
+                ),
+            });
         } else {
             // The volume references are correct, but additionally check to see
             // deleting is true when matching_volumes is 0. Be careful: in the
@@ -1498,15 +1509,23 @@ async fn cmd_db_validate_volume_references(
             // this region snapshot should have `deleting` set to true.
 
             if matching_volumes == 0 && !region_snapshot.deleting {
-                eprintln!(
-                    "region snapshot {} {} {} has 0 volume references but deleting is false!",
-                    region_snapshot.dataset_id,
-                    region_snapshot.region_id,
-                    region_snapshot.snapshot_id,
-                );
+                rows.push(Row {
+                    dataset_id: region_snapshot.dataset_id,
+                    region_id: region_snapshot.region_id,
+                    snapshot_id: region_snapshot.snapshot_id,
+                    error: String::from(
+                        "record has 0 volume references but deleting is false!",
+                    ),
+                });
             }
         }
     }
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .to_string();
+
+    println!("{}", table);
 
     Ok(())
 }
