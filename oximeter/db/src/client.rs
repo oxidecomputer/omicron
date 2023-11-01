@@ -460,6 +460,17 @@ impl Client {
         Ok(())
     }
 
+    fn full_upgrade_path(
+        replicated: bool,
+        version: u64,
+        schema_dir: impl AsRef<Path>,
+    ) -> PathBuf {
+        schema_dir
+            .as_ref()
+            .join(if replicated { "replicated" } else { "single-node" })
+            .join(version.to_string())
+    }
+
     // Read all SQL files, in order, in the schema directory for the provided
     // version.
     async fn read_schema_upgrade_sql_files(
@@ -468,10 +479,8 @@ impl Client {
         version: u64,
         schema_dir: impl AsRef<Path>,
     ) -> Result<BTreeMap<String, (PathBuf, String)>, Error> {
-        let version_schema_dir = schema_dir
-            .as_ref()
-            .join(if replicated { "replicated" } else { "single-node" })
-            .join(version.to_string());
+        let version_schema_dir =
+            Self::full_upgrade_path(replicated, version, schema_dir.as_ref());
         let mut rd =
             fs::read_dir(&version_schema_dir).await.map_err(|err| {
                 Error::ReadSchemaDir {
@@ -1090,8 +1099,6 @@ impl DbWrite for Client {
 
     /// Initialize the replicated telemetry database, creating tables as needed.
     async fn init_replicated_db(&self) -> Result<(), Error> {
-        // The HTTP client doesn't support multiple statements per query, so we break them out here
-        // manually.
         debug!(self.log, "initializing ClickHouse database");
         self.run_many_sql_statements(include_str!(
             "../schema/replicated/db-init.sql"
@@ -1110,8 +1117,6 @@ impl DbWrite for Client {
 
     /// Initialize a single node telemetry database, creating tables as needed.
     async fn init_single_node_db(&self) -> Result<(), Error> {
-        // The HTTP client doesn't support multiple statements per query, so we break them out here
-        // manually.
         debug!(self.log, "initializing ClickHouse database");
         self.run_many_sql_statements(include_str!(
             "../schema/single-node/db-init.sql"
@@ -1390,6 +1395,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial_test::serial]
     async fn test_replicated() {
         let cur_dir = std::env::current_dir().unwrap();
         let replica_config =
@@ -3681,10 +3687,11 @@ mod tests {
         let schema_dir = TempDir::new().expect("failed to create tempdir");
         let mut paths = Vec::with_capacity(versions.len());
         for version in versions.iter() {
-            let version_dir = schema_dir
-                .path()
-                .join(if replicated { "replicated" } else { "single-node" })
-                .join(version.to_string());
+            let version_dir = Client::full_upgrade_path(
+                replicated,
+                *version,
+                schema_dir.as_ref(),
+            );
             fs::create_dir_all(&version_dir)
                 .await
                 .expect("failed to make version directory");
@@ -3730,26 +3737,25 @@ mod tests {
         logctx.cleanup_successful();
     }
 
-    #[tokio::test]
-    async fn test_apply_one_schema_upgrade() {
-        const TEST_NAME: &str = "test_apply_one_schema_upgrade";
-        let logctx = test_setup_log(TEST_NAME);
-        let log = &logctx.log;
-        let mut db = ClickHouseInstance::new_single_node(0)
-            .await
-            .expect("Failed to start ClickHouse");
-        let address = SocketAddr::new(Ipv6Addr::LOCALHOST.into(), db.port());
+    async fn test_apply_one_schema_upgrade_impl(
+        log: &Logger,
+        address: SocketAddr,
+        replicated: bool,
+    ) {
+        let test_name = format!(
+            "test_apply_one_schema_upgrade_{}",
+            if replicated { "replicated" } else { "single_node" }
+        );
         let client = Client::new(address, &log);
 
         // We'll test moving from version 1, which just creates a database and
         // table, to version 2, which adds two columns to that table in
         // different SQL files.
-        const REPLICATED: bool = false;
-        client.execute(format!("CREATE DATABASE {TEST_NAME};")).await.unwrap();
+        client.execute(format!("CREATE DATABASE {test_name};")).await.unwrap();
         client
             .execute(format!(
                 "\
-            CREATE TABLE {TEST_NAME}.tbl (\
+            CREATE TABLE {test_name}.tbl (\
                 `col0` UInt8 \
             )\
             ENGINE = MergeTree()
@@ -3764,13 +3770,13 @@ mod tests {
         // Note that all of these statements are going in the version 2 schema
         // directory.
         let (schema_dir, version_dirs) =
-            create_test_upgrade_schema_directory(REPLICATED, &[NEXT_VERSION])
+            create_test_upgrade_schema_directory(replicated, &[NEXT_VERSION])
                 .await;
         const NEXT_VERSION: u64 = 2;
         let first_sql =
-            format!("ALTER TABLE {TEST_NAME}.tbl ADD COLUMN `col1` UInt16;");
+            format!("ALTER TABLE {test_name}.tbl ADD COLUMN `col1` UInt16;");
         let second_sql =
-            format!("ALTER TABLE {TEST_NAME}.tbl ADD COLUMN `col2` String;");
+            format!("ALTER TABLE {test_name}.tbl ADD COLUMN `col2` String;");
         let all_sql = [first_sql, second_sql];
         let version_dir = &version_dirs[0];
         for (i, sql) in all_sql.iter().enumerate() {
@@ -3783,7 +3789,7 @@ mod tests {
         // Apply the upgrade itself.
         client
             .apply_one_schema_upgrade(
-                REPLICATED,
+                replicated,
                 NEXT_VERSION,
                 schema_dir.path(),
             )
@@ -3795,7 +3801,7 @@ mod tests {
             .execute_with_body(format!(
                 "\
             SELECT name, type FROM system.columns \
-            WHERE database = '{TEST_NAME}' AND table = 'tbl' \
+            WHERE database = '{test_name}' AND table = 'tbl' \
             ORDER BY name \
             FORMAT CSV;\
         "
@@ -3807,7 +3813,59 @@ mod tests {
         assert_eq!(lines.next().unwrap(), "\"col1\",\"UInt16\"");
         assert_eq!(lines.next().unwrap(), "\"col2\",\"String\"");
         assert!(lines.next().is_none());
+    }
 
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_apply_one_schema_upgrade_replicated() {
+        const TEST_NAME: &str = "test_apply_one_schema_upgrade_replicated";
+        let logctx = test_setup_log(TEST_NAME);
+        let log = &logctx.log;
+        let mut cluster = ClickHouseCluster::new()
+            .await
+            .expect("Failed to initialise ClickHouse Cluster");
+        let address = cluster.replica_1.address;
+        test_apply_one_schema_upgrade_impl(log, address, true).await;
+
+        // TODO-cleanup: These should be arrays.
+        cluster
+            .keeper_1
+            .cleanup()
+            .await
+            .expect("Failed to cleanup ClickHouse keeper 1");
+        cluster
+            .keeper_2
+            .cleanup()
+            .await
+            .expect("Failed to cleanup ClickHouse keeper 2");
+        cluster
+            .keeper_3
+            .cleanup()
+            .await
+            .expect("Failed to cleanup ClickHouse keeper 3");
+        cluster
+            .replica_1
+            .cleanup()
+            .await
+            .expect("Failed to cleanup ClickHouse server 1");
+        cluster
+            .replica_2
+            .cleanup()
+            .await
+            .expect("Failed to cleanup ClickHouse server 2");
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_apply_one_schema_upgrade_single_node() {
+        const TEST_NAME: &str = "test_apply_one_schema_upgrade_single_node";
+        let logctx = test_setup_log(TEST_NAME);
+        let log = &logctx.log;
+        let mut db = ClickHouseInstance::new_single_node(0)
+            .await
+            .expect("Failed to start ClickHouse");
+        let address = SocketAddr::new(Ipv6Addr::LOCALHOST.into(), db.port());
+        test_apply_one_schema_upgrade_impl(log, address, false).await;
         db.cleanup().await.expect("Failed to cleanup ClickHouse server");
         logctx.cleanup_successful();
     }
@@ -3838,31 +3896,31 @@ mod tests {
         )
         .await;
 
+        const BOGUS_VERSION: u64 = u64::MAX;
         let err = client.ensure_schema(
             REPLICATED,
-            1000,
+            BOGUS_VERSION,
             schema_dir.path(),
         ).await
             .expect_err("Should have received an error when ensuring a non-existing version");
         let Error::MissingSchemaVersion(missing) = err else {
             panic!("Expected an Error::MissingSchemaVersion, found {err:?}");
         };
-        assert_eq!(missing, 1000);
+        assert_eq!(missing, BOGUS_VERSION);
 
         db.cleanup().await.expect("Failed to cleanup ClickHouse server");
         logctx.cleanup_successful();
     }
 
-    #[tokio::test]
-    async fn test_ensure_schema_walks_through_multiple_steps() {
-        const TEST_NAME: &str =
-            "test_ensure_schema_walks_through_multiple_steps";
-        let logctx = test_setup_log(TEST_NAME);
-        let log = &logctx.log;
-        let mut db = ClickHouseInstance::new_single_node(0)
-            .await
-            .expect("Failed to start ClickHouse");
-        let address = SocketAddr::new(Ipv6Addr::LOCALHOST.into(), db.port());
+    async fn test_ensure_schema_walks_through_multiple_steps_impl(
+        log: &Logger,
+        address: SocketAddr,
+        replicated: bool,
+    ) {
+        let test_name = format!(
+            "test_ensure_schema_walks_through_multiple_steps_{}",
+            if replicated { "replicated" } else { "single_node" }
+        );
         let client = Client::new(address, &log);
 
         // We need to actually have the oximeter DB here, and the version table,
@@ -3891,12 +3949,11 @@ mod tests {
         // the `test_apply_one_schema_upgrade` test, but we split the two
         // modifications over two versions, rather than as multiple schema
         // upgrades in one version bump.
-        const REPLICATED: bool = false;
-        client.execute(format!("CREATE DATABASE {TEST_NAME};")).await.unwrap();
+        client.execute(format!("CREATE DATABASE {test_name};")).await.unwrap();
         client
             .execute(format!(
                 "\
-            CREATE TABLE {TEST_NAME}.tbl (\
+            CREATE TABLE {test_name}.tbl (\
                 `col0` UInt8 \
             )\
             ENGINE = MergeTree()
@@ -3911,11 +3968,11 @@ mod tests {
         // Note that each statements goes into a different version.
         const VERSIONS: [u64; 2] = [2, 3];
         let (schema_dir, version_dirs) =
-            create_test_upgrade_schema_directory(REPLICATED, &VERSIONS).await;
+            create_test_upgrade_schema_directory(replicated, &VERSIONS).await;
         let first_sql =
-            format!("ALTER TABLE {TEST_NAME}.tbl ADD COLUMN `col1` UInt16;");
+            format!("ALTER TABLE {test_name}.tbl ADD COLUMN `col1` UInt16;");
         let second_sql =
-            format!("ALTER TABLE {TEST_NAME}.tbl ADD COLUMN `col2` String;");
+            format!("ALTER TABLE {test_name}.tbl ADD COLUMN `col2` String;");
         let all_sql = [first_sql, second_sql];
         for (version_dir, sql) in version_dirs.iter().zip(all_sql) {
             let path = version_dir.join("up.sql");
@@ -3926,7 +3983,7 @@ mod tests {
 
         // Apply the sequence of upgrades.
         client
-            .ensure_schema(REPLICATED, VERSIONS[1], schema_dir.path())
+            .ensure_schema(replicated, VERSIONS[1], schema_dir.path())
             .await
             .expect("Failed to apply one schema upgrade");
 
@@ -3935,7 +3992,7 @@ mod tests {
             .execute_with_body(format!(
                 "\
             SELECT name, type FROM system.columns \
-            WHERE database = '{TEST_NAME}' AND table = 'tbl' \
+            WHERE database = '{test_name}' AND table = 'tbl' \
             ORDER BY name \
             FORMAT CSV;\
         "
@@ -3953,8 +4010,66 @@ mod tests {
             latest_version, VERSIONS[1],
             "Updated version not written to the database"
         );
+    }
 
+    #[tokio::test]
+    async fn test_ensure_schema_walks_through_multiple_steps_single_node() {
+        const TEST_NAME: &str =
+            "test_ensure_schema_walks_through_multiple_steps_single_node";
+        let logctx = test_setup_log(TEST_NAME);
+        let log = &logctx.log;
+        let mut db = ClickHouseInstance::new_single_node(0)
+            .await
+            .expect("Failed to start ClickHouse");
+        let address = SocketAddr::new(Ipv6Addr::LOCALHOST.into(), db.port());
+        test_ensure_schema_walks_through_multiple_steps_impl(
+            log, address, false,
+        )
+        .await;
         db.cleanup().await.expect("Failed to cleanup ClickHouse server");
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_ensure_schema_walks_through_multiple_steps_replicated() {
+        const TEST_NAME: &str =
+            "test_ensure_schema_walks_through_multiple_steps_replicated";
+        let logctx = test_setup_log(TEST_NAME);
+        let log = &logctx.log;
+        let mut cluster = ClickHouseCluster::new()
+            .await
+            .expect("Failed to initialise ClickHouse Cluster");
+        let address = cluster.replica_1.address;
+        test_ensure_schema_walks_through_multiple_steps_impl(
+            log, address, true,
+        )
+        .await;
+        cluster
+            .keeper_1
+            .cleanup()
+            .await
+            .expect("Failed to cleanup ClickHouse keeper 1");
+        cluster
+            .keeper_2
+            .cleanup()
+            .await
+            .expect("Failed to cleanup ClickHouse keeper 2");
+        cluster
+            .keeper_3
+            .cleanup()
+            .await
+            .expect("Failed to cleanup ClickHouse keeper 3");
+        cluster
+            .replica_1
+            .cleanup()
+            .await
+            .expect("Failed to cleanup ClickHouse server 1");
+        cluster
+            .replica_2
+            .cleanup()
+            .await
+            .expect("Failed to cleanup ClickHouse server 2");
         logctx.cleanup_successful();
     }
 

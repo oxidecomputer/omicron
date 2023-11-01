@@ -219,6 +219,26 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_f32 ON CLUSTER oximeter_cluster
 )
 ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_f32_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 
+CREATE TABLE IF NOT EXISTS oximeter.measurements_f32_local ON CLUSTER oximeter_cluster
+(
+    timeseries_name String,
+    timeseries_key UInt64,
+    timestamp DateTime64(9, 'UTC'),
+    datum Float32
+)
+ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/measurements_f32_local', '{replica}')
+ORDER BY (timeseries_name, timeseries_key, timestamp)
+TTL toDateTime(timestamp) + INTERVAL 30 DAY;
+
+CREATE TABLE IF NOT EXISTS oximeter.measurements_f32 ON CLUSTER oximeter_cluster
+(
+    timeseries_name String,
+    timeseries_key UInt64,
+    timestamp DateTime64(9, 'UTC'),
+    datum Float64
+)
+ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_f32_local', xxHash64(splitByChar(':', timeseries_name)[1]));
+
 CREATE TABLE IF NOT EXISTS oximeter.measurements_f64_local ON CLUSTER oximeter_cluster
 (
     timeseries_name String,

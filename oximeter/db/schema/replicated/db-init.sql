@@ -199,6 +199,26 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_u64 ON CLUSTER oximeter_cluster
 )
 ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_u64_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 
+CREATE TABLE IF NOT EXISTS oximeter.measurements_f32_local ON CLUSTER oximeter_cluster
+(
+    timeseries_name String,
+    timeseries_key UInt64,
+    timestamp DateTime64(9, 'UTC'),
+    datum Float32
+)
+ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/measurements_f32_local', '{replica}')
+ORDER BY (timeseries_name, timeseries_key, timestamp)
+TTL toDateTime(timestamp) + INTERVAL 30 DAY;
+
+CREATE TABLE IF NOT EXISTS oximeter.measurements_f32 ON CLUSTER oximeter_cluster
+(
+    timeseries_name String,
+    timeseries_key UInt64,
+    timestamp DateTime64(9, 'UTC'),
+    datum Float32
+)
+ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_f32_local', xxHash64(splitByChar(':', timeseries_name)[1]));
+
 CREATE TABLE IF NOT EXISTS oximeter.measurements_f64_local ON CLUSTER oximeter_cluster
 (
     timeseries_name String,
@@ -614,12 +634,82 @@ CREATE TABLE IF NOT EXISTS oximeter.fields_bool ON CLUSTER oximeter_cluster
 ENGINE = ReplicatedReplacingMergeTree()
 ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
 
+CREATE TABLE IF NOT EXISTS oximeter.fields_i8 ON CLUSTER oximeter_cluster
+(
+    timeseries_name String,
+    timeseries_key UInt64,
+    field_name String,
+    field_value Int8
+)
+ENGINE = ReplicatedReplacingMergeTree()
+ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
+
+CREATE TABLE IF NOT EXISTS oximeter.fields_u8 ON CLUSTER oximeter_cluster
+(
+    timeseries_name String,
+    timeseries_key UInt64,
+    field_name String,
+    field_value UInt8
+)
+ENGINE = ReplicatedReplacingMergeTree()
+ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
+
+CREATE TABLE IF NOT EXISTS oximeter.fields_i16 ON CLUSTER oximeter_cluster
+(
+    timeseries_name String,
+    timeseries_key UInt64,
+    field_name String,
+    field_value Int16
+)
+ENGINE = ReplicatedReplacingMergeTree()
+ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
+
+CREATE TABLE IF NOT EXISTS oximeter.fields_u16 ON CLUSTER oximeter_cluster
+(
+    timeseries_name String,
+    timeseries_key UInt64,
+    field_name String,
+    field_value UInt16
+)
+ENGINE = ReplicatedReplacingMergeTree()
+ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
+
+CREATE TABLE IF NOT EXISTS oximeter.fields_i32 ON CLUSTER oximeter_cluster
+(
+    timeseries_name String,
+    timeseries_key UInt64,
+    field_name String,
+    field_value Int32
+)
+ENGINE = ReplicatedReplacingMergeTree()
+ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
+
+CREATE TABLE IF NOT EXISTS oximeter.fields_u32 ON CLUSTER oximeter_cluster
+(
+    timeseries_name String,
+    timeseries_key UInt64,
+    field_name String,
+    field_value UInt32
+)
+ENGINE = ReplicatedReplacingMergeTree()
+ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
+
 CREATE TABLE IF NOT EXISTS oximeter.fields_i64 ON CLUSTER oximeter_cluster
 (
     timeseries_name String,
     timeseries_key UInt64,
     field_name String,
     field_value Int64
+)
+ENGINE = ReplicatedReplacingMergeTree()
+ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
+
+CREATE TABLE IF NOT EXISTS oximeter.fields_u64 ON CLUSTER oximeter_cluster
+(
+    timeseries_name String,
+    timeseries_key UInt64,
+    field_name String,
+    field_value UInt64
 )
 ENGINE = ReplicatedReplacingMergeTree()
 ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
