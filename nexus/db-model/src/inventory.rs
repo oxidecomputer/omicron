@@ -208,12 +208,12 @@ pub struct HwBaseboardId {
     pub serial_number: String,
 }
 
-impl<'a> From<&'a BaseboardId> for HwBaseboardId {
-    fn from(c: &'a BaseboardId) -> Self {
+impl From<BaseboardId> for HwBaseboardId {
+    fn from(c: BaseboardId) -> Self {
         HwBaseboardId {
             id: Uuid::new_v4(),
-            part_number: c.part_number.clone(),
-            serial_number: c.serial_number.clone(),
+            part_number: c.part_number,
+            serial_number: c.serial_number,
         }
     }
 }
@@ -248,14 +248,14 @@ pub struct SwCaboose {
     pub version: String,
 }
 
-impl<'a> From<&'a Caboose> for SwCaboose {
-    fn from(c: &'a Caboose) -> Self {
+impl From<Caboose> for SwCaboose {
+    fn from(c: Caboose) -> Self {
         SwCaboose {
             id: Uuid::new_v4(),
-            board: c.board.clone(),
-            git_commit: c.git_commit.clone(),
-            name: c.name.clone(),
-            version: c.version.clone(),
+            board: c.board,
+            git_commit: c.git_commit,
+            name: c.name,
+            version: c.version,
         }
     }
 }

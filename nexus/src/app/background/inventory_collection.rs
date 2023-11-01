@@ -164,8 +164,11 @@ mod test {
             datastore.clone(),
         );
 
-        // Nexus starts our very background task, so we should find a collection
-        // in the database before too long.
+        // Nexus starts the very background task that we're also testing
+        // manually here.  As a result, we should find a collection in the
+        // database before too long.  Wait for it so that after it appears, we
+        // can assume the rest of the collections came from the instance that
+        // we're testing.
         let mut last_collections =
             poll::wait_for_condition::<_, anyhow::Error, _, _>(
                 || async {

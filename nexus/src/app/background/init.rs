@@ -98,7 +98,7 @@ impl BackgroundTasks {
 
         // Background task: inventory collector
         let task_inventory_collection = {
-            let watcher = inventory_collection::InventoryCollector::new(
+            let collector = inventory_collection::InventoryCollector::new(
                 datastore,
                 resolver,
                 &nexus_id.to_string(),
@@ -112,7 +112,7 @@ impl BackgroundTasks {
                     whole system",
                 ),
                 config.inventory.period_secs,
-                Box::new(watcher),
+                Box::new(collector),
                 opctx.child(BTreeMap::new()),
                 vec![],
             );

@@ -70,12 +70,12 @@ impl DataStore {
         let baseboards = collection
             .baseboards
             .iter()
-            .map(|b| HwBaseboardId::from(b.as_ref()))
+            .map(|b| HwBaseboardId::from((**b).clone()))
             .collect::<Vec<_>>();
         let cabooses = collection
             .cabooses
             .iter()
-            .map(|s| SwCaboose::from(s.as_ref()))
+            .map(|s| SwCaboose::from((**s).clone()))
             .collect::<Vec<_>>();
         let error_values = collection
             .errors
@@ -85,7 +85,7 @@ impl DataStore {
                 let index = u16::try_from(i).map_err(|e| {
                     Error::internal_error(&format!(
                         "failed to convert error index to u16 (too \
-                                many errors in inventory collection?): {}",
+                        many errors in inventory collection?): {}",
                         e
                     ))
                 })?;
@@ -799,56 +799,6 @@ impl DataStore {
         Ok(())
     }
 }
-
-/// A SQL common table expression (CTE) used to insert into `inv_caboose`
-///
-/// Concretely, we have these three tables:
-///
-/// - `hw_baseboard` with an "id" primary key and lookup columns "part_number"
-///    and "serial_number"
-/// - `sw_caboose` with an "id" primary key and lookup columns "board",
-///    "git_commit", "name", and "version"
-/// - `inv_caboose` with foreign keys "hw_baseboard_id", "sw_caboose_id", and
-///    various other columns
-///
-/// We want to INSERT INTO `inv_caboose` a row with:
-///
-/// - hw_baseboard_id (foreign key) the result of looking up an hw_baseboard row
-///   by part number and serial number provided by the caller
-///
-/// - sw_caboose_id (foreign key) the result of looking up a sw_caboose row by
-///   board, git_commit, name, and version provided by the caller
-///
-/// - the other columns being literals provided by the caller
-///
-/// To achieve this, we're going to generate something like:
-///
-/// WITH
-///     my_new_row
-/// AS (
-///     SELECT
-///         hw_baseboard.id, /* `hw_baseboard` foreign key */
-///         sw_caboose.id,   /* `sw_caboose` foreign key */
-///         ...              /* caller-provided literal values for the rest */
-///                          /* of the new inv_caboose row */
-///     FROM
-///         hw_baseboard,
-///         sw_caboose
-///     WHERE
-///         hw_baseboard.part_number = ...   /* caller-provided part number */
-///         hw_baseboard.serial_number = ... /* caller-provided serial number */
-///         sw_caboose.board = ...           /* caller-provided board */
-///         sw_caboose.git_commit = ...      /* caller-provided git_commit */
-///         sw_caboose.name = ...            /* caller-provided name */
-///         sw_caboose.version = ...         /* caller-provided version */
-/// ) INSERT INTO
-///     inv_caboose (... /* inv_caboose columns */)
-///     SELECT * from my_new_row;
-///
-/// The whole point is to avoid back-and-forth between the client and the
-/// database.  Those back-and-forth interactions can significantly increase
-/// latency and the probability of transaction conflicts.  See RFD 192 for
-/// details.
 
 /// Extra interfaces that are not intended (and potentially unsafe) for use in
 /// Nexus, but useful for testing and `omdb`
