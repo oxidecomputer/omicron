@@ -1568,6 +1568,17 @@ async fn cmd_db_find_deleted_region_snapshots(
         datasets_region_snapshots
     };
 
+    #[derive(Tabled)]
+    struct Row {
+        dataset_id: Uuid,
+        region_id: Uuid,
+        snapshot_id: Uuid,
+        dataset_addr: std::net::SocketAddrV6,
+        error: String,
+    }
+
+    let mut rows = Vec::new();
+
     // Then, for each one, reconcile with the corresponding Crucible Agent
     for (dataset, region_snapshot) in datasets_and_region_snapshots {
         use crucible_agent_client::types::RegionId;
@@ -1633,27 +1644,30 @@ async fn cmd_db_find_deleted_region_snapshots(
                             if snapshot.time_deleted().is_some() {
                                 // This is ok - Nexus currently soft-deletes its
                                 // resource records.
-
-                                eprintln!(
-                                    "region snapshot {} {} {} at {} was deleted, please remove its record",
-                                    region_snapshot.dataset_id,
-                                    region_snapshot.region_id,
-                                    region_snapshot.snapshot_id,
-                                    dataset.address(),
-                                );
+                                rows.push(Row {
+                                    dataset_id: region_snapshot.dataset_id,
+                                    region_id: region_snapshot.region_id,
+                                    snapshot_id: region_snapshot.snapshot_id,
+                                    dataset_addr: dataset.address(),
+                                    error: String::from(
+                                        "region snapshot was deleted, please remove its record",
+                                    ),
+                                });
                             } else {
                                 // If the higher level Snapshot was _not_
                                 // deleted, this is a Nexus bug: something told
                                 // the Agent to delete the snapshot when the
                                 // higher level Snapshot was not deleted!
 
-                                eprintln!(
-                                    "NEXUS BUG: region snapshot {} {} {} at {} was deleted, but the higher level snapshot was not!",
-                                    region_snapshot.dataset_id,
-                                    region_snapshot.region_id,
-                                    region_snapshot.snapshot_id,
-                                    dataset.address(),
-                                );
+                                rows.push(Row {
+                                    dataset_id: region_snapshot.dataset_id,
+                                    region_id: region_snapshot.region_id,
+                                    snapshot_id: region_snapshot.snapshot_id,
+                                    dataset_addr: dataset.address(),
+                                    error: String::from(
+                                        "NEXUS BUG: region snapshot was deleted, but the higher level snapshot was not!",
+                                    ),
+                                });
                             }
                         }
 
@@ -1674,14 +1688,16 @@ async fn cmd_db_find_deleted_region_snapshots(
                             // This should have never been allowed to happen by
                             // the Agent, so it's a bug.
 
-                            eprintln!(
-                                "region snapshot {} {} {} at {} was deleted but has a running snapshot in state {:?}! This is a bug in the Agent",
-                                region_snapshot.dataset_id,
-                                region_snapshot.region_id,
-                                region_snapshot.snapshot_id,
-                                dataset.address(),
-                                running_snapshot.state,
-                            );
+                            rows.push(Row {
+                                dataset_id: region_snapshot.dataset_id,
+                                region_id: region_snapshot.region_id,
+                                snapshot_id: region_snapshot.snapshot_id,
+                                dataset_addr: dataset.address(),
+                                error: format!(
+                                    "AGENT BUG: region snapshot was deleted but has a running snapshot in state {:?}!",
+                                    running_snapshot.state,
+                                ),
+                            });
                         }
                     }
                 }
@@ -1692,6 +1708,12 @@ async fn cmd_db_find_deleted_region_snapshots(
             }
         }
     }
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .to_string();
+
+    println!("{}", table);
 
     Ok(())
 }
