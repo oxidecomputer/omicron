@@ -118,7 +118,7 @@ impl Hash for SagaId {
 /// This exists because Omicron cannot implement foreign traits
 /// for foreign types.
 #[derive(
-    AsExpression, Copy, Clone, Debug, FromSqlRow, PartialEq, PartialOrd,
+    AsExpression, Copy, Clone, Debug, FromSqlRow, PartialEq, Eq, PartialOrd, Ord,
 )]
 #[diesel(sql_type = sql_types::BigInt)]
 pub struct SagaNodeId(pub steno::SagaNodeId);

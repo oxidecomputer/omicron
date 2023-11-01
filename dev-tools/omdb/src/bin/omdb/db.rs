@@ -1989,31 +1989,124 @@ fn print_saga_nodes(saga: Option<Saga>, saga_nodes: Vec<SagaNodeEvent>) {
         data: String,
     }
 
-    let rows: Vec<_> = saga_nodes
-        .into_iter()
-        .map(|saga_node: SagaNodeEvent| SagaNodeRow {
+    // Keep track of which saga nodes are subsaga start nodes.
+    let mut sub_saga_starts: BTreeMap<
+        nexus_db_model::saga_types::SagaNodeId,
+        u32,
+    > = BTreeMap::default();
+    let mut sub_saga_counter = 0;
+
+    // Keep track of which nodes belong to which sub sagas
+    let mut sub_saga_map: BTreeMap<
+        nexus_db_model::saga_types::SagaNodeId,
+        u32,
+    > = BTreeMap::default();
+
+    let mut rows: Vec<_> = Vec::with_capacity(saga_nodes.len());
+
+    for saga_node in saga_nodes {
+        let node_id = if let Some(dag) = &dag {
+            let dag_node =
+                dag.get_from_saga_node_id(&saga_node.node_id).unwrap();
+
+            let this_sub_saga_id: Option<u32> = match sub_saga_map
+                .get(&saga_node.node_id)
+            {
+                Some(id) => {
+                    // We already determined this node was part of a sub
+                    // saga.
+                    Some(*id)
+                }
+
+                None => {
+                    // Figure out if we're in an existing sub saga
+                    let mut this_sub_saga_start_node_id = None;
+                    let mut this_sub_saga_id = None;
+
+                    for (sub_saga_start_node_id, sub_saga_id) in
+                        &sub_saga_starts
+                    {
+                        // Is there a path from the start of the sub saga to
+                        // this node? If so, then this node is in the sub saga.
+                        let from: u32 = sub_saga_start_node_id.0.into();
+                        let to: u32 = saga_node.node_id.0.into();
+
+                        if petgraph::algo::has_path_connecting(
+                            &dag.graph,
+                            from.into(),
+                            to.into(),
+                            None,
+                        ) {
+                            this_sub_saga_start_node_id =
+                                Some(*sub_saga_start_node_id);
+                            this_sub_saga_id = Some(*sub_saga_id);
+                            break;
+                        }
+                    }
+
+                    if let Some(this_sub_saga_start_node_id) =
+                        this_sub_saga_start_node_id
+                    {
+                        // Is the sub saga over?
+                        if matches!(dag_node, StenoNode::SubsagaEnd { .. }) {
+                            sub_saga_starts
+                                .remove(&this_sub_saga_start_node_id);
+                        }
+                    } else {
+                        // Did a new sub saga start?
+                        if matches!(dag_node, StenoNode::SubsagaStart { .. })
+                            && saga_node.event_type == *"started"
+                        {
+                            sub_saga_starts
+                                .insert(saga_node.node_id, sub_saga_counter);
+                            sub_saga_counter += 1;
+
+                            this_sub_saga_id = Some(sub_saga_counter - 1);
+                        } else {
+                            // Not in a sub saga
+                        }
+                    }
+
+                    if let Some(this_sub_saga_id) = this_sub_saga_id {
+                        sub_saga_map
+                            .insert(saga_node.node_id, this_sub_saga_id);
+                    }
+
+                    this_sub_saga_id
+                }
+            };
+
+            format!(
+                "{}{:3}: {}",
+                if let Some(this_sub_saga_id) = this_sub_saga_id {
+                    format!("sub saga {:3}: ", this_sub_saga_id)
+                } else {
+                    String::from("")
+                },
+                saga_node.node_id.0,
+                match dag_node {
+                    StenoNode::Start { .. } => String::from("start"),
+                    StenoNode::End => String::from("end"),
+                    StenoNode::Action { action_name, .. } =>
+                        action_name.clone(),
+                    StenoNode::Constant { name, .. } => name.clone(),
+                    StenoNode::SubsagaStart { saga_name, params_node_name } =>
+                        format!(
+                            "subsaga start {} ({})",
+                            saga_name, params_node_name
+                        ),
+                    StenoNode::SubsagaEnd { name } =>
+                        format!("subsaga end {}", name),
+                },
+            )
+        } else {
+            format!("{}", saga_node.node_id.0)
+        };
+
+        rows.push(SagaNodeRow {
             saga_id: saga_node.saga_id.0.into(),
             event_time: saga_node.event_time,
-            node_id: if let Some(dag) = &dag {
-                format!(
-                    "{:3}: {}",
-                    saga_node.node_id.0,
-                    match dag.get_from_saga_node_id(&saga_node.node_id).unwrap()
-                    {
-                        StenoNode::Start { .. } => String::from("start"),
-                        StenoNode::End => String::from("end"),
-                        StenoNode::Action { action_name, .. } =>
-                            action_name.clone(),
-                        StenoNode::Constant { name, .. } => name.clone(),
-                        StenoNode::SubsagaStart { saga_name, .. } =>
-                            format!("subsaga start {}", saga_name),
-                        StenoNode::SubsagaEnd { name } =>
-                            format!("subsaga end {}", name),
-                    },
-                )
-            } else {
-                format!("{}", saga_node.node_id.0)
-            },
+            node_id,
             event_type: saga_node.event_type,
             data: saga_node
                 .data
@@ -2023,7 +2116,7 @@ fn print_saga_nodes(saga: Option<Saga>, saga_nodes: Vec<SagaNodeEvent>) {
                 })
                 .unwrap_or(String::from("")),
         })
-        .collect();
+    }
 
     // Using Tabled isn't recommended: the data column could be huge, and Tabled
     // will print spaces in order to make each column the same size
