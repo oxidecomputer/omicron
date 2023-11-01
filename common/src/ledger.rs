@@ -170,7 +170,7 @@ pub trait Ledgerable: DeserializeOwned + Serialize + Send + Sync {
     async fn read_from(log: &Logger, path: &Utf8Path) -> Result<Self, Error> {
         if path.exists() {
             debug!(log, "Reading ledger from {}", path);
-            serde_json::from_str(
+            <Self as Ledgerable>::deserialize(
                 &tokio::fs::read_to_string(&path)
                     .await
                     .map_err(|err| Error::io_path(&path, err))?,
@@ -199,6 +199,10 @@ pub trait Ledgerable: DeserializeOwned + Serialize + Send + Sync {
             .await
             .map_err(|err| Error::io_path(&path, err))?;
         Ok(())
+    }
+
+    fn deserialize(s: &str) -> Result<Self, serde_json::Error> {
+        serde_json::from_str(s)
     }
 }
 

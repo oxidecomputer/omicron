@@ -278,7 +278,7 @@ impl SledAgent {
         // Use "log" for ourself.
         let log = log.new(o!(
             "component" => "SledAgent",
-            "sled_id" => request.id.to_string(),
+            "sled_id" => request.body.id.to_string(),
         ));
         info!(&log, "SledAgent::new(..) starting");
 
@@ -347,7 +347,7 @@ impl SledAgent {
         storage
             .setup_underlay_access(storage_manager::UnderlayAccess {
                 nexus_client: nexus_client.clone(),
-                sled_id: request.id,
+                sled_id: request.body.id,
             })
             .await?;
 
@@ -391,8 +391,10 @@ impl SledAgent {
         };
         let updates = UpdateManager::new(update_config);
 
-        let svc_config =
-            services::Config::new(request.id, config.sidecar_revision.clone());
+        let svc_config = services::Config::new(
+            request.body.id,
+            config.sidecar_revision.clone(),
+        );
 
         // Get our rack network config from the bootstore; we cannot proceed
         // until we have this, as we need to know which switches have uplinks to
@@ -437,15 +439,15 @@ impl SledAgent {
             svc_config,
             port_manager.clone(),
             *sled_address.ip(),
-            request.rack_id,
+            request.body.rack_id,
             rack_network_config.clone(),
         )?;
 
         let zone_bundler = storage.zone_bundler().clone();
         let sled_agent = SledAgent {
             inner: Arc::new(SledAgentInner {
-                id: request.id,
-                subnet: request.subnet,
+                id: request.body.id,
+                subnet: request.body.subnet,
                 storage,
                 instances,
                 hardware,
