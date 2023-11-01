@@ -41,6 +41,7 @@ members = [
     "nexus/db-model",
     "nexus/db-queries",
     "nexus/defaults",
+    "nexus/inventory",
     "nexus/test-interface",
     "nexus/test-utils-macros",
     "nexus/test-utils",
@@ -108,6 +109,7 @@ default-members = [
     "nexus/db-model",
     "nexus/db-queries",
     "nexus/defaults",
+    "nexus/inventory",
     "nexus/types",
     "oximeter/collector",
     "oximeter/db",
@@ -234,6 +236,7 @@ nexus-client = { path = "clients/nexus-client" }
 nexus-db-model = { path = "nexus/db-model" }
 nexus-db-queries = { path = "nexus/db-queries" }
 nexus-defaults = { path = "nexus/defaults" }
+nexus-inventory = { path = "nexus/inventory" }
 omicron-certificates = { path = "certificates" }
 omicron-passwords = { path = "passwords" }
 omicron-workspace-hack = "0.1.0"
@@ -372,8 +375,8 @@ tufaceous = { path = "tufaceous" }
 tufaceous-lib = { path = "tufaceous-lib" }
 unicode-width = "0.1.11"
 update-engine = { path = "update-engine" }
-uuid = { version = "1.4.1", features = ["serde", "v4"] }
 usdt = "0.3"
+uuid = { version = "1.4.1", features = ["serde", "v4"] }
 walkdir = "2.4"
 wicket = { path = "wicket" }
 wicket-common = { path = "wicket-common" }

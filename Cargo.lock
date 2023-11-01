@@ -4380,6 +4380,7 @@ dependencies = [
  "dropshot",
  "expectorate",
  "futures",
+ "gateway-client",
  "headers",
  "hex",
  "http",
@@ -4393,6 +4394,7 @@ dependencies = [
  "newtype_derive",
  "nexus-db-model",
  "nexus-defaults",
+ "nexus-inventory",
  "nexus-test-utils",
  "nexus-types",
  "omicron-common 0.1.0",
@@ -4453,6 +4455,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-inventory"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "expectorate",
+ "futures",
+ "gateway-client",
+ "gateway-messages",
+ "gateway-test-utils",
+ "nexus-types",
+ "omicron-workspace-hack",
+ "regex",
+ "slog",
+ "strum",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "nexus-test-interface"
 version = "0.1.0"
 dependencies = [
@@ -4479,6 +4501,8 @@ dependencies = [
  "dns-server",
  "dns-service-client 0.1.0",
  "dropshot",
+ "gateway-messages",
+ "gateway-test-utils",
  "headers",
  "http",
  "hyper",
@@ -4526,6 +4550,7 @@ dependencies = [
  "chrono",
  "dns-service-client 0.1.0",
  "futures",
+ "gateway-client",
  "newtype_derive",
  "omicron-common 0.1.0",
  "omicron-passwords 0.1.0",
@@ -5070,6 +5095,7 @@ dependencies = [
  "nexus-db-model",
  "nexus-db-queries",
  "nexus-defaults",
+ "nexus-inventory",
  "nexus-test-interface",
  "nexus-test-utils",
  "nexus-test-utils-macros",

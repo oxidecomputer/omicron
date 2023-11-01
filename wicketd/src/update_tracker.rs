@@ -839,25 +839,21 @@ impl UpdateDriver {
 
                     let message = format!(
                         "SP board {}, version {} (git commit {})",
-                        caboose.board,
-                        caboose.version.as_deref().unwrap_or("unknown"),
-                        caboose.git_commit
+                        caboose.board, caboose.version, caboose.git_commit
                     );
-                    match caboose.version.map(|v| v.parse::<SemverVersion>()) {
-                        Some(Ok(version)) => {
+                    match caboose.version.parse::<SemverVersion>() {
+                        Ok(version) => {
                             StepSuccess::new((sp_artifact, Some(version)))
                                 .with_message(message)
                                 .into()
                         }
-                        Some(Err(err)) => StepWarning::new(
+                        Err(err) => StepWarning::new(
                             (sp_artifact, None),
                             format!(
                                 "{message} (failed to parse SP version: {err})"
                             ),
                         )
                         .into(),
-                        None => StepWarning::new((sp_artifact, None), message)
-                            .into(),
                     }
                 },
             )
@@ -1769,8 +1765,7 @@ impl UpdateContext {
 
         let message = format!(
             "RoT slot {active_slot_name} version {} (git commit {})",
-            caboose.version.as_deref().unwrap_or("unknown"),
-            caboose.git_commit
+            caboose.version, caboose.git_commit
         );
 
         let make_result = |active_version| RotInterrogation {
@@ -1779,16 +1774,15 @@ impl UpdateContext {
             active_version,
         };
 
-        match caboose.version.map(|v| v.parse::<SemverVersion>()) {
-            Some(Ok(version)) => StepSuccess::new(make_result(Some(version)))
+        match caboose.version.parse::<SemverVersion>() {
+            Ok(version) => StepSuccess::new(make_result(Some(version)))
                 .with_message(message)
                 .into(),
-            Some(Err(err)) => StepWarning::new(
+            Err(err) => StepWarning::new(
                 make_result(None),
                 format!("{message} (failed to parse RoT version: {err})"),
             )
             .into(),
-            None => StepWarning::new(make_result(None), message).into(),
         }
     }
 

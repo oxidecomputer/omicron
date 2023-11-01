@@ -349,6 +349,8 @@ impl Nexus {
             &background_ctx,
             Arc::clone(&db_datastore),
             &config.pkg.background_tasks,
+            config.deployment.id,
+            resolver.clone(),
         );
 
         let external_resolver = {
