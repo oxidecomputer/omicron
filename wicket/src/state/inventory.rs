@@ -4,7 +4,8 @@
 
 //! Information about all top-level Oxide components (sleds, switches, PSCs)
 
-use anyhow::anyhow;
+use anyhow::{bail, Result};
+use omicron_common::api::internal::nexus::KnownArtifactKind;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -64,26 +65,13 @@ impl Inventory {
             };
 
             // Validate and get a ComponentId
-            let (id, component) = match type_ {
-                SpType::Sled => {
-                    if i > 31 {
-                        return Err(anyhow!("Invalid sled slot: {}", i));
-                    }
-                    (ComponentId::Sled(i as u8), Component::Sled(sp))
-                }
-                SpType::Switch => {
-                    if i > 1 {
-                        return Err(anyhow!("Invalid switch slot: {}", i));
-                    }
-                    (ComponentId::Switch(i as u8), Component::Switch(sp))
-                }
-                SpType::Power => {
-                    if i > 1 {
-                        return Err(anyhow!("Invalid power shelf slot: {}", i));
-                    }
-                    (ComponentId::Psc(i as u8), Component::Psc(sp))
-                }
+            let id = ComponentId::from_sp_type_and_slot(type_, i as u8)?;
+            let component = match type_ {
+                SpType::Sled => Component::Sled(sp),
+                SpType::Switch => Component::Switch(sp),
+                SpType::Power => Component::Psc(sp),
             };
+
             new_inventory.inventory.insert(id, component);
 
             // TODO: Plumb through real power state
@@ -204,6 +192,66 @@ pub enum ComponentId {
 }
 
 impl ComponentId {
+    /// The maximum possible sled ID.
+    pub const MAX_SLED_ID: u8 = 31;
+
+    /// The maximum possible switch ID.
+    pub const MAX_SWITCH_ID: u8 = 1;
+
+    /// The maximum possible power shelf ID.
+    ///
+    /// Currently shipping racks don't have PSC 1.
+    pub const MAX_PSC_ID: u8 = 0;
+
+    pub fn new_sled(slot: u8) -> Result<Self> {
+        if slot > Self::MAX_SLED_ID {
+            bail!("Invalid sled slot: {}", slot);
+        }
+        Ok(Self::Sled(slot))
+    }
+
+    pub fn new_switch(slot: u8) -> Result<Self> {
+        if slot > Self::MAX_SWITCH_ID {
+            bail!("Invalid switch slot: {}", slot);
+        }
+        Ok(Self::Switch(slot))
+    }
+
+    pub fn new_psc(slot: u8) -> Result<Self> {
+        if slot > Self::MAX_PSC_ID {
+            bail!("Invalid power shelf slot: {}", slot);
+        }
+        Ok(Self::Psc(slot))
+    }
+
+    pub fn from_sp_type_and_slot(sp_type: SpType, slot: u8) -> Result<Self> {
+        match sp_type {
+            SpType::Sled => Self::new_sled(slot),
+            SpType::Switch => Self::new_switch(slot),
+            SpType::Power => Self::new_psc(slot),
+        }
+    }
+
+    pub fn name(&self) -> String {
+        self.to_string()
+    }
+
+    pub fn sp_known_artifact_kind(&self) -> KnownArtifactKind {
+        match self {
+            ComponentId::Sled(_) => KnownArtifactKind::GimletSp,
+            ComponentId::Switch(_) => KnownArtifactKind::SwitchSp,
+            ComponentId::Psc(_) => KnownArtifactKind::PscSp,
+        }
+    }
+
+    pub fn rot_known_artifact_kind(&self) -> KnownArtifactKind {
+        match self {
+            ComponentId::Sled(_) => KnownArtifactKind::GimletRot,
+            ComponentId::Switch(_) => KnownArtifactKind::SwitchRot,
+            ComponentId::Psc(_) => KnownArtifactKind::PscRot,
+        }
+    }
+
     pub fn to_string_uppercase(&self) -> String {
         let mut s = self.to_string();
         s.make_ascii_uppercase();

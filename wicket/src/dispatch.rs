@@ -8,12 +8,13 @@ use std::net::{Ipv6Addr, SocketAddrV6};
 
 use anyhow::{bail, Context, Result};
 use camino::{Utf8Path, Utf8PathBuf};
-use clap::Parser;
+use clap::{Args, ColorChoice, Parser, Subcommand};
 use omicron_common::{address::WICKETD_PORT, FileKv};
 use slog::Drain;
 
 use crate::{
-    preflight::PreflightArgs, rack_setup::SetupArgs, upload::UploadArgs, Runner,
+    preflight::PreflightArgs, rack_setup::SetupArgs,
+    rack_update::RackUpdateArgs, upload::UploadArgs, Runner,
 };
 
 pub fn exec() -> Result<()> {
@@ -27,14 +28,22 @@ pub fn exec() -> Result<()> {
             format!("could not parse shell arguments from input {ssh_args}")
         })?;
 
-        let log = setup_log(&log_path()?, WithStderr::Yes)?;
         // parse_from uses the the first argument as the command name. Insert "wicket" as
         // the command name.
-        let args = ShellCommand::parse_from(
+        let app = ShellApp::parse_from(
             std::iter::once("wicket".to_owned()).chain(args),
         );
-        match args {
+
+        let log = setup_log(
+            &log_path()?,
+            WithStderr::Yes { use_color: app.global_opts.use_color() },
+        )?;
+
+        match app.command {
             ShellCommand::UploadRepo(args) => args.exec(log, wicketd_addr),
+            ShellCommand::RackUpdate(args) => {
+                args.exec(log, wicketd_addr, app.global_opts)
+            }
             ShellCommand::Setup(args) => args.exec(log, wicketd_addr),
             ShellCommand::Preflight(args) => args.exec(log, wicketd_addr),
         }
@@ -46,20 +55,62 @@ pub fn exec() -> Result<()> {
     }
 }
 
+/// An app that represents wicket started with arguments over ssh.
+#[derive(Debug, Parser)]
+struct ShellApp {
+    /// Global options.
+    #[clap(flatten)]
+    global_opts: GlobalOpts,
+
+    /// The command to run.
+    #[clap(subcommand)]
+    command: ShellCommand,
+}
+
+#[derive(Debug, Args)]
+#[clap(next_help_heading = "Global options")]
+pub(crate) struct GlobalOpts {
+    /// Color output (auto, always, never)
+    ///
+    /// This may not work everywhere at the moment.
+    #[clap(long, value_enum, global = true, default_value_t)]
+    pub(crate) color: ColorChoice,
+}
+
+impl GlobalOpts {
+    /// Returns true if color should be used on standard error.
+    pub(crate) fn use_color(&self) -> bool {
+        match self.color {
+            ColorChoice::Auto => {
+                supports_color::on_cached(supports_color::Stream::Stderr)
+                    .is_some()
+            }
+            ColorChoice::Always => true,
+            ColorChoice::Never => false,
+        }
+    }
+}
+
 /// Arguments passed to wicket.
 ///
 /// Wicket is designed to be used as a captive shell, set up via sshd
 /// ForceCommand. If no arguments are specified, wicket behaves like a TUI.
 /// However, if arguments are specified via SSH_ORIGINAL_COMMAND, wicketd
 /// accepts an upload command.
-#[derive(Debug, Parser)]
+#[derive(Debug, Subcommand)]
 enum ShellCommand {
     /// Upload a TUF repository to wicketd.
     #[command(visible_alias = "upload")]
     UploadRepo(UploadArgs),
+
+    /// Perform a rack update.
+    #[command(subcommand)]
+    RackUpdate(RackUpdateArgs),
+
     /// Interact with rack setup configuration.
     #[command(subcommand)]
     Setup(SetupArgs),
+
     /// Run checks prior to setting up the rack.
     #[command(subcommand)]
     Preflight(PreflightArgs),
@@ -80,8 +131,8 @@ fn setup_log(
     let drain = slog_term::FullFormat::new(decorator).build().fuse();
 
     let drain = match with_stderr {
-        WithStderr::Yes => {
-            let stderr_drain = stderr_env_drain("RUST_LOG");
+        WithStderr::Yes { use_color } => {
+            let stderr_drain = stderr_env_drain("RUST_LOG", use_color);
             let drain = slog::Duplicate::new(drain, stderr_drain).fuse();
             slog_async::Async::new(drain).build().fuse()
         }
@@ -93,7 +144,7 @@ fn setup_log(
 
 #[derive(Copy, Clone, Debug)]
 enum WithStderr {
-    Yes,
+    Yes { use_color: bool },
     No,
 }
 
@@ -107,8 +158,17 @@ fn log_path() -> Result<Utf8PathBuf> {
     }
 }
 
-fn stderr_env_drain(env_var: &str) -> impl Drain<Ok = (), Err = slog::Never> {
-    let stderr_decorator = slog_term::TermDecorator::new().build();
+fn stderr_env_drain(
+    env_var: &str,
+    use_color: bool,
+) -> impl Drain<Ok = (), Err = slog::Never> {
+    let mut builder = slog_term::TermDecorator::new();
+    if use_color {
+        builder = builder.force_color();
+    } else {
+        builder = builder.force_plain();
+    }
+    let stderr_decorator = builder.build();
     let stderr_drain =
         slog_term::FullFormat::new(stderr_decorator).build().fuse();
     let mut builder = slog_envlogger::LogBuilder::new(stderr_drain);
