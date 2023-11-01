@@ -285,8 +285,9 @@ infra_ip_last = "192.168.1.30"
 
 # Configurations for BGP routers to run on the scrimlets.
 # This array can typically be safely left empty for home/local use,
-# otherwise this is a list of { asn: u32, originate: ["<v4 subnet>"] }
+# otherwise this is a list of { asn: u32, originate: ["<v4 network>"] }
 # structs which will be be inserted when Nexus is started by sled-agent.
+# These prefixes will be advertised to peers set below.
 # see: common/src/api/internal/shared.rs – BgpConfig
 bgp = []
 
@@ -309,6 +310,7 @@ uplink_port_fec="none"
 # and dendrite stub environments, use "switch0"
 switch = "switch0"
 # Neighbors we expect to peer with over BGP on this port.
+# see: common/src/api/internal/shared.rs – BgpPeerConfig
 bgp_peers = []
 ----
 
