@@ -185,3 +185,17 @@ pub enum ConvertGenericPathElement {
     Path(&'static str),
     ArrayIndex(&'static str, usize),
 }
+
+/// The
+/// [`GroupDisplay::add_event_report`](crate::display::GroupDisplay::add_event_report)
+/// method was called with an unknown key.
+#[derive(Clone, Debug)]
+pub struct UnknownReportKey {}
+
+impl fmt::Display for UnknownReportKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("unknown report key")
+    }
+}
+
+impl error::Error for UnknownReportKey {}

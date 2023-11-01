@@ -9,9 +9,11 @@ use std::time::Duration;
 
 mod dispatch;
 mod events;
+mod helpers;
 mod keymap;
 mod preflight;
 mod rack_setup;
+mod rack_update;
 mod runner;
 mod state;
 mod ui;
