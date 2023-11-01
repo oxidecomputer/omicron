@@ -274,6 +274,8 @@ You will also need to update route information if your `$GATEWAY_IP` differs fro
 # outside.  This block assumes that you're following option (2) above: putting
 # your Oxide system on an existing network that you control.
 [rack_network_config]
+# An internal-only IPv6 address block which contains AZ-wide services.
+# This does not need to be changed.
 rack_subnet = "fd00:1122:3344:01::/56"
 # A range of IP addresses used by Boundary Services on the network.  In a real
 # system, these would be addresses of the uplink ports on the Sidecar.  With
@@ -282,6 +284,10 @@ infra_ip_first = "192.168.1.30"
 infra_ip_last = "192.168.1.30"
 
 # Configurations for BGP routers to run on the scrimlets.
+# This array can typically be safely left empty for home/local use,
+# otherwise this is a list of { asn: u32, originate: ["<v4 subnet>"] }
+# structs which will be be inserted when Nexus is started by sled-agent.
+# see: common/src/api/internal/shared.rs – BgpConfig
 bgp = []
 
 [[rack_network_config.ports]]
