@@ -353,42 +353,46 @@ async fn svd_delete_freed_crucible_regions(
             },
         )?;
 
-    // Send DELETE calls to the corresponding Crucible agents
-    delete_crucible_regions(
-        log,
+    for (dataset, region, region_snapshot, volume) in
         freed_datasets_regions_and_volumes
-            .iter()
-            .map(|(d, r, _)| (d.clone(), r.clone()))
-            .collect(),
-    )
-    .await
-    .map_err(|e| {
-        ActionError::action_failed(format!(
-            "failed to delete_crucible_regions: {:?}",
-            e,
-        ))
-    })?;
+    {
+        if region_snapshot.is_some() {
+            // We cannot delete this region yet, the snapshot has not been
+            // deleted. This can occur when multiple volume delete sagas run
+            // concurrently: one will decrement the crucible resources (but
+            // hasn't made the appropriate DELETE calls to remove the running
+            // snapshots and snapshots yet), and the other will be here trying
+            // to delete the region. This race results in the crucible agent
+            // returning "must delete snapshots first" and causing saga unwinds.
+            //
+            // Another volume delete (probably the one racing with this one!)
+            // will pick up this region and remove it.
+            continue;
+        }
 
-    // Remove region DB records
-    osagactx
-        .datastore()
-        .regions_hard_delete(
-            log,
-            freed_datasets_regions_and_volumes
-                .iter()
-                .map(|(_, r, _)| r.id())
-                .collect(),
-        )
-        .await
-        .map_err(|e| {
-            ActionError::action_failed(format!(
-                "failed to regions_hard_delete: {:?}",
-                e,
-            ))
-        })?;
+        // Send DELETE calls to the corresponding Crucible agents
+        delete_crucible_regions(log, vec![(dataset.clone(), region.clone())])
+            .await
+            .map_err(|e| {
+                ActionError::action_failed(format!(
+                    "failed to delete_crucible_regions: {:?}",
+                    e,
+                ))
+            })?;
 
-    // Remove volume DB records
-    for (_, _, volume) in &freed_datasets_regions_and_volumes {
+        // Remove region DB record
+        osagactx
+            .datastore()
+            .regions_hard_delete(log, vec![region.id()])
+            .await
+            .map_err(|e| {
+                ActionError::action_failed(format!(
+                    "failed to regions_hard_delete: {:?}",
+                    e,
+                ))
+            })?;
+
+        // Remove volume DB record
         osagactx.datastore().volume_hard_delete(volume.id()).await.map_err(
             |e| {
                 ActionError::action_failed(format!(
