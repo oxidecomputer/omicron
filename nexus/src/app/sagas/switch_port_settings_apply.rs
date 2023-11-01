@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{NexusActionContext, NEXUS_DPD_TAG};
+use crate::app::map_switch_zone_addrs;
 use crate::app::sagas::retry_until_known_result;
 use crate::app::sagas::{
     declare_saga_actions, ActionRegistry, NexusSaga, SagaInitError,
@@ -15,6 +16,7 @@ use dpd_client::types::{
     RouteSettingsV4, RouteSettingsV6,
 };
 use dpd_client::{Ipv4Cidr, Ipv6Cidr};
+use internal_dns::ServiceName;
 use ipnetwork::IpNetwork;
 use mg_admin_client::types::Prefix4;
 use mg_admin_client::types::{ApplyRequest, BgpPeerConfig, BgpRoute};
@@ -23,7 +25,8 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::UpdatePrecondition;
 use nexus_db_queries::{authn, db};
 use nexus_types::external_api::params;
-use omicron_common::api::external::{self, DataPageParams, NameOrId};
+use omicron_common::address::SLED_AGENT_PORT;
+use omicron_common::api::external::{self, NameOrId};
 use omicron_common::api::internal::shared::{
     ParseSwitchLocationError, SwitchLocation,
 };
@@ -35,8 +38,8 @@ use sled_agent_client::types::{
     BgpPeerConfig as OmicronBgpPeerConfig, HostPortConfig,
 };
 use std::collections::HashMap;
-use std::net::IpAddr;
 use std::net::SocketAddrV6;
+use std::net::{IpAddr, Ipv6Addr};
 use std::str::FromStr;
 use std::sync::Arc;
 use steno::ActionError;
@@ -809,7 +812,7 @@ pub(crate) async fn select_mg_client(
 }
 
 pub(crate) async fn get_scrimlet_address(
-    _location: SwitchLocation,
+    location: SwitchLocation,
     nexus: &Arc<Nexus>,
 ) -> Result<SocketAddrV6, ActionError> {
     /* TODO this depends on DNS entries only coming from RSS, it's broken
@@ -826,21 +829,41 @@ pub(crate) async fn get_scrimlet_address(
             ))
         })
     */
-    let opctx = &nexus.opctx_for_internal_api();
-    Ok(nexus
-        .sled_list(opctx, &DataPageParams::max_page())
+    let result = nexus
+        .resolver()
+        .await
+        .lookup_all_ipv6(ServiceName::Dendrite)
         .await
         .map_err(|e| {
             ActionError::action_failed(format!(
-                "get_scrimlet_address: failed to list sleds: {e}"
+                "scrimlet dns lookup failed {e}",
             ))
-        })?
-        .into_iter()
-        .find(|x| x.is_scrimlet())
-        .ok_or(ActionError::action_failed(
-            "get_scrimlet_address: no scrimlets found".to_string(),
-        ))?
-        .address())
+        });
+
+    let mappings = match result {
+        Ok(addrs) => map_switch_zone_addrs(&nexus.log, addrs).await,
+        Err(e) => {
+            warn!(nexus.log, "Failed to lookup Dendrite address: {e}");
+            return Err(ActionError::action_failed(format!(
+                "switch mapping failed {e}",
+            )));
+        }
+    };
+
+    let addr = match mappings.get(&location) {
+        Some(addr) => addr,
+        None => {
+            return Err(ActionError::action_failed(format!(
+                "address for switch at location: {location} not found",
+            )));
+        }
+    };
+
+    let mut segments = addr.segments();
+    segments[7] = 1;
+    let addr = Ipv6Addr::from(segments);
+
+    Ok(SocketAddrV6::new(addr, SLED_AGENT_PORT, 0, 0))
 }
 
 #[derive(Clone, Debug)]
