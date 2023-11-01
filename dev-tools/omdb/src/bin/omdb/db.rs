@@ -269,6 +269,9 @@ enum RegionCommands {
 
     /// Find what is using a region
     UsedBy(RegionUsedByArgs),
+
+    /// Find deleted volume regions
+    FindDeletedVolumeRegions,
 }
 
 #[derive(Debug, Args)]
@@ -485,6 +488,9 @@ impl DbArgs {
                 )
                 .await
             }
+            DbCommands::Regions(RegionArgs {
+                command: RegionCommands::FindDeletedVolumeRegions,
+            }) => cmd_db_regions_find_deleted(&datastore).await,
             DbCommands::Sagas(SagaArgs {
                 command: SagaCommands::List(saga_list_args),
             }) => {
@@ -2772,6 +2778,42 @@ async fn cmd_db_regions_used_by(
                     usage_name: String::from(""),
                     deleted: false,
                 }
+            }
+        })
+        .collect();
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::psql())
+        .to_string();
+
+    println!("{}", table);
+
+    Ok(())
+}
+
+/// Find deleted volume regions
+async fn cmd_db_regions_find_deleted(
+    datastore: &DataStore,
+) -> Result<(), anyhow::Error> {
+    let datasets_regions_volumes =
+        datastore.find_deleted_volume_regions().await?;
+
+    #[derive(Tabled)]
+    struct Row {
+        dataset_id: Uuid,
+        region_id: Uuid,
+        volume_id: Uuid,
+    }
+
+    let rows: Vec<Row> = datasets_regions_volumes
+        .into_iter()
+        .map(|row| {
+            let (dataset, region, volume) = row;
+
+            Row {
+                dataset_id: dataset.id(),
+                region_id: region.id(),
+                volume_id: volume.id(),
             }
         })
         .collect();
