@@ -3980,23 +3980,7 @@ mod tests {
         // We need to actually have the oximeter DB here, and the version table,
         // since `ensure_schema()` writes out versions to the DB as they're
         // applied.
-        client
-            .execute(format!("CREATE DATABASE {}", crate::DATABASE_NAME))
-            .await
-            .unwrap();
-        client
-            .execute(format!(
-                "\
-            CREATE TABLE {}.version ( \
-                value UInt64, \
-                timestamp DateTime64(9, 'UTC') \
-            ) \
-            ENGINE = MergeTree() \
-            ORDER BY (value, timestamp);",
-                crate::DATABASE_NAME
-            ))
-            .await
-            .unwrap();
+        client.initialize_db_with_version(replicated, 1).await.unwrap();
 
         // We'll test moving from version 1, which just creates a database and
         // table, to version 3, stopping off at version 2. This is similar to
@@ -4019,15 +4003,16 @@ mod tests {
 
         // Write out the upgrading SQL files.
         //
-        // Note that each statements goes into a different version.
-        const VERSIONS: [u64; 2] = [2, 3];
+        // Note that each statement goes into a different version.
+        const VERSIONS: [u64; 3] = [1, 2, 3];
         let (schema_dir, version_dirs) =
             create_test_upgrade_schema_directory(replicated, &VERSIONS).await;
-        let first_sql =
-            format!("ALTER TABLE {test_name}.tbl ADD COLUMN `col1` UInt16;");
+        let first_sql = String::new();
         let second_sql =
+            format!("ALTER TABLE {test_name}.tbl ADD COLUMN `col1` UInt16;");
+        let third_sql =
             format!("ALTER TABLE {test_name}.tbl ADD COLUMN `col2` String;");
-        let all_sql = [first_sql, second_sql];
+        let all_sql = [first_sql, second_sql, third_sql];
         for (version_dir, sql) in version_dirs.iter().zip(all_sql) {
             let path = version_dir.join("up.sql");
             fs::write(path, sql)
@@ -4037,7 +4022,11 @@ mod tests {
 
         // Apply the sequence of upgrades.
         client
-            .ensure_schema(replicated, VERSIONS[1], schema_dir.path())
+            .ensure_schema(
+                replicated,
+                *VERSIONS.last().unwrap(),
+                schema_dir.path(),
+            )
             .await
             .expect("Failed to apply one schema upgrade");
 
@@ -4061,7 +4050,8 @@ mod tests {
 
         let latest_version = client.read_latest_version().await.unwrap();
         assert_eq!(
-            latest_version, VERSIONS[1],
+            latest_version,
+            *VERSIONS.last().unwrap(),
             "Updated version not written to the database"
         );
     }
