@@ -15,7 +15,7 @@ use serde::{de::DeserializeOwned, Serialize};
 ///
 /// NOTE: `StepSpec` is only required to implement `JsonSchema` to obtain the
 /// name of the schema. This is an upstream limitation in `JsonSchema`.
-pub trait StepSpec: JsonSchema + Send {
+pub trait StepSpec: JsonSchema + Send + 'static {
     /// A component associated with each step.
     type Component: Clone
         + fmt::Debug
@@ -183,7 +183,7 @@ impl AsError for NestedError {
 /// Trait that abstracts over concrete errors and `anyhow::Error`.
 ///
 /// This needs to be manually implemented for any custom error types.
-pub trait AsError: fmt::Debug + Send + Sync {
+pub trait AsError: fmt::Debug + Send + Sync + 'static {
     fn as_error(&self) -> &(dyn std::error::Error + 'static);
 }
 
