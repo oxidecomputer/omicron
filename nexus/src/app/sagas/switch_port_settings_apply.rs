@@ -234,11 +234,7 @@ pub(crate) fn api_to_dpd_port_settings(
                 dpd_port_settings.v4_routes.insert(
                     Ipv4Cidr { prefix: n.ip(), prefix_len: n.prefix() }
                         .to_string(),
-                    RouteSettingsV4 {
-                        link_id: link_id.0,
-                        nexthop: gw,
-                        vid: r.vid.map(Into::into),
-                    },
+                    vec![RouteSettingsV4 { link_id: link_id.0, nexthop: gw }],
                 );
             }
             IpNetwork::V6(n) => {
@@ -253,11 +249,7 @@ pub(crate) fn api_to_dpd_port_settings(
                 dpd_port_settings.v6_routes.insert(
                     Ipv6Cidr { prefix: n.ip(), prefix_len: n.prefix() }
                         .to_string(),
-                    RouteSettingsV6 {
-                        link_id: link_id.0,
-                        nexthop: gw,
-                        vid: r.vid.map(Into::into),
-                    },
+                    vec![RouteSettingsV6 { link_id: link_id.0, nexthop: gw }],
                 );
             }
         }
@@ -294,8 +286,20 @@ async fn spa_ensure_switch_port_settings(
         dpd_client.port_settings_apply(&port_id, &dpd_port_settings).await
     })
     .await
-    .map_err(|e| {
-        ActionError::action_failed(format!("dpd port settings apply {e}"))
+    .map_err(|e| match e {
+        progenitor_client::Error::ErrorResponse(ref er) => {
+            if er.status().is_client_error() {
+                ActionError::action_failed(format!(
+                    "bad request: dpd port settings apply {}",
+                    er.message,
+                ))
+            } else {
+                ActionError::action_failed(format!(
+                    "dpd port settings apply {e}"
+                ))
+            }
+        }
+        _ => ActionError::action_failed(format!("dpd port settings apply {e}")),
     })?;
 
     Ok(())

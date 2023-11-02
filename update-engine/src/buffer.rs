@@ -122,19 +122,23 @@ impl<S: StepSpec> EventBuffer<S> {
     ///
     /// This report can be serialized and sent over the wire.
     pub fn generate_report(&self) -> EventReport<S> {
-        self.generate_report_since(None)
+        self.generate_report_since(&mut None)
     }
 
+    /// Generates an [`EventReport`] for this buffer, updating `last_seen` to a
+    /// new value for incremental report generation.
+    ///
+    /// This report can be serialized and sent over the wire.
     pub fn generate_report_since(
         &self,
-        mut last_seen: Option<usize>,
+        last_seen: &mut Option<usize>,
     ) -> EventReport<S> {
         // Gather step events across all keys.
         let mut step_events = Vec::new();
         let mut progress_events = Vec::new();
         for (_, step_data) in self.steps().as_slice() {
             step_events
-                .extend(step_data.step_events_since_impl(last_seen).cloned());
+                .extend(step_data.step_events_since_impl(*last_seen).cloned());
             progress_events
                 .extend(step_data.step_status.progress_event().cloned());
         }
@@ -145,14 +149,14 @@ impl<S: StepSpec> EventBuffer<S> {
         if let Some(last) = step_events.last() {
             // Only update last_seen if there are new step events (otherwise it
             // stays the same).
-            last_seen = Some(last.event_index);
+            *last_seen = Some(last.event_index);
         }
 
         EventReport {
             step_events,
             progress_events,
             root_execution_id: self.root_execution_id(),
-            last_seen,
+            last_seen: *last_seen,
         }
     }
 
@@ -240,8 +244,13 @@ impl<S: StepSpec> EventStore<S> {
         // index.
         let root_event_index = RootEventIndex(event.event_index);
 
-        let actions =
-            self.recurse_for_step_event(&event, 0, None, root_event_index);
+        let actions = self.recurse_for_step_event(
+            &event,
+            0,
+            None,
+            root_event_index,
+            event.total_elapsed,
+        );
         if let Some(new_execution) = actions.new_execution {
             if new_execution.nest_level == 0 {
                 self.root_execution_id = Some(new_execution.execution_id);
@@ -312,6 +321,7 @@ impl<S: StepSpec> EventStore<S> {
         nest_level: usize,
         parent_sort_key: Option<&StepSortKey>,
         root_event_index: RootEventIndex,
+        root_total_elapsed: Duration,
     ) -> RecurseActions {
         let mut new_execution = None;
         let (step_key, progress_key) = match &event.kind {
@@ -365,6 +375,8 @@ impl<S: StepSpec> EventStore<S> {
                 let info = CompletionInfo {
                     attempt: *attempt,
                     outcome,
+                    root_total_elapsed,
+                    leaf_total_elapsed: event.total_elapsed,
                     step_elapsed: *step_elapsed,
                     attempt_elapsed: *attempt_elapsed,
                 };
@@ -405,6 +417,8 @@ impl<S: StepSpec> EventStore<S> {
                 let info = CompletionInfo {
                     attempt: *last_attempt,
                     outcome,
+                    root_total_elapsed,
+                    leaf_total_elapsed: event.total_elapsed,
                     step_elapsed: *step_elapsed,
                     attempt_elapsed: *attempt_elapsed,
                 };
@@ -432,6 +446,8 @@ impl<S: StepSpec> EventStore<S> {
                     total_attempts: *total_attempts,
                     message: message.clone(),
                     causes: causes.clone(),
+                    root_total_elapsed,
+                    leaf_total_elapsed: event.total_elapsed,
                     step_elapsed: *step_elapsed,
                     attempt_elapsed: *attempt_elapsed,
                 };
@@ -456,6 +472,8 @@ impl<S: StepSpec> EventStore<S> {
                 let info = AbortInfo {
                     attempt: *attempt,
                     message: message.clone(),
+                    root_total_elapsed,
+                    leaf_total_elapsed: event.total_elapsed,
                     step_elapsed: *step_elapsed,
                     attempt_elapsed: *attempt_elapsed,
                 };
@@ -481,6 +499,7 @@ impl<S: StepSpec> EventStore<S> {
                     nest_level + 1,
                     parent_sort_key.as_ref(),
                     root_event_index,
+                    root_total_elapsed,
                 );
                 if let Some(nested_new_execution) = &actions.new_execution {
                     // Add an edge from the parent node to the new execution's root node.
@@ -1164,6 +1183,8 @@ impl<S: StepSpec> StepStatus<S> {
 pub struct CompletionInfo {
     pub attempt: usize,
     pub outcome: StepOutcome<NestedSpec>,
+    pub root_total_elapsed: Duration,
+    pub leaf_total_elapsed: Duration,
     pub step_elapsed: Duration,
     pub attempt_elapsed: Duration,
 }
@@ -1179,11 +1200,23 @@ pub enum FailureReason {
     },
 }
 
+impl FailureReason {
+    /// Returns the [`FailureInfo`] if present.
+    pub fn info(&self) -> Option<&FailureInfo> {
+        match self {
+            Self::StepFailed(info) => Some(info),
+            Self::ParentFailed { .. } => None,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct FailureInfo {
     pub total_attempts: usize,
     pub message: String,
     pub causes: Vec<String>,
+    pub root_total_elapsed: Duration,
+    pub leaf_total_elapsed: Duration,
     pub step_elapsed: Duration,
     pub attempt_elapsed: Duration,
 }
@@ -1197,6 +1230,16 @@ pub enum AbortReason {
         /// The parent step key that was aborted.
         parent_step: StepKey,
     },
+}
+
+impl AbortReason {
+    /// Returns the [`AbortInfo`] if present.
+    pub fn info(&self) -> Option<&AbortInfo> {
+        match self {
+            Self::StepAborted(info) => Some(info),
+            Self::ParentAborted { .. } => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -1230,6 +1273,13 @@ pub enum WillNotBeRunReason {
 pub struct AbortInfo {
     pub attempt: usize,
     pub message: String,
+
+    /// The total elapsed time as reported by the root event.
+    pub root_total_elapsed: Duration,
+
+    /// The total elapsed time as reported by the leaf execution event, for
+    /// nested events.
+    pub leaf_total_elapsed: Duration,
     pub step_elapsed: Duration,
     pub attempt_elapsed: Duration,
 }
@@ -1261,14 +1311,61 @@ impl ExecutionSummary {
                 StepStatus::Running { .. } => {
                     execution_status = ExecutionStatus::Running { step_key };
                 }
-                StepStatus::Completed { .. } => {
-                    execution_status = ExecutionStatus::Completed { step_key };
+                StepStatus::Completed { info } => {
+                    let (root_total_elapsed, leaf_total_elapsed) = match info {
+                        Some(info) => (
+                            Some(info.root_total_elapsed),
+                            Some(info.leaf_total_elapsed),
+                        ),
+                        None => (None, None),
+                    };
+
+                    let terminal_status = ExecutionTerminalInfo {
+                        kind: TerminalKind::Completed,
+                        root_total_elapsed,
+                        leaf_total_elapsed,
+                        step_key,
+                    };
+                    execution_status =
+                        ExecutionStatus::Terminal(terminal_status);
                 }
-                StepStatus::Failed { .. } => {
-                    execution_status = ExecutionStatus::Failed { step_key };
+                StepStatus::Failed { reason } => {
+                    let (root_total_elapsed, leaf_total_elapsed) =
+                        match reason.info() {
+                            Some(info) => (
+                                Some(info.root_total_elapsed),
+                                Some(info.leaf_total_elapsed),
+                            ),
+                            None => (None, None),
+                        };
+
+                    let terminal_status = ExecutionTerminalInfo {
+                        kind: TerminalKind::Failed,
+                        root_total_elapsed,
+                        leaf_total_elapsed,
+                        step_key,
+                    };
+                    execution_status =
+                        ExecutionStatus::Terminal(terminal_status);
                 }
-                StepStatus::Aborted { .. } => {
-                    execution_status = ExecutionStatus::Aborted { step_key };
+                StepStatus::Aborted { reason, .. } => {
+                    let (root_total_elapsed, leaf_total_elapsed) =
+                        match reason.info() {
+                            Some(info) => (
+                                Some(info.root_total_elapsed),
+                                Some(info.leaf_total_elapsed),
+                            ),
+                            None => (None, None),
+                        };
+
+                    let terminal_status = ExecutionTerminalInfo {
+                        kind: TerminalKind::Aborted,
+                        root_total_elapsed,
+                        leaf_total_elapsed,
+                        step_key,
+                    };
+                    execution_status =
+                        ExecutionStatus::Terminal(terminal_status);
                 }
                 StepStatus::WillNotBeRun { .. } => {
                     // Ignore steps that will not be run -- a prior step failed.
@@ -1306,7 +1403,7 @@ impl StepSortKey {
 /// Status about a single execution ID.
 ///
 /// Part of [`ExecutionSummary`].
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ExecutionStatus {
     /// This execution has not been started yet.
     NotStarted,
@@ -1319,27 +1416,50 @@ pub enum ExecutionStatus {
         step_key: StepKey,
     },
 
+    /// Execution has finished.
+    Terminal(ExecutionTerminalInfo),
+}
+
+/// Terminal status about a single execution ID.
+///
+/// Part of [`ExecutionStatus`].
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ExecutionTerminalInfo {
+    /// The way in which this execution reached a terminal state.
+    pub kind: TerminalKind,
+
+    /// Total elapsed time (root) for this execution.
+    ///
+    /// The total elapsed time may not be available if execution was interrupted
+    /// and we inferred that it was terminated.
+    pub root_total_elapsed: Option<Duration>,
+
+    /// Total elapsed time (leaf) for this execution.
+    ///
+    /// The total elapsed time may not be available if execution was interrupted
+    /// and we inferred that it was terminated.
+    pub leaf_total_elapsed: Option<Duration>,
+
+    /// The step key that was running when this execution was terminated.
+    ///
+    /// * For completed executions, this is the last step that completed.
+    /// * For failed or aborted executions, this is the step that failed.
+    /// * For aborted executions, this is the step that was running when the
+    ///   abort happened.
+    pub step_key: StepKey,
+}
+
+/// The way in which an execution was terminated.
+///
+/// Part of [`ExecutionStatus`].
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TerminalKind {
     /// This execution completed running.
-    Completed {
-        /// The last step that completed.
-        step_key: StepKey,
-    },
-
+    Completed,
     /// This execution failed.
-    Failed {
-        /// The step key that failed.
-        ///
-        /// Use [`EventBuffer::get`] to get more information about this step.
-        step_key: StepKey,
-    },
-
+    Failed,
     /// This execution was aborted.
-    Aborted {
-        /// The step that was running when the abort happened.
-        ///
-        /// Use [`EventBuffer::get`] to get more information about this step.
-        step_key: StepKey,
-    },
+    Aborted,
 }
 
 /// Keys for the event tree.
@@ -1667,7 +1787,7 @@ mod tests {
             for (i, event) in self.generated_events.iter().enumerate() {
                 for time in 0..times {
                     (event_fn)(&mut buffer, event);
-                    let report = buffer.generate_report_since(last_seen);
+                    let report = buffer.generate_report_since(&mut last_seen);
                     let is_last_event = i == self.generated_events.len() - 1;
                     self.assert_general_properties(
                         &buffer,
@@ -1682,7 +1802,6 @@ mod tests {
                     })
                     .unwrap();
                     reported_step_events.extend(report.step_events);
-                    last_seen = report.last_seen;
 
                     // Ensure that the last root index was updated for this
                     // event's corresponding steps, but not for any others.
@@ -1698,7 +1817,8 @@ mod tests {
 
                     // Call last_seen without feeding a new event in to ensure that
                     // a report with no step events is produced.
-                    let report = buffer.generate_report_since(last_seen);
+                    let mut last_seen_2 = last_seen;
+                    let report = buffer.generate_report_since(&mut last_seen_2);
                     ensure!(
                         report.step_events.is_empty(),
                         "{description}, at index {i} (time {time}),\
@@ -1777,16 +1897,12 @@ mod tests {
             for (i, event) in self.generated_events.iter().enumerate() {
                 let event_added = (event_fn)(&mut buffer, event);
 
-                let report = match last_seen_opt {
+                let report = match &mut last_seen_opt {
                     Some(last_seen) => buffer.generate_report_since(last_seen),
                     None => buffer.generate_report(),
                 };
 
                 let is_last_event = i == self.generated_events.len() - 1;
-                if let Some(last_seen) = &mut last_seen_opt {
-                    *last_seen = report.last_seen;
-                }
-
                 self.assert_general_properties(&buffer, &report, is_last_event)
                     .with_context(|| {
                         format!(
@@ -1925,8 +2041,9 @@ mod tests {
             if is_last_event {
                 ensure!(
                     matches!(
-                        summary[&root_execution_id].execution_status,
-                        ExecutionStatus::Completed { .. },
+                        &summary[&root_execution_id].execution_status,
+                        ExecutionStatus::Terminal(info)
+                            if info.kind == TerminalKind::Completed
                     ),
                     "this is the last event so ExecutionStatus must be completed"
                 );
@@ -1941,8 +2058,9 @@ mod tests {
                     .expect("this is the first nested engine");
                 ensure!(
                     matches!(
-                        nested_summary.execution_status,
-                        ExecutionStatus::Failed { .. },
+                        &nested_summary.execution_status,
+                        ExecutionStatus::Terminal(info)
+                            if info.kind == TerminalKind::Failed
                     ),
                     "for this engine, the ExecutionStatus must be failed"
                 );
@@ -1952,8 +2070,9 @@ mod tests {
                     .expect("this is the second nested engine");
                 ensure!(
                     matches!(
-                        nested_summary.execution_status,
-                        ExecutionStatus::Completed { .. },
+                        &nested_summary.execution_status,
+                        ExecutionStatus::Terminal(info)
+                            if info.kind == TerminalKind::Completed
                     ),
                     "for this engine, the ExecutionStatus must be succeeded"
                 );

@@ -261,9 +261,10 @@ impl<'a> FakeDataAttributes<'a> {
             | KnownArtifactKind::Trampoline
             | KnownArtifactKind::ControlPlane => return make_filler_text(size),
 
-            // hubris artifacts: build a fake archive
-            KnownArtifactKind::GimletSp => "fake-gimlet-sp",
-            KnownArtifactKind::GimletRot => "fake-gimlet-rot",
+            // hubris artifacts: build a fake archive (SimGimletSp and
+            // SimGimletRot are used by sp-sim)
+            KnownArtifactKind::GimletSp => "SimGimletSp",
+            KnownArtifactKind::GimletRot => "SimGimletRot",
             KnownArtifactKind::PscSp => "fake-psc-sp",
             KnownArtifactKind::PscRot => "fake-psc-rot",
             KnownArtifactKind::SwitchSp => "fake-sidecar-sp",

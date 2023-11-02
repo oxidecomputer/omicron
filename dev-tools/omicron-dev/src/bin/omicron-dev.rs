@@ -403,6 +403,10 @@ async fn cmd_run_all(args: &RunAllArgs) -> Result<(), anyhow::Error> {
         cptestctx.silo_name,
         cptestctx.external_dns_zone_name,
     );
+    println!(
+        "omicron-dev: management gateway:    http://{}",
+        cptestctx.gateway.client.bind_address,
+    );
     println!("omicron-dev: silo name:             {}", cptestctx.silo_name,);
     println!(
         "omicron-dev: privileged user name:  {}",
