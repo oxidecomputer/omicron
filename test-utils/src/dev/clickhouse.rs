@@ -530,7 +530,8 @@ async fn find_clickhouse_port_in_log(
 pub async fn wait_for_ready(log_path: PathBuf) -> Result<(), anyhow::Error> {
     let p = poll::wait_for_condition(
         || async {
-            let result = discover_ready(&log_path, CLICKHOUSE_KEEPER_TIMEOUT).await;
+            let result =
+                discover_ready(&log_path, CLICKHOUSE_KEEPER_TIMEOUT).await;
             match result {
                 Ok(ready) => Ok(ready),
                 Err(e) => {
