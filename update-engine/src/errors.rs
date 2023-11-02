@@ -11,7 +11,7 @@ use std::{borrow::Cow, collections::VecDeque, error, fmt};
 use derive_where::derive_where;
 use tokio::sync::mpsc;
 
-use crate::{events::Event, AsError, NestedSpec, StepSpec};
+use crate::{events::Event, AsError, StepSpec};
 
 // NOTE: have to hand write `ExecutionError` and `NestedEngineError` impls
 // because #[source] doesn't work for AsError.
@@ -32,7 +32,6 @@ pub enum ExecutionError<S: StepSpec> {
         message: String,
     },
     EventSendError(mpsc::error::SendError<Event<S>>),
-    NestedSendError(mpsc::error::SendError<Event<NestedSpec>>),
 }
 
 impl<S: StepSpec> fmt::Display for ExecutionError<S> {
@@ -51,9 +50,6 @@ impl<S: StepSpec> fmt::Display for ExecutionError<S> {
             Self::EventSendError(_) => {
                 write!(f, "while sending event, event receiver dropped")
             }
-            Self::NestedSendError(_) => {
-                write!(f, "while sending nested event, event receiver dropped")
-            }
         }
     }
 }
@@ -64,9 +60,6 @@ impl<S: StepSpec> error::Error for ExecutionError<S> {
             ExecutionError::StepFailed { error, .. } => Some(error.as_error()),
             ExecutionError::Aborted { .. } => None,
             ExecutionError::EventSendError(error) => {
-                Some(error as &(dyn error::Error + 'static))
-            }
-            ExecutionError::NestedSendError(error) => {
                 Some(error as &(dyn error::Error + 'static))
             }
         }

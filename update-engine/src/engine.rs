@@ -388,20 +388,23 @@ impl<S: StepSpec, S2: StepSpec> SenderImpl<S2> for NestedSender<S> {
         event: Event<S2>,
     ) -> BoxFuture<'_, Result<(), ExecutionError<S2>>> {
         let now = Instant::now();
-        self.sender
-            .send(StepContextPayload::Nested {
-                now,
-                event: event.into_generic(),
-            })
-            .map_err(|error| {
-                // Extract the event from the error.
-                let event = match error.0 {
-                    StepContextPayload::Nested { event, .. } => event,
-                    _ => unreachable!("we just sent a Nested event"),
-                };
-                ExecutionError::NestedSendError(mpsc::error::SendError(event))
-            })
-            .boxed()
+        async move {
+            self.sender
+                .send(StepContextPayload::Nested {
+                    now,
+                    event: event.into_generic(),
+                })
+                .await
+                .expect("our code always keeps payload_receiver open");
+            let (done, done_rx) = oneshot::channel();
+            self.sender
+                .send(StepContextPayload::Sync { done })
+                .await
+                .expect("our code always keeps payload_receiver open");
+            _ = done_rx.await;
+            Ok(())
+        }
+        .boxed()
     }
 }
 
@@ -921,6 +924,16 @@ impl<'a, S: StepSpec> StepExec<'a, S> {
                         Ok(ControlFlow::Continue(()))
                     }
 
+                    // Note: payload_receiver is always kept open while step_fut
+                    // is being driven. It is only dropped before completion if
+                    // the step is aborted, in which case step_fut is also
+                    // cancelled without being driven further. A bunch of
+                    // expects with "our code always keeps payload_receiver
+                    // open" rely on this.
+                    //
+                    // If we ever move the payload receiver to another task so
+                    // it runs in parallel, this situation would have to be
+                    // handled with care.
                     payload = payload_receiver.recv(), if !payload_done => {
                         match payload {
                             Some(payload) => {

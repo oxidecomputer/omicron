@@ -63,7 +63,7 @@ impl<S: StepSpec> StepContext<S> {
         self.payload_sender
             .send(StepContextPayload::Progress { now, progress, done })
             .await
-            .expect("our code always keeps the receiver open");
+            .expect("our code always keeps payload_receiver open");
         _ = done_rx.await;
     }
 
@@ -146,7 +146,7 @@ impl<S: StepSpec> StepContext<S> {
                         event: Event::Step(event),
                     })
                     .await
-                    .expect("our code always keeps the receiver open");
+                    .expect("our code always keeps payload_receiver open");
             }
 
             for event in delta_report.progress_events {
@@ -156,7 +156,7 @@ impl<S: StepSpec> StepContext<S> {
                         event: Event::Progress(event),
                     })
                     .await
-                    .expect("our code always keeps the receiver open");
+                    .expect("our code always keeps payload_receiver open");
             }
 
             // Ensure that all reports have been received by the engine before
@@ -165,7 +165,7 @@ impl<S: StepSpec> StepContext<S> {
             self.payload_sender
                 .send(StepContextPayload::Sync { done })
                 .await
-                .expect("our code always keeps the receiver open");
+                .expect("our code always keeps payload_receiver open");
             _ = done_rx.await;
         }
 
@@ -228,9 +228,8 @@ impl<S: StepSpec> StepContext<S> {
         let engine = engine.execute();
         match engine.await {
             Ok(cx) => Ok(cx),
-            Err(ExecutionError::EventSendError(_))
-            | Err(ExecutionError::NestedSendError(_)) => {
-                unreachable!("payload_receiver is always kept open")
+            Err(ExecutionError::EventSendError(_)) => {
+                unreachable!("our code always keeps payload_receiver open")
             }
             Err(ExecutionError::StepFailed {
                 component,
