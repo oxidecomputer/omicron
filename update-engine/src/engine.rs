@@ -1227,7 +1227,7 @@ impl<S: StepSpec, F: FnMut() -> usize> StepProgressReporter<S, F> {
                 description: self.step_info.info.description.clone(),
                 message: message,
             },
-            Err(error) => error.into(),
+            Err(error) => error,
         }
     }
 
