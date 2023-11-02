@@ -10,7 +10,7 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
-use crate::db::error::public_error_from_diesel_pool;
+use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::model::Generation;
 use crate::db::model::Name;
@@ -19,13 +19,13 @@ use crate::db::model::Snapshot;
 use crate::db::model::SnapshotState;
 use crate::db::pagination::paginated;
 use crate::db::update_and_check::UpdateAndCheck;
+use crate::db::update_and_check::UpdateStatus;
 use crate::db::TransactionError;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
-use async_bb8_diesel::ConnectionError;
 use chrono::Utc;
 use diesel::prelude::*;
-use diesel::result::Error as DieselError;
+use diesel::OptionalExtension;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
@@ -63,7 +63,7 @@ impl DataStore {
         let project_id = snapshot.project_id;
 
         let snapshot: Snapshot = self
-            .pool_authorized(opctx)
+            .pool_connection_authorized(opctx)
             .await?
             .transaction_async(|conn| async move {
                 use db::schema::snapshot::dsl;
@@ -101,7 +101,7 @@ impl DataStore {
                 // does not match, but a project and name that does, return
                 // ObjectAlreadyExists here.
 
-                let existing_snapshot_id: Option<Uuid> = match dsl::snapshot
+                let existing_snapshot_id: Option<Uuid> = dsl::snapshot
                     .filter(dsl::time_deleted.is_null())
                     .filter(dsl::name.eq(snapshot.name().to_string()))
                     .filter(dsl::project_id.eq(snapshot.project_id))
@@ -109,13 +109,7 @@ impl DataStore {
                     .limit(1)
                     .first_async(&conn)
                     .await
-                {
-                    Ok(v) => Ok(Some(v)),
-                    Err(ConnectionError::Query(DieselError::NotFound)) => {
-                        Ok(None)
-                    }
-                    Err(e) => Err(e),
-                }?;
+                    .optional()?;
 
                 if let Some(existing_snapshot_id) = existing_snapshot_id {
                     if existing_snapshot_id != snapshot.id() {
@@ -157,16 +151,12 @@ impl DataStore {
                             }
                         }
                         AsyncInsertError::DatabaseError(e) => {
-                            public_error_from_diesel_pool(
-                                e,
-                                ErrorHandler::Server,
-                            )
+                            public_error_from_diesel(e, ErrorHandler::Server)
                         }
                     },
                 },
-
-                TxnError::Pool(e) => {
-                    public_error_from_diesel_pool(e, ErrorHandler::Server)
+                TxnError::Database(e) => {
+                    public_error_from_diesel(e, ErrorHandler::Server)
                 }
             })?;
 
@@ -203,10 +193,10 @@ impl DataStore {
             .filter(dsl::gen.eq(old_gen))
             .set((dsl::state.eq(new_state), dsl::gen.eq(next_gen)))
             .returning(Snapshot::as_returning())
-            .get_result_async(self.pool_authorized(opctx).await?)
+            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::NotFoundByResource(authz_snapshot),
                 )
@@ -235,9 +225,9 @@ impl DataStore {
         .filter(dsl::time_deleted.is_null())
         .filter(dsl::project_id.eq(authz_project.id()))
         .select(Snapshot::as_select())
-        .load_async::<Snapshot>(self.pool_authorized(opctx).await?)
+        .load_async::<Snapshot>(&*self.pool_connection_authorized(opctx).await?)
         .await
-        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     pub async fn project_delete_snapshot(
@@ -263,32 +253,70 @@ impl DataStore {
 
         use db::schema::snapshot::dsl;
 
-        let updated_rows = diesel::update(dsl::snapshot)
+        let result = diesel::update(dsl::snapshot)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::gen.eq(gen))
             .filter(dsl::id.eq(snapshot_id))
-            .filter(dsl::state.eq_any(ok_to_delete_states))
+            .filter(dsl::state.eq_any(ok_to_delete_states.clone()))
             .set((
                 dsl::time_deleted.eq(now),
                 dsl::state.eq(SnapshotState::Destroyed),
             ))
             .check_if_exists::<Snapshot>(snapshot_id)
-            .execute_async(self.pool_authorized(&opctx).await?)
+            .execute_and_check(&*self.pool_connection_authorized(&opctx).await?)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Snapshot,
+                        LookupType::ById(snapshot_id),
+                    ),
+                )
             })?;
 
-        if updated_rows == 0 {
-            // Either:
-            //
-            // - the snapshot was already deleted
-            // - the generation number changed
-            // - the state of the snapshot isn't one of `ok_to_delete_states`
+        match result.status {
+            UpdateStatus::Updated => {
+                // snapshot was soft deleted ok
+                Ok(result.found.id())
+            }
 
-            return Err(Error::invalid_request("snapshot cannot be deleted"));
+            UpdateStatus::NotUpdatedButExists => {
+                let snapshot = result.found;
+
+                // if the snapshot was already deleted, return Ok - this
+                // function must remain idempotent for the same input.
+                if snapshot.time_deleted().is_some()
+                    && snapshot.state == SnapshotState::Destroyed
+                {
+                    Ok(snapshot.id())
+                } else {
+                    // if the snapshot was not deleted, figure out why
+                    if !ok_to_delete_states.contains(&snapshot.state) {
+                        Err(Error::invalid_request(&format!(
+                            "snapshot cannot be deleted in state {:?}",
+                            snapshot.state,
+                        )))
+                    } else if snapshot.gen != gen {
+                        Err(Error::invalid_request(&format!(
+                            "snapshot cannot be deleted: mismatched generation {:?} != {:?}",
+                            gen,
+                            snapshot.gen,
+                        )))
+                    } else {
+                        error!(
+                            opctx.log,
+                            "snapshot exists but cannot be deleted: {:?} (db_snapshot is {:?}",
+                            snapshot,
+                            db_snapshot,
+                        );
+
+                        Err(Error::invalid_request(
+                            "snapshot exists but cannot be deleted",
+                        ))
+                    }
+                }
+            }
         }
-
-        Ok(snapshot_id)
     }
 }

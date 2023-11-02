@@ -4,35 +4,72 @@
 
 //! Implementation of the `oximeter` metric collection server.
 
-// Copyright 2021 Oxide Computer Company
+// Copyright 2023 Oxide Computer Company
 
-use dropshot::{
-    endpoint, ApiDescription, ConfigDropshot, ConfigLogging, HttpError,
-    HttpResponseUpdatedNoContent, HttpServer, HttpServerStarter,
-    RequestContext, TypedBody,
-};
-use internal_dns::resolver::{ResolveError, Resolver};
+use anyhow::anyhow;
+use anyhow::Context;
+use dropshot::endpoint;
+use dropshot::ApiDescription;
+use dropshot::ConfigDropshot;
+use dropshot::ConfigLogging;
+use dropshot::EmptyScanParams;
+use dropshot::HttpError;
+use dropshot::HttpResponseDeleted;
+use dropshot::HttpResponseOk;
+use dropshot::HttpResponseUpdatedNoContent;
+use dropshot::HttpServer;
+use dropshot::HttpServerStarter;
+use dropshot::PaginationParams;
+use dropshot::Query;
+use dropshot::RequestContext;
+use dropshot::ResultsPage;
+use dropshot::TypedBody;
+use dropshot::WhichPage;
+use internal_dns::resolver::ResolveError;
+use internal_dns::resolver::Resolver;
 use internal_dns::ServiceName;
-use omicron_common::address::{CLICKHOUSE_PORT, NEXUS_INTERNAL_PORT};
+use omicron_common::address::CLICKHOUSE_PORT;
+use omicron_common::address::NEXUS_INTERNAL_PORT;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
-use omicron_common::{backoff, FileKv};
-use oximeter::types::{ProducerResults, ProducerResultsItem};
-use oximeter_db::{Client, DbWrite};
-use serde::{Deserialize, Serialize};
-use slog::{debug, error, info, o, trace, warn, Drain, Logger};
-use std::collections::{btree_map::Entry, BTreeMap};
-use std::net::{SocketAddr, SocketAddrV6};
+use omicron_common::backoff;
+use omicron_common::FileKv;
+use oximeter::types::ProducerResults;
+use oximeter::types::ProducerResultsItem;
+use oximeter_db::model::OXIMETER_VERSION;
+use oximeter_db::Client;
+use oximeter_db::DbWrite;
+use serde::Deserialize;
+use serde::Serialize;
+use slog::debug;
+use slog::error;
+use slog::info;
+use slog::o;
+use slog::trace;
+use slog::warn;
+use slog::Drain;
+use slog::Logger;
+use std::collections::btree_map::Entry;
+use std::collections::BTreeMap;
+use std::net::SocketAddr;
+use std::net::SocketAddrV6;
+use std::ops::Bound;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
-use tokio::{
-    sync::mpsc, sync::oneshot, sync::Mutex, task::JoinHandle, time::interval,
-};
+use tokio::sync::mpsc;
+use tokio::sync::oneshot;
+use tokio::sync::Mutex;
+use tokio::task::JoinHandle;
+use tokio::time::interval;
 use uuid::Uuid;
 
+mod standalone;
+pub use standalone::standalone_nexus_api;
+pub use standalone::Server as StandaloneNexus;
+
 /// Errors collecting metric data
-#[derive(Debug, Clone, Error)]
+#[derive(Debug, Error)]
 pub enum Error {
     #[error("Error running Oximeter collector server: {0}")]
     Server(String),
@@ -45,6 +82,48 @@ pub enum Error {
 
     #[error(transparent)]
     ResolveError(#[from] ResolveError),
+
+    #[error("No producer is registered with ID")]
+    NoSuchProducer(Uuid),
+
+    #[error("Error running standalone")]
+    Standalone(#[from] anyhow::Error),
+}
+
+impl From<Error> for HttpError {
+    fn from(e: Error) -> Self {
+        match e {
+            Error::NoSuchProducer(id) => HttpError::for_not_found(
+                None,
+                format!("No such producer: {id}"),
+            ),
+            _ => HttpError::for_internal_error(e.to_string()),
+        }
+    }
+}
+
+/// A simple representation of a producer, used mostly for standalone mode.
+///
+/// These are usually specified as a structured string, formatted like:
+/// `"<uuid>@<address>"`.
+#[derive(Copy, Clone, Debug)]
+pub struct ProducerInfo {
+    /// The ID of the producer.
+    pub id: Uuid,
+    /// The address on which the producer listens.
+    pub address: SocketAddr,
+}
+
+impl std::str::FromStr for ProducerInfo {
+    type Err = anyhow::Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let (id, addr) = s
+            .split_once('@')
+            .context("Producer info should written as <id>@<address>")?;
+        let id = id.parse().context("Invalid UUID")?;
+        let address = addr.parse().context("Invalid address")?;
+        Ok(Self { id, address })
+    }
 }
 
 type CollectionToken = oneshot::Sender<()>;
@@ -61,7 +140,6 @@ enum CollectionMessage {
     // from its producer.
     Update(ProducerEndpoint),
     // Request that the task exit
-    #[allow(dead_code)]
     Shutdown,
 }
 
@@ -72,7 +150,7 @@ async fn perform_collection(
     outbox: &mpsc::Sender<(Option<CollectionToken>, ProducerResults)>,
     token: Option<CollectionToken>,
 ) {
-    info!(log, "collecting from producer");
+    debug!(log, "collecting from producer");
     let res = client
         .get(format!(
             "http://{}{}",
@@ -187,6 +265,44 @@ struct CollectionTask {
     pub task: JoinHandle<()>,
 }
 
+// A task run by `oximeter` in standalone mode, which simply prints results as
+// they're received.
+async fn results_printer(
+    log: Logger,
+    mut rx: mpsc::Receiver<(Option<CollectionToken>, ProducerResults)>,
+) {
+    loop {
+        match rx.recv().await {
+            Some((_, results)) => {
+                for res in results.into_iter() {
+                    match res {
+                        ProducerResultsItem::Ok(samples) => {
+                            for sample in samples.into_iter() {
+                                info!(
+                                    log,
+                                    "";
+                                    "sample" => ?sample,
+                                );
+                            }
+                        }
+                        ProducerResultsItem::Err(e) => {
+                            error!(
+                                log,
+                                "received error from a producer";
+                                "err" => ?e,
+                            );
+                        }
+                    }
+                }
+            }
+            None => {
+                debug!(log, "result queue closed, exiting");
+                return;
+            }
+        }
+    }
+}
+
 // Aggregation point for all results, from all collection tasks.
 async fn results_sink(
     log: Logger,
@@ -286,6 +402,20 @@ pub struct DbConfig {
     pub batch_interval: u64,
 }
 
+impl DbConfig {
+    pub const DEFAULT_BATCH_SIZE: usize = 1000;
+    pub const DEFAULT_BATCH_INTERVAL: u64 = 5;
+
+    // Construct config with an address, using the defaults for other fields
+    fn with_address(address: SocketAddr) -> Self {
+        Self {
+            address: Some(address),
+            batch_size: Self::DEFAULT_BATCH_SIZE,
+            batch_interval: Self::DEFAULT_BATCH_INTERVAL,
+        }
+    }
+}
+
 /// The internal agent the oximeter server uses to collect metrics from producers.
 #[derive(Debug)]
 pub struct OximeterAgent {
@@ -295,7 +425,8 @@ pub struct OximeterAgent {
     // Handle to the TX-side of a channel for collecting results from the collection tasks
     result_sender: mpsc::Sender<(Option<CollectionToken>, ProducerResults)>,
     // The actual tokio tasks running the collection on a timer.
-    collection_tasks: Arc<Mutex<BTreeMap<Uuid, CollectionTask>>>,
+    collection_tasks:
+        Arc<Mutex<BTreeMap<Uuid, (ProducerEndpoint, CollectionTask)>>>,
 }
 
 impl OximeterAgent {
@@ -307,7 +438,10 @@ impl OximeterAgent {
         log: &Logger,
     ) -> Result<Self, Error> {
         let (result_sender, result_receiver) = mpsc::channel(8);
-        let log = log.new(o!("component" => "oximeter-agent", "collector_id" => id.to_string()));
+        let log = log.new(o!(
+            "component" => "oximeter-agent",
+            "collector_id" => id.to_string(),
+        ));
         let insertion_log = log.new(o!("component" => "results-sink"));
 
         // Construct the ClickHouse client first, propagate an error if we can't reach the
@@ -322,11 +456,7 @@ impl OximeterAgent {
         };
         let client = Client::new(db_address, &log);
         let replicated = client.is_oximeter_cluster().await?;
-        if !replicated {
-            client.init_single_node_db().await?;
-        } else {
-            client.init_replicated_db().await?;
-        }
+        client.initialize_db_with_version(replicated, OXIMETER_VERSION).await?;
 
         // Spawn the task for aggregating and inserting all metrics
         tokio::spawn(async move {
@@ -347,6 +477,61 @@ impl OximeterAgent {
         })
     }
 
+    /// Construct a new standalone `oximeter` collector.
+    pub async fn new_standalone(
+        id: Uuid,
+        db_config: Option<DbConfig>,
+        log: &Logger,
+    ) -> Result<Self, Error> {
+        let (result_sender, result_receiver) = mpsc::channel(8);
+        let log = log.new(o!(
+            "component" => "oximeter-standalone",
+            "collector_id" => id.to_string(),
+        ));
+
+        // If we have configuration for ClickHouse, we'll spawn the results
+        // sink task as usual. If not, we'll spawn a dummy task that simply
+        // prints the results as they're received.
+        let insertion_log = log.new(o!("component" => "results-sink"));
+        if let Some(db_config) = db_config {
+            let Some(address) = db_config.address else {
+                return Err(Error::Standalone(anyhow!(
+                    "Must provide explicit IP address in standalone mode"
+                )));
+            };
+            let client = Client::new(address, &log);
+            let replicated = client.is_oximeter_cluster().await?;
+            if !replicated {
+                client.init_single_node_db().await?;
+            } else {
+                client.init_replicated_db().await?;
+            }
+
+            // Spawn the task for aggregating and inserting all metrics
+            tokio::spawn(async move {
+                results_sink(
+                    insertion_log,
+                    client,
+                    db_config.batch_size,
+                    Duration::from_secs(db_config.batch_interval),
+                    result_receiver,
+                )
+                .await
+            });
+        } else {
+            tokio::spawn(results_printer(insertion_log, result_receiver));
+        }
+
+        // Construct the ClickHouse client first, propagate an error if we can't reach the
+        // database.
+        Ok(Self {
+            id,
+            log,
+            result_sender,
+            collection_tasks: Arc::new(Mutex::new(BTreeMap::new())),
+        })
+    }
+
     /// Register a new producer with this oximeter instance.
     pub async fn register_producer(
         &self,
@@ -355,30 +540,36 @@ impl OximeterAgent {
         let id = info.id;
         match self.collection_tasks.lock().await.entry(id) {
             Entry::Vacant(value) => {
-                info!(self.log, "registered new metric producer";
-                      "producer_id" => id.to_string(),
-                      "address" => info.address,
+                debug!(
+                    self.log,
+                    "registered new metric producer";
+                    "producer_id" => id.to_string(),
+                    "address" => info.address,
                 );
 
                 // Build channel to control the task and receive results.
                 let (tx, rx) = mpsc::channel(4);
                 let q = self.result_sender.clone();
                 let log = self.log.new(o!("component" => "collection-task", "producer_id" => id.to_string()));
+                let info_clone = info.clone();
                 let task = tokio::spawn(async move {
-                    collection_task(log, info, rx, q).await;
+                    collection_task(log, info_clone, rx, q).await;
                 });
-                value.insert(CollectionTask { inbox: tx, task });
+                value.insert((info, CollectionTask { inbox: tx, task }));
             }
-            Entry::Occupied(value) => {
-                info!(
+            Entry::Occupied(mut value) => {
+                debug!(
                     self.log,
-                    "received request to register existing metric producer, updating collection information";
+                    "received request to register existing metric \
+                    producer, updating collection information";
                    "producer_id" => id.to_string(),
                    "interval" => ?info.interval,
                    "address" => info.address,
                 );
+                value.get_mut().0 = info.clone();
                 value
                     .get()
+                    .1
                     .inbox
                     .send(CollectionMessage::Update(info))
                     .await
@@ -395,10 +586,10 @@ impl OximeterAgent {
     pub async fn force_collection(&self) {
         let mut collection_oneshots = vec![];
         let collection_tasks = self.collection_tasks.lock().await;
-        for task in collection_tasks.iter() {
+        for (_id, (_endpoint, task)) in collection_tasks.iter() {
             let (tx, rx) = oneshot::channel();
             // Scrape from each producer, into oximeter...
-            task.1.inbox.send(CollectionMessage::Collect(tx)).await.unwrap();
+            task.inbox.send(CollectionMessage::Collect(tx)).await.unwrap();
             // ... and keep track of the token that indicates once the metric
             // has made it into Clickhouse.
             collection_oneshots.push(rx);
@@ -411,6 +602,55 @@ impl OximeterAgent {
         // NOTE: This can either mean that the collection completed
         // successfully, or an error occurred in the collection pathway.
         futures::future::join_all(collection_oneshots).await;
+    }
+
+    /// List existing producers.
+    pub async fn list_producers(
+        &self,
+        start_id: Option<Uuid>,
+        limit: usize,
+    ) -> Vec<ProducerEndpoint> {
+        let start = if let Some(id) = start_id {
+            Bound::Excluded(id)
+        } else {
+            Bound::Unbounded
+        };
+        self.collection_tasks
+            .lock()
+            .await
+            .range((start, Bound::Unbounded))
+            .take(limit)
+            .map(|(_id, (info, _t))| info.clone())
+            .collect()
+    }
+
+    /// Delete a producer by ID, stopping its collection task.
+    pub async fn delete_producer(&self, id: Uuid) -> Result<(), Error> {
+        let (_info, task) = self
+            .collection_tasks
+            .lock()
+            .await
+            .remove(&id)
+            .ok_or_else(|| Error::NoSuchProducer(id))?;
+        debug!(
+            self.log,
+            "removed collection task from set";
+            "producer_id" => %id,
+        );
+        match task.inbox.send(CollectionMessage::Shutdown).await {
+            Ok(_) => debug!(
+                self.log,
+                "shut down collection task";
+                "producer_id" => %id,
+            ),
+            Err(e) => error!(
+                self.log,
+                "failed to shut down collection task";
+                "producer_id" => %id,
+                "error" => ?e,
+            ),
+        }
+        Ok(())
     }
 }
 
@@ -440,6 +680,7 @@ impl Config {
     }
 }
 
+/// Arguments for running the `oximeter` collector.
 pub struct OximeterArguments {
     pub id: Uuid,
     pub address: SocketAddrV6,
@@ -447,7 +688,7 @@ pub struct OximeterArguments {
 
 /// A server used to collect metrics from components in the control plane.
 pub struct Oximeter {
-    _agent: Arc<OximeterAgent>,
+    agent: Arc<OximeterAgent>,
     server: HttpServer<Arc<OximeterAgent>>,
 }
 
@@ -572,7 +813,67 @@ impl Oximeter {
         .expect("Expected an infinite retry loop contacting Nexus");
 
         info!(log, "oximeter registered with nexus"; "id" => ?agent.id);
-        Ok(Self { _agent: agent, server })
+        Ok(Self { agent, server })
+    }
+
+    /// Create a new `oximeter` collector running in standalone mode.
+    pub async fn new_standalone(
+        log: &Logger,
+        args: &OximeterArguments,
+        nexus: SocketAddr,
+        clickhouse: Option<SocketAddr>,
+    ) -> Result<Self, Error> {
+        let db_config = clickhouse.map(DbConfig::with_address);
+        let agent = Arc::new(
+            OximeterAgent::new_standalone(args.id, db_config, &log).await?,
+        );
+
+        let dropshot_log = log.new(o!("component" => "dropshot"));
+        let server = HttpServerStarter::new(
+            &ConfigDropshot {
+                bind_address: SocketAddr::V6(args.address),
+                ..Default::default()
+            },
+            oximeter_api(),
+            Arc::clone(&agent),
+            &dropshot_log,
+        )
+        .map_err(|e| Error::Server(e.to_string()))?
+        .start();
+        info!(log, "started oximeter standalone server");
+
+        // Notify the standalone nexus.
+        let client = reqwest::Client::new();
+        let notify_nexus = || async {
+            debug!(log, "contacting nexus");
+            client
+                .post(format!("http://{}/metrics/collectors", nexus))
+                .json(&nexus_client::types::OximeterInfo {
+                    address: server.local_addr().to_string(),
+                    collector_id: agent.id,
+                })
+                .send()
+                .await
+                .map_err(|e| backoff::BackoffError::transient(e.to_string()))?
+                .error_for_status()
+                .map_err(|e| backoff::BackoffError::transient(e.to_string()))
+        };
+        let log_notification_failure = |error, delay| {
+            warn!(
+                log,
+                "failed to contact nexus, will retry in {:?}", delay;
+                "error" => ?error
+            );
+        };
+        backoff::retry_notify(
+            backoff::retry_policy_internal_service(),
+            notify_nexus,
+            log_notification_failure,
+        )
+        .await
+        .expect("Expected an infinite retry loop contacting Nexus");
+
+        Ok(Self { agent, server })
     }
 
     /// Serve requests forever, consuming the server.
@@ -592,6 +893,20 @@ impl Oximeter {
     pub async fn force_collect(&self) {
         self.server.app_private().force_collection().await
     }
+
+    /// List producers.
+    pub async fn list_producers(
+        &self,
+        start: Option<Uuid>,
+        limit: usize,
+    ) -> Vec<ProducerEndpoint> {
+        self.agent.list_producers(start, limit).await
+    }
+
+    /// Delete a producer by ID, stopping its collection task.
+    pub async fn delete_producer(&self, id: Uuid) -> Result<(), Error> {
+        self.agent.delete_producer(id).await
+    }
 }
 
 // Build the HTTP API internal to the control plane
@@ -599,6 +914,12 @@ pub fn oximeter_api() -> ApiDescription<Arc<OximeterAgent>> {
     let mut api = ApiDescription::new();
     api.register(producers_post)
         .expect("Could not register producers_post API handler");
+    api.register(producers_list)
+        .expect("Could not register producers_list API handler");
+    api.register(producer_delete)
+        .expect("Could not register producers_delete API handler");
+    api.register(collector_info)
+        .expect("Could not register collector_info API handler");
     api
 }
 
@@ -616,6 +937,79 @@ async fn producers_post(
     agent
         .register_producer(producer_info)
         .await
-        .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
-    Ok(HttpResponseUpdatedNoContent())
+        .map_err(HttpError::from)
+        .map(|_| HttpResponseUpdatedNoContent())
+}
+
+// Parameters for paginating the list of producers.
+#[derive(Clone, Copy, Debug, Deserialize, schemars::JsonSchema, Serialize)]
+struct ProducerPage {
+    id: Uuid,
+}
+
+// List all producers
+#[endpoint {
+    method = GET,
+    path = "/producers",
+}]
+async fn producers_list(
+    request_context: RequestContext<Arc<OximeterAgent>>,
+    query: Query<PaginationParams<EmptyScanParams, ProducerPage>>,
+) -> Result<HttpResponseOk<ResultsPage<ProducerEndpoint>>, HttpError> {
+    let agent = request_context.context();
+    let pagination = query.into_inner();
+    let limit = request_context.page_limit(&pagination)?.get() as usize;
+    let start = match &pagination.page {
+        WhichPage::First(..) => None,
+        WhichPage::Next(ProducerPage { id }) => Some(*id),
+    };
+    let producers = agent.list_producers(start, limit).await;
+    ResultsPage::new(
+        producers,
+        &EmptyScanParams {},
+        |info: &ProducerEndpoint, _| ProducerPage { id: info.id },
+    )
+    .map(HttpResponseOk)
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, schemars::JsonSchema, Serialize)]
+struct ProducerIdPathParams {
+    producer_id: Uuid,
+}
+
+// Delete a producer by ID.
+#[endpoint {
+    method = DELETE,
+    path = "/producers/{producer_id}",
+}]
+async fn producer_delete(
+    request_context: RequestContext<Arc<OximeterAgent>>,
+    path: dropshot::Path<ProducerIdPathParams>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let agent = request_context.context();
+    let producer_id = path.into_inner().producer_id;
+    agent
+        .delete_producer(producer_id)
+        .await
+        .map_err(HttpError::from)
+        .map(|_| HttpResponseDeleted())
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, schemars::JsonSchema, Serialize)]
+pub struct CollectorInfo {
+    /// The collector's UUID.
+    pub id: Uuid,
+}
+
+// Return identifying information about this collector
+#[endpoint {
+    method = GET,
+    path = "/info",
+}]
+async fn collector_info(
+    request_context: RequestContext<Arc<OximeterAgent>>,
+) -> Result<HttpResponseOk<CollectorInfo>, HttpError> {
+    let agent = request_context.context();
+    let info = CollectorInfo { id: agent.id };
+    Ok(HttpResponseOk(info))
 }

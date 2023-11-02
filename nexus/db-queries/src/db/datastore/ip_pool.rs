@@ -10,8 +10,7 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
-use crate::db::error::diesel_pool_result_optional;
-use crate::db::error::public_error_from_diesel_pool;
+use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::fixed_data::silo::INTERNAL_SILO_ID;
 use crate::db::identity::Resource;
@@ -22,7 +21,7 @@ use crate::db::model::Name;
 use crate::db::pagination::paginated;
 use crate::db::pool::DbConnection;
 use crate::db::queries::ip_pool::FilterOverlappingIpRanges;
-use async_bb8_diesel::{AsyncRunQueryDsl, PoolError};
+use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
 use ipnetwork::IpNetwork;
@@ -65,9 +64,9 @@ impl DataStore {
         .filter(dsl::silo_id.ne(*INTERNAL_SILO_ID).or(dsl::silo_id.is_null()))
         .filter(dsl::time_deleted.is_null())
         .select(db::model::IpPool::as_select())
-        .get_results_async(self.pool_authorized(opctx).await?)
+        .get_results_async(&*self.pool_connection_authorized(opctx).await?)
         .await
-        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Look up the default IP pool for the current silo. If there is no default
@@ -104,9 +103,11 @@ impl DataStore {
             // then by only taking the first result, we get the most specific one
             .order(dsl::silo_id.asc().nulls_last())
             .select(IpPool::as_select())
-            .first_async::<IpPool>(self.pool_authorized(opctx).await?)
+            .first_async::<IpPool>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
             .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Looks up an IP pool intended for internal services.
@@ -127,9 +128,9 @@ impl DataStore {
             .filter(dsl::silo_id.eq(*INTERNAL_SILO_ID))
             .filter(dsl::time_deleted.is_null())
             .select(IpPool::as_select())
-            .get_result_async(self.pool_authorized(opctx).await?)
+            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
             .map(|ip_pool| {
                 (
                     authz::IpPool::new(
@@ -160,10 +161,10 @@ impl DataStore {
         diesel::insert_into(dsl::ip_pool)
             .values(pool)
             .returning(IpPool::as_returning())
-            .get_result_async(self.pool_authorized(opctx).await?)
+            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::Conflict(ResourceType::IpPool, &pool_name),
                 )
@@ -181,16 +182,17 @@ impl DataStore {
         opctx.authorize(authz::Action::Delete, authz_pool).await?;
 
         // Verify there are no IP ranges still in this pool
-        let range = diesel_pool_result_optional(
-            ip_pool_range::dsl::ip_pool_range
-                .filter(ip_pool_range::dsl::ip_pool_id.eq(authz_pool.id()))
-                .filter(ip_pool_range::dsl::time_deleted.is_null())
-                .select(ip_pool_range::dsl::id)
-                .limit(1)
-                .first_async::<Uuid>(self.pool_authorized(opctx).await?)
-                .await,
-        )
-        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
+        let range = ip_pool_range::dsl::ip_pool_range
+            .filter(ip_pool_range::dsl::ip_pool_id.eq(authz_pool.id()))
+            .filter(ip_pool_range::dsl::time_deleted.is_null())
+            .select(ip_pool_range::dsl::id)
+            .limit(1)
+            .first_async::<Uuid>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
         if range.is_some() {
             return Err(Error::InvalidRequest {
                 message:
@@ -212,10 +214,10 @@ impl DataStore {
             .filter(dsl::id.eq(authz_pool.id()))
             .filter(dsl::rcgen.eq(db_pool.rcgen))
             .set(dsl::time_deleted.eq(now))
-            .execute_async(self.pool_authorized(opctx).await?)
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::NotFoundByResource(authz_pool),
                 )
@@ -247,10 +249,10 @@ impl DataStore {
             .filter(dsl::time_deleted.is_null())
             .set(updates)
             .returning(IpPool::as_returning())
-            .get_result_async(self.pool_authorized(opctx).await?)
+            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::NotFoundByResource(authz_pool),
                 )
@@ -269,10 +271,10 @@ impl DataStore {
             .filter(dsl::ip_pool_id.eq(authz_pool.id()))
             .filter(dsl::time_deleted.is_null())
             .select(IpPoolRange::as_select())
-            .get_results_async(self.pool_authorized(opctx).await?)
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::NotFoundByResource(authz_pool),
                 )
@@ -285,24 +287,19 @@ impl DataStore {
         authz_pool: &authz::IpPool,
         range: &IpRange,
     ) -> CreateResult<IpPoolRange> {
-        let conn = self.pool_authorized(opctx).await?;
-        Self::ip_pool_add_range_on_connection(conn, opctx, authz_pool, range)
+        let conn = self.pool_connection_authorized(opctx).await?;
+        Self::ip_pool_add_range_on_connection(&conn, opctx, authz_pool, range)
             .await
     }
 
     /// Variant of [Self::ip_pool_add_range] which may be called from a
     /// transaction context.
-    pub(crate) async fn ip_pool_add_range_on_connection<ConnErr>(
-        conn: &(impl async_bb8_diesel::AsyncConnection<DbConnection, ConnErr>
-              + Sync),
+    pub(crate) async fn ip_pool_add_range_on_connection(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
         opctx: &OpContext,
         authz_pool: &authz::IpPool,
         range: &IpRange,
-    ) -> CreateResult<IpPoolRange>
-    where
-        ConnErr: From<diesel::result::Error> + Send + 'static,
-        PoolError: From<ConnErr>,
-    {
+    ) -> CreateResult<IpPoolRange> {
         use db::schema::ip_pool_range::dsl;
         opctx.authorize(authz::Action::CreateChild, authz_pool).await?;
         let pool_id = authz_pool.id();
@@ -314,14 +311,16 @@ impl DataStore {
             .insert_and_get_result_async(conn)
             .await
             .map_err(|e| {
-                use async_bb8_diesel::ConnectionError::Query;
-                use async_bb8_diesel::PoolError::Connection;
                 use diesel::result::Error::NotFound;
 
                 match e {
-                    AsyncInsertError::DatabaseError(Connection(Query(
-                        NotFound,
-                    ))) => {
+                    AsyncInsertError::CollectionNotFound => {
+                        Error::ObjectNotFound {
+                            type_name: ResourceType::IpPool,
+                            lookup_type: LookupType::ById(pool_id),
+                        }
+                    }
+                    AsyncInsertError::DatabaseError(NotFound) => {
                         // We've filtered out the IP addresses the client provided,
                         // i.e., there's some overlap with existing addresses.
                         Error::invalid_request(
@@ -334,14 +333,8 @@ impl DataStore {
                             .as_str(),
                         )
                     }
-                    AsyncInsertError::CollectionNotFound => {
-                        Error::ObjectNotFound {
-                            type_name: ResourceType::IpPool,
-                            lookup_type: LookupType::ById(pool_id),
-                        }
-                    }
                     AsyncInsertError::DatabaseError(err) => {
-                        public_error_from_diesel_pool(err, ErrorHandler::Server)
+                        public_error_from_diesel(err, ErrorHandler::Server)
                     }
                 }
             })
@@ -366,28 +359,26 @@ impl DataStore {
         // Fetch the range itself, if it exists. We'll need to protect against
         // concurrent inserts of new external IPs from the target range by
         // comparing the rcgen.
-        let range = diesel_pool_result_optional(
-            dsl::ip_pool_range
-                .filter(dsl::ip_pool_id.eq(pool_id))
-                .filter(dsl::first_address.eq(first_net))
-                .filter(dsl::last_address.eq(last_net))
-                .filter(dsl::time_deleted.is_null())
-                .select(IpPoolRange::as_select())
-                .get_result_async::<IpPoolRange>(
-                    self.pool_authorized(opctx).await?,
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let range = dsl::ip_pool_range
+            .filter(dsl::ip_pool_id.eq(pool_id))
+            .filter(dsl::first_address.eq(first_net))
+            .filter(dsl::last_address.eq(last_net))
+            .filter(dsl::time_deleted.is_null())
+            .select(IpPoolRange::as_select())
+            .get_result_async::<IpPoolRange>(&*conn)
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
+            .ok_or_else(|| {
+                Error::invalid_request(
+                    format!(
+                        "The provided range {}-{} does not exist",
+                        first_address, last_address,
+                    )
+                    .as_str(),
                 )
-                .await,
-        )
-        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?
-        .ok_or_else(|| {
-            Error::invalid_request(
-                format!(
-                    "The provided range {}-{} does not exist",
-                    first_address, last_address,
-                )
-                .as_str(),
-            )
-        })?;
+            })?;
 
         // Find external IPs allocated out of this pool and range.
         let range_id = range.id;
@@ -397,9 +388,9 @@ impl DataStore {
                 .filter(external_ip::dsl::ip_pool_range_id.eq(range_id))
                 .filter(external_ip::dsl::time_deleted.is_null()),
         ))
-        .get_result_async::<bool>(self.pool_authorized(opctx).await?)
+        .get_result_async::<bool>(&*conn)
         .await
-        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
         if has_children {
             return Err(Error::invalid_request(
                 "IP pool ranges cannot be deleted while \
@@ -419,9 +410,9 @@ impl DataStore {
                 .filter(dsl::rcgen.eq(rcgen)),
         )
         .set(dsl::time_deleted.eq(now))
-        .execute_async(self.pool_authorized(opctx).await?)
+        .execute_async(&*conn)
         .await
-        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
         if updated_rows == 1 {
             Ok(())
         } else {

@@ -321,11 +321,11 @@
                 <internal_replication>true</internal_replication>
                 <replica>
                     <host from_env="CH_REPLICA_HOST_01"/>             
-                    <port>9000</port>
+                    <port>9001</port>
                 </replica>
                 <replica>
                     <host from_env="CH_REPLICA_HOST_02"/>
-                    <port>9001</port>
+                    <port>9002</port>
                 </replica>
             </shard>
         </oximeter_cluster>

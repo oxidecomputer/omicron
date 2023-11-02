@@ -9,6 +9,7 @@ use diesel::pg::Pg;
 use diesel::query_builder::AstPass;
 use diesel::query_builder::QueryFragment;
 use diesel::query_builder::QueryId;
+use diesel::result::Error as DieselError;
 use diesel::Expression;
 use diesel::SelectableExpression;
 
@@ -77,11 +78,9 @@ where
 /// Returns one of the sentinels if it matches the expected value from
 /// a [`TrueOrCastError`].
 pub fn matches_sentinel(
-    e: &async_bb8_diesel::PoolError,
+    e: &DieselError,
     sentinels: &[&'static str],
 ) -> Option<&'static str> {
-    use async_bb8_diesel::ConnectionError;
-    use async_bb8_diesel::PoolError;
     use diesel::result::DatabaseErrorKind;
     use diesel::result::Error;
 
@@ -94,9 +93,7 @@ pub fn matches_sentinel(
     match e {
         // Catch the specific errors designed to communicate the failures we
         // want to distinguish.
-        PoolError::Connection(ConnectionError::Query(
-            Error::DatabaseError(DatabaseErrorKind::Unknown, ref info),
-        )) => {
+        Error::DatabaseError(DatabaseErrorKind::Unknown, info) => {
             for sentinel in sentinels {
                 if info.message() == bool_parse_error(sentinel) {
                     return Some(sentinel);

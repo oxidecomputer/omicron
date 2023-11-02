@@ -11,7 +11,7 @@ set -u
 set -x
 
 SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-cd "${SOURCE_DIR}/.."
+cd "${SOURCE_DIR}/.." || exit
 OMICRON_TOP="$PWD"
 
 . "$SOURCE_DIR/virtual_hardware.sh"
@@ -56,7 +56,23 @@ function remove_softnpu_zone {
         --ports sc0_1,tfportqsfp0_0
 }
 
+# Some services have their working data overlaid by backing mounts from the
+# internal boot disk. Before we can destroy the ZFS pools, we need to unmount
+# these.
+
+BACKED_SERVICES="svc:/system/fmd:default"
+
+function demount_backingfs {
+    svcadm disable -st $BACKED_SERVICES
+    zpool list -Hpo name | grep '^oxi_' \
+        | xargs -i zfs list -Hpo name,canmount,mounted -r {}/backing \
+        | awk '$3 == "yes" && $2 == "noauto" { print $1 }' \
+        | xargs -l zfs umount
+    svcadm enable -st $BACKED_SERVICES
+}
+
 verify_omicron_uninstalled
+demount_backingfs
 unload_xde_driver
 remove_softnpu_zone
 try_remove_vnics

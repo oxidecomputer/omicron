@@ -19,10 +19,11 @@ use internal_dns::{ServiceName, DNS_ZONE};
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, ReservedRackSubnet,
     DENDRITE_PORT, DNS_HTTP_PORT, DNS_PORT, DNS_REDUNDANCY, MAX_DNS_REDUNDANCY,
-    MGS_PORT, NTP_PORT, NUM_SOURCE_NAT_PORTS, RSS_RESERVED_ADDRESSES,
+    MGD_PORT, MGS_PORT, NTP_PORT, NUM_SOURCE_NAT_PORTS, RSS_RESERVED_ADDRESSES,
     SLED_PREFIX,
 };
 use omicron_common::api::external::{MacAddr, Vni};
+use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_common::api::internal::shared::{
     NetworkInterface, NetworkInterfaceKind, SourceNatConfig,
 };
@@ -276,7 +277,7 @@ impl Plan {
                 "No scrimlets observed".to_string(),
             ));
         }
-        for sled in scrimlets {
+        for (i, sled) in scrimlets.iter().enumerate() {
             let address = get_switch_zone_address(sled.subnet);
             let zone =
                 dns_builder.host_dendrite(sled.sled_id, address).unwrap();
@@ -294,6 +295,18 @@ impl Plan {
                     MGS_PORT,
                 )
                 .unwrap();
+            dns_builder
+                .service_backend_zone(ServiceName::Mgd, &zone, MGD_PORT)
+                .unwrap();
+
+            // TODO only works for single rack
+            let sled_address = get_sled_address(sled.subnet);
+            let switch_location = if i == 0 {
+                SwitchLocation::Switch0
+            } else {
+                SwitchLocation::Switch1
+            };
+            dns_builder.host_scrimlet(switch_location, sled_address).unwrap();
         }
 
         // We'll stripe most services across all available Sleds, round-robin

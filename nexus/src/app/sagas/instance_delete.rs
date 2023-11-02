@@ -8,11 +8,7 @@ use super::ActionRegistry;
 use super::NexusActionContext;
 use super::NexusSaga;
 use crate::app::sagas::declare_saga_actions;
-use crate::app::sagas::retry_until_known_result;
-use nexus_db_queries::db;
-use nexus_db_queries::db::lookup::LookupPath;
-use nexus_db_queries::{authn, authz};
-use nexus_types::identity::Resource;
+use nexus_db_queries::{authn, authz, db};
 use omicron_common::api::external::{Error, ResourceType};
 use omicron_common::api::internal::shared::SwitchLocation;
 use serde::Deserialize;
@@ -22,7 +18,7 @@ use steno::ActionError;
 // instance delete saga: input parameters
 
 #[derive(Debug, Deserialize, Serialize)]
-pub(crate) struct Params {
+pub struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub authz_instance: authz::Instance,
     pub instance: db::model::Instance,
@@ -33,18 +29,9 @@ pub(crate) struct Params {
 
 declare_saga_actions! {
     instance_delete;
-    V2P_ENSURE_UNDO -> "v2p_ensure_undo" {
-        + sid_noop
-        - sid_v2p_ensure_undo
-    }
-    V2P_ENSURE -> "v2p_ensure" {
-        + sid_v2p_ensure
-    }
+
     INSTANCE_DELETE_RECORD -> "no_result1" {
         + sid_delete_instance_record
-    }
-    DELETE_ASIC_CONFIGURATION -> "delete_asic_configuration" {
-        + sid_delete_network_config
     }
     DELETE_NETWORK_INTERFACES -> "no_result2" {
         + sid_delete_network_interfaces
@@ -52,18 +39,12 @@ declare_saga_actions! {
     DEALLOCATE_EXTERNAL_IP -> "no_result3" {
         + sid_deallocate_external_ip
     }
-    VIRTUAL_RESOURCES_ACCOUNT -> "no_result4" {
-        + sid_account_virtual_resources
-    }
-    SLED_RESOURCES_ACCOUNT -> "no_result5" {
-        + sid_account_sled_resources
-    }
 }
 
 // instance delete saga: definition
 
 #[derive(Debug)]
-pub(crate) struct SagaInstanceDelete;
+pub struct SagaInstanceDelete;
 impl NexusSaga for SagaInstanceDelete {
     const NAME: &'static str = "instance-delete";
     type Params = Params;
@@ -76,146 +57,14 @@ impl NexusSaga for SagaInstanceDelete {
         _params: &Self::Params,
         mut builder: steno::DagBuilder,
     ) -> Result<steno::Dag, super::SagaInitError> {
-        builder.append(v2p_ensure_undo_action());
-        builder.append(v2p_ensure_action());
-        builder.append(delete_asic_configuration_action());
         builder.append(instance_delete_record_action());
         builder.append(delete_network_interfaces_action());
         builder.append(deallocate_external_ip_action());
-        builder.append(virtual_resources_account_action());
-        builder.append(sled_resources_account_action());
         Ok(builder.build()?)
     }
 }
 
 // instance delete saga: action implementations
-
-async fn sid_noop(_sagactx: NexusActionContext) -> Result<(), ActionError> {
-    Ok(())
-}
-
-/// Ensure that the v2p mappings for this instance are deleted
-async fn sid_v2p_ensure(
-    sagactx: NexusActionContext,
-) -> Result<(), ActionError> {
-    let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params::<Params>()?;
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
-
-    osagactx
-        .nexus()
-        .delete_instance_v2p_mappings(&opctx, params.authz_instance.id())
-        .await
-        .map_err(ActionError::action_failed)?;
-
-    Ok(())
-}
-
-/// During unwind, ensure that v2p mappings are created again
-async fn sid_v2p_ensure_undo(
-    sagactx: NexusActionContext,
-) -> Result<(), anyhow::Error> {
-    let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params::<Params>()?;
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
-
-    let (.., db_instance) = LookupPath::new(&opctx, &osagactx.datastore())
-        .instance_id(params.authz_instance.id())
-        .fetch_for(authz::Action::Read)
-        .await?;
-
-    osagactx
-        .nexus()
-        .create_instance_v2p_mappings(
-            &opctx,
-            params.authz_instance.id(),
-            db_instance.runtime().sled_id,
-        )
-        .await
-        .map_err(ActionError::action_failed)?;
-
-    Ok(())
-}
-
-async fn sid_delete_network_config(
-    sagactx: NexusActionContext,
-) -> Result<(), ActionError> {
-    let params = sagactx.saga_params::<Params>()?;
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
-    let osagactx = sagactx.user_data();
-
-    let datastore = &osagactx.datastore();
-    let log = sagactx.user_data().log();
-
-    debug!(log, "fetching external ip addresses");
-
-    let external_ips = &datastore
-        .instance_lookup_external_ips(&opctx, params.authz_instance.id())
-        .await
-        .map_err(ActionError::action_failed)?;
-
-    let mut errors: Vec<ActionError> = vec![];
-
-    // Here we are attempting to delete every existing NAT entry while deferring
-    // any error handling. If we don't defer error handling, we might end up
-    // bailing out before we've attempted deletion of all entries.
-    for entry in external_ips {
-        for switch in &params.boundary_switches {
-            debug!(log, "deleting nat mapping"; "switch" => switch.to_string(), "entry" => #?entry);
-
-            let client_result =
-                osagactx.nexus().dpd_clients.get(switch).ok_or_else(|| {
-                    ActionError::action_failed(Error::internal_error(&format!(
-                        "unable to find dendrite client for {switch}"
-                    )))
-                });
-
-            let dpd_client = match client_result {
-                Ok(client) => client,
-                Err(new_error) => {
-                    errors.push(new_error);
-                    continue;
-                }
-            };
-
-            let result = retry_until_known_result(log, || async {
-                dpd_client
-                    .ensure_nat_entry_deleted(log, entry.ip, *entry.first_port)
-                    .await
-            })
-            .await;
-
-            match result {
-                Ok(_) => {
-                    debug!(log, "deleting nat mapping successful"; "switch" => switch.to_string(), "entry" => format!("{entry:#?}"));
-                }
-                Err(e) => {
-                    let new_error =
-                        ActionError::action_failed(Error::internal_error(
-                            &format!("failed to delete nat entry via dpd: {e}"),
-                        ));
-                    error!(log, "{new_error:#?}");
-                    errors.push(new_error);
-                }
-            }
-        }
-    }
-
-    if let Some(error) = errors.first() {
-        return Err(error.clone());
-    }
-
-    Ok(())
-}
 
 async fn sid_delete_instance_record(
     sagactx: NexusActionContext,
@@ -276,66 +125,6 @@ async fn sid_deallocate_external_ip(
             &opctx,
             params.authz_instance.id(),
         )
-        .await
-        .map_err(ActionError::action_failed)?;
-    Ok(())
-}
-
-async fn sid_account_virtual_resources(
-    sagactx: NexusActionContext,
-) -> Result<(), ActionError> {
-    let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params::<Params>()?;
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
-
-    osagactx
-        .datastore()
-        .virtual_provisioning_collection_delete_instance(
-            &opctx,
-            params.instance.id(),
-            params.instance.project_id,
-            i64::from(params.instance.runtime_state.ncpus.0 .0),
-            params.instance.runtime_state.memory,
-        )
-        .await
-        .map_err(ActionError::action_failed)?;
-    Ok(())
-}
-
-async fn sid_account_sled_resources(
-    sagactx: NexusActionContext,
-) -> Result<(), ActionError> {
-    let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params::<Params>()?;
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
-
-    // Fetch the previously-deleted instance record to get its Propolis ID. It
-    // is safe to fetch the ID at this point because the instance is already
-    // deleted and so cannot change anymore.
-    //
-    // TODO(#2315): This prevents the garbage collection of soft-deleted
-    // instance records. A better method is to remove a Propolis's reservation
-    // once an instance no longer refers to it (e.g. when it has stopped or
-    // been removed from the instance's migration information) and then make
-    // this saga check that the instance has no active Propolises before it is
-    // deleted. This logic should be part of the logic needed to stop an
-    // instance and release its Propolis reservation; when that is added this
-    // step can be removed.
-    let instance = osagactx
-        .datastore()
-        .instance_fetch_deleted(&opctx, &params.authz_instance)
-        .await
-        .map_err(ActionError::action_failed)?;
-
-    osagactx
-        .datastore()
-        .sled_reservation_delete(&opctx, instance.runtime().propolis_id)
         .await
         .map_err(ActionError::action_failed)?;
     Ok(())
@@ -472,10 +261,20 @@ mod test {
         };
         let project_lookup =
             nexus.project_lookup(&opctx, project_selector).unwrap();
-        nexus
+
+        let instance_state = nexus
             .project_create_instance(&opctx, &project_lookup, &params)
             .await
-            .unwrap()
+            .unwrap();
+
+        let datastore = cptestctx.server.apictx().nexus.datastore().clone();
+        let (.., db_instance) = LookupPath::new(&opctx, &datastore)
+            .instance_id(instance_state.instance().id())
+            .fetch()
+            .await
+            .expect("test instance should be present in datastore");
+
+        db_instance
     }
 
     #[nexus_test(server = crate::Server)]

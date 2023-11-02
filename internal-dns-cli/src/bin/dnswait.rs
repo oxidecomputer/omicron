@@ -72,7 +72,7 @@ async fn main() -> Result<()> {
     } else {
         let addrs = opt.nameserver_addresses;
         info!(&log, "using explicit nameservers"; "nameservers" => ?addrs);
-        Resolver::new_from_addrs(log.clone(), addrs)
+        Resolver::new_from_addrs(log.clone(), &addrs)
             .context("creating resolver with explicit nameserver addresses")?
     };
 

@@ -101,7 +101,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InstanceRuntimeState"
+                  "$ref": "#/components/schemas/SledInstanceState"
                 }
               }
             }
@@ -231,7 +231,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InstanceRuntimeState"
+                  "$ref": "#/components/schemas/SledInstanceState"
                 }
               }
             }
@@ -289,6 +289,55 @@
         }
       }
     },
+    "/network-bootstore-config": {
+      "get": {
+        "summary": "This API endpoint is only reading the local sled agent's view of the",
+        "description": "bootstore. The boostore is a distributed data store that is eventually consistent. Reads from individual nodes may not represent the latest state.",
+        "operationId": "read_network_bootstore_config_cache",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EarlyNetworkConfig"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "operationId": "write_network_bootstore_config",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EarlyNetworkConfig"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/services": {
       "put": {
         "operationId": "services_put",
@@ -328,6 +377,32 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/switch-ports": {
+      "post": {
+        "operationId": "uplink_ensure",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SwitchPorts"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -442,7 +517,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/SetVirtualNetworkInterfaceHost"
+                "$ref": "#/components/schemas/DeleteVirtualNetworkInterfaceHost"
               }
             }
           },
@@ -863,6 +938,53 @@
       }
     },
     "schemas": {
+      "BgpConfig": {
+        "type": "object",
+        "properties": {
+          "asn": {
+            "description": "The autonomous system number for the BGP configuration.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "originate": {
+            "description": "The set of prefixes for the BGP router to originate.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Ipv4Network"
+            }
+          }
+        },
+        "required": [
+          "asn",
+          "originate"
+        ]
+      },
+      "BgpPeerConfig": {
+        "type": "object",
+        "properties": {
+          "addr": {
+            "description": "Address of the peer.",
+            "type": "string",
+            "format": "ipv4"
+          },
+          "asn": {
+            "description": "The autonomous sysetm number of the router the peer belongs to.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "port": {
+            "description": "Switch port the peer is reachable on.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "addr",
+          "asn",
+          "port"
+        ]
+      },
       "BundleUtilization": {
         "description": "The portion of a debug dataset used for zone bundles.",
         "type": "object",
@@ -1169,6 +1291,59 @@
           "id",
           "name",
           "service_address"
+        ]
+      },
+      "DeleteVirtualNetworkInterfaceHost": {
+        "description": "The data needed to identify a virtual IP for which a sled maintains an OPTE virtual-to-physical mapping such that that mapping can be deleted.",
+        "type": "object",
+        "properties": {
+          "virtual_ip": {
+            "description": "The virtual IP whose mapping should be deleted.",
+            "type": "string",
+            "format": "ip"
+          },
+          "vni": {
+            "description": "The VNI for the network containing the virtual IP whose mapping should be deleted.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Vni"
+              }
+            ]
+          }
+        },
+        "required": [
+          "virtual_ip",
+          "vni"
+        ]
+      },
+      "DhcpConfig": {
+        "description": "DHCP configuration for a port\n\nNot present here: Hostname (DHCPv4 option 12; used in DHCPv6 option 39); we use `InstanceRuntimeState::hostname` for this value.",
+        "type": "object",
+        "properties": {
+          "dns_servers": {
+            "description": "DNS servers to send to the instance\n\n(DHCPv4 option 6; DHCPv6 option 23)",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "ip"
+            }
+          },
+          "host_domain": {
+            "nullable": true,
+            "description": "DNS zone this instance's hostname belongs to (e.g. the `project.example` part of `instance1.project.example`)\n\n(DHCPv4 option 15; used in DHCPv6 option 39)",
+            "type": "string"
+          },
+          "search_domains": {
+            "description": "DNS search domains\n\n(DHCPv4 option 119; DHCPv6 option 24)",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "dns_servers",
+          "search_domains"
         ]
       },
       "DiskEnsureBody": {
@@ -1548,6 +1723,54 @@
           "secs"
         ]
       },
+      "EarlyNetworkConfig": {
+        "description": "Network configuration required to bring up the control plane\n\nThe fields in this structure are those from [`super::params::RackInitializeRequest`] necessary for use beyond RSS. This is just for the initial rack configuration and cold boot purposes. Updates come from Nexus.",
+        "type": "object",
+        "properties": {
+          "body": {
+            "$ref": "#/components/schemas/EarlyNetworkConfigBody"
+          },
+          "generation": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "schema_version": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "body",
+          "generation",
+          "schema_version"
+        ]
+      },
+      "EarlyNetworkConfigBody": {
+        "description": "This is the actual configuration of EarlyNetworking.\n\nWe nest it below the \"header\" of `generation` and `schema_version` so that we can perform partial deserialization of `EarlyNetworkConfig` to only read the header and defer deserialization of the body once we know the schema version. This is possible via the use of [`serde_json::value::RawValue`] in future (post-v1) deserialization paths.",
+        "type": "object",
+        "properties": {
+          "ntp_servers": {
+            "description": "The external NTP server addresses.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "rack_network_config": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RackNetworkConfigV1"
+              }
+            ]
+          }
+        },
+        "required": [
+          "ntp_servers"
+        ]
+      },
       "Error": {
         "description": "Error information from a response.",
         "type": "object",
@@ -1614,6 +1837,26 @@
           }
         ]
       },
+      "HostPortConfig": {
+        "type": "object",
+        "properties": {
+          "addrs": {
+            "description": "IP Address and prefix (e.g., `192.168.0.1/16`) to apply to switchport (must be in infra_ip pool)",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpNetwork"
+            }
+          },
+          "port": {
+            "description": "Switchport to use for external connectivity",
+            "type": "string"
+          }
+        },
+        "required": [
+          "addrs",
+          "port"
+        ]
+      },
       "InstanceCpuCount": {
         "description": "The number of CPUs in an Instance",
         "type": "integer",
@@ -1621,20 +1864,49 @@
         "minimum": 0
       },
       "InstanceEnsureBody": {
-        "description": "The body of a request to ensure that an instance is known to a sled agent.",
+        "description": "The body of a request to ensure that a instance and VMM are known to a sled agent.",
         "type": "object",
         "properties": {
-          "initial": {
+          "hardware": {
             "description": "A description of the instance's virtual hardware and the initial runtime state this sled agent should store for this incarnation of the instance.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/InstanceHardware"
               }
             ]
+          },
+          "instance_runtime": {
+            "description": "The instance runtime state for the instance being registered.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceRuntimeState"
+              }
+            ]
+          },
+          "propolis_addr": {
+            "description": "The address at which this VMM should serve a Propolis server API.",
+            "type": "string"
+          },
+          "propolis_id": {
+            "description": "The ID of the VMM being registered. This may not be the active VMM ID in the instance runtime state (e.g. if the new VMM is going to be a migration target).",
+            "type": "string",
+            "format": "uuid"
+          },
+          "vmm_runtime": {
+            "description": "The initial VMM runtime state for the VMM being registered.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VmmRuntimeState"
+              }
+            ]
           }
         },
         "required": [
-          "initial"
+          "hardware",
+          "instance_runtime",
+          "propolis_addr",
+          "propolis_id",
+          "vmm_runtime"
         ]
       },
       "InstanceHardware": {
@@ -1644,6 +1916,9 @@
           "cloud_init_bytes": {
             "nullable": true,
             "type": "string"
+          },
+          "dhcp_config": {
+            "$ref": "#/components/schemas/DhcpConfig"
           },
           "disks": {
             "type": "array",
@@ -1671,19 +1946,20 @@
               "$ref": "#/components/schemas/NetworkInterface"
             }
           },
-          "runtime": {
-            "$ref": "#/components/schemas/InstanceRuntimeState"
+          "properties": {
+            "$ref": "#/components/schemas/InstanceProperties"
           },
           "source_nat": {
             "$ref": "#/components/schemas/SourceNatConfig"
           }
         },
         "required": [
+          "dhcp_config",
           "disks",
           "external_ips",
           "firewall_rules",
           "nics",
-          "runtime",
+          "properties",
           "source_nat"
         ]
       },
@@ -1748,6 +2024,27 @@
           "src_propolis_id"
         ]
       },
+      "InstanceProperties": {
+        "description": "The \"static\" properties of an instance: information about the instance that doesn't change while the instance is running.",
+        "type": "object",
+        "properties": {
+          "hostname": {
+            "description": "RFC1035-compliant hostname for the instance.",
+            "type": "string"
+          },
+          "memory": {
+            "$ref": "#/components/schemas/ByteCount"
+          },
+          "ncpus": {
+            "$ref": "#/components/schemas/InstanceCpuCount"
+          }
+        },
+        "required": [
+          "hostname",
+          "memory",
+          "ncpus"
+        ]
+      },
       "InstancePutMigrationIdsBody": {
         "description": "The body of a request to set or clear the migration identifiers from a sled agent's instance state records.",
         "type": "object",
@@ -1762,7 +2059,7 @@
             ]
           },
           "old_runtime": {
-            "description": "The last runtime state known to this requestor. This request will succeed if either (a) the Propolis generation in the sled agent's runtime state matches the generation in this record, or (b) the sled agent's runtime state matches what would result from applying this request to the caller's runtime state. This latter condition provides idempotency.",
+            "description": "The last instance runtime state known to this requestor. This request will succeed if either (a) the state generation in the sled agent's runtime state matches the generation in this record, or (b) the sled agent's runtime state matches what would result from applying this request to the caller's runtime state. This latter condition provides idempotency.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/InstanceRuntimeState"
@@ -1800,102 +2097,50 @@
             "description": "The current runtime state of the instance after handling the request to change its state. If the instance's state did not change, this field is `None`.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/InstanceRuntimeState"
+                "$ref": "#/components/schemas/SledInstanceState"
               }
             ]
           }
         }
       },
       "InstanceRuntimeState": {
-        "description": "Runtime state of the Instance, including the actual running state and minimal metadata\n\nThis state is owned by the sled agent running that Instance.",
+        "description": "The dynamic runtime properties of an instance: its current VMM ID (if any), migration information (if any), and the instance state to report if there is no active VMM.",
         "type": "object",
         "properties": {
           "dst_propolis_id": {
             "nullable": true,
-            "description": "the target propolis-server during a migration of this Instance",
+            "description": "If a migration is active, the ID of the target VMM.",
             "type": "string",
             "format": "uuid"
           },
           "gen": {
-            "description": "generation number for this state",
+            "description": "Generation number for this state.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Generation"
-              }
-            ]
-          },
-          "hostname": {
-            "description": "RFC1035-compliant hostname for the Instance.",
-            "type": "string"
-          },
-          "memory": {
-            "description": "memory allocated for this Instance",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ByteCount"
               }
             ]
           },
           "migration_id": {
             "nullable": true,
-            "description": "migration id (if one in process)",
+            "description": "If a migration is active, the ID of that migration.",
             "type": "string",
             "format": "uuid"
-          },
-          "ncpus": {
-            "description": "number of CPUs allocated for this Instance",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/InstanceCpuCount"
-              }
-            ]
-          },
-          "propolis_addr": {
-            "nullable": true,
-            "description": "address of propolis-server running this Instance",
-            "type": "string"
-          },
-          "propolis_gen": {
-            "description": "The generation number for the Propolis and sled identifiers for this instance.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Generation"
-              }
-            ]
           },
           "propolis_id": {
-            "description": "which propolis-server is running this Instance",
-            "type": "string",
-            "format": "uuid"
-          },
-          "run_state": {
-            "description": "runtime state of the Instance",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/InstanceState"
-              }
-            ]
-          },
-          "sled_id": {
-            "description": "which sled is running this Instance",
+            "nullable": true,
+            "description": "The instance's currently active VMM ID.",
             "type": "string",
             "format": "uuid"
           },
           "time_updated": {
-            "description": "timestamp for this information",
+            "description": "Timestamp for this information.",
             "type": "string",
             "format": "date-time"
           }
         },
         "required": [
           "gen",
-          "hostname",
-          "memory",
-          "ncpus",
-          "propolis_gen",
-          "propolis_id",
-          "run_state",
-          "sled_id",
           "time_updated"
         ]
       },
@@ -2052,7 +2297,7 @@
             "description": "The current state of the instance after handling the request to unregister it. If the instance's state did not change, this field is `None`.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/InstanceRuntimeState"
+                "$ref": "#/components/schemas/SledInstanceState"
               }
             ]
           }
@@ -2078,6 +2323,26 @@
           }
         ]
       },
+      "IpNetwork": {
+        "oneOf": [
+          {
+            "title": "v4",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv4Network"
+              }
+            ]
+          },
+          {
+            "title": "v6",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv6Network"
+              }
+            ]
+          }
+        ]
+      },
       "Ipv4Net": {
         "example": "192.168.1.0/24",
         "title": "An IPv4 subnet",
@@ -2085,12 +2350,20 @@
         "type": "string",
         "pattern": "^(([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])/([0-9]|1[0-9]|2[0-9]|3[0-2])$"
       },
+      "Ipv4Network": {
+        "type": "string",
+        "pattern": "^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\/(3[0-2]|[0-2]?[0-9])$"
+      },
       "Ipv6Net": {
         "example": "fd12:3456::/64",
         "title": "An IPv6 subnet",
         "description": "An IPv6 subnet, including prefix and subnet mask",
         "type": "string",
         "pattern": "^([fF][dD])[0-9a-fA-F]{2}:(([0-9a-fA-F]{1,4}:){6}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,6}:)([0-9a-fA-F]{1,4})?\\/([0-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])$"
+      },
+      "Ipv6Network": {
+        "type": "string",
+        "pattern": "^(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\")[/](12[0-8]|1[0-1][0-9]|[0-9]?[0-9])$"
       },
       "KnownArtifactKind": {
         "description": "Kinds of update artifacts, as used by Nexus to determine what updates are available and by sled-agent to determine how to apply an update when asked.",
@@ -2226,6 +2499,93 @@
           }
         ]
       },
+      "PortConfigV1": {
+        "type": "object",
+        "properties": {
+          "addresses": {
+            "description": "This port's addresses.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpNetwork"
+            }
+          },
+          "bgp_peers": {
+            "description": "BGP peers on this port",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BgpPeerConfig"
+            }
+          },
+          "port": {
+            "description": "Nmae of the port this config applies to.",
+            "type": "string"
+          },
+          "routes": {
+            "description": "The set of routes associated with this port.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouteConfig"
+            }
+          },
+          "switch": {
+            "description": "Switch the port belongs to.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SwitchLocation"
+              }
+            ]
+          },
+          "uplink_port_fec": {
+            "description": "Port forward error correction type.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PortFec"
+              }
+            ]
+          },
+          "uplink_port_speed": {
+            "description": "Port speed.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PortSpeed"
+              }
+            ]
+          }
+        },
+        "required": [
+          "addresses",
+          "bgp_peers",
+          "port",
+          "routes",
+          "switch",
+          "uplink_port_fec",
+          "uplink_port_speed"
+        ]
+      },
+      "PortFec": {
+        "description": "Switchport FEC options",
+        "type": "string",
+        "enum": [
+          "firecode",
+          "none",
+          "rs"
+        ]
+      },
+      "PortSpeed": {
+        "description": "Switchport Speed options",
+        "type": "string",
+        "enum": [
+          "speed0_g",
+          "speed1_g",
+          "speed10_g",
+          "speed25_g",
+          "speed40_g",
+          "speed50_g",
+          "speed100_g",
+          "speed200_g",
+          "speed400_g"
+        ]
+      },
       "PriorityDimension": {
         "description": "A dimension along with bundles can be sorted, to determine priority.",
         "oneOf": [
@@ -2253,6 +2613,68 @@
         },
         "minItems": 2,
         "maxItems": 2
+      },
+      "RackNetworkConfigV1": {
+        "description": "Initial network configuration",
+        "type": "object",
+        "properties": {
+          "bgp": {
+            "description": "BGP configurations for connecting the rack to external networks",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BgpConfig"
+            }
+          },
+          "infra_ip_first": {
+            "description": "First ip address to be used for configuring network infrastructure",
+            "type": "string",
+            "format": "ipv4"
+          },
+          "infra_ip_last": {
+            "description": "Last ip address to be used for configuring network infrastructure",
+            "type": "string",
+            "format": "ipv4"
+          },
+          "ports": {
+            "description": "Uplinks for connecting the rack to external networks",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PortConfigV1"
+            }
+          },
+          "rack_subnet": {
+            "$ref": "#/components/schemas/Ipv6Network"
+          }
+        },
+        "required": [
+          "bgp",
+          "infra_ip_first",
+          "infra_ip_last",
+          "ports",
+          "rack_subnet"
+        ]
+      },
+      "RouteConfig": {
+        "type": "object",
+        "properties": {
+          "destination": {
+            "description": "The destination of the route.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpNetwork"
+              }
+            ]
+          },
+          "nexthop": {
+            "description": "The nexthop/gateway address.",
+            "type": "string",
+            "format": "ip"
+          }
+        },
+        "required": [
+          "destination",
+          "nexthop"
+        ]
       },
       "SemverVersion": {
         "type": "string",
@@ -2678,6 +3100,38 @@
           "vni"
         ]
       },
+      "SledInstanceState": {
+        "description": "A wrapper type containing a sled's total knowledge of the state of a specific VMM and the instance it incarnates.",
+        "type": "object",
+        "properties": {
+          "instance_state": {
+            "description": "The sled's conception of the state of the instance.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceRuntimeState"
+              }
+            ]
+          },
+          "propolis_id": {
+            "description": "The ID of the VMM whose state is being reported.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "vmm_state": {
+            "description": "The most recent state of the sled's VMM process.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VmmRuntimeState"
+              }
+            ]
+          }
+        },
+        "required": [
+          "instance_state",
+          "propolis_id",
+          "vmm_state"
+        ]
+      },
       "SledRole": {
         "oneOf": [
           {
@@ -2735,6 +3189,40 @@
         "type": "integer",
         "format": "uint8",
         "minimum": 0
+      },
+      "SwitchLocation": {
+        "description": "Identifies switch physical location",
+        "oneOf": [
+          {
+            "description": "Switch in upper slot",
+            "type": "string",
+            "enum": [
+              "switch0"
+            ]
+          },
+          {
+            "description": "Switch in lower slot",
+            "type": "string",
+            "enum": [
+              "switch1"
+            ]
+          }
+        ]
+      },
+      "SwitchPorts": {
+        "description": "A set of switch uplinks.",
+        "type": "object",
+        "properties": {
+          "uplinks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HostPortConfig"
+            }
+          }
+        },
+        "required": [
+          "uplinks"
+        ]
       },
       "TimeSync": {
         "type": "object",
@@ -2809,6 +3297,38 @@
           "kind",
           "name",
           "version"
+        ]
+      },
+      "VmmRuntimeState": {
+        "description": "The dynamic runtime properties of an individual VMM process.",
+        "type": "object",
+        "properties": {
+          "gen": {
+            "description": "The generation number for this VMM's state.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          },
+          "state": {
+            "description": "The last state reported by this VMM.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceState"
+              }
+            ]
+          },
+          "time_updated": {
+            "description": "Timestamp for the VMM's state.",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "gen",
+          "state",
+          "time_updated"
         ]
       },
       "Vni": {

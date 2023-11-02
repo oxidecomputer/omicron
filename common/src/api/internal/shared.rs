@@ -5,7 +5,7 @@
 //! Types shared between Nexus and Sled Agent.
 
 use crate::api::external::{self, Name};
-use ipnetwork::Ipv4Network;
+use ipnetwork::{IpNetwork, Ipv4Network, Ipv6Network};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -68,18 +68,88 @@ pub struct SourceNatConfig {
     pub last_port: u16,
 }
 
+// We alias [`RackNetworkConfig`] to the current version of the protocol, so
+// that we can convert between versions as necessary.
+pub type RackNetworkConfig = RackNetworkConfigV1;
+
 /// Initial network configuration
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
-pub struct RackNetworkConfig {
+pub struct RackNetworkConfigV1 {
+    pub rack_subnet: Ipv6Network,
     // TODO: #3591 Consider making infra-ip ranges implicit for uplinks
     /// First ip address to be used for configuring network infrastructure
     pub infra_ip_first: Ipv4Addr,
     /// Last ip address to be used for configuring network infrastructure
     pub infra_ip_last: Ipv4Addr,
     /// Uplinks for connecting the rack to external networks
-    pub uplinks: Vec<UplinkConfig>,
+    pub ports: Vec<PortConfigV1>,
+    /// BGP configurations for connecting the rack to external networks
+    pub bgp: Vec<BgpConfig>,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+pub struct BgpConfig {
+    /// The autonomous system number for the BGP configuration.
+    pub asn: u32,
+    /// The set of prefixes for the BGP router to originate.
+    pub originate: Vec<Ipv4Network>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+pub struct BgpPeerConfig {
+    /// The autonomous sysetm number of the router the peer belongs to.
+    pub asn: u32,
+    /// Switch port the peer is reachable on.
+    pub port: String,
+    /// Address of the peer.
+    pub addr: Ipv4Addr,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+pub struct RouteConfig {
+    /// The destination of the route.
+    pub destination: IpNetwork,
+    /// The nexthop/gateway address.
+    pub nexthop: IpAddr,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+pub struct PortConfigV1 {
+    /// The set of routes associated with this port.
+    pub routes: Vec<RouteConfig>,
+    /// This port's addresses.
+    pub addresses: Vec<IpNetwork>,
+    /// Switch the port belongs to.
+    pub switch: SwitchLocation,
+    /// Nmae of the port this config applies to.
+    pub port: String,
+    /// Port speed.
+    pub uplink_port_speed: PortSpeed,
+    /// Port forward error correction type.
+    pub uplink_port_fec: PortFec,
+    /// BGP peers on this port
+    pub bgp_peers: Vec<BgpPeerConfig>,
+}
+
+impl From<UplinkConfig> for PortConfigV1 {
+    fn from(value: UplinkConfig) -> Self {
+        PortConfigV1 {
+            routes: vec![RouteConfig {
+                destination: "0.0.0.0/0".parse().unwrap(),
+                nexthop: value.gateway_ip.into(),
+            }],
+            addresses: vec![value.uplink_cidr.into()],
+            switch: value.switch,
+            port: value.uplink_port,
+            uplink_port_speed: value.uplink_port_speed,
+            uplink_port_fec: value.uplink_port_fec,
+            bgp_peers: vec![],
+        }
+    }
+}
+
+/// Deprecated, use PortConfigV1 instead. Cannot actually deprecate due to
+/// <https://github.com/serde-rs/serde/issues/2195>
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
 pub struct UplinkConfig {
     /// Gateway address
@@ -99,9 +169,41 @@ pub struct UplinkConfig {
     pub uplink_vid: Option<u16>,
 }
 
+/// A set of switch uplinks.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct SwitchPorts {
+    pub uplinks: Vec<HostPortConfig>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+pub struct HostPortConfig {
+    /// Switchport to use for external connectivity
+    pub port: String,
+
+    /// IP Address and prefix (e.g., `192.168.0.1/16`) to apply to switchport
+    /// (must be in infra_ip pool)
+    pub addrs: Vec<IpNetwork>,
+}
+
+impl From<PortConfigV1> for HostPortConfig {
+    fn from(x: PortConfigV1) -> Self {
+        Self { port: x.port, addrs: x.addresses }
+    }
+}
+
 /// Identifies switch physical location
 #[derive(
-    Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema, Hash, Eq,
+    Clone,
+    Copy,
+    Debug,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    JsonSchema,
+    Hash,
+    Eq,
+    PartialOrd,
+    Ord,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum SwitchLocation {

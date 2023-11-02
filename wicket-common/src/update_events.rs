@@ -159,6 +159,21 @@ pub enum UpdateTerminalError {
         #[source]
         error: gateway_client::Error<gateway_client::types::Error>,
     },
+    #[error("getting RoT CMPA failed")]
+    GetRotCmpaFailed {
+        #[source]
+        error: anyhow::Error,
+    },
+    #[error("getting RoT CFPA failed")]
+    GetRotCfpaFailed {
+        #[source]
+        error: anyhow::Error,
+    },
+    #[error("failed to find correctly-singed RoT image")]
+    FailedFindingSignedRotImage {
+        #[source]
+        error: anyhow::Error,
+    },
     #[error("getting SP caboose failed")]
     GetSpCabooseFailed {
         #[source]

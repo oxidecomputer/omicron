@@ -7,7 +7,7 @@ set -o xtrace
 # NOTE: This version should be in sync with the recommended version in
 # .config/nextest.toml. (Maybe build an automated way to pull the recommended
 # version in the future.)
-NEXTEST_VERSION='0.9.57'
+NEXTEST_VERSION='0.9.59'
 
 cargo --version
 rustc --version
@@ -65,6 +65,11 @@ ptime -m timeout 2h cargo nextest run --profile ci --locked --verbose
 #
 banner doctest
 ptime -m timeout 1h cargo test --doc --locked --verbose --no-fail-fast
+
+# We expect the seed CRDB to be placed here, so we explicitly remove it so the
+# rmdir check below doesn't get triggered. Nextest doesn't have support for
+# teardown scripts so this is the best we've got.
+rm -rf "$TEST_TMPDIR/crdb-base"*
 
 #
 # Make sure that we have left nothing around in $TEST_TMPDIR.  The easiest way

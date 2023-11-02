@@ -360,7 +360,7 @@ async fn test_silo_certificates() {
     // create the other Silos and their users.
     let resolver = Arc::new(
         CustomDnsResolver::new(
-            *cptestctx.external_dns.dns_server.local_address(),
+            cptestctx.external_dns.dns_server.local_address(),
         )
         .unwrap(),
     );

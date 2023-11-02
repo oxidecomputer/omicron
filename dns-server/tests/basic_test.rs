@@ -375,7 +375,7 @@ async fn init_client_server(
 
     let mut rc = ResolverConfig::new();
     rc.add_name_server(NameServerConfig {
-        socket_addr: *dns_server.local_address(),
+        socket_addr: dns_server.local_address(),
         protocol: Protocol::Udp,
         tls_dns_name: None,
         trust_nx_responses: false,

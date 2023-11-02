@@ -4,7 +4,6 @@ set -o pipefail
 set -o errexit
 
 SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-ARG0="$(basename "${BASH_SOURCE[0]}")"
 
 function usage {
     echo "usage: $0 [-c COMMIT] [-n]"
@@ -38,7 +37,7 @@ function update_openapi {
     fi
     echo "Updating Dendrite OpenAPI from: $TARGET_COMMIT"
     set -x
-    echo "$OUTPUT" > $OPENAPI_PATH
+    echo "$OUTPUT" > "$OPENAPI_PATH"
     set +x
 }
 
@@ -61,7 +60,7 @@ function update_dendrite_stub_shas {
     fi
     echo "Updating Dendrite stub checksums from: $TARGET_COMMIT"
     set -x
-    echo "$OUTPUT" > $STUB_CHECKSUM_PATH
+    echo "$OUTPUT" > "$STUB_CHECKSUM_PATH"
     set +x
 }
 

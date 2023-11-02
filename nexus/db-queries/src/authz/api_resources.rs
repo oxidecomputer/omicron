@@ -473,6 +473,61 @@ impl AuthorizedResource for DeviceAuthRequestList {
     }
 }
 
+/// Synthetic resource used for modeling access to low-level hardware inventory
+/// data
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Inventory;
+pub const INVENTORY: Inventory = Inventory {};
+
+impl oso::PolarClass for Inventory {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        // Roles are not directly attached to Inventory
+        oso::Class::builder()
+            .with_equality_check()
+            .add_method(
+                "has_role",
+                |_: &Inventory, _actor: AuthenticatedActor, _role: String| {
+                    false
+                },
+            )
+            .add_attribute_getter("fleet", |_| FLEET)
+    }
+}
+
+impl AuthorizedResource for Inventory {
+    fn load_roles<'a, 'b, 'c, 'd, 'e, 'f>(
+        &'a self,
+        opctx: &'b OpContext,
+        datastore: &'c DataStore,
+        authn: &'d authn::Context,
+        roleset: &'e mut RoleSet,
+    ) -> futures::future::BoxFuture<'f, Result<(), Error>>
+    where
+        'a: 'f,
+        'b: 'f,
+        'c: 'f,
+        'd: 'f,
+        'e: 'f,
+    {
+        load_roles_for_resource_tree(&FLEET, opctx, datastore, authn, roleset)
+            .boxed()
+    }
+
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        error
+    }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
+    }
+}
+
 /// Synthetic resource describing the list of Certificates associated with a
 /// Silo
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -899,6 +954,14 @@ authz_resource! {
 
 authz_resource! {
     name = "Sled",
+    parent = "Fleet",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = FleetChild,
+}
+
+authz_resource! {
+    name = "Zpool",
     parent = "Fleet",
     primary_key = Uuid,
     roles_allowed = false,

@@ -25,7 +25,9 @@ use crate::zone_bundle::BundleError;
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
 use dropshot::HttpError;
-use illumos_utils::opte::params::SetVirtualNetworkInterfaceHost;
+use illumos_utils::opte::params::{
+    DeleteVirtualNetworkInterfaceHost, SetVirtualNetworkInterfaceHost,
+};
 use illumos_utils::opte::PortManager;
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use illumos_utils::zone::ZONE_PREFIX;
@@ -33,7 +35,12 @@ use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
 };
 use omicron_common::api::external::Vni;
-use omicron_common::api::internal::shared::RackNetworkConfig;
+use omicron_common::api::internal::nexus::{
+    SledInstanceState, VmmRuntimeState,
+};
+use omicron_common::api::internal::shared::{
+    HostPortConfig, RackNetworkConfig,
+};
 use omicron_common::api::{
     internal::nexus::DiskRuntimeState, internal::nexus::InstanceRuntimeState,
     internal::nexus::UpdateArtifactId,
@@ -46,7 +53,7 @@ use sled_hardware::underlay;
 use sled_hardware::HardwareManager;
 use slog::Logger;
 use std::collections::BTreeMap;
-use std::net::{Ipv6Addr, SocketAddrV6};
+use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -57,8 +64,14 @@ use illumos_utils::{dladm::MockDladm as Dladm, zone::MockZones as Zones};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
+    #[error("Could not find boot disk")]
+    BootDiskNotFound,
+
     #[error("Configuration error: {0}")]
     Config(#[from] crate::config::ConfigError),
+
+    #[error("Error setting up backing filesystems: {0}")]
+    BackingFs(#[from] crate::backing_fs::BackingFsError),
 
     #[error("Error setting up swap device: {0}")]
     SwapDevice(#[from] crate::swap_device::SwapDeviceError),
@@ -226,6 +239,9 @@ struct SledAgentInner {
 
     // Object managing zone bundles.
     zone_bundler: zone_bundle::ZoneBundler,
+
+    // A handle to the bootstore.
+    bootstore: bootstore::NodeHandle,
 }
 
 impl SledAgentInner {
@@ -266,14 +282,17 @@ impl SledAgent {
         ));
         info!(&log, "SledAgent::new(..) starting");
 
-        // Configure a swap device of the configured size before other system setup.
+        let boot_disk = storage
+            .resources()
+            .boot_disk()
+            .await
+            .ok_or_else(|| Error::BootDiskNotFound)?;
+
+        // Configure a swap device of the configured size before other system
+        // setup.
         match config.swap_device_size_gb {
             Some(sz) if sz > 0 => {
                 info!(log, "Requested swap device of size {} GiB", sz);
-                let boot_disk =
-                    storage.resources().boot_disk().await.ok_or_else(|| {
-                        crate::swap_device::SwapDeviceError::BootDiskNotFound
-                    })?;
                 crate::swap_device::ensure_swap_device(
                     &parent_log,
                     &boot_disk.1,
@@ -287,6 +306,9 @@ impl SledAgent {
                 info!(log, "Not setting up swap device: not configured");
             }
         }
+
+        info!(log, "Mounting backing filesystems");
+        crate::backing_fs::ensure_backing_fs(&parent_log, &boot_disk.1)?;
 
         // Ensure we have a thread that automatically reaps process contracts
         // when they become empty. See the comments in
@@ -402,7 +424,7 @@ impl SledAgent {
                 EarlyNetworkConfig::try_from(serialized_config)
                     .map_err(|err| BackoffError::transient(err.to_string()))?;
 
-            Ok(early_network_config.rack_network_config)
+            Ok(early_network_config.body.rack_network_config)
         };
         let rack_network_config: Option<RackNetworkConfig> =
             retry_notify::<_, String, _, _, _, _>(
@@ -453,6 +475,7 @@ impl SledAgent {
                 nexus_request_queue: NexusRequestQueue::new(),
                 rack_network_config,
                 zone_bundler,
+                bootstore: bootstore.clone(),
             }),
             log: log.clone(),
         };
@@ -764,15 +787,26 @@ impl SledAgent {
 
     /// Idempotently ensures that a given instance is registered with this sled,
     /// i.e., that it can be addressed by future calls to
-    /// [`instance_ensure_state`].
+    /// [`Self::instance_ensure_state`].
     pub async fn instance_ensure_registered(
         &self,
         instance_id: Uuid,
-        initial: InstanceHardware,
-    ) -> Result<InstanceRuntimeState, Error> {
+        propolis_id: Uuid,
+        hardware: InstanceHardware,
+        instance_runtime: InstanceRuntimeState,
+        vmm_runtime: VmmRuntimeState,
+        propolis_addr: SocketAddr,
+    ) -> Result<SledInstanceState, Error> {
         self.inner
             .instances
-            .ensure_registered(instance_id, initial)
+            .ensure_registered(
+                instance_id,
+                propolis_id,
+                hardware,
+                instance_runtime,
+                vmm_runtime,
+                propolis_addr,
+            )
             .await
             .map_err(|e| Error::Instance(e))
     }
@@ -816,7 +850,7 @@ impl SledAgent {
         instance_id: Uuid,
         old_runtime: &InstanceRuntimeState,
         migration_ids: &Option<InstanceMigrationSourceParams>,
-    ) -> Result<InstanceRuntimeState, Error> {
+    ) -> Result<SledInstanceState, Error> {
         self.inner
             .instances
             .put_migration_ids(instance_id, old_runtime, migration_ids)
@@ -890,7 +924,7 @@ impl SledAgent {
 
     pub async fn unset_virtual_nic_host(
         &self,
-        mapping: &SetVirtualNetworkInterfaceHost,
+        mapping: &DeleteVirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
         self.inner
             .port_manager
@@ -901,5 +935,20 @@ impl SledAgent {
     /// Gets the sled's current time synchronization state
     pub async fn timesync_get(&self) -> Result<TimeSync, Error> {
         self.inner.services.timesync_get().await.map_err(Error::from)
+    }
+
+    pub async fn ensure_scrimlet_host_ports(
+        &self,
+        uplinks: Vec<HostPortConfig>,
+    ) -> Result<(), Error> {
+        self.inner
+            .services
+            .ensure_scrimlet_host_ports(uplinks)
+            .await
+            .map_err(Error::from)
+    }
+
+    pub fn bootstore(&self) -> bootstore::NodeHandle {
+        self.inner.bootstore.clone()
     }
 }

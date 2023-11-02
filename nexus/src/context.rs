@@ -158,7 +158,7 @@ impl ServerContext {
 
                 internal_dns::resolver::Resolver::new_from_addrs(
                     log.new(o!("component" => "DnsResolver")),
-                    vec![address],
+                    &[address],
                 )
                 .map_err(|e| format!("Failed to create DNS resolver: {}", e))?
             }
@@ -169,11 +169,12 @@ impl ServerContext {
             nexus_config::Database::FromUrl { url } => url.clone(),
             nexus_config::Database::FromDns => {
                 info!(log, "Accessing DB url from DNS");
-                // It's been requested but unfortunately not supported to directly
-                // connect using SRV based lookup.
-                // TODO-robustness: the set of cockroachdb hosts we'll use will be
-                // fixed to whatever we got back from DNS at Nexus start. This means
-                // a new cockroachdb instance won't picked up until Nexus restarts.
+                // It's been requested but unfortunately not supported to
+                // directly connect using SRV based lookup.
+                // TODO-robustness: the set of cockroachdb hosts we'll use will
+                // be fixed to whatever we got back from DNS at Nexus start.
+                // This means a new cockroachdb instance won't picked up until
+                // Nexus restarts.
                 let addrs = loop {
                     match resolver
                         .lookup_all_socket_v6(ServiceName::Cockroach)

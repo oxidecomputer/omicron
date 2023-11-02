@@ -30,6 +30,7 @@ impl_enum_type!(
     Oximeter => b"oximeter"
     Tfport => b"tfport"
     Ntp => b"ntp"
+    Mgd => b"mgd"
 );
 
 impl TryFrom<ServiceKind> for ServiceUsingCertificate {
@@ -88,6 +89,7 @@ impl From<internal_api::params::ServiceKind> for ServiceKind {
             | internal_api::params::ServiceKind::InternalNtp => {
                 ServiceKind::Ntp
             }
+            internal_api::params::ServiceKind::Mgd => ServiceKind::Mgd,
         }
     }
 }

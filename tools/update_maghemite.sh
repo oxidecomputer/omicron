@@ -4,7 +4,6 @@ set -o pipefail
 set -o errexit
 
 SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-ARG0="$(basename "${BASH_SOURCE[0]}")"
 
 function usage {
     echo "usage: $0 [-c COMMIT] [-n]"
@@ -16,8 +15,9 @@ function usage {
 }
 
 PACKAGES=(
-  "maghemite"
+  "mg-ddm-gz"
   "mg-ddm"
+  "mgd"
 )
 
 REPO="oxidecomputer/maghemite"
@@ -27,17 +27,39 @@ REPO="oxidecomputer/maghemite"
 function update_openapi {
     TARGET_COMMIT="$1"
     DRY_RUN="$2"
-    SHA=$(get_sha "$REPO" "$TARGET_COMMIT" "ddm-admin.json" "openapi")
+    DAEMON="$3"
+    SHA=$(get_sha "$REPO" "$TARGET_COMMIT" "${DAEMON}-admin.json" "openapi")
     OUTPUT=$(printf "COMMIT=\"%s\"\nSHA2=\"%s\"\n" "$TARGET_COMMIT" "$SHA")
 
     if [ -n "$DRY_RUN" ]; then
         OPENAPI_PATH="/dev/null"
     else
-        OPENAPI_PATH="$SOURCE_DIR/maghemite_openapi_version"
+        OPENAPI_PATH="$SOURCE_DIR/maghemite_${DAEMON}_openapi_version"
     fi
     echo "Updating Maghemite OpenAPI from: $TARGET_COMMIT"
     set -x
-    echo "$OUTPUT" > $OPENAPI_PATH
+    echo "$OUTPUT" > "$OPENAPI_PATH"
+    set +x
+}
+
+function update_mgd {
+    TARGET_COMMIT="$1"
+    DRY_RUN="$2"
+    DAEMON="$3"
+    SHA=$(get_sha "$REPO" "$TARGET_COMMIT" "mgd" "image")
+    OUTPUT=$(printf "CIDL_SHA256=\"%s\"\n" "$SHA")
+
+    SHA_LINUX=$(get_sha "$REPO" "$TARGET_COMMIT" "mgd" "linux")
+    OUTPUT_LINUX=$(printf "MGD_LINUX_SHA256=\"%s\"\n" "$SHA_LINUX")
+
+    if [ -n "$DRY_RUN" ]; then
+        MGD_PATH="/dev/null"
+    else
+        MGD_PATH="$SOURCE_DIR/maghemite_mgd_checksums"
+    fi
+    echo "Updating Maghemite mgd from: $TARGET_COMMIT"
+    set -x
+    echo "$OUTPUT\n$OUTPUT_LINUX" > $MGD_PATH
     set +x
 }
 
@@ -61,7 +83,9 @@ function main {
     TARGET_COMMIT=$(get_latest_commit_from_gh "$REPO" "$TARGET_COMMIT")
     install_toml2json
     do_update_packages "$TARGET_COMMIT" "$DRY_RUN" "$REPO" "${PACKAGES[@]}"
-    update_openapi "$TARGET_COMMIT" "$DRY_RUN"
+    update_openapi "$TARGET_COMMIT" "$DRY_RUN" ddm
+    update_openapi "$TARGET_COMMIT" "$DRY_RUN" mg
+    update_mgd "$TARGET_COMMIT" "$DRY_RUN"
     do_update_packages "$TARGET_COMMIT" "$DRY_RUN" "$REPO" "${PACKAGES[@]}"
 }
 

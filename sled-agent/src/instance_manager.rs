@@ -21,8 +21,11 @@ use illumos_utils::opte::PortManager;
 use illumos_utils::vmm_reservoir;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
+use omicron_common::api::internal::nexus::SledInstanceState;
+use omicron_common::api::internal::nexus::VmmRuntimeState;
 use slog::Logger;
 use std::collections::BTreeMap;
+use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
@@ -73,6 +76,14 @@ struct InstanceManagerInternal {
     port_manager: PortManager,
     storage: StorageResources,
     zone_bundler: ZoneBundler,
+}
+
+pub(crate) struct InstanceManagerServices {
+    pub nexus_client: NexusClientWithResolver,
+    pub vnic_allocator: VnicAllocator<Etherstub>,
+    pub port_manager: PortManager,
+    pub storage: StorageResources,
+    pub zone_bundler: ZoneBundler,
 }
 
 /// All instances currently running on the sled.
@@ -201,14 +212,21 @@ impl InstanceManager {
     pub async fn ensure_registered(
         &self,
         instance_id: Uuid,
-        initial_hardware: InstanceHardware,
-    ) -> Result<InstanceRuntimeState, Error> {
-        let requested_propolis_id = initial_hardware.runtime.propolis_id;
+        propolis_id: Uuid,
+        hardware: InstanceHardware,
+        instance_runtime: InstanceRuntimeState,
+        vmm_runtime: VmmRuntimeState,
+        propolis_addr: SocketAddr,
+    ) -> Result<SledInstanceState, Error> {
         info!(
             &self.inner.log,
             "ensuring instance is registered";
             "instance_id" => %instance_id,
-            "propolis_id" => %requested_propolis_id
+            "propolis_id" => %propolis_id,
+            "hardware" => ?hardware,
+            "instance_runtime" => ?instance_runtime,
+            "vmm_runtime" => ?vmm_runtime,
+            "propolis_addr" => ?propolis_addr,
         );
 
         let instance = {
@@ -216,7 +234,7 @@ impl InstanceManager {
             if let Some((existing_propolis_id, existing_instance)) =
                 instances.get(&instance_id)
             {
-                if requested_propolis_id != *existing_propolis_id {
+                if propolis_id != *existing_propolis_id {
                     info!(&self.inner.log,
                           "instance already registered with another Propolis ID";
                           "instance_id" => %instance_id,
@@ -240,20 +258,33 @@ impl InstanceManager {
                 let instance_log = self.inner.log.new(o!());
                 let ticket =
                     InstanceTicket::new(instance_id, self.inner.clone());
+
+                let services = InstanceManagerServices {
+                    nexus_client: self.inner.nexus_client.clone(),
+                    vnic_allocator: self.inner.vnic_allocator.clone(),
+                    port_manager: self.inner.port_manager.clone(),
+                    storage: self.inner.storage.clone(),
+                    zone_bundler: self.inner.zone_bundler.clone(),
+                };
+
+                let state = crate::instance::InstanceInitialState {
+                    hardware,
+                    instance_runtime,
+                    vmm_runtime,
+                    propolis_addr,
+                };
+
                 let instance = Instance::new(
                     instance_log,
                     instance_id,
+                    propolis_id,
                     ticket,
-                    initial_hardware,
-                    self.inner.vnic_allocator.clone(),
-                    self.inner.port_manager.clone(),
-                    self.inner.nexus_client.clone(),
-                    self.inner.storage.clone(),
-                    self.inner.zone_bundler.clone(),
+                    state,
+                    services,
                 )?;
                 let instance_clone = instance.clone();
-                let _old = instances
-                    .insert(instance_id, (requested_propolis_id, instance));
+                let _old =
+                    instances.insert(instance_id, (propolis_id, instance));
                 assert!(_old.is_none());
                 instance_clone
             }
@@ -332,7 +363,7 @@ impl InstanceManager {
         instance_id: Uuid,
         old_runtime: &InstanceRuntimeState,
         migration_ids: &Option<InstanceMigrationSourceParams>,
-    ) -> Result<InstanceRuntimeState, Error> {
+    ) -> Result<SledInstanceState, Error> {
         let (_, instance) = self
             .inner
             .instances

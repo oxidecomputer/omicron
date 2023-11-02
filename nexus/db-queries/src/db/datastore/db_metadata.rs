@@ -6,7 +6,7 @@
 
 use super::DataStore;
 use crate::db;
-use crate::db::error::public_error_from_diesel_pool;
+use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::TransactionError;
 use async_bb8_diesel::{
@@ -25,6 +25,17 @@ use std::str::FromStr;
 
 pub const EARLIEST_SUPPORTED_VERSION: &'static str = "1.0.0";
 
+/// Describes a single file containing a schema change, as SQL.
+pub struct SchemaUpgradeStep {
+    pub path: Utf8PathBuf,
+    pub sql: String,
+}
+
+/// Describes a sequence of files containing schema changes.
+pub struct SchemaUpgrade {
+    pub steps: Vec<SchemaUpgradeStep>,
+}
+
 /// Reads a "version directory" and reads all SQL changes into
 /// a result Vec.
 ///
@@ -34,7 +45,7 @@ pub const EARLIEST_SUPPORTED_VERSION: &'static str = "1.0.0";
 /// These are sorted lexicographically.
 pub async fn all_sql_for_version_migration<P: AsRef<Utf8Path>>(
     path: P,
-) -> Result<Vec<String>, String> {
+) -> Result<SchemaUpgrade, String> {
     let target_dir = path.as_ref();
     let mut up_sqls = vec![];
     let entries = target_dir
@@ -54,13 +65,12 @@ pub async fn all_sql_for_version_migration<P: AsRef<Utf8Path>>(
     }
     up_sqls.sort();
 
-    let mut result = vec![];
+    let mut result = SchemaUpgrade { steps: vec![] };
     for path in up_sqls.into_iter() {
-        result.push(
-            tokio::fs::read_to_string(&path)
-                .await
-                .map_err(|e| format!("Cannot read {path}: {e}"))?,
-        );
+        let sql = tokio::fs::read_to_string(&path)
+            .await
+            .map_err(|e| format!("Cannot read {path}: {e}"))?;
+        result.steps.push(SchemaUpgradeStep { path: path.to_owned(), sql });
     }
     Ok(result)
 }
@@ -187,7 +197,8 @@ impl DataStore {
             )
             .map_err(|e| format!("Invalid schema path: {}", e.display()))?;
 
-            let up_sqls = all_sql_for_version_migration(&target_dir).await?;
+            let schema_change =
+                all_sql_for_version_migration(&target_dir).await?;
 
             // Confirm the current version, set the "target_version"
             // column to indicate that a schema update is in-progress.
@@ -205,7 +216,7 @@ impl DataStore {
                 "target_version" => target_version.to_string(),
             );
 
-            for sql in &up_sqls {
+            for SchemaUpgradeStep { path: _, sql } in &schema_change.steps {
                 // Perform the schema change.
                 self.apply_schema_update(
                     &current_version,
@@ -270,11 +281,9 @@ impl DataStore {
         let version: String = dsl::db_metadata
             .filter(dsl::singleton.eq(true))
             .select(dsl::version)
-            .get_result_async(self.pool())
+            .get_result_async(&*self.pool_connection_unauthorized().await?)
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
-            })?;
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         SemverVersion::from_str(&version).map_err(|e| {
             Error::internal_error(&format!("Invalid schema version: {e}"))
@@ -312,9 +321,9 @@ impl DataStore {
             dsl::time_modified.eq(Utc::now()),
             dsl::target_version.eq(Some(to_version.to_string())),
         ))
-        .execute_async(self.pool())
+        .execute_async(&*self.pool_connection_unauthorized().await?)
         .await
-        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         if rows_updated != 1 {
             return Err(Error::internal_error(
@@ -332,7 +341,7 @@ impl DataStore {
         target: &SemverVersion,
         sql: &String,
     ) -> Result<(), Error> {
-        let result = self.pool().transaction_async(|conn| async move {
+        let result = self.pool_connection_unauthorized().await?.transaction_async(|conn| async move {
             if target.to_string() != EARLIEST_SUPPORTED_VERSION {
                 let validate_version_query = format!("SELECT CAST(\
                         IF(\
@@ -353,8 +362,8 @@ impl DataStore {
         match result {
             Ok(()) => Ok(()),
             Err(TransactionError::CustomError(())) => panic!("No custom error"),
-            Err(TransactionError::Pool(e)) => {
-                Err(public_error_from_diesel_pool(e, ErrorHandler::Server))
+            Err(TransactionError::Database(e)) => {
+                Err(public_error_from_diesel(e, ErrorHandler::Server))
             }
         }
     }
@@ -378,9 +387,9 @@ impl DataStore {
             dsl::version.eq(to_version.to_string()),
             dsl::target_version.eq(None as Option<String>),
         ))
-        .execute_async(self.pool())
+        .execute_async(&*self.pool_connection_unauthorized().await?)
         .await
-        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         if rows_updated != 1 {
             return Err(Error::internal_error(
@@ -432,6 +441,7 @@ mod test {
 
         let cfg = db::Config { url: crdb.pg_config().clone() };
         let pool = Arc::new(db::Pool::new(&logctx.log, &cfg));
+        let conn = pool.pool().get().await.unwrap();
 
         // Mimic the layout of "schema/crdb".
         let config_dir = tempfile::TempDir::new().unwrap();
@@ -457,7 +467,7 @@ mod test {
         use db::schema::db_metadata::dsl;
         diesel::update(dsl::db_metadata.filter(dsl::singleton.eq(true)))
             .set(dsl::version.eq(v0.to_string()))
-            .execute_async(pool.pool())
+            .execute_async(&*conn)
             .await
             .expect("Failed to set version back to 0.0.0");
 
@@ -507,7 +517,7 @@ mod test {
                             "EXISTS (SELECT * FROM pg_tables WHERE tablename = 'widget')"
                         )
                     )
-                    .get_result_async::<bool>(datastore.pool())
+                    .get_result_async::<bool>(&*datastore.pool_connection_for_tests().await.unwrap())
                     .await
                     .expect("Failed to query for table");
                 assert_eq!(result, false, "The 'widget' table should have been deleted, but it exists.\

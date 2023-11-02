@@ -5,13 +5,14 @@
 //! CTE implementation for "UPDATE with extended return status".
 
 use super::pool::DbConnection;
-use async_bb8_diesel::{AsyncRunQueryDsl, PoolError};
+use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::associations::HasTable;
 use diesel::pg::Pg;
 use diesel::prelude::*;
 use diesel::query_builder::*;
 use diesel::query_dsl::methods::LoadQuery;
 use diesel::query_source::Table;
+use diesel::result::Error as DieselError;
 use diesel::sql_types::Nullable;
 use diesel::QuerySource;
 use std::marker::PhantomData;
@@ -153,16 +154,13 @@ where
     /// - Ok(Row exists and was updated)
     /// - Ok(Row exists, but was not updated)
     /// - Error (row doesn't exist, or other diesel error)
-    pub async fn execute_and_check<ConnErr>(
+    pub async fn execute_and_check(
         self,
-        conn: &(impl async_bb8_diesel::AsyncConnection<DbConnection, ConnErr>
-              + Sync),
-    ) -> Result<UpdateAndQueryResult<Q>, PoolError>
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> Result<UpdateAndQueryResult<Q>, DieselError>
     where
         // We require this bound to ensure that "Self" is runnable as query.
         Self: LoadQuery<'static, DbConnection, (Option<K>, Option<K>, Q)>,
-        ConnErr: From<diesel::result::Error> + Send + 'static,
-        PoolError: From<ConnErr>,
     {
         let (id0, id1, found) =
             self.get_result_async::<(Option<K>, Option<K>, Q)>(conn).await?;

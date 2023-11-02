@@ -32,4 +32,7 @@ pub struct RegionSnapshot {
 
     // how many volumes reference this?
     pub volume_references: i64,
+
+    // true if part of a volume's `resources_to_clean_up` already
+    pub deleting: bool,
 }

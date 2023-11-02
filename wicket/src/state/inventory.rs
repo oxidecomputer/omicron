@@ -6,7 +6,6 @@
 
 use anyhow::anyhow;
 use once_cell::sync::Lazy;
-use ratatui::text::Text;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::Display;
@@ -148,7 +147,7 @@ pub enum Component {
 }
 
 fn version_or_unknown(caboose: Option<&SpComponentCaboose>) -> String {
-    caboose.and_then(|c| c.version.as_deref()).unwrap_or("UNKNOWN").to_string()
+    caboose.map(|c| c.version.as_str()).unwrap_or("UNKNOWN").to_string()
 }
 
 impl Component {
@@ -185,7 +184,7 @@ impl Component {
     }
 }
 
-// The component type and its slot.
+/// The component type and its slot.
 #[derive(
     Debug,
     Clone,
@@ -205,24 +204,21 @@ pub enum ComponentId {
 }
 
 impl ComponentId {
-    pub fn name(&self) -> String {
-        self.to_string()
+    pub fn to_string_uppercase(&self) -> String {
+        let mut s = self.to_string();
+        s.make_ascii_uppercase();
+        s
     }
 }
 
+/// Prints the component type in standard case.
 impl Display for ComponentId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ComponentId::Sled(i) => write!(f, "SLED {}", i),
-            ComponentId::Switch(i) => write!(f, "SWITCH {}", i),
+            ComponentId::Sled(i) => write!(f, "sled {}", i),
+            ComponentId::Switch(i) => write!(f, "switch {}", i),
             ComponentId::Psc(i) => write!(f, "PSC {}", i),
         }
-    }
-}
-
-impl From<ComponentId> for Text<'_> {
-    fn from(value: ComponentId) -> Self {
-        value.to_string().into()
     }
 }
 
@@ -267,5 +263,17 @@ impl PowerState {
             PowerState::A3 => "commanded off",
             PowerState::A4 => "mechanical off (unplugged)",
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn component_id_display() {
+        assert_eq!(ComponentId::Sled(0).to_string(), "sled 0");
+        assert_eq!(ComponentId::Switch(1).to_string(), "switch 1");
+        assert_eq!(ComponentId::Psc(2).to_string(), "PSC 2");
     }
 }

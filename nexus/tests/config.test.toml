@@ -39,6 +39,7 @@ max_vpc_ipv4_subnet_prefix = 29
 # NOTE: The test suite always overrides this.
 id = "e6bff1ff-24fb-49dc-a54e-c6a350cd4d6c"
 rack_id = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc"
+techport_external_server_port = 0
 
 # Nexus may need to resolve external hosts (e.g. to grab IdP metadata).
 # These are the DNS servers it should use.
@@ -89,3 +90,15 @@ dns_external.max_concurrent_server_updates = 5
 # certificates it will take _other_ Nexus instances to notice and stop serving
 # them (on a sunny day).
 external_endpoints.period_secs = 60
+# How frequently to collect hardware/software inventory from the whole system
+# (even if we don't have reason to believe anything has changed).
+inventory.period_secs = 600
+# Maximum number of past collections to keep in the database
+inventory.nkeep = 3
+# Disable inventory collection altogether (for emergencies)
+inventory.disable = false
+
+[default_region_allocation_strategy]
+# we only have one sled in the test environment, so we need to use the
+# `Random` strategy, instead of `RandomWithDistinctSleds`
+type = "random"

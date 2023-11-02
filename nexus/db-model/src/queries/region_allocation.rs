@@ -48,6 +48,13 @@ table! {
 }
 
 table! {
+    shuffled_candidate_datasets {
+        id -> Uuid,
+        pool_id -> Uuid,
+    }
+}
+
+table! {
     candidate_regions {
         id -> Uuid,
         time_created -> Timestamptz,
@@ -86,6 +93,19 @@ table! {
 table! {
     do_insert (insert) {
         insert -> Bool,
+    }
+}
+
+table! {
+    one_zpool_per_sled (pool_id) {
+        pool_id -> Uuid
+    }
+}
+
+table! {
+    one_dataset_per_zpool {
+        id -> Uuid,
+        pool_id -> Uuid
     }
 }
 
@@ -141,6 +161,7 @@ diesel::allow_tables_to_appear_in_same_query!(
 );
 
 diesel::allow_tables_to_appear_in_same_query!(old_regions, dataset,);
+diesel::allow_tables_to_appear_in_same_query!(old_regions, zpool,);
 
 diesel::allow_tables_to_appear_in_same_query!(
     inserted_regions,
@@ -149,6 +170,7 @@ diesel::allow_tables_to_appear_in_same_query!(
 
 diesel::allow_tables_to_appear_in_same_query!(candidate_zpools, dataset,);
 diesel::allow_tables_to_appear_in_same_query!(candidate_zpools, zpool,);
+diesel::allow_tables_to_appear_in_same_query!(candidate_datasets, dataset);
 
 // == Needed for random region allocation ==
 

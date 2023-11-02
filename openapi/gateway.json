@@ -551,6 +551,70 @@
         }
       }
     },
+    "/sp/{type}/{slot}/component/{component}/cfpa": {
+      "get": {
+        "summary": "Read the requested CFPA slot from a root of trust.",
+        "description": "This endpoint is only valid for the `rot` component.",
+        "operationId": "sp_rot_cfpa_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "component",
+            "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GetCfpaParams"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RotCfpa"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/sp/{type}/{slot}/component/{component}/clear-status": {
       "post": {
         "summary": "Clear status of a component",
@@ -588,6 +652,60 @@
         "responses": {
           "204": {
             "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/sp/{type}/{slot}/component/{component}/cmpa": {
+      "get": {
+        "summary": "Read the CMPA from a root of trust.",
+        "description": "This endpoint is only valid for the `rot` component.",
+        "operationId": "sp_rot_cmpa_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "component",
+            "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RotCmpa"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -1324,6 +1442,17 @@
         "required": [
           "message",
           "request_id"
+        ]
+      },
+      "GetCfpaParams": {
+        "type": "object",
+        "properties": {
+          "slot": {
+            "$ref": "#/components/schemas/RotCfpaSlot"
+          }
+        },
+        "required": [
+          "slot"
         ]
       },
       "HostPhase2Progress": {
@@ -2071,6 +2200,78 @@
           "A2"
         ]
       },
+      "RotCfpa": {
+        "type": "object",
+        "properties": {
+          "base64_data": {
+            "type": "string"
+          },
+          "slot": {
+            "$ref": "#/components/schemas/RotCfpaSlot"
+          }
+        },
+        "required": [
+          "base64_data",
+          "slot"
+        ]
+      },
+      "RotCfpaSlot": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "slot": {
+                "type": "string",
+                "enum": [
+                  "active"
+                ]
+              }
+            },
+            "required": [
+              "slot"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "slot": {
+                "type": "string",
+                "enum": [
+                  "inactive"
+                ]
+              }
+            },
+            "required": [
+              "slot"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "slot": {
+                "type": "string",
+                "enum": [
+                  "scratch"
+                ]
+              }
+            },
+            "required": [
+              "slot"
+            ]
+          }
+        ]
+      },
+      "RotCmpa": {
+        "type": "object",
+        "properties": {
+          "base64_data": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "base64_data"
+        ]
+      },
       "RotSlot": {
         "oneOf": [
           {
@@ -2184,14 +2385,14 @@
             "type": "string"
           },
           "version": {
-            "nullable": true,
             "type": "string"
           }
         },
         "required": [
           "board",
           "git_commit",
-          "name"
+          "name",
+          "version"
         ]
       },
       "SpComponentDetails": {

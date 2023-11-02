@@ -21,8 +21,12 @@ use crate::sim::simulatable::Simulatable;
 use crate::updates::UpdateManager;
 use futures::lock::Mutex;
 use omicron_common::api::external::{DiskState, Error, ResourceType};
-use omicron_common::api::internal::nexus::DiskRuntimeState;
-use omicron_common::api::internal::nexus::InstanceRuntimeState;
+use omicron_common::api::internal::nexus::{
+    DiskRuntimeState, SledInstanceState,
+};
+use omicron_common::api::internal::nexus::{
+    InstanceRuntimeState, VmmRuntimeState,
+};
 use slog::Logger;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
@@ -33,7 +37,9 @@ use std::str::FromStr;
 
 use crucible_client_types::VolumeConstructionRequest;
 use dropshot::HttpServer;
-use illumos_utils::opte::params::SetVirtualNetworkInterfaceHost;
+use illumos_utils::opte::params::{
+    DeleteVirtualNetworkInterfaceHost, SetVirtualNetworkInterfaceHost,
+};
 use nexus_client::types::PhysicalDiskKind;
 use omicron_common::address::PROPOLIS_PORT;
 use propolis_client::Client as PropolisClient;
@@ -217,18 +223,21 @@ impl SledAgent {
     pub async fn instance_register(
         self: &Arc<Self>,
         instance_id: Uuid,
-        mut initial_hardware: InstanceHardware,
-    ) -> Result<InstanceRuntimeState, Error> {
+        propolis_id: Uuid,
+        hardware: InstanceHardware,
+        instance_runtime: InstanceRuntimeState,
+        vmm_runtime: VmmRuntimeState,
+    ) -> Result<SledInstanceState, Error> {
         // respond with a fake 500 level failure if asked to ensure an instance
         // with more than 16 CPUs.
-        let ncpus: i64 = (&initial_hardware.runtime.ncpus).into();
+        let ncpus: i64 = (&hardware.properties.ncpus).into();
         if ncpus > 16 {
             return Err(Error::internal_error(
                 &"could not allocate an instance: ran out of CPUs!",
             ));
         };
 
-        for disk in &initial_hardware.disks {
+        for disk in &hardware.disks {
             let initial_state = DiskRuntimeState {
                 disk_state: DiskState::Attached(instance_id),
                 gen: omicron_common::api::external::Generation::new(),
@@ -253,27 +262,24 @@ impl SledAgent {
                 .await?;
         }
 
-        // if we're making our first instance and a mock propolis-server
-        // is running, interact with it, and patch the instance's
-        // reported propolis-server IP for reports back to nexus.
+        // If the user of this simulated agent previously requested a mock
+        // Propolis server, start that server.
+        //
+        // N.B. The server serves on localhost and not on the per-sled IPv6
+        //      address that Nexus chose when starting the instance. Tests that
+        //      use the mock are expected to correct the contents of CRDB to
+        //      point to the correct address.
         let mock_lock = self.mock_propolis.lock().await;
         if let Some((_srv, client)) = mock_lock.as_ref() {
-            if let Some(addr) = initial_hardware.runtime.propolis_addr.as_mut()
-            {
-                addr.set_ip(Ipv6Addr::LOCALHOST.into());
-            }
             if !self.instances.contains_key(&instance_id).await {
                 let properties = propolis_client::types::InstanceProperties {
-                    id: initial_hardware.runtime.propolis_id,
-                    name: initial_hardware.runtime.hostname.clone(),
+                    id: propolis_id,
+                    name: hardware.properties.hostname.clone(),
                     description: "sled-agent-sim created instance".to_string(),
                     image_id: Uuid::default(),
                     bootrom_id: Uuid::default(),
-                    memory: initial_hardware
-                        .runtime
-                        .memory
-                        .to_whole_mebibytes(),
-                    vcpus: initial_hardware.runtime.ncpus.0 as u8,
+                    memory: hardware.properties.memory.to_whole_mebibytes(),
+                    vcpus: hardware.properties.ncpus.0 as u8,
                 };
                 let body = propolis_client::types::InstanceEnsureRequest {
                     properties,
@@ -296,10 +302,18 @@ impl SledAgent {
 
         let instance_run_time_state = self
             .instances
-            .sim_ensure(&instance_id, initial_hardware.runtime, None)
+            .sim_ensure(
+                &instance_id,
+                SledInstanceState {
+                    instance_state: instance_runtime,
+                    vmm_state: vmm_runtime,
+                    propolis_id,
+                },
+                None,
+            )
             .await?;
 
-        for disk_request in &initial_hardware.disks {
+        for disk_request in &hardware.disks {
             let vcr = &disk_request.volume_construction_request;
             self.map_disk_ids_to_region_ids(&vcr).await?;
         }
@@ -326,9 +340,20 @@ impl SledAgent {
             };
 
         self.detach_disks_from_instance(instance_id).await?;
-        Ok(InstanceUnregisterResponse {
+        let response = InstanceUnregisterResponse {
             updated_runtime: Some(instance.terminate()),
-        })
+        };
+
+        // Poke the now-destroyed instance to force it to be removed from the
+        // collection.
+        //
+        // TODO: In the real sled agent, this happens inline without publishing
+        // any other state changes, whereas this call causes any pending state
+        // changes to be published. This can be fixed by adding a simulated
+        // object collection function to forcibly remove an object from a
+        // collection.
+        self.instances.sim_poke(instance_id, PokeMode::Drain).await;
+        Ok(response)
     }
 
     /// Asks the supplied instance to transition to the requested state.
@@ -416,7 +441,7 @@ impl SledAgent {
         instance_id: Uuid,
         old_runtime: &InstanceRuntimeState,
         migration_ids: &Option<InstanceMigrationSourceParams>,
-    ) -> Result<InstanceRuntimeState, Error> {
+    ) -> Result<SledInstanceState, Error> {
         let instance =
             self.instances.sim_get_cloned_object(&instance_id).await?;
 
@@ -574,11 +599,21 @@ impl SledAgent {
     pub async fn unset_virtual_nic_host(
         &self,
         interface_id: Uuid,
-        mapping: &SetVirtualNetworkInterfaceHost,
+        mapping: &DeleteVirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
         let mut v2p_mappings = self.v2p_mappings.lock().await;
         let vec = v2p_mappings.entry(interface_id).or_default();
-        vec.retain(|x| x != mapping);
+        vec.retain(|x| {
+            x.virtual_ip != mapping.virtual_ip || x.vni != mapping.vni
+        });
+
+        // If the last entry was removed, remove the entire interface ID so that
+        // tests don't have to distinguish never-created entries from
+        // previously-extant-but-now-empty entries.
+        if vec.is_empty() {
+            v2p_mappings.remove(&interface_id);
+        }
+
         Ok(())
     }
 
@@ -605,14 +640,8 @@ impl SledAgent {
             ..Default::default()
         };
         let propolis_log = log.new(o!("component" => "propolis-server-mock"));
-        let config = propolis_server::config::Config {
-            bootrom: Default::default(),
-            pci_bridges: Default::default(),
-            chipset: Default::default(),
-            devices: Default::default(),
-            block_devs: Default::default(),
-        };
-        let private = Arc::new(PropolisContext::new(config, propolis_log));
+        let private =
+            Arc::new(PropolisContext::new(Default::default(), propolis_log));
         info!(log, "Starting mock propolis-server...");
         let dropshot_log = log.new(o!("component" => "dropshot"));
         let mock_api = propolis_server::mock_server::api();

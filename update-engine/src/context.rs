@@ -223,7 +223,7 @@ impl<S: StepSpec> StepContext<S> {
     }
 }
 
-/// Tracker for [`StepContext::add_nested_report`].
+/// Tracker for [`StepContext::send_nested_report`].
 ///
 /// Nested event reports might contain events already seen in prior runs:
 /// `NestedEventBuffer` deduplicates those events such that only deltas are sent
@@ -242,8 +242,7 @@ impl NestedEventBuffer {
         report: EventReport<S>,
     ) -> EventReport<NestedSpec> {
         self.buffer.add_event_report(report.into_generic());
-        let ret = self.buffer.generate_report_since(self.last_seen);
-        self.last_seen = ret.last_seen;
+        let ret = self.buffer.generate_report_since(&mut self.last_seen);
         ret
     }
 }

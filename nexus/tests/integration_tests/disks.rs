@@ -172,7 +172,11 @@ async fn set_instance_state(
 }
 
 async fn instance_simulate(nexus: &Arc<Nexus>, id: &Uuid) {
-    let sa = nexus.instance_sled_by_id(id).await.unwrap();
+    let sa = nexus
+        .instance_sled_by_id(id)
+        .await
+        .unwrap()
+        .expect("instance must be on a sled to simulate a state change");
     sa.instance_finish_transition(*id).await;
 }
 
@@ -1666,6 +1670,84 @@ async fn test_disk_create_for_importing(cptestctx: &ControlPlaneTestContext) {
     let disks = disks_list(&client, &disks_url).await;
     assert_eq!(disks.len(), 1);
     disks_eq(&disks[0], &disk);
+}
+
+#[nexus_test]
+async fn test_project_delete_disk_no_auth_idempotent(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    DiskTest::new(&cptestctx).await;
+    create_org_and_project(client).await;
+
+    // Create a disk
+    let disks_url = get_disks_url();
+
+    let new_disk = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: DISK_NAME.parse().unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_source: params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(512).unwrap(),
+        },
+        size: ByteCount::from_gibibytes_u32(1),
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&new_disk))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<Disk>()
+    .unwrap();
+
+    let disk_url = get_disk_url(DISK_NAME);
+    let disk = disk_get(&client, &disk_url).await;
+    assert_eq!(disk.state, DiskState::Detached);
+
+    // Call project_delete_disk_no_auth twice, ensuring that the disk is either
+    // there before deleting and not afterwards.
+
+    let nexus = &cptestctx.server.apictx().nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+        .disk_id(disk.identity.id)
+        .fetch()
+        .await
+        .unwrap();
+
+    assert_eq!(db_disk.id(), disk.identity.id);
+
+    datastore
+        .project_delete_disk_no_auth(
+            &disk.identity.id,
+            &[DiskState::Detached, DiskState::Faulted],
+        )
+        .await
+        .unwrap();
+
+    let r = LookupPath::new(&opctx, &datastore)
+        .disk_id(disk.identity.id)
+        .fetch()
+        .await;
+
+    assert!(r.is_err());
+
+    datastore
+        .project_delete_disk_no_auth(
+            &disk.identity.id,
+            &[DiskState::Detached, DiskState::Faulted],
+        )
+        .await
+        .unwrap();
 }
 
 async fn disk_get(client: &ClientTestContext, disk_url: &str) -> Disk {

@@ -721,6 +721,7 @@ mod tests {
     use crate::FieldSource;
     use crate::TimeseriesName;
     use chrono::NaiveDateTime;
+    use std::collections::BTreeSet;
     use std::convert::TryFrom;
 
     #[test]
@@ -774,7 +775,7 @@ mod tests {
     fn test_select_query_builder_filter_raw() {
         let schema = TimeseriesSchema {
             timeseries_name: TimeseriesName::try_from("foo:bar").unwrap(),
-            field_schema: vec![
+            field_schema: [
                 FieldSchema {
                     name: "f0".to_string(),
                     ty: FieldType::I64,
@@ -785,7 +786,9 @@ mod tests {
                     ty: FieldType::Bool,
                     source: FieldSource::Target,
                 },
-            ],
+            ]
+            .into_iter()
+            .collect(),
             datum_type: DatumType::I64,
             created: Utc::now(),
         };
@@ -905,7 +908,7 @@ mod tests {
     fn test_select_query_builder_no_fields() {
         let schema = TimeseriesSchema {
             timeseries_name: TimeseriesName::try_from("foo:bar").unwrap(),
-            field_schema: vec![],
+            field_schema: BTreeSet::new(),
             datum_type: DatumType::I64,
             created: Utc::now(),
         };
@@ -927,7 +930,7 @@ mod tests {
     fn test_select_query_builder_limit_offset() {
         let schema = TimeseriesSchema {
             timeseries_name: TimeseriesName::try_from("foo:bar").unwrap(),
-            field_schema: vec![],
+            field_schema: BTreeSet::new(),
             datum_type: DatumType::I64,
             created: Utc::now(),
         };
@@ -996,7 +999,7 @@ mod tests {
     fn test_select_query_builder_no_selectors() {
         let schema = TimeseriesSchema {
             timeseries_name: TimeseriesName::try_from("foo:bar").unwrap(),
-            field_schema: vec![
+            field_schema: [
                 FieldSchema {
                     name: "f0".to_string(),
                     ty: FieldType::I64,
@@ -1007,7 +1010,9 @@ mod tests {
                     ty: FieldType::Bool,
                     source: FieldSource::Target,
                 },
-            ],
+            ]
+            .into_iter()
+            .collect(),
             datum_type: DatumType::I64,
             created: Utc::now(),
         };
@@ -1057,7 +1062,7 @@ mod tests {
     fn test_select_query_builder_field_selectors() {
         let schema = TimeseriesSchema {
             timeseries_name: TimeseriesName::try_from("foo:bar").unwrap(),
-            field_schema: vec![
+            field_schema: [
                 FieldSchema {
                     name: "f0".to_string(),
                     ty: FieldType::I64,
@@ -1068,7 +1073,9 @@ mod tests {
                     ty: FieldType::Bool,
                     source: FieldSource::Target,
                 },
-            ],
+            ]
+            .into_iter()
+            .collect(),
             datum_type: DatumType::I64,
             created: Utc::now(),
         };
@@ -1106,7 +1113,7 @@ mod tests {
     fn test_select_query_builder_full() {
         let schema = TimeseriesSchema {
             timeseries_name: TimeseriesName::try_from("foo:bar").unwrap(),
-            field_schema: vec![
+            field_schema: [
                 FieldSchema {
                     name: "f0".to_string(),
                     ty: FieldType::I64,
@@ -1117,7 +1124,9 @@ mod tests {
                     ty: FieldType::Bool,
                     source: FieldSource::Target,
                 },
-            ],
+            ]
+            .into_iter()
+            .collect(),
             datum_type: DatumType::I64,
             created: Utc::now(),
         };

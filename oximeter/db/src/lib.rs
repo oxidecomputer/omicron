@@ -4,7 +4,7 @@
 
 //! Tools for interacting with the control plane telemetry database.
 
-// Copyright 2021 Oxide Computer Company
+// Copyright 2023 Oxide Computer Company
 
 use crate::query::StringFieldSelector;
 use chrono::{DateTime, Utc};
@@ -13,6 +13,7 @@ pub use oximeter::{DatumType, Field, FieldType, Measurement, Sample};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::convert::TryFrom;
 use std::num::NonZeroU32;
 use thiserror::Error;
@@ -36,12 +37,8 @@ pub enum Error {
     Database(String),
 
     /// A schema provided when collecting samples did not match the expected schema
-    #[error("Schema mismatch for timeseries '{name}', expected fields {expected:?} found fields {actual:?}")]
-    SchemaMismatch {
-        name: String,
-        expected: BTreeMap<String, FieldType>,
-        actual: BTreeMap<String, FieldType>,
-    },
+    #[error("Schema mismatch for timeseries '{0}'", expected.timeseries_name)]
+    SchemaMismatch { expected: TimeseriesSchema, actual: TimeseriesSchema },
 
     #[error("Timeseries not found for: {0}")]
     TimeseriesNotFound(String),
@@ -153,6 +150,13 @@ impl std::convert::TryFrom<String> for TimeseriesName {
     }
 }
 
+impl std::str::FromStr for TimeseriesName {
+    type Err = Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        s.try_into()
+    }
+}
+
 impl<T> PartialEq<T> for TimeseriesName
 where
     T: AsRef<str>,
@@ -177,7 +181,7 @@ fn validate_timeseries_name(s: &str) -> Result<&str, Error> {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct TimeseriesSchema {
     pub timeseries_name: TimeseriesName,
-    pub field_schema: Vec<FieldSchema>,
+    pub field_schema: BTreeSet<FieldSchema>,
     pub datum_type: DatumType,
     pub created: DateTime<Utc>,
 }
@@ -328,19 +332,46 @@ pub struct TimeseriesPageSelector {
 pub(crate) type TimeseriesKey = u64;
 
 pub(crate) fn timeseries_key(sample: &Sample) -> TimeseriesKey {
-    timeseries_key_for(sample.target_fields(), sample.metric_fields())
+    timeseries_key_for(
+        &sample.timeseries_name,
+        sample.sorted_target_fields(),
+        sample.sorted_metric_fields(),
+        sample.measurement.datum_type(),
+    )
 }
 
-pub(crate) fn timeseries_key_for<'a>(
-    target_fields: impl Iterator<Item = &'a Field>,
-    metric_fields: impl Iterator<Item = &'a Field>,
+// It's critical that values used for derivation of the timeseries_key are stable.
+// We use "bcs" to ensure stability of the derivation across hardware and rust toolchain revisions.
+fn canonicalize<T: Serialize + ?Sized>(what: &str, value: &T) -> Vec<u8> {
+    bcs::to_bytes(value)
+        .unwrap_or_else(|_| panic!("Failed to serialize {what}"))
+}
+
+fn timeseries_key_for(
+    timeseries_name: &str,
+    target_fields: &BTreeMap<String, Field>,
+    metric_fields: &BTreeMap<String, Field>,
+    datum_type: DatumType,
 ) -> TimeseriesKey {
-    use std::collections::hash_map::DefaultHasher;
+    // We use HighwayHasher primarily for stability - it should provide a stable
+    // hash for the values used to derive the timeseries_key.
+    use highway::HighwayHasher;
     use std::hash::{Hash, Hasher};
-    let mut hasher = DefaultHasher::new();
-    for field in target_fields.chain(metric_fields) {
-        field.hash(&mut hasher);
+
+    // NOTE: The order of these ".hash" calls matters, changing them will change
+    // the derivation of the "timeseries_key". We have change-detector tests for
+    // modifications like this, but be cautious, making such a change will
+    // impact all currently-provisioned databases.
+    let mut hasher = HighwayHasher::default();
+    canonicalize("timeseries name", timeseries_name).hash(&mut hasher);
+    for field in target_fields.values() {
+        canonicalize("target field", &field).hash(&mut hasher);
     }
+    for field in metric_fields.values() {
+        canonicalize("metric field", &field).hash(&mut hasher);
+    }
+    canonicalize("datum type", &datum_type).hash(&mut hasher);
+
     hasher.finish()
 }
 
@@ -370,8 +401,11 @@ const TIMESERIES_NAME_REGEX: &str =
 
 #[cfg(test)]
 mod tests {
-    use super::TimeseriesName;
+    use super::*;
+    use crate::model::DbFieldList;
+    use crate::model::DbTimeseriesSchema;
     use std::convert::TryFrom;
+    use uuid::Uuid;
 
     #[test]
     fn test_timeseries_name() {
@@ -392,5 +426,207 @@ mod tests {
         assert!(TimeseriesName::try_from(":b").is_err());
         assert!(TimeseriesName::try_from("a:").is_err());
         assert!(TimeseriesName::try_from("123").is_err());
+    }
+
+    // Validates that the timeseries_key stability for a sample is stable.
+    #[test]
+    fn test_timeseries_key_sample_stability() {
+        #[derive(oximeter::Target)]
+        pub struct TestTarget {
+            pub name: String,
+            pub num: i64,
+        }
+
+        #[derive(oximeter::Metric)]
+        pub struct TestMetric {
+            pub id: Uuid,
+            pub datum: i64,
+        }
+
+        let target = TestTarget { name: String::from("Hello"), num: 1337 };
+        let metric = TestMetric { id: Uuid::nil(), datum: 0x1de };
+        let sample = Sample::new(&target, &metric).unwrap();
+        let key = super::timeseries_key(&sample);
+
+        expectorate::assert_contents(
+            "test-output/sample-timeseries-key.txt",
+            &format!("{key}"),
+        );
+    }
+
+    // Validates that the timeseries_key stability for specific fields is
+    // stable.
+    #[test]
+    fn test_timeseries_key_field_stability() {
+        use oximeter::{Field, FieldValue};
+        use strum::EnumCount;
+
+        let values = [
+            ("string", FieldValue::String(String::default())),
+            ("i8", FieldValue::I8(-0x0A)),
+            ("u8", FieldValue::U8(0x0A)),
+            ("i16", FieldValue::I16(-0x0ABC)),
+            ("u16", FieldValue::U16(0x0ABC)),
+            ("i32", FieldValue::I32(-0x0ABC_0000)),
+            ("u32", FieldValue::U32(0x0ABC_0000)),
+            ("i64", FieldValue::I64(-0x0ABC_0000_0000_0000)),
+            ("u64", FieldValue::U64(0x0ABC_0000_0000_0000)),
+            (
+                "ipaddr",
+                FieldValue::IpAddr(std::net::IpAddr::V4(
+                    std::net::Ipv4Addr::LOCALHOST,
+                )),
+            ),
+            ("uuid", FieldValue::Uuid(uuid::Uuid::nil())),
+            ("bool", FieldValue::Bool(true)),
+        ];
+
+        // Exhaustively testing enums is a bit tricky. Although it's easy to
+        // check "all variants of an enum are matched", it harder to test "all
+        // variants of an enum have been supplied".
+        //
+        // We use this as a proxy, confirming that each variant is represented
+        // here for the purposes of tracking stability.
+        assert_eq!(values.len(), FieldValue::COUNT);
+
+        let mut output = vec![];
+        for (name, value) in values {
+            let target_fields = BTreeMap::from([(
+                "field".to_string(),
+                Field { name: name.to_string(), value },
+            )]);
+            let metric_fields = BTreeMap::new();
+            let key = timeseries_key_for(
+                "timeseries name",
+                &target_fields,
+                &metric_fields,
+                // ... Not actually, but we are only trying to compare fields here.
+                DatumType::Bool,
+            );
+            output.push(format!("{name} -> {key}"));
+        }
+
+        expectorate::assert_contents(
+            "test-output/field-timeseries-keys.txt",
+            &output.join("\n"),
+        );
+    }
+
+    // Test that we correctly order field across a target and metric.
+    //
+    // In an earlier commit, we switched from storing fields in an unordered Vec
+    // to using a BTree{Map,Set} to ensure ordering by name. However, the
+    // `TimeseriesSchema` type stored all its fields by chaining the sorted
+    // fields from the target and metric, without then sorting _across_ them.
+    //
+    // This was exacerbated by the error reporting, where we did in fact sort
+    // all fields across the target and metric, making it difficult to tell how
+    // the derived schema was different, if at all.
+    //
+    // This test generates a sample with a schema where the target and metric
+    // fields are sorted within them, but not across them. We check that the
+    // derived schema are actually equal, which means we've imposed that
+    // ordering when deriving the schema.
+    #[test]
+    fn test_schema_field_ordering_across_target_metric() {
+        let target_field = FieldSchema {
+            name: String::from("later"),
+            ty: FieldType::U64,
+            source: FieldSource::Target,
+        };
+        let metric_field = FieldSchema {
+            name: String::from("earlier"),
+            ty: FieldType::U64,
+            source: FieldSource::Metric,
+        };
+        let timeseries_name: TimeseriesName = "foo:bar".parse().unwrap();
+        let datum_type = DatumType::U64;
+        let field_schema =
+            [target_field.clone(), metric_field.clone()].into_iter().collect();
+        let expected_schema = TimeseriesSchema {
+            timeseries_name,
+            field_schema,
+            datum_type,
+            created: Utc::now(),
+        };
+
+        #[derive(oximeter::Target)]
+        struct Foo {
+            later: u64,
+        }
+        #[derive(oximeter::Metric)]
+        struct Bar {
+            earlier: u64,
+            datum: u64,
+        }
+
+        let target = Foo { later: 1 };
+        let metric = Bar { earlier: 2, datum: 10 };
+        let sample = Sample::new(&target, &metric).unwrap();
+        let derived_schema = model::schema_for(&sample);
+        assert_eq!(derived_schema, expected_schema);
+    }
+
+    #[test]
+    fn test_unsorted_db_fields_are_sorted_on_read() {
+        let target_field = FieldSchema {
+            name: String::from("later"),
+            ty: FieldType::U64,
+            source: FieldSource::Target,
+        };
+        let metric_field = FieldSchema {
+            name: String::from("earlier"),
+            ty: FieldType::U64,
+            source: FieldSource::Metric,
+        };
+        let timeseries_name: TimeseriesName = "foo:bar".parse().unwrap();
+        let datum_type = DatumType::U64;
+        let field_schema =
+            [target_field.clone(), metric_field.clone()].into_iter().collect();
+        let expected_schema = TimeseriesSchema {
+            timeseries_name: timeseries_name.clone(),
+            field_schema,
+            datum_type,
+            created: Utc::now(),
+        };
+
+        // The fields here are sorted by target and then metric, which is how we
+        // used to insert them into the DB. We're checking that they are totally
+        // sorted when we read them out of the DB, even though they are not in
+        // the extracted model type.
+        let db_fields = DbFieldList {
+            names: vec![target_field.name.clone(), metric_field.name.clone()],
+            types: vec![target_field.ty.into(), metric_field.ty.into()],
+            sources: vec![
+                target_field.source.into(),
+                metric_field.source.into(),
+            ],
+        };
+        let db_schema = DbTimeseriesSchema {
+            timeseries_name: timeseries_name.to_string(),
+            field_schema: db_fields,
+            datum_type: datum_type.into(),
+            created: expected_schema.created,
+        };
+        assert_eq!(expected_schema, TimeseriesSchema::from(db_schema));
+    }
+
+    #[test]
+    fn test_field_schema_ordering() {
+        let mut fields = BTreeSet::new();
+        fields.insert(FieldSchema {
+            name: String::from("second"),
+            ty: FieldType::U64,
+            source: FieldSource::Target,
+        });
+        fields.insert(FieldSchema {
+            name: String::from("first"),
+            ty: FieldType::U64,
+            source: FieldSource::Target,
+        });
+        let mut iter = fields.iter();
+        assert_eq!(iter.next().unwrap().name, "first");
+        assert_eq!(iter.next().unwrap().name, "second");
+        assert!(iter.next().is_none());
     }
 }

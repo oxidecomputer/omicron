@@ -15,12 +15,12 @@ OUT_DIR="out/npuzone"
 
 # Pinned commit for softnpu ASIC simulator
 SOFTNPU_REPO="softnpu"
-SOFTNPU_COMMIT="64beaff129b7f63a04a53dd5ed0ec09f012f5756"
+SOFTNPU_COMMIT="c1c42398c82b0220c8b5fa3bfba9c7a3bcaa0943"
 
 # This is the softnpu ASIC simulator
 echo "fetching npuzone"
 mkdir -p $OUT_DIR
-$TOOLS_DIR/ensure_buildomat_artifact.sh \
+"$TOOLS_DIR"/ensure_buildomat_artifact.sh \
     -O $OUT_DIR \
     "npuzone" \
     "$SOFTNPU_REPO" \

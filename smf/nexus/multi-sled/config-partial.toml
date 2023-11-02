@@ -1,0 +1,52 @@
+#
+# Oxide API: partial configuration file
+#
+
+[console]
+# Directory for static assets. Absolute path or relative to CWD.
+static_dir = "/var/nexus/static"
+session_idle_timeout_minutes = 60
+session_absolute_timeout_minutes = 480
+
+[authn]
+schemes_external = ["session_cookie", "access_token"]
+
+[log]
+# Show log messages of this level and more severe
+level = "debug"
+mode = "file"
+path = "/dev/stdout"
+if_exists = "append"
+
+# TODO: Uncomment the following lines to enable automatic schema
+# migration on boot.
+#
+# [schema]
+# schema_dir = "/var/nexus/schema/crdb"
+
+[background_tasks]
+dns_internal.period_secs_config = 60
+dns_internal.period_secs_servers = 60
+dns_internal.period_secs_propagation = 60
+dns_internal.max_concurrent_server_updates = 5
+dns_external.period_secs_config = 60
+dns_external.period_secs_servers = 60
+dns_external.period_secs_propagation = 60
+dns_external.max_concurrent_server_updates = 5
+# How frequently we check the list of stored TLS certificates.  This is
+# approximately an upper bound on how soon after updating the list of
+# certificates it will take _other_ Nexus instances to notice and stop serving
+# them (on a sunny day).
+external_endpoints.period_secs = 60
+# How frequently to collect hardware/software inventory from the whole system
+# (even if we don't have reason to believe anything has changed).
+inventory.period_secs = 600
+# Maximum number of past collections to keep in the database
+inventory.nkeep = 3
+# Disable inventory collection altogether (for emergencies)
+inventory.disable = false
+
+[default_region_allocation_strategy]
+# by default, allocate across 3 distinct sleds
+# seed is omitted so a new seed will be chosen with every allocation.
+type = "random_with_distinct_sleds"

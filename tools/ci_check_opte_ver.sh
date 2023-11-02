@@ -15,7 +15,7 @@ for rev in "${opte_deps_revs[@]}"; do
 done
 
 # Grab the API version for this revision
-API_VER=$(curl -s https://raw.githubusercontent.com/oxidecomputer/opte/$OPTE_REV/crates/opte-api/src/lib.rs | sed -n 's/pub const API_VERSION: u64 = \([0-9]*\);/\1/p')
+API_VER=$(curl -s https://raw.githubusercontent.com/oxidecomputer/opte/"$OPTE_REV"/crates/opte-api/src/lib.rs | sed -n 's/pub const API_VERSION: u64 = \([0-9]*\);/\1/p')
 
 # Grab the patch version which is based on the number of commits.
 # Essentially `git rev-list --count $OPTE_REV` but without cloning the repo.
