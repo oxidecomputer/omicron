@@ -33,7 +33,7 @@ use crate::{
         StepEvent, StepEventKind, StepInfo, StepInfoWithMetadata, StepOutcome,
         StepProgress,
     },
-    AsError, CompletionContext, MetadataContext, StepContext,
+    AsError, CompletionContext, MetadataContext, NestedSpec, StepContext,
     StepContextPayload, StepHandle, StepSpec,
 };
 
@@ -389,16 +389,13 @@ impl<S: StepSpec, S2: StepSpec> SenderImpl<S2> for NestedSender<S> {
     ) -> BoxFuture<'_, Result<(), ExecutionError<S2>>> {
         let now = Instant::now();
         async move {
-            self.sender
-                .send(StepContextPayload::Nested {
-                    now,
-                    event: event.into_generic(),
-                })
-                .await
-                .expect("our code always keeps payload_receiver open");
             let (done, done_rx) = oneshot::channel();
             self.sender
-                .send(StepContextPayload::Sync { done })
+                .send(StepContextPayload::NestedSingle {
+                    now,
+                    event: event.into_generic(),
+                    done,
+                })
                 .await
                 .expect("our code always keeps payload_receiver open");
             _ = done_rx.await;
@@ -1084,41 +1081,12 @@ impl<S: StepSpec, F: FnMut() -> usize> StepProgressReporter<S, F> {
                 self.handle_progress(now, progress).await?;
                 std::mem::drop(done);
             }
-            StepContextPayload::Nested { now, event: Event::Step(event) } => {
-                self.sender
-                    .send(Event::Step(StepEvent {
-                        spec: S::schema_name(),
-                        execution_id: self.execution_id,
-                        event_index: (self.next_event_index)(),
-                        total_elapsed: now - self.total_start,
-                        kind: StepEventKind::Nested {
-                            step: self.step_info.clone(),
-                            attempt: self.attempt,
-                            event: Box::new(event),
-                            step_elapsed: now - self.step_start,
-                            attempt_elapsed: now - self.attempt_start,
-                        },
-                    }))
-                    .await?;
+            StepContextPayload::NestedSingle { now, event, done } => {
+                self.handle_nested(now, event).await?;
+                std::mem::drop(done);
             }
-            StepContextPayload::Nested {
-                now,
-                event: Event::Progress(event),
-            } => {
-                self.sender
-                    .send(Event::Progress(ProgressEvent {
-                        spec: S::schema_name(),
-                        execution_id: self.execution_id,
-                        total_elapsed: now - self.total_start,
-                        kind: ProgressEventKind::Nested {
-                            step: self.step_info.clone(),
-                            attempt: self.attempt,
-                            event: Box::new(event),
-                            step_elapsed: now - self.step_start,
-                            attempt_elapsed: now - self.attempt_start,
-                        },
-                    }))
-                    .await?;
+            StepContextPayload::Nested { now, event } => {
+                self.handle_nested(now, event).await?;
             }
             StepContextPayload::Sync { done } => {
                 std::mem::drop(done);
@@ -1190,6 +1158,48 @@ impl<S: StepSpec, F: FnMut() -> usize> StepProgressReporter<S, F> {
                             step_elapsed: now - self.step_start,
                             attempt_elapsed,
                             message,
+                        },
+                    }))
+                    .await
+            }
+        }
+    }
+
+    async fn handle_nested(
+        &mut self,
+        now: Instant,
+        event: Event<NestedSpec>,
+    ) -> Result<(), ExecutionError<S>> {
+        match event {
+            Event::Step(event) => {
+                self.sender
+                    .send(Event::Step(StepEvent {
+                        spec: S::schema_name(),
+                        execution_id: self.execution_id,
+                        event_index: (self.next_event_index)(),
+                        total_elapsed: now - self.total_start,
+                        kind: StepEventKind::Nested {
+                            step: self.step_info.clone(),
+                            attempt: self.attempt,
+                            event: Box::new(event),
+                            step_elapsed: now - self.step_start,
+                            attempt_elapsed: now - self.attempt_start,
+                        },
+                    }))
+                    .await
+            }
+            Event::Progress(event) => {
+                self.sender
+                    .send(Event::Progress(ProgressEvent {
+                        spec: S::schema_name(),
+                        execution_id: self.execution_id,
+                        total_elapsed: now - self.total_start,
+                        kind: ProgressEventKind::Nested {
+                            step: self.step_info.clone(),
+                            attempt: self.attempt,
+                            event: Box::new(event),
+                            step_elapsed: now - self.step_start,
+                            attempt_elapsed: now - self.attempt_start,
                         },
                     }))
                     .await

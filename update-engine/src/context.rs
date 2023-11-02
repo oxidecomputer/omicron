@@ -4,7 +4,6 @@
 
 // Copyright 2023 Oxide Computer Company
 
-use std::convert::Infallible;
 use std::marker::PhantomData;
 use std::sync::Mutex;
 use std::{collections::HashMap, fmt};
@@ -59,7 +58,7 @@ impl<S: StepSpec> StepContext<S> {
     #[inline]
     pub async fn send_progress(&self, progress: StepProgress<S>) {
         let now = Instant::now();
-        let (done, done_rx) = oneshot::channel::<Infallible>();
+        let (done, done_rx) = oneshot::channel();
         self.payload_sender
             .send(StepContextPayload::Progress { now, progress, done })
             .await
@@ -286,19 +285,31 @@ impl NestedEventBuffer {
     }
 }
 
+/// An uninhabited type for oneshot channels, since we only care about them
+/// being dropped.
+#[derive(Debug)]
+pub(crate) enum Never {}
+
 #[derive_where(Debug)]
 pub(crate) enum StepContextPayload<S: StepSpec> {
     Progress {
         now: Instant,
         progress: StepProgress<S>,
-        done: oneshot::Sender<Infallible>,
+        done: oneshot::Sender<Never>,
     },
+    /// A single nested event with synchronization.
+    NestedSingle {
+        now: Instant,
+        event: Event<NestedSpec>,
+        done: oneshot::Sender<Never>,
+    },
+    /// One out of a series of nested events sent in succession.
     Nested {
         now: Instant,
         event: Event<NestedSpec>,
     },
     Sync {
-        done: oneshot::Sender<Infallible>,
+        done: oneshot::Sender<Never>,
     },
 }
 
