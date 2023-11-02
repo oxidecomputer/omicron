@@ -39,16 +39,6 @@ pub struct ClickHouseInstance {
     child: Option<tokio::process::Child>,
 }
 
-/// A `ClickHouseCluster` is used to start and manage a 2 replica 3 keeper ClickHouse cluster.
-#[derive(Debug)]
-pub struct ClickHouseCluster {
-    pub replica_1: ClickHouseInstance,
-    pub replica_2: ClickHouseInstance,
-    pub keeper_1: ClickHouseInstance,
-    pub keeper_2: ClickHouseInstance,
-    pub keeper_3: ClickHouseInstance,
-}
-
 #[derive(Debug, Error)]
 pub enum ClickHouseError {
     #[error("Failed to open ClickHouse log file")]
@@ -330,25 +320,33 @@ impl Drop for ClickHouseInstance {
     }
 }
 
-impl ClickHouseCluster {
-    pub async fn new() -> Result<Self, anyhow::Error> {
-        // Start all Keeper coordinator nodes
-        let cur_dir = std::env::current_dir().unwrap();
-        let keeper_config =
-            cur_dir.as_path().join("src/configs/keeper_config.xml");
+/// A `ClickHouseCluster` is used to start and manage a 2 replica 3 keeper ClickHouse cluster.
+#[derive(Debug)]
+pub struct ClickHouseCluster {
+    pub replica_1: ClickHouseInstance,
+    pub replica_2: ClickHouseInstance,
+    pub keeper_1: ClickHouseInstance,
+    pub keeper_2: ClickHouseInstance,
+    pub keeper_3: ClickHouseInstance,
+    pub replica_config_path: PathBuf,
+    pub keeper_config_path: PathBuf,
+}
 
+impl ClickHouseCluster {
+    pub async fn new(
+        replica_config: PathBuf,
+        keeper_config: PathBuf,
+    ) -> Result<Self, anyhow::Error> {
+        // Start all Keeper coordinator nodes
         let keeper_amount = 3;
         let mut keepers =
-            Self::new_keeper_set(keeper_amount, keeper_config).await?;
+            Self::new_keeper_set(keeper_amount, keeper_config.clone()).await?;
 
         // Start all replica nodes
-        let cur_dir = std::env::current_dir().unwrap();
-        let replica_config =
-            cur_dir.as_path().join("src/configs/replica_config.xml");
-
         let replica_amount = 2;
         let mut replicas =
-            Self::new_replica_set(replica_amount, replica_config).await?;
+            Self::new_replica_set(replica_amount, replica_config.clone())
+                .await?;
 
         let r1 = replicas.swap_remove(0);
         let r2 = replicas.swap_remove(0);
@@ -362,6 +360,8 @@ impl ClickHouseCluster {
             keeper_1: k1,
             keeper_2: k2,
             keeper_3: k3,
+            replica_config_path: replica_config,
+            keeper_config_path: keeper_config,
         })
     }
 
@@ -418,6 +418,14 @@ impl ClickHouseCluster {
         }
 
         Ok(replicas)
+    }
+
+    pub fn replica_config_path(&self) -> &Path {
+        &self.replica_config_path
+    }
+
+    pub fn keeper_config_path(&self) -> &Path {
+        &self.keeper_config_path
     }
 }
 

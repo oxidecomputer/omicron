@@ -265,18 +265,30 @@ struct ChRunArgs {
     /// The HTTP port on which the server will listen
     #[clap(short, long, default_value = "8123", action)]
     port: u16,
+    /// Starts a ClickHouse replicated cluster of 2 replicas and 3 keeper nodes
+    #[clap(long, conflicts_with = "port", action)]
+    replicated: bool,
 }
 
 async fn cmd_clickhouse_run(args: &ChRunArgs) -> Result<(), anyhow::Error> {
+    if args.replicated {
+        start_replicated_cluster().await?;
+    } else {
+        start_single_node(args.port).await?;
+    }
+    Ok(())
+}
+
+async fn start_single_node(port: u16) -> Result<(), anyhow::Error> {
     // Start a stream listening for SIGINT
     let signals = Signals::new(&[SIGINT]).expect("failed to wait for SIGINT");
     let mut signal_stream = signals.fuse();
 
     // Start the database server process, possibly on a specific port
     let mut db_instance =
-        dev::clickhouse::ClickHouseInstance::new_single_node(args.port).await?;
+        dev::clickhouse::ClickHouseInstance::new_single_node(port).await?;
     println!(
-        "omicron-dev: running ClickHouse with full command:\n\"clickhouse {}\"",
+        "\nomicron-dev: running ClickHouse with full command:\n\"clickhouse {}\"",
         db_instance.cmdline().join(" ")
     );
     println!(
@@ -315,6 +327,122 @@ async fn cmd_clickhouse_run(args: &ChRunArgs) -> Result<(), anyhow::Error> {
                 .wait_for_shutdown()
                 .await
                 .context("clean up after SIGINT shutdown")?;
+        }
+    }
+    Ok(())
+}
+
+async fn start_replicated_cluster() -> Result<(), anyhow::Error> {
+    // Start a stream listening for SIGINT
+    let signals = Signals::new(&[SIGINT]).expect("failed to wait for SIGINT");
+    let mut signal_stream = signals.fuse();
+
+    // Start the database server and keeper processes
+    let cur_dir = std::env::current_dir().unwrap();
+    let replica_config =
+        cur_dir.as_path().join("oximeter/db/src/configs/replica_config.xml");
+    let cur_dir = std::env::current_dir().unwrap();
+    let keeper_config =
+        cur_dir.as_path().join("oximeter/db/src/configs/keeper_config.xml");
+
+    let mut cluster =
+        dev::clickhouse::ClickHouseCluster::new(replica_config, keeper_config)
+            .await?;
+    println!(
+        "\nomicron-dev: running ClickHouse cluster with configuration files:\n \
+        replicas: {}\n keepers: {}\n",
+        cluster.replica_config_path().display(),
+        cluster.keeper_config_path().display()
+    );
+    let pid_error_msg = "Failed to get process PID, it may not have started";
+    println!(
+        "omicron-dev: ClickHouse cluster is running with PIDs: {}, {}, {}, {}, {}\n",
+        cluster.replica_1
+            .pid()
+            .expect(pid_error_msg),
+        cluster.replica_2
+            .pid()
+            .expect(pid_error_msg),
+        cluster.keeper_1
+            .pid()
+            .expect(pid_error_msg),
+        cluster.keeper_2
+            .pid()
+            .expect(pid_error_msg),
+        cluster.keeper_3
+            .pid()
+            .expect(pid_error_msg),
+    );
+    println!(
+        "omicron-dev: ClickHouse HTTP servers listening on ports: {}, {}\n",
+        cluster.replica_1.port(),
+        cluster.replica_2.port()
+    );
+    println!(
+        "omicron-dev: ClickHouse keepers listening on ports: {}, {}, {}\n",
+        cluster.keeper_1.port(),
+        cluster.keeper_2.port(),
+        cluster.keeper_3.port()
+    );
+    println!(
+        "omicron-dev: using {} and {} for ClickHouse data storage",
+        cluster.replica_1.data_path().display(),
+        cluster.replica_2.data_path().display()
+    );
+
+    // Wait for the replicas and keepers to exit themselves (an error), or for SIGINT
+    tokio::select! {
+        _ = cluster.replica_1.wait_for_shutdown() => {
+            cluster.replica_1.cleanup().await.context(
+                format!("clean up {} after shutdown", cluster.replica_1.data_path().display())
+            )?;
+            bail!("omicron-dev: ClickHouse replica 1 shutdown unexpectedly");
+        }
+        _ = cluster.replica_2.wait_for_shutdown() => {
+            cluster.replica_2.cleanup().await.context(
+                format!("clean up {} after shutdown", cluster.replica_2.data_path().display())
+            )?;
+            bail!("omicron-dev: ClickHouse replica 2 shutdown unexpectedly");
+        }
+        _ = cluster.keeper_1.wait_for_shutdown() => {
+            cluster.keeper_1.cleanup().await.context(
+                format!("clean up {} after shutdown", cluster.keeper_1.data_path().display())
+            )?;
+            bail!("omicron-dev: ClickHouse keeper 1 shutdown unexpectedly");
+        }
+        _ = cluster.keeper_2.wait_for_shutdown() => {
+            cluster.keeper_2.cleanup().await.context(
+                format!("clean up {} after shutdown", cluster.keeper_2.data_path().display())
+            )?;
+            bail!("omicron-dev: ClickHouse keeper 2 shutdown unexpectedly");
+        }
+        _ = cluster.keeper_3.wait_for_shutdown() => {
+            cluster.keeper_3.cleanup().await.context(
+                format!("clean up {} after shutdown", cluster.keeper_3.data_path().display())
+            )?;
+            bail!("omicron-dev: ClickHouse keeper 3 shutdown unexpectedly");
+        }
+        caught_signal = signal_stream.next() => {
+            assert_eq!(caught_signal.unwrap(), SIGINT);
+            eprintln!(
+                "omicron-dev: caught signal, shutting down and removing \
+                temporary directories"
+            );
+
+            // Remove the data directories.
+            let mut instances = vec![
+                cluster.replica_1,
+                cluster.replica_2,
+                cluster.keeper_1,
+                cluster.keeper_2,
+                cluster.keeper_3,
+            ];
+            for instance in instances.iter_mut() {
+                instance
+                .wait_for_shutdown()
+                .await
+                .context(format!("clean up {} after SIGINT shutdown", instance.data_path().display()))?;
+            };
         }
     }
     Ok(())
