@@ -19,7 +19,7 @@ use dpd_client::{Ipv4Cidr, Ipv6Cidr};
 use internal_dns::ServiceName;
 use ipnetwork::IpNetwork;
 use mg_admin_client::types::Prefix4;
-use mg_admin_client::types::{ApplyRequest, BgpPeerConfig, BgpRoute};
+use mg_admin_client::types::{ApplyRequest, BgpPeerConfig};
 use nexus_db_model::{SwitchLinkFec, SwitchLinkSpeed, NETWORK_KEY};
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::UpdatePrecondition;
@@ -421,22 +421,6 @@ pub(crate) async fn ensure_switch_port_bgp_settings(
                 ))
             })?;
 
-        // TODO picking the first configured address by default, but this needs
-        // to be something that can be specified in the API.
-        let nexthop = match settings.addresses.get(0) {
-            Some(switch_port_addr) => Ok(switch_port_addr.address.ip()),
-            None => Err(ActionError::action_failed(
-                "at least one address required for bgp peering".to_string(),
-            )),
-        }?;
-
-        let nexthop = match nexthop {
-            IpAddr::V4(nexthop) => Ok(nexthop),
-            IpAddr::V6(_) => Err(ActionError::action_failed(
-                "IPv6 nexthop not yet supported".to_string(),
-            )),
-        }?;
-
         let mut prefixes = Vec::new();
         for a in &announcements {
             let value = match a.network.ip() {
@@ -458,7 +442,7 @@ pub(crate) async fn ensure_switch_port_bgp_settings(
             connect_retry: peer.connect_retry.0.into(),
             keepalive: peer.keepalive.0.into(),
             resolution: BGP_SESSION_RESOLUTION,
-            routes: vec![BgpRoute { nexthop, prefixes }],
+            originate: prefixes,
         };
 
         bgp_peer_configs.push(bpc);
