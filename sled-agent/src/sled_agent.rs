@@ -378,8 +378,8 @@ impl SledAgent {
             (Some(p), None) => ReservoirMode::Percentage(p),
             (None, Some(mb)) => ReservoirMode::Size(mb),
             (Some(_), Some(_)) => panic!(
-                "cannot specify vmm_reservoir_percentage and \
-                vmm_reservoir_size_mb at the same time"
+                "only one of vmm_reservoir_percentage and \
+                vmm_reservoir_size_mb is allowed"
             ),
         };
 

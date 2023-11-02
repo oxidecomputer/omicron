@@ -51,8 +51,8 @@ pub struct Config {
     pub sidecar_revision: SidecarRevision,
     /// Optional percentage of DRAM to reserve for guest memory
     pub vmm_reservoir_percentage: Option<u8>,
-    /// Optional DRAM to reserve for guest memory in MiB (cannot be used with
-    /// vmm_reservoir_percentage).
+    /// Optional DRAM to reserve for guest memory in MiB (mutually exclusive
+    /// option with vmm_reservoir_percentage).
     pub vmm_reservoir_size_mb: Option<u32>,
     /// Optional swap device size in GiB
     pub swap_device_size_gb: Option<u32>,

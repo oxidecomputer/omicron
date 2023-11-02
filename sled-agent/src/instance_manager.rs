@@ -141,7 +141,8 @@ impl InstanceManager {
             ReservoirMode::Percentage(percent) => {
                 if !matches!(percent, 1..=99) {
                     return Err(Error::ReservoirConfig(format!(
-                        "reservoir percentage of {} must be between 0 and 100",
+                        "VMM reservoir percentage of {} must be between 0 and \
+                        100",
                         percent
                     )));
                 };
