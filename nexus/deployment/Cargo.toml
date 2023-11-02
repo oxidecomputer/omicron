@@ -9,5 +9,6 @@ futures.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
 slog.workspace = true
+uuid.workspace = true
 
 omicron-workspace-hack.workspace = true

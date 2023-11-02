@@ -4464,6 +4464,7 @@ dependencies = [
  "omicron-common 0.1.0",
  "omicron-workspace-hack",
  "slog",
+ "uuid",
 ]
 
 [[package]]

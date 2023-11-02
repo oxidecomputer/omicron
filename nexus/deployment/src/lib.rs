@@ -113,6 +113,21 @@
 //! the plan.  This means provisioning new zones, removing old zones, adding
 //! instances to DNS, removing instances from DNS, carrying out firmware
 //! updates, etc.
+//!
+//! XXX-dap would be useful to walk through several examples:
+//! - rolling upgrade of Nexus fleet
+//! - add sled
+//! - remove sled
+//! - rolling upgrade of host OS
+//!
+//! XXX-dap-deep: something that seems tricky here is: let's say we're trying to
+//! update five Nexus instances from version V1 to version V2.  We generate a
+//! plan with one instance at V2 and 4 at V1, say.  Now, is that plan
+//! "acceptable" given the current parameters or do we need to generate a new
+//! plan?  We want the answer to be "yes it's acceptable and don't generate a
+//! new plan".  But it depends on the current state, too.  Once the current
+//! state _attains_ that plan, then the plan is no longer acceptable.  Maybe
+//! that's okay?  De-risking that will probably involve trying to write that.
 
 pub mod policy;
 pub mod planner;
