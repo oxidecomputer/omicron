@@ -112,6 +112,9 @@ pub enum Error {
 
     #[error("Schema update SQL files should contain at most 1 statement")]
     MultipleSqlStatementsInSchemaUpdate { path: PathBuf },
+
+    #[error("Schema update versions must be sequential without gaps")]
+    NonSequentialSchemaVersions,
 }
 
 /// A timeseries name.

@@ -366,9 +366,21 @@ impl Client {
             return Err(Error::MissingSchemaVersion(desired_version));
         }
 
+        // Check we have no gaps in version numbers, starting with the latest
+        // version and walking through all available ones strictly greater. This
+        // is to check that the _next_ version is also 1 greater than the
+        // latest.
+        let range = (Bound::Excluded(latest), Bound::Included(desired_version));
+        if available
+            .range(latest..)
+            .zip(available.range(range))
+            .any(|(current, next)| next - current != 1)
+        {
+            return Err(Error::NonSequentialSchemaVersions);
+        }
+
         // Walk through all changes between current version (exclusive) and
         // the desired version (inclusive).
-        let range = (Bound::Excluded(latest), Bound::Included(desired_version));
         let versions_to_apply = available.range(range);
         let mut current = latest;
         for version in versions_to_apply {
@@ -3866,6 +3878,48 @@ mod tests {
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new(Ipv6Addr::LOCALHOST.into(), db.port());
         test_apply_one_schema_upgrade_impl(log, address, false).await;
+        db.cleanup().await.expect("Failed to cleanup ClickHouse server");
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_ensure_schema_with_version_gaps_fails() {
+        let logctx =
+            test_setup_log("test_ensure_schema_with_version_gaps_fails");
+        let log = &logctx.log;
+        let mut db = ClickHouseInstance::new_single_node(0)
+            .await
+            .expect("Failed to start ClickHouse");
+        let address = SocketAddr::new(Ipv6Addr::LOCALHOST.into(), db.port());
+        let client = Client::new(address, &log);
+        const REPLICATED: bool = false;
+        client
+            .initialize_db_with_version(
+                REPLICATED,
+                crate::model::OXIMETER_VERSION,
+            )
+            .await
+            .expect("failed to initialize DB");
+
+        const BOGUS_VERSION: u64 = u64::MAX;
+        let (schema_dir, _) = create_test_upgrade_schema_directory(
+            REPLICATED,
+            &[crate::model::OXIMETER_VERSION, BOGUS_VERSION],
+        )
+        .await;
+
+        let err = client
+            .ensure_schema(REPLICATED, BOGUS_VERSION, schema_dir.path())
+            .await
+            .expect_err(
+                "Should have received an error when ensuring \
+                non-sequential version numbers",
+            );
+        let Error::NonSequentialSchemaVersions = err else {
+            panic!(
+                "Expected an Error::NonSequentialSchemaVersions, found {err:?}"
+            );
+        };
         db.cleanup().await.expect("Failed to cleanup ClickHouse server");
         logctx.cleanup_successful();
     }

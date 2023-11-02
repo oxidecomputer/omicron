@@ -23,6 +23,9 @@ use crate::dev::poll;
 // Timeout used when starting up ClickHouse subprocess.
 const CLICKHOUSE_TIMEOUT: Duration = Duration::from_secs(30);
 
+// Timeout used when starting a ClickHouse keeper subprocess.
+const CLICKHOUSE_KEEPER_TIMEOUT: Duration = Duration::from_secs(60);
+
 /// A `ClickHouseInstance` is used to start and manage a ClickHouse single node server process.
 #[derive(Debug)]
 pub struct ClickHouseInstance {
@@ -527,7 +530,7 @@ async fn find_clickhouse_port_in_log(
 pub async fn wait_for_ready(log_path: PathBuf) -> Result<(), anyhow::Error> {
     let p = poll::wait_for_condition(
         || async {
-            let result = discover_ready(&log_path, CLICKHOUSE_TIMEOUT).await;
+            let result = discover_ready(&log_path, CLICKHOUSE_KEEPER_TIMEOUT).await;
             match result {
                 Ok(ready) => Ok(ready),
                 Err(e) => {
@@ -547,7 +550,7 @@ pub async fn wait_for_ready(log_path: PathBuf) -> Result<(), anyhow::Error> {
             }
         },
         &Duration::from_millis(500),
-        &CLICKHOUSE_TIMEOUT,
+        &CLICKHOUSE_KEEPER_TIMEOUT,
     )
     .await
     .context("waiting to discover if ClickHouse is ready for connections")?;
