@@ -148,6 +148,9 @@ pub enum StartError {
 
     #[error("Failed to bind sprocket server")]
     BindSprocketsServer(#[source] io::Error),
+
+    #[error("Failed to initialize lrtq node as learner: {0}")]
+    FailedLearnerInit(bootstore::NodeRequestError),
 }
 
 /// Server for the bootstrap agent.
@@ -398,6 +401,9 @@ pub enum SledAgentServerStartError {
 
     #[error("Failed to commit sled agent request to ledger")]
     CommitToLedger(#[from] ledger::Error),
+
+    #[error("Failed to initialize this lrtq node as a learner: {0}")]
+    FailedLearnerInit(#[from] bootstore::NodeRequestError),
 }
 
 impl From<SledAgentServerStartError> for StartError {
@@ -411,6 +417,9 @@ impl From<SledAgentServerStartError> for StartError {
             }
             SledAgentServerStartError::CommitToLedger(err) => {
                 Self::CommitToLedger(err)
+            }
+            SledAgentServerStartError::FailedLearnerInit(err) => {
+                Self::FailedLearnerInit(err)
             }
         }
     }
@@ -439,6 +448,11 @@ async fn start_sled_agent(
     } else {
         info!(log, "KeyManager: using hardcoded secret retriever");
         LrtqOrHardcodedSecretRetriever::init_hardcoded();
+    }
+
+    if request.body.use_trust_quorum && request.body.is_lrtq_learner {
+        info!(log, "Initializing sled as learner");
+        bootstore.init_learner().await?;
     }
 
     // Inform the storage service that the key manager is available

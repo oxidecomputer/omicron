@@ -174,6 +174,13 @@ impl TryFrom<UnvalidatedRackInitializeRequest> for RackInitializeRequest {
 pub type Certificate = nexus_client::types::Certificate;
 pub type RecoverySiloConfig = nexus_client::types::RecoverySiloConfig;
 
+/// A request to Add a given sled after rack initialization has occurred
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
+pub struct AddSledRequest {
+    pub sled_id: Baseboard,
+    pub start_request: StartSledAgentRequest,
+}
+
 // A wrapper around StartSledAgentRequestV0 that was used
 // for the ledger format.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
