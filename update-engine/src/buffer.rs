@@ -1500,7 +1500,7 @@ mod tests {
     use tokio_stream::wrappers::ReceiverStream;
 
     use crate::{
-        events::{ProgressUnits, StepProgress},
+        events::{ProgressCounter, ProgressUnits, StepProgress},
         test_utils::TestSpec,
         StepContext, StepSuccess, UpdateEngine,
     };
@@ -1734,6 +1734,36 @@ mod tests {
                         panic!("first event should always be a step event")
                     }
                 };
+
+            // Ensure that nested step 2 produces progress events in the
+            // expected order and in succession.
+            let mut progress_check = NestedProgressCheck::new();
+            for event in &generated_events {
+                if let Event::Progress(event) = event {
+                    let progress_counter = event.kind.progress_counter();
+                    if progress_counter
+                        == Some(&ProgressCounter::new(2, 3, "steps"))
+                    {
+                        progress_check.two_out_of_three_seen();
+                    } else if progress_check
+                        == NestedProgressCheck::TwoOutOfThreeSteps
+                    {
+                        assert_eq!(
+                            progress_counter,
+                            Some(&ProgressCounter::current(50, "units"))
+                        );
+                        progress_check.fifty_units_seen();
+                    } else if progress_check == NestedProgressCheck::FiftyUnits
+                    {
+                        assert_eq!(
+                            progress_counter,
+                            Some(&ProgressCounter::new(3, 3, "steps"))
+                        );
+                        progress_check.three_out_of_three_seen();
+                    }
+                }
+            }
+            progress_check.assert_done();
 
             // Ensure that events are never seen twice.
             let mut event_indexes_seen = HashSet::new();
@@ -2241,6 +2271,7 @@ mod tests {
                 5,
                 "Nested step 2 (fails)",
                 move |cx| async move {
+                    // This is used by NestedProgressCheck below.
                     parent_cx
                         .send_progress(StepProgress::with_current_and_total(
                             2,
@@ -2251,16 +2282,74 @@ mod tests {
                         .await;
 
                     cx.send_progress(StepProgress::with_current(
-                        20,
+                        50,
                         "units",
                         Default::default(),
                     ))
                     .await;
 
+                    parent_cx
+                        .send_progress(StepProgress::with_current_and_total(
+                            3,
+                            3,
+                            "steps",
+                            Default::default(),
+                        ))
+                        .await;
+
                     bail!("failing step")
                 },
             )
             .register();
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum NestedProgressCheck {
+        Initial,
+        TwoOutOfThreeSteps,
+        FiftyUnits,
+        ThreeOutOfThreeSteps,
+    }
+
+    impl NestedProgressCheck {
+        fn new() -> Self {
+            Self::Initial
+        }
+
+        fn two_out_of_three_seen(&mut self) {
+            assert_eq!(
+                *self,
+                Self::Initial,
+                "two_out_of_three_seen: expected Initial",
+            );
+            *self = Self::TwoOutOfThreeSteps;
+        }
+
+        fn fifty_units_seen(&mut self) {
+            assert_eq!(
+                *self,
+                Self::TwoOutOfThreeSteps,
+                "twenty_units_seen: expected TwoOutOfThreeSteps",
+            );
+            *self = Self::FiftyUnits;
+        }
+
+        fn three_out_of_three_seen(&mut self) {
+            assert_eq!(
+                *self,
+                Self::FiftyUnits,
+                "three_out_of_three_seen: expected TwentyUnits",
+            );
+            *self = Self::ThreeOutOfThreeSteps;
+        }
+
+        fn assert_done(&self) {
+            assert_eq!(
+                *self,
+                Self::ThreeOutOfThreeSteps,
+                "assert_done: expected ThreeOutOfThreeSteps",
+            );
+        }
     }
 
     fn define_remote_nested_engine(
