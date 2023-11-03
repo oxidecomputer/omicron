@@ -24,9 +24,9 @@ pub use sprockets_rot::common::msgs::RotRequestV1;
 pub use sprockets_rot::common::msgs::RotResponseV1;
 use sprockets_rot::common::Ed25519PublicKey;
 pub use sprockets_rot::RotSprocketError;
+use std::net::SocketAddrV6;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
-use std::net::SocketAddrV6;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Responsiveness {
