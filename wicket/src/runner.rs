@@ -27,7 +27,7 @@ use wicketd_client::types::ClearUpdateStateOptions;
 
 use crate::events::EventReportMap;
 use crate::helpers::get_update_test_error;
-use crate::rack_update::CreateStartUpdateOptions;
+use crate::state::CreateStartUpdateOptions;
 use crate::ui::Screen;
 use crate::wicketd::{self, WicketdHandle, WicketdManager};
 use crate::{Action, Cmd, Event, KeyHandler, Recorder, State, TICK_INTERVAL};
