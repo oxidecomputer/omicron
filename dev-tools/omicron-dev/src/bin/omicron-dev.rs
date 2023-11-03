@@ -34,7 +34,7 @@ async fn main() -> Result<(), anyhow::Error> {
         OmicronDb::CertCreate { ref args } => cmd_cert_create(args).await,
     };
     if let Err(error) = result {
-        fatal(CmdError::Failure(format!("{:#}", error)));
+        fatal(CmdError::Failure(error.into()));
     }
     Ok(())
 }

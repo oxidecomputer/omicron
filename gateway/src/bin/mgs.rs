@@ -4,6 +4,7 @@
 
 //! Executable program to run gateway, the management gateway service
 
+use anyhow::{anyhow, Context};
 use clap::Parser;
 use futures::StreamExt;
 use omicron_common::cmd::{fatal, CmdError};
@@ -70,26 +71,24 @@ async fn do_run() -> Result<(), CmdError> {
     let args = Args::parse();
 
     match args {
-        Args::Openapi => run_openapi().map_err(CmdError::Failure),
+        Args::Openapi => {
+            run_openapi().map_err(|e| CmdError::Failure(anyhow!("{e}")))
+        }
         Args::Run {
             config_file_path,
             id_and_address_from_smf,
             id,
             address,
         } => {
-            let config = Config::from_file(&config_file_path).map_err(|e| {
-                CmdError::Failure(format!(
-                    "failed to parse {}: {}",
-                    config_file_path.display(),
-                    e
-                ))
-            })?;
+            let config = Config::from_file(&config_file_path)
+                .with_context(|| {
+                    format!("failed to parse {}", config_file_path.display())
+                })
+                .map_err(CmdError::Failure)?;
 
-            let mut signals = Signals::new([signal::SIGUSR1]).map_err(|e| {
-                CmdError::Failure(format!(
-                    "failed to set up signal handler: {e}"
-                ))
-            })?;
+            let mut signals = Signals::new([signal::SIGUSR1])
+                .context("failed to set up signal handler")
+                .map_err(CmdError::Failure)?;
 
             let (id, addresses, rack_id) = if id_and_address_from_smf {
                 let config = read_smf_config()?;
@@ -102,8 +101,9 @@ async fn do_run() -> Result<(), CmdError> {
                 (id.unwrap(), vec![address.unwrap()], rack_id)
             };
             let args = MgsArguments { id, addresses, rack_id };
-            let mut server =
-                start_server(config, args).await.map_err(CmdError::Failure)?;
+            let mut server = start_server(config, args)
+                .await
+                .map_err(|e| CmdError::Failure(anyhow!(e)))?;
 
             loop {
                 tokio::select! {
@@ -111,18 +111,13 @@ async fn do_run() -> Result<(), CmdError> {
                         Some(signal::SIGUSR1) => {
                             let new_config = read_smf_config()?;
                             if new_config.id != id {
-                                return Err(CmdError::Failure(
-                                    "cannot change server ID on refresh"
-                                        .to_string()
-                                ));
+                                return Err(CmdError::Failure(anyhow!("cannot change server ID on refresh")));
                             }
                             server.set_rack_id(new_config.rack_id);
                             server
                                 .adjust_dropshot_addresses(&new_config.addresses)
                                 .await
-                                .map_err(|err| CmdError::Failure(
-                                    format!("config refresh failed: {err}")
-                                ))?;
+                                .map_err(|err| CmdError::Failure(anyhow!("config refresh failed: {err}")))?;
                         }
                         // We only register `SIGUSR1` and never close the
                         // handle, so we never expect `None` or any other
@@ -130,7 +125,7 @@ async fn do_run() -> Result<(), CmdError> {
                         _ => unreachable!("invalid signal: {signal:?}"),
                     },
                     result = server.wait_for_finish() => {
-                        return result.map_err(CmdError::Failure)
+                        return result.map_err(|err| CmdError::Failure(anyhow!("{err}")))
                     }
                 }
             }
@@ -141,7 +136,7 @@ async fn do_run() -> Result<(), CmdError> {
 #[cfg(target_os = "illumos")]
 fn read_smf_config() -> Result<ConfigProperties, CmdError> {
     fn scf_to_cmd_err(err: illumos_utils::scf::ScfError) -> CmdError {
-        CmdError::Failure(err.to_string())
+        CmdError::Failure(err.into())
     }
 
     use illumos_utils::scf::ScfHandle;
@@ -165,12 +160,14 @@ fn read_smf_config() -> Result<ConfigProperties, CmdError> {
 
     let prop_id = config.value_as_string(PROP_ID).map_err(scf_to_cmd_err)?;
 
-    let prop_id = Uuid::try_parse(&prop_id).map_err(|err| {
-        CmdError::Failure(format!(
-            "failed to parse `{CONFIG_PG}/{PROP_ID}` \
-             ({prop_id:?}) as a UUID: {err}"
-        ))
-    })?;
+    let prop_id = Uuid::try_parse(&prop_id)
+        .with_context(|| {
+            format!(
+                "failed to parse `{CONFIG_PG}/{PROP_ID}` ({prop_id:?}) as a \
+                UUID"
+            )
+        })
+        .map_err(CmdError::Failure)?;
 
     let prop_rack_id =
         config.value_as_string(PROP_RACK_ID).map_err(scf_to_cmd_err)?;
@@ -178,12 +175,16 @@ fn read_smf_config() -> Result<ConfigProperties, CmdError> {
     let rack_id = if prop_rack_id == "unknown" {
         None
     } else {
-        Some(Uuid::try_parse(&prop_rack_id).map_err(|err| {
-            CmdError::Failure(format!(
-                "failed to parse `{CONFIG_PG}/{PROP_RACK_ID}` \
-                 ({prop_rack_id:?}) as a UUID: {err}"
-            ))
-        })?)
+        Some(
+            Uuid::try_parse(&prop_rack_id)
+                .with_context(|| {
+                    format!(
+                        "failed to parse `{CONFIG_PG}/{PROP_RACK_ID}` \
+                ({prop_rack_id:?}) as a UUID"
+                    )
+                })
+                .map_err(CmdError::Failure)?,
+        )
     };
 
     let prop_addr =
@@ -192,16 +193,20 @@ fn read_smf_config() -> Result<ConfigProperties, CmdError> {
     let mut addresses = Vec::with_capacity(prop_addr.len());
 
     for addr in prop_addr {
-        addresses.push(addr.parse().map_err(|err| {
-            CmdError::Failure(format!(
-                "failed to parse `{CONFIG_PG}/{PROP_ADDR}` \
-             ({addr:?}) as a socket address: {err}"
-            ))
-        })?);
+        addresses.push(
+            addr.parse()
+                .with_context(|| {
+                    format!(
+                        "failed to parse `{CONFIG_PG}/{PROP_ADDR}` ({addr:?}) \
+                        as a socket address"
+                    )
+                })
+                .map_err(CmdError::Failure)?,
+        );
     }
 
     if addresses.is_empty() {
-        Err(CmdError::Failure(format!(
+        Err(CmdError::Failure(anyhow!(
             "no addresses specified by `{CONFIG_PG}/{PROP_ADDR}`"
         )))
     } else {

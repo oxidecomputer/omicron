@@ -6,6 +6,7 @@
 
 // Copyright 2023 Oxide Computer Company
 
+use anyhow::{anyhow, Context};
 use clap::Parser;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
@@ -132,7 +133,9 @@ async fn main() {
 async fn do_run() -> Result<(), CmdError> {
     let args = Args::parse();
     match args {
-        Args::Openapi => run_openapi().map_err(CmdError::Failure),
+        Args::Openapi => {
+            run_openapi().map_err(|err| CmdError::Failure(anyhow!("{err}")))
+        }
         Args::Run { config_file, id, address } => {
             let config = Config::from_file(config_file).unwrap();
             let args = OximeterArguments { id, address };
@@ -141,13 +144,15 @@ async fn do_run() -> Result<(), CmdError> {
                 .unwrap()
                 .serve_forever()
                 .await
-                .map_err(|e| CmdError::Failure(e.to_string()))
+                .context("Failed to create oximeter")
+                .map_err(CmdError::Failure)
         }
         Args::Standalone { id, address, nexus, clickhouse, log_level } => {
             // Start the standalone Nexus server, for registration of both the
             // collector and producers.
             let nexus_server = StandaloneNexus::new(nexus.into(), log_level)
-                .map_err(|e| CmdError::Failure(e.to_string()))?;
+                .context("Failed to create nexus")
+                .map_err(CmdError::Failure)?;
             let args = OximeterArguments { id, address };
             Oximeter::new_standalone(
                 nexus_server.log(),
@@ -159,10 +164,10 @@ async fn do_run() -> Result<(), CmdError> {
             .unwrap()
             .serve_forever()
             .await
-            .map_err(|e| CmdError::Failure(e.to_string()))
+            .context("Failed to create standalone oximeter")
+            .map_err(CmdError::Failure)
         }
-        Args::StandaloneOpenapi => {
-            run_standalone_openapi().map_err(CmdError::Failure)
-        }
+        Args::StandaloneOpenapi => run_standalone_openapi()
+            .map_err(|err| CmdError::Failure(anyhow!(err))),
     }
 }

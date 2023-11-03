@@ -4,6 +4,7 @@
 
 //! Executable for wicketd: technician port based management service
 
+use anyhow::{anyhow, Context};
 use clap::Parser;
 use omicron_common::{
     address::Ipv6Subnet,
@@ -69,7 +70,9 @@ async fn do_run() -> Result<(), CmdError> {
     let args = Args::parse();
 
     match args {
-        Args::Openapi => run_openapi().map_err(CmdError::Failure),
+        Args::Openapi => {
+            run_openapi().map_err(|err| CmdError::Failure(anyhow!("{err}")))
+        }
         Args::Run {
             config_file_path,
             address,
@@ -82,10 +85,10 @@ async fn do_run() -> Result<(), CmdError> {
         } => {
             let baseboard = if let Some(baseboard_file) = baseboard_file {
                 let baseboard_file = std::fs::read_to_string(baseboard_file)
-                    .map_err(|e| CmdError::Failure(e.to_string()))?;
+                    .map_err(|e| CmdError::Failure(e.into()))?;
                 let baseboard: Baseboard =
                     serde_json::from_str(&baseboard_file)
-                        .map_err(|e| CmdError::Failure(e.to_string()))?;
+                        .map_err(|e| CmdError::Failure(e.into()))?;
 
                 // TODO-correctness `Baseboard::unknown()` is slated for removal
                 // after some refactoring in sled-agent, at which point we'll
@@ -100,19 +103,17 @@ async fn do_run() -> Result<(), CmdError> {
                 None
             };
 
-            let config = Config::from_file(&config_file_path).map_err(|e| {
-                CmdError::Failure(format!(
-                    "failed to parse {}: {}",
-                    config_file_path.display(),
-                    e
-                ))
-            })?;
+            let config = Config::from_file(&config_file_path)
+                .with_context(|| {
+                    format!("failed to parse {}", config_file_path.display())
+                })
+                .map_err(CmdError::Failure)?;
 
             let rack_subnet = match rack_subnet {
                 Some(addr) => Some(Ipv6Subnet::new(addr)),
                 None if read_smf_config => {
                     let smf_values = SmfConfigValues::read_current()
-                        .map_err(|e| CmdError::Failure(e.to_string()))?;
+                        .map_err(|e| CmdError::Failure(e.into()))?;
                     smf_values.rack_subnet
                 }
                 None => None,
@@ -126,12 +127,18 @@ async fn do_run() -> Result<(), CmdError> {
                 baseboard,
                 rack_subnet,
             };
-            let log = config.log.to_logger("wicketd").map_err(|msg| {
-                CmdError::Failure(format!("initializing logger: {}", msg))
-            })?;
-            let server =
-                Server::start(log, args).await.map_err(CmdError::Failure)?;
-            server.wait_for_finish().await.map_err(CmdError::Failure)
+            let log = config
+                .log
+                .to_logger("wicketd")
+                .context("failed to initialize logger")
+                .map_err(CmdError::Failure)?;
+            let server = Server::start(log, args)
+                .await
+                .map_err(|err| CmdError::Failure(anyhow!("{err}")))?;
+            server
+                .wait_for_finish()
+                .await
+                .map_err(|err| CmdError::Failure(anyhow!("{err}")))
         }
     }
 }

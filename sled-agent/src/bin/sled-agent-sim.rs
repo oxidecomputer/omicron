@@ -95,8 +95,8 @@ async fn main() {
 async fn do_run() -> Result<(), CmdError> {
     let args = Args::parse();
 
-    let tmp = camino_tempfile::tempdir()
-        .map_err(|e| CmdError::Failure(e.to_string()))?;
+    let tmp =
+        camino_tempfile::tempdir().map_err(|e| CmdError::Failure(e.into()))?;
     let config = Config {
         id: args.uuid,
         sim_mode: args.sim_mode,
@@ -125,10 +125,10 @@ async fn do_run() -> Result<(), CmdError> {
         (Some(cert_path), Some(key_path)) => {
             let cert_bytes = std::fs::read_to_string(&cert_path)
                 .with_context(|| format!("read {:?}", &cert_path))
-                .map_err(|e| CmdError::Failure(e.to_string()))?;
+                .map_err(|e| CmdError::Failure(e.into()))?;
             let key_bytes = std::fs::read_to_string(&key_path)
                 .with_context(|| format!("read {:?}", &key_path))
-                .map_err(|e| CmdError::Failure(e.to_string()))?;
+                .map_err(|e| CmdError::Failure(e.into()))?;
             Some(NexusTypes::Certificate { cert: cert_bytes, key: key_bytes })
         }
         _ => {
@@ -147,5 +147,5 @@ async fn do_run() -> Result<(), CmdError> {
 
     run_standalone_server(&config, &rss_args)
         .await
-        .map_err(|e| CmdError::Failure(e.to_string()))
+        .map_err(|e| CmdError::Failure(e.into()))
 }
