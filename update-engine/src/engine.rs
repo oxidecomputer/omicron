@@ -342,7 +342,10 @@ impl<'a, S: StepSpec + 'a> UpdateEngine<'a, S> {
 /// `SenderImpl<S>` for *any* StepSpec, not just `S`, to allow nested engines to
 /// be a different StepSpec than the outer engine.
 ///
-/// So we need to use a trait object to achieve type erasure.
+/// In other words, `NestedSender` doesn't just represent a single
+/// `mpsc::Sender<StepContextPayload<S>>`, it represents the universe of all
+/// possible StepSpecs S. This is an infinite number of variants, and requires a
+/// trait object to represent.
 #[derive_where(Clone, Debug)]
 struct EngineSender<S: StepSpec> {
     sender: Arc<dyn SenderImpl<S>>,
