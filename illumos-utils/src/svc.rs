@@ -11,11 +11,8 @@ use omicron_common::backoff;
 
 #[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
 mod inner {
-    use slog::{warn, Logger};
-
-    use crate::PFEXEC;
-
     use super::*;
+    use slog::{warn, Logger};
 
     // TODO(https://www.illumos.org/issues/13837): This is a hack;
     // remove me when when fixed. Ideally, the ".synchronous()" argument
@@ -61,9 +58,13 @@ mod inner {
                     {
                         return Ok(());
                     } else {
+                        // This is helpful in virtual environments where
+                        // services take a few tries to come up. To enable,
+                        // compile with RUSTFLAGS="--cfg svcadm_autoclear"
+                        #[cfg(svcadm_autoclear)]
                         if let Some(zname) = zone {
                             if let Err(out) =
-                                tokio::process::Command::new(PFEXEC)
+                                tokio::process::Command::new(crate::PFEXEC)
                                     .env_clear()
                                     .arg("svcadm")
                                     .arg("-z")
