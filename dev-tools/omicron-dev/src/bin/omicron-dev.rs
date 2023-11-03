@@ -288,7 +288,7 @@ async fn start_single_node(port: u16) -> Result<(), anyhow::Error> {
     let mut db_instance =
         dev::clickhouse::ClickHouseInstance::new_single_node(port).await?;
     println!(
-        "\nomicron-dev: running ClickHouse with full command:\n\"clickhouse {}\"",
+        "omicron-dev: running ClickHouse with full command:\n\"clickhouse {}\"",
         db_instance.cmdline().join(" ")
     );
     println!(
@@ -349,14 +349,14 @@ async fn start_replicated_cluster() -> Result<(), anyhow::Error> {
         dev::clickhouse::ClickHouseCluster::new(replica_config, keeper_config)
             .await?;
     println!(
-        "\nomicron-dev: running ClickHouse cluster with configuration files:\n \
-        replicas: {}\n keepers: {}\n",
+        "omicron-dev: running ClickHouse cluster with configuration files:\n \
+        replicas: {}\n keepers: {}",
         cluster.replica_config_path().display(),
         cluster.keeper_config_path().display()
     );
     let pid_error_msg = "Failed to get process PID, it may not have started";
     println!(
-        "omicron-dev: ClickHouse cluster is running with PIDs: {}, {}, {}, {}, {}\n",
+        "omicron-dev: ClickHouse cluster is running with PIDs: {}, {}, {}, {}, {}",
         cluster.replica_1
             .pid()
             .expect(pid_error_msg),
@@ -374,15 +374,9 @@ async fn start_replicated_cluster() -> Result<(), anyhow::Error> {
             .expect(pid_error_msg),
     );
     println!(
-        "omicron-dev: ClickHouse HTTP servers listening on ports: {}, {}\n",
+        "omicron-dev: ClickHouse HTTP servers listening on ports: {}, {}",
         cluster.replica_1.port(),
         cluster.replica_2.port()
-    );
-    println!(
-        "omicron-dev: ClickHouse keepers listening on ports: {}, {}, {}\n",
-        cluster.keeper_1.port(),
-        cluster.keeper_2.port(),
-        cluster.keeper_3.port()
     );
     println!(
         "omicron-dev: using {} and {} for ClickHouse data storage",
