@@ -90,8 +90,6 @@ impl StartRackUpdateArgs {
         wicketd_addr: SocketAddrV6,
         global_opts: GlobalOpts,
     ) -> Result<()> {
-        // NOTE: This process is not idempotent. Doing so would require using a
-        // UUID, and storing that UUID in wicket.
         let client = create_wicketd_client(&log, wicketd_addr, WICKETD_TIMEOUT);
 
         let update_ids = self.component_ids.to_component_ids()?;
