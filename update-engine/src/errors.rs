@@ -48,13 +48,13 @@ impl<S: StepSpec> fmt::Display for ExecutionError<S> {
                 )
             }
             Self::EventSendError(_) => {
-                write!(f, "event receiver dropped")
+                write!(f, "while sending event, event receiver dropped")
             }
         }
     }
 }
 
-impl<S: StepSpec + 'static> error::Error for ExecutionError<S> {
+impl<S: StepSpec> error::Error for ExecutionError<S> {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match self {
             ExecutionError::StepFailed { error, .. } => Some(error.as_error()),
@@ -112,7 +112,7 @@ impl<S: StepSpec> fmt::Display for NestedEngineError<S> {
     }
 }
 
-impl<S: StepSpec + 'static> error::Error for NestedEngineError<S> {
+impl<S: StepSpec> error::Error for NestedEngineError<S> {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match self {
             Self::Creation { error } => Some(error.as_error()),

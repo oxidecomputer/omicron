@@ -12,7 +12,7 @@
 //! would be the only consumer -- and in that case it's okay to query the
 //! database directly.
 
-// NOTE: eminates from Tabled macros
+// NOTE: emanates from Tabled macros
 #![allow(clippy::useless_vec)]
 
 use crate::Omdb;
@@ -30,6 +30,7 @@ use diesel::BoolExpressionMethods;
 use diesel::ExpressionMethods;
 use diesel::JoinOnDsl;
 use diesel::NullableExpressionMethods;
+use gateway_client::types::SpType;
 use nexus_db_model::Dataset;
 use nexus_db_model::Disk;
 use nexus_db_model::DnsGroup;
@@ -37,17 +38,22 @@ use nexus_db_model::DnsName;
 use nexus_db_model::DnsVersion;
 use nexus_db_model::DnsZone;
 use nexus_db_model::ExternalIp;
+use nexus_db_model::HwBaseboardId;
 use nexus_db_model::Instance;
+use nexus_db_model::InvCollection;
 use nexus_db_model::Project;
 use nexus_db_model::Region;
 use nexus_db_model::RegionSnapshot;
 use nexus_db_model::Sled;
 use nexus_db_model::Snapshot;
 use nexus_db_model::SnapshotState;
+use nexus_db_model::SwCaboose;
 use nexus_db_model::Vmm;
 use nexus_db_model::Zpool;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
+use nexus_db_queries::db::datastore::DataStoreConnection;
+use nexus_db_queries::db::datastore::DataStoreInventoryTest;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::lookup::LookupPath;
@@ -56,11 +62,14 @@ use nexus_db_queries::db::DataStore;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params::DnsRecord;
 use nexus_types::internal_api::params::Srv;
+use nexus_types::inventory::CabooseWhich;
+use nexus_types::inventory::Collection;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Generation;
 use omicron_common::postgres_config::PostgresConfigWithUrl;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt::Display;
@@ -132,6 +141,8 @@ enum DbCommands {
     Disks(DiskArgs),
     /// Print information about internal and external DNS
     Dns(DnsArgs),
+    /// Print information about collected hardware/software inventory
+    Inventory(InventoryArgs),
     /// Print information about control plane services
     Services(ServicesArgs),
     /// Print information about sleds
@@ -210,6 +221,42 @@ impl CliDnsGroup {
             CliDnsGroup::External => DnsGroup::External,
         }
     }
+}
+
+#[derive(Debug, Args)]
+struct InventoryArgs {
+    #[command(subcommand)]
+    command: InventoryCommands,
+}
+
+#[derive(Debug, Subcommand)]
+enum InventoryCommands {
+    /// list all baseboards ever found
+    BaseboardIds,
+    /// list all cabooses ever found
+    Cabooses,
+    /// list and show details from particular collections
+    Collections(CollectionsArgs),
+}
+
+#[derive(Debug, Args)]
+struct CollectionsArgs {
+    #[command(subcommand)]
+    command: CollectionsCommands,
+}
+
+#[derive(Debug, Subcommand)]
+enum CollectionsCommands {
+    /// list collections
+    List,
+    /// show what was found in a particular collection
+    Show(CollectionsShowArgs),
+}
+
+#[derive(Debug, Args)]
+struct CollectionsShowArgs {
+    /// id of the collection
+    id: Uuid,
 }
 
 #[derive(Debug, Args)]
@@ -335,6 +382,10 @@ impl DbArgs {
                 cmd_db_dns_names(&opctx, &datastore, self.fetch_limit, args)
                     .await
             }
+            DbCommands::Inventory(inventory_args) => {
+                cmd_db_inventory(&datastore, self.fetch_limit, inventory_args)
+                    .await
+            }
             DbCommands::Services(ServicesArgs {
                 command: ServicesCommands::ListInstances,
             }) => {
@@ -429,13 +480,21 @@ where
     D: Display,
 {
     if items.len() == usize::try_from(limit.get()).unwrap() {
-        eprintln!(
-            "WARN: {}: found {} items (the limit).  There may be more items \
-            that were ignored.  Consider overriding with --fetch-limit.",
-            context(),
-            items.len(),
-        );
+        limit_error(limit, context);
     }
+}
+
+fn limit_error<F, D>(limit: NonZeroU32, context: F)
+where
+    F: FnOnce() -> D,
+    D: Display,
+{
+    eprintln!(
+        "WARN: {}: found {} items (the limit).  There may be more items \
+            that were ignored.  Consider overriding with --fetch-limit.",
+        context(),
+        limit,
+    );
 }
 
 /// Returns pagination parameters to fetch the first page of results for a
@@ -1687,4 +1746,405 @@ fn format_record(record: &DnsRecord) -> impl Display {
             format!("SRV  port {:5} {}", port, target)
         }
     }
+}
+
+// Inventory
+
+async fn cmd_db_inventory(
+    datastore: &DataStore,
+    limit: NonZeroU32,
+    inventory_args: &InventoryArgs,
+) -> Result<(), anyhow::Error> {
+    let conn = datastore.pool_connection_for_tests().await?;
+    match inventory_args.command {
+        InventoryCommands::BaseboardIds => {
+            cmd_db_inventory_baseboard_ids(&conn, limit).await
+        }
+        InventoryCommands::Cabooses => {
+            cmd_db_inventory_cabooses(&conn, limit).await
+        }
+        InventoryCommands::Collections(CollectionsArgs {
+            command: CollectionsCommands::List,
+        }) => cmd_db_inventory_collections_list(&conn, limit).await,
+        InventoryCommands::Collections(CollectionsArgs {
+            command: CollectionsCommands::Show(CollectionsShowArgs { id }),
+        }) => cmd_db_inventory_collections_show(datastore, id, limit).await,
+    }
+}
+
+async fn cmd_db_inventory_baseboard_ids(
+    conn: &DataStoreConnection<'_>,
+    limit: NonZeroU32,
+) -> Result<(), anyhow::Error> {
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct BaseboardRow {
+        id: Uuid,
+        part_number: String,
+        serial_number: String,
+    }
+
+    use db::schema::hw_baseboard_id::dsl;
+    let baseboard_ids = dsl::hw_baseboard_id
+        .order_by((dsl::part_number, dsl::serial_number))
+        .limit(i64::from(u32::from(limit)))
+        .select(HwBaseboardId::as_select())
+        .load_async(&**conn)
+        .await
+        .context("loading baseboard ids")?;
+    check_limit(&baseboard_ids, limit, || "loading baseboard ids");
+
+    let rows = baseboard_ids.into_iter().map(|baseboard_id| BaseboardRow {
+        id: baseboard_id.id,
+        part_number: baseboard_id.part_number,
+        serial_number: baseboard_id.serial_number,
+    });
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
+
+    Ok(())
+}
+
+async fn cmd_db_inventory_cabooses(
+    conn: &DataStoreConnection<'_>,
+    limit: NonZeroU32,
+) -> Result<(), anyhow::Error> {
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct CabooseRow {
+        id: Uuid,
+        board: String,
+        git_commit: String,
+        name: String,
+        version: String,
+    }
+
+    use db::schema::sw_caboose::dsl;
+    let mut cabooses = dsl::sw_caboose
+        .limit(i64::from(u32::from(limit)))
+        .select(SwCaboose::as_select())
+        .load_async(&**conn)
+        .await
+        .context("loading cabooses")?;
+    check_limit(&cabooses, limit, || "loading cabooses");
+    cabooses.sort();
+
+    let rows = cabooses.into_iter().map(|caboose| CabooseRow {
+        id: caboose.id,
+        board: caboose.board,
+        name: caboose.name,
+        version: caboose.version,
+        git_commit: caboose.git_commit,
+    });
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
+
+    Ok(())
+}
+
+async fn cmd_db_inventory_collections_list(
+    conn: &DataStoreConnection<'_>,
+    limit: NonZeroU32,
+) -> Result<(), anyhow::Error> {
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct CollectionRow {
+        id: Uuid,
+        started: String,
+        took: String,
+        nsps: i64,
+        nerrors: i64,
+    }
+
+    let collections = {
+        use db::schema::inv_collection::dsl;
+        dsl::inv_collection
+            .order_by(dsl::time_started)
+            .limit(i64::from(u32::from(limit)))
+            .select(InvCollection::as_select())
+            .load_async(&**conn)
+            .await
+            .context("loading collections")?
+    };
+    check_limit(&collections, limit, || "loading collections");
+
+    let mut rows = Vec::new();
+    for collection in collections {
+        let nerrors = {
+            use db::schema::inv_collection_error::dsl;
+            dsl::inv_collection_error
+                .filter(dsl::inv_collection_id.eq(collection.id))
+                .select(diesel::dsl::count_star())
+                .first_async(&**conn)
+                .await
+                .context("counting errors")?
+        };
+
+        let nsps = {
+            use db::schema::inv_service_processor::dsl;
+            dsl::inv_service_processor
+                .filter(dsl::inv_collection_id.eq(collection.id))
+                .select(diesel::dsl::count_star())
+                .first_async(&**conn)
+                .await
+                .context("counting SPs")?
+        };
+
+        let took = format!(
+            "{} ms",
+            collection
+                .time_done
+                .signed_duration_since(&collection.time_started)
+                .num_milliseconds()
+        );
+        rows.push(CollectionRow {
+            id: collection.id,
+            started: humantime::format_rfc3339_seconds(
+                collection.time_started.into(),
+            )
+            .to_string(),
+            took,
+            nsps,
+            nerrors,
+        });
+    }
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
+
+    Ok(())
+}
+
+async fn cmd_db_inventory_collections_show(
+    datastore: &DataStore,
+    id: Uuid,
+    limit: NonZeroU32,
+) -> Result<(), anyhow::Error> {
+    let (collection, incomplete) = datastore
+        .inventory_collection_read_best_effort(id, limit)
+        .await
+        .context("reading collection")?;
+    if incomplete {
+        limit_error(limit, || "loading collection");
+    }
+
+    inv_collection_print(&collection).await?;
+    let nerrors = inv_collection_print_errors(&collection).await?;
+    inv_collection_print_devices(&collection).await?;
+
+    if nerrors > 0 {
+        eprintln!(
+            "warning: {} collection error{} {} reported above",
+            nerrors,
+            if nerrors == 1 { "was" } else { "were" },
+            if nerrors == 1 { "" } else { "s" }
+        );
+    }
+
+    Ok(())
+}
+
+async fn inv_collection_print(
+    collection: &Collection,
+) -> Result<(), anyhow::Error> {
+    println!("collection: {}", collection.id);
+    println!(
+        "collector:  {}{}",
+        collection.collector,
+        if collection.collector.parse::<Uuid>().is_ok() {
+            " (likely a Nexus instance)"
+        } else {
+            ""
+        }
+    );
+    println!(
+        "started:    {}",
+        humantime::format_rfc3339_millis(collection.time_started.into())
+    );
+    println!(
+        "done:       {}",
+        humantime::format_rfc3339_millis(collection.time_done.into())
+    );
+
+    Ok(())
+}
+
+async fn inv_collection_print_errors(
+    collection: &Collection,
+) -> Result<u32, anyhow::Error> {
+    println!("errors:     {}", collection.errors.len());
+    for (index, message) in collection.errors.iter().enumerate() {
+        println!("  error {}: {}", index, message);
+    }
+
+    Ok(collection
+        .errors
+        .len()
+        .try_into()
+        .expect("could not convert error count into u32 (yikes)"))
+}
+
+async fn inv_collection_print_devices(
+    collection: &Collection,
+) -> Result<(), anyhow::Error> {
+    // Assemble a list of baseboard ids, sorted first by device type (sled,
+    // switch, power), then by slot number.  This is the order in which we will
+    // print everything out.
+    let mut sorted_baseboard_ids: Vec<_> =
+        collection.sps.keys().cloned().collect();
+    sorted_baseboard_ids.sort_by(|s1, s2| {
+        let sp1 = collection.sps.get(s1).unwrap();
+        let sp2 = collection.sps.get(s2).unwrap();
+        sp1.sp_type.cmp(&sp2.sp_type).then(sp1.sp_slot.cmp(&sp2.sp_slot))
+    });
+
+    // Now print them.
+    for baseboard_id in &sorted_baseboard_ids {
+        // This unwrap should not fail because the collection we're iterating
+        // over came from the one we're looking into now.
+        let sp = collection.sps.get(baseboard_id).unwrap();
+        let baseboard = collection.baseboards.get(baseboard_id);
+        let rot = collection.rots.get(baseboard_id);
+
+        println!("");
+        match baseboard {
+            None => {
+                // It should be impossible to find an SP whose baseboard
+                // information we didn't previously fetch.  That's either a bug
+                // in this tool (for failing to fetch or find the right
+                // baseboard information) or the inventory system (for failing
+                // to insert a record into the hw_baseboard_id table).
+                println!(
+                    "{:?} (serial number unknown -- this is a bug)",
+                    sp.sp_type
+                );
+                println!("    part number: unknown");
+            }
+            Some(baseboard) => {
+                println!("{:?} {}", sp.sp_type, baseboard.serial_number);
+                println!("    part number: {}", baseboard.part_number);
+            }
+        };
+
+        println!("    power:    {:?}", sp.power_state);
+        println!("    revision: {}", sp.baseboard_revision);
+        print!("    MGS slot: {:?} {}", sp.sp_type, sp.sp_slot);
+        if let SpType::Sled = sp.sp_type {
+            print!(" (cubby {})", sp.sp_slot);
+        }
+        println!("");
+        println!("    found at: {} from {}", sp.time_collected, sp.source);
+
+        #[derive(Tabled)]
+        #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+        struct CabooseRow<'a> {
+            slot: String,
+            board: &'a str,
+            name: &'a str,
+            version: &'a str,
+            git_commit: &'a str,
+        }
+
+        println!("    cabooses:");
+        let caboose_rows: Vec<_> = CabooseWhich::iter()
+            .filter_map(|c| {
+                collection.caboose_for(c, baseboard_id).map(|d| (c, d))
+            })
+            .map(|(c, found_caboose)| CabooseRow {
+                slot: format!("{:?}", c),
+                board: &found_caboose.caboose.board,
+                name: &found_caboose.caboose.name,
+                version: &found_caboose.caboose.version,
+                git_commit: &found_caboose.caboose.git_commit,
+            })
+            .collect();
+        let table = tabled::Table::new(caboose_rows)
+            .with(tabled::settings::Style::empty())
+            .with(tabled::settings::Padding::new(0, 1, 0, 0))
+            .to_string();
+        println!("{}", textwrap::indent(&table.to_string(), "        "));
+
+        if let Some(rot) = rot {
+            println!("    RoT: active slot: slot {:?}", rot.active_slot);
+            println!(
+                "    RoT: persistent boot preference: slot {:?}",
+                rot.persistent_boot_preference,
+            );
+            println!(
+                "    RoT: pending persistent boot preference: {}",
+                rot.pending_persistent_boot_preference
+                    .map(|s| format!("slot {:?}", s))
+                    .unwrap_or_else(|| String::from("-"))
+            );
+            println!(
+                "    RoT: transient boot preference: {}",
+                rot.transient_boot_preference
+                    .map(|s| format!("slot {:?}", s))
+                    .unwrap_or_else(|| String::from("-"))
+            );
+
+            println!(
+                "    RoT: slot A SHA3-256: {}",
+                rot.slot_a_sha3_256_digest
+                    .clone()
+                    .unwrap_or_else(|| String::from("-"))
+            );
+
+            println!(
+                "    RoT: slot B SHA3-256: {}",
+                rot.slot_b_sha3_256_digest
+                    .clone()
+                    .unwrap_or_else(|| String::from("-"))
+            );
+        } else {
+            println!("    RoT: no information found");
+        }
+    }
+
+    println!("");
+    for sp_missing_rot in collection
+        .sps
+        .keys()
+        .collect::<BTreeSet<_>>()
+        .difference(&collection.rots.keys().collect::<BTreeSet<_>>())
+    {
+        // It's not a bug in either omdb or the inventory system to find an SP
+        // with no RoT.  It just means that when we collected inventory from the
+        // SP, it couldn't communicate with its RoT.
+        let sp = collection.sps.get(*sp_missing_rot).unwrap();
+        println!(
+            "warning: found SP with no RoT: {:?} slot {}",
+            sp.sp_type, sp.sp_slot
+        );
+    }
+
+    for rot_missing_sp in collection
+        .rots
+        .keys()
+        .collect::<BTreeSet<_>>()
+        .difference(&collection.sps.keys().collect::<BTreeSet<_>>())
+    {
+        // It *is* a bug in the inventory system (or omdb) to find an RoT with
+        // no SP, since we get the RoT information from the SP in the first
+        // place.
+        println!(
+            "error: found RoT with no SP: \
+            hw_baseboard_id {:?} -- this is a bug",
+            rot_missing_sp
+        );
+    }
+
+    Ok(())
 }
