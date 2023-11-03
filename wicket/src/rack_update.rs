@@ -12,9 +12,10 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use clap::{Args, Subcommand};
 use slog::Logger;
+use tokio::{sync::watch, task::JoinHandle};
 use update_engine::display::{GroupDisplay, LineDisplayStyles};
 use wicket_common::update_events::EventReport;
 use wicketd_client::types::{StartUpdateOptions, StartUpdateParams};
@@ -166,7 +167,6 @@ async fn do_attach_to_updates(
     update_ids: BTreeSet<ComponentId>,
     global_opts: GlobalOpts,
 ) -> Result<()> {
-    // Maintain state for each update ID.
     let mut display = GroupDisplay::new_with_display(
         update_ids.iter().copied(),
         std::io::stderr(),
@@ -175,46 +175,105 @@ async fn do_attach_to_updates(
         display.set_styles(LineDisplayStyles::colorized());
     }
 
+    let (mut rx, handle) = start_fetch_reports_task(&log, client.clone()).await;
+    let mut status_timer = tokio::time::interval(Duration::from_secs(5));
+    status_timer.tick().await;
+
     while !display.stats().is_terminal() {
-        // TODO: Ideally we'd not fetch the full event report each time and just
-        // get diffs from the last report. The capability for this exists in the
-        // update-engine, it just needs to be plumbed through the API.
-        let response = match client.get_artifacts_and_event_reports().await {
-            Ok(response) => response,
-            Err(error) => {
-                if let wicketd_client::Error::ErrorResponse(error) = &error {
-                    slog::error!(
-                        log,
-                        "Error response from wicketd: {}",
-                        error.message
-                    );
-                } else {
-                    slog::error!(log, "Error from wicketd: {}", error);
+        tokio::select! {
+            res = rx.changed() => {
+                if res.is_err() {
+                    // The sending end is closed, which means that the task
+                    // created by start_fetch_reports_task died... this can
+                    // happen either due to a panic or due to an error.
+                    match handle.await {
+                        Ok(Ok(())) => {
+                            // The task exited normally, which means that the
+                            // sending end was closed normally. This cannot
+                            // happen.
+                            bail!("fetch_reports task exited with Ok(()) \
+                                   -- this should never happen here");
+                        }
+                        Ok(Err(error)) => {
+                            // The task exited with an error.
+                            return Err(error).context("fetch_reports task errored out");
+                        }
+                        Err(error) => {
+                            // The task panicked.
+                            return Err(anyhow!(error)).context("fetch_reports task panicked");
+                        }
+                    }
                 }
-                tokio::time::sleep(Duration::from_secs(1)).await;
-                continue;
+
+                let event_reports = rx.borrow_and_update();
+                // TODO: parallelize this computation?
+                for (id, event_report) in &*event_reports {
+                    // If display.add_event_report errors out, it's for a report for a
+                    // component we weren't interested in. Ignore it.
+                    _ = display.add_event_report(&id, event_report.clone());
+                }
+
+                // Print out status for each component ID at the end -- do it here so
+                // that we also consider components for which we haven't seen status
+                // yet.
+                display.write_events()?;
             }
-        };
-
-        let event_reports = response.into_inner().event_reports;
-        let event_reports = parse_event_report_map(&log, event_reports);
-
-        // TODO: parallelize this computation?
-        for (id, event_report) in event_reports {
-            // If display.add_event_report errors out, we received a report for
-            // a component we weren't interested in.
-            _ = display.add_event_report(&id, event_report);
+            _ = status_timer.tick() => {
+                display.write_stats("Status")?;
+            }
         }
-
-        // Print out status for each component ID at the end -- do it here so
-        // that we also consider components for which we haven't seen status
-        // yet.
-        display.write_events()?;
     }
 
-    slog::info!(log, "All updates completed"; "num_updates" => update_ids.len());
+    // Show any remaining events.
+    display.write_events()?;
+    // And also show a summary.
+    display.write_stats("Summary")?;
+
+    std::mem::drop(rx);
+    handle
+        .await
+        .context("fetch_reports task panicked after rx dropped")?
+        .context("fetch_reports task errored out after rx dropped")?;
+
+    if display.stats().has_failures() {
+        bail!("one or more failures occurred");
+    }
 
     Ok(())
+}
+
+async fn start_fetch_reports_task(
+    log: &Logger,
+    client: wicketd_client::Client,
+) -> (watch::Receiver<BTreeMap<ComponentId, EventReport>>, JoinHandle<Result<()>>)
+{
+    // Since reports are always cumulative, we can use a watch receiver here
+    // rather than an mpsc receiver. If we start using incremental reports at
+    // some point this would need to be changed to be an mpsc receiver.
+    let (tx, rx) = watch::channel(BTreeMap::new());
+    let log = log.new(slog::o!("task" => "fetch_reports"));
+
+    let handle = tokio::spawn(async move {
+        loop {
+            let response = client.get_artifacts_and_event_reports().await?;
+            let reports = response.into_inner().event_reports;
+            let reports = parse_event_report_map(&log, reports);
+            if tx.send(reports).is_err() {
+                // The receiving end is closed, exit.
+                break;
+            }
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_secs(1)) => {},
+                _ = tx.closed() => {
+                    // The receiving end is closed, exit.
+                    break;
+                }
+            }
+        }
+
+        Ok(())
+    });
+    (rx, handle)
 }
 
 /// Command-line arguments for selecting component IDs.

@@ -8,6 +8,7 @@ use std::{borrow::Borrow, collections::BTreeMap, fmt, time::Duration};
 
 use owo_colors::OwoColorize;
 use swrite::{swrite, SWrite};
+use tokio::time::Instant;
 use unicode_width::UnicodeWidthStr;
 
 use crate::{
@@ -16,8 +17,8 @@ use crate::{
 };
 
 use super::{
-    line_display_shared::LineDisplayFormatter, LineDisplayShared,
-    LineDisplayStyles, HEADER_WIDTH,
+    line_display_shared::{LineDisplayFormatter, LineDisplayOutput},
+    LineDisplayShared, LineDisplayStyles, HEADER_WIDTH,
 };
 
 /// A displayer that simultaneously manages and shows line-based output for
@@ -31,6 +32,9 @@ pub struct GroupDisplay<K, W, S: StepSpec> {
     // the writer in a line-buffered fashion (see Self::write_events).
     writer: W,
     max_width: usize,
+    // This is set to Instant::now as soon as the first event report is
+    // received.
+    start_instant: Option<Instant>,
     single_states: BTreeMap<K, SingleState<S>>,
     formatter: LineDisplayFormatter,
     stats: GroupDisplayStats,
@@ -69,6 +73,7 @@ impl<K: Eq + Ord, W: std::io::Write, S: StepSpec> GroupDisplay<K, W, S> {
         Self {
             writer,
             max_width,
+            start_instant: None,
             single_states,
             formatter: LineDisplayFormatter::new(),
             stats: GroupDisplayStats::new(not_started),
@@ -131,6 +136,9 @@ impl<K: Eq + Ord, W: std::io::Write, S: StepSpec> GroupDisplay<K, W, S> {
     {
         if let Some(state) = self.single_states.get_mut(key) {
             let result = state.add_event_report(event_report);
+            if self.start_instant.is_none() {
+                self.start_instant = Some(Instant::now());
+            }
             self.stats.apply_result(result);
             Ok(())
         } else {
@@ -143,19 +151,22 @@ impl<K: Eq + Ord, W: std::io::Write, S: StepSpec> GroupDisplay<K, W, S> {
         // Add a prefix which is equal to the maximum width of the prefixes.
         // [prefix 00:00:00] takes up self.max_width + 9 characters inside the
         // brackets.
-        let total_width = self.max_width + 9;
-        let mut line = format!("[{:total_width$}] ", "");
+        let prefix = " ".repeat(self.max_width);
+        let mut line = self.formatter.start_line(
+            &prefix,
+            self.start_instant.as_ref().map(Instant::elapsed),
+        );
         self.stats.format_line(&mut line, header, &self.formatter);
         writeln!(self.writer, "{line}")
     }
 
     /// Writes all pending events to the writer.
     pub fn write_events(&mut self) -> std::io::Result<()> {
-        let mut lines = Vec::new();
+        let mut out = LineDisplayOutput::new();
         for state in self.single_states.values_mut() {
-            state.format_events(&self.formatter, &mut lines);
+            state.format_events(&self.formatter, &mut out);
         }
-        for line in lines {
+        for line in out.iter() {
             writeln!(self.writer, "{line}")?;
         }
         Ok(())
@@ -313,7 +324,7 @@ impl<S: StepSpec> SingleState<S> {
         // Right-align the prefix to the maximum width.
         let prefix = format!("{:>max_width$}", prefix);
         Self {
-            shared: LineDisplayShared::new(),
+            shared: LineDisplayShared::default(),
             kind: SingleStateKind::NotStarted { displayed: false },
             prefix,
         }
@@ -387,58 +398,40 @@ impl<S: StepSpec> SingleState<S> {
     pub(super) fn format_events(
         &mut self,
         formatter: &LineDisplayFormatter,
-        out: &mut Vec<String>,
+        out: &mut LineDisplayOutput,
     ) {
+        let mut cx = self.shared.with_context(&self.prefix, formatter);
         match &mut self.kind {
             SingleStateKind::NotStarted { displayed } => {
                 if !*displayed {
-                    let line = self.shared.format_generic(
-                        &self.prefix,
-                        "Update not started, waiting...",
-                        formatter,
-                    );
-                    out.push(line);
+                    let line =
+                        cx.format_generic("Update not started, waiting...");
+                    out.add_line(line);
                     *displayed = true;
                 }
             }
             SingleStateKind::Running { event_buffer } => {
-                self.shared.format_event_buffer(
-                    &self.prefix,
-                    event_buffer,
-                    formatter,
-                    out,
-                );
+                cx.format_event_buffer(event_buffer, out);
             }
             SingleStateKind::Terminal { info, pending_event_buffer } => {
                 // Are any remaining events left? This also sets pending_event_buffer
                 // to None after displaying remaining events.
                 if let Some(event_buffer) = pending_event_buffer.take() {
-                    self.shared.format_event_buffer(
-                        &self.prefix,
-                        &event_buffer,
-                        formatter,
-                        out,
-                    );
+                    cx.format_event_buffer(&event_buffer, out);
                     // Also show a line to wrap up the terminal status.
-                    let line = self.shared.format_terminal_info(
-                        &self.prefix,
-                        info,
-                        formatter,
-                    );
-                    out.push(line);
+                    let line = cx.format_terminal_info(info);
+                    out.add_line(line);
                 }
 
                 // Nothing to do, the terminal status was already printed above.
             }
             SingleStateKind::Overwritten { displayed } => {
                 if !*displayed {
-                    let line = self.shared.format_generic(
-                        &self.prefix,
+                    let line = cx.format_generic(
                         "Update overwritten (a different update was started)\
-                                assuming failure",
-                        formatter,
+                         assuming failure",
                     );
-                    out.push(line);
+                    out.add_line(line);
                     *displayed = true;
                 }
             }

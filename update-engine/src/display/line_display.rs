@@ -11,7 +11,10 @@ use std::time::Duration;
 
 use crate::{EventBuffer, ExecutionTerminalInfo, StepSpec};
 
-use super::{LineDisplayFormatter, LineDisplayShared};
+use super::{
+    line_display_shared::LineDisplayOutput, LineDisplayFormatter,
+    LineDisplayShared,
+};
 
 /// A line-oriented display.
 ///
@@ -29,7 +32,7 @@ impl<W: std::io::Write> LineDisplay<W> {
     pub fn new(writer: W) -> Self {
         Self {
             writer: DebugIgnore(writer),
-            shared: LineDisplayShared::new(),
+            shared: LineDisplayShared::default(),
             formatter: LineDisplayFormatter::new(),
             prefix: String::new(),
         }
@@ -61,14 +64,11 @@ impl<W: std::io::Write> LineDisplay<W> {
         &mut self,
         buffer: &EventBuffer<S>,
     ) -> std::io::Result<()> {
-        let mut lines = Vec::new();
-        self.shared.format_event_buffer(
-            &self.prefix,
-            buffer,
-            &self.formatter,
-            &mut lines,
-        );
-        for line in lines {
+        let mut out = LineDisplayOutput::new();
+        self.shared
+            .with_context(&self.prefix, &self.formatter)
+            .format_event_buffer(buffer, &mut out);
+        for line in out.iter() {
             writeln!(self.writer, "{line}")?;
         }
 
@@ -80,18 +80,19 @@ impl<W: std::io::Write> LineDisplay<W> {
         &mut self,
         info: &ExecutionTerminalInfo,
     ) -> std::io::Result<()> {
-        let line = self.shared.format_terminal_info(
-            &self.prefix,
-            info,
-            &self.formatter,
-        );
+        let line = self
+            .shared
+            .with_context(&self.prefix, &self.formatter)
+            .format_terminal_info(info);
         writeln!(self.writer, "{line}")
     }
 
     /// Writes a generic line to the writer, with prefix attached if provided.
     pub fn write_generic(&mut self, message: &str) -> std::io::Result<()> {
-        let line =
-            self.shared.format_generic(&self.prefix, message, &self.formatter);
+        let line = self
+            .shared
+            .with_context(&self.prefix, &self.formatter)
+            .format_generic(message);
         writeln!(self.writer, "{line}")
     }
 }
@@ -110,6 +111,7 @@ pub struct LineDisplayStyles {
     pub warning_style: Style,
     pub warning_message_style: Style,
     pub error_style: Style,
+    pub error_message_style: Style,
     pub skipped_style: Style,
     pub retry_style: Style,
 }
@@ -126,6 +128,7 @@ impl LineDisplayStyles {
         ret.warning_style = Style::new().bold().yellow();
         ret.warning_message_style = Style::new().yellow();
         ret.error_style = Style::new().bold().red();
+        ret.error_message_style = Style::new().red();
         ret.skipped_style = Style::new().bold().yellow();
         ret.retry_style = Style::new().bold().yellow();
 

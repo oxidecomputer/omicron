@@ -169,7 +169,7 @@ async fn test_updates() {
         StepEventKind::ExecutionFailed { failed_step, .. } => {
             // TODO: obviously we shouldn't stop here, get past more of the
             // update process in this test.
-            assert_eq!(failed_step.info.component, UpdateComponent::Sp);
+            assert_eq!(failed_step.info.component, UpdateComponent::Rot);
         }
         other => {
             panic!("unexpected terminal event kind: {other:?}");

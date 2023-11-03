@@ -135,7 +135,7 @@ pub enum Component {
 }
 
 fn version_or_unknown(caboose: Option<&SpComponentCaboose>) -> String {
-    caboose.and_then(|c| c.version.as_deref()).unwrap_or("UNKNOWN").to_string()
+    caboose.map(|c| c.version.as_str()).unwrap_or("UNKNOWN").to_string()
 }
 
 impl Component {

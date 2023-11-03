@@ -15,13 +15,16 @@ use clap::{Parser, ValueEnum};
 use display::make_displayer;
 use omicron_test_utils::dev::test_setup_log;
 use spec::{
-    ComponentRegistrar, ExampleCompletionMetadata, ExampleComponent,
-    ExampleSpec, ExampleStepId, ExampleStepMetadata, ExampleWriteSpec,
-    ExampleWriteStepId, StepHandle, StepProgress, StepSkipped, StepWarning,
-    UpdateEngine,
+    ComponentRegistrar, EventBuffer, ExampleCompletionMetadata,
+    ExampleComponent, ExampleSpec, ExampleStepId, ExampleStepMetadata,
+    ExampleWriteSpec, ExampleWriteStepId, StepHandle, StepProgress,
+    StepSkipped, StepWarning, UpdateEngine,
 };
-use tokio::io::AsyncWriteExt;
-use update_engine::{events::ProgressUnits, StepContext, StepSuccess};
+use tokio::{io::AsyncWriteExt, sync::mpsc};
+use update_engine::{
+    events::{Event, ProgressUnits},
+    StepContext, StepSuccess,
+};
 
 mod display;
 mod spec;
@@ -315,6 +318,7 @@ impl ExampleContext {
 
                     cx.with_nested_engine(|engine| {
                         register_nested_write_steps(
+                            &self.log,
                             engine,
                             component,
                             &destinations,
@@ -354,6 +358,7 @@ impl ExampleContext {
 }
 
 fn register_nested_write_steps<'a>(
+    log: &'a slog::Logger,
     engine: &mut UpdateEngine<'a, ExampleWriteSpec>,
     component: ExampleComponent,
     destinations: &'a [Utf8PathBuf],
@@ -379,6 +384,38 @@ fn register_nested_write_steps<'a>(
                             Default::default(),
                         ))
                         .await;
+
+                    let mut remote_engine_receiver = create_remote_engine(
+                        log,
+                        component,
+                        buf_list.clone(),
+                        destination.clone(),
+                    );
+                    let mut buffer = EventBuffer::default();
+                    let mut last_seen = None;
+                    while let Some(event) = remote_engine_receiver.recv().await
+                    {
+                        // Only send progress up to 50% to demonstrate
+                        // not receiving full progress.
+                        if let Event::Progress(event) = &event {
+                            if let Some(counter) = event.kind.progress_counter()
+                            {
+                                if let Some(total) = counter.total {
+                                    if counter.current > total / 2 {
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+
+                        buffer.add_event(event);
+                        let report =
+                            buffer.generate_report_since(&mut last_seen);
+                        cx.send_nested_report(report)
+                            .await
+                            .expect("this engine should never fail");
+                    }
+
                     let mut file =
                         tokio::fs::File::create(destination)
                             .await
@@ -416,4 +453,51 @@ fn register_nested_write_steps<'a>(
             )
             .register();
     }
+}
+
+/// Sets up a remote engine that can be used to execute steps.
+fn create_remote_engine(
+    log: &slog::Logger,
+    component: ExampleComponent,
+    mut buf_list: BufList,
+    destination: Utf8PathBuf,
+) -> mpsc::Receiver<Event<ExampleWriteSpec>> {
+    let (sender, receiver) = tokio::sync::mpsc::channel(128);
+    let engine = UpdateEngine::new(log, sender);
+    engine
+        .for_component(component)
+        .new_step(
+            ExampleWriteStepId::Write { destination: destination.clone() },
+            format!("Writing to {destination} (remote, fake)"),
+            move |cx| async move {
+                let num_bytes = buf_list.num_bytes();
+                let mut total_written = 0;
+
+                while buf_list.has_remaining() {
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                    // Don't actually write these bytes -- this engine is just
+                    // for demoing.
+                    let written_bytes =
+                        (num_bytes / 10).min(buf_list.num_bytes());
+                    total_written += written_bytes;
+                    buf_list.advance(written_bytes);
+                    cx.send_progress(StepProgress::with_current_and_total(
+                        total_written as u64,
+                        num_bytes as u64,
+                        ProgressUnits::new_const("fake bytes"),
+                        (),
+                    ))
+                    .await;
+                }
+
+                StepSuccess::new(()).into()
+            },
+        )
+        .register();
+
+    tokio::spawn(async move {
+        engine.execute().await.expect("remote engine succeeded")
+    });
+
+    receiver
 }

@@ -251,6 +251,10 @@ task: "external_endpoints"
     on each one
 
 
+task: "inventory_collection"
+    collects hardware and software inventory data from the whole system
+
+
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
@@ -331,6 +335,15 @@ task: "external_endpoints"
         warning: silo REDACTED_UUID_REDACTED_UUID_REDACTED with DNS name "test-suite-silo.sys.oxide-dev.test" has no usable certificates
 
     TLS certificates: 0
+
+task: "inventory_collection"
+  configured period: every 10m
+  currently executing: no
+  last completed activation: iter 3, triggered by an explicit signal
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last collection id:      REDACTED_UUID_REDACTED_UUID_REDACTED
+    last collection started: <REDACTED_TIMESTAMP>
+    last collection done:    <REDACTED_TIMESTAMP>
 
 ---------------------------------------------
 stderr:

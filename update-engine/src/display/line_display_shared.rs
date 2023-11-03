@@ -7,7 +7,7 @@
 //! Types and code shared between `LineDisplay` and `GroupDisplay`.
 
 use std::{
-    collections::{hash_map::Entry, HashMap},
+    collections::HashMap,
     fmt::{self, Write as _},
     time::Duration,
 };
@@ -17,12 +17,11 @@ use swrite::{swrite, SWrite as _};
 
 use crate::{
     events::{
-        LowPriorityStepEventKind, ProgressCounter, ProgressEvent, StepEvent,
-        StepInfo, StepOutcome,
+        ProgressCounter, ProgressEvent, ProgressEventKind, StepEvent,
+        StepEventKind, StepInfo, StepOutcome,
     },
-    AbortInfo, AbortReason, CompletionInfo, EventBuffer, EventBufferStepData,
-    ExecutionTerminalInfo, FailureInfo, FailureReason, NestedSpec,
-    RootEventIndex, StepKey, StepSpec, StepStatus, TerminalKind,
+    EventBuffer, ExecutionId, ExecutionTerminalInfo, StepKey, StepSpec,
+    TerminalKind,
 };
 
 use super::LineDisplayStyles;
@@ -31,27 +30,36 @@ use super::LineDisplayStyles;
 // 9 characters is the longest.
 pub(super) const HEADER_WIDTH: usize = 9;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub(super) struct LineDisplayShared {
-    step_data: HashMap<StepKey, StepData>,
+    // This is a map from root execution ID to data about it.
+    execution_data: HashMap<ExecutionId, ExecutionData>,
 }
 
 impl LineDisplayShared {
-    pub(super) fn new() -> Self {
-        Self { step_data: HashMap::new() }
+    pub(super) fn with_context<'a>(
+        &'a mut self,
+        prefix: &'a str,
+        formatter: &'a LineDisplayFormatter,
+    ) -> LineDisplaySharedContext<'a> {
+        LineDisplaySharedContext { shared: self, prefix, formatter }
     }
+}
 
+#[derive(Debug)]
+pub(super) struct LineDisplaySharedContext<'a> {
+    shared: &'a mut LineDisplayShared,
+    prefix: &'a str,
+    formatter: &'a LineDisplayFormatter,
+}
+
+impl<'a> LineDisplaySharedContext<'a> {
     /// Produces a generic line from the prefix and message.
     ///
     /// This line does not have a trailing newline; adding one is the caller's
     /// responsibility.
-    pub(super) fn format_generic(
-        &self,
-        prefix: &str,
-        message: &str,
-        formatter: &LineDisplayFormatter,
-    ) -> String {
-        let mut line = formatter.start_println(prefix);
+    pub(super) fn format_generic(&self, message: &str) -> String {
+        let mut line = self.formatter.start_println(self.prefix);
         line.push_str(message);
         line
     }
@@ -62,256 +70,388 @@ impl LineDisplayShared {
     /// caller's responsibility.
     pub(super) fn format_event_buffer<S: StepSpec>(
         &mut self,
-        prefix: &str,
         buffer: &EventBuffer<S>,
-        formatter: &LineDisplayFormatter,
-        out: &mut Vec<String>,
+        out: &mut LineDisplayOutput,
     ) {
-        let steps = buffer.steps();
-        for (step_key, data) in steps.as_slice() {
-            self.format_step_and_update(
-                prefix, buffer, *step_key, data, formatter, out,
-            );
+        let Some(execution_id) = buffer.root_execution_id() else {
+            // No known events, so nothing to display.
+            return;
+        };
+        let execution_data =
+            self.shared.execution_data.entry(execution_id).or_default();
+        let prev_progress_event_at = execution_data.last_progress_event_at;
+        let mut current_progress_event_at = prev_progress_event_at;
+
+        let report =
+            buffer.generate_report_since(&mut execution_data.last_seen);
+
+        for event in &report.step_events {
+            self.format_step_event(buffer, event, out);
+        }
+
+        // Update progress events.
+        for event in &report.progress_events {
+            if Some(event.total_elapsed) > prev_progress_event_at {
+                self.format_progress_event(buffer, event, out);
+                current_progress_event_at =
+                    current_progress_event_at.max(Some(event.total_elapsed));
+            }
+        }
+
+        // Finally, write to last_progress_event_at. (Need to re-fetch execution data.)
+        let execution_data = self
+            .shared
+            .execution_data
+            .get_mut(&execution_id)
+            .expect("we created this execution data above");
+        execution_data.last_progress_event_at = current_progress_event_at;
+    }
+
+    /// Format this step event.
+    fn format_step_event<S: StepSpec>(
+        &self,
+        buffer: &EventBuffer<S>,
+        step_event: &StepEvent<S>,
+        out: &mut LineDisplayOutput,
+    ) {
+        self.format_step_event_impl(
+            buffer,
+            step_event,
+            Default::default(),
+            step_event.total_elapsed,
+            out,
+        );
+    }
+
+    fn format_step_event_impl<S: StepSpec, S2: StepSpec>(
+        &self,
+        buffer: &EventBuffer<S>,
+        step_event: &StepEvent<S2>,
+        mut nest_data: NestData,
+        root_total_elapsed: Duration,
+        out: &mut LineDisplayOutput,
+    ) {
+        match &step_event.kind {
+            StepEventKind::NoStepsDefined => {
+                let mut line = self
+                    .formatter
+                    .start_line(self.prefix, Some(step_event.total_elapsed));
+                swrite!(
+                    line,
+                    "{:>HEADER_WIDTH$} ",
+                    "No steps defined"
+                        .style(self.formatter.styles.progress_style),
+                );
+                out.add_line(line);
+            }
+            StepEventKind::ExecutionStarted { first_step, .. } => {
+                let ld_step_info = LineDisplayStepInfo::new(
+                    buffer,
+                    step_event.execution_id,
+                    &first_step.info,
+                    &nest_data,
+                );
+                let mut line = self
+                    .formatter
+                    .start_line(self.prefix, Some(root_total_elapsed));
+
+                swrite!(
+                    line,
+                    "{:>HEADER_WIDTH$} ",
+                    "Running".style(self.formatter.styles.progress_style),
+                );
+                self.formatter.add_step_info(&mut line, ld_step_info);
+                out.add_line(line);
+            }
+            StepEventKind::AttemptRetry {
+                step,
+                next_attempt,
+                attempt_elapsed,
+                message,
+                ..
+            } => {
+                let ld_step_info = LineDisplayStepInfo::new(
+                    buffer,
+                    step_event.execution_id,
+                    &step.info,
+                    &nest_data,
+                );
+
+                let mut line = self
+                    .formatter
+                    .start_line(self.prefix, Some(root_total_elapsed));
+
+                swrite!(
+                    line,
+                    "{:>HEADER_WIDTH$} ",
+                    "Retry".style(self.formatter.styles.warning_style)
+                );
+                self.formatter.add_step_info(&mut line, ld_step_info);
+                swrite!(
+                    line,
+                    ": after {:.2?}",
+                    attempt_elapsed.style(self.formatter.styles.meta_style),
+                );
+                if *next_attempt > 1 {
+                    swrite!(
+                        line,
+                        " (at attempt {})",
+                        next_attempt
+                            .saturating_sub(1)
+                            .style(self.formatter.styles.meta_style),
+                    );
+                }
+                swrite!(
+                    line,
+                    " with message: {}",
+                    message.style(self.formatter.styles.warning_message_style)
+                );
+
+                out.add_line(line);
+            }
+            StepEventKind::ProgressReset {
+                step,
+                attempt,
+                attempt_elapsed,
+                message,
+                ..
+            } => {
+                let ld_step_info = LineDisplayStepInfo::new(
+                    buffer,
+                    step_event.execution_id,
+                    &step.info,
+                    &nest_data,
+                );
+
+                let mut line = self
+                    .formatter
+                    .start_line(self.prefix, Some(root_total_elapsed));
+
+                swrite!(
+                    line,
+                    "{:>HEADER_WIDTH$} ",
+                    "Reset".style(self.formatter.styles.warning_style)
+                );
+                self.formatter.add_step_info(&mut line, ld_step_info);
+                swrite!(
+                    line,
+                    ": after {:.2?}",
+                    attempt_elapsed.style(self.formatter.styles.meta_style),
+                );
+                if *attempt > 1 {
+                    swrite!(
+                        line,
+                        " (at attempt {})",
+                        attempt.style(self.formatter.styles.meta_style),
+                    );
+                }
+                swrite!(
+                    line,
+                    " with message: {}",
+                    message.style(self.formatter.styles.warning_message_style)
+                );
+
+                out.add_line(line);
+            }
+            StepEventKind::StepCompleted {
+                step,
+                attempt,
+                outcome,
+                next_step,
+                attempt_elapsed,
+                ..
+            } => {
+                // --- Add completion info about this step.
+
+                let ld_step_info = LineDisplayStepInfo::new(
+                    buffer,
+                    step_event.execution_id,
+                    &step.info,
+                    &nest_data,
+                );
+                let mut line = self
+                    .formatter
+                    .start_line(self.prefix, Some(root_total_elapsed));
+
+                self.formatter.add_completion_and_step_info(
+                    &mut line,
+                    ld_step_info,
+                    *attempt_elapsed,
+                    *attempt,
+                    outcome,
+                );
+
+                out.add_line(line);
+
+                // --- Add information about the next step.
+
+                let ld_step_info = LineDisplayStepInfo::new(
+                    buffer,
+                    step_event.execution_id,
+                    &next_step.info,
+                    &nest_data,
+                );
+
+                let mut line = self
+                    .formatter
+                    .start_line(self.prefix, Some(root_total_elapsed));
+
+                self.format_step_running(&mut line, ld_step_info);
+
+                out.add_line(line);
+            }
+            StepEventKind::ExecutionCompleted {
+                last_step,
+                last_attempt,
+                last_outcome,
+                attempt_elapsed,
+                ..
+            } => {
+                let ld_step_info = LineDisplayStepInfo::new(
+                    buffer,
+                    step_event.execution_id,
+                    &last_step.info,
+                    &nest_data,
+                );
+
+                let mut line = self
+                    .formatter
+                    .start_line(self.prefix, Some(root_total_elapsed));
+
+                self.formatter.add_completion_and_step_info(
+                    &mut line,
+                    ld_step_info,
+                    *attempt_elapsed,
+                    *last_attempt,
+                    last_outcome,
+                );
+
+                out.add_line(line);
+            }
+            StepEventKind::ExecutionFailed {
+                failed_step,
+                total_attempts,
+                attempt_elapsed,
+                message,
+                causes,
+                ..
+            } => {
+                let ld_step_info = LineDisplayStepInfo::new(
+                    buffer,
+                    step_event.execution_id,
+                    &failed_step.info,
+                    &nest_data,
+                );
+
+                let mut line = self
+                    .formatter
+                    .start_line(self.prefix, Some(root_total_elapsed));
+                // The prefix is used for "Caused by" lines below. Add
+                // the requisite amount of spacing here.
+                let mut caused_by_prefix = line.clone();
+                swrite!(caused_by_prefix, "{:>HEADER_WIDTH$} ", "");
+                nest_data.add_prefix(&mut caused_by_prefix);
+
+                swrite!(
+                    line,
+                    "{:>HEADER_WIDTH$} ",
+                    "Failed".style(self.formatter.styles.error_style)
+                );
+
+                self.formatter.add_step_info(&mut line, ld_step_info);
+                line.push_str(": ");
+
+                self.formatter.add_failure_info(
+                    &mut line,
+                    &caused_by_prefix,
+                    *attempt_elapsed,
+                    *total_attempts,
+                    message,
+                    causes,
+                );
+
+                out.add_line(line);
+            }
+            StepEventKind::ExecutionAborted {
+                aborted_step,
+                attempt,
+                attempt_elapsed,
+                message,
+                ..
+            } => {
+                let ld_step_info = LineDisplayStepInfo::new(
+                    buffer,
+                    step_event.execution_id,
+                    &aborted_step.info,
+                    &nest_data,
+                );
+
+                let mut line = self
+                    .formatter
+                    .start_line(self.prefix, Some(root_total_elapsed));
+
+                swrite!(
+                    line,
+                    "{:>HEADER_WIDTH$} ",
+                    "Aborted".style(self.formatter.styles.error_style)
+                );
+                self.formatter.add_step_info(&mut line, ld_step_info);
+                line.push_str(": ");
+
+                self.formatter.add_abort_info(
+                    &mut line,
+                    *attempt_elapsed,
+                    *attempt,
+                    message,
+                );
+
+                out.add_line(line);
+            }
+            StepEventKind::Nested { step, event, .. } => {
+                // Look up the child event's ID to add to the nest data.
+                let child_step_key = StepKey {
+                    execution_id: event.execution_id,
+                    // TODO: we currently look up index 0 because that should
+                    // always exist (unless no steps are defined, in which case
+                    // we skip this). The child index is actually shared by all
+                    // steps within an execution. Fix this by changing
+                    // EventBuffer to also track general per-execution data.
+                    index: 0,
+                };
+                let Some(child_step_data) = buffer.get(&child_step_key) else {
+                    // This should only happen if no steps are defined. See TODO
+                    // above.
+                    return;
+                };
+                let (_, child_index) = child_step_data
+                    .parent_key_and_child_index()
+                    .expect("child steps should have a child index");
+
+                nest_data.add_nest_level(step.info.index, child_index);
+
+                self.format_step_event_impl(
+                    buffer,
+                    &**event,
+                    nest_data,
+                    root_total_elapsed,
+                    out,
+                );
+            }
+            StepEventKind::Unknown => {}
         }
     }
 
-    /// Produces lines corresponding to this step, and advances internal state.
-    ///
-    /// Returned lines do not have a trailing newline; adding them is the
-    /// caller's responsibility.
-    pub(super) fn format_step_and_update<S: StepSpec>(
-        &mut self,
-        prefix: &str,
-        buffer: &EventBuffer<S>,
-        step_key: StepKey,
-        data: &EventBufferStepData<S>,
-        formatter: &LineDisplayFormatter,
-        out: &mut Vec<String>,
+    fn format_step_running<S: StepSpec>(
+        &self,
+        line: &mut String,
+        ld_step_info: LineDisplayStepInfo<'_, S>,
     ) {
-        let ld_step_info = LineDisplayStepInfo {
-            step_info: data.step_info(),
-            parent_key_and_child_index: data.parent_key_and_child_index(),
-            total_steps: data.total_steps(),
-        };
-        let nest_level = data.nest_level();
-        let step_status = data.step_status();
-
-        match step_status {
-            StepStatus::NotStarted => {}
-            StepStatus::Running { progress_event, low_priority } => {
-                for event in low_priority {
-                    self.format_low_priority_event(
-                        prefix,
-                        event,
-                        step_key,
-                        ld_step_info,
-                        nest_level,
-                        formatter,
-                        out,
-                    );
-                }
-
-                self.format_progress_event(
-                    prefix,
-                    progress_event,
-                    step_key,
-                    data,
-                    ld_step_info,
-                    nest_level,
-                    formatter,
-                    out,
-                );
-
-                self.insert_or_update_index(
-                    step_key,
-                    data.last_root_event_index(),
-                );
-            }
-            StepStatus::Completed { info } => {
-                if let Some(sd) = self.step_data.get(&step_key) {
-                    if sd.last_root_event_index >= data.last_root_event_index()
-                    {
-                        // We've already displayed this event.
-                        return;
-                    }
-                }
-
-                match info {
-                    Some(info) => {
-                        let mut line = formatter
-                            .start_line(prefix, Some(info.root_total_elapsed));
-                        formatter.add_completion_and_step_info(
-                            &mut line,
-                            NestLevel::Regular(nest_level),
-                            ld_step_info,
-                            info,
-                        );
-                        out.push(line);
-                    }
-                    None => {
-                        // This means that we don't know what happened to the step
-                        // but it did complete.
-                        let mut line = formatter.start_line(prefix, None);
-                        swrite!(
-                            line,
-                            "{:>HEADER_WIDTH$} ",
-                            "Completed".style(formatter.styles.progress_style),
-                        );
-                        formatter.add_step_info(
-                            &mut line,
-                            ld_step_info,
-                            NestLevel::Regular(nest_level),
-                        );
-                        swrite!(
-                            line,
-                            ": with {}",
-                            "unknown outcome"
-                                .style(formatter.styles.meta_style),
-                        );
-                        out.push(line);
-                    }
-                }
-
-                self.insert_or_update_index(
-                    step_key,
-                    data.last_root_event_index(),
-                );
-            }
-            StepStatus::Failed { reason } => {
-                if let Some(ld) = self.step_data.get(&step_key) {
-                    if ld.last_root_event_index >= data.last_root_event_index()
-                    {
-                        // We've already displayed this event.
-                        return;
-                    }
-                }
-
-                match reason {
-                    FailureReason::StepFailed(info) => {
-                        let mut line = formatter
-                            .start_line(prefix, Some(info.root_total_elapsed));
-                        let nest_level = NestLevel::Regular(nest_level);
-
-                        // The prefix is used for "Caused by" lines below. Add
-                        // the requisite amount of spacing here.
-                        let mut caused_by_prefix = line.clone();
-                        swrite!(caused_by_prefix, "{:>HEADER_WIDTH$} ", "");
-                        nest_level.add_prefix(&mut caused_by_prefix);
-
-                        swrite!(
-                            line,
-                            "{:>HEADER_WIDTH$} ",
-                            "Failed".style(formatter.styles.error_style)
-                        );
-                        formatter.add_step_info(
-                            &mut line,
-                            ld_step_info,
-                            nest_level,
-                        );
-                        line.push_str(": ");
-                        formatter.add_failure_info(
-                            &mut line,
-                            &caused_by_prefix,
-                            info,
-                        );
-                        out.push(line);
-                    }
-                    FailureReason::ParentFailed { parent_step } => {
-                        let parent_step_info = buffer
-                            .get(&parent_step)
-                            .expect("parent step must exist");
-                        let mut line = formatter.start_line(prefix, None);
-                        swrite!(
-                            line,
-                            "{:>HEADER_WIDTH$} ",
-                            "Failed".style(formatter.styles.error_style)
-                        );
-                        formatter.add_step_info(
-                            &mut line,
-                            ld_step_info,
-                            NestLevel::Regular(nest_level),
-                        );
-                        swrite!(
-                            line,
-                            ": because parent step {} failed",
-                            parent_step_info
-                                .step_info()
-                                .description
-                                .style(formatter.styles.step_name_style)
-                        );
-                        out.push(line);
-                    }
-                }
-
-                self.insert_or_update_index(
-                    step_key,
-                    data.last_root_event_index(),
-                );
-            }
-            StepStatus::Aborted { reason, .. } => {
-                if let Some(ld) = self.step_data.get(&step_key) {
-                    if ld.last_root_event_index >= data.last_root_event_index()
-                    {
-                        // We've already displayed this event.
-                        return;
-                    }
-                }
-
-                match reason {
-                    AbortReason::StepAborted(info) => {
-                        let mut line = formatter
-                            .start_line(prefix, Some(info.root_total_elapsed));
-                        swrite!(
-                            line,
-                            "{:>HEADER_WIDTH$} ",
-                            "Aborted".style(formatter.styles.error_style)
-                        );
-                        formatter.add_step_info(
-                            &mut line,
-                            ld_step_info,
-                            NestLevel::Regular(nest_level),
-                        );
-                        line.push_str(": ");
-                        formatter.add_abort_info(&mut line, info);
-                        out.push(line);
-                    }
-                    AbortReason::ParentAborted { parent_step } => {
-                        let parent_step_info = buffer
-                            .get(&parent_step)
-                            .expect("parent step must exist");
-                        let mut line = formatter.start_line(prefix, None);
-                        swrite!(
-                            line,
-                            "{:>HEADER_WIDTH$} ",
-                            "Aborted".style(formatter.styles.error_style)
-                        );
-                        formatter.add_step_info(
-                            &mut line,
-                            ld_step_info,
-                            NestLevel::Regular(nest_level),
-                        );
-                        swrite!(
-                            line,
-                            ": because parent step {} aborted",
-                            parent_step_info
-                                .step_info()
-                                .description
-                                .style(formatter.styles.step_name_style)
-                        );
-                        out.push(line);
-                    }
-                }
-
-                self.insert_or_update_index(
-                    step_key,
-                    data.last_root_event_index(),
-                );
-            }
-            StepStatus::WillNotBeRun { .. } => {
-                // We don't print "will not be run". (TODO: maybe add an
-                // extended mode which does do so?)
-            }
-        }
+        swrite!(
+            line,
+            "{:>HEADER_WIDTH$} ",
+            "Running".style(self.formatter.styles.progress_style),
+        );
+        self.formatter.add_step_info(line, ld_step_info);
     }
 
     /// Formats this terminal information.
@@ -320,260 +460,167 @@ impl LineDisplayShared {
     /// responsibility.
     pub(super) fn format_terminal_info(
         &self,
-        prefix: &str,
         info: &ExecutionTerminalInfo,
-        formatter: &LineDisplayFormatter,
     ) -> String {
-        let mut line = formatter.start_line(prefix, info.leaf_total_elapsed);
+        let mut line =
+            self.formatter.start_line(self.prefix, info.leaf_total_elapsed);
         match info.kind {
             TerminalKind::Completed => {
                 swrite!(
                     line,
                     "{:>HEADER_WIDTH$} Execution {}",
-                    "Terminal".style(formatter.styles.progress_style),
-                    "completed".style(formatter.styles.progress_style),
+                    "Terminal".style(self.formatter.styles.progress_style),
+                    "completed".style(self.formatter.styles.progress_style),
                 );
             }
             TerminalKind::Failed => {
                 swrite!(
                     line,
                     "{:>HEADER_WIDTH$} Execution {}",
-                    "Terminal".style(formatter.styles.error_style),
-                    "failed".style(formatter.styles.error_style),
+                    "Terminal".style(self.formatter.styles.error_style),
+                    "failed".style(self.formatter.styles.error_style),
                 );
             }
             TerminalKind::Aborted => {
                 swrite!(
                     line,
                     "{:>HEADER_WIDTH$} Execution {}",
-                    "Terminal".style(formatter.styles.error_style),
-                    "aborted".style(formatter.styles.error_style),
+                    "Terminal".style(self.formatter.styles.error_style),
+                    "aborted".style(self.formatter.styles.error_style),
                 );
             }
         }
         line
     }
 
-    fn format_low_priority_event<S: StepSpec>(
-        &mut self,
-        prefix: &str,
-        event: &StepEvent<S>,
-        step_key: StepKey,
-        ld_step_info: LineDisplayStepInfo<'_>,
-        nest_level: usize,
-        formatter: &LineDisplayFormatter,
-        out: &mut Vec<String>,
+    fn format_progress_event<S: StepSpec, S2: StepSpec>(
+        &self,
+        buffer: &EventBuffer<S>,
+        progress_event: &ProgressEvent<S2>,
+        out: &mut LineDisplayOutput,
     ) {
-        if let Some(sd) = self.step_data.get(&step_key) {
-            if sd.last_root_event_index >= RootEventIndex(event.event_index) {
-                // We've already displayed this event.
-                return;
-            }
-        }
-
-        let Some(lowpri_event) = event.to_low_priority() else {
-            // Can't show anything for unknown events.
-            return;
-        };
-
-        let mut line = formatter.start_line(prefix, Some(event.total_elapsed));
-
-        match lowpri_event.kind {
-            LowPriorityStepEventKind::ProgressReset {
-                attempt,
-                attempt_elapsed,
-                message,
-                ..
-            } => {
-                swrite!(
-                    line,
-                    "{:>HEADER_WIDTH$} ",
-                    "Reset".style(formatter.styles.warning_style)
-                );
-                formatter.add_step_info(
-                    &mut line,
-                    ld_step_info,
-                    NestLevel::Regular(nest_level),
-                );
-                swrite!(
-                    line,
-                    ": after {:.2?}",
-                    attempt_elapsed.style(formatter.styles.meta_style),
-                );
-                if attempt > 1 {
-                    swrite!(
-                        line,
-                        " (at attempt {})",
-                        attempt.style(formatter.styles.meta_style),
-                    );
-                }
-                swrite!(
-                    line,
-                    " with message: {}",
-                    message.style(formatter.styles.warning_message_style)
-                );
-            }
-            LowPriorityStepEventKind::AttemptRetry {
-                next_attempt,
-                attempt_elapsed,
-                message,
-                ..
-            } => {
-                swrite!(
-                    line,
-                    "{:>HEADER_WIDTH$} ",
-                    "Retry".style(formatter.styles.warning_style)
-                );
-                formatter.add_step_info(
-                    &mut line,
-                    ld_step_info,
-                    NestLevel::Regular(nest_level),
-                );
-                swrite!(
-                    line,
-                    ": after {:.2?}",
-                    attempt_elapsed.style(formatter.styles.meta_style),
-                );
-                swrite!(
-                    line,
-                    " (at attempt {})",
-                    next_attempt
-                        .saturating_sub(1)
-                        .style(formatter.styles.meta_style),
-                );
-                swrite!(
-                    line,
-                    " with message: {}",
-                    message.style(formatter.styles.warning_message_style)
-                );
-            }
-        }
-
-        out.push(line);
+        self.format_progress_event_impl(
+            buffer,
+            progress_event,
+            NestData::default(),
+            progress_event.total_elapsed,
+            out,
+        )
     }
 
-    fn format_progress_event<S: StepSpec>(
-        &mut self,
-        prefix: &str,
-        progress_event: &ProgressEvent<S>,
-        step_key: StepKey,
-        data: &EventBufferStepData<S>,
-        ld_step_info: LineDisplayStepInfo<'_>,
-        nest_level: usize,
-        formatter: &LineDisplayFormatter,
-        out: &mut Vec<String>,
+    fn format_progress_event_impl<S: StepSpec, S2: StepSpec>(
+        &self,
+        buffer: &EventBuffer<S>,
+        progress_event: &ProgressEvent<S2>,
+        mut nest_data: NestData,
+        root_total_elapsed: Duration,
+        out: &mut LineDisplayOutput,
     ) {
-        let Some(leaf_step_elapsed) = progress_event.kind.leaf_step_elapsed()
-        else {
-            // Can't show anything for unknown events.
-            return;
-        };
-        let leaf_attempt = progress_event
-            .kind
-            .leaf_attempt()
-            .expect("if leaf_step_elapsed is Some, leaf_attempt must be Some");
-        let leaf_attempt_elapsed = progress_event
-            .kind
-            .leaf_attempt_elapsed()
-            .expect(
-            "if leaf_step_elapsed is Some, leaf_attempt_elapsed must be Some",
-        );
-
-        let sd = self
-            .step_data
-            .entry(step_key)
-            .or_insert_with(|| StepData::new(data.last_root_event_index()));
-
-        let (is_first_event, should_display) = match sd.last_progress_event_at {
-            Some(last_progress_event_at) => {
-                // Don't show events with zero attempt elapsed time unless
-                // they're the first (the others will be shown as part of
-                // low-priority step events).
-                let should_display = if leaf_attempt > 1 {
-                    leaf_attempt_elapsed > Duration::ZERO
-                } else {
-                    true
+        match &progress_event.kind {
+            ProgressEventKind::WaitingForProgress { .. } => {
+                // Don't need to show this because "Running" is shown within
+                // step events.
+            }
+            ProgressEventKind::Progress {
+                step,
+                progress,
+                attempt_elapsed,
+                ..
+            } => {
+                let step_key = StepKey {
+                    execution_id: progress_event.execution_id,
+                    index: step.info.index,
                 };
-                // Show further progress events only after the progress interval
-                // has elapsed.
-                let should_display = should_display
-                    && leaf_step_elapsed
-                        > last_progress_event_at + formatter.progress_interval;
-                (false, should_display)
-            }
-            None => (true, true),
-        };
+                let step_data =
+                    buffer.get(&step_key).expect("step key must exist");
+                let ld_step_info = LineDisplayStepInfo {
+                    step_info: &step.info,
+                    total_steps: step_data.total_steps(),
+                    nest_data: &nest_data,
+                };
 
-        if should_display {
-            let mut line = formatter
-                .start_line(prefix, Some(progress_event.total_elapsed));
-            let nest_level = if is_first_event {
-                NestLevel::Regular(nest_level)
-            } else {
-                // Add an extra half-indent for non-first progress events.
-                NestLevel::ExtraHalf(nest_level)
-            };
+                let mut line = self
+                    .formatter
+                    .start_line(self.prefix, Some(root_total_elapsed));
 
-            let (before, after) = match progress_event.kind.progress_counter() {
-                Some(counter) => {
-                    let progress_str = format_progress_counter(counter);
-                    (
-                        format!(
-                            "{:>HEADER_WIDTH$} ",
-                            "Progress".style(formatter.styles.progress_style)
-                        ),
-                        format!(
-                            "{progress_str} after {:.2?}",
-                            leaf_attempt_elapsed
-                                .style(formatter.styles.meta_style),
-                        ),
-                    )
-                }
-                None => {
-                    let before = format!(
-                        "{:>HEADER_WIDTH$} ",
-                        "Running".style(formatter.styles.progress_style),
-                    );
-
-                    // If the leaf attempt elapsed is non-zero, show it.
-                    let after = if leaf_attempt_elapsed > Duration::ZERO {
-                        format!(
-                            "after {:.2?}",
-                            leaf_attempt_elapsed
-                                .style(formatter.styles.meta_style),
+                let (before, after) = match progress {
+                    Some(counter) => {
+                        let progress_str = format_progress_counter(counter);
+                        (
+                            format!(
+                                "{:>HEADER_WIDTH$} ",
+                                "Progress".style(
+                                    self.formatter.styles.progress_style
+                                )
+                            ),
+                            format!(
+                                "{progress_str} after {:.2?}",
+                                attempt_elapsed
+                                    .style(self.formatter.styles.meta_style),
+                            ),
                         )
-                    } else {
-                        String::new()
-                    };
+                    }
+                    None => {
+                        let before = format!(
+                            "{:>HEADER_WIDTH$} ",
+                            "Running"
+                                .style(self.formatter.styles.progress_style),
+                        );
 
-                    (before, after)
+                        // If the attempt elapsed is non-zero, show it.
+                        let after = if *attempt_elapsed > Duration::ZERO {
+                            format!(
+                                "after {:.2?}",
+                                attempt_elapsed
+                                    .style(self.formatter.styles.meta_style),
+                            )
+                        } else {
+                            String::new()
+                        };
+
+                        (before, after)
+                    }
+                };
+
+                swrite!(line, "{}", before);
+                self.formatter.add_step_info(&mut line, ld_step_info);
+                if !after.is_empty() {
+                    swrite!(line, ": {}", after);
                 }
-            };
 
-            swrite!(line, "{}", before);
-            formatter.add_step_info(&mut line, ld_step_info, nest_level);
-            if !after.is_empty() {
-                swrite!(line, ": {}", after);
+                out.add_line(line);
             }
+            ProgressEventKind::Nested { step, event, .. } => {
+                // Look up the child event's ID to add to the nest data.
+                let child_step_key = StepKey {
+                    execution_id: event.execution_id,
+                    // TODO: we currently look up index 0 because that should
+                    // always exist (unless no steps are defined, in which case
+                    // we skip this). The child index is actually shared by all
+                    // steps within an execution. Fix this by changing
+                    // EventBuffer to also track general per-execution data.
+                    index: 0,
+                };
+                let Some(child_step_data) = buffer.get(&child_step_key) else {
+                    // This should only happen if no steps are defined. See TODO
+                    // above.
+                    return;
+                };
+                let (_, child_index) = child_step_data
+                    .parent_key_and_child_index()
+                    .expect("child steps should have a child index");
 
-            out.push(line);
+                nest_data.add_nest_level(step.info.index, child_index);
 
-            sd.update_progress_event(leaf_step_elapsed);
-        }
-    }
-
-    fn insert_or_update_index(
-        &mut self,
-        step_key: StepKey,
-        last_root_index: RootEventIndex,
-    ) {
-        match self.step_data.entry(step_key) {
-            Entry::Occupied(mut entry) => {
-                entry.get_mut().update_last_root_event_index(last_root_index);
+                self.format_progress_event_impl(
+                    buffer,
+                    &**event,
+                    nest_data,
+                    root_total_elapsed,
+                    out,
+                );
             }
-            Entry::Vacant(entry) => {
-                entry.insert(StepData::new(last_root_index));
-            }
+            ProgressEventKind::Unknown => {}
         }
     }
 }
@@ -640,7 +687,7 @@ impl LineDisplayFormatter {
         }
     }
 
-    fn start_line(
+    pub(super) fn start_line(
         &self,
         prefix: &str,
         total_elapsed: Option<Duration>,
@@ -653,10 +700,10 @@ impl LineDisplayFormatter {
 
         // Show total elapsed time in an hh:mm:ss format.
         if let Some(total_elapsed) = total_elapsed {
-            let total_elapsed = total_elapsed.as_secs();
-            let hours = total_elapsed / 3600;
-            let minutes = (total_elapsed % 3600) / 60;
-            let seconds = total_elapsed % 60;
+            let total_elapsed_secs = total_elapsed.as_secs();
+            let hours = total_elapsed_secs / 3600;
+            let minutes = (total_elapsed_secs % 3600) / 60;
+            let seconds = total_elapsed_secs % 60;
             swrite!(&mut line, "{:02}:{:02}:{:02}", hours, minutes, seconds);
         } else {
             // Add 8 spaces to align with hh:mm:ss.
@@ -668,29 +715,12 @@ impl LineDisplayFormatter {
         line
     }
 
-    fn add_step_info(
+    fn add_step_info<S: StepSpec>(
         &self,
         line: &mut String,
-        ld_step_info: LineDisplayStepInfo<'_>,
-        nest_level: NestLevel,
+        ld_step_info: LineDisplayStepInfo<'_, S>,
     ) {
-        nest_level.add_prefix(line);
-
-        match ld_step_info.parent_key_and_child_index {
-            Some((parent_key, child_index)) => {
-                // Print e.g. (6a .
-                swrite!(
-                    line,
-                    "({}{} ",
-                    // Add 1 to the index to make it 1-based.
-                    parent_key.index + 1,
-                    AsLetters(child_index)
-                );
-            }
-            None => {
-                swrite!(line, "(");
-            }
-        };
+        ld_step_info.nest_data.add_prefix(line);
 
         // Print out "<step index>/<total steps>)". Leave space such that we
         // print out e.g. "1/8)" and " 3/14)".
@@ -715,33 +745,34 @@ impl LineDisplayFormatter {
         );
     }
 
-    pub(super) fn add_completion_and_step_info(
+    pub(super) fn add_completion_and_step_info<S: StepSpec>(
         &self,
         line: &mut String,
-        nest_level: NestLevel,
-        ld_step_info: LineDisplayStepInfo<'_>,
-        info: &CompletionInfo,
+        ld_step_info: LineDisplayStepInfo<'_, S>,
+        attempt_elapsed: Duration,
+        attempt: usize,
+        outcome: &StepOutcome<S>,
     ) {
         let mut meta = format!(
             "after {:.2?}",
-            info.step_elapsed.style(self.styles.meta_style)
+            attempt_elapsed.style(self.styles.meta_style)
         );
-        if info.attempt > 1 {
+        if attempt > 1 {
             swrite!(
                 meta,
                 " (at attempt {})",
-                info.attempt.style(self.styles.meta_style)
+                attempt.style(self.styles.meta_style)
             );
         }
 
-        match &info.outcome {
+        match &outcome {
             StepOutcome::Success { message, .. } => {
                 swrite!(
                     line,
                     "{:>HEADER_WIDTH$} ",
                     "Completed".style(self.styles.progress_style),
                 );
-                self.add_step_info(line, ld_step_info, nest_level);
+                self.add_step_info(line, ld_step_info);
                 match message {
                     Some(message) => {
                         swrite!(
@@ -761,7 +792,7 @@ impl LineDisplayFormatter {
                     "{:>HEADER_WIDTH$} ",
                     "Completed".style(self.styles.warning_style),
                 );
-                self.add_step_info(line, ld_step_info, nest_level);
+                self.add_step_info(line, ld_step_info);
                 swrite!(
                     line,
                     ": {meta} with warning: {}",
@@ -774,7 +805,7 @@ impl LineDisplayFormatter {
                     "{:>HEADER_WIDTH$} ",
                     "Skipped".style(self.styles.skipped_style),
                 );
-                self.add_step_info(line, ld_step_info, nest_level);
+                self.add_step_info(line, ld_step_info);
                 swrite!(
                     line,
                     ": {}",
@@ -788,28 +819,35 @@ impl LineDisplayFormatter {
         &self,
         line: &mut String,
         line_prefix: &str,
-        info: &FailureInfo,
+        attempt_elapsed: Duration,
+        total_attempts: usize,
+        message: &str,
+        causes: &[String],
     ) {
         let mut meta = format!(
             "after {:.2?}",
-            info.step_elapsed.style(self.styles.meta_style)
+            attempt_elapsed.style(self.styles.meta_style)
         );
-        if info.total_attempts > 1 {
+        if total_attempts > 1 {
             swrite!(
                 meta,
                 " (after {} attempts)",
-                info.total_attempts.style(self.styles.meta_style)
+                total_attempts.style(self.styles.meta_style)
             );
         }
 
-        swrite!(line, "{meta}: {}", info.message);
-        if !info.causes.is_empty() {
+        swrite!(
+            line,
+            "{meta}: {}",
+            message.style(self.styles.error_message_style)
+        );
+        if !causes.is_empty() {
             swrite!(
                 line,
                 "\n{line_prefix}{}",
                 "  Caused by:".style(self.styles.meta_style)
             );
-            for cause in &info.causes {
+            for cause in causes {
                 swrite!(line, "\n{line_prefix}  - {}", cause);
             }
         }
@@ -817,83 +855,119 @@ impl LineDisplayFormatter {
         // The last newline is added by the caller.
     }
 
-    pub(super) fn add_abort_info(&self, line: &mut String, info: &AbortInfo) {
+    pub(super) fn add_abort_info(
+        &self,
+        line: &mut String,
+        attempt_elapsed: Duration,
+        attempt: usize,
+        message: &str,
+    ) {
         let mut meta = format!(
             "after {:.2?}",
-            info.step_elapsed.style(self.styles.meta_style)
+            attempt_elapsed.style(self.styles.meta_style)
         );
-        if info.attempt > 1 {
+        if attempt > 1 {
             swrite!(
                 meta,
                 " (at attempt {})",
-                info.attempt.style(self.styles.meta_style)
+                attempt.style(self.styles.meta_style)
             );
         }
 
-        swrite!(line, "{meta} with message \"{}\"", info.message,);
+        swrite!(line, "{meta} with message \"{}\"", message);
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct LineDisplayOutput {
+    lines: Vec<String>,
+}
+
+impl LineDisplayOutput {
+    pub(super) fn new() -> Self {
+        Self { lines: Vec::new() }
+    }
+
+    pub(super) fn add_line(&mut self, line: String) {
+        self.lines.push(line);
+    }
+
+    pub(super) fn iter(&self) -> impl Iterator<Item = &str> {
+        self.lines.iter().map(|line| line.as_str())
     }
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(super) struct LineDisplayStepInfo<'a> {
-    pub(super) step_info: &'a StepInfo<NestedSpec>,
-    pub(super) parent_key_and_child_index: Option<(StepKey, usize)>,
+pub(super) struct LineDisplayStepInfo<'a, S: StepSpec> {
+    pub(super) step_info: &'a StepInfo<S>,
     pub(super) total_steps: usize,
+    pub(super) nest_data: &'a NestData,
+}
+
+impl<'a, S: StepSpec> LineDisplayStepInfo<'a, S> {
+    fn new<S2: StepSpec>(
+        buffer: &'a EventBuffer<S2>,
+        execution_id: ExecutionId,
+        step_info: &'a StepInfo<S>,
+        nest_data: &'a NestData,
+    ) -> Self {
+        let step_key = StepKey { execution_id, index: step_info.index };
+        let step_data = buffer.get(&step_key).expect("step key must exist");
+        LineDisplayStepInfo {
+            step_info,
+            total_steps: step_data.total_steps(),
+            nest_data,
+        }
+    }
 }
 
 /// Per-step stateful data tracked by the line displayer.
-#[derive(Debug)]
-struct StepData {
-    /// The last root event index that was displayed for this step.
+#[derive(Debug, Default)]
+struct ExecutionData {
+    /// The last seen root event index.
     ///
     /// This is used to avoid displaying the same event twice.
-    last_root_event_index: RootEventIndex,
+    last_seen: Option<usize>,
 
-    /// The last `leaf_step_elapsed` at which a progress event was displayed for
-    /// this step.
+    /// The last `root_total_elapsed` at which a progress event was displayed for
+    /// this execution.
     last_progress_event_at: Option<Duration>,
 }
 
-impl StepData {
-    fn new(last_root_event_index: RootEventIndex) -> Self {
-        Self { last_root_event_index, last_progress_event_at: None }
-    }
-
-    fn update_progress_event(&mut self, leaf_step_elapsed: Duration) {
-        self.last_progress_event_at = Some(leaf_step_elapsed);
-    }
-
-    fn update_last_root_event_index(
-        &mut self,
-        root_event_index: RootEventIndex,
-    ) {
-        self.last_root_event_index = root_event_index;
-    }
+#[derive(Clone, Debug, Default)]
+pub(super) struct NestData {
+    nest_indexes: Vec<NestIndex>,
 }
 
-#[derive(Copy, Clone, Debug)]
-pub(super) enum NestLevel {
-    /// Regular nest level.
-    Regular(usize),
+impl NestData {
+    fn add_nest_level(&mut self, parent_step_index: usize, child_index: usize) {
+        self.nest_indexes.push(NestIndex { parent_step_index, child_index });
+    }
 
-    /// These many nest levels, except also add an extra half indent.
-    ExtraHalf(usize),
-}
+    fn add_prefix(&self, line: &mut String) {
+        if !self.nest_indexes.is_empty() {
+            line.push_str(&"..".repeat(self.nest_indexes.len()));
+            line.push_str(" ");
+        }
 
-impl NestLevel {
-    fn add_prefix(self, line: &mut String) {
-        match self {
-            NestLevel::Regular(0) => {}
-            NestLevel::Regular(nest_level) => {
-                line.push_str(&"....".repeat(nest_level));
-                line.push_str(" ");
-            }
-            NestLevel::ExtraHalf(nest_level) => {
-                line.push_str(&"....".repeat(nest_level));
-                line.push_str(".. ");
-            }
+        for nest_index in &self.nest_indexes {
+            swrite!(
+                line,
+                "{}{} ",
+                // Add 1 to the index to make it 1-based.
+                nest_index.parent_step_index + 1,
+                AsLetters(nest_index.child_index)
+            );
         }
     }
+}
+
+#[derive(Clone, Debug)]
+struct NestIndex {
+    parent_step_index: usize,
+    // If a parent has multiple nested executions, this counts which execution
+    // this is, up from 0.
+    child_index: usize,
 }
 
 /// A display impl that converts a 0-based index into a letter or a series of
