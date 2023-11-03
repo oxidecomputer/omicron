@@ -905,16 +905,14 @@ impl<'buf, S: StepSpec> EventBufferSteps<'buf, S> {
 #[derive_where(Clone, Debug)]
 pub struct EventBufferStepData<S: StepSpec> {
     step_info: StepInfo<NestedSpec>,
-    parent_key_and_child_index: Option<(StepKey, usize)>,
 
     sort_key: StepSortKey,
-    // XXX: nest_level and total_steps are common to each execution, but are
-    // stored separately here. These should likely move into
-    // EventBufferExecutionData.
+
+    // TODO: These steps are common to each execution, but are stored separately
+    // here. These should likely move into EventBufferExecutionData.
+    parent_key_and_child_index: Option<(StepKey, usize)>,
     nest_level: usize,
     total_steps: usize,
-
-    // The number of child executions seen so far.
     child_executions_seen: usize,
 
     // Invariant: stored in order sorted by leaf event index.
