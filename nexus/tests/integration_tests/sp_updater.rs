@@ -48,6 +48,7 @@ async fn test_sp_updater_updates_sled() {
     )
     .await;
 
+    // Configure an MGS client.
     let mgs_listen_addr = mgstestctx
         .server
         .dropshot_server_for_address(mgs_addr)
@@ -58,6 +59,7 @@ async fn test_sp_updater_updates_sled() {
         mgstestctx.logctx.log.new(slog::o!("component" => "MgsClient")),
     ));
 
+    // Configure and instantiate an `SpUpdater`.
     let sp_type = SpType::Sled;
     let sp_slot = 0;
     let update_id = Uuid::new_v4();
@@ -71,8 +73,10 @@ async fn test_sp_updater_updates_sled() {
         &mgstestctx.logctx.log,
     );
 
+    // Run the update.
     sp_updater.update([mgs_client]).await.expect("update failed");
 
+    // Ensure the SP received the complete update.
     let last_update_image = mgstestctx.simrack.gimlets[sp_slot as usize]
         .last_update_data()
         .await
@@ -238,6 +242,9 @@ async fn test_sp_updater_remembers_successful_mgs_instance() {
         hubris_archive.image.data.len()
     );
 
+    // Check that our bogus MGS only received a single connection attempt.
+    // (After SpUpdater failed to talk to this instance, it should have fallen
+    // back to the valid one for all further requests.)
     assert_eq!(
         failing_mgs_conn_counter.load(Ordering::SeqCst),
         1,
@@ -286,6 +293,8 @@ async fn test_sp_updater_delivers_progress() {
     let hubris_archive = RawHubrisArchive::from_vec(hubris_archive).unwrap();
     let sp_image_len = hubris_archive.image.data.len() as u32;
 
+    // Subscribe to update progress, and check that there is no status yet; we
+    // haven't started the update.
     let mut progress = sp_updater.progress_watcher();
     assert_eq!(*progress.borrow_and_update(), None);
 
@@ -317,42 +326,48 @@ async fn test_sp_updater_delivers_progress() {
         })
     );
 
-    // Record the number of responses the SP has sent; we'll use this to bracket
-    // our checks of its state below.
+    // Record the number of responses the SP has sent; we'll use
+    // `sp_responses.changed()` in the loop below, and want to mark whatever
+    // value this watch channel currently has as seen.
     sp_responses.borrow_and_update();
 
     // At this point, there are two clients racing each other to talk to our
     // simulated SP:
     //
     // 1. MGS is trying to deliver the update
-    // 2. `sp_updater` is trying to poll for update status
+    // 2. `sp_updater` is trying to poll (via MGS) for update status
     //
     // and we want to ensure that we see any relevant progress reports from
-    // `sp_updater`. We'll let one message through at a time (waiting until our
-    // SP has responded by waiting for a change to `sp_responses`) then check
-    // its update state: if it changed, the packet we let through was data from
-    // MGS; otherwise, it was a status request from `sp_updater`.
+    // `sp_updater`. We'll let one MGS -> SP message through at a time (waiting
+    // until our SP has responded by waiting for a change to `sp_responses`)
+    // then check its update state: if it changed, the packet we let through was
+    // data from MGS; otherwise, it was a status request from `sp_updater`.
     //
     // This loop will continue until either:
     //
     // 1. We see an `UpdateStatus::InProgress` message indicating 100% delivery,
     //    at which point we break out of the loop
-    // 2. We time out waiting for 1 (by timing out for either the SP to process
-    //    a request or `sp_updater` to realize there's been progress), at which
-    //    point we panic and fail this test
+    // 2. We time out waiting for the previous step (by timing out for either
+    //    the SP to process a request or `sp_updater` to realize there's been
+    //    progress), at which point we panic and fail this test.
     let mut prev_bytes_received = 0;
     let mut expect_progress_change = false;
     loop {
+        // Allow the SP to accept and respond to a single UDP packet.
         sp_throttle.send(1).unwrap();
 
-        // Safety rail that we haven't screwed up our untangle-the-race
-        // logic: if we don't see the SP process any new messages after several
-        // seconds, our test is broken, so fail.
+        // Wait until the SP has sent a response, with a safety rail that we
+        // haven't screwed up our untangle-the-race logic: if we don't see the
+        // SP process any new messages after several seconds, our test is
+        // broken, so fail.
         tokio::time::timeout(Duration::from_secs(10), sp_responses.changed())
             .await
             .expect("timeout waiting for SP response count to change")
             .expect("sp response count sender dropped");
 
+        // Inspec the SP's in-memory update state; we expect only `InProgress`
+        // or `Complete`, and in either case we note whether we expect to see
+        // status changes from `sp_updater`.
         match target_sp.current_update_status().await {
             UpdateStatus::InProgress(sp_progress) => {
                 if sp_progress.bytes_received > prev_bytes_received {

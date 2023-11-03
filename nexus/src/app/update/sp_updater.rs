@@ -70,7 +70,12 @@ impl SpUpdater {
         self.progress.subscribe()
     }
 
-    /// TODO
+    /// Drive this SP update to completion (or failure).
+    ///
+    /// Only one MGS instance is required to drive an update; however, if
+    /// multiple MGS instances are available and passed to this method and an
+    /// error occurs communicating with one instance, `SpUpdater` will try the
+    /// remaining instances before failing.
     ///
     /// # Panics
     ///
@@ -93,6 +98,8 @@ impl SpUpdater {
         })
         .await?;
 
+        // `wait_for_update_completion` uses `try_all_mgs_clients` internally,
+        // so we don't wrap it here.
         me.wait_for_update_completion(&mut mgs_clients).await?;
 
         me.try_all_mgs_clients(&mut mgs_clients, |client| async move {
@@ -103,6 +110,9 @@ impl SpUpdater {
         Ok(())
     }
 
+    // Helper method to run `op` against all clients. If `op` returns
+    // successfully for one client, that client will be rotated to the front of
+    // the list (so any subsequent operations can start with the first client).
     async fn try_all_mgs_clients<T, F, Fut>(
         &self,
         mgs_clients: &mut VecDeque<Arc<gateway_client::Client>>,
