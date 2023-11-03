@@ -28,9 +28,9 @@ use crate::{
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum RackUpdateArgs {
-    /// Start a rack update.
+    /// Start one or more updates.
     Start(StartRackUpdateArgs),
-    /// Attach to a running update.
+    /// Attach to one or more running updates.
     Attach(AttachArgs),
 }
 
@@ -69,17 +69,17 @@ pub(crate) struct StartRackUpdateArgs {
     component_ids: ComponentIdSelector,
 
     /// Force update the RoT even if the version is the same.
-    #[clap(long)]
+    #[clap(long, help_heading = "Update options")]
     force_update_rot: bool,
 
     /// Force update the SP even if the version is the same.
-    #[clap(long)]
+    #[clap(long, help_heading = "Update options")]
     force_update_sp: bool,
 
     /// Detach after starting the update.
     ///
     /// The `attach` command can be used to reattach to the running update.
-    #[clap(short, long)]
+    #[clap(short, long, help_heading = "Update options")]
     detach: bool,
 }
 
@@ -276,7 +276,7 @@ async fn start_fetch_reports_task(
 
 /// Command-line arguments for selecting component IDs.
 #[derive(Debug, Args)]
-#[clap(next_help_heading = "COMPONENT SELECTORS")]
+#[clap(next_help_heading = "Component selectors")]
 struct ComponentIdSelector {
     /// The sleds to operate on.
     #[clap(long, value_delimiter = ',')]

@@ -46,9 +46,9 @@ impl ShellApp {
 #[derive(Debug, Args)]
 #[clap(next_help_heading = "Global options")]
 pub(crate) struct GlobalOpts {
-    /// Color output (auto, always, never)
+    /// Color output
     ///
-    /// This may not work everywhere at the moment.
+    /// This may not be obeyed everywhere at the moment.
     #[clap(long, value_enum, global = true, default_value_t)]
     pub(crate) color: ColorChoice,
 }
