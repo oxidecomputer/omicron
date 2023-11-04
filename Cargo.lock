@@ -4345,7 +4345,7 @@ dependencies = [
  "omicron-passwords 0.1.0",
  "omicron-rpaths",
  "omicron-workspace-hack",
- "parse-display",
+ "parse-display 0.8.2",
  "pq-sys",
  "rand 0.8.5",
  "ref-cast",
@@ -4519,7 +4519,7 @@ dependencies = [
  "oximeter-client",
  "oximeter-collector",
  "oximeter-producer 0.1.0",
- "parse-display",
+ "parse-display 0.8.2",
  "serde",
  "serde_json",
  "serde_urlencoded",
@@ -4558,7 +4558,7 @@ dependencies = [
  "openssl",
  "openssl-probe",
  "openssl-sys",
- "parse-display",
+ "parse-display 0.8.2",
  "schemars",
  "serde",
  "serde_json",
@@ -4890,7 +4890,7 @@ dependencies = [
  "libc",
  "macaddr",
  "omicron-workspace-hack",
- "parse-display",
+ "parse-display 0.8.2",
  "progenitor",
  "proptest",
  "rand 0.8.5",
@@ -4934,7 +4934,7 @@ dependencies = [
  "ipnetwork",
  "lazy_static",
  "macaddr",
- "parse-display",
+ "parse-display 0.7.0",
  "progenitor",
  "rand 0.8.5",
  "reqwest",
@@ -5120,7 +5120,7 @@ dependencies = [
  "oximeter-db",
  "oximeter-instruments",
  "oximeter-producer 0.1.0",
- "parse-display",
+ "parse-display 0.8.2",
  "paste",
  "pem 1.1.1",
  "petgraph",
@@ -5466,6 +5466,7 @@ dependencies = [
  "rand_chacha 0.3.1",
  "regex",
  "regex-automata 0.4.3",
+ "regex-syntax 0.6.29",
  "regex-syntax 0.8.2",
  "reqwest",
  "ring 0.16.20",
@@ -6013,7 +6014,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ac6b32f6c8212838b74c0f5ba412194e88897923020810d9bec72d3594c2588d"
 dependencies = [
  "once_cell",
- "parse-display-derive",
+ "parse-display-derive 0.7.0",
+ "regex",
+]
+
+[[package]]
+name = "parse-display"
+version = "0.8.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c6509d08722b53e8dafe97f2027b22ccbe3a5db83cb352931e9716b0aa44bc5c"
+dependencies = [
+ "once_cell",
+ "parse-display-derive 0.8.2",
  "regex",
 ]
 
@@ -6030,6 +6042,21 @@ dependencies = [
  "regex-syntax 0.6.29",
  "structmeta 0.1.6",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "parse-display-derive"
+version = "0.8.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "68517892c8daf78da08c0db777fcc17e07f2f63ef70041718f8a7630ad84f341"
+dependencies = [
+ "once_cell",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "regex-syntax 0.7.5",
+ "structmeta 0.2.0",
+ "syn 2.0.32",
 ]
 
 [[package]]
