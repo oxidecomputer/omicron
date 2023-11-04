@@ -180,7 +180,6 @@ pub(crate) fn api_to_dpd_port_settings(
     settings: &SwitchPortSettingsCombinedResult,
 ) -> Result<PortSettings, String> {
     let mut dpd_port_settings = PortSettings {
-        tag: NEXUS_DPD_TAG.into(),
         links: HashMap::new(),
         v4_routes: HashMap::new(),
         v6_routes: HashMap::new(),
@@ -195,6 +194,7 @@ pub(crate) fn api_to_dpd_port_settings(
             LinkSettings {
                 params: LinkCreate {
                     autoneg: false,
+                    lane: Some(LinkId(0)),
                     kr: false,
                     fec: match l.fec {
                         SwitchLinkFec::Firecode => PortFec::Firecode,
@@ -286,7 +286,13 @@ async fn spa_ensure_switch_port_settings(
         })?;
 
     retry_until_known_result(log, || async {
-        dpd_client.port_settings_apply(&port_id, &dpd_port_settings).await
+        dpd_client
+            .port_settings_apply(
+                &port_id,
+                Some(NEXUS_DPD_TAG),
+                &dpd_port_settings,
+            )
+            .await
     })
     .await
     .map_err(|e| match e {
@@ -334,7 +340,9 @@ async fn spa_undo_ensure_switch_port_settings(
         Some(id) => id,
         None => {
             retry_until_known_result(log, || async {
-                dpd_client.port_settings_clear(&port_id).await
+                dpd_client
+                    .port_settings_clear(&port_id, Some(NEXUS_DPD_TAG))
+                    .await
             })
             .await
             .map_err(|e| external::Error::internal_error(&e.to_string()))?;
@@ -358,7 +366,13 @@ async fn spa_undo_ensure_switch_port_settings(
         })?;
 
     retry_until_known_result(log, || async {
-        dpd_client.port_settings_apply(&port_id, &dpd_port_settings).await
+        dpd_client
+            .port_settings_apply(
+                &port_id,
+                Some(NEXUS_DPD_TAG),
+                &dpd_port_settings,
+            )
+            .await
     })
     .await
     .map_err(|e| external::Error::internal_error(&e.to_string()))?;
