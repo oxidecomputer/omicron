@@ -10104,7 +10104,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "toml 0.8.6",
- "toml_edit 0.19.15",
+ "toml_edit 0.20.7",
  "tui-tree-widget",
  "unicode-width",
  "update-engine",
