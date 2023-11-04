@@ -365,7 +365,7 @@ tokio-util = "0.7.10"
 toml = "0.8.6"
 toml_edit = "0.19.15"
 topological-sort = "0.2.2"
-tough = { version = "0.12", features = [ "http" ] }
+tough = { version = "0.14", features = [ "http" ] }
 trust-dns-client = "0.22"
 trust-dns-proto = "0.22"
 trust-dns-resolver = "0.22"
