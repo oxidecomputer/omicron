@@ -368,7 +368,7 @@ topological-sort = "0.2.2"
 tough = { version = "0.12", features = [ "http" ] }
 trust-dns-client = "0.22"
 trust-dns-proto = "0.22"
-trust-dns-resolver = "0.22"
+trust-dns-resolver = "0.23"
 trust-dns-server = "0.22"
 trybuild = "1.0.85"
 tufaceous = { path = "tufaceous" }
