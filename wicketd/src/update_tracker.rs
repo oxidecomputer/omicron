@@ -8,6 +8,7 @@ use crate::artifacts::ArtifactIdData;
 use crate::artifacts::UpdatePlan;
 use crate::artifacts::WicketdArtifactStore;
 use crate::helpers::sps_to_string;
+use crate::http_entrypoints::ClearUpdateStateResponse;
 use crate::http_entrypoints::GetArtifactsAndEventReportsResponse;
 use crate::http_entrypoints::StartUpdateOptions;
 use crate::http_entrypoints::UpdateSimulatedResult;
@@ -184,10 +185,10 @@ impl UpdateTracker {
 
     pub(crate) async fn clear_update_state(
         &self,
-        sp: SpIdentifier,
-    ) -> Result<(), ClearUpdateStateError> {
+        sps: BTreeSet<SpIdentifier>,
+    ) -> Result<ClearUpdateStateResponse, ClearUpdateStateError> {
         let mut update_data = self.sp_update_data.lock().await;
-        update_data.clear_update_state(sp)
+        update_data.clear_update_state(&sps)
     }
 
     pub(crate) async fn abort_update(
@@ -609,19 +610,38 @@ impl UpdateTrackerData {
 
     fn clear_update_state(
         &mut self,
-        sp: SpIdentifier,
-    ) -> Result<(), ClearUpdateStateError> {
-        // Is an update currently running? If so, then reject the request.
-        let is_running = self
-            .sp_update_data
-            .get(&sp)
-            .map_or(false, |update_data| !update_data.task.is_finished());
-        if is_running {
-            return Err(ClearUpdateStateError::UpdateInProgress);
+        sps: &BTreeSet<SpIdentifier>,
+    ) -> Result<ClearUpdateStateResponse, ClearUpdateStateError> {
+        // Are any updates currently running? If so, then reject the request.
+        let in_progress_updates = sps
+            .iter()
+            .filter_map(|sp| {
+                self.sp_update_data
+                    .get(sp)
+                    .map_or(false, |update_data| {
+                        !update_data.task.is_finished()
+                    })
+                    .then(|| *sp)
+            })
+            .collect::<Vec<_>>();
+
+        if !in_progress_updates.is_empty() {
+            return Err(ClearUpdateStateError::UpdateInProgress(
+                in_progress_updates,
+            ));
         }
 
-        self.sp_update_data.remove(&sp);
-        Ok(())
+        let mut resp = ClearUpdateStateResponse::default();
+
+        for sp in sps {
+            if self.sp_update_data.remove(sp).is_some() {
+                resp.cleared.insert(*sp);
+            } else {
+                resp.no_update_data.insert(*sp);
+            }
+        }
+
+        Ok(resp)
     }
 
     async fn abort_update(
@@ -695,8 +715,8 @@ pub enum StartUpdateError {
 
 #[derive(Debug, Clone, Error, Eq, PartialEq)]
 pub enum ClearUpdateStateError {
-    #[error("target is currently being updated")]
-    UpdateInProgress,
+    #[error("target are currently being updated: {}", sps_to_string(.0))]
+    UpdateInProgress(Vec<SpIdentifier>),
 }
 
 impl ClearUpdateStateError {
@@ -704,7 +724,7 @@ impl ClearUpdateStateError {
         let message = DisplayErrorChain::new(self).to_string();
 
         match self {
-            ClearUpdateStateError::UpdateInProgress => {
+            ClearUpdateStateError::UpdateInProgress(_) => {
                 HttpError::for_bad_request(None, message)
             }
         }
