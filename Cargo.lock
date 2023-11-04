@@ -2042,7 +2042,7 @@ dependencies = [
  "tokio",
  "toml 0.8.6",
  "trust-dns-client",
- "trust-dns-proto",
+ "trust-dns-proto 0.22.0",
  "trust-dns-resolver",
  "trust-dns-server",
  "uuid",
@@ -2126,6 +2126,15 @@ dependencies = [
  "slog",
  "toml 0.8.6",
  "uuid",
+]
+
+[[package]]
+name = "drain"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2f1a0abf3fcefad9b4dd0e414207a7408e12b68414a01e6bb19b897d5bd7632d"
+dependencies = [
+ "tokio",
 ]
 
 [[package]]
@@ -2326,6 +2335,18 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "enum-as-inner"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5ffccbb6966c05b32ef8fbac435df276c4ae4d3dc55a8cd0eb9745e6c12f546a"
+dependencies = [
+ "heck 0.4.1",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.32",
 ]
 
 [[package]]
@@ -3618,7 +3639,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
- "trust-dns-proto",
+ "trust-dns-proto 0.22.0",
  "trust-dns-resolver",
  "uuid",
 ]
@@ -3637,7 +3658,7 @@ dependencies = [
  "reqwest",
  "slog",
  "thiserror",
- "trust-dns-proto",
+ "trust-dns-proto 0.22.0",
  "trust-dns-resolver",
  "uuid",
 ]
@@ -4525,7 +4546,7 @@ dependencies = [
  "serde_urlencoded",
  "slog",
  "tempfile",
- "trust-dns-proto",
+ "trust-dns-proto 0.22.0",
  "trust-dns-resolver",
  "uuid",
 ]
@@ -5493,7 +5514,7 @@ dependencies = [
  "toml_datetime",
  "toml_edit 0.19.15",
  "tracing",
- "trust-dns-proto",
+ "trust-dns-proto 0.22.0",
  "unicode-bidi",
  "unicode-normalization",
  "unicode-xid",
@@ -9366,7 +9387,7 @@ dependencies = [
  "time",
  "tokio",
  "tracing",
- "trust-dns-proto",
+ "trust-dns-proto 0.22.0",
 ]
 
 [[package]]
@@ -9378,13 +9399,38 @@ dependencies = [
  "async-trait",
  "cfg-if 1.0.0",
  "data-encoding",
- "enum-as-inner",
+ "enum-as-inner 0.5.1",
  "futures-channel",
  "futures-io",
  "futures-util",
  "idna 0.2.3",
  "ipnet",
  "lazy_static",
+ "rand 0.8.5",
+ "smallvec 1.11.0",
+ "thiserror",
+ "tinyvec",
+ "tokio",
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "trust-dns-proto"
+version = "0.23.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3119112651c157f4488931a01e586aa459736e9d6046d3bd9105ffb69352d374"
+dependencies = [
+ "async-trait",
+ "cfg-if 1.0.0",
+ "data-encoding",
+ "enum-as-inner 0.6.0",
+ "futures-channel",
+ "futures-io",
+ "futures-util",
+ "idna 0.4.0",
+ "ipnet",
+ "once_cell",
  "rand 0.8.5",
  "smallvec 1.11.0",
  "thiserror",
@@ -9411,29 +9457,29 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
- "trust-dns-proto",
+ "trust-dns-proto 0.22.0",
 ]
 
 [[package]]
 name = "trust-dns-server"
-version = "0.22.1"
+version = "0.23.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "99022f9befa6daec2a860be68ac28b1f0d9d7ccf441d8c5a695e35a58d88840d"
+checksum = "c540f73c2b2ec2f6c54eabd0900e7aafb747a820224b742f556e8faabb461bc7"
 dependencies = [
  "async-trait",
  "bytes",
  "cfg-if 1.0.0",
- "enum-as-inner",
+ "drain",
+ "enum-as-inner 0.6.0",
  "futures-executor",
  "futures-util",
  "serde",
  "thiserror",
  "time",
  "tokio",
- "toml 0.5.11",
+ "toml 0.7.8",
  "tracing",
- "trust-dns-client",
- "trust-dns-proto",
+ "trust-dns-proto 0.23.2",
 ]
 
 [[package]]
