@@ -3435,6 +3435,7 @@ checksum = "d530e1a18b1cb4c484e6e34556a0d948706958449fca0cab753d649f2bce3d1f"
 dependencies = [
  "equivalent",
  "hashbrown 0.14.2",
+ "serde",
 ]
 
 [[package]]
@@ -5440,7 +5441,7 @@ dependencies = [
  "hex",
  "hyper",
  "hyper-rustls",
- "indexmap 1.9.3",
+ "indexmap 2.1.0",
  "inout",
  "ipnetwork",
  "itertools 0.10.5",
@@ -5562,7 +5563,7 @@ version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "75e56d5c441965b6425165b7e3223cc933ca469834f4a8b4786817a1f9dc4f13"
 dependencies = [
- "indexmap 1.9.3",
+ "indexmap 2.1.0",
  "serde",
  "serde_json",
 ]
