@@ -67,7 +67,7 @@ async fn main() -> Result<()> {
         info!(&log, "using system configuration");
         let async_resolver =
             hickory_resolver::AsyncResolver::tokio_from_system_conf()
-            .context("initializing resolver from system configuration")?;
+                .context("initializing resolver from system configuration")?;
         Resolver::new_with_resolver(log.clone(), async_resolver)
     } else {
         let addrs = opt.nameserver_addresses;
