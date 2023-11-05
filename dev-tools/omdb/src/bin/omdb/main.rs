@@ -94,7 +94,7 @@ impl Omdb {
         log: slog::Logger,
         service_name: internal_dns::ServiceName,
     ) -> Result<Vec<SocketAddrV6>, anyhow::Error> {
-        let resolver = self.dns_resolver(log).await?;
+        let resolver = self.dns_resolver(log).await;
         resolver
             .lookup_all_socket_v6(service_name)
             .await
@@ -104,19 +104,13 @@ impl Omdb {
     async fn dns_resolver(
         &self,
         log: slog::Logger,
-    ) -> Result<internal_dns::resolver::Resolver, anyhow::Error> {
+    ) -> internal_dns::resolver::Resolver {
         match &self.dns_server {
             Some(dns_server) => {
                 internal_dns::resolver::Resolver::new_from_addrs(
                     log,
                     &[*dns_server],
                 )
-                .with_context(|| {
-                    format!(
-                        "creating DNS resolver for DNS server {:?}",
-                        dns_server
-                    )
-                })
             }
             None => {
                 // In principle, we should look at /etc/resolv.conf to find the
@@ -141,12 +135,6 @@ impl Omdb {
                     to specify an alternate DNS server)",
                 );
                 internal_dns::resolver::Resolver::new_from_subnet(log, subnet)
-                    .with_context(|| {
-                        format!(
-                            "creating DNS resolver for subnet {}",
-                            subnet.net()
-                        )
-                    })
             }
         }
     }

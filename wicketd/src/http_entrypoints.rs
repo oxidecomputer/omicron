@@ -1274,13 +1274,7 @@ async fn post_reload_config(
         let resolver = Resolver::new_from_subnet(
             rqctx.log.new(o!("component" => "InternalDnsResolver")),
             rack_subnet,
-        )
-        .map_err(|err| {
-            HttpError::for_unavail(
-                None,
-                format!("failed to create internal DNS resolver: {err}"),
-            )
-        })?;
+        );
 
         *rqctx.internal_dns_resolver.lock().unwrap() = Some(resolver);
     }

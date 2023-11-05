@@ -15,6 +15,11 @@ use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
 use dropshot::HandlerTaskMode;
 use gateway_test_utils::setup::GatewayTestContext;
+use hickory_resolver::config::NameServerConfig;
+use hickory_resolver::config::Protocol;
+use hickory_resolver::config::ResolverConfig;
+use hickory_resolver::config::ResolverOpts;
+use hickory_resolver::TokioAsyncResolver;
 use nexus_test_interface::NexusServer;
 use nexus_types::external_api::params::UserId;
 use nexus_types::internal_api::params::Certificate;
@@ -43,11 +48,6 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::time::Duration;
-use trust_dns_resolver::config::NameServerConfig;
-use trust_dns_resolver::config::Protocol;
-use trust_dns_resolver::config::ResolverConfig;
-use trust_dns_resolver::config::ResolverOpts;
-use trust_dns_resolver::TokioAsyncResolver;
 use uuid::Uuid;
 
 pub mod db;
@@ -1156,14 +1156,11 @@ pub fn assert_same_items<T: PartialEq + Debug>(v1: Vec<T>, v2: Vec<T>) {
 pub async fn start_dns_server(
     log: slog::Logger,
     storage_path: &Utf8Path,
-) -> Result<
-    (
-        dns_server::dns_server::ServerHandle,
-        dropshot::HttpServer<dns_server::http_server::Context>,
-        TokioAsyncResolver,
-    ),
-    anyhow::Error,
-> {
+) -> (
+    dns_server::dns_server::ServerHandle,
+    dropshot::HttpServer<dns_server::http_server::Context>,
+    TokioAsyncResolver,
+) {
     let config_store = dns_server::storage::Config {
         keep_old_generations: 3,
         storage_path: storage_path.into(),
@@ -1194,12 +1191,11 @@ pub async fn start_dns_server(
         socket_addr: dns_server.local_address(),
         protocol: Protocol::Udp,
         tls_dns_name: None,
-        trust_nx_responses: false,
+        trust_negative_responses: false,
         bind_addr: None,
     });
     let resolver =
-        TokioAsyncResolver::tokio(resolver_config, ResolverOpts::default())
-            .context("creating DNS resolver")?;
+        TokioAsyncResolver::tokio(resolver_config, ResolverOpts::default());
 
-    Ok((dns_server, http_server, resolver))
+    (dns_server, http_server, resolver)
 }

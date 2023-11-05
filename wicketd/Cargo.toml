@@ -21,6 +21,7 @@ flume.workspace = true
 futures.workspace = true
 gateway-messages.workspace = true
 hex.workspace = true
+hickory-resolver.workspace = true
 hubtools.workspace = true
 http.workspace = true
 hyper.workspace = true
@@ -36,11 +37,10 @@ serde_json.workspace = true
 slog.workspace = true
 slog-dtrace.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = [ "full" ] }
+tokio = { workspace = true, features = ["full"] }
 tokio-stream.workspace = true
 tokio-util.workspace = true
 tough.workspace = true
-trust-dns-resolver.workspace = true
 snafu.workspace = true
 toml.workspace = true
 uuid.workspace = true

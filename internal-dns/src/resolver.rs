@@ -2,24 +2,24 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use hickory_resolver::config::{
+    LookupIpStrategy, NameServerConfig, Protocol, ResolverConfig, ResolverOpts,
+};
+use hickory_resolver::lookup::SrvLookup;
+use hickory_resolver::TokioAsyncResolver;
 use hyper::client::connect::dns::Name;
 use omicron_common::address::{
     Ipv6Subnet, ReservedRackSubnet, AZ_PREFIX, DNS_PORT,
 };
 use slog::{debug, error, info, trace};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
-use trust_dns_resolver::config::{
-    LookupIpStrategy, NameServerConfig, Protocol, ResolverConfig, ResolverOpts,
-};
-use trust_dns_resolver::lookup::SrvLookup;
-use trust_dns_resolver::TokioAsyncResolver;
 
 pub type DnsError = dns_service_client::Error<dns_service_client::types::Error>;
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum ResolveError {
     #[error(transparent)]
-    Resolve(#[from] trust_dns_resolver::error::ResolveError),
+    Resolve(#[from] hickory_resolver::error::ResolveError),
 
     #[error("Record not found for SRV key: {}", .0.dns_name())]
     NotFound(crate::ServiceName),
@@ -53,10 +53,7 @@ impl reqwest::dns::Resolve for Resolver {
 
 impl Resolver {
     /// Construct a new DNS resolver from specific DNS server addresses.
-    pub fn new_from_addrs(
-        log: slog::Logger,
-        dns_addrs: &[SocketAddr],
-    ) -> Result<Self, ResolveError> {
+    pub fn new_from_addrs(log: slog::Logger, dns_addrs: &[SocketAddr]) -> Self {
         info!(log, "new DNS resolver"; "addresses" => ?dns_addrs);
 
         let mut rc = ResolverConfig::new();
@@ -66,7 +63,7 @@ impl Resolver {
                 socket_addr,
                 protocol: Protocol::Udp,
                 tls_dns_name: None,
-                trust_nx_responses: false,
+                trust_negative_responses: false,
                 bind_addr: None,
             });
         }
@@ -77,18 +74,15 @@ impl Resolver {
         // the IPv4 variant.
         opts.ip_strategy = LookupIpStrategy::Ipv6Only;
         opts.negative_max_ttl = Some(std::time::Duration::from_secs(15));
-        let resolver = TokioAsyncResolver::tokio(rc, opts)?;
+        let resolver = TokioAsyncResolver::tokio(rc, opts);
 
-        Ok(Self { log, resolver })
+        Self { log, resolver }
     }
 
     /// Convenience wrapper for [`Resolver::new_from_subnet`] that determines
     /// the subnet based on a provided IP address and then uses the DNS
     /// resolvers for that subnet.
-    pub fn new_from_ip(
-        log: slog::Logger,
-        address: Ipv6Addr,
-    ) -> Result<Self, ResolveError> {
+    pub fn new_from_ip(log: slog::Logger, address: Ipv6Addr) -> Self {
         let subnet = Ipv6Subnet::<AZ_PREFIX>::new(address);
         Self::new_from_subnet(log, subnet)
     }
@@ -135,7 +129,7 @@ impl Resolver {
     pub fn new_from_subnet(
         log: slog::Logger,
         subnet: Ipv6Subnet<AZ_PREFIX>,
-    ) -> Result<Self, ResolveError> {
+    ) -> Self {
         let dns_ips = Self::servers_from_subnet(subnet);
         Resolver::new_from_addrs(log, &dns_ips)
     }
@@ -163,7 +157,7 @@ impl Resolver {
             .iter()
             .next()
             .ok_or_else(|| ResolveError::NotFound(srv))?;
-        Ok(*address)
+        Ok(address.0)
     }
 
     /// Returns the targets of the SRV records for a DNS name
@@ -313,7 +307,7 @@ impl Resolver {
     //   (1) it returns `IpAddr`'s rather than `SocketAddr`'s
     //   (2) it doesn't actually return all the addresses from the Additional
     //       section of the DNS server's response.
-    //       See bluejekyll/trust-dns#1980
+    //       See hickory-dns/hickory-dns#1980
     //
     // (1) is not a huge deal as we can try to match up the targets ourselves
     // to grab the port for creating a `SocketAddr` but (2) means we need to do
@@ -352,7 +346,7 @@ impl Resolver {
             .flat_map(move |target| match target {
                 Ok((ips, port)) => Some(
                     ips.into_iter()
-                        .map(move |ip| SocketAddrV6::new(ip, port, 0, 0)),
+                        .map(move |ip| SocketAddrV6::new(ip.0, port, 0, 0)),
                 ),
                 Err((target, err)) => {
                     error!(
@@ -463,10 +457,9 @@ mod test {
             drop(self)
         }
 
-        fn resolver(&self) -> anyhow::Result<Resolver> {
+        fn resolver(&self) -> Resolver {
             let log = self.log.new(o!("component" => "DnsResolver"));
             Resolver::new_from_addrs(log, &[self.dns_server_address()])
-                .context("creating resolver for test DNS server")
         }
 
         async fn update(
@@ -496,7 +489,7 @@ mod test {
     async fn lookup_nonexistent_record_fails() {
         let logctx = test_setup_log("lookup_nonexistent_record_fails");
         let dns_server = DnsServer::create(&logctx.log).await;
-        let resolver = dns_server.resolver().unwrap();
+        let resolver = dns_server.resolver();
 
         let err = resolver
             .lookup_ip(ServiceName::Cockroach)
@@ -510,7 +503,7 @@ mod test {
         assert!(
             matches!(
                 dns_error.kind(),
-                trust_dns_resolver::error::ResolveErrorKind::NoRecordsFound { .. },
+                hickory_resolver::error::ResolveErrorKind::NoRecordsFound { .. },
             ),
             "Saw error: {dns_error}",
         );
@@ -533,7 +526,7 @@ mod test {
         let dns_config = dns_config.build();
         dns_server.update(&dns_config).await.unwrap();
 
-        let resolver = dns_server.resolver().unwrap();
+        let resolver = dns_server.resolver();
         let found_ip = resolver
             .lookup_ipv6(ServiceName::Cockroach)
             .await
@@ -612,7 +605,7 @@ mod test {
         dns_server.update(&dns_config).await.unwrap();
 
         // Look up Cockroach
-        let resolver = dns_server.resolver().unwrap();
+        let resolver = dns_server.resolver();
         let ip = resolver
             .lookup_ipv6(ServiceName::Cockroach)
             .await
@@ -660,7 +653,7 @@ mod test {
             error,
             ResolveError::Resolve(error)
                 if matches!(error.kind(),
-                    trust_dns_resolver::error::ResolveErrorKind::NoRecordsFound { .. }
+                    hickory_resolver::error::ResolveErrorKind::NoRecordsFound { .. }
                 )
         );
 
@@ -679,7 +672,7 @@ mod test {
     async fn update_record() {
         let logctx = test_setup_log("update_record");
         let dns_server = DnsServer::create(&logctx.log).await;
-        let resolver = dns_server.resolver().unwrap();
+        let resolver = dns_server.resolver();
 
         // Insert a record, observe that it exists.
         let mut dns_builder = DnsConfigBuilder::new();
@@ -791,8 +784,7 @@ mod test {
         let resolver = Resolver::new_from_addrs(
             logctx.log.clone(),
             &[dns_server.dns_server.local_address()],
-        )
-        .unwrap();
+        );
 
         // Start a test server, but don't register it with the DNS server (yet).
         let label = 1234;
@@ -871,8 +863,7 @@ mod test {
                 dns_server1.dns_server.local_address(),
                 dns_server2.dns_server.local_address(),
             ],
-        )
-        .unwrap();
+        );
 
         // Start a test server, but don't register it with the DNS server (yet).
         let label = 1234;
@@ -944,8 +935,7 @@ mod test {
         let resolver = Resolver::new_from_addrs(
             logctx.log.clone(),
             &[dns_server.dns_server.local_address()],
-        )
-        .unwrap();
+        );
 
         // Create DNS config with a single service and multiple backends.
         let mut dns_config = DnsConfigBuilder::new();

@@ -7,13 +7,13 @@
 use anyhow::anyhow;
 use anyhow::Context;
 use futures::FutureExt;
+use hickory_resolver::config::{
+    NameServerConfig, Protocol, ResolverConfig, ResolverOpts,
+};
+use hickory_resolver::TokioAsyncResolver;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use thiserror::Error;
-use trust_dns_resolver::config::{
-    NameServerConfig, Protocol, ResolverConfig, ResolverOpts,
-};
-use trust_dns_resolver::TokioAsyncResolver;
 
 progenitor::generate_api!(
     spec = "../../openapi/nexus.json",
@@ -40,21 +40,21 @@ pub struct CustomDnsResolver {
 impl CustomDnsResolver {
     /// Make a new custom resolver that uses the DNS server at the specified
     /// address
-    pub fn new(dns_addr: SocketAddr) -> anyhow::Result<CustomDnsResolver> {
+    pub fn new(dns_addr: SocketAddr) -> Self {
         let mut resolver_config = ResolverConfig::new();
         resolver_config.add_name_server(NameServerConfig {
             socket_addr: dns_addr,
             protocol: Protocol::Udp,
             tls_dns_name: None,
-            trust_nx_responses: false,
+            trust_negative_responses: false,
             bind_addr: None,
         });
 
-        let resolver = Arc::new(
-            TokioAsyncResolver::tokio(resolver_config, ResolverOpts::default())
-                .context("failed to create resolver")?,
-        );
-        Ok(CustomDnsResolver { dns_addr, resolver })
+        let resolver = Arc::new(TokioAsyncResolver::tokio(
+            resolver_config,
+            ResolverOpts::default(),
+        ));
+        Self { dns_addr, resolver }
     }
 
     /// Returns the address of the DNS server that we're using to resolve names

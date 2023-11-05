@@ -37,8 +37,8 @@ serde_json.workspace = true
 serde_urlencoded.workspace = true
 slog.workspace = true
 tempfile.workspace = true
-trust-dns-proto.workspace = true
-trust-dns-resolver.workspace = true
+hickory-proto.workspace = true
+hickory-resolver.workspace = true
 uuid.workspace = true
 omicron-workspace-hack.workspace = true
 

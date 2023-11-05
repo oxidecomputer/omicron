@@ -66,14 +66,13 @@ async fn main() -> Result<()> {
     let resolver = if opt.nameserver_addresses.is_empty() {
         info!(&log, "using system configuration");
         let async_resolver =
-            trust_dns_resolver::AsyncResolver::tokio_from_system_conf()
-                .context("initializing resolver from system configuration")?;
+            hickory_resolver::AsyncResolver::tokio_from_system_conf()
+            .context("initializing resolver from system configuration")?;
         Resolver::new_with_resolver(log.clone(), async_resolver)
     } else {
         let addrs = opt.nameserver_addresses;
         info!(&log, "using explicit nameservers"; "nameservers" => ?addrs);
         Resolver::new_from_addrs(log.clone(), &addrs)
-            .context("creating resolver with explicit nameserver addresses")?
     };
 
     let result = omicron_common::backoff::retry_notify(

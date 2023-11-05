@@ -1,6 +1,7 @@
 use crate::helpers::generate_name;
 use anyhow::{anyhow, Context as _, Result};
 use chrono::Utc;
+use hickory_resolver::error::ResolveErrorKind;
 use omicron_sled_agent::rack_setup::config::SetupServiceConfig;
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use oxide_client::types::{Name, ProjectCreate};
@@ -12,7 +13,6 @@ use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
-use trust_dns_resolver::error::ResolveErrorKind;
 
 const RSS_CONFIG_STR: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),

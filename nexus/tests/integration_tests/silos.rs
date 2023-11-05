@@ -34,6 +34,7 @@ use std::fmt::Write;
 use std::str::FromStr;
 
 use base64::Engine;
+use hickory_resolver::error::ResolveErrorKind;
 use http::method::Method;
 use http::StatusCode;
 use httptest::{matchers::*, responders::*, Expectation, Server};
@@ -41,7 +42,6 @@ use nexus_types::external_api::shared::{FleetRole, SiloRole};
 use std::convert::Infallible;
 use std::net::Ipv4Addr;
 use std::time::Duration;
-use trust_dns_resolver::error::ResolveErrorKind;
 use uuid::Uuid;
 
 type ControlPlaneTestContext =
@@ -2151,7 +2151,6 @@ pub async fn verify_silo_dns_name(
                 .external_dns
                 .resolver()
                 .await
-                .expect("Failed to create external DNS resolver")
                 .ipv4_lookup(&dns_name)
                 .await
             {

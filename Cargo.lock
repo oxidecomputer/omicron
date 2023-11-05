@@ -2021,6 +2021,10 @@ dependencies = [
  "dns-service-client 0.1.0",
  "dropshot",
  "expectorate",
+ "hickory-client",
+ "hickory-proto",
+ "hickory-resolver",
+ "hickory-server",
  "http",
  "omicron-test-utils",
  "omicron-workspace-hack",
@@ -2041,10 +2045,6 @@ dependencies = [
  "thiserror",
  "tokio",
  "toml 0.8.6",
- "trust-dns-client",
- "trust-dns-proto",
- "trust-dns-resolver",
- "trust-dns-server",
  "uuid",
 ]
 
@@ -2294,6 +2294,7 @@ dependencies = [
  "camino",
  "chrono",
  "futures",
+ "hickory-resolver",
  "http",
  "omicron-sled-agent",
  "omicron-test-utils",
@@ -2306,7 +2307,6 @@ dependencies = [
  "serde_json",
  "tokio",
  "toml 0.8.6",
- "trust-dns-resolver",
  "uuid",
 ]
 
@@ -2326,6 +2326,18 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "enum-as-inner"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5ffccbb6966c05b32ef8fbac435df276c4ae4d3dc55a8cd0eb9745e6c12f546a"
+dependencies = [
+ "heck 0.4.1",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.32",
 ]
 
 [[package]]
@@ -3065,6 +3077,90 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6fe2267d4ed49bc07b63801559be28c718ea06c4738b7a03c94df7386d2cde46"
 
 [[package]]
+name = "hickory-client"
+version = "0.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f3e08124cf0ddda93b1186d4af73599de401f3b52f14cd9aaa719049379462e"
+dependencies = [
+ "cfg-if 1.0.0",
+ "data-encoding",
+ "futures-channel",
+ "futures-util",
+ "hickory-proto",
+ "once_cell",
+ "radix_trie",
+ "rand 0.8.5",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "hickory-proto"
+version = "0.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "091a6fbccf4860009355e3efc52ff4acf37a63489aad7435372d44ceeb6fbbcf"
+dependencies = [
+ "async-trait",
+ "cfg-if 1.0.0",
+ "data-encoding",
+ "enum-as-inner 0.6.0",
+ "futures-channel",
+ "futures-io",
+ "futures-util",
+ "idna 0.4.0",
+ "ipnet",
+ "once_cell",
+ "rand 0.8.5",
+ "thiserror",
+ "tinyvec",
+ "tokio",
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "hickory-resolver"
+version = "0.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "35b8f021164e6a984c9030023544c57789c51760065cd510572fedcfb04164e8"
+dependencies = [
+ "cfg-if 1.0.0",
+ "futures-util",
+ "hickory-proto",
+ "ipconfig",
+ "lru-cache",
+ "once_cell",
+ "parking_lot 0.12.1",
+ "rand 0.8.5",
+ "resolv-conf",
+ "smallvec 1.11.0",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "hickory-server"
+version = "0.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4fbbb45bc4dcb456445732c705e3cfdc7393b8bcae5c36ecec36b9d76bd67cb5"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "cfg-if 1.0.0",
+ "enum-as-inner 0.6.0",
+ "futures-util",
+ "hickory-proto",
+ "serde",
+ "thiserror",
+ "time",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "highway"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3605,6 +3701,8 @@ dependencies = [
  "dropshot",
  "expectorate",
  "futures",
+ "hickory-proto",
+ "hickory-resolver",
  "hyper",
  "omicron-common 0.1.0",
  "omicron-test-utils",
@@ -3618,8 +3716,6 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
- "trust-dns-proto",
- "trust-dns-resolver",
  "uuid",
 ]
 
@@ -3649,12 +3745,12 @@ dependencies = [
  "anyhow",
  "clap 4.4.3",
  "dropshot",
+ "hickory-resolver",
  "internal-dns 0.1.0",
  "omicron-common 0.1.0",
  "omicron-workspace-hack",
  "slog",
  "tokio",
- "trust-dns-resolver",
 ]
 
 [[package]]
@@ -4504,6 +4600,8 @@ dependencies = [
  "gateway-messages",
  "gateway-test-utils",
  "headers",
+ "hickory-proto",
+ "hickory-resolver",
  "http",
  "hyper",
  "internal-dns 0.1.0",
@@ -4525,8 +4623,6 @@ dependencies = [
  "serde_urlencoded",
  "slog",
  "tempfile",
- "trust-dns-proto",
- "trust-dns-resolver",
  "uuid",
 ]
 
@@ -5080,6 +5176,7 @@ dependencies = [
  "gateway-test-utils",
  "headers",
  "hex",
+ "hickory-resolver",
  "http",
  "httptest",
  "hyper",
@@ -5158,7 +5255,6 @@ dependencies = [
  "tokio-postgres",
  "toml 0.8.6",
  "tough",
- "trust-dns-resolver",
  "usdt",
  "uuid",
 ]
@@ -5439,6 +5535,7 @@ dependencies = [
  "hashbrown 0.13.2",
  "hashbrown 0.14.2",
  "hex",
+ "hickory-proto",
  "hyper",
  "hyper-rustls",
  "indexmap 2.1.0",
@@ -5493,7 +5590,6 @@ dependencies = [
  "toml_datetime",
  "toml_edit 0.19.15",
  "tracing",
- "trust-dns-proto",
  "unicode-bidi",
  "unicode-normalization",
  "unicode-xid",
@@ -5702,6 +5798,7 @@ dependencies = [
  "base64 0.21.5",
  "chrono",
  "futures",
+ "hickory-resolver",
  "http",
  "hyper",
  "omicron-workspace-hack",
@@ -5713,7 +5810,6 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tokio",
- "trust-dns-resolver",
  "uuid",
 ]
 
@@ -9350,26 +9446,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "trust-dns-client"
-version = "0.22.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6c408c32e6a9dbb38037cece35740f2cf23c875d8ca134d33631cec83f74d3fe"
-dependencies = [
- "cfg-if 1.0.0",
- "data-encoding",
- "futures-channel",
- "futures-util",
- "lazy_static",
- "radix_trie",
- "rand 0.8.5",
- "thiserror",
- "time",
- "tokio",
- "tracing",
- "trust-dns-proto",
-]
-
-[[package]]
 name = "trust-dns-proto"
 version = "0.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9378,7 +9454,7 @@ dependencies = [
  "async-trait",
  "cfg-if 1.0.0",
  "data-encoding",
- "enum-as-inner",
+ "enum-as-inner 0.5.1",
  "futures-channel",
  "futures-io",
  "futures-util",
@@ -9411,28 +9487,6 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
- "trust-dns-proto",
-]
-
-[[package]]
-name = "trust-dns-server"
-version = "0.22.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "99022f9befa6daec2a860be68ac28b1f0d9d7ccf441d8c5a695e35a58d88840d"
-dependencies = [
- "async-trait",
- "bytes",
- "cfg-if 1.0.0",
- "enum-as-inner",
- "futures-executor",
- "futures-util",
- "serde",
- "thiserror",
- "time",
- "tokio",
- "toml 0.5.11",
- "tracing",
- "trust-dns-client",
  "trust-dns-proto",
 ]
 
@@ -10204,6 +10258,7 @@ dependencies = [
  "gateway-messages",
  "gateway-test-utils",
  "hex",
+ "hickory-resolver",
  "http",
  "hubtools",
  "hyper",
@@ -10240,7 +10295,6 @@ dependencies = [
  "tokio-util",
  "toml 0.8.6",
  "tough",
- "trust-dns-resolver",
  "tufaceous",
  "tufaceous-lib",
  "update-engine",

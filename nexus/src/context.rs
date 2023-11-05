@@ -148,7 +148,6 @@ impl ServerContext {
                     log.new(o!("component" => "DnsResolver")),
                     az_subnet,
                 )
-                .map_err(|e| format!("Failed to create DNS resolver: {}", e))?
             }
             nexus_config::InternalDns::FromAddress { address } => {
                 info!(
@@ -160,7 +159,6 @@ impl ServerContext {
                     log.new(o!("component" => "DnsResolver")),
                     &[address],
                 )
-                .map_err(|e| format!("Failed to create DNS resolver: {}", e))?
             }
         };
 

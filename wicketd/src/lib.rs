@@ -165,18 +165,12 @@ impl Server {
         ));
 
         let bootstrap_peers = BootstrapPeers::new(&log);
-        let internal_dns_resolver = args
-            .rack_subnet
-            .map(|addr| {
-                Resolver::new_from_subnet(
-                    log.new(o!("component" => "InternalDnsResolver")),
-                    addr,
-                )
-                .map_err(|err| {
-                    format!("Could not create internal DNS resolver: {err}")
-                })
-            })
-            .transpose()?;
+        let internal_dns_resolver = args.rack_subnet.map(|addr| {
+            Resolver::new_from_subnet(
+                log.new(o!("component" => "InternalDnsResolver")),
+                addr,
+            )
+        });
 
         let internal_dns_resolver = Arc::new(Mutex::new(internal_dns_resolver));
         let nexus_tcp_proxy = NexusTcpProxy::start(

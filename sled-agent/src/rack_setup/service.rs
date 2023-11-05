@@ -775,7 +775,7 @@ impl ServiceInner {
         let resolver = DnsResolver::new_from_subnet(
             self.log.new(o!("component" => "DnsResolver")),
             config.az_subnet(),
-        )?;
+        );
 
         let marker_paths: Vec<Utf8PathBuf> = storage_resources
             .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
