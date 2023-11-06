@@ -741,21 +741,13 @@ impl Inner {
             }
             SledAgentState::ServerStarted(server) => {
                 info!(log, "Sled Agent already loaded");
-
-                let sled_address = request.sled_address();
-                let response = if server.id() != request_id {
+                let initial = server.sled_agent().start_request();
+                let response = if initial != &request {
                     Err(format!(
-                        "Sled Agent already running with UUID {}, \
-                                     but {} was requested",
-                        server.id(),
-                        request_id,
-                    ))
-                } else if &server.address().ip() != sled_address.ip() {
-                    Err(format!(
-                        "Sled Agent already running on address {}, \
-                                     but {} was requested",
-                        server.address().ip(),
-                        sled_address.ip(),
+                        "Sled Agent already running: 
+                        initital request = {:?}, 
+                        current request: {:?}",
+                        initial, request
                     ))
                 } else {
                     Ok(SledAgentResponse { id: server.id() })

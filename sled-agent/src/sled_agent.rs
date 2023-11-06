@@ -215,6 +215,10 @@ struct SledAgentInner {
     // The Sled Agent's address can be derived from this value.
     subnet: Ipv6Subnet<SLED_PREFIX>,
 
+    // The request that was used to start the sled-agent
+    // This is used for idempotence checks during RSS/Add-Sled internal APIs
+    start_request: StartSledAgentRequest,
+
     // Component of Sled Agent responsible for storage and dataset management.
     storage: StorageManager,
 
@@ -453,6 +457,7 @@ impl SledAgent {
             inner: Arc::new(SledAgentInner {
                 id: request.body.id,
                 subnet: request.body.subnet,
+                start_request: request,
                 storage,
                 instances,
                 hardware,
@@ -527,6 +532,10 @@ impl SledAgent {
 
     pub fn logger(&self) -> &Logger {
         &self.log
+    }
+
+    pub fn start_request(&self) -> &StartSledAgentRequest {
+        &self.inner.start_request
     }
 
     // Sends a request to Nexus informing it that the current sled exists.
