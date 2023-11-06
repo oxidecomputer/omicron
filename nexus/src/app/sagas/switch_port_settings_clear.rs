@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::switch_port_settings_apply::select_dendrite_client;
-use super::NexusActionContext;
+use super::{NexusActionContext, NEXUS_DPD_TAG};
 use crate::app::sagas::retry_until_known_result;
 use crate::app::sagas::switch_port_settings_apply::{
     api_to_dpd_port_settings, apply_bootstore_update, bootstore_update,
@@ -154,7 +154,7 @@ async fn spa_clear_switch_port_settings(
     let dpd_client = select_dendrite_client(&sagactx).await?;
 
     retry_until_known_result(log, || async {
-        dpd_client.port_settings_clear(&port_id).await
+        dpd_client.port_settings_clear(&port_id, Some(NEXUS_DPD_TAG)).await
     })
     .await
     .map_err(|e| ActionError::action_failed(e.to_string()))?;
@@ -197,7 +197,13 @@ async fn spa_undo_clear_switch_port_settings(
         .map_err(ActionError::action_failed)?;
 
     retry_until_known_result(log, || async {
-        dpd_client.port_settings_apply(&port_id, &dpd_port_settings).await
+        dpd_client
+            .port_settings_apply(
+                &port_id,
+                Some(NEXUS_DPD_TAG),
+                &dpd_port_settings,
+            )
+            .await
     })
     .await
     .map_err(|e| external::Error::internal_error(&e.to_string()))?;

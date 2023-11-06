@@ -75,3 +75,5 @@ impl slog::KV for FileKv {
         )
     }
 }
+
+pub const OMICRON_DPD_TAG: &str = "omicron";
