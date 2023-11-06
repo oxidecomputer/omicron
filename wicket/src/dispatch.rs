@@ -8,13 +8,10 @@ use std::net::{Ipv6Addr, SocketAddrV6};
 
 use anyhow::{bail, Context, Result};
 use camino::{Utf8Path, Utf8PathBuf};
-use clap::Parser;
 use omicron_common::{address::WICKETD_PORT, FileKv};
 use slog::Drain;
 
-use crate::{
-    preflight::PreflightArgs, rack_setup::SetupArgs, upload::UploadArgs, Runner,
-};
+use crate::Runner;
 
 pub fn exec() -> Result<()> {
     let wicketd_addr =
@@ -22,47 +19,14 @@ pub fn exec() -> Result<()> {
 
     // SSH_ORIGINAL_COMMAND contains additional arguments, if any.
     if let Ok(ssh_args) = std::env::var("SSH_ORIGINAL_COMMAND") {
-        // The argument is in a quoted form, so split it using Unix shell semantics.
-        let args = shell_words::split(&ssh_args).with_context(|| {
-            format!("could not parse shell arguments from input {ssh_args}")
-        })?;
-
         let log = setup_log(&log_path()?, WithStderr::Yes)?;
-        // parse_from uses the the first argument as the command name. Insert "wicket" as
-        // the command name.
-        let args = ShellCommand::parse_from(
-            std::iter::once("wicket".to_owned()).chain(args),
-        );
-        match args {
-            ShellCommand::UploadRepo(args) => args.exec(log, wicketd_addr),
-            ShellCommand::Setup(args) => args.exec(log, wicketd_addr),
-            ShellCommand::Preflight(args) => args.exec(log, wicketd_addr),
-        }
+        crate::cli::exec(log, &ssh_args, wicketd_addr)
     } else {
         // Do not expose log messages via standard error since they'll show up
         // on top of the TUI.
         let log = setup_log(&log_path()?, WithStderr::No)?;
         Runner::new(log, wicketd_addr).run()
     }
-}
-
-/// Arguments passed to wicket.
-///
-/// Wicket is designed to be used as a captive shell, set up via sshd
-/// ForceCommand. If no arguments are specified, wicket behaves like a TUI.
-/// However, if arguments are specified via SSH_ORIGINAL_COMMAND, wicketd
-/// accepts an upload command.
-#[derive(Debug, Parser)]
-enum ShellCommand {
-    /// Upload a TUF repository to wicketd.
-    #[command(visible_alias = "upload")]
-    UploadRepo(UploadArgs),
-    /// Interact with rack setup configuration.
-    #[command(subcommand)]
-    Setup(SetupArgs),
-    /// Run checks prior to setting up the rack.
-    #[command(subcommand)]
-    Preflight(PreflightArgs),
 }
 
 fn setup_log(
