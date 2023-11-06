@@ -121,7 +121,7 @@ pub async fn nexus_addr() -> Result<IpAddr> {
     let config = rss_config()?;
     let dns_addr = external_dns_addr(&config)?;
     let dns_name = nexus_external_dns_name(&config);
-    let resolver = CustomDnsResolver::new(dns_addr)?;
+    let resolver = CustomDnsResolver::new(dns_addr);
     wait_for_records(
         &resolver,
         &dns_name,
@@ -148,7 +148,7 @@ impl ClientParams {
         let dns_addr = external_dns_addr(&rss_config)?;
         eprintln!("Using external DNS server at {:?}", dns_addr);
         let nexus_dns_name = nexus_external_dns_name(&rss_config);
-        let resolver = Arc::new(CustomDnsResolver::new(dns_addr)?);
+        let resolver = Arc::new(CustomDnsResolver::new(dns_addr));
 
         // If we were provided with a path to a certificate in the environment,
         // add it as a trusted one.
