@@ -180,7 +180,7 @@ fn read_smf_config() -> Result<ConfigProperties, CmdError> {
                 .with_context(|| {
                     format!(
                         "failed to parse `{CONFIG_PG}/{PROP_RACK_ID}` \
-                ({prop_rack_id:?}) as a UUID"
+                        ({prop_rack_id:?}) as a UUID"
                     )
                 })
                 .map_err(CmdError::Failure)?,
