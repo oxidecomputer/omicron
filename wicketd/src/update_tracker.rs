@@ -715,7 +715,7 @@ pub enum StartUpdateError {
 
 #[derive(Debug, Clone, Error, Eq, PartialEq)]
 pub enum ClearUpdateStateError {
-    #[error("target are currently being updated: {}", sps_to_string(.0))]
+    #[error("targets are currently being updated: {}", sps_to_string(.0))]
     UpdateInProgress(Vec<SpIdentifier>),
 }
 
