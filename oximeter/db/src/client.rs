@@ -352,9 +352,7 @@ impl Client {
             "starting upgrade to desired version {}", desired_version
         );
         let available = Self::read_available_schema_versions(
-            &self.log,
-            replicated,
-            schema_dir.clone(),
+            &self.log, replicated, schema_dir,
         )
         .await?;
         // We explicitly ignore version 0, which implies the database doesn't
