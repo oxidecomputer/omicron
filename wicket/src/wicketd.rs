@@ -10,9 +10,10 @@ use std::net::SocketAddrV6;
 use tokio::sync::mpsc::{self, Sender, UnboundedSender};
 use tokio::time::{interval, Duration, MissedTickBehavior};
 use wicketd_client::types::{
-    AbortUpdateOptions, ClearUpdateStateOptions, GetInventoryParams,
-    GetInventoryResponse, GetLocationResponse, IgnitionCommand, SpIdentifier,
-    SpType, StartUpdateOptions, StartUpdateParams,
+    AbortUpdateOptions, ClearUpdateStateOptions, ClearUpdateStateParams,
+    GetInventoryParams, GetInventoryResponse, GetLocationResponse,
+    IgnitionCommand, SpIdentifier, SpType, StartUpdateOptions,
+    StartUpdateParams,
 };
 
 use crate::events::EventReportMap;
@@ -229,14 +230,15 @@ impl WicketdManager {
         tokio::spawn(async move {
             let update_client =
                 create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
-            let sp: SpIdentifier = component_id.into();
-            let response = match update_client
-                .post_clear_update_state(sp.type_, sp.slot, &options)
-                .await
-            {
-                Ok(_) => Ok(()),
-                Err(error) => Err(error.to_string()),
+            let params = ClearUpdateStateParams {
+                targets: vec![component_id.into()],
+                options,
             };
+            let response =
+                match update_client.post_clear_update_state(&params).await {
+                    Ok(_) => Ok(()),
+                    Err(error) => Err(error.to_string()),
+                };
 
             slog::info!(
                 log,

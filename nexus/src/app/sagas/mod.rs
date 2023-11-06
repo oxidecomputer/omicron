@@ -313,7 +313,7 @@ macro_rules! declare_saga_actions {
     };
 }
 
-pub(crate) const NEXUS_DPD_TAG: &str = "nexus";
+use omicron_common::OMICRON_DPD_TAG as NEXUS_DPD_TAG;
 
 pub(crate) use __action_name;
 pub(crate) use __emit_action;

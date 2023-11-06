@@ -206,14 +206,14 @@ hex-literal = "0.4.1"
 highway = "1.1.0"
 hkdf = "0.12.3"
 http = "0.2.9"
-httptest = "0.15.4"
+httptest = "0.15.5"
 hubtools = { git = "https://github.com/oxidecomputer/hubtools.git", branch = "main" }
 humantime = "2.1.0"
 hyper = "0.14"
 hyper-rustls = "0.24.2"
 hyper-staticfile = "0.9.5"
 illumos-utils = { path = "illumos-utils" }
-indexmap = "2.0.0"
+indexmap = "2.1.0"
 indicatif = { version = "0.17.7", features = ["rayon"] }
 installinator = { path = "installinator" }
 installinator-artifactd = { path = "installinator-artifactd" }
@@ -225,7 +225,7 @@ ipnetwork = { version = "0.20", features = ["schemars"] }
 itertools = "0.11.0"
 key-manager = { path = "key-manager" }
 lazy_static = "1.4.0"
-libc = "0.2.149"
+libc = "0.2.150"
 linear-map = "1.2.0"
 macaddr = { version = "1.0.1", features = ["serde_std"] }
 mime_guess = "2.0.4"
@@ -274,7 +274,7 @@ oximeter-instruments = { path = "oximeter/instruments" }
 oximeter-macro-impl = { path = "oximeter/oximeter-macro-impl" }
 oximeter-producer = { path = "oximeter/producer" }
 p256 = "0.13"
-parse-display = "0.7.0"
+parse-display = "0.8.2"
 partial-io = { version = "0.5.4", features = ["proptest1", "tokio1"] }
 paste = "1.0.14"
 percent-encoding = "2.3.0"
@@ -365,9 +365,9 @@ tokio-stream = "0.1.14"
 tokio-tungstenite = "0.18"
 tokio-util = "0.7.10"
 toml = "0.8.6"
-toml_edit = "0.19.15"
+toml_edit = "0.20.7"
 topological-sort = "0.2.2"
-tough = { version = "0.12", features = [ "http" ] }
+tough = { version = "0.14", features = [ "http" ] }
 trust-dns-client = "0.22"
 trust-dns-proto = "0.22"
 trust-dns-resolver = "0.22"
@@ -378,14 +378,14 @@ tufaceous-lib = { path = "tufaceous-lib" }
 unicode-width = "0.1.11"
 update-engine = { path = "update-engine" }
 usdt = "0.3"
-uuid = { version = "1.4.1", features = ["serde", "v4"] }
+uuid = { version = "1.5.0", features = ["serde", "v4"] }
 walkdir = "2.4"
 wicket = { path = "wicket" }
 wicket-common = { path = "wicket-common" }
 wicketd-client = { path = "clients/wicketd-client" }
 zeroize = { version = "1.6.0", features = ["zeroize_derive", "std"] }
 zip = { version = "0.6.6", default-features = false, features = ["deflate","bzip2"] }
-zone = { version = "0.2", default-features = false, features = ["async"] }
+zone = { version = "0.3", default-features = false, features = ["async"] }
 
 [profile.dev]
 panic = "abort"
