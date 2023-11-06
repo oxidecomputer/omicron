@@ -391,12 +391,9 @@ async fn test_ip_pool_with_silo(cptestctx: &ControlPlaneTestContext) {
             silo: NameOrId::Name(cptestctx.silo_name.clone()),
             is_default: false,
         });
-    let _: IpPoolResource = object_create(
-        client,
-        &format!("/v1/system/ip-pools/p0/associations"),
-        &params,
-    )
-    .await;
+    let _: IpPoolResource =
+        object_create(client, "/v1/system/ip-pools/p0/associations", &params)
+            .await;
 
     // get silo ID so we can test association by ID as well
     let silo_url = format!("/v1/system/silos/{}", cptestctx.silo_name);
@@ -425,12 +422,9 @@ async fn test_ip_pool_with_silo(cptestctx: &ControlPlaneTestContext) {
             silo: NameOrId::Id(silo.identity.id),
             is_default: false,
         });
-    let _: IpPoolResource = object_create(
-        client,
-        &format!("/v1/system/ip-pools/p1/associations"),
-        &params,
-    )
-    .await;
+    let _: IpPoolResource =
+        object_create(client, "/v1/system/ip-pools/p1/associations", &params)
+            .await;
 
     // association should look the same as the other one, except different pool ID
     let assocs_p1 = get_associations(client, "p1").await;

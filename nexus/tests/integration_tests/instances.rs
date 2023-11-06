@@ -3654,6 +3654,87 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
     );
 }
 
+#[nexus_test]
+async fn test_instance_ephemeral_ip_from_orphan_pool(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let _ = create_project(&client, PROJECT_NAME).await;
+
+    let pool_name = "orphan-pool";
+    let _: views::IpPool = object_create(
+        client,
+        "/v1/system/ip-pools",
+        &params::IpPoolCreate {
+            identity: IdentityMetadataCreateParams {
+                name: String::from(pool_name).parse().unwrap(),
+                description: String::from("an ip pool"),
+            },
+        },
+    )
+    .await;
+
+    let default_pool_range = IpRange::V4(
+        Ipv4Range::new(
+            std::net::Ipv4Addr::new(10, 0, 0, 1),
+            std::net::Ipv4Addr::new(10, 0, 0, 5),
+        )
+        .unwrap(),
+    );
+    let orphan_pool_range = IpRange::V4(
+        Ipv4Range::new(
+            std::net::Ipv4Addr::new(10, 1, 0, 1),
+            std::net::Ipv4Addr::new(10, 1, 0, 5),
+        )
+        .unwrap(),
+    );
+    // have to populate default pool or snat IP allocation fails before it can
+    // get to failing on ephemeral IP allocation
+    populate_ip_pool(&client, "default", Some(default_pool_range)).await;
+    populate_ip_pool(client, pool_name, Some(orphan_pool_range)).await;
+
+    // this should 404
+    let instance_name = "orphan-pool-inst";
+    let body = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: instance_name.parse().unwrap(),
+            description: format!("instance {:?}", instance_name),
+        },
+        ncpus: InstanceCpuCount(4),
+        memory: ByteCount::from_gibibytes_u32(1),
+        hostname: String::from("the_host"),
+        user_data:
+            b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
+                .to_vec(),
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![params::ExternalIpCreate::Ephemeral {
+            pool_name: Some("orphan-pool".parse().unwrap()),
+        }],
+        disks: vec![],
+        start: true,
+    };
+
+    let url = format!("/v1/instances?project={}", PROJECT_NAME);
+    let error = NexusRequest::new(
+        RequestBuilder::new(&client, http::Method::POST, &url)
+            .expect_status(Some(StatusCode::NOT_FOUND))
+            .body(Some(&body)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap::<dropshot::HttpErrorResponseBody>()
+    .await;
+
+    assert_eq!(error.error_code.unwrap(), "ObjectNotFound".to_string());
+    assert_eq!(
+        error.message,
+        "not found: ip-pool with name \"orphan-pool\"".to_string()
+    );
+
+    // TODO: associate the pool with a different silo and we should get the same
+    // error on instance create
+}
+
 async fn create_instance_with_pool(
     client: &ClientTestContext,
     instance_name: &str,

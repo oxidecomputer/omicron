@@ -79,6 +79,38 @@ impl DataStore {
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
+    /// Look up whether the given pool is available to users in the given silo,
+    /// i.e., whether there is an entry in the association table associating the
+    /// pool with either that silo or the fleet
+    pub async fn ip_pool_fetch_association(
+        &self,
+        opctx: &OpContext,
+        authz_pool: &authz::IpPool,
+    ) -> LookupResult<IpPoolResource> {
+        use db::schema::ip_pool;
+        use db::schema::ip_pool_resource;
+
+        let authz_silo = opctx.authn.silo_required()?;
+
+        ip_pool::table
+            .inner_join(ip_pool_resource::table)
+            .filter(
+                (ip_pool_resource::resource_type
+                    .eq(IpPoolResourceType::Silo)
+                    .and(ip_pool_resource::resource_id.eq(authz_silo.id())))
+                .or(ip_pool_resource::resource_type
+                    .eq(IpPoolResourceType::Fleet)),
+            )
+            .filter(ip_pool::id.eq(authz_pool.id()))
+            .filter(ip_pool::time_deleted.is_null())
+            .select(IpPoolResource::as_select())
+            .first_async::<IpPoolResource>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
     /// Look up the default IP pool for the current silo. If there is no default
     /// at silo scope, fall back to the next level up, namely the fleet default.
     /// There should always be a default pool at the fleet level, though this

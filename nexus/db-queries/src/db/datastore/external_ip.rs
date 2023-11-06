@@ -6,6 +6,7 @@
 
 use super::DataStore;
 use crate::authz;
+use crate::authz::ApiResource;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::error::public_error_from_diesel;
@@ -56,30 +57,21 @@ impl DataStore {
     ) -> CreateResult<ExternalIp> {
         let pool = match pool_name {
             Some(name) => {
-                let (.., _authz_pool, pool) = LookupPath::new(opctx, &self)
+                let (.., authz_pool, pool) = LookupPath::new(opctx, &self)
                     .ip_pool_name(&name)
                     // any authenticated user can CreateChild on an IP pool. this is
                     // meant to represent allocating an IP
                     .fetch_for(authz::Action::CreateChild)
                     .await?;
 
-                // TODO: this logic must change now that pools can be associated
-                // with many resources. The logic is slightly simpler now (at
-                // least conceptually, if not in implementation): Is this pool
-                // associated with either the fleet or the silo? otherwise, 404
-
-                // If the named pool conflicts with user's current scope, i.e.,
-                // if it has a silo and it's different from the current silo,
-                // then as far as IP allocation is concerned, that pool doesn't
-                // exist. If the pool has no silo, it's fleet-scoped and can
-                // always be used.
-
-                // let authz_silo_id = opctx.authn.silo_required()?.id();
-                // if let Some(pool_silo_id) = pool.silo_id {
-                //     if pool_silo_id != authz_silo_id {
-                //         return Err(authz_pool.not_found());
-                //     }
-                // }
+                // Is this pool associated with either the fleet or the silo? otherwise, 404
+                if self
+                    .ip_pool_fetch_association(opctx, &authz_pool)
+                    .await
+                    .is_err()
+                {
+                    return Err(authz_pool.not_found());
+                }
 
                 pool
             }
