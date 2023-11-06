@@ -29,12 +29,10 @@ async fn do_run() -> Result<(), CmdError> {
     let config = Config::from_file(args.config_file_path)
         .map_err(|e| CmdError::Failure(anyhow!(e)))?;
 
-    let log =
-        sp_sim::logger(&config).map_err(|e| CmdError::Failure(anyhow!(e)))?;
+    let log = sp_sim::logger(&config).map_err(CmdError::Failure)?;
 
-    let _rack = SimRack::start(&config, &log)
-        .await
-        .map_err(|e| CmdError::Failure(anyhow!(e)))?;
+    let _rack =
+        SimRack::start(&config, &log).await.map_err(CmdError::Failure)?;
 
     // for now, do nothing except let the spawned tasks run. in the future
     // (or when used as a library), the expectation is that a caller can

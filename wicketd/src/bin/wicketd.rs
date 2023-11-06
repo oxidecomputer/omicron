@@ -113,7 +113,7 @@ async fn do_run() -> Result<(), CmdError> {
                 Some(addr) => Some(Ipv6Subnet::new(addr)),
                 None if read_smf_config => {
                     let smf_values = SmfConfigValues::read_current()
-                        .map_err(|e| CmdError::Failure(anyhow!(e)))?;
+                        .map_err(CmdError::Failure)?;
                     smf_values.rack_subnet
                 }
                 None => None,
