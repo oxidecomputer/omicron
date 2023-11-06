@@ -71,7 +71,7 @@ async fn do_run() -> Result<(), CmdError> {
 
     match args {
         Args::Openapi => {
-            run_openapi().map_err(|err| CmdError::Failure(anyhow!("{err}")))
+            run_openapi().map_err(|err| CmdError::Failure(anyhow!(err)))
         }
         Args::Run {
             config_file_path,
@@ -134,11 +134,11 @@ async fn do_run() -> Result<(), CmdError> {
                 .map_err(CmdError::Failure)?;
             let server = Server::start(log, args)
                 .await
-                .map_err(|err| CmdError::Failure(anyhow!("{err}")))?;
+                .map_err(|err| CmdError::Failure(anyhow!(err)))?;
             server
                 .wait_for_finish()
                 .await
-                .map_err(|err| CmdError::Failure(anyhow!("{err}")))
+                .map_err(|err| CmdError::Failure(anyhow!(err)))
         }
     }
 }

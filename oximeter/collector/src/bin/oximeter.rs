@@ -134,7 +134,7 @@ async fn do_run() -> Result<(), CmdError> {
     let args = Args::parse();
     match args {
         Args::Openapi => {
-            run_openapi().map_err(|err| CmdError::Failure(anyhow!("{err}")))
+            run_openapi().map_err(|err| CmdError::Failure(anyhow!(err)))
         }
         Args::Run { config_file, id, address } => {
             let config = Config::from_file(config_file).unwrap();

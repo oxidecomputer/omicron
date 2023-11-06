@@ -72,7 +72,7 @@ async fn do_run() -> Result<(), CmdError> {
 
     match args {
         Args::Openapi => {
-            run_openapi().map_err(|e| CmdError::Failure(anyhow!("{e}")))
+            run_openapi().map_err(|e| CmdError::Failure(anyhow!(e)))
         }
         Args::Run {
             config_file_path,
@@ -125,7 +125,7 @@ async fn do_run() -> Result<(), CmdError> {
                         _ => unreachable!("invalid signal: {signal:?}"),
                     },
                     result = server.wait_for_finish() => {
-                        return result.map_err(|err| CmdError::Failure(anyhow!("{err}")))
+                        return result.map_err(|err| CmdError::Failure(anyhow!(err)))
                     }
                 }
             }

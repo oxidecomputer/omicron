@@ -53,9 +53,9 @@ async fn do_run() -> Result<(), CmdError> {
     match args {
         Args::Openapi(flavor) => match flavor {
             OpenapiFlavor::Sled => sled_server::run_openapi()
-                .map_err(|err| CmdError::Failure(anyhow!("{err}"))),
+                .map_err(|err| CmdError::Failure(anyhow!(err))),
             OpenapiFlavor::Bootstrap => bootstrap_server::run_openapi()
-                .map_err(|err| CmdError::Failure(anyhow!("{err}"))),
+                .map_err(|err| CmdError::Failure(anyhow!(err))),
         },
         Args::Run { config_path } => {
             let config = SledConfig::from_file(&config_path)
@@ -110,7 +110,7 @@ async fn do_run() -> Result<(), CmdError> {
             server
                 .wait_for_finish()
                 .await
-                .map_err(|err| CmdError::Failure(anyhow!("{err}")))?;
+                .map_err(|err| CmdError::Failure(anyhow!(err)))?;
 
             Ok(())
         }
