@@ -174,6 +174,13 @@ impl TryFrom<UnvalidatedRackInitializeRequest> for RackInitializeRequest {
 pub type Certificate = nexus_client::types::Certificate;
 pub type RecoverySiloConfig = nexus_client::types::RecoverySiloConfig;
 
+// A wrapper around StartSledAgentRequestV0 that was used
+// for the ledger format.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
+struct PersistentSledAgentRequest {
+    request: StartSledAgentRequestV0,
+}
+
 /// The version of `StartSledAgentRequest` we originally shipped with.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct StartSledAgentRequestV0 {
@@ -312,7 +319,7 @@ impl Ledgerable for StartSledAgentRequest {
 
         // We don't have the latest version. Try to deserialize v0 and then
         // convert it to the latest version.
-        let v0 = serde_json::from_str::<StartSledAgentRequestV0>(s)?;
+        let v0 = serde_json::from_str::<PersistentSledAgentRequest>(s)?.request;
         Ok(v0.into())
     }
 }
@@ -414,24 +421,26 @@ mod tests {
 
     #[test]
     fn serialize_start_sled_agent_v0_deserialize_v1() {
-        let v0 = StartSledAgentRequestV0 {
-            id: Uuid::new_v4(),
-            rack_id: Uuid::new_v4(),
-            ntp_servers: vec![String::from("test.pool.example.com")],
-            dns_servers: vec!["1.1.1.1".parse().unwrap()],
-            use_trust_quorum: false,
-            subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
+        let v0 = PersistentSledAgentRequest {
+            request: StartSledAgentRequestV0 {
+                id: Uuid::new_v4(),
+                rack_id: Uuid::new_v4(),
+                ntp_servers: vec![String::from("test.pool.example.com")],
+                dns_servers: vec!["1.1.1.1".parse().unwrap()],
+                use_trust_quorum: false,
+                subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
+            },
         };
         let serialized = serde_json::to_string(&v0).unwrap();
         let expected = StartSledAgentRequest {
             generation: 0,
             schema_version: 1,
             body: StartSledAgentRequestBody {
-                id: v0.id,
-                rack_id: v0.rack_id,
-                use_trust_quorum: false,
+                id: v0.request.id,
+                rack_id: v0.request.rack_id,
+                use_trust_quorum: v0.request.use_trust_quorum,
                 is_lrtq_learner: false,
-                subnet: v0.subnet,
+                subnet: v0.request.subnet,
             },
         };
 
