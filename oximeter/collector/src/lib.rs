@@ -472,8 +472,9 @@ impl OximeterAgent {
         match client.check_db_is_at_expected_version().await {
             Ok(_) => {}
             Err(oximeter_db::Error::DatabaseVersionMismatch {
-                found, ..
-            }) if found == 0 => {
+                found: 0,
+                ..
+            }) => {
                 debug!(log, "oximeter database does not exist, creating");
                 let replicated = client.is_oximeter_cluster().await?;
                 client
