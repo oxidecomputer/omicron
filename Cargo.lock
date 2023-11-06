@@ -5843,7 +5843,6 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "serial_test",
  "slog",
  "slog-async",
  "slog-dtrace",

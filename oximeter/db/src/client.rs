@@ -1407,7 +1407,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_replicated() {
         let cur_dir = std::env::current_dir().unwrap();
         let replica_config =
@@ -3828,7 +3827,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_apply_one_schema_upgrade_replicated() {
         const TEST_NAME: &str = "test_apply_one_schema_upgrade_replicated";
         let logctx = test_setup_log(TEST_NAME);
@@ -4075,7 +4073,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_ensure_schema_walks_through_multiple_steps_replicated() {
         const TEST_NAME: &str =
             "test_ensure_schema_walks_through_multiple_steps_replicated";
