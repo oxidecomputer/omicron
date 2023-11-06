@@ -299,7 +299,7 @@ impl SledAgent {
                     sz,
                 )?;
             }
-            Some(sz) if sz == 0 => {
+            Some(0) => {
                 panic!("Invalid requested swap device size of 0 GiB");
             }
             None | Some(_) => {
@@ -375,7 +375,7 @@ impl SledAgent {
                     e
                 })?;
             }
-            Some(sz) if sz == 0 => {
+            Some(0) => {
                 warn!(log, "Not using VMM reservoir (size 0 bytes requested)");
             }
             None => {
