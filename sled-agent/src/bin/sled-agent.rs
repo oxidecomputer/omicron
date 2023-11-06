@@ -59,7 +59,7 @@ async fn do_run() -> Result<(), CmdError> {
         },
         Args::Run { config_path } => {
             let config = SledConfig::from_file(&config_path)
-                .map_err(|e| CmdError::Failure(e.into()))?;
+                .map_err(|e| CmdError::Failure(anyhow!(e)))?;
 
             // - Sled agent starts with the normal config file - typically
             // called "config.toml".
@@ -82,7 +82,7 @@ async fn do_run() -> Result<(), CmdError> {
             let rss_config = if rss_config_path.exists() {
                 Some(
                     RssConfig::from_file(rss_config_path)
-                        .map_err(|e| CmdError::Failure(e.into()))?,
+                        .map_err(|e| CmdError::Failure(anyhow!(e)))?,
                 )
             } else {
                 None
@@ -90,7 +90,7 @@ async fn do_run() -> Result<(), CmdError> {
 
             let server = bootstrap_server::Server::start(config)
                 .await
-                .map_err(|err| CmdError::Failure(err.into()))?;
+                .map_err(|err| CmdError::Failure(anyhow!(err)))?;
 
             // If requested, automatically supply the RSS configuration.
             //
@@ -102,7 +102,7 @@ async fn do_run() -> Result<(), CmdError> {
                     // abandon the server.
                     Ok(_) | Err(RssAccessError::AlreadyInitialized) => {}
                     Err(e) => {
-                        return Err(CmdError::Failure(e.into()));
+                        return Err(CmdError::Failure(anyhow!(e)));
                     }
                 }
             }

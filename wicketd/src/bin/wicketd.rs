@@ -85,10 +85,10 @@ async fn do_run() -> Result<(), CmdError> {
         } => {
             let baseboard = if let Some(baseboard_file) = baseboard_file {
                 let baseboard_file = std::fs::read_to_string(baseboard_file)
-                    .map_err(|e| CmdError::Failure(e.into()))?;
+                    .map_err(|e| CmdError::Failure(anyhow!(e)))?;
                 let baseboard: Baseboard =
                     serde_json::from_str(&baseboard_file)
-                        .map_err(|e| CmdError::Failure(e.into()))?;
+                        .map_err(|e| CmdError::Failure(anyhow!(e)))?;
 
                 // TODO-correctness `Baseboard::unknown()` is slated for removal
                 // after some refactoring in sled-agent, at which point we'll
@@ -113,7 +113,7 @@ async fn do_run() -> Result<(), CmdError> {
                 Some(addr) => Some(Ipv6Subnet::new(addr)),
                 None if read_smf_config => {
                     let smf_values = SmfConfigValues::read_current()
-                        .map_err(|e| CmdError::Failure(e.into()))?;
+                        .map_err(|e| CmdError::Failure(anyhow!(e)))?;
                     smf_values.rack_subnet
                 }
                 None => None,

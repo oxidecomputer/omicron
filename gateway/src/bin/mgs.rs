@@ -136,7 +136,7 @@ async fn do_run() -> Result<(), CmdError> {
 #[cfg(target_os = "illumos")]
 fn read_smf_config() -> Result<ConfigProperties, CmdError> {
     fn scf_to_cmd_err(err: illumos_utils::scf::ScfError) -> CmdError {
-        CmdError::Failure(err.into())
+        CmdError::Failure(anyhow!(err))
     }
 
     use illumos_utils::scf::ScfHandle;

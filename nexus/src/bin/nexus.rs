@@ -54,7 +54,7 @@ async fn do_run() -> Result<(), CmdError> {
     let args = Args::parse();
 
     let config = Config::from_file(args.config_file_path)
-        .map_err(|e| CmdError::Failure(e.into()))?;
+        .map_err(|e| CmdError::Failure(anyhow!(e)))?;
 
     if args.openapi {
         run_openapi_external().map_err(|err| CmdError::Failure(anyhow!(err)))
