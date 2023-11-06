@@ -216,7 +216,7 @@ fn read_smf_config() -> Result<ConfigProperties, CmdError> {
 
 #[cfg(not(target_os = "illumos"))]
 fn read_smf_config() -> Result<ConfigProperties, CmdError> {
-    Err(CmdError::Failure(
-        "SMF configuration only available on illumos".to_string(),
-    ))
+    Err(CmdError::Failure(anyhow!(
+        "SMF configuration only available on illumos"
+    )))
 }
