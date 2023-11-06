@@ -57,7 +57,7 @@ ipnetwork = { version = "0.20.0", features = ["schemars"] }
 itertools = { version = "0.10.5" }
 lalrpop-util = { version = "0.19.12" }
 lazy_static = { version = "1.4.0", default-features = false, features = ["spin_no_std"] }
-libc = { version = "0.2.149", features = ["extra_traits"] }
+libc = { version = "0.2.150", features = ["extra_traits"] }
 log = { version = "0.4.20", default-features = false, features = ["std"] }
 managed = { version = "0.8.0", default-features = false, features = ["alloc", "map"] }
 memchr = { version = "2.6.3" }
@@ -99,7 +99,7 @@ tracing = { version = "0.1.37", features = ["log"] }
 unicode-bidi = { version = "0.3.13" }
 unicode-normalization = { version = "0.1.22" }
 usdt = { version = "0.3.5" }
-uuid = { version = "1.4.1", features = ["serde", "v4"] }
+uuid = { version = "1.5.0", features = ["serde", "v4"] }
 yasna = { version = "0.5.2", features = ["bit-vec", "num-bigint", "std", "time"] }
 zeroize = { version = "1.6.0", features = ["std", "zeroize_derive"] }
 zip = { version = "0.6.6", default-features = false, features = ["bzip2", "deflate"] }
@@ -149,7 +149,7 @@ ipnetwork = { version = "0.20.0", features = ["schemars"] }
 itertools = { version = "0.10.5" }
 lalrpop-util = { version = "0.19.12" }
 lazy_static = { version = "1.4.0", default-features = false, features = ["spin_no_std"] }
-libc = { version = "0.2.149", features = ["extra_traits"] }
+libc = { version = "0.2.150", features = ["extra_traits"] }
 log = { version = "0.4.20", default-features = false, features = ["std"] }
 managed = { version = "0.8.0", default-features = false, features = ["alloc", "map"] }
 memchr = { version = "2.6.3" }
@@ -194,7 +194,7 @@ unicode-bidi = { version = "0.3.13" }
 unicode-normalization = { version = "0.1.22" }
 unicode-xid = { version = "0.2.4" }
 usdt = { version = "0.3.5" }
-uuid = { version = "1.4.1", features = ["serde", "v4"] }
+uuid = { version = "1.5.0", features = ["serde", "v4"] }
 yasna = { version = "0.5.2", features = ["bit-vec", "num-bigint", "std", "time"] }
 zeroize = { version = "1.6.0", features = ["std", "zeroize_derive"] }
 zip = { version = "0.6.6", default-features = false, features = ["bzip2", "deflate"] }

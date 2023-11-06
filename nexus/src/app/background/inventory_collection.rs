@@ -191,8 +191,7 @@ mod test {
         let resolver = internal_dns::resolver::Resolver::new_from_addrs(
             cptestctx.logctx.log.clone(),
             &[cptestctx.internal_dns.dns_server.local_address()],
-        )
-        .unwrap();
+        );
 
         // Now we'll create our own copy of the background task and activate it
         // a bunch and make sure that it always creates a new collection and

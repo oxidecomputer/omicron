@@ -2155,11 +2155,11 @@ pub async fn verify_silo_dns_name(
                 .await
             {
                 Ok(result) => {
-                    let addrs: Vec<_> = result.iter().collect();
+                    let addrs: Vec<_> = result.iter().map(|a| a.0).collect();
                     if addrs.is_empty() {
                         false
                     } else {
-                        assert_eq!(addrs, [&nexus_ip]);
+                        assert_eq!(addrs, [nexus_ip]);
                         true
                     }
                 }
