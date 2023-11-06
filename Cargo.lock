@@ -10600,9 +10600,9 @@ dependencies = [
 
 [[package]]
 name = "zone"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b0545a42fbd7a81245726d54a0146cb4fd93882ebb6da50d60acf2e37394f198"
+checksum = "a62a428a79ea2224ce8ab05d6d8a21bdd7b4b68a8dbc1230511677a56e72ef22"
 dependencies = [
  "itertools 0.10.5",
  "thiserror",
@@ -10612,9 +10612,9 @@ dependencies = [
 
 [[package]]
 name = "zone_cfg_derive"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef224b009d070d3b1adb9e375fcf8ec2f1948a412c3bbf8755c0ef4e3f91ef94"
+checksum = "d5c4f01d3785e222d5aca11c9813e9c46b69abfe258756c99c9b628683626cc8"
 dependencies = [
  "heck 0.4.1",
  "proc-macro-error",
