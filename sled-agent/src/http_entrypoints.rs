@@ -739,9 +739,13 @@ async fn add_sled_to_initialized_rack(
     )
     .await
     .map_err(|e| {
-        HttpError::for_internal_error(format!(
-            "failed to add sled to rack cluster: {e}"
-        ))
+        let message = format!("Failed to add sled to rack cluster: {e}");
+        HttpError {
+            status_code: http::StatusCode::SERVICE_UNAVAILABLE,
+            error_code: None,
+            external_message: message.clone(),
+            internal_message: message,
+        }
     })?;
     Ok(HttpResponseUpdatedNoContent())
 }
