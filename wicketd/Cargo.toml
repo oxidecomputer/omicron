@@ -71,6 +71,7 @@ gateway-test-utils.workspace = true
 http.workspace = true
 installinator.workspace = true
 installinator-artifact-client.workspace = true
+maplit.workspace = true
 omicron-test-utils.workspace = true
 openapi-lint.workspace = true
 openapiv3.workspace = true
@@ -80,4 +81,5 @@ subprocess.workspace = true
 tar.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 tufaceous.workspace = true
+wicket.workspace = true
 wicketd-client.workspace = true

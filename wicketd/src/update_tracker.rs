@@ -227,24 +227,23 @@ impl UpdateTracker {
 
         let mut errors = Vec::new();
 
-        // Check that we're not already updating any of these SPs.
-        let update_in_progress: Vec<_> = sps
+        // Check that we don't already have any update state for these SPs.
+        let existing_updates: Vec<_> = sps
             .iter()
             .filter(|sp| {
                 // If we don't have any update data for this SP, it's not in
                 // progress.
                 //
-                // If we do, it's in progress if the task is not finished.
-                update_data
-                    .sp_update_data
-                    .get(sp)
-                    .map_or(false, |data| !data.task.is_finished())
+                // This used to check that the task was finished, but we changed
+                // that in favor of forcing users to clear update state before
+                // starting a new one.
+                update_data.sp_update_data.get(sp).is_some()
             })
             .copied()
             .collect();
 
-        if !update_in_progress.is_empty() {
-            errors.push(StartUpdateError::UpdateInProgress(update_in_progress));
+        if !existing_updates.is_empty() {
+            errors.push(StartUpdateError::ExistingUpdates(existing_updates));
         }
 
         let plan = update_data.artifact_store.current_plan();
@@ -709,8 +708,8 @@ impl UpdateTrackerData {
 pub enum StartUpdateError {
     #[error("no TUF repository available")]
     TufRepositoryUnavailable,
-    #[error("targets are already being updated: {}", sps_to_string(.0))]
-    UpdateInProgress(Vec<SpIdentifier>),
+    #[error("existing update data found (must clear state before starting): {}", sps_to_string(.0))]
+    ExistingUpdates(Vec<SpIdentifier>),
 }
 
 #[derive(Debug, Clone, Error, Eq, PartialEq)]
