@@ -9,11 +9,11 @@ use std::convert::From;
 use std::net::SocketAddrV6;
 use tokio::sync::mpsc::{self, Sender, UnboundedSender};
 use tokio::time::{interval, Duration, MissedTickBehavior};
+use wicket_common::rack_update::{SpIdentifier, SpType};
 use wicketd_client::types::{
     AbortUpdateOptions, ClearUpdateStateOptions, ClearUpdateStateParams,
     GetInventoryParams, GetInventoryResponse, GetLocationResponse,
-    IgnitionCommand, SpIdentifier, SpType, StartUpdateOptions,
-    StartUpdateParams,
+    IgnitionCommand, StartUpdateOptions, StartUpdateParams,
 };
 
 use crate::events::EventReportMap;
@@ -41,7 +41,7 @@ const WICKETD_POLL_INTERVAL: Duration = Duration::from_millis(500);
 // WICKETD_TIMEOUT used to be 1 second, but that might be too short (and in
 // particular might be responsible for
 // https://github.com/oxidecomputer/omicron/issues/3103).
-const WICKETD_TIMEOUT: Duration = Duration::from_secs(5);
+pub(crate) const WICKETD_TIMEOUT: Duration = Duration::from_secs(5);
 
 // Assume that these requests are periodic on the order of seconds or the
 // result of human interaction. In either case, this buffer should be plenty
@@ -200,7 +200,7 @@ impl WicketdManager {
                 create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
             let sp: SpIdentifier = component_id.into();
             let response = match update_client
-                .post_abort_update(sp.type_, sp.slot, &options)
+                .post_abort_update(&sp.type_, sp.slot, &options)
                 .await
             {
                 Ok(_) => Ok(()),
@@ -267,7 +267,7 @@ impl WicketdManager {
             let client = create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
             let sp: SpIdentifier = component_id.into();
             let res =
-                client.post_ignition_command(sp.type_, sp.slot, command).await;
+                client.post_ignition_command(&sp.type_, sp.slot, command).await;
             // We don't return errors or success values, as there's nobody to
             // return them to. How do we relay this result to the user?
             slog::info!(

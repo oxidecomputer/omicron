@@ -15,11 +15,11 @@ use toml_edit::InlineTable;
 use toml_edit::Item;
 use toml_edit::Table;
 use toml_edit::Value;
+use wicket_common::rack_update::SpType;
 use wicketd_client::types::BootstrapSledDescription;
 use wicketd_client::types::CurrentRssUserConfigInsensitive;
 use wicketd_client::types::IpRange;
 use wicketd_client::types::RackNetworkConfigV1;
-use wicketd_client::types::SpType;
 
 static TEMPLATE: &str = include_str!("config_template.toml");
 
@@ -317,6 +317,7 @@ mod tests {
     use omicron_common::api::internal::shared::RackNetworkConfigV1 as InternalRackNetworkConfig;
     use std::net::Ipv6Addr;
     use wicket_common::rack_setup::PutRssUserConfigInsensitive;
+    use wicket_common::rack_update::SpIdentifier;
     use wicketd_client::types::Baseboard;
     use wicketd_client::types::BgpConfig;
     use wicketd_client::types::BgpPeerConfig;
@@ -324,7 +325,6 @@ mod tests {
     use wicketd_client::types::PortFec;
     use wicketd_client::types::PortSpeed;
     use wicketd_client::types::RouteConfig;
-    use wicketd_client::types::SpIdentifier;
     use wicketd_client::types::SwitchLocation;
 
     fn put_config_from_current_config(

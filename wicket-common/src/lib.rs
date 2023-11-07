@@ -6,3 +6,4 @@
 
 pub mod rack_setup;
 pub mod update_events;
+pub mod rack_update;

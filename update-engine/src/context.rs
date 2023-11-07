@@ -108,7 +108,7 @@ impl<S: StepSpec> StepContext<S> {
                             component: failed_step.info.component.clone(),
                             id: failed_step.info.id.clone(),
                             description: failed_step.info.description.clone(),
-                            error: NestedError::new(
+                            error: NestedError::from_message_and_causes(
                                 message.clone(),
                                 causes.clone(),
                             ),
