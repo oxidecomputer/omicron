@@ -41,14 +41,9 @@ use illumos_utils::zone;
 use illumos_utils::zone::Zones;
 use omicron_common::ledger;
 use omicron_common::ledger::Ledger;
-use omicron_common::ledger::Ledgerable;
-use schemars::JsonSchema;
-use serde::Deserialize;
-use serde::Serialize;
 use sled_hardware::underlay;
 use sled_hardware::HardwareUpdate;
 use slog::Logger;
-use std::borrow::Cow;
 use std::io;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
@@ -225,11 +220,8 @@ impl Server {
             async {
                 let paths = sled_config_paths(storage_resources).await?;
                 let maybe_ledger =
-                    Ledger::<PersistentSledAgentRequest<'static>>::new(
-                        &startup_log,
-                        paths,
-                    )
-                    .await;
+                    Ledger::<StartSledAgentRequest>::new(&startup_log, paths)
+                        .await;
                 Ok::<_, StartError>(maybe_ledger)
             },
             &mut hardware_monitor,
@@ -288,11 +280,11 @@ impl Server {
 
         // Do we have a persistent sled-agent request that we need to restore?
         let state = if let Some(ledger) = maybe_ledger {
-            let sled_request = ledger.data();
+            let start_sled_agent_request = ledger.into_inner();
             let sled_agent_server = wait_while_handling_hardware_updates(
                 start_sled_agent(
                     &config,
-                    &sled_request.request,
+                    start_sled_agent_request,
                     &bootstore_handles.node_handle,
                     &managers,
                     &ddm_admin_localhost_client,
@@ -426,7 +418,7 @@ impl From<SledAgentServerStartError> for StartError {
 
 async fn start_sled_agent(
     config: &SledConfig,
-    request: &StartSledAgentRequest,
+    request: StartSledAgentRequest,
     bootstore: &bootstore::NodeHandle,
     managers: &BootstrapManagers,
     ddmd_client: &DdmAdminClient,
@@ -440,7 +432,7 @@ async fn start_sled_agent(
     // storage manager about keys, advertising prefixes, ...).
 
     // Initialize the secret retriever used by the `KeyManager`
-    if request.use_trust_quorum {
+    if request.body.use_trust_quorum {
         info!(log, "KeyManager: using lrtq secret retriever");
         let salt = request.hash_rack_id();
         LrtqOrHardcodedSecretRetriever::init_lrtq(salt, bootstore.clone())
@@ -463,7 +455,7 @@ async fn start_sled_agent(
     // we'll need to do something different here for underlay vs bootstrap
     // addrs (either talk to a differently-configured ddmd, or include info
     // indicating which kind of address we're advertising).
-    ddmd_client.advertise_prefix(request.subnet);
+    ddmd_client.advertise_prefix(request.body.subnet);
 
     // Server does not exist, initialize it.
     let server = SledAgentServer::start(
@@ -483,11 +475,7 @@ async fn start_sled_agent(
     // initialized on the next boot.
     let paths = sled_config_paths(managers.storage.resources()).await?;
 
-    let mut ledger = Ledger::new_with(
-        &log,
-        paths,
-        PersistentSledAgentRequest { request: Cow::Borrowed(request) },
-    );
+    let mut ledger = Ledger::new_with(&log, paths, request);
     ledger.commit().await?;
 
     Ok(server)
@@ -611,18 +599,6 @@ async fn wait_while_handling_hardware_updates<F: Future<Output = T>, T>(
     }
 }
 
-#[derive(Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
-struct PersistentSledAgentRequest<'a> {
-    request: Cow<'a, StartSledAgentRequest>,
-}
-
-impl<'a> Ledgerable for PersistentSledAgentRequest<'a> {
-    fn is_newer_than(&self, _other: &Self) -> bool {
-        true
-    }
-    fn generation_bump(&mut self) {}
-}
-
 /// Runs the OpenAPI generator, emitting the spec to stdout.
 pub fn run_openapi() -> Result<(), String> {
     http_api()
@@ -717,11 +693,12 @@ impl Inner {
         response_tx: oneshot::Sender<Result<SledAgentResponse, String>>,
         log: &Logger,
     ) {
+        let request_id = request.body.id;
         match &self.state {
             SledAgentState::Bootstrapping => {
                 let response = match start_sled_agent(
                     &self.config,
-                    &request,
+                    request,
                     &self.bootstore_handles.node_handle,
                     &self.managers,
                     &self.ddm_admin_localhost_client,
@@ -742,7 +719,7 @@ impl Inner {
                             .await;
 
                         self.state = SledAgentState::ServerStarted(server);
-                        Ok(SledAgentResponse { id: request.id })
+                        Ok(SledAgentResponse { id: request_id })
                     }
                     Err(err) => Err(format!("{err:#}")),
                 };
@@ -752,12 +729,12 @@ impl Inner {
                 info!(log, "Sled Agent already loaded");
 
                 let sled_address = request.sled_address();
-                let response = if server.id() != request.id {
+                let response = if server.id() != request_id {
                     Err(format!(
                         "Sled Agent already running with UUID {}, \
                                      but {} was requested",
                         server.id(),
-                        request.id,
+                        request_id,
                     ))
                 } else if &server.address().ip() != sled_address.ip() {
                     Err(format!(
@@ -873,6 +850,8 @@ impl Inner {
 
 #[cfg(test)]
 mod tests {
+    use crate::bootstrap::params::StartSledAgentRequestBody;
+
     use super::*;
     use omicron_common::address::Ipv6Subnet;
     use omicron_test_utils::dev::test_setup_log;
@@ -880,20 +859,21 @@ mod tests {
     use uuid::Uuid;
 
     #[tokio::test]
-    async fn persistent_sled_agent_request_serialization() {
+    async fn start_sled_agent_request_serialization() {
         let logctx =
             test_setup_log("persistent_sled_agent_request_serialization");
         let log = &logctx.log;
 
-        let request = PersistentSledAgentRequest {
-            request: Cow::Owned(StartSledAgentRequest {
+        let request = StartSledAgentRequest {
+            generation: 0,
+            schema_version: 1,
+            body: StartSledAgentRequestBody {
                 id: Uuid::new_v4(),
                 rack_id: Uuid::new_v4(),
-                ntp_servers: vec![String::from("test.pool.example.com")],
-                dns_servers: vec!["1.1.1.1".parse().unwrap()],
                 use_trust_quorum: false,
+                is_lrtq_learner: false,
                 subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
-            }),
+            },
         };
 
         let tempdir = camino_tempfile::Utf8TempDir::new().unwrap();
@@ -902,7 +882,7 @@ mod tests {
         let mut ledger = Ledger::new_with(log, paths.clone(), request.clone());
         ledger.commit().await.expect("Failed to write to ledger");
 
-        let ledger = Ledger::<PersistentSledAgentRequest>::new(log, paths)
+        let ledger = Ledger::<StartSledAgentRequest>::new(log, paths)
             .await
             .expect("Failed to read request");
 
@@ -912,9 +892,9 @@ mod tests {
 
     #[test]
     fn test_persistent_sled_agent_request_schema() {
-        let schema = schemars::schema_for!(PersistentSledAgentRequest<'_>);
+        let schema = schemars::schema_for!(StartSledAgentRequest);
         expectorate::assert_contents(
-            "../schema/persistent-sled-agent-request.json",
+            "../schema/start-sled-agent-request.json",
             &serde_json::to_string_pretty(&schema).unwrap(),
         );
     }
