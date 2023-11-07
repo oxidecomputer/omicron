@@ -17,6 +17,7 @@ use std::io::Read;
 use std::mem;
 use std::net::SocketAddrV6;
 use std::time::Duration;
+use tokio::runtime::Handle;
 use wicket_common::rack_setup::PutRssUserConfigInsensitive;
 use wicketd_client::types::CertificateUploadResponse;
 use wicketd_client::types::NewPasswordHash;
@@ -64,12 +65,10 @@ impl SetupArgs {
     pub(crate) fn exec(
         self,
         log: Logger,
+        handle: &Handle,
         wicketd_addr: SocketAddrV6,
     ) -> Result<()> {
-        let runtime =
-            tokio::runtime::Runtime::new().context("creating tokio runtime")?;
-
-        runtime.block_on(self.exec_impl(log, wicketd_addr))
+        handle.block_on(self.exec_impl(log, wicketd_addr))
     }
 
     async fn exec_impl(

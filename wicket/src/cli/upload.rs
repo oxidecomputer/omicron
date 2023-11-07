@@ -15,6 +15,7 @@ use buf_list::BufList;
 use clap::Args;
 use futures::StreamExt;
 use reqwest::Body;
+use tokio::runtime::Handle;
 use tokio_util::io::ReaderStream;
 
 use crate::wicketd::create_wicketd_client;
@@ -34,11 +35,10 @@ impl UploadArgs {
     pub(crate) fn exec(
         self,
         log: slog::Logger,
+        handle: &Handle,
         wicketd_addr: SocketAddrV6,
     ) -> Result<()> {
-        let runtime =
-            tokio::runtime::Runtime::new().context("creating tokio runtime")?;
-        runtime.block_on(self.do_upload(log, wicketd_addr))
+        handle.block_on(self.do_upload(log, wicketd_addr))
     }
 
     async fn do_upload(
