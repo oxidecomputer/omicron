@@ -26,6 +26,7 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
 use ipnetwork::IpNetwork;
+use nexus_db_model::ExternalIp;
 use nexus_db_model::IpPoolResourceType;
 use nexus_types::external_api::shared::IpRange;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -413,17 +414,82 @@ impl DataStore {
             })
     }
 
+    // TODO: move all that horrible ip searching logic in here
+    // TODO: write a test for this
+    // async fn ensure_no_ips_outstanding() {}
+
+    /// Delete IP pool assocation with resource unless there are outstanding
+    /// IPs allocated from the pool in the associated silo (or the fleet, if
+    /// it's a fleet association).
     pub async fn ip_pool_dissociate_resource(
         &self,
         opctx: &OpContext,
         // TODO: this could take the authz_pool, it's just more annoying to test that way
         ip_pool_id: Uuid,
+        // TODO: we need to know the resource type because it affects the IPs query
         resource_id: Uuid,
     ) -> DeleteResult {
+        use db::schema::external_ip;
+        use db::schema::instance;
         use db::schema::ip_pool_resource;
+        use db::schema::project;
         opctx
             .authorize(authz::Action::CreateChild, &authz::IP_POOL_LIST)
             .await?;
+
+        // We can only delete the association if there are no IPs allocated
+        // from this pool in the associated resource.
+
+        // most of the query is the same between silo and fleet
+        let base_query = |table: external_ip::table| {
+            table
+                .inner_join(
+                    instance::table
+                        .on(external_ip::parent_id.eq(instance::id.nullable())),
+                )
+                .filter(external_ip::is_service.eq(false))
+                .filter(external_ip::parent_id.is_not_null())
+                .filter(external_ip::time_deleted.is_null())
+                .filter(external_ip::ip_pool_id.eq(ip_pool_id))
+                .filter(instance::time_deleted.is_not_null())
+                .select(ExternalIp::as_select())
+                .limit(1)
+        };
+
+        let is_silo = true; // TODO obviously this is not how this works
+        let existing_ips = if is_silo {
+            // if it's a silo association, we also have to join through IPs to instances
+            // to projects to get the silo ID
+            base_query(external_ip::table)
+                .inner_join(
+                    project::table.on(instance::project_id.eq(project::id)),
+                )
+                .filter(project::silo_id.eq(resource_id))
+                .load_async::<ExternalIp>(
+                    &*self.pool_connection_authorized(opctx).await?,
+                )
+                .await
+        } else {
+            // If it's a fleet association, we can't delete it if there are any IPs
+            // allocated from the pool anywhere
+            base_query(external_ip::table)
+                .load_async::<ExternalIp>(
+                    &*self.pool_connection_authorized(opctx).await?,
+                )
+                .await
+        }
+        .map_err(|e| {
+            Error::internal_error(&format!(
+                "error checking for outstanding IPs before deleting IP pool association to resource: {:?}",
+                e
+            ))
+        })?;
+
+        if !existing_ips.is_empty() {
+            return Err(Error::InvalidRequest {
+                message: "IP addresses from this pool are in use in the associated silo/fleet".to_string()
+            });
+        }
 
         diesel::delete(ip_pool_resource::table)
             .filter(ip_pool_resource::ip_pool_id.eq(ip_pool_id))

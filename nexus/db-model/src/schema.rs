@@ -1221,6 +1221,11 @@ allow_tables_to_appear_in_same_query!(
 allow_tables_to_appear_in_same_query!(dns_zone, dns_version, dns_name);
 allow_tables_to_appear_in_same_query!(external_ip, service);
 
+// used for query to check whether an IP pool association has any allocated IPs before deleting
+allow_tables_to_appear_in_same_query!(external_ip, instance);
+allow_tables_to_appear_in_same_query!(external_ip, project);
+allow_tables_to_appear_in_same_query!(external_ip, ip_pool_resource);
+
 allow_tables_to_appear_in_same_query!(
     switch_port,
     switch_port_settings_route_config
