@@ -24,7 +24,7 @@ use crate::dev::poll;
 const CLICKHOUSE_TIMEOUT: Duration = Duration::from_secs(30);
 
 // Timeout used when starting a ClickHouse keeper subprocess.
-const CLICKHOUSE_KEEPER_TIMEOUT: Duration = Duration::from_secs(60);
+const CLICKHOUSE_KEEPER_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// A `ClickHouseInstance` is used to start and manage a ClickHouse single node server process.
 #[derive(Debug)]

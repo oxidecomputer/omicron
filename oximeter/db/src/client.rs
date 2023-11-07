@@ -3836,6 +3836,7 @@ mod tests {
         test_apply_one_schema_upgrade_impl(log, address, true).await;
 
         // TODO-cleanup: These should be arrays.
+        // See https://github.com/oxidecomputer/omicron/issues/4460.
         cluster
             .keeper_1
             .cleanup()
