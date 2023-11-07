@@ -59,7 +59,7 @@ function update_mgd {
     fi
     echo "Updating Maghemite mgd from: $TARGET_COMMIT"
     set -x
-    echo "$OUTPUT\n$OUTPUT_LINUX" > $MGD_PATH
+    printf "$OUTPUT\n$OUTPUT_LINUX" > $MGD_PATH
     set +x
 }
 
