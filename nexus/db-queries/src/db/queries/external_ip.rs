@@ -825,6 +825,8 @@ mod tests {
     use async_bb8_diesel::AsyncRunQueryDsl;
     use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
     use dropshot::test_util::LogContext;
+    use nexus_db_model::IpPoolResource;
+    use nexus_db_model::IpPoolResourceType;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::external_api::shared::IpRange;
     use omicron_common::address::NUM_SOURCE_NAT_PORTS;
@@ -862,32 +864,29 @@ mod tests {
             Self { logctx, opctx, db, db_datastore }
         }
 
-        async fn create_ip_pool(
-            &self,
-            name: &str,
-            range: IpRange,
-            _is_default: bool,
-        ) {
+        /// Create pool and associate with current silo
+        async fn create_ip_pool(&self, name: &str, range: IpRange) {
             let pool = IpPool::new(&IdentityMetadataCreateParams {
                 name: String::from(name).parse().unwrap(),
                 description: format!("ip pool {}", name),
             });
 
-            let conn = self
-                .db_datastore
-                .pool_connection_authorized(&self.opctx)
+            self.db_datastore
+                .ip_pool_create(&self.opctx, pool.clone())
                 .await
-                .unwrap();
+                .expect("Failed to create IP pool");
 
-            use crate::db::schema::ip_pool::dsl as ip_pool_dsl;
-            diesel::insert_into(ip_pool_dsl::ip_pool)
-                .values(pool.clone())
-                .execute_async(&*conn)
+            let silo_id = self.opctx.authn.silo_required().unwrap().id();
+            let association = IpPoolResource {
+                resource_id: silo_id,
+                resource_type: IpPoolResourceType::Silo,
+                ip_pool_id: pool.id(),
+                is_default: false,
+            };
+            self.db_datastore
+                .ip_pool_associate_resource(&self.opctx, association)
                 .await
-                .expect("Failed to create IP Pool");
-
-            let _silo_id = self.opctx.authn.silo_required().unwrap().id();
-            // TODO: associate with silo here to match previous behavior
+                .expect("Failed to associate IP dool with silo");
 
             self.initialize_ip_pool(name, range).await;
         }
@@ -1713,7 +1712,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 6),
         ))
         .unwrap();
-        context.create_ip_pool("p1", second_range, /*default*/ false).await;
+        context.create_ip_pool("p1", second_range).await;
 
         // Allocating an address on an instance in the second pool should be
         // respected, even though there are IPs available in the first.
@@ -1756,7 +1755,7 @@ mod tests {
         let last_address = Ipv4Addr::new(10, 0, 0, 6);
         let second_range =
             IpRange::try_from((first_address, last_address)).unwrap();
-        context.create_ip_pool("p1", second_range, /* default */ false).await;
+        context.create_ip_pool("p1", second_range).await;
 
         // Allocate all available addresses in the second pool.
         let instance_id = Uuid::new_v4();
