@@ -13,6 +13,7 @@
 mod command;
 mod preflight;
 mod rack_setup;
+mod rack_update;
 mod upload;
 
-pub use command::exec;
+pub(super) use command::{GlobalOpts, ShellApp};

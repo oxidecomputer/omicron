@@ -6,32 +6,64 @@
 
 use std::net::SocketAddrV6;
 
-use anyhow::{Context, Result};
-use clap::Parser;
+use anyhow::Result;
+use clap::{Args, ColorChoice, Parser, Subcommand};
 
 use super::{
-    preflight::PreflightArgs, rack_setup::SetupArgs, upload::UploadArgs,
+    preflight::PreflightArgs, rack_setup::SetupArgs,
+    rack_update::RackUpdateArgs, upload::UploadArgs,
 };
 
-pub fn exec(
-    log: slog::Logger,
-    args: &str,
-    wicketd_addr: SocketAddrV6,
-) -> Result<()> {
-    // The argument is in a quoted form, so split it using Unix shell semantics.
-    let args = shell_words::split(&args).with_context(|| {
-        format!("could not parse shell arguments from input {args}")
-    })?;
+/// An app that represents wicket started with arguments over ssh.
+#[derive(Debug, Parser)]
+pub(crate) struct ShellApp {
+    /// Global options.
+    #[clap(flatten)]
+    pub(crate) global_opts: GlobalOpts,
 
-    // parse_from uses the the first argument as the command name. Insert "wicket" as
-    // the command name.
-    let args = ShellCommand::parse_from(
-        std::iter::once("wicket".to_owned()).chain(args),
-    );
-    match args {
-        ShellCommand::UploadRepo(args) => args.exec(log, wicketd_addr),
-        ShellCommand::Setup(args) => args.exec(log, wicketd_addr),
-        ShellCommand::Preflight(args) => args.exec(log, wicketd_addr),
+    /// The command to run.
+    #[clap(subcommand)]
+    command: ShellCommand,
+}
+
+impl ShellApp {
+    pub(crate) fn exec(
+        self,
+        log: slog::Logger,
+        wicketd_addr: SocketAddrV6,
+    ) -> Result<()> {
+        match self.command {
+            ShellCommand::UploadRepo(args) => args.exec(log, wicketd_addr),
+            ShellCommand::RackUpdate(args) => {
+                args.exec(log, wicketd_addr, self.global_opts)
+            }
+            ShellCommand::Setup(args) => args.exec(log, wicketd_addr),
+            ShellCommand::Preflight(args) => args.exec(log, wicketd_addr),
+        }
+    }
+}
+
+#[derive(Debug, Args)]
+#[clap(next_help_heading = "Global options")]
+pub(crate) struct GlobalOpts {
+    /// Color output
+    ///
+    /// This may not be obeyed everywhere at the moment.
+    #[clap(long, value_enum, global = true, default_value_t)]
+    pub(crate) color: ColorChoice,
+}
+
+impl GlobalOpts {
+    /// Returns true if color should be used on standard error.
+    pub(crate) fn use_color(&self) -> bool {
+        match self.color {
+            ColorChoice::Auto => {
+                supports_color::on_cached(supports_color::Stream::Stderr)
+                    .is_some()
+            }
+            ColorChoice::Always => true,
+            ColorChoice::Never => false,
+        }
     }
 }
 
@@ -41,14 +73,20 @@ pub fn exec(
 /// ForceCommand. If no arguments are specified, wicket behaves like a TUI.
 /// However, if arguments are specified via SSH_ORIGINAL_COMMAND, wicketd
 /// accepts an upload command.
-#[derive(Debug, Parser)]
+#[derive(Debug, Subcommand)]
 enum ShellCommand {
     /// Upload a TUF repository to wicketd.
     #[command(visible_alias = "upload")]
     UploadRepo(UploadArgs),
+
+    /// Perform a rack update.
+    #[command(subcommand)]
+    RackUpdate(RackUpdateArgs),
+
     /// Interact with rack setup configuration.
     #[command(subcommand)]
     Setup(SetupArgs),
+
     /// Run checks prior to setting up the rack.
     #[command(subcommand)]
     Preflight(PreflightArgs),

@@ -3723,6 +3723,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "is_ci"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "616cde7c720bb2bb5824a224687d8f77bfd38922027f01d825cd7453be5099fb"
+
+[[package]]
 name = "itertools"
 version = "0.10.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8715,6 +8721,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "81cdd64d312baedb58e21336b31bc043b77e01cc99033ce76ef539f78e965ebc"
 
 [[package]]
+name = "supports-color"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d6398cde53adc3c4557306a96ce67b302968513830a77a95b2b17305d9719a89"
+dependencies = [
+ "is-terminal",
+ "is_ci",
+]
+
+[[package]]
 name = "swrite"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9733,6 +9749,7 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "cancel-safe-futures",
+ "clap 4.4.3",
  "debug-ignore",
  "derive-where",
  "either",
@@ -9749,8 +9766,11 @@ dependencies = [
  "serde_json",
  "serde_with",
  "slog",
+ "supports-color",
+ "swrite",
  "tokio",
  "tokio-stream",
+ "unicode-width",
  "uuid",
 ]
 
@@ -10110,6 +10130,7 @@ dependencies = [
  "ciborium",
  "clap 4.4.3",
  "crossterm 0.27.0",
+ "debug-ignore",
  "futures",
  "hex",
  "humantime",
@@ -10133,6 +10154,7 @@ dependencies = [
  "slog-async",
  "slog-envlogger",
  "slog-term",
+ "supports-color",
  "tempfile",
  "textwrap 0.16.0",
  "tokio",
@@ -10142,6 +10164,7 @@ dependencies = [
  "tui-tree-widget",
  "unicode-width",
  "update-engine",
+ "uuid",
  "wicket-common",
  "wicketd-client",
  "zeroize",

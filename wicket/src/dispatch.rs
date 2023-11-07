@@ -8,10 +8,11 @@ use std::net::{Ipv6Addr, SocketAddrV6};
 
 use anyhow::{bail, Context, Result};
 use camino::{Utf8Path, Utf8PathBuf};
+use clap::Parser;
 use omicron_common::{address::WICKETD_PORT, FileKv};
 use slog::Drain;
 
-use crate::Runner;
+use crate::{cli::ShellApp, Runner};
 
 pub fn exec() -> Result<()> {
     let wicketd_addr =
@@ -19,8 +20,21 @@ pub fn exec() -> Result<()> {
 
     // SSH_ORIGINAL_COMMAND contains additional arguments, if any.
     if let Ok(ssh_args) = std::env::var("SSH_ORIGINAL_COMMAND") {
-        let log = setup_log(&log_path()?, WithStderr::Yes)?;
-        crate::cli::exec(log, &ssh_args, wicketd_addr)
+        // The argument is in a quoted form, so split it using Unix shell semantics.
+        let args = shell_words::split(&ssh_args).with_context(|| {
+            format!("could not parse shell arguments from input {ssh_args}")
+        })?;
+        // parse_from uses the the first argument as the command name. Insert "wicket" as
+        // the command name.
+        let app = ShellApp::parse_from(
+            std::iter::once("wicket".to_owned()).chain(args),
+        );
+
+        let log = setup_log(
+            &log_path()?,
+            WithStderr::Yes { use_color: app.global_opts.use_color() },
+        )?;
+        app.exec(log, wicketd_addr)
     } else {
         // Do not expose log messages via standard error since they'll show up
         // on top of the TUI.
@@ -44,8 +58,8 @@ fn setup_log(
     let drain = slog_term::FullFormat::new(decorator).build().fuse();
 
     let drain = match with_stderr {
-        WithStderr::Yes => {
-            let stderr_drain = stderr_env_drain("RUST_LOG");
+        WithStderr::Yes { use_color } => {
+            let stderr_drain = stderr_env_drain("RUST_LOG", use_color);
             let drain = slog::Duplicate::new(drain, stderr_drain).fuse();
             slog_async::Async::new(drain).build().fuse()
         }
@@ -57,7 +71,7 @@ fn setup_log(
 
 #[derive(Copy, Clone, Debug)]
 enum WithStderr {
-    Yes,
+    Yes { use_color: bool },
     No,
 }
 
@@ -71,8 +85,17 @@ fn log_path() -> Result<Utf8PathBuf> {
     }
 }
 
-fn stderr_env_drain(env_var: &str) -> impl Drain<Ok = (), Err = slog::Never> {
-    let stderr_decorator = slog_term::TermDecorator::new().build();
+fn stderr_env_drain(
+    env_var: &str,
+    use_color: bool,
+) -> impl Drain<Ok = (), Err = slog::Never> {
+    let mut builder = slog_term::TermDecorator::new();
+    if use_color {
+        builder = builder.force_color();
+    } else {
+        builder = builder.force_plain();
+    }
+    let stderr_decorator = builder.build();
     let stderr_drain =
         slog_term::FullFormat::new(stderr_decorator).build().fuse();
     let mut builder = slog_envlogger::LogBuilder::new(stderr_drain);
