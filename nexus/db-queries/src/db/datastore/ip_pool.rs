@@ -147,10 +147,12 @@ impl DataStore {
             )
             .filter(ip_pool_resource::is_default.eq(true))
             .filter(ip_pool::time_deleted.is_null())
-            // TODO: order by most specific first so we get the most specific
-            // when we select the first one. alphabetical desc technically
-            // works but come on. won't work when we have project association
-            .order(ip_pool_resource::resource_type.desc())
+            // Order by most specific first so we get the most specific.
+            // resource_type is an enum in the DB and therefore gets its order
+            // from the definition; it's not lexicographic. So correctness here
+            // relies on the types being most-specific-first in the definition.
+            // There are tests for this.
+            .order(ip_pool_resource::resource_type.asc())
             .select(IpPool::as_select())
             .first_async::<IpPool>(
                 &*self.pool_connection_authorized(opctx).await?,
@@ -304,10 +306,6 @@ impl DataStore {
                     .and(ip_pool_resource::resource_id.eq(*INTERNAL_SILO_ID)),
             )
             .filter(ip_pool::time_deleted.is_null())
-            // TODO: order by most specific first so we get the most specific
-            // when we select the first one. alphabetical desc technically
-            // works but come on. won't work when we have project association
-            .order(ip_pool_resource::resource_type.desc())
             .select(IpPool::as_select())
             .load_async::<IpPool>(
                 &*self.pool_connection_authorized(opctx).await?,

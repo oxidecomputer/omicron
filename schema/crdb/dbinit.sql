@@ -1470,9 +1470,13 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_pool_by_name ON omicron.public.ip_pool 
 ) WHERE
     time_deleted IS NULL;
 
+-- The order here is most-specific first, and it matters because we use this
+-- fact to select the most specific default in the case where there is both a
+-- silo default and a fleet default. If we were to add a project type, it should
+-- be added before silo.
 CREATE TYPE IF NOT EXISTS omicron.public.ip_pool_resource_type AS ENUM (
-    'fleet',
-    'silo'
+    'silo',
+    'fleet'
 );
 
 -- join table associating IP pools with resources like fleet or silo
