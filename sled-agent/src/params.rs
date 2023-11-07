@@ -10,6 +10,8 @@ pub use crate::zone_bundle::ZoneBundleMetadata;
 pub use illumos_utils::opte::params::DhcpConfig;
 pub use illumos_utils::opte::params::VpcFirewallRule;
 pub use illumos_utils::opte::params::VpcFirewallRulesEnsureBody;
+use illumos_utils::zpool::ZpoolName;
+use omicron_common::api::external::Generation;
 use omicron_common::api::internal::nexus::{
     DiskRuntimeState, InstanceProperties, InstanceRuntimeState,
     SledInstanceState, VmmRuntimeState,
@@ -26,7 +28,6 @@ use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::time::Duration;
 use thiserror::Error;
 use uuid::Uuid;
-use illumos_utils::zpool::ZpoolName;
 
 /// Used to request a Disk state change
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
@@ -867,9 +868,11 @@ pub struct ServiceEnsureBody {
 }
 
 /// Describes the set of Omicron zones running on a sled
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[derive(
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+)]
 pub struct OmicronZonesConfig {
-    // XXX-dap generation number
+    pub generation: Generation,
     pub zones: Vec<OmicronZoneConfig>,
 }
 
@@ -916,9 +919,20 @@ impl OmicronZoneConfig {
 
         DatasetName::new(dataset.pool_name, dataset_kind)
     }
+
+    // XXX-dap TODO-doc
+    pub fn zone_name(&self) -> String {
+        illumos_utils::running_zone::InstalledZone::get_zone_name(
+            self.zone_type.zone_type_str(),
+            self.id,
+        )
+    }
 }
 
 /// Describes a persistent ZFS dataset associated with an Omicron zone
+#[derive(
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+)]
 pub struct OmicronZoneDataset {
     pool_name: ZpoolName,
 }
@@ -929,6 +943,9 @@ pub struct OmicronZoneDataset {
 /// XXX-dap ideally this would not be necessary at all!  Sled Agent shouldn't
 /// have to know about the things running on it, I think?
 /// XXX-dap commonize with ServiceType (well, probably remove ServiceType)
+#[derive(
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+)]
 pub enum OmicronZoneType {
     BoundaryNtp {
         address: SocketAddrV6,
@@ -1008,6 +1025,26 @@ pub enum OmicronZoneType {
     Oximeter {
         address: SocketAddrV6,
     },
+}
+
+impl OmicronZoneType {
+    // XXX-dap TODO-doc must match ZoneType
+    fn zone_type_str(&self) -> &str {
+        match self {
+            OmicronZoneType::BoundaryNtp { .. } => "ntp",
+            OmicronZoneType::InternalNtp { .. } => "ntp",
+
+            OmicronZoneType::Clickhouse { .. } => "clickhouse",
+            OmicronZoneType::ClickhouseKeeper { .. } => "clickhouse_keeper",
+            OmicronZoneType::CockroachDb { .. } => "cockroachdb",
+            OmicronZoneType::Crucible { .. } => "crucible",
+            OmicronZoneType::CruciblePantry { .. } => "crucible_pantry",
+            OmicronZoneType::ExternalDns { .. } => "external_dns",
+            OmicronZoneType::InternalDns { .. } => "internal_dns",
+            OmicronZoneType::Nexus { .. } => "nexus",
+            OmicronZoneType::Oximeter { .. } => "oximeter",
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]

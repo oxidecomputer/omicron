@@ -10,8 +10,8 @@ use crate::params::{
     CleanupContextUpdate, DiskEnsureBody, InstanceEnsureBody,
     InstancePutMigrationIdsBody, InstancePutStateBody,
     InstancePutStateResponse, InstanceUnregisterResponse, OmicronZonesConfig,
-    ServiceEnsureBody, SledRole, TimeSync, VpcFirewallRulesEnsureBody,
-    ZoneBundleId, ZoneBundleMetadata, Zpool,
+    SledRole, TimeSync, VpcFirewallRulesEnsureBody, ZoneBundleId,
+    ZoneBundleMetadata, Zpool,
 };
 use crate::sled_agent::Error as SledAgentError;
 use crate::zone_bundle;
@@ -314,11 +314,11 @@ async fn zones_list(
     method = GET,
     path = "/omicron_zones",
 }]
-async fn omicron_zones_put(
+async fn omicron_zones_get(
     rqctx: RequestContext<SledAgent>,
 ) -> Result<HttpResponseOk<OmicronZonesConfig>, HttpError> {
     let sa = rqctx.context();
-    Ok(sa.omicron_zones_list().await?)
+    Ok(HttpResponseOk(sa.omicron_zones_list().await?))
 }
 
 #[endpoint {

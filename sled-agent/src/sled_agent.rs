@@ -14,8 +14,8 @@ use crate::nexus::{NexusClientWithResolver, NexusRequestQueue};
 use crate::params::{
     DiskStateRequested, InstanceHardware, InstanceMigrationSourceParams,
     InstancePutStateResponse, InstanceStateRequested,
-    InstanceUnregisterResponse, OmicronZonesConfig, ServiceEnsureBody,
-    SledRole, TimeSync, VpcFirewallRule, ZoneBundleMetadata, Zpool,
+    InstanceUnregisterResponse, OmicronZonesConfig, SledRole, TimeSync,
+    VpcFirewallRule, ZoneBundleMetadata, Zpool,
 };
 use crate::services::{self, ServiceManager};
 use crate::storage_manager::{self, StorageManager};
@@ -57,7 +57,6 @@ use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::storage::dataset::DatasetName;
 #[cfg(not(test))]
 use illumos_utils::{dladm::Dladm, zone::Zones};
 #[cfg(test)]
@@ -724,7 +723,7 @@ impl SledAgent {
     pub async fn omicron_zones_list(
         &self,
     ) -> Result<OmicronZonesConfig, Error> {
-        Ok(self.inner.services.omicron_zones_list(requested_services).await?)
+        Ok(self.inner.services.omicron_zones_list().await?)
     }
 
     /// Ensures that the specific set of Omicron zones are running as configured
@@ -753,7 +752,7 @@ impl SledAgent {
 
         self.inner
             .services
-            .ensure_all_omicron_zones_persistent(requested_services)
+            .ensure_all_omicron_zones_persistent(requested_zones)
             .await?;
         Ok(())
     }

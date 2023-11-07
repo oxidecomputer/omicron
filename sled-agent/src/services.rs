@@ -20,10 +20,10 @@
 //! of what other services Nexus wants to have executing on the sled.
 //!
 //! To accomplish this, the following interfaces are exposed:
-//! - [ServiceManager::ensure_all_services_persistent] exposes an API to request
-//! a set of services that should persist beyond reboot.
+//! - [ServiceManager::ensure_all_omicron_zones_persistent] exposes an API to
+//!   request a set of Omicron zones that should persist beyond reboot.
 //! - [ServiceManager::activate_switch] exposes an API to specifically enable
-//! or disable (via [ServiceManager::deactivate_switch]) the switch zone.
+//!   or disable (via [ServiceManager::deactivate_switch]) the switch zone.
 
 use crate::bootstrap::early_networking::{
     EarlyNetworkSetup, EarlyNetworkSetupError,
@@ -31,9 +31,9 @@ use crate::bootstrap::early_networking::{
 use crate::bootstrap::BootstrapNetworking;
 use crate::config::SidecarRevision;
 use crate::params::{
-    DendriteAsic, ServiceEnsureBody, ServiceType, ServiceZoneRequest,
-    ServiceZoneService, TimeSync, ZoneBundleCause, ZoneBundleMetadata,
-    ZoneType,
+    DendriteAsic, OmicronZoneConfig, OmicronZonesConfig, ServiceEnsureBody,
+    ServiceType, ServiceZoneRequest, ServiceZoneService, TimeSync,
+    ZoneBundleCause, ZoneBundleMetadata, ZoneType,
 };
 use crate::profile::*;
 use crate::smf_helper::Service;
@@ -274,25 +274,25 @@ impl Config {
 }
 
 // The filename of the ledger, within the provided directory.
-const SERVICES_LEDGER_FILENAME_V1: &str = "services.json";
+const SERVICES_LEDGER_FILENAME: &str = "services.json";
 
 // A wrapper around `ZoneRequest`, which allows it to be serialized
 // to a JSON file.
 // XXX-dap TODO-doc
 #[derive(Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
-struct OldZoneRequests {
+struct AllZoneRequestsV1 {
     generation: Generation,
-    requests: Vec<ZoneRequest>,
+    requests: Vec<ZoneRequestV1>,
 }
 
-impl Default for OldZoneRequests {
+impl Default for AllZoneRequestsV1 {
     fn default() -> Self {
         Self { generation: Generation::new(), requests: vec![] }
     }
 }
 
-impl Ledgerable for OldZoneRequests {
-    fn is_newer_than(&self, other: &OldZoneRequests) -> bool {
+impl Ledgerable for AllZoneRequestsV1 {
+    fn is_newer_than(&self, other: &AllZoneRequestsV1) -> bool {
         self.generation >= other.generation
     }
 
@@ -304,11 +304,40 @@ impl Ledgerable for OldZoneRequests {
 // This struct represents the combo of "what zone did you ask for" + "where did
 // we put it".
 #[derive(Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
-struct ZoneRequest {
+struct ZoneRequestV1 {
     zone: ServiceZoneRequest,
     // TODO: Consider collapsing "root" into ServiceZoneRequest
     #[schemars(with = "String")]
     root: Utf8PathBuf,
+}
+
+// XXX-dap TODO-doc and maybe rename it?
+#[derive(Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+struct ZoneConfig {
+    zone: OmicronZoneConfig,
+    // TODO: Consider collapsing "root" into OmicronZoneConfig?
+    #[schemars(with = "String")]
+    root: Utf8PathBuf,
+}
+
+// The filename of the ledger, within the provided directory.
+const ZONES_LEDGER_FILENAME: &str = "omicron_zones.json";
+
+// XXX-dap TODO-doc
+#[derive(Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+struct ZonesConfig {
+    generation: Generation,
+    zones: Vec<ZoneConfig>,
+}
+
+impl Ledgerable for ZonesConfig {
+    fn is_newer_than(&self, other: &ZonesConfig) -> bool {
+        self.generation >= other.generation
+    }
+
+    fn generation_bump(&mut self) {
+        self.generation = self.generation.next();
+    }
 }
 
 struct Task {
@@ -475,14 +504,27 @@ impl ServiceManager {
 
     async fn all_service_ledgers(&self) -> Vec<Utf8PathBuf> {
         if let Some(dir) = self.inner.ledger_directory_override.get() {
-            return vec![dir.join(SERVICES_LEDGER_FILENAME_V1)];
+            return vec![dir.join(SERVICES_LEDGER_FILENAME)];
         }
         self.inner
             .storage
             .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
             .await
             .into_iter()
-            .map(|p| p.join(SERVICES_LEDGER_FILENAME_V1))
+            .map(|p| p.join(SERVICES_LEDGER_FILENAME))
+            .collect()
+    }
+
+    async fn all_omicron_zone_ledgers(&self) -> Vec<Utf8PathBuf> {
+        if let Some(dir) = self.inner.ledger_directory_override.get() {
+            return vec![dir.join(ZONES_LEDGER_FILENAME)];
+        }
+        self.inner
+            .storage
+            .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
+            .await
+            .into_iter()
+            .map(|p| p.join(ZONES_LEDGER_FILENAME))
             .collect()
     }
 
@@ -501,7 +543,7 @@ impl ServiceManager {
 
         let mut existing_zones = self.inner.zones.lock().await;
         let Some(mut ledger) =
-            Ledger::<OldZoneRequests>::new(log, ledger_paths).await
+            Ledger::<AllZoneRequestsV1>::new(log, ledger_paths).await
         else {
             info!(log, "Loading services - No services detected");
             return Ok(());
@@ -516,7 +558,7 @@ impl ServiceManager {
         let all_zones_request = self
             .ensure_all_services(
                 &mut existing_zones,
-                &OldZoneRequests::default(),
+                &AllZoneRequestsV1::default(),
                 ServiceEnsureBody {
                     services: services
                         .requests
@@ -1047,9 +1089,11 @@ impl ServiceManager {
             .add_instance(ServiceInstanceBuilder::new("default")))
     }
 
+    // XXX-dap need to update this thing to take some enum that's either the
+    // switch zone or one of the other zones
     async fn initialize_zone(
         &self,
-        request: &ZoneRequest,
+        request: &ZoneConfig,
         filesystems: &[zone::Fs],
         data_links: &[String],
     ) -> Result<RunningZone, Error> {
@@ -2077,7 +2121,59 @@ impl ServiceManager {
     async fn initialize_services_locked(
         &self,
         existing_zones: &mut BTreeMap<String, RunningZone>,
-        requests: &Vec<ZoneRequest>,
+        requests: &Vec<ZoneRequestV1>,
+    ) -> Result<(), Error> {
+        if let Some(name) = requests
+            .iter()
+            .map(|request| request.zone.zone_name())
+            .duplicates()
+            .next()
+        {
+            return Err(Error::BadServiceRequest {
+                service: name,
+                message: "Should not initialize zone twice".to_string(),
+            });
+        }
+
+        let futures = requests.iter().map(|request| {
+            async move {
+                self.initialize_zone(
+                    request,
+                    // filesystems=
+                    &[],
+                    // data_links=
+                    &[],
+                )
+                .await
+                .map_err(|error| (request.zone.zone_name(), error))
+            }
+        });
+        let results = futures::future::join_all(futures).await;
+
+        let mut errors = Vec::new();
+        for result in results {
+            match result {
+                Ok(zone) => {
+                    existing_zones.insert(zone.name().to_string(), zone);
+                }
+                Err((zone_name, error)) => {
+                    errors.push((zone_name, Box::new(error)));
+                }
+            }
+        }
+
+        if !errors.is_empty() {
+            return Err(Error::ZoneInitialize(errors));
+        }
+
+        Ok(())
+    }
+
+    // Populates `existing_zones` according to the requests in `services`.
+    async fn initialize_omicron_zones_locked(
+        &self,
+        existing_zones: &mut BTreeMap<String, RunningZone>,
+        requests: &Vec<ZoneConfig>,
     ) -> Result<(), Error> {
         if let Some(name) = requests
             .iter()
@@ -2152,6 +2248,46 @@ impl ServiceManager {
         Err(BundleError::NoSuchZone { name: name.to_string() })
     }
 
+    /// Returns the current Omicron zone configuration
+    pub async fn omicron_zones_list(
+        &self,
+    ) -> Result<OmicronZonesConfig, Error> {
+        let log = &self.inner.log;
+
+        // We need to take the lock in order for the information in the ledger
+        // to be up-to-date.
+        let _existing_zones = self.inner.zones.lock().await;
+
+        // Read the existing set of services from the ledger.
+        let zone_ledger_paths = self.all_omicron_zone_ledgers().await;
+        let ledger =
+            match Ledger::<ZonesConfig>::new(log, zone_ledger_paths.clone())
+                .await
+            {
+                Some(ledger) => ledger,
+                None => Ledger::<ZonesConfig>::new_with(
+                    log,
+                    zone_ledger_paths.clone(),
+                    ZonesConfig {
+                        // XXX-dap this means Nexus must use a newer generation
+                        // for its first one
+                        generation: Generation::new(),
+                        zones: vec![],
+                    },
+                ),
+            };
+
+        let ledger_zone_config = ledger.data();
+        Ok(OmicronZonesConfig {
+            generation: ledger_zone_config.generation,
+            zones: ledger_zone_config
+                .zones
+                .iter()
+                .map(|z| z.zone.clone())
+                .collect(),
+        })
+    }
+
     /// Ensures that particular Omicron zones are running
     ///
     /// These services will be instantiated by this function, and will be
@@ -2166,90 +2302,184 @@ impl ServiceManager {
         let mut existing_zones = self.inner.zones.lock().await;
 
         // Read the existing set of services from the ledger.
-        let service_paths = self.all_service_ledgers().await;
+        let zone_ledger_paths = self.all_omicron_zone_ledgers().await;
         let mut ledger =
-            match Ledger::<OldZoneRequests>::new(log, service_paths.clone())
+            match Ledger::<ZonesConfig>::new(log, zone_ledger_paths.clone())
                 .await
             {
                 Some(ledger) => ledger,
-                None => Ledger::<OldZoneRequests>::new_with(
+                None => Ledger::<ZonesConfig>::new_with(
                     log,
-                    service_paths.clone(),
-                    OldZoneRequests::default(),
+                    zone_ledger_paths.clone(),
+                    ZonesConfig {
+                        // XXX-dap this means Nexus must use a newer generation
+                        // for its first one
+                        generation: Generation::new(),
+                        zones: vec![],
+                    },
                 ),
             };
-        let ledger_zone_requests = ledger.data_mut();
 
-        let mut zone_requests = self
-            .ensure_all_services(
+        let ledger_zone_config = ledger.data_mut();
+
+        let new_config = self
+            .ensure_all_omicron_zones(
                 &mut existing_zones,
-                ledger_zone_requests,
+                ledger_zone_config,
                 request,
             )
             .await?;
 
-        // Update the services in the ledger and write it back to both M.2s
-        ledger_zone_requests.requests.clear();
-        ledger_zone_requests.requests.append(&mut zone_requests.requests);
+        // Update the zones in the ledger and write it back to both M.2s
+        *ledger_zone_config = new_config;
         ledger.commit().await?;
 
         Ok(())
     }
 
-    /// Ensures that particular services should be initialized.
-    ///
-    /// These services will be instantiated by this function, and will be
-    /// recorded to a local file to ensure they start automatically on next
-    /// boot.
-    pub async fn ensure_all_services_persistent(
+    // Ensures that only the following Omicron zones are running.
+    //
+    // Does not record any information such that these services are
+    // re-instantiated on boot.
+    async fn ensure_all_omicron_zones(
         &self,
-        request: ServiceEnsureBody,
-    ) -> Result<(), Error> {
+        // XXX-dap drop MutexGuard part
+        existing_zones: &mut MutexGuard<'_, BTreeMap<String, RunningZone>>,
+        old_config: &ZonesConfig,
+        new_request: OmicronZonesConfig,
+    ) -> Result<ZonesConfig, Error> {
         let log = &self.inner.log;
 
-        let mut existing_zones = self.inner.zones.lock().await;
+        // Do some data-normalization to ensure we can compare the "requested
+        // set" vs the "existing set" as HashSets.
+        // XXX-dap can we not skip this clone?
+        let old_zones_set: HashSet<OmicronZoneConfig> =
+            HashSet::from_iter(old_config.zones.iter().map(|z| z.zone.clone()));
+        let requested_zones_set =
+            HashSet::from_iter(new_request.zones.into_iter());
 
-        // Read the existing set of services from the ledger.
-        let service_paths = self.all_service_ledgers().await;
-        let mut ledger =
-            match Ledger::<OldZoneRequests>::new(log, service_paths.clone())
-                .await
-            {
-                Some(ledger) => ledger,
-                None => Ledger::<OldZoneRequests>::new_with(
+        let zones_to_be_removed =
+            old_zones_set.difference(&requested_zones_set);
+        let zones_to_be_added = requested_zones_set.difference(&old_zones_set);
+
+        // Destroy zones that should not be running
+        for zone in zones_to_be_removed {
+            let expected_zone_name = zone.zone_name();
+            if let Some(mut zone) = existing_zones.remove(&expected_zone_name) {
+                debug!(
                     log,
-                    service_paths.clone(),
-                    OldZoneRequests::default(),
-                ),
-            };
-        let ledger_zone_requests = ledger.data_mut();
+                    "removing an existing zone";
+                    "zone_name" => &expected_zone_name,
+                );
+                if let Err(e) = self
+                    .inner
+                    .zone_bundler
+                    .create(&zone, ZoneBundleCause::UnexpectedZone)
+                    .await
+                {
+                    error!(
+                        log,
+                        "Failed to take bundle of unexpected zone";
+                        "zone_name" => &expected_zone_name,
+                        "reason" => ?e,
+                    );
+                }
+                if let Err(e) = zone.stop().await {
+                    error!(log, "Failed to stop zone {}: {e}", zone.name());
+                }
+            } else {
+                warn!(log, "Expected to remove zone, but could not find it");
+            }
+        }
 
-        let mut zone_requests = self
-            .ensure_all_services(
-                &mut existing_zones,
-                ledger_zone_requests,
-                request,
-            )
+        // Create zones that should be running
+        let all_u2_roots =
+            self.inner.storage.all_u2_mountpoints(ZONE_DATASET).await;
+        let mut new_zones = Vec::new();
+        for zone in zones_to_be_added {
+            // Check if we think the zone should already be running
+            let name = zone.zone_name();
+            if existing_zones.contains_key(&name) {
+                // Make sure the zone actually exists in the right state too
+                match Zones::find(&name).await {
+                    Ok(Some(zone)) if zone.state() == zone::State::Running => {
+                        info!(log, "skipping running zone"; "zone" => &name);
+                        continue;
+                    }
+                    _ => {
+                        // Mismatch between SA's view and reality, let's try to
+                        // clean up any remanants and try initialize it again
+                        warn!(
+                            log,
+                            "expected to find existing zone in running state";
+                            "zone" => &name,
+                        );
+                        if let Err(e) =
+                            existing_zones.remove(&name).unwrap().stop().await
+                        {
+                            error!(
+                                log,
+                                "Failed to stop zone";
+                                "zone" => &name,
+                                "error" => %e,
+                            );
+                        }
+                    }
+                }
+            }
+
+            // For each new zone request, we pick an arbitrary U.2 to store
+            // the zone filesystem. Note: This isn't known to Nexus right now,
+            // so it's a local-to-sled decision.
+            //
+            // This is (currently) intentional, as the zone filesystem should
+            // be destroyed between reboots.
+            let mut rng = rand::thread_rng();
+            let root = all_u2_roots
+                .choose(&mut rng)
+                .ok_or_else(|| Error::U2NotFound)?
+                .clone();
+
+            // XXX-dap XXX XXX XXX working here
+            // So: the current problem is: how to store the root we choose?
+            // (and maybe: is this the right place to choose it?)  I opted not
+            // to put this into the ledger structure because I hoped I wouldn't
+            // need it.  But I think we might need it because:
+            // - we need to tear down this filesystem on sled agent startup when
+            //   we wipe everything (I assume this is how we do this -- haven't
+            //   verified it)
+            // XXX-dap another thing I noticed here is that the old code
+            // instantiated a whole AllZoneRequestsV1 only for the "requests"
+            // field (I think).  We return the whole thing but the caller only
+            // uses "requests".  We also pass only "requests" down to
+            // initialize_services_locked().
+            // XXX-dap next step will be to update initialize_services_locked().
+            new_zones.push(ZoneConfig { zone: zone.clone(), root });
+        }
+
+        self.initialize_omicron_zones_locked(existing_zones, &new_zones)
             .await?;
 
-        // Update the services in the ledger and write it back to both M.2s
-        ledger_zone_requests.requests.clear();
-        ledger_zone_requests.requests.append(&mut zone_requests.requests);
-        ledger.commit().await?;
+        for old_zone in &old_config.zones {
+            if requested_zones_set.contains(&old_zone.zone) {
+                new_zones.push(old_zone.clone());
+            }
+        }
 
-        Ok(())
+        Ok(ZonesConfig { generation: new_request.generation, zones: new_zones })
     }
 
     // Ensures that only the following services are running.
     //
     // Does not record any information such that these services are
     // re-instantiated on boot.
+    // XXX-dap remove me (change callers to use ensure_all_omicron_zones())
     async fn ensure_all_services(
         &self,
         existing_zones: &mut MutexGuard<'_, BTreeMap<String, RunningZone>>,
-        old_request: &OldZoneRequests,
+        old_request: &AllZoneRequestsV1,
         request: ServiceEnsureBody,
-    ) -> Result<OldZoneRequests, Error> {
+    ) -> Result<AllZoneRequestsV1, Error> {
         let log = &self.inner.log;
 
         // Do some data-normalization to ensure we can compare the "requested
@@ -2296,7 +2526,7 @@ impl ServiceManager {
         }
 
         // Create zones that should be running
-        let mut zone_requests = OldZoneRequests::default();
+        let mut zone_requests = AllZoneRequestsV1::default();
         let all_u2_roots =
             self.inner.storage.all_u2_mountpoints(ZONE_DATASET).await;
         for zone in zones_to_be_added {
@@ -2344,7 +2574,7 @@ impl ServiceManager {
 
             zone_requests
                 .requests
-                .push(ZoneRequest { zone: zone.clone(), root });
+                .push(ZoneRequestV1 { zone: zone.clone(), root });
         }
         self.initialize_services_locked(
             existing_zones,
@@ -3033,7 +3263,7 @@ impl ServiceManager {
                 .clone()
         };
 
-        let request = ZoneRequest { zone: request.clone(), root };
+        let request = ZoneRequestV1 { zone: request.clone(), root };
         let zone =
             self.initialize_zone(&request, filesystems, data_links).await?;
         *sled_zone =
@@ -3190,6 +3420,7 @@ mod test {
     async fn ensure_new_service(mgr: &ServiceManager, id: Uuid) {
         let _expectations = expect_new_service();
 
+        // XXX-dap replace with call to ensure_all_omicron_zones_persistent
         mgr.ensure_all_services_persistent(ServiceEnsureBody {
             services: vec![ServiceZoneRequest {
                 id,
@@ -3216,6 +3447,7 @@ mod test {
     // Prepare to call "ensure" for a service which already exists. We should
     // return the service without actually installing a new zone.
     async fn ensure_existing_service(mgr: &ServiceManager, id: Uuid) {
+        // XXX-dap replace with call to ensure_all_omicron_zones_persistent
         mgr.ensure_all_services_persistent(ServiceEnsureBody {
             services: vec![ServiceZoneRequest {
                 id,
@@ -3544,7 +3776,7 @@ mod test {
         // Next, delete the ledger. This means the service we just created will
         // not be remembered on the next initialization.
         std::fs::remove_file(
-            test_config.config_dir.path().join(SERVICES_LEDGER_FILENAME_V1),
+            test_config.config_dir.path().join(SERVICES_LEDGER_FILENAME),
         )
         .unwrap();
 
@@ -3595,7 +3827,7 @@ mod test {
 
     #[test]
     fn test_all_zone_requests_schema() {
-        let schema = schemars::schema_for!(OldZoneRequests);
+        let schema = schemars::schema_for!(AllZoneRequestsV1);
         expectorate::assert_contents(
             "../schema/all-zone-requests.json",
             &serde_json::to_string_pretty(&schema).unwrap(),
