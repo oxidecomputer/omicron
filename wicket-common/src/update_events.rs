@@ -169,7 +169,7 @@ pub enum UpdateTerminalError {
         #[source]
         error: anyhow::Error,
     },
-    #[error("failed to find correctly-singed RoT image")]
+    #[error("failed to find correctly-signed RoT image")]
     FailedFindingSignedRotImage {
         #[source]
         error: anyhow::Error,
