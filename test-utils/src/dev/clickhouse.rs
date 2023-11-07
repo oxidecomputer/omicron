@@ -340,12 +340,12 @@ impl ClickHouseCluster {
         // Start all Keeper coordinator nodes
         let keeper_amount = 3;
         let mut keepers =
-            Self::new_keeper_set(keeper_amount, keeper_config.clone()).await?;
+            Self::new_keeper_set(keeper_amount, &keeper_config).await?;
 
         // Start all replica nodes
         let replica_amount = 2;
         let mut replicas =
-            Self::new_replica_set(replica_amount, replica_config.clone())
+            Self::new_replica_set(replica_amount, &replica_config)
                 .await?;
 
         let r1 = replicas.swap_remove(0);
@@ -367,7 +367,7 @@ impl ClickHouseCluster {
 
     pub async fn new_keeper_set(
         keeper_amount: u16,
-        config_path: PathBuf,
+        config_path: &PathBuf,
     ) -> Result<Vec<ClickHouseInstance>, anyhow::Error> {
         let mut keepers = vec![];
 
@@ -392,7 +392,7 @@ impl ClickHouseCluster {
 
     pub async fn new_replica_set(
         replica_amount: u16,
-        config_path: PathBuf,
+        config_path: &PathBuf,
     ) -> Result<Vec<ClickHouseInstance>, anyhow::Error> {
         let mut replicas = vec![];
 

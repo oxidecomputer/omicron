@@ -338,12 +338,11 @@ async fn start_replicated_cluster() -> Result<(), anyhow::Error> {
     let mut signal_stream = signals.fuse();
 
     // Start the database server and keeper processes
-    let cur_dir = std::env::current_dir().unwrap();
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let replica_config =
-        cur_dir.as_path().join("oximeter/db/src/configs/replica_config.xml");
-    let cur_dir = std::env::current_dir().unwrap();
+        manifest_dir.as_path().join("../../oximeter/db/src/configs/replica_config.xml");
     let keeper_config =
-        cur_dir.as_path().join("oximeter/db/src/configs/keeper_config.xml");
+        manifest_dir.as_path().join("../../oximeter/db/src/configs/keeper_config.xml");
 
     let mut cluster =
         dev::clickhouse::ClickHouseCluster::new(replica_config, keeper_config)
@@ -356,7 +355,8 @@ async fn start_replicated_cluster() -> Result<(), anyhow::Error> {
     );
     let pid_error_msg = "Failed to get process PID, it may not have started";
     println!(
-        "omicron-dev: ClickHouse cluster is running with PIDs: {}, {}, {}, {}, {}",
+        "omicron-dev: ClickHouse cluster is running with: server PIDs = [{}, {}] \
+        and keeper PIDs = [{}, {}, {}]",
         cluster.replica_1
             .pid()
             .expect(pid_error_msg),
