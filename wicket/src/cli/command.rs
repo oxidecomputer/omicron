@@ -8,7 +8,6 @@ use std::net::SocketAddrV6;
 
 use anyhow::Result;
 use clap::{Args, ColorChoice, Parser, Subcommand};
-use tokio::runtime::Handle;
 
 use super::{
     preflight::PreflightArgs, rack_setup::SetupArgs,
@@ -34,24 +33,21 @@ pub(crate) struct ShellApp {
 }
 
 impl ShellApp {
-    pub(crate) fn exec(
+    pub(crate) async fn exec(
         self,
         log: slog::Logger,
-        handle: &Handle,
         wicketd_addr: SocketAddrV6,
         output: CommandOutput<'_>,
     ) -> Result<()> {
         match self.command {
             ShellCommand::UploadRepo(args) => {
-                args.exec(log, handle, wicketd_addr)
+                args.exec(log, wicketd_addr).await
             }
             ShellCommand::RackUpdate(args) => {
-                args.exec(log, handle, wicketd_addr, self.global_opts, output)
+                args.exec(log, wicketd_addr, self.global_opts, output).await
             }
-            ShellCommand::Setup(args) => args.exec(log, handle, wicketd_addr),
-            ShellCommand::Preflight(args) => {
-                args.exec(log, handle, wicketd_addr)
-            }
+            ShellCommand::Setup(args) => args.exec(log, wicketd_addr).await,
+            ShellCommand::Preflight(args) => args.exec(log, wicketd_addr).await,
         }
     }
 }

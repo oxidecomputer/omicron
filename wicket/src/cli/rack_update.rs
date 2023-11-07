@@ -15,7 +15,7 @@ use std::{
 use anyhow::{anyhow, bail, Context, Result};
 use clap::{Args, Subcommand};
 use slog::Logger;
-use tokio::{runtime::Handle, sync::watch, task::JoinHandle};
+use tokio::{sync::watch, task::JoinHandle};
 use update_engine::display::{GroupDisplay, LineDisplayStyles};
 use wicket_common::update_events::EventReport;
 use wicketd_client::types::StartUpdateParams;
@@ -37,18 +37,7 @@ pub(crate) enum RackUpdateArgs {
 }
 
 impl RackUpdateArgs {
-    pub(crate) fn exec(
-        self,
-        log: Logger,
-        handle: &Handle,
-        wicketd_addr: SocketAddrV6,
-        global_opts: GlobalOpts,
-        output: CommandOutput<'_>,
-    ) -> Result<()> {
-        handle.block_on(self.exec_impl(log, wicketd_addr, global_opts, output))
-    }
-
-    async fn exec_impl(
+    pub(crate) async fn exec(
         self,
         log: Logger,
         wicketd_addr: SocketAddrV6,

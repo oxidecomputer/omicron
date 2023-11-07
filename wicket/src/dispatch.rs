@@ -11,7 +11,6 @@ use camino::{Utf8Path, Utf8PathBuf};
 use clap::Parser;
 use omicron_common::{address::WICKETD_PORT, FileKv};
 use slog::Drain;
-use tokio::runtime::Handle;
 
 use crate::{
     cli::{CommandOutput, ShellApp},
@@ -31,12 +30,11 @@ pub fn exec() -> Result<()> {
 
             let runtime = tokio::runtime::Runtime::new()
                 .context("creating tokio runtime")?;
-            exec_with_args(
-                runtime.handle(),
+            runtime.block_on(exec_with_args(
                 wicketd_addr,
                 args,
                 OutputKind::Terminal,
-            )
+            ))
         }
         Err(_) => {
             // Do not expose log messages via standard error since they'll show up
@@ -60,11 +58,7 @@ pub enum OutputKind<'a> {
     Terminal,
 }
 
-pub fn exec_with_args<S>(
-    // While it is possible to obtain an ambient handle, it's more type-safe to
-    // require that users explicitly pass in a handle (this means that they're
-    // more likely to have created a runtime).
-    handle: &Handle,
+pub async fn exec_with_args<S>(
     wicketd_addr: SocketAddrV6,
     args: Vec<S>,
     output: OutputKind<'_>,
@@ -81,7 +75,7 @@ where
     match output {
         OutputKind::Captured { log, stdout, stderr } => {
             let output = CommandOutput { stdout, stderr };
-            app.exec(log, handle, wicketd_addr, output)
+            app.exec(log, wicketd_addr, output).await
         }
         OutputKind::Terminal => {
             let log = setup_log(
@@ -92,7 +86,7 @@ where
             let mut stderr = std::io::stderr();
             let output =
                 CommandOutput { stdout: &mut stdout, stderr: &mut stderr };
-            app.exec(log, handle, wicketd_addr, output)
+            app.exec(log, wicketd_addr, output).await
         }
     }
 }
