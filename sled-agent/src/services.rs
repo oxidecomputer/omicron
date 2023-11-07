@@ -274,24 +274,25 @@ impl Config {
 }
 
 // The filename of the ledger, within the provided directory.
-const SERVICES_LEDGER_FILENAME: &str = "services.json";
+const SERVICES_LEDGER_FILENAME_V1: &str = "services.json";
 
 // A wrapper around `ZoneRequest`, which allows it to be serialized
 // to a JSON file.
+// XXX-dap TODO-doc
 #[derive(Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
-struct AllZoneRequests {
+struct OldZoneRequests {
     generation: Generation,
     requests: Vec<ZoneRequest>,
 }
 
-impl Default for AllZoneRequests {
+impl Default for OldZoneRequests {
     fn default() -> Self {
         Self { generation: Generation::new(), requests: vec![] }
     }
 }
 
-impl Ledgerable for AllZoneRequests {
-    fn is_newer_than(&self, other: &AllZoneRequests) -> bool {
+impl Ledgerable for OldZoneRequests {
+    fn is_newer_than(&self, other: &OldZoneRequests) -> bool {
         self.generation >= other.generation
     }
 
@@ -474,14 +475,14 @@ impl ServiceManager {
 
     async fn all_service_ledgers(&self) -> Vec<Utf8PathBuf> {
         if let Some(dir) = self.inner.ledger_directory_override.get() {
-            return vec![dir.join(SERVICES_LEDGER_FILENAME)];
+            return vec![dir.join(SERVICES_LEDGER_FILENAME_V1)];
         }
         self.inner
             .storage
             .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
             .await
             .into_iter()
-            .map(|p| p.join(SERVICES_LEDGER_FILENAME))
+            .map(|p| p.join(SERVICES_LEDGER_FILENAME_V1))
             .collect()
     }
 
@@ -500,7 +501,7 @@ impl ServiceManager {
 
         let mut existing_zones = self.inner.zones.lock().await;
         let Some(mut ledger) =
-            Ledger::<AllZoneRequests>::new(log, ledger_paths).await
+            Ledger::<OldZoneRequests>::new(log, ledger_paths).await
         else {
             info!(log, "Loading services - No services detected");
             return Ok(());
@@ -515,7 +516,7 @@ impl ServiceManager {
         let all_zones_request = self
             .ensure_all_services(
                 &mut existing_zones,
-                &AllZoneRequests::default(),
+                &OldZoneRequests::default(),
                 ServiceEnsureBody {
                     services: services
                         .requests
@@ -2151,6 +2152,50 @@ impl ServiceManager {
         Err(BundleError::NoSuchZone { name: name.to_string() })
     }
 
+    /// Ensures that particular Omicron zones are running
+    ///
+    /// These services will be instantiated by this function, and will be
+    /// recorded to a local file to ensure they start automatically on next
+    /// boot.
+    pub async fn ensure_all_omicron_zones_persistent(
+        &self,
+        request: OmicronZonesConfig,
+    ) -> Result<(), Error> {
+        let log = &self.inner.log;
+
+        let mut existing_zones = self.inner.zones.lock().await;
+
+        // Read the existing set of services from the ledger.
+        let service_paths = self.all_service_ledgers().await;
+        let mut ledger =
+            match Ledger::<OldZoneRequests>::new(log, service_paths.clone())
+                .await
+            {
+                Some(ledger) => ledger,
+                None => Ledger::<OldZoneRequests>::new_with(
+                    log,
+                    service_paths.clone(),
+                    OldZoneRequests::default(),
+                ),
+            };
+        let ledger_zone_requests = ledger.data_mut();
+
+        let mut zone_requests = self
+            .ensure_all_services(
+                &mut existing_zones,
+                ledger_zone_requests,
+                request,
+            )
+            .await?;
+
+        // Update the services in the ledger and write it back to both M.2s
+        ledger_zone_requests.requests.clear();
+        ledger_zone_requests.requests.append(&mut zone_requests.requests);
+        ledger.commit().await?;
+
+        Ok(())
+    }
+
     /// Ensures that particular services should be initialized.
     ///
     /// These services will be instantiated by this function, and will be
@@ -2167,14 +2212,14 @@ impl ServiceManager {
         // Read the existing set of services from the ledger.
         let service_paths = self.all_service_ledgers().await;
         let mut ledger =
-            match Ledger::<AllZoneRequests>::new(log, service_paths.clone())
+            match Ledger::<OldZoneRequests>::new(log, service_paths.clone())
                 .await
             {
                 Some(ledger) => ledger,
-                None => Ledger::<AllZoneRequests>::new_with(
+                None => Ledger::<OldZoneRequests>::new_with(
                     log,
                     service_paths.clone(),
-                    AllZoneRequests::default(),
+                    OldZoneRequests::default(),
                 ),
             };
         let ledger_zone_requests = ledger.data_mut();
@@ -2202,9 +2247,9 @@ impl ServiceManager {
     async fn ensure_all_services(
         &self,
         existing_zones: &mut MutexGuard<'_, BTreeMap<String, RunningZone>>,
-        old_request: &AllZoneRequests,
+        old_request: &OldZoneRequests,
         request: ServiceEnsureBody,
-    ) -> Result<AllZoneRequests, Error> {
+    ) -> Result<OldZoneRequests, Error> {
         let log = &self.inner.log;
 
         // Do some data-normalization to ensure we can compare the "requested
@@ -2251,7 +2296,7 @@ impl ServiceManager {
         }
 
         // Create zones that should be running
-        let mut zone_requests = AllZoneRequests::default();
+        let mut zone_requests = OldZoneRequests::default();
         let all_u2_roots =
             self.inner.storage.all_u2_mountpoints(ZONE_DATASET).await;
         for zone in zones_to_be_added {
@@ -3499,7 +3544,7 @@ mod test {
         // Next, delete the ledger. This means the service we just created will
         // not be remembered on the next initialization.
         std::fs::remove_file(
-            test_config.config_dir.path().join(SERVICES_LEDGER_FILENAME),
+            test_config.config_dir.path().join(SERVICES_LEDGER_FILENAME_V1),
         )
         .unwrap();
 
@@ -3550,7 +3595,7 @@ mod test {
 
     #[test]
     fn test_all_zone_requests_schema() {
-        let schema = schemars::schema_for!(AllZoneRequests);
+        let schema = schemars::schema_for!(OldZoneRequests);
         expectorate::assert_contents(
             "../schema/all-zone-requests.json",
             &serde_json::to_string_pretty(&schema).unwrap(),

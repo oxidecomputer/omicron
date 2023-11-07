@@ -9,9 +9,9 @@ use crate::bootstrap::early_networking::EarlyNetworkConfig;
 use crate::params::{
     CleanupContextUpdate, DiskEnsureBody, InstanceEnsureBody,
     InstancePutMigrationIdsBody, InstancePutStateBody,
-    InstancePutStateResponse, InstanceUnregisterResponse, ServiceEnsureBody,
-    SledRole, TimeSync, VpcFirewallRulesEnsureBody, ZoneBundleId,
-    ZoneBundleMetadata, Zpool,
+    InstancePutStateResponse, InstanceUnregisterResponse, OmicronZonesConfig,
+    ServiceEnsureBody, SledRole, TimeSync, VpcFirewallRulesEnsureBody,
+    ZoneBundleId, ZoneBundleMetadata, Zpool,
 };
 use crate::sled_agent::Error as SledAgentError;
 use crate::zone_bundle;
@@ -47,7 +47,8 @@ pub fn api() -> SledApiDescription {
         api.register(instance_put_state)?;
         api.register(instance_register)?;
         api.register(instance_unregister)?;
-        api.register(services_put)?;
+        api.register(omicron_zones_get)?;
+        api.register(omicron_zones_put)?;
         api.register(zones_list)?;
         api.register(zone_bundle_list)?;
         api.register(zone_bundle_list_all)?;
@@ -310,43 +311,27 @@ async fn zones_list(
 }
 
 #[endpoint {
-    method = PUT,
-    path = "/services",
+    method = GET,
+    path = "/omicron_zones",
 }]
-async fn services_put(
+async fn omicron_zones_put(
     rqctx: RequestContext<SledAgent>,
-    body: TypedBody<ServiceEnsureBody>,
+) -> Result<HttpResponseOk<OmicronZonesConfig>, HttpError> {
+    let sa = rqctx.context();
+    Ok(sa.omicron_zones_list().await?)
+}
+
+#[endpoint {
+    method = PUT,
+    path = "/omicron_zones",
+}]
+async fn omicron_zones_put(
+    rqctx: RequestContext<SledAgent>,
+    body: TypedBody<OmicronZonesConfig>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let sa = rqctx.context().clone();
+    let sa = rqctx.context();
     let body_args = body.into_inner();
-
-    // Spawn a separate task to run `services_ensure`: cancellation of this
-    // endpoint's future (as might happen if the client abandons the request or
-    // times out) could result in leaving zones partially configured and the
-    // in-memory state of the service manager invalid. See:
-    // oxidecomputer/omicron#3098.
-    let handler = async move {
-        match sa.services_ensure(body_args).await {
-            Ok(()) => Ok(()),
-            Err(e) => {
-                // Log the error here to make things clear even if the client
-                // has already disconnected.
-                error!(sa.logger(), "failed to initialize services: {e}");
-                Err(e)
-            }
-        }
-    };
-    match tokio::spawn(handler).await {
-        Ok(result) => result.map_err(|e| Error::from(e))?,
-
-        Err(e) => {
-            return Err(HttpError::for_internal_error(format!(
-                "unexpected failure awaiting \"services_ensure\": {:#}",
-                e
-            )));
-        }
-    }
-
+    sa.omicron_zones_ensure(body_args).await?;
     Ok(HttpResponseUpdatedNoContent())
 }
 

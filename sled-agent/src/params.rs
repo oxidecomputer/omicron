@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::storage::dataset::DatasetName;
 use crate::zone_bundle::PriorityOrder;
 pub use crate::zone_bundle::ZoneBundleCause;
 pub use crate::zone_bundle::ZoneBundleId;
@@ -25,6 +26,7 @@ use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::time::Duration;
 use thiserror::Error;
 use uuid::Uuid;
+use illumos_utils::zpool::ZpoolName;
 
 /// Used to request a Disk state change
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
@@ -862,6 +864,150 @@ impl TryFrom<ServiceZoneService>
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct ServiceEnsureBody {
     pub services: Vec<ServiceZoneRequest>,
+}
+
+/// Describes the set of Omicron zones running on a sled
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct OmicronZonesConfig {
+    // XXX-dap generation number
+    pub zones: Vec<OmicronZoneConfig>,
+}
+
+/// Describes one Omicron zone running on a sled
+#[derive(
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+)]
+pub struct OmicronZoneConfig {
+    pub id: Uuid,
+    pub underlay_address: Ipv6Addr,
+    pub zone_type: OmicronZoneType,
+}
+
+impl OmicronZoneConfig {
+    // XXX-dap should the caller (RSS) should specify this directly?  That
+    // eliminates one reason why Sled Agent needs to know about what kind of
+    // dataset it's looking at.
+    pub fn dataset_name(&self) -> Option<DatasetName> {
+        let (dataset, dataset_kind) = match &self.zone_type {
+            OmicronZoneType::BoundaryNtp { .. }
+            | OmicronZoneType::InternalNtp { .. }
+            | OmicronZoneType::Nexus { .. }
+            | OmicronZoneType::Oximeter { .. }
+            | OmicronZoneType::CruciblePantry { .. } => None,
+            OmicronZoneType::Clickhouse { dataset, .. } => {
+                Some((dataset, DatasetKind::Clickhouse))
+            }
+            OmicronZoneType::ClickhouseKeeper { dataset, .. } => {
+                Some((dataset, DatasetKind::ClickhouseKeeper))
+            }
+            OmicronZoneType::CockroachDb { dataset, .. } => {
+                Some((dataset, DatasetKind::CockroachDb))
+            }
+            OmicronZoneType::Crucible { dataset, .. } => {
+                Some((dataset, DatasetKind::Crucible))
+            }
+            OmicronZoneType::ExternalDns { dataset, .. } => {
+                Some((dataset, DatasetKind::ExternalDns))
+            }
+            OmicronZoneType::InternalDns { dataset, .. } => {
+                Some((dataset, DatasetKind::InternalDns))
+            }
+        }?;
+
+        DatasetName::new(dataset.pool_name, dataset_kind)
+    }
+}
+
+/// Describes a persistent ZFS dataset associated with an Omicron zone
+pub struct OmicronZoneDataset {
+    pool_name: ZpoolName,
+}
+
+/// Describes what component is running in this zone and its associated
+/// type-specific configuration
+///
+/// XXX-dap ideally this would not be necessary at all!  Sled Agent shouldn't
+/// have to know about the things running on it, I think?
+/// XXX-dap commonize with ServiceType (well, probably remove ServiceType)
+pub enum OmicronZoneType {
+    BoundaryNtp {
+        address: SocketAddrV6,
+        ntp_servers: Vec<String>,
+        dns_servers: Vec<IpAddr>,
+        domain: Option<String>,
+        /// The service vNIC providing outbound connectivity using OPTE.
+        nic: NetworkInterface,
+        /// The SNAT configuration for outbound connections.
+        snat_cfg: SourceNatConfig,
+    },
+
+    Clickhouse {
+        address: SocketAddrV6,
+        dataset: OmicronZoneDataset,
+    },
+
+    ClickhouseKeeper {
+        address: SocketAddrV6,
+        dataset: OmicronZoneDataset,
+    },
+    CockroachDb {
+        address: SocketAddrV6,
+        dataset: OmicronZoneDataset,
+    },
+
+    Crucible {
+        address: SocketAddrV6,
+        dataset: OmicronZoneDataset,
+    },
+    CruciblePantry {
+        address: SocketAddrV6,
+    },
+    ExternalDns {
+        dataset: OmicronZoneDataset,
+        /// The address at which the external DNS server API is reachable.
+        http_address: SocketAddrV6,
+        /// The address at which the external DNS server is reachable.
+        dns_address: SocketAddr,
+        /// The service vNIC providing external connectivity using OPTE.
+        nic: NetworkInterface,
+    },
+    InternalDns {
+        dataset: OmicronZoneDataset,
+        http_address: SocketAddrV6,
+        dns_address: SocketAddrV6,
+        /// The addresses in the global zone which should be created
+        ///
+        /// For the DNS service, which exists outside the sleds's typical subnet
+        /// - adding an address in the GZ is necessary to allow inter-zone
+        /// traffic routing.
+        gz_address: Ipv6Addr,
+
+        /// The address is also identified with an auxiliary bit of information
+        /// to ensure that the created global zone address can have a unique
+        /// name.
+        gz_address_index: u32,
+    },
+    InternalNtp {
+        address: SocketAddrV6,
+        ntp_servers: Vec<String>,
+        dns_servers: Vec<IpAddr>,
+        domain: Option<String>,
+    },
+    Nexus {
+        /// The address at which the internal nexus server is reachable.
+        internal_address: SocketAddrV6,
+        /// The address at which the external nexus server is reachable.
+        external_ip: IpAddr,
+        /// The service vNIC providing external connectivity using OPTE.
+        nic: NetworkInterface,
+        /// Whether Nexus's external endpoint should use TLS
+        external_tls: bool,
+        /// External DNS servers Nexus can use to resolve external hosts.
+        external_dns_servers: Vec<IpAddr>,
+    },
+    Oximeter {
+        address: SocketAddrV6,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]

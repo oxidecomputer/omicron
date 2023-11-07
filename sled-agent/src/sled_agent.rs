@@ -14,8 +14,8 @@ use crate::nexus::{NexusClientWithResolver, NexusRequestQueue};
 use crate::params::{
     DiskStateRequested, InstanceHardware, InstanceMigrationSourceParams,
     InstancePutStateResponse, InstanceStateRequested,
-    InstanceUnregisterResponse, ServiceEnsureBody, SledRole, TimeSync,
-    VpcFirewallRule, ZoneBundleMetadata, Zpool,
+    InstanceUnregisterResponse, OmicronZonesConfig, ServiceEnsureBody,
+    SledRole, TimeSync, VpcFirewallRule, ZoneBundleMetadata, Zpool,
 };
 use crate::services::{self, ServiceManager};
 use crate::storage_manager::{self, StorageManager};
@@ -57,6 +57,7 @@ use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;
 
+use crate::storage::dataset::DatasetName;
 #[cfg(not(test))]
 use illumos_utils::{dladm::Dladm, zone::Zones};
 #[cfg(test)]
@@ -719,36 +720,40 @@ impl SledAgent {
         self.inner.zone_bundler.cleanup().await.map_err(Error::from)
     }
 
-    /// Ensures that particular services should be initialized.
-    ///
-    /// These services will be instantiated by this function, will be recorded
-    /// to a local file to ensure they start automatically on next boot.
-    pub async fn services_ensure(
+    /// List the Omicron zone configuration that's currently running
+    pub async fn omicron_zones_list(
         &self,
-        requested_services: ServiceEnsureBody,
-    ) -> Result<(), Error> {
-        let datasets: Vec<_> = requested_services
-            .services
-            .iter()
-            .filter_map(|service| service.dataset.clone())
-            .collect();
+    ) -> Result<OmicronZonesConfig, Error> {
+        Ok(self.inner.services.omicron_zones_list(requested_services).await?)
+    }
 
+    /// Ensures that the specific set of Omicron zones are running as configured
+    /// (and that no other zones are running)
+    pub async fn omicron_zones_ensure(
+        &self,
+        requested_zones: OmicronZonesConfig,
+    ) -> Result<(), Error> {
         // TODO:
         // - If these are the set of filesystems, we should also consider
         // removing the ones which are not listed here.
         // - It's probably worth sending a bulk request to the storage system,
         // rather than requesting individual datasets.
-        for dataset in &datasets {
+        for zone in &requested_zones.zones {
+            let Some(dataset_name) = zone.dataset_name() else {
+                continue;
+            };
+
             // First, ensure the dataset exists
+            let dataset_id = zone.id;
             self.inner
                 .storage
-                .upsert_filesystem(dataset.id, dataset.name.clone())
+                .upsert_filesystem(dataset_id, dataset_name)
                 .await?;
         }
 
         self.inner
             .services
-            .ensure_all_services_persistent(requested_services)
+            .ensure_all_omicron_zones_persistent(requested_services)
             .await?;
         Ok(())
     }
