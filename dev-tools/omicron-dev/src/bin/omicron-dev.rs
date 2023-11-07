@@ -339,10 +339,12 @@ async fn start_replicated_cluster() -> Result<(), anyhow::Error> {
 
     // Start the database server and keeper processes
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let replica_config =
-        manifest_dir.as_path().join("../../oximeter/db/src/configs/replica_config.xml");
-    let keeper_config =
-        manifest_dir.as_path().join("../../oximeter/db/src/configs/keeper_config.xml");
+    let replica_config = manifest_dir
+        .as_path()
+        .join("../../oximeter/db/src/configs/replica_config.xml");
+    let keeper_config = manifest_dir
+        .as_path()
+        .join("../../oximeter/db/src/configs/keeper_config.xml");
 
     let mut cluster =
         dev::clickhouse::ClickHouseCluster::new(replica_config, keeper_config)

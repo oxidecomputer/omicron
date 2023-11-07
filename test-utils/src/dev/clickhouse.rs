@@ -345,8 +345,7 @@ impl ClickHouseCluster {
         // Start all replica nodes
         let replica_amount = 2;
         let mut replicas =
-            Self::new_replica_set(replica_amount, &replica_config)
-                .await?;
+            Self::new_replica_set(replica_amount, &replica_config).await?;
 
         let r1 = replicas.swap_remove(0);
         let r2 = replicas.swap_remove(0);
