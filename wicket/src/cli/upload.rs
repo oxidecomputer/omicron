@@ -31,14 +31,12 @@ pub(crate) struct UploadArgs {
 }
 
 impl UploadArgs {
-    pub(crate) fn exec(
+    pub(crate) async fn exec(
         self,
         log: slog::Logger,
         wicketd_addr: SocketAddrV6,
     ) -> Result<()> {
-        let runtime =
-            tokio::runtime::Runtime::new().context("creating tokio runtime")?;
-        runtime.block_on(self.do_upload(log, wicketd_addr))
+        self.do_upload(log, wicketd_addr).await
     }
 
     async fn do_upload(

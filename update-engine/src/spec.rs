@@ -149,8 +149,19 @@ pub struct NestedError {
 }
 
 impl NestedError {
+    /// Creates a new `NestedError` from an error.
+    pub fn new(error: &dyn std::error::Error) -> Self {
+        Self {
+            message: format!("{}", error),
+            source: error.source().map(|s| Box::new(Self::new(s))),
+        }
+    }
+
     /// Creates a new `NestedError` from a message and a list of causes.
-    pub fn new(message: String, causes: Vec<String>) -> Self {
+    pub fn from_message_and_causes(
+        message: String,
+        causes: Vec<String>,
+    ) -> Self {
         // Yes, this is an actual singly-linked list. You rarely ever see them
         // in Rust but they're required to implement Error::source.
         let mut next = None;
@@ -171,6 +182,47 @@ impl fmt::Display for NestedError {
 impl std::error::Error for NestedError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         self.source.as_ref().map(|s| s as &(dyn std::error::Error + 'static))
+    }
+}
+
+mod nested_error_serde {
+    use super::*;
+    use serde::Deserialize;
+
+    #[derive(Serialize, Deserialize)]
+    struct SerializedNestedError {
+        message: String,
+        causes: Vec<String>,
+    }
+
+    impl Serialize for NestedError {
+        fn serialize<S: serde::Serializer>(
+            &self,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error> {
+            let mut causes = Vec::new();
+            let mut cause = self.source.as_ref();
+            while let Some(c) = cause {
+                causes.push(c.message.clone());
+                cause = c.source.as_ref();
+            }
+
+            let serialized =
+                SerializedNestedError { message: self.message.clone(), causes };
+            serialized.serialize(serializer)
+        }
+    }
+
+    impl<'de> Deserialize<'de> for NestedError {
+        fn deserialize<D: serde::Deserializer<'de>>(
+            deserializer: D,
+        ) -> Result<Self, D::Error> {
+            let serialized = SerializedNestedError::deserialize(deserializer)?;
+            Ok(NestedError::from_message_and_causes(
+                serialized.message,
+                serialized.causes,
+            ))
+        }
     }
 }
 
