@@ -1404,18 +1404,20 @@ mod tests {
         db.cleanup().await.expect("Failed to cleanup ClickHouse server");
     }
 
-    #[tokio::test]
-    async fn test_replicated() {
-        let cur_dir = std::env::current_dir().unwrap();
+    async fn create_cluster() -> ClickHouseCluster {
+        let cur_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let replica_config =
             cur_dir.as_path().join("src/configs/replica_config.xml");
-        let cur_dir = std::env::current_dir().unwrap();
         let keeper_config =
             cur_dir.as_path().join("src/configs/keeper_config.xml");
-
-        let mut cluster = ClickHouseCluster::new(replica_config, keeper_config)
+        ClickHouseCluster::new(replica_config, keeper_config)
             .await
-            .expect("Failed to initialise ClickHouse Cluster");
+            .expect("Failed to initialise ClickHouse Cluster")
+    }
+
+    #[tokio::test]
+    async fn test_replicated() {
+        let mut cluster = create_cluster().await;
 
         // Tests that the expected error is returned on a wrong address
         bad_db_connection_test().await.unwrap();
@@ -3829,9 +3831,7 @@ mod tests {
         const TEST_NAME: &str = "test_apply_one_schema_upgrade_replicated";
         let logctx = test_setup_log(TEST_NAME);
         let log = &logctx.log;
-        let mut cluster = ClickHouseCluster::new()
-            .await
-            .expect("Failed to initialise ClickHouse Cluster");
+        let mut cluster = create_cluster().await;
         let address = cluster.replica_1.address;
         test_apply_one_schema_upgrade_impl(log, address, true).await;
 
@@ -4077,9 +4077,7 @@ mod tests {
             "test_ensure_schema_walks_through_multiple_steps_replicated";
         let logctx = test_setup_log(TEST_NAME);
         let log = &logctx.log;
-        let mut cluster = ClickHouseCluster::new()
-            .await
-            .expect("Failed to initialise ClickHouse Cluster");
+        let mut cluster = create_cluster().await;
         let address = cluster.replica_1.address;
         test_ensure_schema_walks_through_multiple_steps_impl(
             log, address, true,
