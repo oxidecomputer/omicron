@@ -685,7 +685,7 @@ impl DataStore {
             .rev()
             .find(|(_i, (_collection_id, nerrors))| *nerrors == 0);
         let candidate = match last_completed_idx {
-            Some((i, _)) if i == 0 => candidates.iter().skip(1).next(),
+            Some((0, _)) => candidates.iter().skip(1).next(),
             _ => candidates.iter().next(),
         }
         .map(|(collection_id, _nerrors)| *collection_id);

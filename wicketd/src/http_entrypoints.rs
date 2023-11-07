@@ -709,10 +709,28 @@ pub(crate) enum UpdateSimulatedResult {
 }
 
 #[derive(Clone, Debug, JsonSchema, Deserialize)]
+pub(crate) struct ClearUpdateStateParams {
+    /// The SP identifiers to clear the update state for. Must be non-empty.
+    pub(crate) targets: BTreeSet<SpIdentifier>,
+
+    /// Options for clearing update state
+    pub(crate) options: ClearUpdateStateOptions,
+}
+
+#[derive(Clone, Debug, JsonSchema, Deserialize)]
 pub(crate) struct ClearUpdateStateOptions {
     /// If passed in, fails the clear update state operation with a simulated
     /// error.
     pub(crate) test_error: Option<UpdateTestError>,
+}
+
+#[derive(Clone, Debug, Default, JsonSchema, Serialize)]
+pub(crate) struct ClearUpdateStateResponse {
+    /// The SPs for which update data was cleared.
+    pub(crate) cleared: BTreeSet<SpIdentifier>,
+
+    /// The SPs that had no update state to clear.
+    pub(crate) no_update_data: BTreeSet<SpIdentifier>,
 }
 
 #[derive(Clone, Debug, JsonSchema, Deserialize)]
@@ -1080,25 +1098,31 @@ async fn post_abort_update(
 /// Use this to clear update state after a failed update.
 #[endpoint {
     method = POST,
-    path = "/clear-update-state/{type}/{slot}",
+    path = "/clear-update-state",
 }]
 async fn post_clear_update_state(
     rqctx: RequestContext<ServerContext>,
-    target: Path<SpIdentifier>,
-    opts: TypedBody<ClearUpdateStateOptions>,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    params: TypedBody<ClearUpdateStateParams>,
+) -> Result<HttpResponseOk<ClearUpdateStateResponse>, HttpError> {
     let log = &rqctx.log;
-    let target = target.into_inner();
+    let rqctx = rqctx.context();
+    let params = params.into_inner();
 
-    let opts = opts.into_inner();
-    if let Some(test_error) = opts.test_error {
+    if params.targets.is_empty() {
+        return Err(HttpError::for_bad_request(
+            None,
+            "No targets specified".into(),
+        ));
+    }
+
+    if let Some(test_error) = params.options.test_error {
         return Err(test_error
             .into_http_error(log, "clearing update state")
             .await);
     }
 
-    match rqctx.context().update_tracker.clear_update_state(target).await {
-        Ok(()) => Ok(HttpResponseUpdatedNoContent {}),
+    match rqctx.update_tracker.clear_update_state(params.targets).await {
+        Ok(response) => Ok(HttpResponseOk(response)),
         Err(err) => Err(err.to_http_error()),
     }
 }
