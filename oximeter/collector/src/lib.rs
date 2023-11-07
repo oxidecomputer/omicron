@@ -731,7 +731,7 @@ impl Oximeter {
         let resolver = Resolver::new_from_ip(
             log.new(o!("component" => "DnsResolver")),
             *args.address.ip(),
-        )?;
+        );
 
         let make_agent = || async {
             debug!(log, "creating ClickHouse client");

@@ -11,6 +11,10 @@ chrono.workspace = true
 clap.workspace = true
 dns-service-client.workspace = true
 dropshot.workspace = true
+hickory-client.workspace = true
+hickory-proto.workspace = true
+hickory-resolver.workspace = true
+hickory-server.workspace = true
 http.workspace = true
 pretty-hex.workspace = true
 schemars.workspace = true
@@ -23,12 +27,8 @@ slog-async.workspace = true
 slog-envlogger.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = [ "full" ] }
+tokio = { workspace = true, features = ["full"] }
 toml.workspace = true
-trust-dns-client.workspace = true
-trust-dns-proto.workspace = true
-trust-dns-resolver.workspace = true
-trust-dns-server.workspace = true
 uuid.workspace = true
 omicron-workspace-hack.workspace = true
 
@@ -40,4 +40,3 @@ openapi-lint.workspace = true
 serde_json.workspace = true
 subprocess.workspace = true
 tempdir.workspace = true
-trust-dns-resolver.workspace = true

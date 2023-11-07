@@ -631,7 +631,7 @@ impl ServiceManager {
                 resolver: Resolver::new_from_ip(
                     self.inner.log.new(o!("component" => "DnsResolver")),
                     underlay_address,
-                )?,
+                ),
                 underlay_address,
                 rack_id,
                 rack_network_config,

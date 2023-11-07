@@ -46,13 +46,10 @@ impl Server {
         info!(log, "setting up sled agent server");
 
         let sled_address = request.sled_address();
-        let resolver = Arc::new(
-            Resolver::new_from_ip(
-                log.new(o!("component" => "DnsResolver")),
-                *sled_address.ip(),
-            )
-            .map_err(|e| e.to_string())?,
-        );
+        let resolver = Arc::new(Resolver::new_from_ip(
+            log.new(o!("component" => "DnsResolver")),
+            *sled_address.ip(),
+        ));
 
         let nexus_client = NexusClientWithResolver::new(&log, resolver)
             .map_err(|e| e.to_string())?;

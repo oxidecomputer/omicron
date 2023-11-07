@@ -12,5 +12,5 @@ internal-dns.workspace = true
 omicron-common.workspace = true
 slog.workspace = true
 tokio.workspace = true
-trust-dns-resolver.workspace = true
+hickory-resolver.workspace = true
 omicron-workspace-hack.workspace = true
