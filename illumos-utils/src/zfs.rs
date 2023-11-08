@@ -184,9 +184,7 @@ impl From<&DiskIdentity> for Keypath {
 fn build_keypath(id: &DiskIdentity, root: &str) -> Keypath {
     let filename =
         format!("{}-{}-{}-zfs-aes-256-gcm.key", id.vendor, id.serial, id.model);
-    let mut path = Utf8PathBuf::new();
-    path.push(root);
-    path.push(filename);
+    let path: Utf8PathBuf = [root, &filename].iter().collect();
     Keypath(path)
 }
 

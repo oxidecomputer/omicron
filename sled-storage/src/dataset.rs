@@ -19,7 +19,6 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_hardware::DiskVariant;
 use slog::{info, Logger};
-use std::str::FromStr;
 use std::sync::OnceLock;
 
 pub const INSTALL_DATASET: &'static str = "install";
@@ -139,34 +138,6 @@ pub enum DatasetKind {
     InternalDns,
 }
 
-impl From<DatasetKind> for sled_agent_client::types::DatasetKind {
-    fn from(k: DatasetKind) -> Self {
-        use DatasetKind::*;
-        match k {
-            CockroachDb => Self::CockroachDb,
-            Crucible => Self::Crucible,
-            Clickhouse => Self::Clickhouse,
-            ClickhouseKeeper => Self::ClickhouseKeeper,
-            ExternalDns => Self::ExternalDns,
-            InternalDns => Self::InternalDns,
-        }
-    }
-}
-
-impl From<DatasetKind> for nexus_client::types::DatasetKind {
-    fn from(k: DatasetKind) -> Self {
-        use DatasetKind::*;
-        match k {
-            CockroachDb => Self::Cockroach,
-            Crucible => Self::Crucible,
-            Clickhouse => Self::Clickhouse,
-            ClickhouseKeeper => Self::ClickhouseKeeper,
-            ExternalDns => Self::ExternalDns,
-            InternalDns => Self::InternalDns,
-        }
-    }
-}
-
 impl std::fmt::Display for DatasetKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use DatasetKind::*;
@@ -207,18 +178,6 @@ impl DatasetName {
 
     pub fn full(&self) -> String {
         format!("{}/{}", self.pool_name, self.kind)
-    }
-}
-
-impl From<DatasetName> for sled_agent_client::types::DatasetName {
-    fn from(n: DatasetName) -> Self {
-        Self {
-            pool_name: sled_agent_client::types::ZpoolName::from_str(
-                &n.pool().to_string(),
-            )
-            .unwrap(),
-            kind: n.dataset().clone().into(),
-        }
     }
 }
 

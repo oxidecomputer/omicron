@@ -78,7 +78,4 @@ pub enum Error {
 
     #[error("Zpool Not Found: {0}")]
     ZpoolNotFound(String),
-
-    #[error("Underlay not yet initialized")]
-    UnderlayNotInitialized,
 }

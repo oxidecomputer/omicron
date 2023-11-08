@@ -4341,6 +4341,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sled-hardware",
+ "sled-storage",
  "slog",
  "uuid",
 ]
@@ -8164,6 +8165,7 @@ dependencies = [
  "regress",
  "reqwest",
  "serde",
+ "sled-storage",
  "slog",
  "uuid",
 ]
@@ -8207,7 +8209,6 @@ dependencies = [
  "glob",
  "illumos-utils",
  "key-manager",
- "nexus-client 0.1.0",
  "omicron-common 0.1.0",
  "omicron-test-utils",
  "omicron-workspace-hack",
@@ -8215,7 +8216,6 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "sled-agent-client",
  "sled-hardware",
  "slog",
  "thiserror",

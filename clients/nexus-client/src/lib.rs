@@ -407,3 +407,17 @@ impl From<sled_hardware::Baseboard> for types::Baseboard {
         }
     }
 }
+
+impl From<sled_storage::dataset::DatasetKind> for types::DatasetKind {
+    fn from(k: sled_storage::dataset::DatasetKind) -> Self {
+        use sled_storage::dataset::DatasetKind::*;
+        match k {
+            CockroachDb => Self::Cockroach,
+            Crucible => Self::Crucible,
+            Clickhouse => Self::Clickhouse,
+            ClickhouseKeeper => Self::ClickhouseKeeper,
+            ExternalDns => Self::ExternalDns,
+            InternalDns => Self::InternalDns,
+        }
+    }
+}

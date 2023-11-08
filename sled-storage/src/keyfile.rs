@@ -26,10 +26,7 @@ impl KeyFile {
         key: &[u8; 32],
         log: &Logger,
     ) -> std::io::Result<KeyFile> {
-        // TODO: fix this to not truncate
         // We want to overwrite any existing contents.
-        // If we truncate we may leave dirty pages around
-        // containing secrets.
         let mut file = tokio::fs::OpenOptions::new()
             .create(true)
             .write(true)
