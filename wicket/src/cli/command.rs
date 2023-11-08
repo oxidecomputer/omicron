@@ -14,6 +14,12 @@ use super::{
     rack_update::RackUpdateArgs, upload::UploadArgs,
 };
 
+pub(crate) struct CommandOutput<'a> {
+    #[allow(dead_code)]
+    pub(crate) stdout: &'a mut dyn std::io::Write,
+    pub(crate) stderr: &'a mut dyn std::io::Write,
+}
+
 /// An app that represents wicket started with arguments over ssh.
 #[derive(Debug, Parser)]
 pub(crate) struct ShellApp {
@@ -27,18 +33,21 @@ pub(crate) struct ShellApp {
 }
 
 impl ShellApp {
-    pub(crate) fn exec(
+    pub(crate) async fn exec(
         self,
         log: slog::Logger,
         wicketd_addr: SocketAddrV6,
+        output: CommandOutput<'_>,
     ) -> Result<()> {
         match self.command {
-            ShellCommand::UploadRepo(args) => args.exec(log, wicketd_addr),
-            ShellCommand::RackUpdate(args) => {
-                args.exec(log, wicketd_addr, self.global_opts)
+            ShellCommand::UploadRepo(args) => {
+                args.exec(log, wicketd_addr).await
             }
-            ShellCommand::Setup(args) => args.exec(log, wicketd_addr),
-            ShellCommand::Preflight(args) => args.exec(log, wicketd_addr),
+            ShellCommand::RackUpdate(args) => {
+                args.exec(log, wicketd_addr, self.global_opts, output).await
+            }
+            ShellCommand::Setup(args) => args.exec(log, wicketd_addr).await,
+            ShellCommand::Preflight(args) => args.exec(log, wicketd_addr).await,
         }
     }
 }

@@ -26,6 +26,8 @@ use crate::{
     wicketd::{create_wicketd_client, WICKETD_TIMEOUT},
 };
 
+use super::command::CommandOutput;
+
 #[derive(Debug, Subcommand)]
 pub(crate) enum RackUpdateArgs {
     /// Start one or more updates.
@@ -35,29 +37,19 @@ pub(crate) enum RackUpdateArgs {
 }
 
 impl RackUpdateArgs {
-    pub(crate) fn exec(
+    pub(crate) async fn exec(
         self,
         log: Logger,
         wicketd_addr: SocketAddrV6,
         global_opts: GlobalOpts,
-    ) -> Result<()> {
-        let runtime =
-            tokio::runtime::Runtime::new().context("creating tokio runtime")?;
-        runtime.block_on(self.exec_impl(log, wicketd_addr, global_opts))
-    }
-
-    async fn exec_impl(
-        self,
-        log: Logger,
-        wicketd_addr: SocketAddrV6,
-        global_opts: GlobalOpts,
+        output: CommandOutput<'_>,
     ) -> Result<()> {
         match self {
             RackUpdateArgs::Start(args) => {
-                args.exec(log, wicketd_addr, global_opts).await
+                args.exec(log, wicketd_addr, global_opts, output).await
             }
             RackUpdateArgs::Attach(args) => {
-                args.exec(log, wicketd_addr, global_opts).await
+                args.exec(log, wicketd_addr, global_opts, output).await
             }
         }
     }
@@ -89,6 +81,7 @@ impl StartRackUpdateArgs {
         log: Logger,
         wicketd_addr: SocketAddrV6,
         global_opts: GlobalOpts,
+        output: CommandOutput<'_>,
     ) -> Result<()> {
         let client = create_wicketd_client(&log, wicketd_addr, WICKETD_TIMEOUT);
 
@@ -131,7 +124,8 @@ impl StartRackUpdateArgs {
         }
 
         // Now, attach to the update by printing out update logs.
-        do_attach_to_updates(log, client, update_ids, global_opts).await?;
+        do_attach_to_updates(log, client, update_ids, global_opts, output)
+            .await?;
 
         Ok(())
     }
@@ -149,11 +143,12 @@ impl AttachArgs {
         log: Logger,
         wicketd_addr: SocketAddrV6,
         global_opts: GlobalOpts,
+        output: CommandOutput<'_>,
     ) -> Result<()> {
         let client = create_wicketd_client(&log, wicketd_addr, WICKETD_TIMEOUT);
 
         let update_ids = self.component_ids.to_component_ids()?;
-        do_attach_to_updates(log, client, update_ids, global_opts).await
+        do_attach_to_updates(log, client, update_ids, global_opts, output).await
     }
 }
 
@@ -162,10 +157,11 @@ async fn do_attach_to_updates(
     client: wicketd_client::Client,
     update_ids: BTreeSet<ComponentId>,
     global_opts: GlobalOpts,
+    output: CommandOutput<'_>,
 ) -> Result<()> {
     let mut display = GroupDisplay::new_with_display(
         update_ids.iter().copied(),
-        std::io::stderr(),
+        output.stderr,
     );
     if global_opts.use_color() {
         display.set_styles(LineDisplayStyles::colorized());

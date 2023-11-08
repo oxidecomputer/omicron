@@ -16,4 +16,4 @@ mod rack_setup;
 mod rack_update;
 mod upload;
 
-pub(super) use command::{GlobalOpts, ShellApp};
+pub(super) use command::{CommandOutput, GlobalOpts, ShellApp};

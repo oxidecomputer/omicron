@@ -12,34 +12,82 @@ use clap::Parser;
 use omicron_common::{address::WICKETD_PORT, FileKv};
 use slog::Drain;
 
-use crate::{cli::ShellApp, Runner};
+use crate::{
+    cli::{CommandOutput, ShellApp},
+    Runner,
+};
 
 pub fn exec() -> Result<()> {
     let wicketd_addr =
         SocketAddrV6::new(Ipv6Addr::LOCALHOST, WICKETD_PORT, 0, 0);
 
     // SSH_ORIGINAL_COMMAND contains additional arguments, if any.
-    if let Ok(ssh_args) = std::env::var("SSH_ORIGINAL_COMMAND") {
-        // The argument is in a quoted form, so split it using Unix shell semantics.
-        let args = shell_words::split(&ssh_args).with_context(|| {
-            format!("could not parse shell arguments from input {ssh_args}")
-        })?;
-        // parse_from uses the the first argument as the command name. Insert "wicket" as
-        // the command name.
-        let app = ShellApp::parse_from(
-            std::iter::once("wicket".to_owned()).chain(args),
-        );
+    match std::env::var("SSH_ORIGINAL_COMMAND") {
+        Ok(ssh_args) => {
+            let args = shell_words::split(&ssh_args).with_context(|| {
+                format!("could not parse shell arguments from input {ssh_args}")
+            })?;
 
-        let log = setup_log(
-            &log_path()?,
-            WithStderr::Yes { use_color: app.global_opts.use_color() },
-        )?;
-        app.exec(log, wicketd_addr)
-    } else {
-        // Do not expose log messages via standard error since they'll show up
-        // on top of the TUI.
-        let log = setup_log(&log_path()?, WithStderr::No)?;
-        Runner::new(log, wicketd_addr).run()
+            let runtime = tokio::runtime::Runtime::new()
+                .context("creating tokio runtime")?;
+            runtime.block_on(exec_with_args(
+                wicketd_addr,
+                args,
+                OutputKind::Terminal,
+            ))
+        }
+        Err(_) => {
+            // Do not expose log messages via standard error since they'll show up
+            // on top of the TUI.
+            let log = setup_log(&log_path()?, WithStderr::No)?;
+            Runner::new(log, wicketd_addr).run()
+        }
+    }
+}
+
+/// Enables capturing of wicket's output.
+pub enum OutputKind<'a> {
+    /// Captures output to the provided log, as well as a buffer.
+    Captured {
+        log: slog::Logger,
+        stdout: &'a mut Vec<u8>,
+        stderr: &'a mut Vec<u8>,
+    },
+
+    /// Writes output to a terminal.
+    Terminal,
+}
+
+pub async fn exec_with_args<S>(
+    wicketd_addr: SocketAddrV6,
+    args: Vec<S>,
+    output: OutputKind<'_>,
+) -> Result<()>
+where
+    S: AsRef<str>,
+{
+    // parse_from uses the the first argument as the command name. Insert "wicket" as
+    // the command name.
+    let app = ShellApp::parse_from(
+        std::iter::once("wicket").chain(args.iter().map(|s| s.as_ref())),
+    );
+
+    match output {
+        OutputKind::Captured { log, stdout, stderr } => {
+            let output = CommandOutput { stdout, stderr };
+            app.exec(log, wicketd_addr, output).await
+        }
+        OutputKind::Terminal => {
+            let log = setup_log(
+                &log_path()?,
+                WithStderr::Yes { use_color: app.global_opts.use_color() },
+            )?;
+            let mut stdout = std::io::stdout();
+            let mut stderr = std::io::stderr();
+            let output =
+                CommandOutput { stdout: &mut stdout, stderr: &mut stderr };
+            app.exec(log, wicketd_addr, output).await
+        }
     }
 }
 
