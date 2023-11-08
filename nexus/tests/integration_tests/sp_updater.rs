@@ -1,7 +1,8 @@
-//! Nexus integration tests
-//!
-//! See the driver in the parent directory for how and why this is structured
-//! the way it is.
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! Tests `SpUpdater`'s delivery of updates to SPs via MGS
 
 use gateway_client::types::SpType;
 use gateway_messages::{SpPort, UpdateInProgressStatus, UpdateStatus};

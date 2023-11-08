@@ -44,7 +44,7 @@ pub struct SpUpdater {
     sp_type: SpType,
     sp_slot: u32,
     update_id: Uuid,
-    // TODO-clarity maybe a newtype for this? TBD where we how we get this from
+    // TODO-clarity maybe a newtype for this? TBD how we get this from
     // wherever it's stored, which might give us a stronger type already.
     sp_hubris_archive: Vec<u8>,
 }
@@ -154,9 +154,9 @@ impl SpUpdater {
         &self,
         client: &gateway_client::Client,
     ) -> Result<(), GatewayClientError> {
-        // The SP has two firmware slots, but they're aren't invidually labled.
-        // We always request an update to slot 0, which means "the inactive
-        // slot".
+        // The SP has two firmware slots, but they're aren't individually
+        // labled. We always request an update to slot 0, which means "the
+        // inactive slot".
         let firmware_slot = 0;
 
         // Start the update.
