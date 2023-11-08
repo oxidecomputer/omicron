@@ -7,25 +7,31 @@ This directory describes the schema(s) used by CockroachDB.
 
 We use the following conventions:
 
-* `schema/crdb/VERSION/up.sql`: The necessary idempotent migrations to transition from the
-  previous version of CockroachDB to this version. These migrations will always be placed
-  within one transaction per file.
-** If more than one change is needed per version, any number of files starting with `up`
-   and ending with `.sql` may be used. These files will be sorted in lexicographic order
-   before being executed, and each will be executed in a separate transaction.
-** CockroachDB documentation recommends the following: "Execute schema changes... in a single
-   explicit transaction consisting of the single schema change statement".
-   Practically this means: If you want to change multiple tables, columns,
-   types, indices, or constraints, do so in separate files.
-** More information can be found here: https://www.cockroachlabs.com/docs/stable/online-schema-changes
-* `schema/crdb/dbinit.sql`: The necessary operations to create the latest version
-  of the schema. Should be equivalent to running all `up.sql` migrations, in-order.
-* `schema/crdb/dbwipe.sql`: The necessary operations to delete the latest version
-  of the schema.
+* `schema/crdb/VERSION/up*.sql`: Files containing the necessary idempotent
+  statements to transition from the previous version of the database schema to
+  this version.  All of the statements in a given file will be executed
+  together in one transaction; however, usually only one statement should
+  appear in each file.  More on this below.
+** If there's only one statement required, we put it into `up.sql`.
+** If more than one change is needed, any number of files starting with `up`
+   and ending with `.sql` may be used. These files will be sorted in
+   lexicographic order before being executed.  Each will be executed in a
+   separate transaction.
+** CockroachDB documentation recommends the following: "Execute schema
+   changes ... in an explicit transaction consisting of the single schema
+   change statement.".  Practically this means: If you want to change multiple
+   tables, columns, types, indices, or constraints, do so in separate files.
+   See https://www.cockroachlabs.com/docs/stable/online-schema-changes for
+   more.
+* `schema/crdb/dbinit.sql`: The necessary operations to create the latest
+  version of the schema. Should be equivalent to running all `up.sql`
+  migrations, in-order.
+* `schema/crdb/dbwipe.sql`: The necessary operations to delete the latest
+  version of the schema.
 
-Note that to upgrade from version N to version N+2, we always need to apply the
-N+1 upgrade first, before applying the N+2 upgrade. This simplifies our model
-of DB schema changes as an incremental linear history.
+Note that to upgrade from version N to version N+2, we always apply the N+1
+upgrade first, before applying the N+2 upgrade. This simplifies our model of DB
+schema changes by ensuring an incremental, linear history.
 
 == Offline Upgrade
 
@@ -34,9 +40,9 @@ This means we're operating with the following constraints:
 
 * We assume that downtime is acceptable to perform an update.
 * We assume that while an update is occuring, all Nexus services
-are running the same version of software.
+  are running the same version of software.
 * We assume that no (non-upgrade) concurrent database requests will happen for
-the duration of the migration.
+  the duration of the migration.
 
 This is not an acceptable long-term solution - we must be able to update
 without downtime - but it is an interim solution, and one which provides a
@@ -44,7 +50,7 @@ fall-back pathway for performing upgrades.
 
 See RFD 319 for more discussion of the online upgrade plans.
 
-=== How to change the schema
+== How to change the schema
 
 Assumptions:
 
@@ -53,11 +59,22 @@ Assumptions:
 
 Process:
 
-* Choose a `NEW_VERSION` number. This should almost certainly be a major version bump over `OLD_VERSION`.
-* Add a file to `schema/crdb/NEW_VERSION/up.sql` with your changes to the schema.
-** This file should validate the expected current version transactionally.
-** This file should only issue a single schema-modifying statement per transaction.
-** This file should not issue any data-modifying operations within the schema-modifying transactions.
+* Choose a `NEW_VERSION` number. This should almost certainly be a major
+  version bump over `OLD_VERSION`.
+* Create directory `schema/crdb/NEW_VERSION`.
+* If only one SQL statement is necessary to get from `OLD_VERSION` to
+  `NEW_VERSION`, put that statement into `schema/crdb/NEW_VERSION/up.sql`.  If
+  multiple statements are required, put each one into a separate file, naming
+  these `schema/crdb/NEW_VERSION/upN.sql` for as many `N` as you need.
+** Each file should contain _either_ one schema-modifying statement _or_ some
+   number of data-modifying statements.  You can combine multiple data-modifying
+   statements.  But you should not mix schema-modifying statements and
+   data-modifying statements in one file.  And you should not include multiple
+   schema-modifying statements in one file.
+** Beware that the entire file will be run in one transaction.  Expensive data-
+   modifying operations leading to long-running transactions are generally
+   to-be-avoided; however, there's no better way to do this today if you really
+   do need to update thousands of rows as part of the update.
 * Update `schema/crdb/dbinit.sql` to match what the database should look like
   after your update is applied. Don't forget to update the version field of
   `db_metadata` at the bottom of the file!
@@ -68,35 +85,23 @@ Process:
 SQL Validation, via Automated Tests:
 
 * The `SCHEMA_VERSION` matches the version used in `dbinit.sql`
-* The combination of all `up.sql` files results in the same schema as `dbinit.sql`
+* The combination of all `up.sql` files results in the same schema as
+  `dbinit.sql`
 * All `up.sql` files can be applied twice without error
 
-==== Handling common schema changes
+=== General notes
 
-Although CockroachDB's schema includes some opaque internally-generated fields
-that are order dependent - such as the names of anonymous CHECK constraints -
-our schema comparison tools intentionally ignore these values. As a result,
-when performing schema changes, the order of new tables and constraints should
-generally not be important.
+CockroachDB's representation of the schema includes some opaque
+internally-generated fields that are order dependent, like the names of
+anonymous CHECK constraints.  Our schema comparison tools intentionally ignore
+these values. As a result, when performing schema changes, the order of new
+tables and constraints should generally not be important.
 
-As convention, however, we recommend keeping the `db_metadata` file at the end of
-`dbinit.sql`, so that the database does not contain a version until it is fully
-populated.
+As convention, however, we recommend keeping the `db_metadata` file at the end
+of `dbinit.sql`, so that the database does not contain a version until it is
+fully populated.
 
-==== Adding new source tables to an existing view
-
-An upgrade can add a new table and then use a `CREATE OR REPLACE VIEW` statement
-to make an existing view depend on that table. To do this in `dbinit.sql` while
-maintaining table and view ordering, use `CREATE VIEW` to create a "placeholder"
-view in the correct position, then add the table to the bottom of `dbinit.sql`
-and use `CREATE OR REPLACE VIEW` to "fill out" the placeholder definition to
-refer to the new table. (You may need to do the `CREATE OR REPLACE VIEW` in a
-separate transaction from the original `CREATE VIEW`.)
-
-Note that `CREATE OR REPLACE VIEW` requires that the new view maintain all of
-the columns of the old view with the same type and same order (though the query
-used to populate them can change. See
-https://www.postgresql.org/docs/15/sql-createview.html.
+=== Scenario-specific gotchas
 
 ==== Renaming columns
 

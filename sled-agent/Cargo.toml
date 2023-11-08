@@ -45,6 +45,7 @@ nexus-client.workspace = true
 omicron-common.workspace = true
 once_cell.workspace = true
 oximeter.workspace = true
+oximeter-instruments.workspace = true
 oximeter-producer.workspace = true
 percent-encoding.workspace = true
 progenitor.workspace = true

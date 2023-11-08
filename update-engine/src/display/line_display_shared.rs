@@ -59,7 +59,7 @@ impl<'a> LineDisplaySharedContext<'a> {
     /// This line does not have a trailing newline; adding one is the caller's
     /// responsibility.
     pub(super) fn format_generic(&self, message: &str) -> String {
-        let mut line = self.formatter.start_println(self.prefix);
+        let mut line = self.formatter.start_line(self.prefix, None);
         line.push_str(message);
         line
     }
@@ -138,7 +138,7 @@ impl<'a> LineDisplaySharedContext<'a> {
                     .start_line(self.prefix, Some(step_event.total_elapsed));
                 swrite!(
                     line,
-                    "{:>HEADER_WIDTH$} ",
+                    "{}",
                     "No steps defined"
                         .style(self.formatter.styles.progress_style),
                 );
@@ -411,7 +411,7 @@ impl<'a> LineDisplaySharedContext<'a> {
                 // Look up the child event's ID to add to the nest data.
                 let child_step_key = StepKey {
                     execution_id: event.execution_id,
-                    // TODO: we currently look up index 0 because that should
+                    // XXX: we currently look up index 0 because that should
                     // always exist (unless no steps are defined, in which case
                     // we skip this). The child index is actually shared by all
                     // steps within an execution. Fix this by changing
@@ -594,7 +594,7 @@ impl<'a> LineDisplaySharedContext<'a> {
                 // Look up the child event's ID to add to the nest data.
                 let child_step_key = StepKey {
                     execution_id: event.execution_id,
-                    // TODO: we currently look up index 0 because that should
+                    // XXX: we currently look up index 0 because that should
                     // always exist (unless no steps are defined, in which case
                     // we skip this). The child index is actually shared by all
                     // steps within an execution. Fix this by changing
@@ -679,14 +679,6 @@ impl LineDisplayFormatter {
     // Internal helpers
     // ---
 
-    fn start_println(&self, prefix: &str) -> String {
-        if !prefix.is_empty() {
-            format!("[{}] ", prefix.style(self.styles.prefix_style))
-        } else {
-            String::new()
-        }
-    }
-
     pub(super) fn start_line(
         &self,
         prefix: &str,
@@ -704,7 +696,9 @@ impl LineDisplayFormatter {
             let hours = total_elapsed_secs / 3600;
             let minutes = (total_elapsed_secs % 3600) / 60;
             let seconds = total_elapsed_secs % 60;
-            swrite!(&mut line, "{:02}:{:02}:{:02}", hours, minutes, seconds);
+            swrite!(line, "{:02}:{:02}:{:02}", hours, minutes, seconds);
+            // To show total_elapsed more accurately, use:
+            // swrite!(line, "{:.2?}", total_elapsed);
         } else {
             // Add 8 spaces to align with hh:mm:ss.
             line.push_str("        ");
