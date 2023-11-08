@@ -7,6 +7,6 @@ license = "MPL-2.0"
 [dependencies]
 anyhow.workspace = true
 camino.workspace = true
-cargo_toml = "0.16"
+cargo_toml = "0.17"
 cargo_metadata = "0.18"
 clap.workspace = true

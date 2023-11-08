@@ -29,10 +29,9 @@ fn do_run() -> Result<(), CmdError> {
     match args {
         Args::Openapi => {
             installinator_artifactd::run_openapi().map_err(|error| {
-                CmdError::Failure(format!(
-                    "failed to generate OpenAPI spec: {:?}",
-                    error
-                ))
+                CmdError::Failure(
+                    error.context("failed to generate OpenAPI spec"),
+                )
             })
         }
     }

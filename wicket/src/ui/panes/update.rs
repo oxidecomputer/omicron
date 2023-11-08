@@ -1895,7 +1895,7 @@ impl ComponentUpdateListState {
                     ));
                     None
                 }
-                ExecutionStatus::Running { step_key } => {
+                ExecutionStatus::Running { step_key, .. } => {
                     status_text
                         .push(Span::styled("Update ", style::plain_text()));
                     status_text.push(Span::styled(
