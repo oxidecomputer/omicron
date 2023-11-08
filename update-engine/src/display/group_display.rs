@@ -6,14 +6,14 @@
 
 use std::{borrow::Borrow, collections::BTreeMap, fmt, time::Duration};
 
+use libsw::TokioSw;
 use owo_colors::OwoColorize;
 use swrite::{swrite, SWrite};
-use tokio::time::Instant;
 use unicode_width::UnicodeWidthStr;
 
 use crate::{
     errors::UnknownReportKey, events::EventReport, EventBuffer,
-    ExecutionTerminalInfo, StepSpec, TerminalKind,
+    ExecutionStatus, ExecutionTerminalInfo, StepSpec, TerminalKind,
 };
 
 use super::{
@@ -32,9 +32,8 @@ pub struct GroupDisplay<K, W, S: StepSpec> {
     // the writer in a line-buffered fashion (see Self::write_events).
     writer: W,
     max_width: usize,
-    // This is set to Instant::now as soon as the first event report is
-    // received.
-    start_instant: Option<Instant>,
+    // This is set to the highest value of root_total_elapsed seen from any event reports.
+    start_sw: TokioSw,
     single_states: BTreeMap<K, SingleState<S>>,
     formatter: LineDisplayFormatter,
     stats: GroupDisplayStats,
@@ -73,7 +72,9 @@ impl<K: Eq + Ord, W: std::io::Write, S: StepSpec> GroupDisplay<K, W, S> {
         Self {
             writer,
             max_width,
-            start_instant: None,
+            // This creates the stopwatch in the stopped state with duration 0 -- i.e. a minimal
+            // value that will be replaced as soon as an event comes in.
+            start_sw: TokioSw::new(),
             single_states,
             formatter: LineDisplayFormatter::new(),
             stats: GroupDisplayStats::new(not_started),
@@ -136,8 +137,12 @@ impl<K: Eq + Ord, W: std::io::Write, S: StepSpec> GroupDisplay<K, W, S> {
     {
         if let Some(state) = self.single_states.get_mut(key) {
             let result = state.add_event_report(event_report);
-            if self.start_instant.is_none() {
-                self.start_instant = Some(Instant::now());
+            // Set self.start_sw to the max of root_total_elapsed and the current value.
+            if let Some(root_total_elapsed) = result.root_total_elapsed {
+                if self.start_sw.elapsed() < root_total_elapsed {
+                    self.start_sw =
+                        TokioSw::with_elapsed_started(root_total_elapsed);
+                }
             }
             self.stats.apply_result(result);
             Ok(())
@@ -148,14 +153,10 @@ impl<K: Eq + Ord, W: std::io::Write, S: StepSpec> GroupDisplay<K, W, S> {
 
     /// Writes a "Status" or "Summary" line to the writer with statistics.
     pub fn write_stats(&mut self, header: &str) -> std::io::Result<()> {
-        // Add a prefix which is equal to the maximum width of the prefixes.
-        // [prefix 00:00:00] takes up self.max_width + 9 characters inside the
-        // brackets.
+        // Add a blank prefix which is equal to the maximum width of known prefixes.
         let prefix = " ".repeat(self.max_width);
-        let mut line = self.formatter.start_line(
-            &prefix,
-            self.start_instant.as_ref().map(Instant::elapsed),
-        );
+        let mut line =
+            self.formatter.start_line(&prefix, Some(self.start_sw.elapsed()));
         self.stats.format_line(&mut line, header, &self.formatter);
         writeln!(self.writer, "{line}")
     }
@@ -349,6 +350,7 @@ impl<S: StepSpec> SingleState<S> {
                 // events.
                 return AddEventReportResult::unchanged(
                     SingleStateTag::Terminal(info.kind),
+                    info.root_total_elapsed,
                 );
             }
             SingleStateKind::Overwritten { .. } => {
@@ -356,6 +358,7 @@ impl<S: StepSpec> SingleState<S> {
                 // buffer is for a new update, which we don't show.
                 return AddEventReportResult::unchanged(
                     SingleStateTag::Overwritten,
+                    None,
                 );
             }
         };
@@ -373,26 +376,53 @@ impl<S: StepSpec> SingleState<S> {
                 return AddEventReportResult {
                     before,
                     after: SingleStateTag::Overwritten,
+                    root_total_elapsed: None,
                 };
             }
         }
 
         event_buffer.add_event_report(event_report);
-        let after = if let Some(info) = event_buffer.root_terminal_info() {
-            // Grab the event buffer to store it in the terminal state.
-            let event_buffer =
-                std::mem::replace(event_buffer, EventBuffer::new(0));
-            let terminal_kind = info.kind;
-            self.kind = SingleStateKind::Terminal {
-                info,
-                pending_event_buffer: Some(event_buffer),
+        let (after, max_total_elapsed) =
+            match event_buffer.root_execution_summary() {
+                Some(summary) => {
+                    match summary.execution_status {
+                        ExecutionStatus::NotStarted => {
+                            (SingleStateTag::NotStarted, None)
+                        }
+                        ExecutionStatus::Running {
+                            root_total_elapsed: max_total_elapsed,
+                            ..
+                        } => (SingleStateTag::Running, Some(max_total_elapsed)),
+                        ExecutionStatus::Terminal(info) => {
+                            // Grab the event buffer to store it in the terminal state.
+                            let event_buffer = std::mem::replace(
+                                event_buffer,
+                                EventBuffer::new(0),
+                            );
+                            let terminal_kind = info.kind;
+                            let root_total_elapsed = info.root_total_elapsed;
+                            self.kind = SingleStateKind::Terminal {
+                                info,
+                                pending_event_buffer: Some(event_buffer),
+                            };
+                            (
+                                SingleStateTag::Terminal(terminal_kind),
+                                root_total_elapsed,
+                            )
+                        }
+                    }
+                }
+                None => {
+                    // We don't have a summary yet.
+                    (SingleStateTag::NotStarted, None)
+                }
             };
-            SingleStateTag::Terminal(terminal_kind)
-        } else {
-            SingleStateTag::Running
-        };
 
-        AddEventReportResult { before, after }
+        AddEventReportResult {
+            before,
+            after,
+            root_total_elapsed: max_total_elapsed,
+        }
     }
 
     pub(super) fn format_events(
@@ -428,7 +458,7 @@ impl<S: StepSpec> SingleState<S> {
             SingleStateKind::Overwritten { displayed } => {
                 if !*displayed {
                     let line = cx.format_generic(
-                        "Update overwritten (a different update was started)\
+                        "Update overwritten (a different update was started): \
                          assuming failure",
                     );
                     out.add_line(line);
@@ -461,11 +491,15 @@ enum SingleStateKind<S: StepSpec> {
 struct AddEventReportResult {
     before: SingleStateTag,
     after: SingleStateTag,
+    root_total_elapsed: Option<Duration>,
 }
 
 impl AddEventReportResult {
-    fn unchanged(tag: SingleStateTag) -> Self {
-        Self { before: tag, after: tag }
+    fn unchanged(
+        tag: SingleStateTag,
+        root_total_elapsed: Option<Duration>,
+    ) -> Self {
+        Self { before: tag, after: tag, root_total_elapsed }
     }
 }
 
