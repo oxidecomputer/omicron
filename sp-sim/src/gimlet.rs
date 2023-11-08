@@ -150,113 +150,108 @@ impl Gimlet {
         let mut inner_tasks = Vec::new();
         let (commands, commands_rx) = mpsc::unbounded_channel();
 
-        let (local_addrs, handler, responses_sent_count) =
-            if let Some(bind_addrs) = gimlet.common.bind_addrs {
-                // bind to our two local "KSZ" ports
-                assert_eq!(bind_addrs.len(), 2); // gimlet SP always has 2 ports
-                let servers = future::try_join(
-                    UdpServer::new(
-                        bind_addrs[0],
-                        gimlet.common.multicast_addr,
-                        &log,
-                    ),
-                    UdpServer::new(
-                        bind_addrs[1],
-                        gimlet.common.multicast_addr,
-                        &log,
-                    ),
-                )
-                .await?;
-                let servers = [servers.0, servers.1];
-
-                for component_config in &gimlet.common.components {
-                    let id = component_config.id.as_str();
-                    let component =
-                        SpComponent::try_from(id).map_err(|_| {
-                            anyhow!("component id {:?} too long", id)
-                        })?;
-
-                    if let Some(addr) = component_config.serial_console {
-                        let listener =
-                            TcpListener::bind(addr).await.with_context(
-                                || format!("failed to bind to {}", addr),
-                            )?;
-                        info!(
-                            log, "bound fake serial console to TCP port";
-                            "addr" => %addr,
-                            "component" => ?component,
-                        );
-
-                        serial_console_addrs.insert(
-                        component
-                            .as_str()
-                            .with_context(|| "non-utf8 component")?
-                            .to_string(),
-                        listener
-                            .local_addr()
-                            .with_context(|| {
-                                "failed to get local address of bound socket"
-                            })
-                            .and_then(|addr| match addr {
-                                SocketAddr::V4(addr) => {
-                                    bail!("bound IPv4 address {}", addr)
-                                }
-                                SocketAddr::V6(addr) => Ok(addr),
-                            })?,
-                    );
-
-                        let (tx, rx) = mpsc::unbounded_channel();
-                        incoming_console_tx.insert(component, tx);
-
-                        let serial_console = SerialConsoleTcpTask::new(
-                            component,
-                            listener,
-                            rx,
-                            [
-                                Arc::clone(servers[0].socket()),
-                                Arc::clone(servers[1].socket()),
-                            ],
-                            Arc::clone(&attached_mgs),
-                            log.new(
-                                slog::o!("serial-console" => id.to_string()),
-                            ),
-                        );
-                        inner_tasks.push(task::spawn(async move {
-                            serial_console.run().await
-                        }));
-                    }
-                }
-                let local_addrs =
-                    [servers[0].local_addr(), servers[1].local_addr()];
-                let (inner, handler, responses_sent_count) = UdpTask::new(
-                    servers,
-                    gimlet.common.components.clone(),
-                    attached_mgs,
-                    gimlet.common.serial_number.clone(),
-                    incoming_console_tx,
-                    commands_rx,
-                    log,
-                );
-                inner_tasks.push(task::spawn(async move {
-                    inner.run().await.unwrap()
-                }));
-
-                (Some(local_addrs), Some(handler), Some(responses_sent_count))
-            } else {
-                (None, None, None)
-            };
-
         let (manufacturing_public_key, rot) =
             RotSprocket::bootstrap_from_config(&gimlet.common);
+
+        // Weird case - if we don't have any bind addresses, we're only being
+        // created to simulate an RoT, so go ahead and return without actually
+        // starting a simulated SP.
+        let Some(bind_addrs) = gimlet.common.bind_addrs else {
+            return Ok(Self {
+                rot: Mutex::new(rot),
+                manufacturing_public_key,
+                local_addrs: None,
+                handler: None,
+                serial_console_addrs,
+                commands,
+                inner_tasks,
+                responses_sent_count: None,
+            });
+        };
+
+        // bind to our two local "KSZ" ports
+        assert_eq!(bind_addrs.len(), 2); // gimlet SP always has 2 ports
+        let servers = future::try_join(
+            UdpServer::new(bind_addrs[0], gimlet.common.multicast_addr, &log),
+            UdpServer::new(bind_addrs[1], gimlet.common.multicast_addr, &log),
+        )
+        .await?;
+        let servers = [servers.0, servers.1];
+
+        for component_config in &gimlet.common.components {
+            let id = component_config.id.as_str();
+            let component = SpComponent::try_from(id)
+                .map_err(|_| anyhow!("component id {:?} too long", id))?;
+
+            if let Some(addr) = component_config.serial_console {
+                let listener = TcpListener::bind(addr)
+                    .await
+                    .with_context(|| format!("failed to bind to {}", addr))?;
+                info!(
+                    log, "bound fake serial console to TCP port";
+                    "addr" => %addr,
+                    "component" => ?component,
+                );
+
+                serial_console_addrs.insert(
+                    component
+                        .as_str()
+                        .with_context(|| "non-utf8 component")?
+                        .to_string(),
+                    listener
+                        .local_addr()
+                        .with_context(|| {
+                            "failed to get local address of bound socket"
+                        })
+                        .and_then(|addr| match addr {
+                            SocketAddr::V4(addr) => {
+                                bail!("bound IPv4 address {}", addr)
+                            }
+                            SocketAddr::V6(addr) => Ok(addr),
+                        })?,
+                );
+
+                let (tx, rx) = mpsc::unbounded_channel();
+                incoming_console_tx.insert(component, tx);
+
+                let serial_console = SerialConsoleTcpTask::new(
+                    component,
+                    listener,
+                    rx,
+                    [
+                        Arc::clone(servers[0].socket()),
+                        Arc::clone(servers[1].socket()),
+                    ],
+                    Arc::clone(&attached_mgs),
+                    log.new(slog::o!("serial-console" => id.to_string())),
+                );
+                inner_tasks.push(task::spawn(async move {
+                    serial_console.run().await
+                }));
+            }
+        }
+        let local_addrs = [servers[0].local_addr(), servers[1].local_addr()];
+        let (inner, handler, responses_sent_count) = UdpTask::new(
+            servers,
+            gimlet.common.components.clone(),
+            attached_mgs,
+            gimlet.common.serial_number.clone(),
+            incoming_console_tx,
+            commands_rx,
+            log,
+        );
+        inner_tasks
+            .push(task::spawn(async move { inner.run().await.unwrap() }));
+
         Ok(Self {
             rot: Mutex::new(rot),
             manufacturing_public_key,
-            local_addrs,
-            handler,
+            local_addrs: Some(local_addrs),
+            handler: Some(handler),
             serial_console_addrs,
             commands,
             inner_tasks,
-            responses_sent_count,
+            responses_sent_count: Some(responses_sent_count),
         })
     }
 
