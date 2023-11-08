@@ -168,13 +168,14 @@ async fn query_crdb_schema_version(crdb: &CockroachInstance) -> String {
 //
 // Note that for the purposes of schema comparisons, we don't care about parsing
 // the contents of the database, merely the schema and equality of contained data.
-#[derive(Eq, PartialEq, Clone, Debug)]
+#[derive(PartialEq, Clone, Debug)]
 enum AnySqlType {
     DateTime,
     String(String),
     Bool(bool),
     Uuid(Uuid),
     Int8(i64),
+    Float4(f32),
     // TODO: This isn't exhaustive, feel free to add more.
     //
     // These should only be necessary for rows where the database schema changes also choose to
@@ -213,6 +214,9 @@ impl<'a> tokio_postgres::types::FromSql<'a> for AnySqlType {
         if i64::accepts(ty) {
             return Ok(AnySqlType::Int8(i64::from_sql(ty, raw)?));
         }
+        if f32::accepts(ty) {
+            return Ok(AnySqlType::Float4(f32::from_sql(ty, raw)?));
+        }
         Err(anyhow::anyhow!(
             "Cannot parse type {ty}. If you're trying to use this type in a table which is populated \
 during a schema migration, consider adding it to `AnySqlType`."
@@ -224,7 +228,7 @@ during a schema migration, consider adding it to `AnySqlType`."
     }
 }
 
-#[derive(Eq, PartialEq, Debug)]
+#[derive(PartialEq, Debug)]
 struct NamedSqlValue {
     // It's a little redunant to include the column name alongside each value,
     // but it results in a prettier diff.
@@ -240,7 +244,7 @@ impl NamedSqlValue {
 }
 
 // A generic representation of a row of SQL data
-#[derive(Eq, PartialEq, Debug)]
+#[derive(PartialEq, Debug)]
 struct Row {
     values: Vec<NamedSqlValue>,
 }
@@ -322,6 +326,42 @@ async fn crdb_select(
         .query(&sql, &[])
         .await
         .unwrap_or_else(|_| panic!("failed to query {table}"));
+    client.cleanup().await.expect("cleaning up after wipe");
+
+    let mut result = vec![];
+    for row in rows {
+        let mut row_result = Row::new();
+        for i in 0..row.len() {
+            let column_name = row.columns()[i].name();
+            row_result.values.push(NamedSqlValue {
+                column: column_name.to_string(),
+                value: row.get(i),
+            });
+        }
+        result.push(row_result);
+    }
+    result
+}
+
+async fn crdb_list_enums(crdb: &CockroachInstance) -> Vec<Row> {
+    let client = crdb.connect().await.expect("failed to connect");
+
+    // https://www.cockroachlabs.com/docs/stable/pg-catalog
+    // https://www.postgresql.org/docs/current/catalog-pg-enum.html
+    let sql = "SELECT n.nspname as schema,
+           t.typname as typename,
+           e.enumsortorder as sort_order,
+           e.enumlabel as label
+        FROM pg_type t
+        JOIN pg_enum e on t.oid = e.enumtypid
+        JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace
+        WHERE t.typtype = 'e'
+        ORDER BY n.nspname, t.typname, e.enumsortorder;"
+        .to_string();
+    let rows = client
+        .query(&sql, &[])
+        .await
+        .unwrap_or_else(|_| panic!("failed to list enums"));
     client.cleanup().await.expect("cleaning up after wipe");
 
     let mut result = vec![];
@@ -569,10 +609,11 @@ const PG_INDEXES: [&'static str; 5] =
 const TABLES: [&'static str; 4] =
     ["table_catalog", "table_schema", "table_name", "table_type"];
 
-#[derive(Eq, PartialEq, Debug)]
+#[derive(PartialEq, Debug)]
 struct InformationSchema {
     columns: Vec<Row>,
     constraint_column_usage: Vec<Row>,
+    enums: Vec<Row>,
     key_column_usage: Vec<Row>,
     referential_constraints: Vec<Row>,
     views: Vec<Row>,
@@ -589,6 +630,11 @@ impl InformationSchema {
         // the columns diff especially needs this: it can be 20k lines otherwise
         similar_asserts::assert_eq!(self.tables, other.tables);
         similar_asserts::assert_eq!(self.columns, other.columns);
+        similar_asserts::assert_eq!(
+            self.enums,
+            other.enums,
+            "Enums did not match. Members must have the same order in dbinit.sql and migrations. If a migration adds a member, it should be added at the end of the definition in dbinit.sql."
+        );
         similar_asserts::assert_eq!(self.views, other.views);
         similar_asserts::assert_eq!(
             self.table_constraints,
@@ -623,6 +669,8 @@ impl InformationSchema {
             Some("table_schema = 'public'"),
         )
         .await;
+
+        let enums = crdb_list_enums(crdb).await;
 
         let constraint_column_usage = crdb_select(
             crdb,
@@ -694,6 +742,7 @@ impl InformationSchema {
         Self {
             columns,
             constraint_column_usage,
+            enums,
             key_column_usage,
             referential_constraints,
             views,

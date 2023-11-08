@@ -191,7 +191,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_switch_by_rack ON omicron.public.switch
 
 CREATE TYPE IF NOT EXISTS omicron.public.service_kind AS ENUM (
   'clickhouse',
-  'clickhouse_keeper',
   'cockroach',
   'crucible',
   'crucible_pantry',
@@ -202,6 +201,7 @@ CREATE TYPE IF NOT EXISTS omicron.public.service_kind AS ENUM (
   'ntp',
   'oximeter',
   'tfport',
+  'clickhouse_keeper',
   'mgd'
 );
 
@@ -402,9 +402,9 @@ CREATE TYPE IF NOT EXISTS omicron.public.dataset_kind AS ENUM (
   'crucible',
   'cockroach',
   'clickhouse',
-  'clickhouse_keeper',
   'external_dns',
-  'internal_dns'
+  'internal_dns',
+  'clickhouse_keeper'
 );
 
 /*
