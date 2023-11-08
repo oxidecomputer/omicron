@@ -62,12 +62,12 @@ pub async fn test_setup(
     test_name: &str,
     sp_port: SpPort,
 ) -> GatewayTestContext {
-    let (server_config, mut sp_sim_config) = load_test_config();
+    let (server_config, sp_sim_config) = load_test_config();
     test_setup_with_config(
         test_name,
         sp_port,
         server_config,
-        &mut sp_sim_config,
+        &sp_sim_config,
         None,
     )
     .await
@@ -104,9 +104,7 @@ pub async fn test_setup_with_config(
     let localhost_port_0 = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0);
     let mut addresses = vec![localhost_port_0];
     if let Some(addr) = listen_addr {
-        if addr != localhost_port_0 {
-            addresses.push(addr);
-        }
+        addresses.push(addr);
     };
 
     // Use log settings from the server config and ignore log settings in

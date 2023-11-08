@@ -12,8 +12,6 @@ use omicron_nexus::app::test_interfaces::{SpUpdater, UpdateProgress};
 use sp_sim::SimulatedSp;
 use sp_sim::SIM_GIMLET_BOARD;
 use sp_sim::SIM_SIDECAR_BOARD;
-use std::net::Ipv6Addr;
-use std::net::SocketAddrV6;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -37,25 +35,13 @@ fn make_fake_sp_image(board: &str) -> Vec<u8> {
 #[tokio::test]
 async fn test_sp_updater_updates_sled() {
     // Start MGS + Sim SP.
-    let (mgs_config, sp_sim_config) = mgs_setup::load_test_config();
-    let mgs_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0);
-    let mgstestctx = mgs_setup::test_setup_with_config(
-        "test_sp_updater_updates_sled",
-        SpPort::One,
-        mgs_config,
-        &sp_sim_config,
-        Some(mgs_addr),
-    )
-    .await;
+    let mgstestctx =
+        mgs_setup::test_setup("test_sp_updater_updates_sled", SpPort::One)
+            .await;
 
     // Configure an MGS client.
-    let mgs_listen_addr = mgstestctx
-        .server
-        .dropshot_server_for_address(mgs_addr)
-        .expect("missing dropshot server for localhost address")
-        .local_addr();
     let mgs_client = Arc::new(gateway_client::Client::new(
-        &format!("http://{mgs_listen_addr}"),
+        &mgstestctx.client.url("/").to_string(),
         mgstestctx.logctx.log.new(slog::o!("component" => "MgsClient")),
     ));
 
@@ -92,29 +78,20 @@ async fn test_sp_updater_updates_sled() {
         last_update_image.len(),
         hubris_archive.image.data.len()
     );
+
+    mgstestctx.teardown().await;
 }
 
 #[tokio::test]
 async fn test_sp_updater_updates_switch() {
     // Start MGS + Sim SP.
-    let (mgs_config, sp_sim_config) = mgs_setup::load_test_config();
-    let mgs_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0);
-    let mgstestctx = mgs_setup::test_setup_with_config(
-        "test_sp_updater_updates_switch",
-        SpPort::One,
-        mgs_config,
-        &sp_sim_config,
-        Some(mgs_addr),
-    )
-    .await;
+    let mgstestctx =
+        mgs_setup::test_setup("test_sp_updater_updates_switch", SpPort::One)
+            .await;
 
-    let mgs_listen_addr = mgstestctx
-        .server
-        .dropshot_server_for_address(mgs_addr)
-        .expect("missing dropshot server for localhost address")
-        .local_addr();
+    // Configure an MGS client.
     let mgs_client = Arc::new(gateway_client::Client::new(
-        &format!("http://{mgs_listen_addr}"),
+        &mgstestctx.client.url("/").to_string(),
         mgstestctx.logctx.log.new(slog::o!("component" => "MgsClient")),
     ));
 
@@ -148,27 +125,16 @@ async fn test_sp_updater_updates_switch() {
         last_update_image.len(),
         hubris_archive.image.data.len()
     );
+
+    mgstestctx.teardown().await;
 }
 
 #[tokio::test]
 async fn test_sp_updater_remembers_successful_mgs_instance() {
     // Start MGS + Sim SP.
-    let (mgs_config, sp_sim_config) = mgs_setup::load_test_config();
-    let mgs_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0);
-    let mgstestctx = mgs_setup::test_setup_with_config(
-        "test_sp_updater_updates_switch",
-        SpPort::One,
-        mgs_config,
-        &sp_sim_config,
-        Some(mgs_addr),
-    )
-    .await;
-
-    let mgs_listen_addr = mgstestctx
-        .server
-        .dropshot_server_for_address(mgs_addr)
-        .expect("missing dropshot server for localhost address")
-        .local_addr();
+    let mgstestctx =
+        mgs_setup::test_setup("test_sp_updater_updates_sled", SpPort::One)
+            .await;
 
     // Also start a local TCP server that we will claim is an MGS instance, but
     // it will close connections immediately after accepting them. This will
@@ -206,8 +172,8 @@ async fn test_sp_updater_remembers_successful_mgs_instance() {
             mgstestctx.logctx.log.new(slog::o!("component" => "MgsClient1")),
         )),
         Arc::new(gateway_client::Client::new(
-            &format!("http://{mgs_listen_addr}"),
-            mgstestctx.logctx.log.new(slog::o!("component" => "MgsClient2")),
+            &mgstestctx.client.url("/").to_string(),
+            mgstestctx.logctx.log.new(slog::o!("component" => "MgsClient")),
         )),
     ];
 
@@ -251,29 +217,20 @@ async fn test_sp_updater_remembers_successful_mgs_instance() {
         "bogus MGS instance didn't receive the expected number of connections"
     );
     failing_mgs_task.abort();
+
+    mgstestctx.teardown().await;
 }
 
 #[tokio::test]
 async fn test_sp_updater_delivers_progress() {
     // Start MGS + Sim SP.
-    let (mgs_config, sp_sim_config) = mgs_setup::load_test_config();
-    let mgs_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0);
-    let mgstestctx = mgs_setup::test_setup_with_config(
-        "test_sp_updater_delivers_progress",
-        SpPort::One,
-        mgs_config,
-        &sp_sim_config,
-        Some(mgs_addr),
-    )
-    .await;
+    let mgstestctx =
+        mgs_setup::test_setup("test_sp_updater_updates_sled", SpPort::One)
+            .await;
 
-    let mgs_listen_addr = mgstestctx
-        .server
-        .dropshot_server_for_address(mgs_addr)
-        .expect("missing dropshot server for localhost address")
-        .local_addr();
+    // Configure an MGS client.
     let mgs_client = Arc::new(gateway_client::Client::new(
-        &format!("http://{mgs_listen_addr}"),
+        &mgstestctx.client.url("/").to_string(),
         mgstestctx.logctx.log.new(slog::o!("component" => "MgsClient")),
     ));
 
@@ -442,4 +399,6 @@ async fn test_sp_updater_delivers_progress() {
         last_update_image.len(),
         hubris_archive.image.data.len()
     );
+
+    mgstestctx.teardown().await;
 }
