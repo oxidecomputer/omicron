@@ -13,6 +13,7 @@ camino.workspace = true
 ciborium.workspace = true
 clap.workspace = true
 crossterm.workspace = true
+debug-ignore.workspace = true
 futures.workspace = true
 hex = { workspace = true, features = ["serde"] }
 humantime.workspace = true
@@ -33,6 +34,7 @@ slog.workspace = true
 slog-async.workspace = true
 slog-envlogger.workspace = true
 slog-term.workspace = true
+supports-color.workspace = true
 textwrap.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tokio-util.workspace = true
@@ -40,6 +42,7 @@ toml.workspace = true
 toml_edit.workspace = true
 tui-tree-widget = "0.13.0"
 unicode-width.workspace = true
+uuid.workspace = true
 zeroize.workspace = true
 
 omicron-passwords.workspace = true
