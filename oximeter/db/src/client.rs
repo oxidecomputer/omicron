@@ -1064,7 +1064,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_replicated() {
-        let mut cluster = ClickHouseCluster::new()
+        let cur_dir = std::env::current_dir().unwrap();
+        let replica_config =
+            cur_dir.as_path().join("src/configs/replica_config.xml");
+        let cur_dir = std::env::current_dir().unwrap();
+        let keeper_config =
+            cur_dir.as_path().join("src/configs/keeper_config.xml");
+
+        let mut cluster = ClickHouseCluster::new(replica_config, keeper_config)
             .await
             .expect("Failed to initialise ClickHouse Cluster");
 

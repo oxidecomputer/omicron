@@ -4,6 +4,7 @@
 
 //! Sled agent implementation
 
+use crate::bootstrap::config::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use crate::bootstrap::early_networking::{
     EarlyNetworkConfig, EarlyNetworkSetupError,
 };
@@ -24,7 +25,11 @@ use crate::zone_bundle;
 use crate::zone_bundle::BundleError;
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
+use ddm_admin_client::Client as DdmAdminClient;
+use derive_more::From;
 use dropshot::HttpError;
+use futures::stream::FuturesUnordered;
+use futures::StreamExt;
 use illumos_utils::opte::params::{
     DeleteVirtualNetworkInterfaceHost, SetVirtualNetworkInterfaceHost,
 };
@@ -49,8 +54,8 @@ use omicron_common::backoff::{
     retry_notify, retry_notify_ext, retry_policy_internal_service_aggressive,
     BackoffError,
 };
-use sled_hardware::underlay;
 use sled_hardware::HardwareManager;
+use sled_hardware::{underlay, underlay::BootstrapInterface, Baseboard};
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
@@ -210,6 +215,10 @@ struct SledAgentInner {
     // The Sled Agent's address can be derived from this value.
     subnet: Ipv6Subnet<SLED_PREFIX>,
 
+    // The request that was used to start the sled-agent
+    // This is used for idempotence checks during RSS/Add-Sled internal APIs
+    start_request: StartSledAgentRequest,
+
     // Component of Sled Agent responsible for storage and dataset management.
     storage: StorageManager,
 
@@ -278,7 +287,7 @@ impl SledAgent {
         // Use "log" for ourself.
         let log = log.new(o!(
             "component" => "SledAgent",
-            "sled_id" => request.id.to_string(),
+            "sled_id" => request.body.id.to_string(),
         ));
         info!(&log, "SledAgent::new(..) starting");
 
@@ -299,7 +308,7 @@ impl SledAgent {
                     sz,
                 )?;
             }
-            Some(sz) if sz == 0 => {
+            Some(0) => {
                 panic!("Invalid requested swap device size of 0 GiB");
             }
             None | Some(_) => {
@@ -347,7 +356,7 @@ impl SledAgent {
         storage
             .setup_underlay_access(storage_manager::UnderlayAccess {
                 nexus_client: nexus_client.clone(),
-                sled_id: request.id,
+                sled_id: request.body.id,
             })
             .await?;
 
@@ -375,7 +384,7 @@ impl SledAgent {
                     e
                 })?;
             }
-            Some(sz) if sz == 0 => {
+            Some(0) => {
                 warn!(log, "Not using VMM reservoir (size 0 bytes requested)");
             }
             None => {
@@ -391,8 +400,10 @@ impl SledAgent {
         };
         let updates = UpdateManager::new(update_config);
 
-        let svc_config =
-            services::Config::new(request.id, config.sidecar_revision.clone());
+        let svc_config = services::Config::new(
+            request.body.id,
+            config.sidecar_revision.clone(),
+        );
 
         // Get our rack network config from the bootstore; we cannot proceed
         // until we have this, as we need to know which switches have uplinks to
@@ -437,15 +448,16 @@ impl SledAgent {
             svc_config,
             port_manager.clone(),
             *sled_address.ip(),
-            request.rack_id,
+            request.body.rack_id,
             rack_network_config.clone(),
         )?;
 
         let zone_bundler = storage.zone_bundler().clone();
         let sled_agent = SledAgent {
             inner: Arc::new(SledAgentInner {
-                id: request.id,
-                subnet: request.subnet,
+                id: request.body.id,
+                subnet: request.body.subnet,
+                start_request: request,
                 storage,
                 instances,
                 hardware,
@@ -520,6 +532,10 @@ impl SledAgent {
 
     pub fn logger(&self) -> &Logger {
         &self.log
+    }
+
+    pub fn start_request(&self) -> &StartSledAgentRequest {
+        &self.inner.start_request
     }
 
     // Sends a request to Nexus informing it that the current sled exists.
@@ -939,4 +955,92 @@ impl SledAgent {
     pub fn bootstore(&self) -> bootstore::NodeHandle {
         self.inner.bootstore.clone()
     }
+}
+
+#[derive(From, thiserror::Error, Debug)]
+pub enum AddSledError {
+    #[error("Failed to learn bootstrap ip for {sled_id}")]
+    BootstrapAgentClient {
+        sled_id: Baseboard,
+        #[source]
+        err: bootstrap_agent_client::Error,
+    },
+    #[error("Failed to connect to DDM")]
+    DdmAdminClient(#[source] ddm_admin_client::DdmError),
+    #[error("Failed to learn bootstrap ip for {0}")]
+    NotFound(Baseboard),
+    #[error("Failed to initialize {sled_id}: {err}")]
+    BootstrapTcpClient {
+        sled_id: Baseboard,
+        err: crate::bootstrap::client::Error,
+    },
+}
+
+/// Add a sled to an  
+pub async fn add_sled_to_initialized_rack(
+    log: Logger,
+    sled_id: Baseboard,
+    request: StartSledAgentRequest,
+) -> Result<(), AddSledError> {
+    // Get all known bootstrap addresses via DDM
+    let ddm_admin_client = DdmAdminClient::localhost(&log)?;
+    let addrs = ddm_admin_client
+        .derive_bootstrap_addrs_from_prefixes(&[BootstrapInterface::GlobalZone])
+        .await?;
+
+    // Create a set of futures to concurrently map the baseboard to bootstrap ip
+    // for each sled
+    let mut addrs_to_sleds = addrs
+        .map(|ip| {
+            let log = log.clone();
+            async move {
+                let client = bootstrap_agent_client::Client::new(
+                    &format!("http://[{ip}]"),
+                    log,
+                );
+                let result = client.baseboard_get().await;
+
+                (ip, result)
+            }
+        })
+        .collect::<FuturesUnordered<_>>();
+
+    // Execute the futures until we find our matching sled or done searching
+    let mut target_ip = None;
+    while let Some((ip, result)) = addrs_to_sleds.next().await {
+        match result {
+            Ok(baseboard) => {
+                // Convert from progenitor type back to `sled-hardware`
+                // type.
+                let found = baseboard.into_inner().into();
+                if sled_id == found {
+                    target_ip = Some(ip);
+                    break;
+                }
+            }
+            Err(err) => {
+                warn!(
+                    log, "Failed to get baseboard for {ip}";
+                    "err" => #%err,
+                );
+            }
+        }
+    }
+
+    // Contact the sled and initialize it
+    let bootstrap_addr =
+        target_ip.ok_or_else(|| AddSledError::NotFound(sled_id.clone()))?;
+    let bootstrap_addr =
+        SocketAddrV6::new(bootstrap_addr, BOOTSTRAP_AGENT_RACK_INIT_PORT, 0, 0);
+    let client = crate::bootstrap::client::Client::new(
+        bootstrap_addr,
+        log.new(o!("BootstrapAgentClient" => bootstrap_addr.to_string())),
+    );
+
+    client.start_sled_agent(&request).await.map_err(|err| {
+        AddSledError::BootstrapTcpClient { sled_id: sled_id.clone(), err }
+    })?;
+
+    info!(log, "Peer agent initialized"; "peer_bootstrap_addr" => %bootstrap_addr, "peer_id" => %sled_id);
+    Ok(())
 }
