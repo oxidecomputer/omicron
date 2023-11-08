@@ -13,11 +13,14 @@ use omicron_nexus::app::test_interfaces::{SpUpdater, UpdateProgress};
 use sp_sim::SimulatedSp;
 use sp_sim::SIM_GIMLET_BOARD;
 use sp_sim::SIM_SIDECAR_BOARD;
+use std::mem;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
+use tokio::net::TcpStream;
+use tokio::sync::mpsc;
 use uuid::Uuid;
 
 fn make_fake_sp_image(board: &str) -> Vec<u8> {
@@ -133,9 +136,11 @@ async fn test_sp_updater_updates_switch() {
 #[tokio::test]
 async fn test_sp_updater_remembers_successful_mgs_instance() {
     // Start MGS + Sim SP.
-    let mgstestctx =
-        mgs_setup::test_setup("test_sp_updater_updates_sled", SpPort::One)
-            .await;
+    let mgstestctx = mgs_setup::test_setup(
+        "test_sp_updater_remembers_successful_mgs_instance",
+        SpPort::One,
+    )
+    .await;
 
     // Also start a local TCP server that we will claim is an MGS instance, but
     // it will close connections immediately after accepting them. This will
@@ -223,10 +228,209 @@ async fn test_sp_updater_remembers_successful_mgs_instance() {
 }
 
 #[tokio::test]
+async fn test_sp_updater_switches_mgs_instances_on_failure() {
+    enum MgsProxy {
+        One(TcpStream),
+        Two(TcpStream),
+    }
+
+    // Start MGS + Sim SP.
+    let mgstestctx = mgs_setup::test_setup(
+        "test_sp_updater_switches_mgs_instances_on_failure",
+        SpPort::One,
+    )
+    .await;
+    let mgs_bind_addr = mgstestctx.client.bind_address;
+
+    let spawn_mgs_proxy_task = |mut stream: TcpStream| {
+        tokio::spawn(async move {
+            let mut mgs_stream = TcpStream::connect(mgs_bind_addr)
+                .await
+                .expect("failed to connect to MGS");
+            tokio::io::copy_bidirectional(&mut stream, &mut mgs_stream)
+                .await
+                .expect("failed to proxy connection to MGS");
+        })
+    };
+
+    // Start two MGS proxy tasks; when each receives an incoming TCP connection,
+    // it forwards that `TcpStream` along the `mgs_proxy_connections` channel
+    // along with a tag of which proxy it is. We'll use this below to flip flop
+    // between MGS "instances" (really these two proxies).
+    let (mgs_proxy_connections_tx, mut mgs_proxy_connections_rx) =
+        mpsc::unbounded_channel();
+    let (mgs_proxy_one_task, mgs_proxy_one_addr) = {
+        let socket = TcpListener::bind("[::1]:0").await.unwrap();
+        let addr = socket.local_addr().unwrap();
+        let mgs_proxy_connections_tx = mgs_proxy_connections_tx.clone();
+        let task = tokio::spawn(async move {
+            loop {
+                let (stream, _peer) = socket.accept().await.unwrap();
+                mgs_proxy_connections_tx.send(MgsProxy::One(stream)).unwrap();
+            }
+        });
+        (task, addr)
+    };
+    let (mgs_proxy_two_task, mgs_proxy_two_addr) = {
+        let socket = TcpListener::bind("[::1]:0").await.unwrap();
+        let addr = socket.local_addr().unwrap();
+        let task = tokio::spawn(async move {
+            loop {
+                let (stream, _peer) = socket.accept().await.unwrap();
+                mgs_proxy_connections_tx.send(MgsProxy::Two(stream)).unwrap();
+            }
+        });
+        (task, addr)
+    };
+
+    // Disable connection pooling so each request gets a new TCP connection.
+    let client =
+        reqwest::Client::builder().pool_max_idle_per_host(0).build().unwrap();
+
+    // Configure two MGS clients pointed at our two proxy tasks.
+    let mgs_clients = [
+        Arc::new(gateway_client::Client::new_with_client(
+            &format!("http://{mgs_proxy_one_addr}"),
+            client.clone(),
+            mgstestctx.logctx.log.new(slog::o!("component" => "MgsClient1")),
+        )),
+        Arc::new(gateway_client::Client::new_with_client(
+            &format!("http://{mgs_proxy_two_addr}"),
+            client,
+            mgstestctx.logctx.log.new(slog::o!("component" => "MgsClient2")),
+        )),
+    ];
+
+    let sp_type = SpType::Sled;
+    let sp_slot = 0;
+    let update_id = Uuid::new_v4();
+    let hubris_archive = make_fake_sp_image(SIM_GIMLET_BOARD);
+
+    let sp_updater = SpUpdater::new(
+        sp_type,
+        sp_slot,
+        update_id,
+        hubris_archive.clone(),
+        &mgstestctx.logctx.log,
+    );
+
+    // Spawn the actual update task.
+    let mut update_task = tokio::spawn(sp_updater.update(mgs_clients));
+
+    // Loop over incoming requests. We expect this sequence:
+    //
+    // 1. Connection arrives on the first proxy
+    // 2. We spawn a task to service that request, and set `should_swap`
+    // 3. Connection arrives on the first proxy
+    // 4. We drop that connection, flip `expected_proxy`, and clear
+    //    `should_swap`
+    // 5. Connection arrives on the second proxy
+    // 6. We spawn a task to service that request, and set `should_swap`
+    // 7. Connection arrives on the second proxy
+    // 8. We drop that connection, flip `expected_proxy`, and clear
+    //    `should_swap`
+    //
+    // ... repeat until the update is complete.
+    let mut expected_proxy = 0;
+    let mut proxy_one_count = 0;
+    let mut proxy_two_count = 0;
+    let mut total_requests_handled = 0;
+    let mut should_swap = false;
+    loop {
+        tokio::select! {
+            Some(proxy_stream) = mgs_proxy_connections_rx.recv() => {
+                let stream = match proxy_stream {
+                    MgsProxy::One(stream) => {
+                        assert_eq!(expected_proxy, 0);
+                        proxy_one_count += 1;
+                        stream
+                    }
+                    MgsProxy::Two(stream) => {
+                        assert_eq!(expected_proxy, 1);
+                        proxy_two_count += 1;
+                        stream
+                    }
+                };
+
+                // Should we trigger `SpUpdater` to swap to the other MGS
+                // (proxy)? If so, do that by dropping this connection (which
+                // will cause a client failure) and note that we expect the next
+                // incoming request to come on the other proxy.
+                if should_swap {
+                    mem::drop(stream);
+                    expected_proxy ^= 1;
+                    should_swap = false;
+                } else {
+                    // Otherwise, handle this connection.
+                    total_requests_handled += 1;
+                    spawn_mgs_proxy_task(stream);
+                    should_swap = true;
+                }
+            }
+
+            result = &mut update_task => {
+                match result {
+                    Ok(Ok(())) => {
+                        mgs_proxy_one_task.abort();
+                        mgs_proxy_two_task.abort();
+                        break;
+                    }
+                    Ok(Err(err)) => panic!("update failed: {err}"),
+                    Err(err) => panic!("update task panicked: {err}"),
+                }
+            }
+        }
+    }
+
+    // An SP update requires a minimum of 3 requests to MGS: post the update,
+    // check the status, and post an SP reset. There may be more requests if the
+    // update is not yet complete when the status is checked, but we can just
+    // check that each of our proxies received at least 2 incoming requests;
+    // based on our outline above, if we got the minimum of 3 requests, it would
+    // look like this:
+    //
+    // 1. POST update -> first proxy (success)
+    // 2. GET status -> first proxy (fail)
+    // 3. GET status retry -> second proxy (success)
+    // 4. POST reset -> second proxy (fail)
+    // 5. POST reset -> first proxy (success)
+    //
+    // This pattern would repeat if multiple status requests were required, so
+    // we always expect the first proxy to see exactly one more connection
+    // attempt than the second (because it went first before they started
+    // swapping), and the two together should see a total of one less than
+    // double the number of successful requests required.
+    assert!(total_requests_handled >= 3);
+    assert_eq!(proxy_one_count, proxy_two_count + 1);
+    assert_eq!(
+        (proxy_one_count + proxy_two_count + 1) / 2,
+        total_requests_handled
+    );
+
+    let last_update_image = mgstestctx.simrack.gimlets[sp_slot as usize]
+        .last_update_data()
+        .await
+        .expect("simulated SP did not receive an update");
+
+    let hubris_archive = RawHubrisArchive::from_vec(hubris_archive).unwrap();
+
+    assert_eq!(
+        hubris_archive.image.data.as_slice(),
+        &*last_update_image,
+        "simulated SP update contents (len {}) \
+         do not match test generated fake image (len {})",
+        last_update_image.len(),
+        hubris_archive.image.data.len()
+    );
+
+    mgstestctx.teardown().await;
+}
+
+#[tokio::test]
 async fn test_sp_updater_delivers_progress() {
     // Start MGS + Sim SP.
     let mgstestctx =
-        mgs_setup::test_setup("test_sp_updater_updates_sled", SpPort::One)
+        mgs_setup::test_setup("test_sp_updater_delivers_progress", SpPort::One)
             .await;
 
     // Configure an MGS client.
