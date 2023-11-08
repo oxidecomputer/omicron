@@ -4,6 +4,7 @@
 
 //! Plan generation for "how should sleds be initialized".
 
+use crate::bootstrap::params::StartSledAgentRequestBody;
 use crate::bootstrap::{
     config::BOOTSTRAP_AGENT_RACK_INIT_PORT, params::StartSledAgentRequest,
 };
@@ -99,12 +100,15 @@ impl Plan {
             (
                 bootstrap_addr,
                 StartSledAgentRequest {
-                    id: Uuid::new_v4(),
-                    subnet,
-                    ntp_servers: config.ntp_servers.clone(),
-                    dns_servers: config.dns_servers.clone(),
-                    use_trust_quorum,
-                    rack_id,
+                    generation: 0,
+                    schema_version: 1,
+                    body: StartSledAgentRequestBody {
+                        id: Uuid::new_v4(),
+                        subnet,
+                        use_trust_quorum,
+                        is_lrtq_learner: false,
+                        rack_id,
+                    },
                 },
             )
         });

@@ -107,21 +107,13 @@ impl<S: StepSpec> EventBuffer<S> {
         self.event_store.root_execution_id
     }
 
-    /// Returns information about terminal status for this buffer's root
-    /// execution ID, or None if the execution has not started or is currently
-    /// running.
-    pub fn root_terminal_info(&self) -> Option<ExecutionTerminalInfo> {
-        let Some(root_execution_id) = self.root_execution_id() else {
-            return None;
-        };
-
-        let summary = self.steps().summarize();
-        summary
-            .get(&root_execution_id)
-            .expect("root execution ID must always be present in summary")
-            .execution_status
-            .terminal_info()
-            .cloned()
+    /// Returns an execution summary for the root execution ID, if this event buffer is aware of any
+    /// events.
+    pub fn root_execution_summary(&self) -> Option<ExecutionSummary> {
+        // XXX: more efficient algorithm
+        let root_execution_id = self.root_execution_id()?;
+        let mut summary = self.steps().summarize();
+        summary.remove(&root_execution_id)
     }
 
     /// Returns information about each step, as currently tracked by the buffer,
@@ -288,9 +280,6 @@ impl<S: StepSpec> EventStore<S> {
                             // parent key was unknown. This can happen if we
                             // didn't receive an event regarding a parent
                             // execution being started.
-                            //
-                            // TODO: This should probably be an error that gets
-                            // bubbled up to callers.
                             None
                         }
                     }
@@ -1471,8 +1460,17 @@ impl ExecutionSummary {
                 StepStatus::NotStarted => {
                     // This step hasn't been started yet. Skip over it.
                 }
-                StepStatus::Running { .. } => {
-                    execution_status = ExecutionStatus::Running { step_key };
+                StepStatus::Running { low_priority, progress_event } => {
+                    let root_total_elapsed = low_priority
+                        .iter()
+                        .map(|event| event.total_elapsed)
+                        .chain(std::iter::once(progress_event.total_elapsed))
+                        .max()
+                        .expect("at least one value was provided");
+                    execution_status = ExecutionStatus::Running {
+                        step_key,
+                        root_total_elapsed,
+                    };
                 }
                 StepStatus::Completed { reason } => {
                     let (root_total_elapsed, leaf_total_elapsed) =
@@ -1578,6 +1576,9 @@ pub enum ExecutionStatus {
         ///
         /// Use [`EventBuffer::get`] to get more information about this step.
         step_key: StepKey,
+
+        /// The maximum root_total_elapsed seen.
+        root_total_elapsed: Duration,
     },
 
     /// Execution has finished.
