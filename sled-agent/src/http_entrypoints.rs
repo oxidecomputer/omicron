@@ -6,6 +6,7 @@
 
 use super::sled_agent::SledAgent;
 use crate::bootstrap::early_networking::EarlyNetworkConfig;
+use crate::bootstrap::params::AddSledRequest;
 use crate::params::{
     CleanupContextUpdate, DiskEnsureBody, InstanceEnsureBody,
     InstancePutMigrationIdsBody, InstancePutStateBody,
@@ -68,6 +69,7 @@ pub fn api() -> SledApiDescription {
         api.register(uplink_ensure)?;
         api.register(read_network_bootstore_config_cache)?;
         api.register(write_network_bootstore_config)?;
+        api.register(add_sled_to_initialized_rack)?;
 
         Ok(())
     }
@@ -704,5 +706,46 @@ async fn write_network_bootstore_config(
         },
     )?;
 
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+/// Add a sled to a rack that was already initialized via RSS
+#[endpoint {
+    method = PUT,
+    path = "/sleds"
+}]
+async fn add_sled_to_initialized_rack(
+    rqctx: RequestContext<SledAgent>,
+    body: TypedBody<AddSledRequest>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let sa = rqctx.context();
+    let request = body.into_inner();
+
+    // Perform some minimal validation
+    if request.start_request.body.use_trust_quorum
+        && !request.start_request.body.is_lrtq_learner
+    {
+        return Err(HttpError::for_bad_request(
+            None,
+            "New sleds must be LRTQ learners if trust quorum is in use"
+                .to_string(),
+        ));
+    }
+
+    crate::sled_agent::add_sled_to_initialized_rack(
+        sa.logger().clone(),
+        request.sled_id,
+        request.start_request,
+    )
+    .await
+    .map_err(|e| {
+        let message = format!("Failed to add sled to rack cluster: {e}");
+        HttpError {
+            status_code: http::StatusCode::INTERNAL_SERVER_ERROR,
+            error_code: None,
+            external_message: message.clone(),
+            internal_message: message,
+        }
+    })?;
     Ok(HttpResponseUpdatedNoContent())
 }

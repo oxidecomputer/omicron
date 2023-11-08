@@ -159,6 +159,20 @@ $ cargo run --bin omicron-dev -- ch-run
 omicron-dev: running ClickHouse (PID: 2463), full command is "clickhouse server --log-file /var/folders/67/2tlym22x1r3d2kwbh84j298w0000gn/T/.tmpJ5nhot/clickhouse-server.log --errorlog-file /var/folders/67/2tlym22x1r3d2kwbh84j298w0000gn/T/.tmpJ5nhot/clickhouse-server.errlog -- --http_port 8123 --path /var/folders/67/2tlym22x1r3d2kwbh84j298w0000gn/T/.tmpJ5nhot"
 omicron-dev: using /var/folders/67/2tlym22x1r3d2kwbh84j298w0000gn/T/.tmpJ5nhot for ClickHouse data storage
 ----
++
+If you wish to start a ClickHouse replicated cluster instead of a single node, run the following instead:
+[source,text]
+---
+$ cargo run --bin omicron-dev -- ch-run --replicated
+    Finished dev [unoptimized + debuginfo] target(s) in 0.31s
+     Running `target/debug/omicron-dev ch-run --replicated`
+omicron-dev: running ClickHouse cluster with configuration files:
+ replicas: /home/{user}/src/omicron/oximeter/db/src/configs/replica_config.xml
+ keepers: /home/{user}/src/omicron/oximeter/db/src/configs/keeper_config.xml
+omicron-dev: ClickHouse cluster is running with PIDs: 1113482, 1113681, 1113387, 1113451, 1113419
+omicron-dev: ClickHouse HTTP servers listening on ports: 8123, 8124
+omicron-dev: using /tmp/.tmpFH6v8h and /tmp/.tmpkUjDji for ClickHouse data storage
+---
 
 . `nexus` requires a configuration file to run.  You can use `nexus/examples/config.toml` to start with.  Build and run it like this:
 +

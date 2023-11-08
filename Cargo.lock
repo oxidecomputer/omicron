@@ -874,12 +874,12 @@ dependencies = [
 
 [[package]]
 name = "cargo_toml"
-version = "0.16.3"
+version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e3f9629bc6c4388ea699781dc988c2b99766d7679b151c81990b4fa1208fafd3"
+checksum = "6ca592ad99e6a0fd4b95153406138b997cc26ccd3cd0aecdfd4fbdbf1519bd77"
 dependencies = [
  "serde",
- "toml 0.8.6",
+ "toml 0.8.8",
 ]
 
 [[package]]
@@ -1360,23 +1360,6 @@ dependencies = [
 
 [[package]]
 name = "crossterm"
-version = "0.26.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a84cda67535339806297f1b331d6dd6320470d2a0fe65381e79ee9e156dd3d13"
-dependencies = [
- "bitflags 1.3.2",
- "crossterm_winapi",
- "libc",
- "mio",
- "parking_lot 0.12.1",
- "serde",
- "signal-hook",
- "signal-hook-mio",
- "winapi",
-]
-
-[[package]]
-name = "crossterm"
 version = "0.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f476fe445d41c9e991fd07515a6f463074b782242ccf4a5b7b1d1012e70824df"
@@ -1387,6 +1370,7 @@ dependencies = [
  "libc",
  "mio",
  "parking_lot 0.12.1",
+ "serde",
  "signal-hook",
  "signal-hook-mio",
  "winapi",
@@ -1439,7 +1423,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tokio-util",
- "toml 0.8.6",
+ "toml 0.8.8",
  "tracing",
  "usdt",
  "uuid",
@@ -1497,7 +1481,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio-rustls",
- "toml 0.8.6",
+ "toml 0.8.8",
  "twox-hash",
  "uuid",
  "vergen",
@@ -1767,7 +1751,7 @@ dependencies = [
  "slog",
  "thiserror",
  "tokio",
- "toml 0.8.6",
+ "toml 0.8.8",
 ]
 
 [[package]]
@@ -2040,7 +2024,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
- "toml 0.8.6",
+ "toml 0.8.8",
  "trust-dns-client",
  "trust-dns-proto",
  "trust-dns-resolver",
@@ -2124,7 +2108,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
- "toml 0.8.6",
+ "toml 0.8.8",
  "uuid",
 ]
 
@@ -2305,7 +2289,7 @@ dependencies = [
  "russh-keys",
  "serde_json",
  "tokio",
- "toml 0.8.6",
+ "toml 0.8.8",
  "trust-dns-resolver",
  "uuid",
 ]
@@ -3400,7 +3384,7 @@ dependencies = [
  "smf",
  "thiserror",
  "tokio",
- "toml 0.8.6",
+ "toml 0.8.8",
  "uuid",
  "zone",
 ]
@@ -3518,7 +3502,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-stream",
- "toml 0.8.6",
+ "toml 0.8.8",
  "tufaceous-lib",
  "update-engine",
  "uuid",
@@ -3933,6 +3917,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "libsw"
+version = "3.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "610cd929d24f634af855498b575263c44d541a0e28c21d595968a6e25fe190f9"
+dependencies = [
+ "tokio",
+]
+
+[[package]]
 name = "libtest-mimic"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4149,7 +4142,7 @@ dependencies = [
  "slog",
  "thiserror",
  "tokio",
- "toml 0.8.6",
+ "toml 0.8.8",
 ]
 
 [[package]]
@@ -4443,7 +4436,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-postgres",
- "toml 0.8.6",
+ "toml 0.8.8",
  "usdt",
  "uuid",
 ]
@@ -4917,7 +4910,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-postgres",
- "toml 0.8.6",
+ "toml 0.8.8",
  "uuid",
 ]
 
@@ -4973,7 +4966,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "thiserror",
- "toml 0.8.6",
+ "toml 0.8.8",
 ]
 
 [[package]]
@@ -5007,7 +5000,7 @@ dependencies = [
  "subprocess",
  "tokio",
  "tokio-postgres",
- "toml 0.8.6",
+ "toml 0.8.8",
 ]
 
 [[package]]
@@ -5051,7 +5044,7 @@ dependencies = [
  "tokio-stream",
  "tokio-tungstenite 0.18.0",
  "tokio-util",
- "toml 0.8.6",
+ "toml 0.8.8",
  "uuid",
 ]
 
@@ -5162,7 +5155,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-postgres",
- "toml 0.8.6",
+ "toml 0.8.8",
  "tough",
  "trust-dns-resolver",
  "usdt",
@@ -5245,7 +5238,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
- "toml 0.8.6",
+ "toml 0.8.8",
  "topological-sort",
  "walkdir",
 ]
@@ -5365,7 +5358,7 @@ dependencies = [
  "tofino",
  "tokio",
  "tokio-tungstenite 0.18.0",
- "toml 0.8.6",
+ "toml 0.8.8",
  "usdt",
  "uuid",
  "zeroize",
@@ -5428,6 +5421,7 @@ dependencies = [
  "const-oid",
  "crossbeam-epoch",
  "crossbeam-utils",
+ "crossterm",
  "crypto-common",
  "diesel",
  "digest",
@@ -5499,6 +5493,7 @@ dependencies = [
  "toml 0.7.8",
  "toml_datetime",
  "toml_edit 0.19.15",
+ "toml_edit 0.21.0",
  "tracing",
  "trust-dns-proto",
  "unicode-bidi",
@@ -5820,7 +5815,7 @@ dependencies = [
  "subprocess",
  "thiserror",
  "tokio",
- "toml 0.8.6",
+ "toml 0.8.8",
  "uuid",
 ]
 
@@ -6983,7 +6978,7 @@ checksum = "2e2e4cd95294a85c3b4446e63ef054eea43e0205b1fd60120c16b74ff7ff96ad"
 dependencies = [
  "bitflags 2.4.0",
  "cassowary",
- "crossterm 0.27.0",
+ "crossterm",
  "indoc 2.0.3",
  "itertools 0.11.0",
  "paste",
@@ -7064,12 +7059,12 @@ dependencies = [
 
 [[package]]
 name = "reedline"
-version = "0.23.0"
+version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3defc4467a8909614bcb02cb304a3e8472c31f7a44e6c6c287eb9575b212bc4d"
+checksum = "e7dc1d1d369c194cf79acc204397aca1fecc4248df3e1c1eabb15e5ef2d16991"
 dependencies = [
  "chrono",
- "crossterm 0.26.1",
+ "crossterm",
  "fd-lock",
  "itertools 0.10.5",
  "nu-ansi-term",
@@ -7397,9 +7392,9 @@ dependencies = [
 
 [[package]]
 name = "russh"
-version = "0.38.0"
+version = "0.39.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ae0efcc0f4cd6c062c07e572ce4b806e3967fa029fcbfcc0aa98fb5910a37925"
+checksum = "7878311587d0353a854d5be954fbe68bdf6e77873933b484d1e45db12bb2f8cf"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -8465,7 +8460,7 @@ dependencies = [
  "sprockets-rot",
  "thiserror",
  "tokio",
- "toml 0.8.6",
+ "toml 0.8.8",
 ]
 
 [[package]]
@@ -9242,14 +9237,14 @@ dependencies = [
 
 [[package]]
 name = "toml"
-version = "0.8.6"
+version = "0.8.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ff9e3abce27ee2c9a37f9ad37238c1bdd4e789c84ba37df76aa4d528f5072cc"
+checksum = "a1a195ec8c9da26928f773888e0742ca3ca1040c6cd859c919c9f59c1954ab35"
 dependencies = [
  "serde",
  "serde_spanned",
  "toml_datetime",
- "toml_edit 0.20.7",
+ "toml_edit 0.21.0",
 ]
 
 [[package]]
@@ -9276,9 +9271,9 @@ dependencies = [
 
 [[package]]
 name = "toml_edit"
-version = "0.20.7"
+version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70f427fce4d84c72b5b732388bf4a9f4531b53f74e2887e3ecb2481f68f66d81"
+checksum = "d34d383cd00a163b4a5b85053df514d45bc330f6de7737edfe0a93311d1eaa03"
 dependencies = [
  "indexmap 2.1.0",
  "serde",
@@ -9533,7 +9528,7 @@ dependencies = [
  "sha2",
  "slog",
  "tar",
- "toml 0.8.6",
+ "toml 0.8.8",
  "tough",
  "url",
  "zip",
@@ -9756,6 +9751,7 @@ dependencies = [
  "futures",
  "indexmap 2.1.0",
  "indicatif",
+ "libsw",
  "linear-map",
  "omicron-test-utils",
  "omicron-workspace-hack",
@@ -10129,7 +10125,7 @@ dependencies = [
  "camino",
  "ciborium",
  "clap 4.4.3",
- "crossterm 0.27.0",
+ "crossterm",
  "debug-ignore",
  "futures",
  "hex",
@@ -10159,8 +10155,8 @@ dependencies = [
  "textwrap 0.16.0",
  "tokio",
  "tokio-util",
- "toml 0.8.6",
- "toml_edit 0.20.7",
+ "toml 0.8.8",
+ "toml_edit 0.21.0",
  "tui-tree-widget",
  "unicode-width",
  "update-engine",
@@ -10194,7 +10190,7 @@ dependencies = [
  "camino",
  "ciborium",
  "clap 4.4.3",
- "crossterm 0.27.0",
+ "crossterm",
  "omicron-workspace-hack",
  "ratatui",
  "reedline",
@@ -10268,7 +10264,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util",
- "toml 0.8.6",
+ "toml 0.8.8",
  "tough",
  "trust-dns-resolver",
  "tufaceous",

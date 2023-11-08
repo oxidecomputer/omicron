@@ -221,9 +221,9 @@ impl ExampleContext {
                     ))
                     .await;
 
-                    // Try again.
+                    // Try again, and this time succeed.
                     let mut buf_list = BufList::new();
-                    for i in 0..8 {
+                    for i in 0..=10 {
                         tokio::time::sleep(Duration::from_millis(100)).await;
                         cx.send_progress(StepProgress::with_current_and_total(
                             num_bytes * i / 10,
