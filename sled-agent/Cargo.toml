@@ -41,6 +41,7 @@ itertools.workspace = true
 key-manager.workspace = true
 libc.workspace = true
 macaddr.workspace = true
+mg-admin-client.workspace = true
 nexus-client.workspace = true
 omicron-common.workspace = true
 once_cell.workspace = true

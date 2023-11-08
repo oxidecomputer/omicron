@@ -675,10 +675,15 @@ impl super::Nexus {
                 addresses: info.addresses.iter().map(|a| a.address).collect(),
                 bgp_peers: peer_info
                     .iter()
-                    .map(|(_p, asn, addr)| BgpPeerConfig {
+                    .map(|(p, asn, addr)| BgpPeerConfig {
                         addr: *addr,
                         asn: *asn,
                         port: port.port_name.clone(),
+                        hold_time: Some(p.hold_time.0.into()),
+                        connect_retry: Some(p.connect_retry.0.into()),
+                        delay_open: Some(p.delay_open.0.into()),
+                        idle_hold_time: Some(p.idle_hold_time.0.into()),
+                        keepalive: Some(p.keepalive.0.into()),
                     })
                     .collect(),
                 switch: port.switch_location.parse().unwrap(),
