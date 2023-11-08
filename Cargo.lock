@@ -874,12 +874,12 @@ dependencies = [
 
 [[package]]
 name = "cargo_toml"
-version = "0.16.3"
+version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e3f9629bc6c4388ea699781dc988c2b99766d7679b151c81990b4fa1208fafd3"
+checksum = "6ca592ad99e6a0fd4b95153406138b997cc26ccd3cd0aecdfd4fbdbf1519bd77"
 dependencies = [
  "serde",
- "toml 0.8.0",
+ "toml 0.8.8",
 ]
 
 [[package]]
@@ -1439,7 +1439,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tokio-util",
- "toml 0.8.0",
+ "toml 0.8.8",
  "tracing",
  "usdt",
  "uuid",
@@ -1497,7 +1497,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio-rustls",
- "toml 0.8.0",
+ "toml 0.8.8",
  "twox-hash",
  "uuid",
  "vergen",
@@ -1709,7 +1709,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "edd72493923899c6f10c641bdbdeddc7183d6396641d99c1a0d1597f37f92e28"
 dependencies = [
  "cfg-if 1.0.0",
- "hashbrown 0.14.0",
+ "hashbrown 0.14.2",
  "lock_api",
  "once_cell",
  "parking_lot_core 0.9.8",
@@ -1767,7 +1767,7 @@ dependencies = [
  "slog",
  "thiserror",
  "tokio",
- "toml 0.7.8",
+ "toml 0.8.8",
 ]
 
 [[package]]
@@ -2040,7 +2040,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
- "toml 0.7.8",
+ "toml 0.8.8",
  "trust-dns-client",
  "trust-dns-proto",
  "trust-dns-resolver",
@@ -2124,7 +2124,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
- "toml 0.7.8",
+ "toml 0.8.8",
  "uuid",
 ]
 
@@ -2146,7 +2146,7 @@ dependencies = [
  "hostname",
  "http",
  "hyper",
- "indexmap 2.0.0",
+ "indexmap 2.1.0",
  "multer",
  "openapiv3",
  "paste",
@@ -2305,7 +2305,7 @@ dependencies = [
  "russh-keys",
  "serde_json",
  "tokio",
- "toml 0.7.8",
+ "toml 0.8.8",
  "trust-dns-resolver",
  "uuid",
 ]
@@ -2965,9 +2965,9 @@ dependencies = [
 
 [[package]]
 name = "hashbrown"
-version = "0.14.0"
+version = "0.14.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2c6201b9ff9fd90a5a3bac2e56a830d0caa509576f0e503818ee82c181b3437a"
+checksum = "f93e7192158dbcda357bdec5fb5788eebf8bbac027f3f33e719d29135ae84156"
 dependencies = [
  "ahash",
  "allocator-api2",
@@ -2979,7 +2979,7 @@ version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "312f66718a2d7789ffef4f4b7b213138ed9f1eb3aa1d0d82fc99f88fb3ffd26f"
 dependencies = [
- "hashbrown 0.14.0",
+ "hashbrown 0.14.2",
 ]
 
 [[package]]
@@ -3150,9 +3150,9 @@ checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
 
 [[package]]
 name = "httptest"
-version = "0.15.4"
+version = "0.15.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f6f25cfb6def593d43fae1ead24861f217e93bc70768a45cc149a69b5f049df4"
+checksum = "c8b44a11846bda8c9fe9194f9924db7132c34635c7ce020f180f6c5d46d2308f"
 dependencies = [
  "bstr 0.2.17",
  "bytes",
@@ -3400,7 +3400,7 @@ dependencies = [
  "smf",
  "thiserror",
  "tokio",
- "toml 0.7.8",
+ "toml 0.8.8",
  "uuid",
  "zone",
 ]
@@ -3429,12 +3429,12 @@ dependencies = [
 
 [[package]]
 name = "indexmap"
-version = "2.0.0"
+version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d5477fe2230a79769d8dc68e0eabf5437907c0457a5614a9e8dddb67f65eb65d"
+checksum = "d530e1a18b1cb4c484e6e34556a0d948706958449fca0cab753d649f2bce3d1f"
 dependencies = [
  "equivalent",
- "hashbrown 0.14.0",
+ "hashbrown 0.14.2",
  "serde",
 ]
 
@@ -3518,7 +3518,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-stream",
- "toml 0.7.8",
+ "toml 0.8.8",
  "tufaceous-lib",
  "update-engine",
  "uuid",
@@ -3843,9 +3843,9 @@ checksum = "830d08ce1d1d941e6b30645f1a0eb5643013d835ce3779a5fc208261dbe10f55"
 
 [[package]]
 name = "libc"
-version = "0.2.149"
+version = "0.2.150"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a08173bc88b7955d1b3145aa561539096c421ac8debde8cbc3612ec635fee29b"
+checksum = "89d92a4743f9a61002fae18374ed11e7973f530cb3a3255fb354818118b2203c"
 
 [[package]]
 name = "libdlpi-sys"
@@ -4143,7 +4143,7 @@ dependencies = [
  "slog",
  "thiserror",
  "tokio",
- "toml 0.7.8",
+ "toml 0.8.8",
 ]
 
 [[package]]
@@ -4345,7 +4345,7 @@ dependencies = [
  "omicron-passwords 0.1.0",
  "omicron-rpaths",
  "omicron-workspace-hack",
- "parse-display",
+ "parse-display 0.8.2",
  "pq-sys",
  "rand 0.8.5",
  "ref-cast",
@@ -4380,6 +4380,7 @@ dependencies = [
  "dropshot",
  "expectorate",
  "futures",
+ "gateway-client",
  "headers",
  "hex",
  "http",
@@ -4393,6 +4394,7 @@ dependencies = [
  "newtype_derive",
  "nexus-db-model",
  "nexus-defaults",
+ "nexus-inventory",
  "nexus-test-utils",
  "nexus-types",
  "omicron-common 0.1.0",
@@ -4435,7 +4437,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-postgres",
- "toml 0.7.8",
+ "toml 0.8.8",
  "usdt",
  "uuid",
 ]
@@ -4450,6 +4452,26 @@ dependencies = [
  "omicron-workspace-hack",
  "rand 0.8.5",
  "serde_json",
+]
+
+[[package]]
+name = "nexus-inventory"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "expectorate",
+ "futures",
+ "gateway-client",
+ "gateway-messages",
+ "gateway-test-utils",
+ "nexus-types",
+ "omicron-workspace-hack",
+ "regex",
+ "slog",
+ "strum",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -4479,6 +4501,8 @@ dependencies = [
  "dns-server",
  "dns-service-client 0.1.0",
  "dropshot",
+ "gateway-messages",
+ "gateway-test-utils",
  "headers",
  "http",
  "hyper",
@@ -4495,7 +4519,7 @@ dependencies = [
  "oximeter-client",
  "oximeter-collector",
  "oximeter-producer 0.1.0",
- "parse-display",
+ "parse-display 0.8.2",
  "serde",
  "serde_json",
  "serde_urlencoded",
@@ -4526,6 +4550,7 @@ dependencies = [
  "chrono",
  "dns-service-client 0.1.0",
  "futures",
+ "gateway-client",
  "newtype_derive",
  "omicron-common 0.1.0",
  "omicron-passwords 0.1.0",
@@ -4533,7 +4558,7 @@ dependencies = [
  "openssl",
  "openssl-probe",
  "openssl-sys",
- "parse-display",
+ "parse-display 0.8.2",
  "schemars",
  "serde",
  "serde_json",
@@ -4865,7 +4890,7 @@ dependencies = [
  "libc",
  "macaddr",
  "omicron-workspace-hack",
- "parse-display",
+ "parse-display 0.8.2",
  "progenitor",
  "proptest",
  "rand 0.8.5",
@@ -4886,7 +4911,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-postgres",
- "toml 0.7.8",
+ "toml 0.8.8",
  "uuid",
 ]
 
@@ -4909,7 +4934,7 @@ dependencies = [
  "ipnetwork",
  "lazy_static",
  "macaddr",
- "parse-display",
+ "parse-display 0.7.0",
  "progenitor",
  "rand 0.8.5",
  "reqwest",
@@ -4942,7 +4967,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "thiserror",
- "toml 0.7.8",
+ "toml 0.8.8",
 ]
 
 [[package]]
@@ -4976,7 +5001,7 @@ dependencies = [
  "subprocess",
  "tokio",
  "tokio-postgres",
- "toml 0.7.8",
+ "toml 0.8.8",
 ]
 
 [[package]]
@@ -5020,7 +5045,7 @@ dependencies = [
  "tokio-stream",
  "tokio-tungstenite 0.18.0",
  "tokio-util",
- "toml 0.7.8",
+ "toml 0.8.8",
  "uuid",
 ]
 
@@ -5070,6 +5095,7 @@ dependencies = [
  "nexus-db-model",
  "nexus-db-queries",
  "nexus-defaults",
+ "nexus-inventory",
  "nexus-test-interface",
  "nexus-test-utils",
  "nexus-test-utils-macros",
@@ -5094,7 +5120,7 @@ dependencies = [
  "oximeter-db",
  "oximeter-instruments",
  "oximeter-producer 0.1.0",
- "parse-display",
+ "parse-display 0.8.2",
  "paste",
  "pem 1.1.1",
  "petgraph",
@@ -5130,7 +5156,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-postgres",
- "toml 0.7.8",
+ "toml 0.8.8",
  "tough",
  "trust-dns-resolver",
  "usdt",
@@ -5208,11 +5234,12 @@ dependencies = [
  "slog-term",
  "smf",
  "strum",
+ "swrite",
  "tar",
  "tempfile",
  "thiserror",
  "tokio",
- "toml 0.7.8",
+ "toml 0.8.8",
  "topological-sort",
  "walkdir",
 ]
@@ -5332,7 +5359,7 @@ dependencies = [
  "tofino",
  "tokio",
  "tokio-tungstenite 0.18.0",
- "toml 0.7.8",
+ "toml 0.8.8",
  "usdt",
  "uuid",
  "zeroize",
@@ -5411,11 +5438,11 @@ dependencies = [
  "generic-array",
  "getrandom 0.2.10",
  "hashbrown 0.13.2",
- "hashbrown 0.14.0",
+ "hashbrown 0.14.2",
  "hex",
  "hyper",
  "hyper-rustls",
- "indexmap 2.0.0",
+ "indexmap 2.1.0",
  "inout",
  "ipnetwork",
  "itertools 0.10.5",
@@ -5440,6 +5467,7 @@ dependencies = [
  "rand_chacha 0.3.1",
  "regex",
  "regex-automata 0.4.3",
+ "regex-syntax 0.6.29",
  "regex-syntax 0.8.2",
  "reqwest",
  "ring 0.16.20",
@@ -5525,7 +5553,7 @@ version = "0.4.0"
 source = "git+https://github.com/oxidecomputer/openapi-lint?branch=main#bb69a3a4a184d966bac2a0df2be5c9038d9867d0"
 dependencies = [
  "heck 0.4.1",
- "indexmap 2.0.0",
+ "indexmap 2.1.0",
  "lazy_static",
  "openapiv3",
  "regex",
@@ -5537,7 +5565,7 @@ version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "75e56d5c441965b6425165b7e3223cc933ca469834f4a8b4786817a1f9dc4f13"
 dependencies = [
- "indexmap 2.0.0",
+ "indexmap 2.1.0",
  "serde",
  "serde_json",
 ]
@@ -5786,7 +5814,7 @@ dependencies = [
  "subprocess",
  "thiserror",
  "tokio",
- "toml 0.7.8",
+ "toml 0.8.8",
  "uuid",
 ]
 
@@ -5987,7 +6015,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ac6b32f6c8212838b74c0f5ba412194e88897923020810d9bec72d3594c2588d"
 dependencies = [
  "once_cell",
- "parse-display-derive",
+ "parse-display-derive 0.7.0",
+ "regex",
+]
+
+[[package]]
+name = "parse-display"
+version = "0.8.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c6509d08722b53e8dafe97f2027b22ccbe3a5db83cb352931e9716b0aa44bc5c"
+dependencies = [
+ "once_cell",
+ "parse-display-derive 0.8.2",
  "regex",
 ]
 
@@ -6002,8 +6041,23 @@ dependencies = [
  "quote",
  "regex",
  "regex-syntax 0.6.29",
- "structmeta",
+ "structmeta 0.1.6",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "parse-display-derive"
+version = "0.8.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "68517892c8daf78da08c0db777fcc17e07f2f63ef70041718f8a7630ad84f341"
+dependencies = [
+ "once_cell",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "regex-syntax 0.7.5",
+ "structmeta 0.2.0",
+ "syn 2.0.32",
 ]
 
 [[package]]
@@ -6182,7 +6236,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e1d3afd2628e69da2be385eb6f2fd57c8ac7977ceeff6dc166ff1657b0e386a9"
 dependencies = [
  "fixedbitset",
- "indexmap 2.0.0",
+ "indexmap 2.1.0",
  "serde",
  "serde_derive",
 ]
@@ -6574,7 +6628,7 @@ dependencies = [
  "getopts",
  "heck 0.4.1",
  "http",
- "indexmap 2.0.0",
+ "indexmap 2.1.0",
  "openapiv3",
  "proc-macro2",
  "quote",
@@ -7835,9 +7889,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.107"
+version = "1.0.108"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b420ce6e3d8bd882e9b243c6eed35dbc9a6110c9769e74b584e0d68d1f20c65"
+checksum = "3d1c7e3eac408d115102c4c24ad393e0821bb3a5df4d506a80f85f7a742a526b"
 dependencies = [
  "itoa",
  "ryu",
@@ -7876,9 +7930,9 @@ dependencies = [
 
 [[package]]
 name = "serde_spanned"
-version = "0.6.3"
+version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "96426c9936fd7a0124915f9185ea1d20aa9445cc9821142f0a73bc9207a2e186"
+checksum = "12022b835073e5b11e90a14f86838ceb1c8fb0325b72416845c487ac0fa95e80"
 dependencies = [
  "serde",
 ]
@@ -7952,7 +8006,7 @@ version = "0.9.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1a49e178e4452f45cb61d0cd8cebc1b0fafd3e41929e996cef79aa3aca91f574"
 dependencies = [
- "indexmap 2.0.0",
+ "indexmap 2.1.0",
  "itoa",
  "ryu",
  "serde",
@@ -8405,7 +8459,7 @@ dependencies = [
  "sprockets-rot",
  "thiserror",
  "tokio",
- "toml 0.7.8",
+ "toml 0.8.8",
 ]
 
 [[package]]
@@ -8547,8 +8601,20 @@ checksum = "104842d6278bf64aa9d2f182ba4bde31e8aec7a131d29b7f444bb9b344a09e2a"
 dependencies = [
  "proc-macro2",
  "quote",
- "structmeta-derive",
+ "structmeta-derive 0.1.6",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "structmeta"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "78ad9e09554f0456d67a69c1584c9798ba733a5b50349a6c0d0948710523922d"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "structmeta-derive 0.2.0",
+ "syn 2.0.32",
 ]
 
 [[package]]
@@ -8560,6 +8626,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "structmeta-derive"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a60bcaff7397072dca0017d1db428e30d5002e00b6847703e2e42005c95fbe00"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.32",
 ]
 
 [[package]]
@@ -8636,6 +8713,12 @@ name = "subtle"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "81cdd64d312baedb58e21336b31bc043b77e01cc99033ce76ef539f78e965ebc"
+
+[[package]]
+name = "swrite"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f3fece30b2dc06d65ecbca97b602db15bf75f932711d60cc604534f1f8b7a03"
 
 [[package]]
 name = "syn"
@@ -8788,14 +8871,14 @@ checksum = "3369f5ac52d5eb6ab48c6b4ffdc8efbcad6b89c765749064ba298f2c68a16a76"
 
 [[package]]
 name = "test-strategy"
-version = "0.2.1"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62d6408d1406657be2f9d1701fbae379331d30d2f6e92050710edb0d34eeb480"
+checksum = "b8361c808554228ad09bfed70f5c823caf8a3450b6881cc3a38eb57e8c08c1d9"
 dependencies = [
  "proc-macro2",
  "quote",
- "structmeta",
- "syn 1.0.109",
+ "structmeta 0.2.0",
+ "syn 2.0.32",
 ]
 
 [[package]]
@@ -9143,21 +9226,21 @@ dependencies = [
 
 [[package]]
 name = "toml"
-version = "0.8.0"
+version = "0.8.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c226a7bba6d859b63c92c4b4fe69c5b6b72d0cb897dbc8e6012298e6154cb56e"
+checksum = "a1a195ec8c9da26928f773888e0742ca3ca1040c6cd859c919c9f59c1954ab35"
 dependencies = [
  "serde",
  "serde_spanned",
  "toml_datetime",
- "toml_edit 0.20.0",
+ "toml_edit 0.21.0",
 ]
 
 [[package]]
 name = "toml_datetime"
-version = "0.6.3"
+version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7cda73e2f1397b1262d6dfdcef8aafae14d1de7748d66822d3bfeeb6d03e5e4b"
+checksum = "3550f4e9685620ac18a50ed434eb3aec30db8ba93b0287467bca5826ea25baf1"
 dependencies = [
  "serde",
 ]
@@ -9168,7 +9251,7 @@ version = "0.19.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1b5bb770da30e5cbfde35a2d7b9b8a2c4b8ef89548a7a6aeab5c9a576e3e7421"
 dependencies = [
- "indexmap 2.0.0",
+ "indexmap 2.1.0",
  "serde",
  "serde_spanned",
  "toml_datetime",
@@ -9177,11 +9260,22 @@ dependencies = [
 
 [[package]]
 name = "toml_edit"
-version = "0.20.0"
+version = "0.20.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ff63e60a958cefbb518ae1fd6566af80d9d4be430a33f3723dfc47d1d411d95"
+checksum = "70f427fce4d84c72b5b732388bf4a9f4531b53f74e2887e3ecb2481f68f66d81"
 dependencies = [
- "indexmap 2.0.0",
+ "indexmap 2.1.0",
+ "toml_datetime",
+ "winnow",
+]
+
+[[package]]
+name = "toml_edit"
+version = "0.21.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d34d383cd00a163b4a5b85053df514d45bc330f6de7737edfe0a93311d1eaa03"
+dependencies = [
+ "indexmap 2.1.0",
  "serde",
  "serde_spanned",
  "toml_datetime",
@@ -9209,9 +9303,9 @@ checksum = "ea68304e134ecd095ac6c3574494fc62b909f416c4fca77e440530221e549d3d"
 
 [[package]]
 name = "tough"
-version = "0.12.5"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc636dd1ee889a366af6731f1b63b60baf19528b46df5a7c2d4b3bf8b60bca2d"
+checksum = "eda3efa9005cf9c1966984c3b9a44c3f37b7ed2c95ba338d6ad51bba70e989a0"
 dependencies = [
  "chrono",
  "dyn-clone",
@@ -9434,7 +9528,7 @@ dependencies = [
  "sha2",
  "slog",
  "tar",
- "toml 0.7.8",
+ "toml 0.8.8",
  "tough",
  "url",
  "zip",
@@ -9654,7 +9748,7 @@ dependencies = [
  "derive-where",
  "either",
  "futures",
- "indexmap 2.0.0",
+ "indexmap 2.1.0",
  "indicatif",
  "linear-map",
  "omicron-test-utils",
@@ -9757,9 +9851,9 @@ checksum = "711b9620af191e0cdc7468a8d14e709c3dcdb115b36f838e601583af800a370a"
 
 [[package]]
 name = "uuid"
-version = "1.4.1"
+version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "79daa5ed5740825c40b389c5e50312b9c86df53fccd33f281df655642b43869d"
+checksum = "88ad59a7560b41a70d191093a945f0b87bc1deeda46fb237479708a1d6b6cdfc"
 dependencies = [
  "getrandom 0.2.10",
  "serde",
@@ -10030,7 +10124,7 @@ dependencies = [
  "futures",
  "hex",
  "humantime",
- "indexmap 2.0.0",
+ "indexmap 2.1.0",
  "indicatif",
  "itertools 0.11.0",
  "omicron-common 0.1.0",
@@ -10054,8 +10148,8 @@ dependencies = [
  "textwrap 0.16.0",
  "tokio",
  "tokio-util",
- "toml 0.7.8",
- "toml_edit 0.19.15",
+ "toml 0.8.8",
+ "toml_edit 0.20.7",
  "tui-tree-widget",
  "unicode-width",
  "update-engine",
@@ -10162,7 +10256,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util",
- "toml 0.7.8",
+ "toml 0.8.8",
  "tough",
  "trust-dns-resolver",
  "tufaceous",
@@ -10524,9 +10618,9 @@ dependencies = [
 
 [[package]]
 name = "zone"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b0545a42fbd7a81245726d54a0146cb4fd93882ebb6da50d60acf2e37394f198"
+checksum = "a62a428a79ea2224ce8ab05d6d8a21bdd7b4b68a8dbc1230511677a56e72ef22"
 dependencies = [
  "itertools 0.10.5",
  "thiserror",
@@ -10536,9 +10630,9 @@ dependencies = [
 
 [[package]]
 name = "zone_cfg_derive"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef224b009d070d3b1adb9e375fcf8ec2f1948a412c3bbf8755c0ef4e3f91ef94"
+checksum = "d5c4f01d3785e222d5aca11c9813e9c46b69abfe258756c99c9b628683626cc8"
 dependencies = [
  "heck 0.4.1",
  "proc-macro-error",

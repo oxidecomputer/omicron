@@ -16,6 +16,7 @@ set -x
 
 SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 OMICRON_TOP="$SOURCE_DIR/.."
+SOFTNPU_MODE=${SOFTNPU_MODE:-zone};
 
 . "$SOURCE_DIR/virtual_hardware.sh"
 
@@ -83,6 +84,9 @@ in the SoftNPU zone later to add those entries."
 
 ensure_run_as_root
 ensure_zpools
-ensure_simulated_links "$PHYSICAL_LINK"
-warn_if_no_proxy_arp
-ensure_softnpu_zone
+
+if [[ "$SOFTNPU_MODE" == "zone" ]]; then
+    ensure_simulated_links "$PHYSICAL_LINK"
+    warn_if_no_proxy_arp
+    ensure_softnpu_zone
+fi
