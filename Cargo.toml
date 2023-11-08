@@ -224,6 +224,7 @@ ipcc-key-value = { path = "ipcc-key-value" }
 ipnetwork = { version = "0.20", features = ["schemars"] }
 itertools = "0.11.0"
 key-manager = { path = "key-manager" }
+kstat-rs = "0.2.3"
 lazy_static = "1.4.0"
 libc = "0.2.150"
 linear-map = "1.2.0"

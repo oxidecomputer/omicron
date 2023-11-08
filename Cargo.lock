@@ -3789,6 +3789,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "kstat-rs"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fcc713c7902f757cf0c04012dbad3864ea505f2660467b704847ea7ea2ff6d67"
+dependencies = [
+ "libc",
+ "thiserror",
+]
+
+[[package]]
 name = "lalrpop"
 version = "0.19.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5328,6 +5338,7 @@ dependencies = [
  "openapiv3",
  "opte-ioctl",
  "oximeter 0.1.0",
+ "oximeter-instruments",
  "oximeter-producer 0.1.0",
  "percent-encoding",
  "pretty_assertions",
@@ -5856,12 +5867,19 @@ dependencies = [
 name = "oximeter-instruments"
 version = "0.1.0"
 dependencies = [
+ "cfg-if 1.0.0",
  "chrono",
  "dropshot",
  "futures",
  "http",
+ "kstat-rs",
  "omicron-workspace-hack",
  "oximeter 0.1.0",
+ "rand 0.8.5",
+ "slog",
+ "slog-async",
+ "slog-term",
+ "thiserror",
  "tokio",
  "uuid",
 ]
