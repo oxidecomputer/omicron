@@ -136,7 +136,9 @@ impl SimulatedSp for Sidecar {
         self.responses_sent_count.clone()
     }
 
-    async fn install_udp_throttler(&self) -> mpsc::UnboundedSender<usize> {
+    async fn install_udp_accept_semaphore(
+        &self,
+    ) -> mpsc::UnboundedSender<usize> {
         let (tx, rx) = mpsc::unbounded_channel();
         let (resp_tx, resp_rx) = oneshot::channel();
         if let Ok(()) =

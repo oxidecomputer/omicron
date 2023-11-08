@@ -73,26 +73,28 @@ pub trait SimulatedSp {
     /// requests.
     fn responses_sent_count(&self) -> Option<watch::Receiver<usize>>;
 
-    /// Inject a UDP-level "throttler" on this simualted SP.
+    /// Inject a UDP-accept-level semaphore on this simualted SP.
     ///
     /// If this method is not called, the SP will handle requests as they come
     /// in.
     ///
-    /// When this method is called, it will set its "throttle count" to zero.
-    /// When the trottle count is zero, the SP will not accept incoming UDP
+    /// When this method is called, it will set its lease count to zero.
+    /// When the lease count is zero, the SP will not accept incoming UDP
     /// packets. When a value is sent on the channel returned by this method,
-    /// that value will be added to the throttle count. When the SP successfully
-    /// sends a response to a message, the throttle count will be decremented by
+    /// that value will be added to the lease count. When the SP successfully
+    /// sends a response to a message, the lease count will be decremented by
     /// one.
     ///
     /// Two example use cases for this method are that a caller could:
     ///
-    /// * Artificially slow down the simulated SP (e.g., increment the throttle
-    ///   count by N every M millis)
+    /// * Artificially slow down the simulated SP (e.g., throttle the SP to "N
+    ///   requests per second" by incrementing the lease count periodically)
     /// * Force the simulated SP to single-step message (e.g., by incrementing
-    ///   the throttle count by 1 and then waiting for a message to be received,
+    ///   the lease count by 1 and then waiting for a message to be received,
     ///   which can be observed via `responses_sent_count`)
-    async fn install_udp_throttler(&self) -> mpsc::UnboundedSender<usize>;
+    async fn install_udp_accept_semaphore(
+        &self,
+    ) -> mpsc::UnboundedSender<usize>;
 }
 
 // Helper function to pad a simulated serial number (stored as a `String`) to

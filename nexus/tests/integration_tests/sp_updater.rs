@@ -256,10 +256,10 @@ async fn test_sp_updater_delivers_progress() {
     let mut progress = sp_updater.progress_watcher();
     assert_eq!(*progress.borrow_and_update(), None);
 
-    // Throttle the requests our target SP will receive so we can inspect
-    // progress messages without racing.
+    // Install a semaphore on the requests our target SP will receive so we can
+    // inspect progress messages without racing.
     let target_sp = &mgstestctx.simrack.gimlets[sp_slot as usize];
-    let sp_throttle = target_sp.install_udp_throttler().await;
+    let sp_accept_sema = target_sp.install_udp_accept_semaphore().await;
     let mut sp_responses = target_sp.responses_sent_count().unwrap();
 
     // Spawn the update on a background task so we can watch `progress` as it is
@@ -269,7 +269,7 @@ async fn test_sp_updater_delivers_progress() {
     // Allow the SP to respond to 2 messages: the caboose check and the "prepare
     // update" messages that trigger the start of an update, then ensure we see
     // the "started" progress.
-    sp_throttle.send(2).unwrap();
+    sp_accept_sema.send(2).unwrap();
     progress.changed().await.unwrap();
     assert_eq!(*progress.borrow_and_update(), Some(UpdateProgress::Started));
 
@@ -312,7 +312,7 @@ async fn test_sp_updater_delivers_progress() {
     let mut expect_progress_change = false;
     loop {
         // Allow the SP to accept and respond to a single UDP packet.
-        sp_throttle.send(1).unwrap();
+        sp_accept_sema.send(1).unwrap();
 
         // Wait until the SP has sent a response, with a safety rail that we
         // haven't screwed up our untangle-the-race logic: if we don't see the
@@ -379,9 +379,9 @@ async fn test_sp_updater_delivers_progress() {
 
     // The update has been fully delivered to the SP, but we don't see an
     // `UpdateStatus::Complete` message until the SP is reset. Release the SP
-    // throttle since we're no longer racing to observe intermediate progress,
+    // semaphore since we're no longer racing to observe intermediate progress,
     // and wait for the completion message.
-    sp_throttle.send(usize::MAX).unwrap();
+    sp_accept_sema.send(usize::MAX).unwrap();
     progress.changed().await.unwrap();
     assert_eq!(*progress.borrow_and_update(), Some(UpdateProgress::Complete));
 
