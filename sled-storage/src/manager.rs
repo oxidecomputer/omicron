@@ -115,21 +115,21 @@ impl StorageHandle {
     /// Wait for a boot disk to be initialized
     pub async fn wait_for_boot_disk(&mut self) -> (DiskIdentity, ZpoolName) {
         loop {
-            // We panic if the sender is dropped, as this means
-            // the StorageManager has gone away, which it should not do.
-            self.resource_updates.changed().await.unwrap();
-            // Limit any RWLock related cancellation issues by immediately cloning
-            let resources = self.resource_updates.borrow().clone();
+            let resources = self.resource_updates.borrow_and_update();
             if let Some((disk_id, zpool_name)) = resources.boot_disk() {
                 return (disk_id, zpool_name);
             }
+            drop(resources);
+            // We panic if the sender is dropped, as this means
+            // the StorageManager has gone away, which it should not do.
+            self.resource_updates.changed().await.unwrap();
         }
     }
 
     /// Wait for any storage resource changes
     pub async fn wait_for_changes(&mut self) -> StorageResources {
         self.resource_updates.changed().await.unwrap();
-        self.resource_updates.borrow().clone()
+        self.resource_updates.borrow_and_update().clone()
     }
 
     /// Retrieve the latest value of `StorageResources` from the
