@@ -50,7 +50,7 @@ fall-back pathway for performing upgrades.
 
 See RFD 319 for more discussion of the online upgrade plans.
 
-=== How to change the schema
+== How to change the schema
 
 Assumptions:
 
@@ -89,7 +89,7 @@ SQL Validation, via Automated Tests:
   `dbinit.sql`
 * All `up.sql` files can be applied twice without error
 
-==== General notes
+=== General notes
 
 CockroachDB's representation of the schema includes some opaque
 internally-generated fields that are order dependent, like the names of
@@ -100,6 +100,8 @@ tables and constraints should generally not be important.
 As convention, however, we recommend keeping the `db_metadata` file at the end
 of `dbinit.sql`, so that the database does not contain a version until it is
 fully populated.
+
+=== Scenario-specific gotchas
 
 ==== Renaming columns
 
