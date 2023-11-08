@@ -312,7 +312,7 @@ async fn zones_list(
 
 #[endpoint {
     method = GET,
-    path = "/omicron_zones",
+    path = "/omicron-zones",
 }]
 async fn omicron_zones_get(
     rqctx: RequestContext<SledAgent>,
@@ -323,7 +323,7 @@ async fn omicron_zones_get(
 
 #[endpoint {
     method = PUT,
-    path = "/omicron_zones",
+    path = "/omicron-zones",
 }]
 async fn omicron_zones_put(
     rqctx: RequestContext<SledAgent>,
