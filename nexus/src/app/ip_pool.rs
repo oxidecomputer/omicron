@@ -7,6 +7,8 @@
 use crate::external_api::params;
 use crate::external_api::shared::IpRange;
 use ipnetwork::IpNetwork;
+use nexus_db_model::IpPoolResourceDelete;
+use nexus_db_model::IpPoolResourceType;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
@@ -14,6 +16,7 @@ use nexus_db_queries::db::fixed_data::FLEET_ID;
 use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::model::Name;
+use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -137,11 +140,28 @@ impl super::Nexus {
     ) -> DeleteResult {
         let (.., authz_pool) =
             pool_lookup.lookup_for(authz::Action::Modify).await?;
+
+        let (resource_type, resource_id) = match ip_pool_dissoc {
+            params::IpPoolAssociationDelete::Silo(assoc) => {
+                let (.., silo) = self
+                    .silo_lookup(opctx, assoc.silo.clone())?
+                    .fetch()
+                    .await?;
+                (IpPoolResourceType::Silo, silo.id())
+            }
+            params::IpPoolAssociationDelete::Fleet => {
+                (IpPoolResourceType::Fleet, *FLEET_ID)
+            }
+        };
+
         self.db_datastore
             .ip_pool_dissociate_resource(
                 opctx,
-                authz_pool.id(),
-                ip_pool_dissoc.resource_id,
+                &IpPoolResourceDelete {
+                    ip_pool_id: authz_pool.id(),
+                    resource_id,
+                    resource_type,
+                },
             )
             .await
     }

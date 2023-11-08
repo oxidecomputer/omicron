@@ -14,11 +14,10 @@ use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::fixed_data::silo::INTERNAL_SILO_ID;
 use crate::db::identity::Resource;
-use crate::db::model::IpPool;
-use crate::db::model::IpPoolRange;
-use crate::db::model::IpPoolResource;
-use crate::db::model::IpPoolUpdate;
-use crate::db::model::Name;
+use crate::db::model::{
+    IpPool, IpPoolRange, IpPoolResource, IpPoolResourceDelete, IpPoolUpdate,
+    Name,
+};
 use crate::db::pagination::paginated;
 use crate::db::pool::DbConnection;
 use crate::db::queries::ip_pool::FilterOverlappingIpRanges;
@@ -418,10 +417,7 @@ impl DataStore {
     async fn ensure_no_ips_outstanding(
         &self,
         opctx: &OpContext,
-        // TODO: this could take the authz_pool, it's just more annoying to test that way
-        ip_pool_id: Uuid,
-        // TODO: we need to know the resource type because it affects the IPs query
-        resource_id: Uuid,
+        association: &IpPoolResourceDelete,
     ) -> Result<(), Error> {
         use db::schema::external_ip;
         use db::schema::instance;
@@ -443,26 +439,28 @@ impl DataStore {
                 .filter(external_ip::is_service.eq(false))
                 .filter(external_ip::parent_id.is_not_null())
                 .filter(external_ip::time_deleted.is_null())
-                .filter(external_ip::ip_pool_id.eq(ip_pool_id))
+                .filter(external_ip::ip_pool_id.eq(association.ip_pool_id))
                 .filter(instance::time_deleted.is_not_null())
                 .select(ExternalIp::as_select())
                 .limit(1)
         };
 
-        let is_silo = true; // TODO obviously this is not how this works
-        let existing_ips = if is_silo {
+        let existing_ips = match association.resource_type {
+            IpPoolResourceType::Silo => {
+
             // if it's a silo association, we also have to join through IPs to instances
             // to projects to get the silo ID
             base_query(external_ip::table)
                 .inner_join(
                     project::table.on(instance::project_id.eq(project::id)),
                 )
-                .filter(project::silo_id.eq(resource_id))
+                .filter(project::silo_id.eq(association.resource_id))
                 .load_async::<ExternalIp>(
                     &*self.pool_connection_authorized(opctx).await?,
                 )
                 .await
-        } else {
+        },
+            IpPoolResourceType::Fleet => {
             // If it's a fleet association, we can't delete it if there are any IPs
             // allocated from the pool anywhere
             base_query(external_ip::table)
@@ -470,6 +468,7 @@ impl DataStore {
                     &*self.pool_connection_authorized(opctx).await?,
                 )
                 .await
+                }
         }
         .map_err(|e| {
             Error::internal_error(&format!(
@@ -493,10 +492,7 @@ impl DataStore {
     pub async fn ip_pool_dissociate_resource(
         &self,
         opctx: &OpContext,
-        // TODO: this could take the authz_pool, it's just more annoying to test that way
-        ip_pool_id: Uuid,
-        // TODO: we need to know the resource type because it affects the IPs query
-        resource_id: Uuid,
+        association: &IpPoolResourceDelete,
     ) -> DeleteResult {
         use db::schema::ip_pool_resource;
         opctx
@@ -505,11 +501,11 @@ impl DataStore {
 
         // We can only delete the association if there are no IPs allocated
         // from this pool in the associated resource.
-        self.ensure_no_ips_outstanding(opctx, ip_pool_id, resource_id).await?;
+        self.ensure_no_ips_outstanding(opctx, association).await?;
 
         diesel::delete(ip_pool_resource::table)
-            .filter(ip_pool_resource::ip_pool_id.eq(ip_pool_id))
-            .filter(ip_pool_resource::resource_id.eq(resource_id))
+            .filter(ip_pool_resource::ip_pool_id.eq(association.ip_pool_id))
+            .filter(ip_pool_resource::resource_id.eq(association.resource_id))
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map(|_rows_deleted| ())
@@ -691,6 +687,7 @@ mod test {
     use crate::db::fixed_data::FLEET_ID;
     use crate::db::model::{IpPool, IpPoolResource, IpPoolResourceType};
     use assert_matches::assert_matches;
+    use nexus_db_model::IpPoolResourceDelete;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::identity::Resource;
     use omicron_common::api::external::{Error, IdentityMetadataCreateParams};
@@ -816,7 +813,14 @@ mod test {
 
         // now remove the association and we should get the default fleet pool again
         datastore
-            .ip_pool_dissociate_resource(&opctx, pool1_for_silo.id(), silo_id)
+            .ip_pool_dissociate_resource(
+                &opctx,
+                &IpPoolResourceDelete {
+                    ip_pool_id: pool1_for_silo.id(),
+                    resource_id: silo_id,
+                    resource_type: IpPoolResourceType::Silo,
+                },
+            )
             .await
             .expect("Failed to dissociate IP pool from silo");
 

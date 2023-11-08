@@ -760,10 +760,15 @@ pub enum IpPoolAssociationCreate {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct IpPoolAssociationDelete {
-    pub resource_id: Uuid,
-    // TODO: not technically necessary, should we include it for completeness? feels user-unfriendly
-    // pub resource_type: IpPoolResourceType,
+pub struct IpPoolSiloAssociationDelete {
+    pub silo: NameOrId,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "resource_type", rename_all = "snake_case")]
+pub enum IpPoolAssociationDelete {
+    Silo(IpPoolSiloAssociationDelete),
+    Fleet,
 }
 
 // INSTANCES
