@@ -11,9 +11,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::Display;
 use std::iter::Iterator;
+use wicket_common::rack_update::SpType;
 use wicketd_client::types::{
     RackV1Inventory, RotInventory, RotSlot, SpComponentCaboose,
-    SpComponentInfo, SpIgnition, SpState, SpType,
+    SpComponentInfo, SpIgnition, SpState,
 };
 
 pub static ALL_COMPONENT_IDS: Lazy<Vec<ComponentId>> = Lazy::new(|| {
@@ -65,7 +66,7 @@ impl Inventory {
             };
 
             // Validate and get a ComponentId
-            let id = ComponentId::from_sp_type_and_slot(type_, i as u8)?;
+            let id = ComponentId::from_sp_type_and_slot(type_, i)?;
             let component = match type_ {
                 SpType::Sled => Component::Sled(sp),
                 SpType::Switch => Component::Switch(sp),
@@ -224,7 +225,10 @@ impl ComponentId {
         Ok(Self::Psc(slot))
     }
 
-    pub fn from_sp_type_and_slot(sp_type: SpType, slot: u8) -> Result<Self> {
+    pub fn from_sp_type_and_slot(sp_type: SpType, slot: u32) -> Result<Self> {
+        let slot = slot.try_into().map_err(|_| {
+            anyhow::anyhow!("invalid slot (must fit in a u8): {}", slot)
+        })?;
         match sp_type {
             SpType::Sled => Self::new_sled(slot),
             SpType::Switch => Self::new_switch(slot),

@@ -23,10 +23,10 @@ use tokio::sync::mpsc::{
 };
 use tokio::time::{interval, Duration};
 use wicketd_client::types::AbortUpdateOptions;
-use wicketd_client::types::ClearUpdateStateOptions;
 
 use crate::events::EventReportMap;
 use crate::helpers::get_update_test_error;
+use crate::state::CreateClearUpdateStateOptions;
 use crate::state::CreateStartUpdateOptions;
 use crate::ui::Screen;
 use crate::wicketd::{self, WicketdHandle, WicketdManager};
@@ -210,11 +210,8 @@ impl RunnerCore {
             }
             Action::ClearUpdateState(component_id) => {
                 if let Some(wicketd) = wicketd {
-                    let test_error = get_update_test_error(
-                        "WICKET_TEST_CLEAR_UPDATE_STATE_ERROR",
-                    )?;
-
-                    let options = ClearUpdateStateOptions { test_error };
+                    let options = CreateClearUpdateStateOptions {};
+                    let options = options.to_clear_update_state_options()?;
                     wicketd.tx.blocking_send(
                         wicketd::Request::ClearUpdateState {
                             component_id,

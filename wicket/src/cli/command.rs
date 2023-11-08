@@ -15,7 +15,6 @@ use super::{
 };
 
 pub(crate) struct CommandOutput<'a> {
-    #[allow(dead_code)]
     pub(crate) stdout: &'a mut dyn std::io::Write,
     pub(crate) stderr: &'a mut dyn std::io::Write,
 }

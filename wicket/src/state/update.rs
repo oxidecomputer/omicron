@@ -18,7 +18,9 @@ use serde::{Deserialize, Serialize};
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::fmt::Display;
-use wicketd_client::types::{ArtifactId, SemverVersion, StartUpdateOptions};
+use wicketd_client::types::{
+    ArtifactId, ClearUpdateStateOptions, SemverVersion, StartUpdateOptions,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RackUpdateState {
@@ -467,6 +469,19 @@ impl CreateStartUpdateOptions {
             skip_rot_version_check: self.force_update_rot,
             skip_sp_version_check: self.force_update_sp,
         })
+    }
+}
+
+pub struct CreateClearUpdateStateOptions {}
+
+impl CreateClearUpdateStateOptions {
+    pub fn to_clear_update_state_options(
+        &self,
+    ) -> Result<ClearUpdateStateOptions> {
+        let test_error =
+            get_update_test_error("WICKET_TEST_CLEAR_UPDATE_STATE_ERROR")?;
+
+        Ok(ClearUpdateStateOptions { test_error })
     }
 }
 

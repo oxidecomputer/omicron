@@ -13,16 +13,24 @@ use std::{
 };
 
 use anyhow::{anyhow, bail, Context, Result};
-use clap::{Args, Subcommand};
+use clap::{Args, Subcommand, ValueEnum};
 use slog::Logger;
 use tokio::{sync::watch, task::JoinHandle};
-use update_engine::display::{GroupDisplay, LineDisplayStyles};
-use wicket_common::update_events::EventReport;
-use wicketd_client::types::StartUpdateParams;
+use update_engine::{
+    display::{GroupDisplay, LineDisplayStyles},
+    NestedError,
+};
+use wicket_common::{
+    rack_update::ClearUpdateStateResponse, update_events::EventReport,
+};
+use wicketd_client::types::{ClearUpdateStateParams, StartUpdateParams};
 
 use crate::{
     cli::GlobalOpts,
-    state::{parse_event_report_map, ComponentId, CreateStartUpdateOptions},
+    state::{
+        parse_event_report_map, ComponentId, CreateClearUpdateStateOptions,
+        CreateStartUpdateOptions,
+    },
     wicketd::{create_wicketd_client, WICKETD_TIMEOUT},
 };
 
@@ -34,6 +42,8 @@ pub(crate) enum RackUpdateArgs {
     Start(StartRackUpdateArgs),
     /// Attach to one or more running updates.
     Attach(AttachArgs),
+    /// Clear updates.
+    Clear(ClearArgs),
 }
 
 impl RackUpdateArgs {
@@ -49,6 +59,9 @@ impl RackUpdateArgs {
                 args.exec(log, wicketd_addr, global_opts, output).await
             }
             RackUpdateArgs::Attach(args) => {
+                args.exec(log, wicketd_addr, global_opts, output).await
+            }
+            RackUpdateArgs::Clear(args) => {
                 args.exec(log, wicketd_addr, global_opts, output).await
             }
         }
@@ -266,6 +279,109 @@ async fn start_fetch_reports_task(
         Ok(())
     });
     (rx, handle)
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ClearArgs {
+    #[clap(flatten)]
+    component_ids: ComponentIdSelector,
+    #[clap(long, value_name = "FORMAT", value_enum, default_value_t = MessageFormat::Human)]
+    message_format: MessageFormat,
+}
+
+impl ClearArgs {
+    async fn exec(
+        self,
+        log: Logger,
+        wicketd_addr: SocketAddrV6,
+        global_opts: GlobalOpts,
+        output: CommandOutput<'_>,
+    ) -> Result<()> {
+        let client = create_wicketd_client(&log, wicketd_addr, WICKETD_TIMEOUT);
+
+        let update_ids = self.component_ids.to_component_ids()?;
+        let response =
+            do_clear_update_state(client, update_ids, global_opts).await;
+
+        match self.message_format {
+            MessageFormat::Human => {
+                let response = response?;
+                let cleared = response
+                    .cleared
+                    .iter()
+                    .map(|sp| {
+                        ComponentId::from_sp_type_and_slot(sp.type_, sp.slot)
+                            .map(|id| id.to_string())
+                    })
+                    .collect::<Result<Vec<_>>>()
+                    .context("unknown component ID returned in response")?;
+                let no_update_data = response
+                    .no_update_data
+                    .iter()
+                    .map(|sp| {
+                        ComponentId::from_sp_type_and_slot(sp.type_, sp.slot)
+                            .map(|id| id.to_string())
+                    })
+                    .collect::<Result<Vec<_>>>()
+                    .context("unknown component ID returned in response")?;
+
+                if !cleared.is_empty() {
+                    slog::info!(
+                        log,
+                        "cleared update state for {} components: {}",
+                        cleared.len(),
+                        cleared.join(", ")
+                    );
+                }
+                if !no_update_data.is_empty() {
+                    slog::info!(
+                        log,
+                        "no update data found for {} components: {}",
+                        no_update_data.len(),
+                        no_update_data.join(", ")
+                    );
+                }
+            }
+            MessageFormat::Json => {
+                let response =
+                    response.map_err(|error| NestedError::new(error.as_ref()));
+                // Return the response as a JSON object.
+                serde_json::to_writer_pretty(output.stdout, &response)
+                    .context("error writing to output")?;
+                if response.is_err() {
+                    bail!("error clearing update state");
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+async fn do_clear_update_state(
+    client: wicketd_client::Client,
+    update_ids: BTreeSet<ComponentId>,
+    _global_opts: GlobalOpts,
+) -> Result<ClearUpdateStateResponse> {
+    let options =
+        CreateClearUpdateStateOptions {}.to_clear_update_state_options()?;
+    let params = ClearUpdateStateParams {
+        targets: update_ids.iter().copied().map(Into::into).collect(),
+        options,
+    };
+
+    let result = client
+        .post_clear_update_state(&params)
+        .await
+        .context("error calling clear_update_state")?;
+    let response = result.into_inner();
+    Ok(response)
+}
+
+#[derive(Clone, Copy, Eq, PartialEq, Hash, Debug, ValueEnum)]
+enum MessageFormat {
+    Human,
+    Json,
 }
 
 /// Command-line arguments for selecting component IDs.
