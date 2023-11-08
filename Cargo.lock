@@ -1360,23 +1360,6 @@ dependencies = [
 
 [[package]]
 name = "crossterm"
-version = "0.26.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a84cda67535339806297f1b331d6dd6320470d2a0fe65381e79ee9e156dd3d13"
-dependencies = [
- "bitflags 1.3.2",
- "crossterm_winapi",
- "libc",
- "mio",
- "parking_lot 0.12.1",
- "serde",
- "signal-hook",
- "signal-hook-mio",
- "winapi",
-]
-
-[[package]]
-name = "crossterm"
 version = "0.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f476fe445d41c9e991fd07515a6f463074b782242ccf4a5b7b1d1012e70824df"
@@ -1387,6 +1370,7 @@ dependencies = [
  "libc",
  "mio",
  "parking_lot 0.12.1",
+ "serde",
  "signal-hook",
  "signal-hook-mio",
  "winapi",
@@ -5437,6 +5421,7 @@ dependencies = [
  "const-oid",
  "crossbeam-epoch",
  "crossbeam-utils",
+ "crossterm",
  "crypto-common",
  "diesel",
  "digest",
@@ -6992,7 +6977,7 @@ checksum = "2e2e4cd95294a85c3b4446e63ef054eea43e0205b1fd60120c16b74ff7ff96ad"
 dependencies = [
  "bitflags 2.4.0",
  "cassowary",
- "crossterm 0.27.0",
+ "crossterm",
  "indoc 2.0.3",
  "itertools 0.11.0",
  "paste",
@@ -7073,12 +7058,12 @@ dependencies = [
 
 [[package]]
 name = "reedline"
-version = "0.23.0"
+version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3defc4467a8909614bcb02cb304a3e8472c31f7a44e6c6c287eb9575b212bc4d"
+checksum = "e7dc1d1d369c194cf79acc204397aca1fecc4248df3e1c1eabb15e5ef2d16991"
 dependencies = [
  "chrono",
- "crossterm 0.26.1",
+ "crossterm",
  "fd-lock",
  "itertools 0.10.5",
  "nu-ansi-term",
@@ -10150,7 +10135,7 @@ dependencies = [
  "camino",
  "ciborium",
  "clap 4.4.3",
- "crossterm 0.27.0",
+ "crossterm",
  "debug-ignore",
  "futures",
  "hex",
@@ -10215,7 +10200,7 @@ dependencies = [
  "camino",
  "ciborium",
  "clap 4.4.3",
- "crossterm 0.27.0",
+ "crossterm",
  "omicron-workspace-hack",
  "ratatui",
  "reedline",
