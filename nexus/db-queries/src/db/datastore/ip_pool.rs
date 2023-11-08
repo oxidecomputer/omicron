@@ -414,24 +414,17 @@ impl DataStore {
             })
     }
 
-    // TODO: move all that horrible ip searching logic in here
     // TODO: write a test for this
-    // async fn ensure_no_ips_outstanding() {}
-
-    /// Delete IP pool assocation with resource unless there are outstanding
-    /// IPs allocated from the pool in the associated silo (or the fleet, if
-    /// it's a fleet association).
-    pub async fn ip_pool_dissociate_resource(
+    async fn ensure_no_ips_outstanding(
         &self,
         opctx: &OpContext,
         // TODO: this could take the authz_pool, it's just more annoying to test that way
         ip_pool_id: Uuid,
         // TODO: we need to know the resource type because it affects the IPs query
         resource_id: Uuid,
-    ) -> DeleteResult {
+    ) -> Result<(), Error> {
         use db::schema::external_ip;
         use db::schema::instance;
-        use db::schema::ip_pool_resource;
         use db::schema::project;
         opctx
             .authorize(authz::Action::CreateChild, &authz::IP_POOL_LIST)
@@ -490,6 +483,29 @@ impl DataStore {
                 message: "IP addresses from this pool are in use in the associated silo/fleet".to_string()
             });
         }
+
+        Ok(())
+    }
+
+    /// Delete IP pool assocation with resource unless there are outstanding
+    /// IPs allocated from the pool in the associated silo (or the fleet, if
+    /// it's a fleet association).
+    pub async fn ip_pool_dissociate_resource(
+        &self,
+        opctx: &OpContext,
+        // TODO: this could take the authz_pool, it's just more annoying to test that way
+        ip_pool_id: Uuid,
+        // TODO: we need to know the resource type because it affects the IPs query
+        resource_id: Uuid,
+    ) -> DeleteResult {
+        use db::schema::ip_pool_resource;
+        opctx
+            .authorize(authz::Action::CreateChild, &authz::IP_POOL_LIST)
+            .await?;
+
+        // We can only delete the association if there are no IPs allocated
+        // from this pool in the associated resource.
+        self.ensure_no_ips_outstanding(opctx, ip_pool_id, resource_id).await?;
 
         diesel::delete(ip_pool_resource::table)
             .filter(ip_pool_resource::ip_pool_id.eq(ip_pool_id))
