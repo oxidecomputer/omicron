@@ -4,8 +4,7 @@
 
 //! Developer tool for easily running bits of Omicron
 
-use anyhow::bail;
-use anyhow::Context;
+use anyhow::{bail, Context};
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use clap::Args;
@@ -34,7 +33,7 @@ async fn main() -> Result<(), anyhow::Error> {
         OmicronDb::CertCreate { ref args } => cmd_cert_create(args).await,
     };
     if let Err(error) = result {
-        fatal(CmdError::Failure(format!("{:#}", error)));
+        fatal(CmdError::Failure(error));
     }
     Ok(())
 }
