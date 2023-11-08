@@ -335,6 +335,8 @@ pub struct BackgroundTaskConfig {
     pub dns_external: DnsTasksConfig,
     /// configuration for external endpoint list watcher
     pub external_endpoints: ExternalEndpointsConfig,
+    /// configuration for inventory tasks
+    pub inventory: InventoryConfig,
 }
 
 #[serde_as]
@@ -367,6 +369,30 @@ pub struct ExternalEndpointsConfig {
     pub period_secs: Duration,
     // Other policy around the TLS certificates could go here (e.g.,
     // allow/disallow wildcard certs, don't serve expired certs, etc.)
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct InventoryConfig {
+    /// period (in seconds) for periodic activations of this background task
+    ///
+    /// Each activation fetches information about all harware and software in
+    /// the system and inserts it into the database.  This generates a moderate
+    /// amount of data.
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+
+    /// maximum number of past collections to keep in the database
+    ///
+    /// This is a very coarse mechanism to keep the system from overwhelming
+    /// itself with inventory data.
+    pub nkeep: u32,
+
+    /// disable inventory collection altogether
+    ///
+    /// This is an emergency lever for support / operations.  It should never be
+    /// necessary.
+    pub disable: bool,
 }
 
 /// Configuration for a nexus server
@@ -467,19 +493,16 @@ impl std::fmt::Display for SchemeName {
 
 #[cfg(test)]
 mod test {
-    use super::Tunables;
     use super::{
-        default_techport_external_server_port, AuthnConfig, Config,
-        ConsoleConfig, LoadError, PackageConfig, SchemeName,
-        TimeseriesDbConfig, UpdatesConfig,
+        default_techport_external_server_port, AuthnConfig,
+        BackgroundTaskConfig, Config, ConfigDropshotWithTls, ConsoleConfig,
+        Database, DeploymentConfig, DnsTasksConfig, DpdConfig,
+        ExternalEndpointsConfig, InternalDns, InventoryConfig, LoadError,
+        LoadErrorKind, MgdConfig, PackageConfig, SchemeName,
+        TimeseriesDbConfig, Tunables, UpdatesConfig,
     };
     use crate::address::{Ipv6Subnet, RACK_PREFIX};
     use crate::api::internal::shared::SwitchLocation;
-    use crate::nexus_config::{
-        BackgroundTaskConfig, ConfigDropshotWithTls, Database,
-        DeploymentConfig, DnsTasksConfig, DpdConfig, ExternalEndpointsConfig,
-        InternalDns, LoadErrorKind, MgdConfig,
-    };
     use dropshot::ConfigDropshot;
     use dropshot::ConfigLogging;
     use dropshot::ConfigLoggingIfExists;
@@ -626,6 +649,9 @@ mod test {
             dns_external.period_secs_propagation = 7
             dns_external.max_concurrent_server_updates = 8
             external_endpoints.period_secs = 9
+            inventory.period_secs = 10
+            inventory.nkeep = 11
+            inventory.disable = false
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -719,6 +745,11 @@ mod test {
                         },
                         external_endpoints: ExternalEndpointsConfig {
                             period_secs: Duration::from_secs(9),
+                        },
+                        inventory: InventoryConfig {
+                            period_secs: Duration::from_secs(10),
+                            nkeep: 11,
+                            disable: false,
                         }
                     },
                     default_region_allocation_strategy:
@@ -773,6 +804,9 @@ mod test {
             dns_external.period_secs_propagation = 7
             dns_external.max_concurrent_server_updates = 8
             external_endpoints.period_secs = 9
+            inventory.period_secs = 10
+            inventory.nkeep = 3
+            inventory.disable = false
             [default_region_allocation_strategy]
             type = "random"
             "##,

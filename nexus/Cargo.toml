@@ -84,6 +84,7 @@ usdt.workspace = true
 nexus-defaults.workspace = true
 nexus-db-model.workspace = true
 nexus-db-queries.workspace = true
+nexus-inventory.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
 omicron-passwords.workspace = true
