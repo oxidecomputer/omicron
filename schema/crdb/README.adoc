@@ -101,21 +101,6 @@ As convention, however, we recommend keeping the `db_metadata` file at the end
 of `dbinit.sql`, so that the database does not contain a version until it is
 fully populated.
 
-==== Adding new source tables to an existing view
-
-An upgrade can add a new table and then use a `CREATE OR REPLACE VIEW` statement
-to make an existing view depend on that table. To do this in `dbinit.sql` while
-maintaining table and view ordering, use `CREATE VIEW` to create a "placeholder"
-view in the correct position, then add the table to the bottom of `dbinit.sql`
-and use `CREATE OR REPLACE VIEW` to "fill out" the placeholder definition to
-refer to the new table. (You may need to do the `CREATE OR REPLACE VIEW` in a
-separate transaction from the original `CREATE VIEW`.)
-
-Note that `CREATE OR REPLACE VIEW` requires that the new view maintain all of
-the columns of the old view with the same type and same order (though the query
-used to populate them can change. See
-https://www.postgresql.org/docs/15/sql-createview.html.
-
 ==== Renaming columns
 
 Idempotently renaming existing columns is unfortunately not possible in our
