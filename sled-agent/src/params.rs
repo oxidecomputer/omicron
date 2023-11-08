@@ -917,14 +917,14 @@ impl OmicronZoneConfig {
             }
         }?;
 
-        DatasetName::new(dataset.pool_name, dataset_kind)
+        Some(DatasetName::new(dataset.pool_name.clone(), dataset_kind))
     }
 
     // XXX-dap TODO-doc
     pub fn zone_name(&self) -> String {
         illumos_utils::running_zone::InstalledZone::get_zone_name(
             self.zone_type.zone_type_str(),
-            self.id,
+            Some(self.id),
         )
     }
 }
@@ -1029,7 +1029,7 @@ pub enum OmicronZoneType {
 
 impl OmicronZoneType {
     // XXX-dap TODO-doc must match ZoneType
-    fn zone_type_str(&self) -> &str {
+    pub fn zone_type_str(&self) -> &str {
         match self {
             OmicronZoneType::BoundaryNtp { .. } => "ntp",
             OmicronZoneType::InternalNtp { .. } => "ntp",
@@ -1044,6 +1044,18 @@ impl OmicronZoneType {
             OmicronZoneType::Nexus { .. } => "nexus",
             OmicronZoneType::Oximeter { .. } => "oximeter",
         }
+    }
+}
+
+impl crate::smf_helper::Service for OmicronZoneType {
+    fn service_name(&self) -> String {
+        self.zone_type_str().to_owned()
+    }
+    fn smf_name(&self) -> String {
+        format!("svc:/oxide/{}", self.service_name())
+    }
+    fn should_import(&self) -> bool {
+        true
     }
 }
 
