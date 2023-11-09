@@ -6,7 +6,7 @@
 
 // TODO see the TODO for nexus.
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use camino::Utf8PathBuf;
 use clap::Parser;
 use dropshot::ConfigDropshot;
@@ -96,7 +96,7 @@ async fn do_run() -> Result<(), CmdError> {
     let args = Args::parse();
 
     let tmp = camino_tempfile::tempdir()
-        .map_err(|e| CmdError::Failure(e.to_string()))?;
+        .map_err(|e| CmdError::Failure(anyhow!(e)))?;
     let config = Config {
         id: args.uuid,
         sim_mode: args.sim_mode,
@@ -125,10 +125,10 @@ async fn do_run() -> Result<(), CmdError> {
         (Some(cert_path), Some(key_path)) => {
             let cert_bytes = std::fs::read_to_string(&cert_path)
                 .with_context(|| format!("read {:?}", &cert_path))
-                .map_err(|e| CmdError::Failure(e.to_string()))?;
+                .map_err(CmdError::Failure)?;
             let key_bytes = std::fs::read_to_string(&key_path)
                 .with_context(|| format!("read {:?}", &key_path))
-                .map_err(|e| CmdError::Failure(e.to_string()))?;
+                .map_err(CmdError::Failure)?;
             Some(NexusTypes::Certificate { cert: cert_bytes, key: key_bytes })
         }
         _ => {
@@ -145,7 +145,5 @@ async fn do_run() -> Result<(), CmdError> {
         tls_certificate,
     };
 
-    run_standalone_server(&config, &rss_args)
-        .await
-        .map_err(|e| CmdError::Failure(e.to_string()))
+    run_standalone_server(&config, &rss_args).await.map_err(CmdError::Failure)
 }

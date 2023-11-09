@@ -290,6 +290,7 @@ pub enum ServiceType {
     #[serde(skip)]
     Tfport {
         pkt_source: String,
+        asic: DendriteAsic,
     },
     #[serde(skip)]
     Uplink,

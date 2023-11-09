@@ -26,6 +26,7 @@ mod http_entrypoints;
 mod instance;
 mod instance_manager;
 mod long_running_tasks;
+mod metrics;
 mod nexus;
 pub mod params;
 mod profile;

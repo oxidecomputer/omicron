@@ -899,7 +899,7 @@ async fn find_service_log_files(
         if path != current_log_file
             && path_ref.starts_with(current_log_file_ref)
         {
-            log_files.push(path.clone().into());
+            log_files.push(path.into());
         }
     }
 

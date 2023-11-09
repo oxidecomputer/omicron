@@ -277,8 +277,8 @@ impl Driver {
     /// Enumerate all registered background tasks
     ///
     /// This is aimed at callers that want to get the status of all background
-    /// tasks.  You'd call [`Driver::task_status()`] with each of the items produced
-    /// by the iterator.
+    /// tasks.  You'd call [`Driver::task_status()`] with each of the items
+    /// produced by the iterator.
     pub fn tasks(&self) -> impl Iterator<Item = &TaskHandle> {
         self.tasks.keys()
     }

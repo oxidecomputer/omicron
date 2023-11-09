@@ -237,6 +237,7 @@ impl super::Nexus {
             &self.background_tasks.task_external_dns_config,
             &self.background_tasks.task_external_dns_servers,
             &self.background_tasks.task_external_endpoints,
+            &self.background_tasks.task_inventory_collection,
         ] {
             self.background_tasks.activate(task);
         }
@@ -278,7 +279,9 @@ impl super::Nexus {
 
                     let qsfp_ports: Vec<Name> = all_ports
                         .iter()
-                        .filter(|port| port.starts_with("qsfp"))
+                        .filter(|port| {
+                            matches!(port, dpd_client::types::PortId::Qsfp(_))
+                        })
                         .map(|port| port.to_string().parse().unwrap())
                         .collect();
 
@@ -493,7 +496,11 @@ impl super::Nexus {
 
                 match self
                     .db_datastore
-                    .switch_port_settings_create(opctx, &port_settings_params)
+                    .switch_port_settings_create(
+                        opctx,
+                        &port_settings_params,
+                        None,
+                    )
                     .await
                 {
                     Ok(_) | Err(Error::ObjectAlreadyExists { .. }) => Ok(()),

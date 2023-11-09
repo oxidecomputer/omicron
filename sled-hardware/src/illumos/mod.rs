@@ -610,34 +610,37 @@ impl HardwareManager {
         // receiver will receive a tokio::sync::broadcast::error::RecvError::Lagged
         // error, indicating they should re-scan the hardware themselves.
         let (tx, _) = broadcast::channel(1024);
-        let hw = match sled_mode {
-            // Treat as a possible scrimlet and setup to scan for real Tofino device.
-            SledMode::Auto
-            | SledMode::Scrimlet { asic: DendriteAsic::TofinoAsic } => {
-                HardwareView::new()
-            }
+        let hw =
+            match sled_mode {
+                // Treat as a possible scrimlet and setup to scan for real Tofino device.
+                SledMode::Auto
+                | SledMode::Scrimlet { asic: DendriteAsic::TofinoAsic } => {
+                    HardwareView::new()
+                }
 
-            // Treat sled as gimlet and ignore any attached Tofino device.
-            SledMode::Gimlet => HardwareView::new_stub_tofino(
-                // active=
-                false,
-            ),
+                // Treat sled as gimlet and ignore any attached Tofino device.
+                SledMode::Gimlet => HardwareView::new_stub_tofino(
+                    // active=
+                    false,
+                ),
 
-            // Treat as scrimlet and use the stub Tofino device.
-            SledMode::Scrimlet { asic: DendriteAsic::TofinoStub } => {
-                HardwareView::new_stub_tofino(true)
-            }
+                // Treat as scrimlet and use the stub Tofino device.
+                SledMode::Scrimlet { asic: DendriteAsic::TofinoStub } => {
+                    HardwareView::new_stub_tofino(true)
+                }
 
-            // Treat as scrimlet (w/ SoftNPU) and use the stub Tofino device.
-            // TODO-correctness:
-            // I'm not sure whether or not we should be treating softnpu
-            // as a stub or treating it as a different HardwareView variant,
-            // so this might change.
-            SledMode::Scrimlet { asic: DendriteAsic::SoftNpu } => {
-                HardwareView::new_stub_tofino(true)
+                // Treat as scrimlet (w/ SoftNPU) and use the stub Tofino device.
+                // TODO-correctness:
+                // I'm not sure whether or not we should be treating softnpu
+                // as a stub or treating it as a different HardwareView variant,
+                // so this might change.
+                SledMode::Scrimlet {
+                    asic:
+                        DendriteAsic::SoftNpuZone
+                        | DendriteAsic::SoftNpuPropolisDevice,
+                } => HardwareView::new_stub_tofino(true),
             }
-        }
-        .map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())?;
         let inner = Arc::new(Mutex::new(hw));
 
         // Force the device tree to be polled at least once before returning.

@@ -536,8 +536,10 @@ impl ServiceInner {
         // We need the ID when passing info to Nexus.
         let mut id_map = HashMap::new();
         for (_, sled_request) in sled_plan.sleds.iter() {
-            id_map
-                .insert(get_sled_address(sled_request.subnet), sled_request.id);
+            id_map.insert(
+                get_sled_address(sled_request.body.subnet),
+                sled_request.body.id,
+            );
         }
 
         // Convert all the information we have about services and datasets into
@@ -927,7 +929,7 @@ impl ServiceInner {
             .sleds
             .values()
             .map(|initialization_request| {
-                get_sled_address(initialization_request.subnet)
+                get_sled_address(initialization_request.body.subnet)
             })
             .collect();
         let service_plan = if let Some(plan) =

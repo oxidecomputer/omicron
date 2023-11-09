@@ -27,6 +27,7 @@ use omicron_common::backoff::{
     retry_notify, retry_policy_local, BackoffError, ExponentialBackoff,
     ExponentialBackoffBuilder,
 };
+use omicron_common::OMICRON_DPD_TAG;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use slog::Logger;
@@ -403,7 +404,7 @@ impl<'a> EarlyNetworkSetup<'a> {
         let dpd = DpdClient::new(
             &format!("http://[{}]:{}", switch_zone_underlay_ip, DENDRITE_PORT),
             dpd_client::ClientState {
-                tag: "early_networking".to_string(),
+                tag: OMICRON_DPD_TAG.into(),
                 log: self.log.new(o!("component" => "DpdClient")),
             },
         );
@@ -432,13 +433,17 @@ impl<'a> EarlyNetworkSetup<'a> {
                 "Configuring default uplink on switch";
                 "config" => #?dpd_port_settings
             );
-            dpd.port_settings_apply(&port_id, &dpd_port_settings)
-                .await
-                .map_err(|e| {
-                    EarlyNetworkSetupError::Dendrite(format!(
-                        "unable to apply uplink port configuration: {e}"
-                    ))
-                })?;
+            dpd.port_settings_apply(
+                &port_id,
+                Some(OMICRON_DPD_TAG),
+                &dpd_port_settings,
+            )
+            .await
+            .map_err(|e| {
+                EarlyNetworkSetupError::Dendrite(format!(
+                    "unable to apply uplink port configuration: {e}"
+                ))
+            })?;
 
             info!(self.log, "advertising boundary services loopback address");
 
@@ -462,10 +467,9 @@ impl<'a> EarlyNetworkSetup<'a> {
                 "failed to parse `BOUNDARY_SERVICES_ADDR` as `Ipv6Addr`: {e}"
             ))
             })?,
-            tag: "rss".into(),
+            tag: OMICRON_DPD_TAG.into(),
         };
         let mut dpd_port_settings = PortSettings {
-            tag: "rss".into(),
             links: HashMap::new(),
             v4_routes: HashMap::new(),
             v6_routes: HashMap::new(),
@@ -488,6 +492,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                 kr: false,
                 fec: convert_fec(&port_config.uplink_port_fec),
                 speed: convert_speed(&port_config.uplink_port_speed),
+                lane: Some(LinkId(0)),
             },
             //addrs: vec![addr],
             addrs,
@@ -509,7 +514,7 @@ impl<'a> EarlyNetworkSetup<'a> {
             {
                 dpd_port_settings.v4_routes.insert(
                     dst.to_string(),
-                    RouteSettingsV4 { link_id: link_id.0, nexthop, vid: None },
+                    vec![RouteSettingsV4 { link_id: link_id.0, nexthop }],
                 );
             }
             if let (IpNetwork::V6(dst), IpAddr::V6(nexthop)) =
@@ -517,7 +522,7 @@ impl<'a> EarlyNetworkSetup<'a> {
             {
                 dpd_port_settings.v6_routes.insert(
                     dst.to_string(),
-                    RouteSettingsV6 { link_id: link_id.0, nexthop, vid: None },
+                    vec![RouteSettingsV6 { link_id: link_id.0, nexthop }],
                 );
             }
         }

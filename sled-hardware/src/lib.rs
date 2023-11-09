@@ -44,7 +44,8 @@ pub enum HardwareUpdate {
 pub enum DendriteAsic {
     TofinoAsic,
     TofinoStub,
-    SoftNpu,
+    SoftNpuZone,
+    SoftNpuPropolisDevice,
 }
 
 impl std::fmt::Display for DendriteAsic {
@@ -55,7 +56,9 @@ impl std::fmt::Display for DendriteAsic {
             match self {
                 DendriteAsic::TofinoAsic => "tofino_asic",
                 DendriteAsic::TofinoStub => "tofino_stub",
-                DendriteAsic::SoftNpu => "soft_npu",
+                DendriteAsic::SoftNpuZone => "soft_npu_zone",
+                DendriteAsic::SoftNpuPropolisDevice =>
+                    "soft_npu_propolis_device",
             }
         )
     }

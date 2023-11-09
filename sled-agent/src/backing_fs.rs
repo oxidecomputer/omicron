@@ -25,6 +25,7 @@ use camino::Utf8PathBuf;
 use illumos_utils::zfs::{
     EnsureFilesystemError, GetValueError, Mountpoint, SizeDetails, Zfs,
 };
+use std::io;
 
 #[derive(Debug, thiserror::Error)]
 pub enum BackingFsError {
@@ -36,9 +37,12 @@ pub enum BackingFsError {
 
     #[error("Error initializing dataset: {0}")]
     Mount(#[from] EnsureFilesystemError),
+
+    #[error("Failed to ensure subdirectory {0}")]
+    EnsureSubdir(#[from] io::Error),
 }
 
-struct BackingFs {
+struct BackingFs<'a> {
     // Dataset name
     name: &'static str,
     // Mountpoint
@@ -49,9 +53,11 @@ struct BackingFs {
     compression: Option<&'static str>,
     // Linked service
     service: Option<&'static str>,
+    // Subdirectories to ensure
+    subdirs: Option<&'a [&'static str]>,
 }
 
-impl BackingFs {
+impl<'a> BackingFs<'a> {
     const fn new(name: &'static str) -> Self {
         Self {
             name,
@@ -59,6 +65,7 @@ impl BackingFs {
             quota: None,
             compression: None,
             service: None,
+            subdirs: None,
         }
     }
 
@@ -81,10 +88,16 @@ impl BackingFs {
         self.service = Some(service);
         self
     }
+
+    const fn subdirs(mut self, subdirs: &'a [&'static str]) -> Self {
+        self.subdirs = Some(subdirs);
+        self
+    }
 }
 
 const BACKING_FMD_DATASET: &'static str = "fmd";
 const BACKING_FMD_MOUNTPOINT: &'static str = "/var/fm/fmd";
+const BACKING_FMD_SUBDIRS: [&'static str; 3] = ["rsrc", "ckpt", "xprt"];
 const BACKING_FMD_SERVICE: &'static str = "svc:/system/fmd:default";
 const BACKING_FMD_QUOTA: usize = 500 * (1 << 20); // 500 MiB
 
@@ -94,6 +107,7 @@ const BACKINGFS_COUNT: usize = 1;
 static BACKINGFS: [BackingFs; BACKINGFS_COUNT] =
     [BackingFs::new(BACKING_FMD_DATASET)
         .mountpoint(BACKING_FMD_MOUNTPOINT)
+        .subdirs(&BACKING_FMD_SUBDIRS)
         .quota(BACKING_FMD_QUOTA)
         .compression(BACKING_COMPRESSION)
         .service(BACKING_FMD_SERVICE)];
@@ -164,6 +178,15 @@ pub(crate) fn ensure_backing_fs(
         info!(log, "Mounting {} on {}", dataset, mountpoint);
 
         Zfs::mount_overlay_dataset(&dataset, &mountpoint)?;
+
+        if let Some(subdirs) = bfs.subdirs {
+            for dir in subdirs {
+                let subdir = format!("{}/{}", mountpoint, dir);
+
+                info!(log, "Ensuring directory {}", subdir);
+                std::fs::create_dir_all(subdir)?;
+            }
+        }
 
         if let Some(service) = bfs.service {
             info!(log, "Starting service {}", service);

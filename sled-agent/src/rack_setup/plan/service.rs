@@ -250,7 +250,7 @@ impl Plan {
             let result: Result<Vec<SledInfo>, PlanError> =
                 futures::future::try_join_all(sleds.values().map(
                     |sled_request| async {
-                        let subnet = sled_request.subnet;
+                        let subnet = sled_request.body.subnet;
                         let sled_address = get_sled_address(subnet);
                         let u2_zpools =
                             Self::get_u2_zpools_from_sled(log, sled_address)
@@ -258,7 +258,7 @@ impl Plan {
                         let is_scrimlet =
                             Self::is_sled_scrimlet(log, sled_address).await?;
                         Ok(SledInfo::new(
-                            sled_request.id,
+                            sled_request.body.id,
                             subnet,
                             sled_address,
                             u2_zpools,

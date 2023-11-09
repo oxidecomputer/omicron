@@ -13,6 +13,7 @@
 use super::maghemite;
 use super::server::StartError;
 use crate::config::Config;
+use crate::config::SidecarRevision;
 use crate::long_running_tasks::{
     spawn_all_longrunning_tasks, LongRunningTaskHandles,
 };
@@ -236,6 +237,7 @@ async fn cleanup_all_old_global_state(log: &Logger) -> Result<(), StartError> {
 }
 
 fn enable_mg_ddm(config: &Config, log: &Logger) -> Result<(), StartError> {
+    info!(log, "finding links {:?}", config.data_links);
     let mg_addr_objs = underlay::find_nics(&config.data_links)
         .map_err(StartError::FindMaghemiteAddrObjs)?;
     if mg_addr_objs.is_empty() {
@@ -300,7 +302,16 @@ fn sled_mode_from_config(config: &Config) -> Result<SledMode, StartError> {
             } else if cfg!(feature = "switch-stub") {
                 DendriteAsic::TofinoStub
             } else if cfg!(feature = "switch-softnpu") {
-                DendriteAsic::SoftNpu
+                match config.sidecar_revision {
+                    SidecarRevision::SoftZone(_) => DendriteAsic::SoftNpuZone,
+                    SidecarRevision::SoftPropolis(_) => {
+                        DendriteAsic::SoftNpuPropolisDevice
+                    }
+                    _ => return Err(StartError::IncorrectBuildPackaging(
+                        "sled-agent configured to run on softnpu zone but dosen't \
+                         have a softnpu sidecar revision",
+                    )),
+                }
             } else {
                 return Err(StartError::IncorrectBuildPackaging(
                     "sled-agent configured to run on scrimlet but wasn't \

@@ -27,6 +27,7 @@ use crate::server::Server as SledAgentServer;
 use crate::services::ServiceManager;
 use crate::sled_agent::SledAgent;
 use crate::storage_monitor::UnderlayAccess;
+use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
 use cancel_safe_futures::TryStreamExt;
 use ddm_admin_client::Client as DdmAdminClient;
@@ -39,15 +40,10 @@ use illumos_utils::zone;
 use illumos_utils::zone::Zones;
 use omicron_common::ledger;
 use omicron_common::ledger::Ledger;
-use omicron_common::ledger::Ledgerable;
-use schemars::JsonSchema;
-use serde::Deserialize;
-use serde::Serialize;
 use sled_hardware::underlay;
 use sled_storage::dataset::CONFIG_DATASET;
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
-use std::borrow::Cow;
 use std::io;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
@@ -151,6 +147,9 @@ pub enum StartError {
 
     #[error("Failed to bind sprocket server")]
     BindSprocketsServer(#[source] io::Error),
+
+    #[error("Failed to initialize lrtq node as learner: {0}")]
+    FailedLearnerInit(bootstore::NodeRequestError),
 }
 
 /// Server for the bootstrap agent.
@@ -185,11 +184,8 @@ impl Server {
         let paths =
             sled_config_paths(&long_running_task_handles.storage_manager)
                 .await?;
-        let maybe_ledger = Ledger::<PersistentSledAgentRequest<'static>>::new(
-            &startup_log,
-            paths,
-        )
-        .await;
+        let maybe_ledger =
+            Ledger::<StartSledAgentRequest>::new(&startup_log, paths).await;
 
         // We don't yet _act_ on the `StartSledAgentRequest` if we have one, but
         // if we have one we init our `RssAccess` noting that we're already
@@ -239,10 +235,10 @@ impl Server {
 
         // Do we have a persistent sled-agent request that we need to restore?
         let state = if let Some(ledger) = maybe_ledger {
-            let sled_request = ledger.data();
+            let start_sled_agent_request = ledger.into_inner();
             let sled_agent_server = start_sled_agent(
                 &config,
-                &sled_request.request,
+                start_sled_agent_request,
                 long_running_task_handles.clone(),
                 underlay_available_tx,
                 service_manager.clone(),
@@ -330,6 +326,9 @@ pub enum SledAgentServerStartError {
 
     #[error("Failed to commit sled agent request to ledger")]
     CommitToLedger(#[from] ledger::Error),
+
+    #[error("Failed to initialize this lrtq node as a learner: {0}")]
+    FailedLearnerInit(#[from] bootstore::NodeRequestError),
 }
 
 impl From<SledAgentServerStartError> for StartError {
@@ -344,6 +343,9 @@ impl From<SledAgentServerStartError> for StartError {
             SledAgentServerStartError::CommitToLedger(err) => {
                 Self::CommitToLedger(err)
             }
+            SledAgentServerStartError::FailedLearnerInit(err) => {
+                Self::FailedLearnerInit(err)
+            }
         }
     }
 }
@@ -351,7 +353,7 @@ impl From<SledAgentServerStartError> for StartError {
 #[allow(clippy::too_many_arguments)]
 async fn start_sled_agent(
     config: &SledConfig,
-    request: &StartSledAgentRequest,
+    request: StartSledAgentRequest,
     long_running_task_handles: LongRunningTaskHandles,
     underlay_available_tx: oneshot::Sender<UnderlayAccess>,
     service_manager: ServiceManager,
@@ -366,7 +368,7 @@ async fn start_sled_agent(
     // storage manager about keys, advertising prefixes, ...).
 
     // Initialize the secret retriever used by the `KeyManager`
-    if request.use_trust_quorum {
+    if request.body.use_trust_quorum {
         info!(log, "KeyManager: using lrtq secret retriever");
         let salt = request.hash_rack_id();
         LrtqOrHardcodedSecretRetriever::init_lrtq(
@@ -376,6 +378,11 @@ async fn start_sled_agent(
     } else {
         info!(log, "KeyManager: using hardcoded secret retriever");
         LrtqOrHardcodedSecretRetriever::init_hardcoded();
+    }
+
+    if request.body.use_trust_quorum && request.body.is_lrtq_learner {
+        info!(log, "Initializing sled as learner");
+        long_running_task_handles.bootstore.init_learner().await?;
     }
 
     // Inform the storage service that the key manager is available
@@ -392,7 +399,7 @@ async fn start_sled_agent(
     // we'll need to do something different here for underlay vs bootstrap
     // addrs (either talk to a differently-configured ddmd, or include info
     // indicating which kind of address we're advertising).
-    ddmd_client.advertise_prefix(request.subnet);
+    ddmd_client.advertise_prefix(request.body.subnet);
 
     // Server does not exist, initialize it.
     let server = SledAgentServer::start(
@@ -413,11 +420,7 @@ async fn start_sled_agent(
     let paths =
         sled_config_paths(&long_running_task_handles.storage_manager).await?;
 
-    let mut ledger = Ledger::new_with(
-        &log,
-        paths,
-        PersistentSledAgentRequest { request: Cow::Borrowed(request) },
-    );
+    let mut ledger = Ledger::new_with(&log, paths, request);
     ledger.commit().await?;
 
     Ok(server)
@@ -482,18 +485,6 @@ async fn sled_config_paths(
         return Err(MissingM2Paths(CONFIG_DATASET));
     }
     Ok(paths)
-}
-
-#[derive(Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
-struct PersistentSledAgentRequest<'a> {
-    request: Cow<'a, StartSledAgentRequest>,
-}
-
-impl<'a> Ledgerable for PersistentSledAgentRequest<'a> {
-    fn is_newer_than(&self, _other: &Self) -> bool {
-        true
-    }
-    fn generation_bump(&mut self) {}
 }
 
 /// Runs the OpenAPI generator, emitting the spec to stdout.
@@ -565,12 +556,13 @@ impl Inner {
                 sled_agent_started_tx,
                 underlay_available_tx,
             ) => {
+                let request_id = request.body.id;
                 // Extract from an option to satisfy the borrow checker
                 let sled_agent_started_tx =
                     sled_agent_started_tx.take().unwrap();
                 let response = match start_sled_agent(
                     &self.config,
-                    &request,
+                    request,
                     self.long_running_task_handles.clone(),
                     underlay_available_tx.take().unwrap(),
                     self.service_manager.clone(),
@@ -589,7 +581,7 @@ impl Inner {
                             .map_err(|_| ())
                             .expect("Failed to send to StorageMonitor");
                         self.state = SledAgentState::ServerStarted(server);
-                        Ok(SledAgentResponse { id: request.id })
+                        Ok(SledAgentResponse { id: request_id })
                     }
                     Err(err) => Err(format!("{err:#}")),
                 };
@@ -597,21 +589,13 @@ impl Inner {
             }
             SledAgentState::ServerStarted(server) => {
                 info!(log, "Sled Agent already loaded");
-
-                let sled_address = request.sled_address();
-                let response = if server.id() != request.id {
+                let initial = server.sled_agent().start_request();
+                let response = if initial != &request {
                     Err(format!(
-                        "Sled Agent already running with UUID {}, \
-                                     but {} was requested",
-                        server.id(),
-                        request.id,
-                    ))
-                } else if &server.address().ip() != sled_address.ip() {
-                    Err(format!(
-                        "Sled Agent already running on address {}, \
-                                     but {} was requested",
-                        server.address().ip(),
-                        sled_address.ip(),
+                        "Sled Agent already running: 
+                        initital request = {:?}, 
+                        current request: {:?}",
+                        initial, request
                     ))
                 } else {
                     Ok(SledAgentResponse { id: server.id() })
@@ -720,6 +704,8 @@ impl Inner {
 
 #[cfg(test)]
 mod tests {
+    use crate::bootstrap::params::StartSledAgentRequestBody;
+
     use super::*;
     use omicron_common::address::Ipv6Subnet;
     use omicron_test_utils::dev::test_setup_log;
@@ -727,20 +713,21 @@ mod tests {
     use uuid::Uuid;
 
     #[tokio::test]
-    async fn persistent_sled_agent_request_serialization() {
+    async fn start_sled_agent_request_serialization() {
         let logctx =
             test_setup_log("persistent_sled_agent_request_serialization");
         let log = &logctx.log;
 
-        let request = PersistentSledAgentRequest {
-            request: Cow::Owned(StartSledAgentRequest {
+        let request = StartSledAgentRequest {
+            generation: 0,
+            schema_version: 1,
+            body: StartSledAgentRequestBody {
                 id: Uuid::new_v4(),
                 rack_id: Uuid::new_v4(),
-                ntp_servers: vec![String::from("test.pool.example.com")],
-                dns_servers: vec!["1.1.1.1".parse().unwrap()],
                 use_trust_quorum: false,
+                is_lrtq_learner: false,
                 subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
-            }),
+            },
         };
 
         let tempdir = camino_tempfile::Utf8TempDir::new().unwrap();
@@ -749,7 +736,7 @@ mod tests {
         let mut ledger = Ledger::new_with(log, paths.clone(), request.clone());
         ledger.commit().await.expect("Failed to write to ledger");
 
-        let ledger = Ledger::<PersistentSledAgentRequest>::new(log, paths)
+        let ledger = Ledger::<StartSledAgentRequest>::new(log, paths)
             .await
             .expect("Failed to read request");
 
@@ -759,9 +746,9 @@ mod tests {
 
     #[test]
     fn test_persistent_sled_agent_request_schema() {
-        let schema = schemars::schema_for!(PersistentSledAgentRequest<'_>);
+        let schema = schemars::schema_for!(StartSledAgentRequest);
         expectorate::assert_contents(
-            "../schema/persistent-sled-agent-request.json",
+            "../schema/start-sled-agent-request.json",
             &serde_json::to_string_pretty(&schema).unwrap(),
         );
     }

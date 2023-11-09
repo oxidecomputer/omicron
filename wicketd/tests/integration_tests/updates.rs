@@ -12,17 +12,23 @@ use clap::Parser;
 use gateway_messages::SpPort;
 use gateway_test_utils::setup as gateway_setup;
 use installinator::HOST_PHASE_2_FILE_NAME;
+use maplit::btreeset;
 use omicron_common::{
     api::internal::nexus::KnownArtifactKind,
     update::{ArtifactHashId, ArtifactKind},
 };
 use tokio::sync::watch;
+use update_engine::NestedError;
 use uuid::Uuid;
-use wicket_common::update_events::{StepEventKind, UpdateComponent};
+use wicket::OutputKind;
+use wicket_common::{
+    rack_update::{ClearUpdateStateResponse, SpIdentifier, SpType},
+    update_events::{StepEventKind, UpdateComponent},
+};
 use wicketd::{RunningUpdateState, StartUpdateError};
 use wicketd_client::types::{
-    GetInventoryParams, GetInventoryResponse, SpIdentifier, SpType,
-    StartUpdateOptions, StartUpdateParams,
+    GetInventoryParams, GetInventoryResponse, StartUpdateOptions,
+    StartUpdateParams,
 };
 
 #[tokio::test]
@@ -149,7 +155,7 @@ async fn test_updates() {
     let terminal_event = 'outer: loop {
         let event_report = wicketd_testctx
             .wicketd_client
-            .get_update_sp(target_sp.type_, target_sp.slot)
+            .get_update_sp(&target_sp.type_, target_sp.slot)
             .await
             .expect("get_update_sp successful")
             .into_inner();
@@ -169,12 +175,85 @@ async fn test_updates() {
         StepEventKind::ExecutionFailed { failed_step, .. } => {
             // TODO: obviously we shouldn't stop here, get past more of the
             // update process in this test.
-            assert_eq!(failed_step.info.component, UpdateComponent::Sp);
+            assert_eq!(failed_step.info.component, UpdateComponent::Rot);
         }
         other => {
             panic!("unexpected terminal event kind: {other:?}");
         }
     }
+
+    // Try starting the update again -- this should fail because we require that update state is
+    // cleared before starting a new one.
+    {
+        let error = wicketd_testctx
+            .wicketd_client
+            .post_start_update(&params)
+            .await
+            .expect_err(
+                "post_start_update should fail \
+                 since update data is already present",
+            );
+        let error_str = error.to_string();
+        assert!(
+            // Errors lose type information across the OpenAPI boundary, so sadly we have to match on
+            // the error string.
+            error_str.contains("existing update data found"),
+            "unexpected error: {error_str}"
+        );
+    }
+
+    // Try clearing the update via the wicket CLI.
+    {
+        let args = vec![
+            "rack-update",
+            "clear",
+            "--sled",
+            "0,1",
+            "--message-format",
+            "json",
+        ];
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let output = OutputKind::Captured {
+            log: wicketd_testctx.log().clone(),
+            stdout: &mut stdout,
+            stderr: &mut stderr,
+        };
+
+        wicket::exec_with_args(wicketd_testctx.wicketd_addr, args, output)
+            .await
+            .expect("wicket rack-update clear failed");
+
+        // stdout should contain a JSON object.
+        let response: Result<ClearUpdateStateResponse, NestedError> =
+            serde_json::from_slice(&stdout).expect("stdout is valid JSON");
+        assert_eq!(
+            response.expect("expected Ok response"),
+            ClearUpdateStateResponse {
+                cleared: btreeset![SpIdentifier {
+                    type_: SpType::Sled,
+                    slot: 0
+                }],
+                no_update_data: btreeset![SpIdentifier {
+                    type_: SpType::Sled,
+                    slot: 1
+                }],
+            }
+        );
+    }
+
+    // Check to see that the update state for SP 0 was cleared.
+    let event_report = wicketd_testctx
+        .wicketd_client
+        .get_update_sp(&target_sp.type_, target_sp.slot)
+        .await
+        .expect("get_update_sp successful")
+        .into_inner();
+    assert!(
+        event_report.step_events.is_empty(),
+        "update state should be cleared (instead got {:?}",
+        event_report
+    );
 
     wicketd_testctx.teardown().await;
 }
@@ -367,8 +446,8 @@ async fn test_update_races() {
         .await
         .expect_err("failed because update is currently running");
 
-    // Also try starting another fake update, which should fail -- we don't let
-    // updates be started in the middle of other updates.
+    // Also try starting another fake update, which should fail -- we don't let updates be started
+    // if there's current update state.
     {
         let (_, receiver) = watch::channel(());
         let err = wicketd_testctx
@@ -380,7 +459,7 @@ async fn test_update_races() {
         assert_eq!(err.len(), 1, "one error returned: {err:?}");
         assert_eq!(
             err.first().unwrap(),
-            &StartUpdateError::UpdateInProgress(vec![sp])
+            &StartUpdateError::ExistingUpdates(vec![sp])
         );
     }
 
@@ -390,7 +469,7 @@ async fn test_update_races() {
     // Ensure that the event buffer indicates completion.
     let event_buffer = wicketd_testctx
         .wicketd_client
-        .get_update_sp(SpType::Sled, 0)
+        .get_update_sp(&SpType::Sled, 0)
         .await
         .expect("received event buffer successfully");
     let last_event =
@@ -412,7 +491,7 @@ async fn test_update_races() {
     // clean.
     let event_buffer = wicketd_testctx
         .wicketd_client
-        .get_update_sp(SpType::Sled, 0)
+        .get_update_sp(&SpType::Sled, 0)
         .await
         .expect("received event buffer successfully");
     assert!(

@@ -21,7 +21,7 @@ tokio = { workspace = true, features = ["full"] }
 wicket.workspace = true
 
 # used only by wicket-dbg binary
-reedline = "0.23.0"
+reedline = "0.25.0"
 omicron-workspace-hack.workspace = true
 
 [[bin]]
