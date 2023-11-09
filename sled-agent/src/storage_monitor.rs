@@ -100,7 +100,12 @@ impl StorageMonitor {
                 res = self.nexus_notifications.next(),
                     if !self.nexus_notifications.is_empty() =>
                 {
-                    info!(self.log, "Nexus notification complete: {:?}", res);
+                    match res {
+                        Some(Ok(s)) => {
+                            info!(self.log, "Nexus notification complete: {s}");
+                        }
+                        e => error!(self.log, "Nexus notification error: {e:?}")
+                    }
                 }
                 resources = self.storage_manager.wait_for_changes() => {
                     info!(

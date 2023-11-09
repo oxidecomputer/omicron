@@ -74,8 +74,7 @@ pub async fn spawn_all_longrunning_tasks(
     let underlay_available_tx =
         spawn_storage_monitor(log, storage_manager.clone());
 
-    // TODO: Does this need to run inside tokio::task::spawn_blocking?
-    let hardware_manager = spawn_hardware_manager(log, sled_mode);
+    let hardware_manager = spawn_hardware_manager(log, sled_mode).await;
 
     // Start monitoring for hardware changes
     let (sled_agent_started_tx, service_manager_ready_tx) =
@@ -148,7 +147,7 @@ fn spawn_storage_monitor(
     underlay_available_tx
 }
 
-fn spawn_hardware_manager(
+async fn spawn_hardware_manager(
     log: &Logger,
     sled_mode: SledMode,
 ) -> HardwareManager {
@@ -161,7 +160,12 @@ fn spawn_hardware_manager(
     // There are pros and cons to both methods, but the reason to mention it here is that
     // the handle in this case is the `HardwareManager` itself.
     info!(log, "Starting HardwareManager"; "sled_mode" => ?sled_mode);
-    HardwareManager::new(log, sled_mode).unwrap()
+    let log = log.clone();
+    tokio::task::spawn_blocking(move || {
+        HardwareManager::new(&log, sled_mode).unwrap()
+    })
+    .await
+    .unwrap()
 }
 
 fn spawn_hardware_monitor(
