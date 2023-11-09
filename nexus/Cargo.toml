@@ -104,6 +104,7 @@ hyper-rustls.workspace = true
 itertools.workspace = true
 gateway-messages.workspace = true
 gateway-test-utils.workspace = true
+hubtools.workspace = true
 nexus-test-utils-macros.workspace = true
 nexus-test-utils.workspace = true
 omicron-sled-agent.workspace = true
@@ -117,6 +118,7 @@ pretty_assertions.workspace = true
 rcgen.workspace = true
 regex.workspace = true
 similar-asserts.workspace = true
+sp-sim.workspace = true
 rustls = { workspace = true }
 subprocess.workspace = true
 term.workspace = true
