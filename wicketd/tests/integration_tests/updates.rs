@@ -182,6 +182,26 @@ async fn test_updates() {
         }
     }
 
+    // Try starting the update again -- this should fail because we require that update state is
+    // cleared before starting a new one.
+    {
+        let error = wicketd_testctx
+            .wicketd_client
+            .post_start_update(&params)
+            .await
+            .expect_err(
+                "post_start_update should fail \
+                 since update data is already present",
+            );
+        let error_str = error.to_string();
+        assert!(
+            // Errors lose type information across the OpenAPI boundary, so sadly we have to match on
+            // the error string.
+            error_str.contains("existing update data found"),
+            "unexpected error: {error_str}"
+        );
+    }
+
     // Try clearing the update via the wicket CLI.
     {
         let args = vec![
@@ -426,8 +446,8 @@ async fn test_update_races() {
         .await
         .expect_err("failed because update is currently running");
 
-    // Also try starting another fake update, which should fail -- we don't let
-    // updates be started in the middle of other updates.
+    // Also try starting another fake update, which should fail -- we don't let updates be started
+    // if there's current update state.
     {
         let (_, receiver) = watch::channel(());
         let err = wicketd_testctx
@@ -439,7 +459,7 @@ async fn test_update_races() {
         assert_eq!(err.len(), 1, "one error returned: {err:?}");
         assert_eq!(
             err.first().unwrap(),
-            &StartUpdateError::UpdateInProgress(vec![sp])
+            &StartUpdateError::ExistingUpdates(vec![sp])
         );
     }
 
