@@ -12,30 +12,8 @@ use sled_hardware::{Baseboard, HardwareManager, HardwareUpdate};
 use sled_storage::disk::RawDisk;
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
-use std::fmt::Debug;
-use tokio::sync::broadcast;
 use tokio::sync::broadcast::error::RecvError;
-use tokio::sync::mpsc;
-
-const QUEUE_SIZE: usize = 10;
-
-pub enum HardwareMonitorMsg {
-    SledAgentStarted(SledAgent),
-    ServiceManagerCreated(ServiceManager),
-}
-
-impl Debug for HardwareMonitorMsg {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            HardwareMonitorMsg::SledAgentStarted(_) => {
-                f.debug_struct("SledAgentStarted").finish()
-            }
-            HardwareMonitorMsg::ServiceManagerCreated(_) => {
-                f.debug_struct("ServiceManagerCreated").finish()
-            }
-        }
-    }
-}
+use tokio::sync::{broadcast, oneshot};
 
 // A thin wrapper around the the [`ServiceManager`] that caches the state
 // whether or not the tofino is loaded if the [`ServiceManager`] doesn't exist
@@ -62,36 +40,26 @@ impl TofinoManager {
         *self = Self::Ready(service_manager);
         tofino_loaded
     }
-}
 
-#[derive(Clone)]
-pub struct HardwareMonitorHandle {
-    tx: mpsc::Sender<HardwareMonitorMsg>,
-}
-
-impl HardwareMonitorHandle {
-    pub async fn service_manager_ready(&self, service_manager: ServiceManager) {
-        self.tx
-            .send(HardwareMonitorMsg::ServiceManagerCreated(service_manager))
-            .await
-            .unwrap();
-    }
-
-    pub async fn sled_agent_started(&self, sled_agent: SledAgent) {
-        self.tx
-            .send(HardwareMonitorMsg::SledAgentStarted(sled_agent))
-            .await
-            .unwrap();
+    pub fn is_ready(&self) -> bool {
+        match self {
+            TofinoManager::Ready(_) => true,
+            _ => false,
+        }
     }
 }
 
+// A monitor for hardware events
 pub struct HardwareMonitor {
     log: Logger,
 
     baseboard: Baseboard,
 
-    // Receive messages from the [`HardwareMonitorHandle`]
-    handle_rx: mpsc::Receiver<HardwareMonitorMsg>,
+    // Receive a onetime notification that the SledAgent has started
+    sled_agent_started_rx: oneshot::Receiver<SledAgent>,
+
+    // Receive a onetime notification that the ServiceManager is ready
+    service_manager_ready_rx: oneshot::Receiver<ServiceManager>,
 
     // Receive messages from the [`HardwareManager`]
     hardware_rx: broadcast::Receiver<HardwareUpdate>,
@@ -123,9 +91,15 @@ impl HardwareMonitor {
         log: &Logger,
         hardware_manager: &HardwareManager,
         storage_manager: &StorageHandle,
-    ) -> (HardwareMonitor, HardwareMonitorHandle) {
+    ) -> (
+        HardwareMonitor,
+        oneshot::Sender<SledAgent>,
+        oneshot::Sender<ServiceManager>,
+    ) {
+        let (sled_agent_started_tx, sled_agent_started_rx) = oneshot::channel();
+        let (service_manager_ready_tx, service_manager_ready_rx) =
+            oneshot::channel();
         let baseboard = hardware_manager.baseboard();
-        let (handle_tx, handle_rx) = mpsc::channel(QUEUE_SIZE);
         let hardware_rx = hardware_manager.monitor();
         let log = log.new(o!("component" => "HardwareMonitor"));
         let tofino_manager = TofinoManager::new();
@@ -133,14 +107,16 @@ impl HardwareMonitor {
             HardwareMonitor {
                 log,
                 baseboard,
-                handle_rx,
+                sled_agent_started_rx,
+                service_manager_ready_rx,
                 hardware_rx,
                 hardware_manager: hardware_manager.clone(),
                 storage_manager: storage_manager.clone(),
                 sled_agent: None,
                 tofino_manager,
             },
-            HardwareMonitorHandle { tx: handle_tx },
+            sled_agent_started_tx,
+            service_manager_ready_tx,
         )
     }
 
@@ -155,13 +131,21 @@ impl HardwareMonitor {
 
         loop {
             tokio::select! {
-                Some(msg) = self.handle_rx.recv() => {
-                    info!(
-                        self.log,
-                        "Received hardware monitor message";
-                        "msg" => ?msg
-                    );
-                    self.handle_monitor_msg(msg).await;
+                Ok(sled_agent) = &mut self.sled_agent_started_rx,
+                    if self.sled_agent.is_none() =>
+                {
+                    info!(self.log, "Sled Agent Started");
+                    self.sled_agent = Some(sled_agent);
+                    self.check_latest_hardware_snapshot().await;
+                }
+                Ok(service_manager) = &mut self.service_manager_ready_rx,
+                    if !self.tofino_manager.is_ready() =>
+                {
+                    let tofino_loaded =
+                        self.tofino_manager.become_ready(service_manager);
+                    if tofino_loaded {
+                        self.activate_switch().await;
+                    }
                 }
                 update = self.hardware_rx.recv() => {
                     info!(
@@ -170,23 +154,6 @@ impl HardwareMonitor {
                         "update" => ?update,
                     );
                     self.handle_hardware_update(update).await;
-                }
-            }
-        }
-    }
-
-    // Handle a message from the [`HardwareMonitorHandle`]
-    async fn handle_monitor_msg(&mut self, msg: HardwareMonitorMsg) {
-        match msg {
-            HardwareMonitorMsg::SledAgentStarted(sled_agent) => {
-                self.sled_agent = Some(sled_agent);
-                self.check_latest_hardware_snapshot().await;
-            }
-            HardwareMonitorMsg::ServiceManagerCreated(service_manager) => {
-                let tofino_loaded =
-                    self.tofino_manager.become_ready(service_manager);
-                if tofino_loaded {
-                    self.activate_switch().await;
                 }
             }
         }

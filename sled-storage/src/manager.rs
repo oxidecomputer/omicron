@@ -392,7 +392,7 @@ impl StorageManager {
                 // We hit a transient error in a prior iteration.
                 saved.insert(disk);
             } else {
-                // Try ot add the disk. If there was a transient error the disk will
+                // Try to add the disk. If there was a transient error the disk will
                 // have been requeued. If there was a permanent error, it will have been
                 // dropped. If there is an another unexpected error, we will handle it and
                 // requeue ourselves.

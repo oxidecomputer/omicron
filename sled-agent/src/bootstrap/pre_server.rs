@@ -17,6 +17,7 @@ use crate::long_running_tasks::{
     spawn_all_longrunning_tasks, LongRunningTaskHandles,
 };
 use crate::services::ServiceManager;
+use crate::sled_agent::SledAgent;
 use camino::Utf8PathBuf;
 use cancel_safe_futures::TryStreamExt;
 use ddm_admin_client::Client as DdmAdminClient;
@@ -38,6 +39,7 @@ use slog::Drain;
 use slog::Logger;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
+use tokio::sync::oneshot;
 
 pub(super) struct BootstrapAgentStartup {
     pub(super) config: Config,
@@ -47,6 +49,7 @@ pub(super) struct BootstrapAgentStartup {
     pub(super) startup_log: Logger,
     pub(super) service_manager: ServiceManager,
     pub(super) long_running_task_handles: LongRunningTaskHandles,
+    pub(super) sled_agent_started_tx: oneshot::Sender<SledAgent>,
 }
 
 impl BootstrapAgentStartup {
@@ -105,7 +108,11 @@ impl BootstrapAgentStartup {
 
         // Spawn all important long running tasks that live for the lifetime of
         // the process and are used by both the bootstrap agent and sled agent
-        let long_running_task_handles = spawn_all_longrunning_tasks(
+        let (
+            long_running_task_handles,
+            sled_agent_started_tx,
+            service_manager_ready_tx,
+        ) = spawn_all_longrunning_tasks(
             &base_log,
             sled_mode,
             startup_networking.global_zone_bootstrap_ip,
@@ -128,10 +135,12 @@ impl BootstrapAgentStartup {
             long_running_task_handles.zone_bundler.clone(),
         );
 
-        long_running_task_handles
-            .hardware_monitor
-            .service_manager_ready(service_manager.clone())
-            .await;
+        // Inform the hardware monitor that the service manager is ready
+        // This is a onetime operation, and so we use a oneshot channel
+        service_manager_ready_tx
+            .send(service_manager.clone())
+            .map_err(|_| ())
+            .expect("Failed to send to StorageMonitor");
 
         Ok(Self {
             config,
@@ -141,6 +150,7 @@ impl BootstrapAgentStartup {
             startup_log: log,
             service_manager,
             long_running_task_handles,
+            sled_agent_started_tx,
         })
     }
 }

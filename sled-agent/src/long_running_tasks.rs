@@ -17,7 +17,9 @@ use crate::bootstrap::bootstore_setup::{
 };
 use crate::bootstrap::secret_retriever::LrtqOrHardcodedSecretRetriever;
 use crate::config::Config;
-use crate::hardware_monitor::{HardwareMonitor, HardwareMonitorHandle};
+use crate::hardware_monitor::HardwareMonitor;
+use crate::services::ServiceManager;
+use crate::sled_agent::SledAgent;
 use crate::storage_monitor::{StorageMonitor, StorageMonitorHandle};
 use crate::zone_bundle::{CleanupContext, ZoneBundler};
 use bootstore::schemes::v0 as bootstore;
@@ -27,6 +29,7 @@ use sled_storage::disk::SyntheticDisk;
 use sled_storage::manager::{StorageHandle, StorageManager};
 use slog::{info, Logger};
 use std::net::Ipv6Addr;
+use tokio::sync::oneshot;
 
 /// A mechanism for interacting with all long running tasks that can be shared
 /// between the bootstrap-agent and sled-agent code.
@@ -50,10 +53,6 @@ pub struct LongRunningTaskHandles {
     /// A mechanism for interacting with the hardware device tree
     pub hardware_manager: HardwareManager,
 
-    /// A mechanism for interacting with the task that monitors for hardware
-    /// updates from the [`HardwareManager`]
-    pub hardware_monitor: HardwareMonitorHandle,
-
     // A handle for interacting with the bootstore
     pub bootstore: bootstore::NodeHandle,
 
@@ -67,7 +66,11 @@ pub async fn spawn_all_longrunning_tasks(
     sled_mode: SledMode,
     global_zone_bootstrap_ip: Ipv6Addr,
     config: &Config,
-) -> LongRunningTaskHandles {
+) -> (
+    LongRunningTaskHandles,
+    oneshot::Sender<SledAgent>,
+    oneshot::Sender<ServiceManager>,
+) {
     let storage_key_requester = spawn_key_manager(log);
     let mut storage_manager =
         spawn_storage_manager(log, storage_key_requester.clone());
@@ -78,7 +81,7 @@ pub async fn spawn_all_longrunning_tasks(
     let hardware_manager = spawn_hardware_manager(log, sled_mode);
 
     // Start monitoring for hardware changes
-    let hardware_monitor =
+    let (sled_agent_started_tx, service_manager_ready_tx) =
         spawn_hardware_monitor(log, &hardware_manager, &storage_manager);
 
     // Add some synthetic disks if necessary.
@@ -100,15 +103,18 @@ pub async fn spawn_all_longrunning_tasks(
 
     let zone_bundler = spawn_zone_bundler_tasks(log, &mut storage_manager);
 
-    LongRunningTaskHandles {
-        storage_key_requester,
-        storage_manager,
-        storage_monitor,
-        hardware_manager,
-        hardware_monitor,
-        bootstore,
-        zone_bundler,
-    }
+    (
+        LongRunningTaskHandles {
+            storage_key_requester,
+            storage_manager,
+            storage_monitor,
+            hardware_manager,
+            bootstore,
+            zone_bundler,
+        },
+        sled_agent_started_tx,
+        service_manager_ready_tx,
+    )
 }
 
 fn spawn_key_manager(log: &Logger) -> StorageKeyRequester {
@@ -125,7 +131,7 @@ fn spawn_storage_manager(
     key_requester: StorageKeyRequester,
 ) -> StorageHandle {
     info!(log, "Starting StorageManager");
-    let (mut manager, handle) = StorageManager::new(log, key_requester);
+    let (manager, handle) = StorageManager::new(log, key_requester);
     tokio::spawn(async move {
         manager.run().await;
     });
@@ -165,14 +171,14 @@ fn spawn_hardware_monitor(
     log: &Logger,
     hardware_manager: &HardwareManager,
     storage_handle: &StorageHandle,
-) -> HardwareMonitorHandle {
+) -> (oneshot::Sender<SledAgent>, oneshot::Sender<ServiceManager>) {
     info!(log, "Starting HardwareMonitor");
-    let (mut monitor, handle) =
+    let (mut monitor, sled_agent_started_tx, service_manager_ready_tx) =
         HardwareMonitor::new(log, hardware_manager, storage_handle);
     tokio::spawn(async move {
         monitor.run().await;
     });
-    handle
+    (sled_agent_started_tx, service_manager_ready_tx)
 }
 
 async fn spawn_bootstore_tasks(

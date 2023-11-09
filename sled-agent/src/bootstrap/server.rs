@@ -25,6 +25,7 @@ use crate::config::ConfigError;
 use crate::long_running_tasks::LongRunningTaskHandles;
 use crate::server::Server as SledAgentServer;
 use crate::services::ServiceManager;
+use crate::sled_agent::SledAgent;
 use camino::Utf8PathBuf;
 use cancel_safe_futures::TryStreamExt;
 use ddm_admin_client::Client as DdmAdminClient;
@@ -175,6 +176,7 @@ impl Server {
             startup_log,
             service_manager,
             long_running_task_handles,
+            sled_agent_started_tx,
         } = BootstrapAgentStartup::run(config).await?;
 
         // Do we have a StartSledAgentRequest stored in the ledger?
@@ -251,10 +253,10 @@ impl Server {
             // switch zone, if we're a scrimlet, to give it our underlay network
             // information.
             let sled_agent = sled_agent_server.sled_agent();
-            long_running_task_handles
-                .hardware_monitor
-                .sled_agent_started(sled_agent.clone())
-                .await;
+            sled_agent_started_tx
+                .send(sled_agent.clone())
+                .map_err(|_| ())
+                .expect("Failed to send to StorageMonitor");
 
             // For cold boot specifically, we now need to load the services
             // we're responsible for, while continuing to handle hardware
@@ -263,7 +265,7 @@ impl Server {
             sled_agent.cold_boot_load_services().await;
             SledAgentState::ServerStarted(sled_agent_server)
         } else {
-            SledAgentState::Bootstrapping
+            SledAgentState::Bootstrapping(Some(sled_agent_started_tx))
         };
 
         // Spawn our inner task that handles any future hardware updates and any
@@ -306,7 +308,7 @@ impl Server {
 // bootstrap server).
 enum SledAgentState {
     // We're still in the bootstrapping phase, waiting for a sled-agent request.
-    Bootstrapping,
+    Bootstrapping(Option<oneshot::Sender<SledAgent>>),
     // ... or the sled agent server is running.
     ServerStarted(SledAgentServer),
 }
@@ -548,8 +550,11 @@ impl Inner {
         response_tx: oneshot::Sender<Result<SledAgentResponse, String>>,
         log: &Logger,
     ) {
-        match &self.state {
-            SledAgentState::Bootstrapping => {
+        match &mut self.state {
+            SledAgentState::Bootstrapping(sled_agent_started_tx) => {
+                // Extract from an option to satisfy the borrow checker
+                let sled_agent_started_tx =
+                    sled_agent_started_tx.take().unwrap();
                 let response = match start_sled_agent(
                     &self.config,
                     &request,
@@ -565,11 +570,10 @@ impl Inner {
                         // We've created sled-agent; we need to (possibly)
                         // reconfigure the switch zone, if we're a scrimlet, to
                         // give it our underlay network information.
-                        self.long_running_task_handles
-                            .hardware_monitor
-                            .sled_agent_started(server.sled_agent().clone())
-                            .await;
-
+                        sled_agent_started_tx
+                            .send(server.sled_agent().clone())
+                            .map_err(|_| ())
+                            .expect("Failed to send to StorageMonitor");
                         self.state = SledAgentState::ServerStarted(server);
                         Ok(SledAgentResponse { id: request.id })
                     }

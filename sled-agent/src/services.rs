@@ -3204,7 +3204,7 @@ mod test {
     }
 
     async fn setup_storage() -> StorageHandle {
-        let (mut manager, handle) = FakeStorageManager::new();
+        let (manager, handle) = FakeStorageManager::new();
 
         // Spawn the storage manager as done by sled-agent
         tokio::spawn(async move {
