@@ -1161,6 +1161,13 @@ table! {
 }
 
 table! {
+    sw_root_of_trust_page (id) {
+        id -> Uuid,
+        data_base64 -> Text,
+    }
+}
+
+table! {
     inv_collection (id) {
         id -> Uuid,
         time_started -> Timestamptz,
@@ -1218,6 +1225,18 @@ table! {
 
         which -> crate::CabooseWhichEnum,
         sw_caboose_id -> Uuid,
+    }
+}
+
+table! {
+    inv_root_of_trust_page (inv_collection_id, hw_baseboard_id, which) {
+        inv_collection_id -> Uuid,
+        hw_baseboard_id -> Uuid,
+        time_collected -> Timestamptz,
+        source -> Text,
+
+        which -> crate::RotPageWhichEnum,
+        sw_root_of_trust_page_id -> Uuid,
     }
 }
 

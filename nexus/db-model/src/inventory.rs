@@ -6,7 +6,8 @@
 
 use crate::schema::{
     hw_baseboard_id, inv_caboose, inv_collection, inv_collection_error,
-    inv_root_of_trust, inv_service_processor, sw_caboose,
+    inv_root_of_trust, inv_root_of_trust_page, inv_service_processor,
+    sw_caboose, sw_root_of_trust_page,
 };
 use crate::{impl_enum_type, SqlU16, SqlU32};
 use chrono::DateTime;
@@ -18,7 +19,7 @@ use diesel::pg::Pg;
 use diesel::serialize::ToSql;
 use diesel::{serialize, sql_types};
 use nexus_types::inventory::{
-    BaseboardId, Caboose, Collection, PowerState, RotSlot,
+    BaseboardId, Caboose, Collection, PowerState, RotPage, RotSlot,
 };
 use uuid::Uuid;
 
@@ -128,6 +129,59 @@ impl From<CabooseWhich> for nexus_types::inventory::CabooseWhich {
             CabooseWhich::SpSlot1 => nexus_inventory::CabooseWhich::SpSlot1,
             CabooseWhich::RotSlotA => nexus_inventory::CabooseWhich::RotSlotA,
             CabooseWhich::RotSlotB => nexus_inventory::CabooseWhich::RotSlotB,
+        }
+    }
+}
+
+// See [`nexus_types::inventory::RotPageWhich`].
+impl_enum_type!(
+    #[derive(SqlType, Debug, QueryId)]
+    #[diesel(postgres_type(name = "caboose_which"))]
+    pub struct RotPageWhichEnum;
+
+    #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
+    #[diesel(sql_type = RotPageWhichEnum)]
+    pub enum RotPageWhich;
+
+    // Enum values
+    Cmpa => b"cmpa"
+    CfpaActive => b"cfpa_active"
+    CfpaInactive => b"cfpa_inactive"
+    CfpaScratch => b"cfpa_scratch"
+);
+
+impl From<nexus_types::inventory::RotPageWhich> for RotPageWhich {
+    fn from(c: nexus_types::inventory::RotPageWhich) -> Self {
+        use nexus_types::inventory as nexus_inventory;
+        match c {
+            nexus_inventory::RotPageWhich::Cmpa => RotPageWhich::Cmpa,
+            nexus_inventory::RotPageWhich::CfpaActive => {
+                RotPageWhich::CfpaActive
+            }
+            nexus_inventory::RotPageWhich::CfpaInactive => {
+                RotPageWhich::CfpaInactive
+            }
+            nexus_inventory::RotPageWhich::CfpaScratch => {
+                RotPageWhich::CfpaScratch
+            }
+        }
+    }
+}
+
+impl From<RotPageWhich> for nexus_types::inventory::RotPageWhich {
+    fn from(row: RotPageWhich) -> Self {
+        use nexus_types::inventory as nexus_inventory;
+        match row {
+            RotPageWhich::Cmpa => nexus_inventory::RotPageWhich::Cmpa,
+            RotPageWhich::CfpaActive => {
+                nexus_inventory::RotPageWhich::CfpaActive
+            }
+            RotPageWhich::CfpaInactive => {
+                nexus_inventory::RotPageWhich::CfpaInactive
+            }
+            RotPageWhich::CfpaScratch => {
+                nexus_inventory::RotPageWhich::CfpaScratch
+            }
         }
     }
 }
@@ -268,6 +322,36 @@ impl From<SwCaboose> for Caboose {
             name: row.name,
             version: row.version,
         }
+    }
+}
+
+/// See [`nexus_types::inventory::RotPage`].
+#[derive(
+    Queryable,
+    Insertable,
+    Clone,
+    Debug,
+    Selectable,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+)]
+#[diesel(table_name = sw_root_of_trust_page)]
+pub struct SwRotPage {
+    pub id: Uuid,
+    pub data_base64: String,
+}
+
+impl From<RotPage> for SwRotPage {
+    fn from(p: RotPage) -> Self {
+        Self { id: Uuid::new_v4(), data_base64: p.data_base64 }
+    }
+}
+
+impl From<SwRotPage> for RotPage {
+    fn from(row: SwRotPage) -> Self {
+        Self { data_base64: row.data_base64 }
     }
 }
 
@@ -440,4 +524,17 @@ pub struct InvCaboose {
 
     pub which: CabooseWhich,
     pub sw_caboose_id: Uuid,
+}
+
+/// See [`nexus_types::inventory::RotPageFound`].
+#[derive(Queryable, Clone, Debug, Selectable)]
+#[diesel(table_name = inv_root_of_trust_page)]
+pub struct InvRotPage {
+    pub inv_collection_id: Uuid,
+    pub hw_baseboard_id: Uuid,
+    pub time_collected: DateTime<Utc>,
+    pub source: String,
+
+    pub which: RotPageWhich,
+    pub sw_root_of_trust_page_id: Uuid,
 }

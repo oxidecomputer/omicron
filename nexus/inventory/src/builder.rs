@@ -19,6 +19,9 @@ use nexus_types::inventory::Caboose;
 use nexus_types::inventory::CabooseFound;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
+use nexus_types::inventory::RotPage;
+use nexus_types::inventory::RotPageFound;
+use nexus_types::inventory::RotPageWhich;
 use nexus_types::inventory::RotState;
 use nexus_types::inventory::ServiceProcessor;
 use std::collections::BTreeMap;
@@ -39,10 +42,13 @@ pub struct CollectionBuilder {
     collector: String,
     baseboards: BTreeSet<Arc<BaseboardId>>,
     cabooses: BTreeSet<Arc<Caboose>>,
+    rot_pages: BTreeSet<Arc<RotPage>>,
     sps: BTreeMap<Arc<BaseboardId>, ServiceProcessor>,
     rots: BTreeMap<Arc<BaseboardId>, RotState>,
     cabooses_found:
         BTreeMap<CabooseWhich, BTreeMap<Arc<BaseboardId>, CabooseFound>>,
+    rot_pages_found:
+        BTreeMap<RotPageWhich, BTreeMap<Arc<BaseboardId>, RotPageFound>>,
 }
 
 impl CollectionBuilder {
@@ -58,9 +64,11 @@ impl CollectionBuilder {
             collector: collector.to_owned(),
             baseboards: BTreeSet::new(),
             cabooses: BTreeSet::new(),
+            rot_pages: BTreeSet::new(),
             sps: BTreeMap::new(),
             rots: BTreeMap::new(),
             cabooses_found: BTreeMap::new(),
+            rot_pages_found: BTreeMap::new(),
         }
     }
 
@@ -78,9 +86,11 @@ impl CollectionBuilder {
             collector: self.collector,
             baseboards: self.baseboards,
             cabooses: self.cabooses,
+            rot_pages: self.rot_pages,
             sps: self.sps,
             rots: self.rots,
             cabooses_found: self.cabooses_found,
+            rot_pages_found: self.rot_pages_found,
         }
     }
 

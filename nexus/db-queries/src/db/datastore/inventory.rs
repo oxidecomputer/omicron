@@ -37,10 +37,12 @@ use nexus_db_model::InvCaboose;
 use nexus_db_model::InvCollection;
 use nexus_db_model::InvCollectionError;
 use nexus_db_model::InvRootOfTrust;
+use nexus_db_model::InvRotPage;
 use nexus_db_model::InvServiceProcessor;
 use nexus_db_model::SpType;
 use nexus_db_model::SpTypeEnum;
 use nexus_db_model::SwCaboose;
+use nexus_db_model::SwRotPage;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
@@ -1092,6 +1094,85 @@ impl DataStoreInventoryTest for DataStore {
                 );
             }
 
+            // Fetch records of RoT pages found.
+            let inv_rot_page_rows = {
+                use db::schema::inv_root_of_trust_page::dsl;
+                dsl::inv_root_of_trust_page
+                    .filter(dsl::inv_collection_id.eq(id))
+                    .limit(sql_limit)
+                    .select(InvRotPage::as_select())
+                    .load_async(&**conn)
+                    .await
+                    .context("loading inv_root_of_trust_page")?
+            };
+            limit_reached =
+                limit_reached || inv_rot_page_rows.len() == usize_limit;
+
+            // Collect the unique sw_rot_page_ids for those pages.
+            let sw_rot_page_ids: BTreeSet<_> = inv_rot_page_rows
+                .iter()
+                .map(|inv_rot_page| inv_rot_page.sw_root_of_trust_page_id)
+                .collect();
+            // Fetch the corresponing records.
+            let rot_pages_by_id: BTreeMap<_, _> = {
+                use db::schema::sw_root_of_trust_page::dsl;
+                dsl::sw_root_of_trust_page
+                    .filter(dsl::id.eq_any(sw_rot_page_ids))
+                    .limit(sql_limit)
+                    .select(SwRotPage::as_select())
+                    .load_async(&**conn)
+                    .await
+                    .context("loading sw_root_of_trust_page")?
+                    .into_iter()
+                    .map(|sw_rot_page_row| {
+                        (
+                            sw_rot_page_row.id,
+                            Arc::new(nexus_types::inventory::RotPage::from(
+                                sw_rot_page_row,
+                            )),
+                        )
+                    })
+                    .collect()
+            };
+            limit_reached =
+                limit_reached || rot_pages_by_id.len() == usize_limit;
+
+            // Assemble the lists of rot pages found.
+            let mut rot_pages_found = BTreeMap::new();
+            for p in inv_rot_page_rows {
+                let by_baseboard = rot_pages_found
+                    .entry(nexus_types::inventory::RotPageWhich::from(p.which))
+                    .or_insert_with(BTreeMap::new);
+                let Some(bb) = baseboards_by_id.get(&p.hw_baseboard_id) else {
+                    bail!(
+                        "unknown baseboard found in inv_root_of_trust_page: {}",
+                        p.hw_baseboard_id
+                    );
+                };
+                let Some(sw_rot_page) =
+                    rot_pages_by_id.get(&p.sw_root_of_trust_page_id)
+                else {
+                    bail!(
+                        "unknown rot page found in inv_root_of_trust_page: {}",
+                        p.sw_root_of_trust_page_id
+                    );
+                };
+
+                let previous = by_baseboard.insert(
+                    bb.clone(),
+                    nexus_types::inventory::RotPageFound {
+                        time_collected: p.time_collected,
+                        source: p.source,
+                        page: sw_rot_page.clone(),
+                    },
+                );
+                anyhow::ensure!(
+                    previous.is_none(),
+                    "duplicate rot page found: {:?} baseboard {:?}",
+                    p.which,
+                    p.hw_baseboard_id
+                );
+            }
             Ok((
                 Collection {
                     id,
@@ -1101,9 +1182,11 @@ impl DataStoreInventoryTest for DataStore {
                     collector,
                     baseboards: baseboards_by_id.values().cloned().collect(),
                     cabooses: cabooses_by_id.values().cloned().collect(),
+                    rot_pages: rot_pages_by_id.values().cloned().collect(),
                     sps,
                     rots,
                     cabooses_found,
+                    rot_pages_found,
                 },
                 limit_reached,
             ))
