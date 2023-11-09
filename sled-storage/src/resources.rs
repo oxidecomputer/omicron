@@ -34,21 +34,28 @@ const ZONE_BUNDLE_DIRECTORY: &str = "zone";
 /// inside the `StorageManager` task if there are any outstanding copies.
 /// Therefore, we only pay the cost to update infrequently, and no locks are
 /// required by callers when operating on cloned data. The only contention here
-/// is for the refrence counters of the internal Arcs when `StorageResources`
+/// is for the reference counters of the internal Arcs when `StorageResources`
 /// gets cloned or dropped.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StorageResources {
     // All disks, real and synthetic, being managed by this sled
-    pub disks: Arc<BTreeMap<DiskIdentity, (Disk, Pool)>>,
+    disks: Arc<BTreeMap<DiskIdentity, (Disk, Pool)>>,
 }
 
 impl StorageResources {
+    /// Return a reference to the current snapshot of disks
+    pub fn disks(&self) -> &BTreeMap<DiskIdentity, (Disk, Pool)> {
+        &self.disks
+    }
+
     /// Insert a disk and its zpool
     ///
-    /// Return true if data was changed, false otherwise
-    ///
-    /// This really should not be used outside this crate, except for testing
-    pub fn insert_disk(&mut self, disk: Disk) -> Result<bool, Error> {
+    /// If the disk passed in is new or modified, or its pool size or pool name
+    /// changed, then insert the changed values and return `true`. Otherwise,
+    /// do not insert anything and return false. For instance, if only the pool
+    /// health changes, because it is not one of the checked values, we will not
+    /// insert the update and will return `false`.
+    pub(crate) fn insert_disk(&mut self, disk: Disk) -> Result<bool, Error> {
         let disk_id = disk.identity().clone();
         let zpool_name = disk.zpool_name().clone();
         let zpool = Pool::new(zpool_name, disk_id.clone())?;
@@ -130,6 +137,7 @@ impl StorageResources {
         }
         None
     }
+
     /// Returns all M.2 zpools
     pub fn all_m2_zpools(&self) -> Vec<ZpoolName> {
         self.all_zpools(DiskVariant::M2)
@@ -159,7 +167,6 @@ impl StorageResources {
     pub fn get_all_zpools(&self) -> Vec<(ZpoolName, DiskVariant)> {
         self.disks
             .values()
-            .cloned()
             .map(|(disk, _)| (disk.zpool_name().clone(), disk.variant()))
             .collect()
     }

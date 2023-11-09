@@ -100,7 +100,7 @@ const ARCHIVAL_INTERVAL: Duration = Duration::from_secs(300);
 impl DumpSetup {
     pub(crate) async fn update_dumpdev_setup(
         &self,
-        disks: &Arc<BTreeMap<DiskIdentity, (Disk, Pool)>>,
+        disks: &BTreeMap<DiskIdentity, (Disk, Pool)>,
     ) {
         let log = &self.log;
         let mut m2_dump_slices = Vec::new();

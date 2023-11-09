@@ -170,7 +170,7 @@ impl StorageMonitor {
                 self.add_zpool_notify(pool, put).await;
             }
         }
-        self.dump_setup.update_dumpdev_setup(&updated_resources.disks).await;
+        self.dump_setup.update_dumpdev_setup(&updated_resources.disks()).await;
 
         // Save the updated `StorageResources`
         self.storage_resources = updated_resources;
@@ -329,8 +329,8 @@ fn compute_resource_diffs(
 
     // Diff the existing resources with the update to see what has changed
     // This loop finds disks and pools that were modified or deleted
-    for (disk_id, (disk, pool)) in current.disks.iter() {
-        match updated.disks.get(disk_id) {
+    for (disk_id, (disk, pool)) in current.disks().iter() {
+        match updated.disks().get(disk_id) {
             Some((updated_disk, updated_pool)) => {
                 if disk != updated_disk {
                     disk_puts.push(PhysicalDiskPutRequest {
@@ -356,8 +356,8 @@ fn compute_resource_diffs(
 
     // Diff the existing resources with the update to see what has changed
     // This loop finds new disks and pools
-    for (disk_id, (updated_disk, updated_pool)) in updated.disks.iter() {
-        if !current.disks.contains_key(disk_id) {
+    for (disk_id, (updated_disk, updated_pool)) in updated.disks().iter() {
+        if !current.disks().contains_key(disk_id) {
             disk_puts.push(PhysicalDiskPutRequest {
                 sled_id: *sled_id,
                 model: disk_id.model.clone(),

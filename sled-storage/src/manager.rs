@@ -351,9 +351,7 @@ impl StorageManager {
             StorageRequest::AddDisk(raw_disk) => {
                 self.add_disk(raw_disk).await?
             }
-            StorageRequest::RemoveDisk(raw_disk) => {
-                self.remove_disk(raw_disk).await
-            }
+            StorageRequest::RemoveDisk(raw_disk) => self.remove_disk(raw_disk),
             StorageRequest::DisksChanged(raw_disks) => {
                 self.ensure_using_exactly_these_disks(raw_disks).await
             }
@@ -433,7 +431,17 @@ impl StorageManager {
         send_updates
     }
 
-    // Add a disk to `StorageResources` if it is new and return Ok(true) if so
+    // Add a disk to `StorageResources` if it is new,
+    // updated, or its pool has been updated as determined by
+    // [`$crate::resources::StorageResources::insert_disk`] and we decide not to
+    // queue the disk for later addition. If the disk was inserted to resources
+    // return `Ok(true)`.
+    //
+    // In case the disk is queued, it wasn't inserted into `StorageResources`
+    // for another reason, or we have already consumed and logged an error
+    // return `Ok(false).
+    //
+    // In all other cases return an Error.
     async fn add_disk(&mut self, raw_disk: RawDisk) -> Result<bool, Error> {
         match raw_disk.variant() {
             DiskVariant::U2 => self.add_u2_disk(raw_disk).await,
@@ -486,7 +494,7 @@ impl StorageManager {
     }
 
     // Delete a real disk and return `true` if the disk was actually removed
-    async fn remove_disk(&mut self, raw_disk: RawDisk) -> bool {
+    fn remove_disk(&mut self, raw_disk: RawDisk) -> bool {
         // If the disk is a U.2, we want to first delete it from any queued disks
         let _ = self.queued_u2_drives.remove(&raw_disk);
         self.resources.remove_disk(raw_disk.identity())
@@ -512,7 +520,7 @@ impl StorageManager {
         // Find all existing disks not in the current set
         let to_remove: Vec<DiskIdentity> = self
             .resources
-            .disks
+            .disks()
             .keys()
             .filter_map(|id| {
                 if !all_ids.contains(id) {
@@ -555,7 +563,7 @@ impl StorageManager {
         info!(self.log, "add_dataset: {:?}", request);
         if !self
             .resources
-            .disks
+            .disks()
             .values()
             .any(|(_, pool)| &pool.name == request.dataset_name.pool())
         {
