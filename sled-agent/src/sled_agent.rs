@@ -57,6 +57,7 @@ use slog::Logger;
 use std::collections::BTreeMap;
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::sync::Arc;
+use tokio::sync::oneshot;
 use uuid::Uuid;
 
 #[cfg(not(test))]
@@ -271,6 +272,7 @@ impl SledAgent {
         request: StartSledAgentRequest,
         services: ServiceManager,
         long_running_task_handles: LongRunningTaskHandles,
+        underlay_available_tx: oneshot::Sender<UnderlayAccess>,
     ) -> Result<SledAgent, Error> {
         // Pass the "parent_log" to all subcomponents that want to set their own
         // "component" value.
@@ -347,13 +349,13 @@ impl SledAgent {
 
         // Inform the `StorageMonitor` that the underlay is available so that
         // it can try to contact nexus.
-        long_running_task_handles
-            .storage_monitor
-            .underlay_available(UnderlayAccess {
+        underlay_available_tx
+            .send(UnderlayAccess {
                 nexus_client: nexus_client.clone(),
                 sled_id: request.id,
             })
-            .await;
+            .map_err(|_| ())
+            .expect("Failed to send to StorageMonitor");
 
         let instances = InstanceManager::new(
             parent_log.clone(),

@@ -18,6 +18,7 @@ use crate::long_running_tasks::{
 };
 use crate::services::ServiceManager;
 use crate::sled_agent::SledAgent;
+use crate::storage_monitor::UnderlayAccess;
 use camino::Utf8PathBuf;
 use cancel_safe_futures::TryStreamExt;
 use ddm_admin_client::Client as DdmAdminClient;
@@ -50,6 +51,7 @@ pub(super) struct BootstrapAgentStartup {
     pub(super) service_manager: ServiceManager,
     pub(super) long_running_task_handles: LongRunningTaskHandles,
     pub(super) sled_agent_started_tx: oneshot::Sender<SledAgent>,
+    pub(super) underlay_available_tx: oneshot::Sender<UnderlayAccess>,
 }
 
 impl BootstrapAgentStartup {
@@ -112,6 +114,7 @@ impl BootstrapAgentStartup {
             long_running_task_handles,
             sled_agent_started_tx,
             service_manager_ready_tx,
+            underlay_available_tx,
         ) = spawn_all_longrunning_tasks(
             &base_log,
             sled_mode,
@@ -151,6 +154,7 @@ impl BootstrapAgentStartup {
             service_manager,
             long_running_task_handles,
             sled_agent_started_tx,
+            underlay_available_tx,
         })
     }
 }

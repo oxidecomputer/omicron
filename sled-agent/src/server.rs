@@ -11,10 +11,12 @@ use crate::bootstrap::params::StartSledAgentRequest;
 use crate::long_running_tasks::LongRunningTaskHandles;
 use crate::nexus::NexusClientWithResolver;
 use crate::services::ServiceManager;
+use crate::storage_monitor::UnderlayAccess;
 use internal_dns::resolver::Resolver;
 use slog::Logger;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use tokio::sync::oneshot;
 use uuid::Uuid;
 
 /// Packages up a [`SledAgent`], running the sled agent API under a Dropshot
@@ -40,6 +42,7 @@ impl Server {
         request: StartSledAgentRequest,
         long_running_tasks_handles: LongRunningTaskHandles,
         services: ServiceManager,
+        underlay_available_tx: oneshot::Sender<UnderlayAccess>,
     ) -> Result<Server, String> {
         info!(log, "setting up sled agent server");
 
@@ -62,6 +65,7 @@ impl Server {
             request,
             services,
             long_running_tasks_handles,
+            underlay_available_tx,
         )
         .await
         .map_err(|e| e.to_string())?;

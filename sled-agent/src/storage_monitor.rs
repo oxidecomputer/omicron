@@ -24,21 +24,13 @@ use sled_storage::resources::StorageResources;
 use slog::Logger;
 use std::fmt::Debug;
 use std::pin::Pin;
-use tokio::sync::mpsc;
+use tokio::sync::oneshot;
 use uuid::Uuid;
-
-const QUEUE_SIZE: usize = 10;
 
 #[derive(From, Clone, Debug)]
 enum NexusDiskRequest {
     Put(PhysicalDiskPutRequest),
     Delete(PhysicalDiskDeleteRequest),
-}
-
-/// A message sent from the `StorageMonitorHandle` to the `StorageMonitor`.
-#[derive(Debug)]
-pub enum StorageMonitorMsg {
-    UnderlayAvailable(UnderlayAccess),
 }
 
 /// Describes the access to the underlay used by the StorageManager.
@@ -56,25 +48,12 @@ impl Debug for UnderlayAccess {
     }
 }
 
-/// A mechanism for interacting with the StorageMonitor
-#[derive(Clone)]
-pub struct StorageMonitorHandle {
-    tx: mpsc::Sender<StorageMonitorMsg>,
-}
-
-impl StorageMonitorHandle {
-    pub async fn underlay_available(&self, underlay_access: UnderlayAccess) {
-        self.tx
-            .send(StorageMonitorMsg::UnderlayAvailable(underlay_access))
-            .await
-            .unwrap();
-    }
-}
-
 pub struct StorageMonitor {
     log: Logger,
     storage_manager: StorageHandle,
-    handle_rx: mpsc::Receiver<StorageMonitorMsg>,
+
+    // Receive a onetime notification that the underlay is available
+    underlay_available_rx: oneshot::Receiver<UnderlayAccess>,
 
     // A cached copy of the `StorageResources` from the last update
     storage_resources: StorageResources,
@@ -93,8 +72,8 @@ impl StorageMonitor {
     pub fn new(
         log: &Logger,
         storage_manager: StorageHandle,
-    ) -> (StorageMonitor, StorageMonitorHandle) {
-        let (handle_tx, handle_rx) = mpsc::channel(QUEUE_SIZE);
+    ) -> (StorageMonitor, oneshot::Sender<UnderlayAccess>) {
+        let (underlay_available_tx, underlay_available_rx) = oneshot::channel();
         let storage_resources = StorageResources::default();
         let dump_setup = DumpSetup::new(&log);
         let log = log.new(o!("component" => "StorageMonitor"));
@@ -102,20 +81,20 @@ impl StorageMonitor {
             StorageMonitor {
                 log,
                 storage_manager,
-                handle_rx,
+                underlay_available_rx,
                 storage_resources,
                 underlay: None,
                 nexus_notifications: FuturesOrdered::new(),
                 dump_setup,
             },
-            StorageMonitorHandle { tx: handle_tx },
+            underlay_available_tx,
         )
     }
 
     /// Run the main receive loop of the `StorageMonitor`
     ///
     /// This should be spawned into a tokio task
-    pub async fn run(&mut self) {
+    pub async fn run(mut self) {
         loop {
             tokio::select! {
                 res = self.nexus_notifications.next(),
@@ -131,24 +110,17 @@ impl StorageMonitor {
                     );
                     self.handle_resource_update(resources).await;
                 }
-                Some(msg) = self.handle_rx.recv() => {
+                Ok(underlay) = &mut self.underlay_available_rx,
+                    if self.underlay.is_none() =>
+                {
+                    let sled_id = underlay.sled_id;
                     info!(
                         self.log,
-                        "Received storage monitor message";
-                        "monitor_msg" => ?msg
+                        "Underlay Available"; "sled_id" => %sled_id
                     );
-                    self.handle_monitor_msg(msg).await;
+                    self.underlay = Some(underlay);
+                    self.notify_nexus_about_existing_resources(sled_id).await;
                 }
-            }
-        }
-    }
-
-    async fn handle_monitor_msg(&mut self, msg: StorageMonitorMsg) {
-        match msg {
-            StorageMonitorMsg::UnderlayAvailable(underlay) => {
-                let sled_id = underlay.sled_id;
-                self.underlay = Some(underlay);
-                self.notify_nexus_about_existing_resources(sled_id).await;
             }
         }
     }

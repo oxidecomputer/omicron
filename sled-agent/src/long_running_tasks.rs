@@ -20,7 +20,7 @@ use crate::config::Config;
 use crate::hardware_monitor::HardwareMonitor;
 use crate::services::ServiceManager;
 use crate::sled_agent::SledAgent;
-use crate::storage_monitor::{StorageMonitor, StorageMonitorHandle};
+use crate::storage_monitor::{StorageMonitor, UnderlayAccess};
 use crate::zone_bundle::{CleanupContext, ZoneBundler};
 use bootstore::schemes::v0 as bootstore;
 use key_manager::{KeyManager, StorageKeyRequester};
@@ -45,11 +45,6 @@ pub struct LongRunningTaskHandles {
     /// for establishing zpools on disks and managing their datasets.
     pub storage_manager: StorageHandle,
 
-    /// A task which monitors for updates from the `StorageManager` and takes
-    /// actions based on those updates, such as informing Nexus and setting
-    /// up dump locations.
-    pub storage_monitor: StorageMonitorHandle,
-
     /// A mechanism for interacting with the hardware device tree
     pub hardware_manager: HardwareManager,
 
@@ -70,12 +65,14 @@ pub async fn spawn_all_longrunning_tasks(
     LongRunningTaskHandles,
     oneshot::Sender<SledAgent>,
     oneshot::Sender<ServiceManager>,
+    oneshot::Sender<UnderlayAccess>,
 ) {
     let storage_key_requester = spawn_key_manager(log);
     let mut storage_manager =
         spawn_storage_manager(log, storage_key_requester.clone());
 
-    let storage_monitor = spawn_storage_monitor(log, storage_manager.clone());
+    let underlay_available_tx =
+        spawn_storage_monitor(log, storage_manager.clone());
 
     // TODO: Does this need to run inside tokio::task::spawn_blocking?
     let hardware_manager = spawn_hardware_manager(log, sled_mode);
@@ -107,13 +104,13 @@ pub async fn spawn_all_longrunning_tasks(
         LongRunningTaskHandles {
             storage_key_requester,
             storage_manager,
-            storage_monitor,
             hardware_manager,
             bootstore,
             zone_bundler,
         },
         sled_agent_started_tx,
         service_manager_ready_tx,
+        underlay_available_tx,
     )
 }
 
@@ -141,14 +138,14 @@ fn spawn_storage_manager(
 fn spawn_storage_monitor(
     log: &Logger,
     storage_handle: StorageHandle,
-) -> StorageMonitorHandle {
+) -> oneshot::Sender<UnderlayAccess> {
     info!(log, "Starting StorageMonitor");
-    let (mut storage_monitor, handle) =
+    let (storage_monitor, underlay_available_tx) =
         StorageMonitor::new(log, storage_handle);
     tokio::spawn(async move {
         storage_monitor.run().await;
     });
-    handle
+    underlay_available_tx
 }
 
 fn spawn_hardware_manager(

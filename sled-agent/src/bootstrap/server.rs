@@ -26,6 +26,7 @@ use crate::long_running_tasks::LongRunningTaskHandles;
 use crate::server::Server as SledAgentServer;
 use crate::services::ServiceManager;
 use crate::sled_agent::SledAgent;
+use crate::storage_monitor::UnderlayAccess;
 use camino::Utf8PathBuf;
 use cancel_safe_futures::TryStreamExt;
 use ddm_admin_client::Client as DdmAdminClient;
@@ -177,6 +178,7 @@ impl Server {
             service_manager,
             long_running_task_handles,
             sled_agent_started_tx,
+            underlay_available_tx,
         } = BootstrapAgentStartup::run(config).await?;
 
         // Do we have a StartSledAgentRequest stored in the ledger?
@@ -242,6 +244,7 @@ impl Server {
                 &config,
                 &sled_request.request,
                 long_running_task_handles.clone(),
+                underlay_available_tx,
                 service_manager.clone(),
                 &ddm_admin_localhost_client,
                 &base_log,
@@ -249,9 +252,7 @@ impl Server {
             )
             .await?;
 
-            // We've created sled-agent; we need to (possibly) reconfigure the
-            // switch zone, if we're a scrimlet, to give it our underlay network
-            // information.
+            // Give the HardwareMonitory access to the `SledAgent`
             let sled_agent = sled_agent_server.sled_agent();
             sled_agent_started_tx
                 .send(sled_agent.clone())
@@ -265,7 +266,10 @@ impl Server {
             sled_agent.cold_boot_load_services().await;
             SledAgentState::ServerStarted(sled_agent_server)
         } else {
-            SledAgentState::Bootstrapping(Some(sled_agent_started_tx))
+            SledAgentState::Bootstrapping(
+                Some(sled_agent_started_tx),
+                Some(underlay_available_tx),
+            )
         };
 
         // Spawn our inner task that handles any future hardware updates and any
@@ -308,7 +312,10 @@ impl Server {
 // bootstrap server).
 enum SledAgentState {
     // We're still in the bootstrapping phase, waiting for a sled-agent request.
-    Bootstrapping(Option<oneshot::Sender<SledAgent>>),
+    Bootstrapping(
+        Option<oneshot::Sender<SledAgent>>,
+        Option<oneshot::Sender<UnderlayAccess>>,
+    ),
     // ... or the sled agent server is running.
     ServerStarted(SledAgentServer),
 }
@@ -345,6 +352,7 @@ async fn start_sled_agent(
     config: &SledConfig,
     request: &StartSledAgentRequest,
     long_running_task_handles: LongRunningTaskHandles,
+    underlay_available_tx: oneshot::Sender<UnderlayAccess>,
     service_manager: ServiceManager,
     ddmd_client: &DdmAdminClient,
     base_log: &Logger,
@@ -392,6 +400,7 @@ async fn start_sled_agent(
         request.clone(),
         long_running_task_handles.clone(),
         service_manager,
+        underlay_available_tx,
     )
     .await
     .map_err(SledAgentServerStartError::FailedStartingServer)?;
@@ -551,7 +560,10 @@ impl Inner {
         log: &Logger,
     ) {
         match &mut self.state {
-            SledAgentState::Bootstrapping(sled_agent_started_tx) => {
+            SledAgentState::Bootstrapping(
+                sled_agent_started_tx,
+                underlay_available_tx,
+            ) => {
                 // Extract from an option to satisfy the borrow checker
                 let sled_agent_started_tx =
                     sled_agent_started_tx.take().unwrap();
@@ -559,6 +571,7 @@ impl Inner {
                     &self.config,
                     &request,
                     self.long_running_task_handles.clone(),
+                    underlay_available_tx.take().unwrap(),
                     self.service_manager.clone(),
                     &self.ddm_admin_localhost_client,
                     &self.base_log,

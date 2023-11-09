@@ -474,10 +474,10 @@ impl ServiceManager {
     }
 
     async fn all_service_ledgers(&self) -> Vec<Utf8PathBuf> {
-        let resources = self.inner.storage.get_latest_resources().await;
         if let Some(dir) = self.inner.ledger_directory_override.get() {
             return vec![dir.join(SERVICES_LEDGER_FILENAME)];
         }
+        let resources = self.inner.storage.get_latest_resources().await;
         resources
             .all_m2_mountpoints(CONFIG_DATASET)
             .into_iter()
