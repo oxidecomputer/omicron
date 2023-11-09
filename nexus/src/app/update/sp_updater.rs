@@ -4,6 +4,7 @@
 
 //! Module containing types for updating SPs via MGS.
 
+use super::UpdateProgress;
 use futures::Future;
 use gateway_client::types::SpType;
 use gateway_client::types::SpUpdateStatus;
@@ -24,18 +25,8 @@ pub enum SpUpdateError {
 
     // Error returned when we successfully start an update but it fails to
     // complete successfully.
-    #[error("update failed to complete: {0}")]
+    #[error("SP update failed to complete: {0}")]
     FailedToComplete(String),
-}
-
-// TODO-cleanup Probably share this with other update implementations?
-#[derive(Debug, PartialEq, Clone)]
-pub enum UpdateProgress {
-    Started,
-    Preparing { progress: Option<f64> },
-    InProgress { progress: Option<f64> },
-    Complete,
-    Failed(String),
 }
 
 pub struct SpUpdater {

@@ -27,8 +27,18 @@ use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
 mod sp_updater;
+mod rot_updater;
 
-pub use sp_updater::{SpUpdateError, SpUpdater, UpdateProgress};
+pub use sp_updater::{SpUpdateError, SpUpdater};
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum UpdateProgress {
+    Started,
+    Preparing { progress: Option<f64> },
+    InProgress { progress: Option<f64> },
+    Complete,
+    Failed(String),
+}
 
 static BASE_ARTIFACT_DIR: &str = "/var/tmp/oxide_artifacts";
 
