@@ -922,7 +922,7 @@ mod tests {
         let resources = handle.wait_for_changes().await;
         let expected: HashSet<_> =
             disks.iter().take(3).map(|d| d.identity()).collect();
-        let actual: HashSet<_> = resources.disks.keys().collect();
+        let actual: HashSet<_> = resources.disks().keys().collect();
         assert_eq!(expected, actual);
 
         // Add first three disks after the initial one. The returned resources
@@ -935,7 +935,7 @@ mod tests {
         let resources = handle.wait_for_changes().await;
         let expected: HashSet<_> =
             disks.iter().skip(1).take(3).map(|d| d.identity()).collect();
-        let actual: HashSet<_> = resources.disks.keys().collect();
+        let actual: HashSet<_> = resources.disks().keys().collect();
         assert_eq!(expected, actual);
 
         // Ensure the same set of disks and make sure no change occurs
@@ -958,7 +958,7 @@ mod tests {
         let resources = handle.wait_for_changes().await;
         let expected: HashSet<_> =
             disks.iter().skip(4).take(5).map(|d| d.identity()).collect();
-        let actual: HashSet<_> = resources.disks.keys().collect();
+        let actual: HashSet<_> = resources.disks().keys().collect();
         assert_eq!(expected, actual);
 
         // Finally, change the zpool backing of the 5th disk to be that of the 10th
@@ -980,10 +980,10 @@ mod tests {
         let resources = handle.wait_for_changes().await;
 
         // Ensure the one modified disk changed as we expected
-        assert_eq!(5, resources.disks.len());
+        assert_eq!(5, resources.disks().len());
         for raw_disk in expected {
             let (disk, pool) =
-                resources.disks.get(raw_disk.identity()).unwrap();
+                resources.disks().get(raw_disk.identity()).unwrap();
             assert_eq!(disk.zpool_name(), raw_disk.zpool_name());
             assert_eq!(&pool.name, disk.zpool_name());
             assert_eq!(raw_disk.identity(), &pool.parent);

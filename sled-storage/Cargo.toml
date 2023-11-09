@@ -24,7 +24,7 @@ uuid.workspace = true
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
-illumos-utils = { workspace = true, features = ["tmp_keypath"] }
+illumos-utils = { workspace = true, features = ["tmp_keypath", "testing"] }
 omicron-test-utils.workspace = true
 camino-tempfile.workspace = true
 

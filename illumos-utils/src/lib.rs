@@ -112,7 +112,7 @@ mod inner {
 }
 
 // Due to feature unification, the `testing` feature is enabled when some tests
-// don't actually want to use it. We allow them to opt out of  the use of the
+// don't actually want to use it. We allow them to opt out of the use of the
 // free function here. We also explicitly opt-in where mocks are used.
 //
 // Note that this only works if the tests that use mocks and those that  don't
@@ -120,6 +120,7 @@ mod inner {
 // so there is no problem currently.
 //
 // We can remove all this when we get rid of the mocks.
+#[cfg(any(test, feature = "testing"))]
 pub static USE_MOCKS: AtomicBool = AtomicBool::new(false);
 
 pub fn execute(
