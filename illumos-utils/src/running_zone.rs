@@ -517,12 +517,12 @@ impl RunningZone {
         // services are up, so future requests to create network addresses
         // or manipulate services will work.
         let fmri = "svc:/milestone/single-user:default";
-        wait_for_service(Some(&zone.name), fmri).await.map_err(|_| {
-            BootError::Timeout {
+        wait_for_service(Some(&zone.name), fmri, zone.log.clone())
+            .await
+            .map_err(|_| BootError::Timeout {
                 service: fmri.to_string(),
                 zone: zone.name.to_string(),
-            }
-        })?;
+            })?;
 
         // If the zone is self-assembling, then SMF service(s) inside the zone
         // will be creating the listen address for the zone's service(s),

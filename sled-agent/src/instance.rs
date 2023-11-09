@@ -984,7 +984,7 @@ impl Instance {
         // but it helps distinguish "online in SMF" from "responding to HTTP
         // requests".
         let fmri = fmri_name();
-        wait_for_service(Some(&zname), &fmri)
+        wait_for_service(Some(&zname), &fmri, inner.log.clone())
             .await
             .map_err(|_| Error::Timeout(fmri.to_string()))?;
         info!(inner.log, "Propolis SMF service is online");

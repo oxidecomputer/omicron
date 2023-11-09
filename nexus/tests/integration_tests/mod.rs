@@ -32,6 +32,7 @@ mod silo_users;
 mod silos;
 mod sleds;
 mod snapshots;
+mod sp_updater;
 mod ssh_keys;
 mod subnet_allocation;
 mod switch_port;

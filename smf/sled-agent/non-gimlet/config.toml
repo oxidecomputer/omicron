@@ -12,7 +12,7 @@ sled_mode = "scrimlet"
 # Identifies the revision of the sidecar that is attached, if one is attached.
 # TODO: This field should be removed once Gimlets have the ability to auto-detect
 # this information.
-sidecar_revision.soft = { front_port_count = 1, rear_port_count = 1 }
+sidecar_revision.soft_zone = { front_port_count = 1, rear_port_count = 1 }
 
 # Setting this to true causes sled-agent to always report that its time is
 # in-sync, rather than querying its NTP zone.

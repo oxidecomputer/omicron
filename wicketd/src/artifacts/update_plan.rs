@@ -590,6 +590,59 @@ impl<'a> UpdatePlanBuilder<'a> {
             }
         }
 
+        // Ensure that all A/B RoT images for each board kind have the same
+        // version number.
+        for (kind, mut single_board_rot_artifacts) in [
+            (
+                KnownArtifactKind::GimletRot,
+                self.gimlet_rot_a.iter().chain(&self.gimlet_rot_b),
+            ),
+            (
+                KnownArtifactKind::PscRot,
+                self.psc_rot_a.iter().chain(&self.psc_rot_b),
+            ),
+            (
+                KnownArtifactKind::SwitchRot,
+                self.sidecar_rot_a.iter().chain(&self.sidecar_rot_b),
+            ),
+        ] {
+            // We know each of these iterators has at least 2 elements (one from
+            // the A artifacts and one from the B artifacts, checked above) so
+            // we can safely unwrap the first.
+            let version =
+                &single_board_rot_artifacts.next().unwrap().id.version;
+            for artifact in single_board_rot_artifacts {
+                if artifact.id.version != *version {
+                    return Err(RepositoryError::MultipleVersionsPresent {
+                        kind,
+                        v1: version.clone(),
+                        v2: artifact.id.version.clone(),
+                    });
+                }
+            }
+        }
+
+        // Repeat the same version check for all SP images. (This is a separate
+        // loop because the types of the iterators don't match.)
+        for (kind, mut single_board_sp_artifacts) in [
+            (KnownArtifactKind::GimletSp, self.gimlet_sp.values()),
+            (KnownArtifactKind::PscSp, self.psc_sp.values()),
+            (KnownArtifactKind::SwitchSp, self.sidecar_sp.values()),
+        ] {
+            // We know each of these iterators has at least 1 element (checked
+            // above) so we can safely unwrap the first.
+            let version = &single_board_sp_artifacts.next().unwrap().id.version;
+            for artifact in single_board_sp_artifacts {
+                if artifact.id.version != *version {
+                    return Err(RepositoryError::MultipleVersionsPresent {
+                        kind,
+                        v1: version.clone(),
+                        v2: artifact.id.version.clone(),
+                    });
+                }
+            }
+        }
+
         Ok(UpdatePlan {
             system_version: self.system_version,
             gimlet_sp: self.gimlet_sp, // checked above
