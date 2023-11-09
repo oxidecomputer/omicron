@@ -65,8 +65,7 @@ use crate::bootstrap::params::StartSledAgentRequest;
 use crate::bootstrap::rss_handle::BootstrapAgentHandle;
 use crate::nexus::d2n_params;
 use crate::params::{
-    AutonomousServiceOnlyError, ServiceType, ServiceZoneRequest,
-    ServiceZoneService, TimeSync, ZoneType,
+    OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig, TimeSync,
 };
 use crate::rack_setup::plan::service::{
     Plan as ServicePlan, PlanError as ServicePlanError,
@@ -256,10 +255,10 @@ impl ServiceInner {
         ServiceInner { log }
     }
 
-    async fn initialize_services_on_sled(
+    async fn initialize_zones_on_sled(
         &self,
         sled_address: SocketAddrV6,
-        zones_config: &SledAgentTypes::OmicronZonesConfig,
+        zones_config: &OmicronZonesConfig,
     ) -> Result<(), SetupServiceError> {
         let dur = std::time::Duration::from_secs(60);
         let client = reqwest::ClientBuilder::new()
@@ -278,7 +277,7 @@ impl ServiceInner {
                 "attempting to set up sled's Omicron zones: {:?}", zones_config
             );
             client
-                .omicron_zones_put(zones_config)
+                .omicron_zones_put(&zones_config.clone().into())
                 .await
                 .map_err(BackoffError::transient)?;
             Ok::<(), BackoffError<SledAgentError<SledAgentTypes::Error>>>(())
@@ -308,33 +307,27 @@ impl ServiceInner {
     //
     // Note that after first-time setup, the initialization order of
     // services should not matter.
-    // XXX-dap revisit me -- I think we probably need to store a few different
-    // OmicronZoneConfig objects rather than this approach of slicing only part
-    // of it.  Or else we store the last generation used and all the zones in
-    // one place and use a filter function here and then generate an
-    // OmicronZonesConfig on the fly -- maybe that's a better idea.
-    async fn ensure_all_services_of_type(
+    async fn ensure_zones_of_type(
         &self,
-        service_plan: &ServicePlan,
-        zone_types: &HashSet<ZoneType>,
+        service_plan: &mut ServicePlan,
+        // XXX-dap better way to deal with this filtering that doesn't require a
+        // box and also doesn't require that the caller has done this correctly
+        zone_filter: &(dyn Fn(&OmicronZoneType) -> bool + Send + Sync),
     ) -> Result<(), SetupServiceError> {
-        futures::future::join_all(service_plan.services.iter().map(
-            |(sled_address, services_request)| async move {
-                let services: Vec<_> = services_request
-                    .services
+        futures::future::join_all(service_plan.services.iter_mut().map(
+            |(sled_address, sled_config)| async move {
+                let zones: Vec<_> = sled_config
+                    .zones
                     .iter()
-                    .filter_map(|service| {
-                        if zone_types.contains(&service.zone_type) {
-                            Some(service.clone())
-                        } else {
-                            None
-                        }
-                    })
+                    .filter(|z| zone_filter(&z.zone_type))
+                    .cloned()
                     .collect();
-                if !services.is_empty() {
-                    self.initialize_services_on_sled(*sled_address, &services)
-                        .await?;
-                }
+                let generation = sled_config.next_generation;
+                sled_config.next_generation =
+                    sled_config.next_generation.next();
+                let zones_config = OmicronZonesConfig { generation, zones };
+                self.initialize_zones_on_sled(*sled_address, &zones_config)
+                    .await?;
                 Ok(())
             },
         ))
@@ -356,17 +349,15 @@ impl ServiceInner {
         let dns_server_ips =
             // iterate sleds
             service_plan.services.iter().filter_map(
-                |(_, services_request)| {
-                    // iterate services for this sled
-                    let dns_addrs: Vec<SocketAddrV6> = services_request
-                        .services
+                |(_, sled_config)| {
+                    // iterate zones for this sled
+                    let dns_addrs: Vec<SocketAddrV6> = sled_config
+                        .zones
                         .iter()
-                        .filter_map(|service| {
-                            match &service.services[0] {
-                                ServiceZoneService {
-                                    details: ServiceType::InternalDns { http_address, .. },
-                                    ..
-                                } => {
+                        .filter_map(|zone_config| {
+                            match &zone_config.zone_type {
+                                OmicronZoneType::InternalDns { http_address, .. }
+                                => {
                                     Some(*http_address)
                                 },
                                 _ => None,
@@ -540,25 +531,28 @@ impl ServiceInner {
         // a format which can be processed by Nexus.
         let mut services: Vec<NexusTypes::ServicePutRequest> = vec![];
         let mut datasets: Vec<NexusTypes::DatasetCreateRequest> = vec![];
-        for (addr, service_request) in service_plan.services.iter() {
+        for (addr, sled_config) in service_plan.services.iter() {
             let sled_id = *id_map
                 .get(addr)
                 .expect("Sled address in service plan, but not sled plan");
 
-            for zone in &service_request.services {
-                services.extend(zone.into_nexus_service_req(sled_id).map_err(
-                    |err| SetupServiceError::BadConfig(err.to_string()),
-                )?);
+            for zone in &sled_config.zones {
+                services.push(zone.into_nexus_service_req(sled_id));
             }
 
-            for service in service_request.services.iter() {
-                if let Some(dataset) = &service.dataset {
+            for zone in &sled_config.zones {
+                // XXX-dap TODO-cleanup kind of a cheating way to use the
+                // existing implementation
+                let native_zone_config = OmicronZoneConfig::from(zone.clone());
+                if let Some((dataset_name, dataset_address)) =
+                    native_zone_config.dataset_name_and_address()
+                {
                     datasets.push(NexusTypes::DatasetCreateRequest {
-                        zpool_id: dataset.name.pool().id(),
-                        dataset_id: dataset.id,
+                        zpool_id: dataset_name.pool().id(),
+                        dataset_id: zone.id,
                         request: NexusTypes::DatasetPutRequest {
-                            address: dataset.service_address.to_string(),
-                            kind: dataset.name.dataset().clone().into(),
+                            address: dataset_address.to_string(),
+                            kind: dataset_name.dataset().clone().into(),
                         },
                     })
                 }
@@ -694,20 +688,22 @@ impl ServiceInner {
     ) -> Result<(), SetupServiceError> {
         // Now that datasets and zones have started for CockroachDB,
         // perform one-time initialization of the cluster.
-        let sled_address =
-            service_plan
-                .services
-                .iter()
-                .find_map(|(sled_address, sled_request)| {
-                    if sled_request.services.iter().any(|service| {
-                        service.zone_type == ZoneType::CockroachDb
-                    }) {
-                        Some(sled_address)
-                    } else {
-                        None
-                    }
-                })
-                .expect("Should not create service plans without CockroachDb");
+        let sled_address = service_plan
+            .services
+            .iter()
+            .find_map(|(sled_address, sled_config)| {
+                if sled_config.zones.iter().any(|zone_config| {
+                    matches!(
+                        &zone_config.zone_type,
+                        OmicronZoneType::CockroachDb { .. }
+                    )
+                }) {
+                    Some(sled_address)
+                } else {
+                    None
+                }
+            })
+            .expect("Should not create service plans without CockroachDb");
         let dur = std::time::Duration::from_secs(60);
         let client = reqwest::ClientBuilder::new()
             .connect_timeout(dur)
@@ -925,7 +921,11 @@ impl ServiceInner {
                 get_sled_address(initialization_request.subnet)
             })
             .collect();
-        let service_plan = if let Some(plan) =
+        // XXX-dap annoying that we need a `mut` service plan.  it's just to
+        // update the generation numbers.  It'd maybe better not to store those?
+        // XXX-dap will this work if we make it partway through and then
+        // crash?  The next time we may try to put an earlier generation first
+        let mut service_plan = if let Some(plan) =
             ServicePlan::load(&self.log, storage_resources).await?
         {
             plan
@@ -941,9 +941,11 @@ impl ServiceInner {
 
         // Set up internal DNS services first and write the initial
         // DNS configuration to the internal DNS servers.
-        let mut zone_types = HashSet::new();
-        zone_types.insert(ZoneType::InternalDns);
-        self.ensure_all_services_of_type(&service_plan, &zone_types).await?;
+        let zone_filter1 = |zone_type: &OmicronZoneType| {
+            matches!(zone_type, OmicronZoneType::InternalDns { .. })
+        };
+        self.ensure_zones_of_type(&mut service_plan, &(zone_filter1.clone()))
+            .await?;
         self.initialize_internal_dns_records(&service_plan).await?;
 
         // Ask MGS in each switch zone which switch it is.
@@ -954,8 +956,16 @@ impl ServiceInner {
         // Next start up the NTP services.
         // Note we also specify internal DNS services again because it
         // can ony be additive.
-        zone_types.insert(ZoneType::Ntp);
-        self.ensure_all_services_of_type(&service_plan, &zone_types).await?;
+        let zone_filter2 = |zone_type: &OmicronZoneType| {
+            zone_filter1(zone_type)
+                || matches!(
+                    zone_type,
+                    OmicronZoneType::BoundaryNtp { .. }
+                        | OmicronZoneType::InternalNtp { .. }
+                )
+        };
+        self.ensure_zones_of_type(&mut service_plan, &(zone_filter2.clone()))
+            .await?;
 
         // Wait until time is synchronized on all sleds before proceeding.
         self.wait_for_timesync(&sled_addresses).await?;
@@ -963,29 +973,29 @@ impl ServiceInner {
         info!(self.log, "Finished setting up Internal DNS and NTP");
 
         // Wait until Cockroach has been initialized before running Nexus.
-        zone_types.insert(ZoneType::CockroachDb);
-        self.ensure_all_services_of_type(&service_plan, &zone_types).await?;
+        let zone_filter3 = |zone_type: &OmicronZoneType| {
+            zone_filter2(zone_type)
+                || matches!(zone_type, OmicronZoneType::CockroachDb { .. })
+        };
+        self.ensure_zones_of_type(&mut service_plan, &(zone_filter3.clone()))
+            .await?;
 
         // Now that datasets and zones have started for CockroachDB,
         // perform one-time initialization of the cluster.
         self.initialize_cockroach(&service_plan).await?;
 
-        // Issue service initialization requests.
-        futures::future::join_all(service_plan.services.iter().map(
-            |(sled_address, services_request)| async move {
-                // With the current implementation of "initialize_services_on_sled",
-                // we must provide the set of *all* services that should be
-                // executing on a sled.
-                //
-                // This means re-requesting the DNS and NTP services, even if
-                // they are already running - this is fine, however, as the
-                // receiving sled agent doesn't modify the already-running
-                // service.
-                self.initialize_services_on_sled(
-                    *sled_address,
-                    &services_request.services,
-                )
-                .await?;
+        // Issue the rest of the zone initialization requests.
+        futures::future::join_all(service_plan.services.iter_mut().map(
+            |(sled_address, sled_config)| async move {
+                let generation = sled_config.next_generation;
+                sled_config.next_generation =
+                    sled_config.next_generation.next();
+                let zones_config = OmicronZonesConfig {
+                    generation,
+                    zones: sled_config.zones.clone(),
+                };
+                self.initialize_zones_on_sled(*sled_address, &zones_config)
+                    .await?;
                 Ok(())
             },
         ))
