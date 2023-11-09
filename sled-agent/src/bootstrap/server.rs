@@ -348,6 +348,7 @@ impl From<SledAgentServerStartError> for StartError {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn start_sled_agent(
     config: &SledConfig,
     request: &StartSledAgentRequest,

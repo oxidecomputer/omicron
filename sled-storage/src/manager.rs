@@ -208,7 +208,7 @@ impl FakeStorageManager {
         )
     }
 
-    /// Run the main receive loop of the `StorageManager`
+    /// Run the main receive loop of the `FakeStorageManager`
     ///
     /// This should be spawned into a tokio task
     pub async fn run(mut self) {
@@ -253,11 +253,14 @@ impl FakeStorageManager {
 pub struct StorageManager {
     log: Logger,
     state: StorageManagerState,
+    // Used to find the capacity of the channel for tracking purposes
+    tx: mpsc::Sender<StorageRequest>,
     rx: mpsc::Receiver<StorageRequest>,
     resources: StorageResources,
     queued_u2_drives: HashSet<RawDisk>,
     key_requester: StorageKeyRequester,
     resource_updates: watch::Sender<StorageResources>,
+    last_logged_capacity: usize,
 }
 
 impl StorageManager {
@@ -272,11 +275,13 @@ impl StorageManager {
             StorageManager {
                 log: log.new(o!("component" => "StorageManager")),
                 state: StorageManagerState::WaitingForKeyManager,
+                tx: tx.clone(),
                 rx,
                 resources,
                 queued_u2_drives: HashSet::new(),
                 key_requester,
                 resource_updates: update_tx,
+                last_logged_capacity: 0,
             },
             StorageHandle { tx, resource_updates: update_rx },
         )
@@ -292,16 +297,8 @@ impl StorageManager {
             interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
             tokio::select! {
                 res = self.step() => {
-                    match res {
-                        Some(Ok(())) => (),
-                        Some(Err(e)) => warn!(self.log, "{e}"),
-                        None => {
-                            info!(
-                                self.log,
-                                "Shutting down StorageManager task: no handles."
-                            );
-                            return;
-                        }
+                    if let Err(e) = res {
+                        warn!(self.log, "{e}");
                     }
                 }
                 _ = interval.tick(),
@@ -321,17 +318,38 @@ impl StorageManager {
     ///
     /// Return `None` if the sender side has disappeared and the task should
     /// shutdown.
-    pub async fn step(&mut self) -> Option<Result<(), Error>> {
-        let Some(req) = self.rx.recv().await else {
-            return None;
-        };
+    pub async fn step(&mut self) -> Result<(), Error> {
+        const CAPACITY_LOG_THRESHOLD: usize = 10;
+        // We check the capacity and log it every time it changes by at least 10
+        // entries in either direction.
+        let current = self.tx.capacity();
+        if self.last_logged_capacity.saturating_sub(current)
+            >= CAPACITY_LOG_THRESHOLD
+        {
+            info!(
+                self.log,
+                "Channel capacity decreased";
+                "previous" => ?self.last_logged_capacity,
+                "current" => ?current
+            );
+            self.last_logged_capacity = current;
+        } else if current.saturating_sub(self.last_logged_capacity)
+            >= CAPACITY_LOG_THRESHOLD
+        {
+            info!(
+                self.log,
+                "Channel capacity increased";
+                "previous" => ?self.last_logged_capacity,
+                "current" => ?current
+            );
+            self.last_logged_capacity = current;
+        }
+        // The sending side never disappears because we hold a copy
+        let req = self.rx.recv().await.unwrap();
         info!(self.log, "Received {:?}", req);
         let should_send_updates = match req {
             StorageRequest::AddDisk(raw_disk) => {
-                match self.add_disk(raw_disk).await {
-                    Ok(is_new) => is_new,
-                    Err(e) => return Some(Err(e)),
-                }
+                self.add_disk(raw_disk).await?
             }
             StorageRequest::RemoveDisk(raw_disk) => {
                 self.remove_disk(raw_disk).await
@@ -368,7 +386,7 @@ impl StorageManager {
             let _ = self.resource_updates.send_replace(self.resources.clone());
         }
 
-        Some(Ok(()))
+        Ok(())
     }
 
     // Loop through all queued disks inserting them into [`StorageResources`]
@@ -782,7 +800,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let disk = SyntheticDisk::create_zpool(dir.path(), &zpool_name).into();
         handle.upsert_disk(disk).await;
-        manager.step().await.unwrap().unwrap();
+        manager.step().await.unwrap();
 
         // We can't wait for a reply through the handle as the storage manager task
         // isn't actually running. We just check the resources directly.
@@ -795,7 +813,7 @@ mod tests {
         // Now inform the storage manager that the key manager is ready
         // The queued disk should not be added due to the error
         handle.key_manager_ready().await;
-        manager.step().await.unwrap().unwrap();
+        manager.step().await.unwrap();
         assert!(manager.resources.all_u2_zpools().is_empty());
 
         // Manually simulating a timer tick to add queued disks should also

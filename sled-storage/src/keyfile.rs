@@ -5,7 +5,7 @@
 //! Key file support for ZFS dataset encryption
 
 use illumos_utils::zfs::Keypath;
-use slog::{info, Logger};
+use slog::{error, info, Logger};
 use tokio::fs::{remove_file, File};
 use tokio::io::{AsyncSeekExt, AsyncWriteExt, SeekFrom};
 
@@ -18,6 +18,7 @@ pub struct KeyFile {
     path: Keypath,
     file: File,
     log: Logger,
+    zero_and_unlink_called: bool,
 }
 
 impl KeyFile {
@@ -34,7 +35,12 @@ impl KeyFile {
             .await?;
         file.write_all(key).await?;
         info!(log, "Created keyfile {}", path);
-        Ok(KeyFile { path, file, log: log.clone() })
+        Ok(KeyFile {
+            path,
+            file,
+            log: log.clone(),
+            zero_and_unlink_called: false,
+        })
     }
 
     /// These keyfiles live on a tmpfs and we zero the file so the data doesn't
@@ -43,6 +49,7 @@ impl KeyFile {
     /// It'd be nice to `impl Drop for `KeyFile` and then call `zero`
     /// from within the drop handler, but async `Drop` isn't supported.
     pub async fn zero_and_unlink(&mut self) -> std::io::Result<()> {
+        self.zero_and_unlink_called = true;
         let zeroes = [0u8; 32];
         let _ = self.file.seek(SeekFrom::Start(0)).await?;
         self.file.write_all(&zeroes).await?;
@@ -53,5 +60,17 @@ impl KeyFile {
 
     pub fn path(&self) -> &Keypath {
         &self.path
+    }
+}
+
+impl Drop for KeyFile {
+    fn drop(&mut self) {
+        if !self.zero_and_unlink_called {
+            error!(
+                self.log,
+                "Failed to call zero_and_unlink for keyfile";
+                "path" => %self.path
+            );
+        }
     }
 }
