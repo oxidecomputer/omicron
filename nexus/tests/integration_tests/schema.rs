@@ -354,7 +354,7 @@ async fn crdb_list_enums(crdb: &CockroachInstance) -> Vec<Row> {
 
     // https://www.cockroachlabs.com/docs/stable/show-enums
     let rows = client
-        .query(&"show enums;".to_string(), &[])
+        .query("show enums;", &[])
         .await
         .unwrap_or_else(|_| panic!("failed to list enums"));
     client.cleanup().await.expect("cleaning up after wipe");
