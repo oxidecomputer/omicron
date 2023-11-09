@@ -170,7 +170,7 @@ impl StorageMonitor {
                 self.add_zpool_notify(pool, put).await;
             }
         }
-        self.dump_setup.update_dumpdev_setup(&updated_resources.disks()).await;
+        self.dump_setup.update_dumpdev_setup(updated_resources.disks()).await;
 
         // Save the updated `StorageResources`
         self.storage_resources = updated_resources;
