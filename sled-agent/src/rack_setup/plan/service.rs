@@ -1157,6 +1157,8 @@ mod tests {
         assert_eq!(internal_service_ips, expected_internal_service_ips);
     }
 
+    // XXX-dap I think we should remove this test?  Do we really consider the
+    // RSS service plan stable?
     #[test]
     fn test_rss_service_plan_schema() {
         let schema = schemars::schema_for!(Plan);
