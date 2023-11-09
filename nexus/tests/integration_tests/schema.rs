@@ -176,6 +176,7 @@ enum AnySqlType {
     Uuid(Uuid),
     Int8(i64),
     Float4(f32),
+    TextArray(Vec<String>),
     // TODO: This isn't exhaustive, feel free to add more.
     //
     // These should only be necessary for rows where the database schema changes also choose to
@@ -216,6 +217,11 @@ impl<'a> tokio_postgres::types::FromSql<'a> for AnySqlType {
         }
         if f32::accepts(ty) {
             return Ok(AnySqlType::Float4(f32::from_sql(ty, raw)?));
+        }
+        if Vec::<String>::accepts(ty) {
+            return Ok(AnySqlType::TextArray(Vec::<String>::from_sql(
+                ty, raw,
+            )?));
         }
         Err(anyhow::anyhow!(
             "Cannot parse type {ty}. If you're trying to use this type in a table which is populated \
@@ -346,20 +352,9 @@ async fn crdb_select(
 async fn crdb_list_enums(crdb: &CockroachInstance) -> Vec<Row> {
     let client = crdb.connect().await.expect("failed to connect");
 
-    // https://www.cockroachlabs.com/docs/stable/pg-catalog
-    // https://www.postgresql.org/docs/current/catalog-pg-enum.html
-    let sql = "SELECT n.nspname as schema,
-           t.typname as typename,
-           e.enumsortorder as sort_order,
-           e.enumlabel as label
-        FROM pg_type t
-        JOIN pg_enum e on t.oid = e.enumtypid
-        JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace
-        WHERE t.typtype = 'e'
-        ORDER BY n.nspname, t.typname, e.enumsortorder;"
-        .to_string();
+    // https://www.cockroachlabs.com/docs/stable/show-enums
     let rows = client
-        .query(&sql, &[])
+        .query(&"show enums;".to_string(), &[])
         .await
         .unwrap_or_else(|_| panic!("failed to list enums"));
     client.cleanup().await.expect("cleaning up after wipe");
