@@ -272,19 +272,7 @@ impl<'a> From<&'a [&'static str]> for ColumnSelector<'a> {
     }
 }
 
-async fn crdb_show_constraints(
-    crdb: &CockroachInstance,
-    table: &str,
-) -> Vec<Row> {
-    let client = crdb.connect().await.expect("failed to connect");
-
-    let sql = format!("SHOW CONSTRAINTS FROM {table}");
-    let rows = client
-        .query(&sql, &[])
-        .await
-        .unwrap_or_else(|_| panic!("failed to query {table}"));
-    client.cleanup().await.expect("cleaning up after wipe");
-
+fn process_rows(rows: &Vec<tokio_postgres::Row>) -> Vec<Row> {
     let mut result = vec![];
     for row in rows {
         let mut row_result = Row::new();
@@ -298,6 +286,22 @@ async fn crdb_show_constraints(
         result.push(row_result);
     }
     result
+}
+
+async fn crdb_show_constraints(
+    crdb: &CockroachInstance,
+    table: &str,
+) -> Vec<Row> {
+    let client = crdb.connect().await.expect("failed to connect");
+
+    let sql = format!("SHOW CONSTRAINTS FROM {table}");
+    let rows = client
+        .query(&sql, &[])
+        .await
+        .unwrap_or_else(|_| panic!("failed to query {table}"));
+    client.cleanup().await.expect("cleaning up after wipe");
+
+    process_rows(&rows)
 }
 
 async fn crdb_select(
@@ -334,19 +338,7 @@ async fn crdb_select(
         .unwrap_or_else(|_| panic!("failed to query {table}"));
     client.cleanup().await.expect("cleaning up after wipe");
 
-    let mut result = vec![];
-    for row in rows {
-        let mut row_result = Row::new();
-        for i in 0..row.len() {
-            let column_name = row.columns()[i].name();
-            row_result.values.push(NamedSqlValue {
-                column: column_name.to_string(),
-                value: row.get(i),
-            });
-        }
-        result.push(row_result);
-    }
-    result
+    process_rows(&rows)
 }
 
 async fn crdb_list_enums(crdb: &CockroachInstance) -> Vec<Row> {
@@ -359,19 +351,7 @@ async fn crdb_list_enums(crdb: &CockroachInstance) -> Vec<Row> {
         .unwrap_or_else(|_| panic!("failed to list enums"));
     client.cleanup().await.expect("cleaning up after wipe");
 
-    let mut result = vec![];
-    for row in rows {
-        let mut row_result = Row::new();
-        for i in 0..row.len() {
-            let column_name = row.columns()[i].name();
-            row_result.values.push(NamedSqlValue {
-                column: column_name.to_string(),
-                value: row.get(i),
-            });
-        }
-        result.push(row_result);
-    }
-    result
+    process_rows(&rows)
 }
 
 async fn read_all_schema_versions() -> BTreeSet<SemverVersion> {
