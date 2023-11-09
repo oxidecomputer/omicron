@@ -628,7 +628,9 @@ impl InformationSchema {
         similar_asserts::assert_eq!(
             self.enums,
             other.enums,
-            "Enums did not match. Members must have the same order in dbinit.sql and migrations. If a migration adds a member, it should be added at the end of the definition in dbinit.sql."
+            "Enums did not match. Members must have the same order in dbinit.sql and \
+            migrations. If a migration adds a member, it should use BEFORE or AFTER \
+            to add it in the same order as dbinit.sql."
         );
         similar_asserts::assert_eq!(self.views, other.views);
         similar_asserts::assert_eq!(
