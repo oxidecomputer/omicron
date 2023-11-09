@@ -53,7 +53,7 @@ const QUEUE_SIZE: usize = 256;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StorageManagerState {
     WaitingForKeyManager,
-    QueuingDisks,
+    QueueingDisks,
     Normal,
 }
 
@@ -72,7 +72,7 @@ enum StorageRequest {
     NewFilesystem(NewFilesystemRequest),
     KeyManagerReady,
     /// This will always grab the latest state after any new updates, as it
-    /// serializes through the `StorageManager` task.
+    /// serializes through the `StorageManager` task after all prior requests.
     /// This serialization is particularly useful for tests.
     GetLatestResources(oneshot::Sender<StorageResources>),
 
@@ -302,7 +302,7 @@ impl StorageManager {
                     }
                 }
                 _ = interval.tick(),
-                    if self.state == StorageManagerState::QueuingDisks =>
+                    if self.state == StorageManagerState::QueueingDisks =>
                 {
                     if self.add_queued_disks().await {
                         let _ = self.resource_updates.send_replace(self.resources.clone());
@@ -404,7 +404,7 @@ impl StorageManager {
         let queued = std::mem::take(&mut self.queued_u2_drives);
         let mut iter = queued.into_iter();
         while let Some(disk) = iter.next() {
-            if self.state == StorageManagerState::QueuingDisks {
+            if self.state == StorageManagerState::QueueingDisks {
                 // We hit a transient error in a prior iteration.
                 saved.insert(disk);
             } else {
@@ -467,7 +467,7 @@ impl StorageManager {
                     "disk_id" => ?raw_disk.identity()
                 );
                 self.queued_u2_drives.insert(raw_disk);
-                self.state = StorageManagerState::QueuingDisks;
+                self.state = StorageManagerState::QueueingDisks;
                 Ok(false)
             }
             Err(err) => {
@@ -692,7 +692,7 @@ mod tests {
 
         // Check other non-normal stages and ensure disk gets queued
         manager.queued_u2_drives.clear();
-        manager.state = StorageManagerState::QueuingDisks;
+        manager.state = StorageManagerState::QueueingDisks;
         manager.add_u2_disk(raw_disk.clone()).await.unwrap();
         assert!(manager.resources.all_u2_zpools().is_empty());
         assert_eq!(manager.queued_u2_drives, HashSet::from([raw_disk]));
