@@ -246,20 +246,6 @@ pub enum DatasetKind {
     InternalDns,
 }
 
-impl From<DatasetKind> for sled_agent_client::types::DatasetKind {
-    fn from(k: DatasetKind) -> Self {
-        use DatasetKind::*;
-        match k {
-            CockroachDb => Self::CockroachDb,
-            Crucible => Self::Crucible,
-            Clickhouse => Self::Clickhouse,
-            ClickhouseKeeper => Self::ClickhouseKeeper,
-            ExternalDns => Self::ExternalDns,
-            InternalDns => Self::InternalDns,
-        }
-    }
-}
-
 impl From<DatasetKind> for nexus_client::types::DatasetKind {
     fn from(k: DatasetKind) -> Self {
         use DatasetKind::*;
@@ -436,104 +422,14 @@ impl crate::smf_helper::Service for ServiceType {
 }
 
 /// Error returned by attempting to convert an internal service (i.e., a service
-/// started autonomously by sled-agent) into a
-/// `sled_agent_client::types::ServiceType` to be sent to a remote sled-agent.
+/// started autonomously by sled-agent) into an externally-visible service type
+// XXX-dap feels like this should be removable
 #[derive(Debug, Clone, Copy, Error)]
 #[error("This service may only be started autonomously by sled-agent")]
 pub struct AutonomousServiceOnlyError;
 
-impl TryFrom<ServiceType> for sled_agent_client::types::ServiceType {
-    type Error = AutonomousServiceOnlyError;
-
-    fn try_from(s: ServiceType) -> Result<Self, Self::Error> {
-        use sled_agent_client::types::ServiceType as AutoSt;
-        use ServiceType as St;
-
-        match s {
-            St::Nexus {
-                internal_address,
-                external_ip,
-                nic,
-                external_tls,
-                external_dns_servers,
-            } => Ok(AutoSt::Nexus {
-                internal_address: internal_address.to_string(),
-                external_ip,
-                nic: nic.into(),
-                external_tls,
-                external_dns_servers,
-            }),
-            St::ExternalDns { http_address, dns_address, nic } => {
-                Ok(AutoSt::ExternalDns {
-                    http_address: http_address.to_string(),
-                    dns_address: dns_address.to_string(),
-                    nic: nic.into(),
-                })
-            }
-            St::InternalDns {
-                http_address,
-                dns_address,
-                gz_address,
-                gz_address_index,
-            } => Ok(AutoSt::InternalDns {
-                http_address: http_address.to_string(),
-                dns_address: dns_address.to_string(),
-                gz_address,
-                gz_address_index,
-            }),
-            St::Oximeter { address } => {
-                Ok(AutoSt::Oximeter { address: address.to_string() })
-            }
-            St::CruciblePantry { address } => {
-                Ok(AutoSt::CruciblePantry { address: address.to_string() })
-            }
-            St::BoundaryNtp {
-                address,
-                ntp_servers,
-                dns_servers,
-                domain,
-                nic,
-                snat_cfg,
-            } => Ok(AutoSt::BoundaryNtp {
-                address: address.to_string(),
-                ntp_servers,
-                dns_servers,
-                domain,
-                nic: nic.into(),
-                snat_cfg: snat_cfg.into(),
-            }),
-            St::InternalNtp { address, ntp_servers, dns_servers, domain } => {
-                Ok(AutoSt::InternalNtp {
-                    address: address.to_string(),
-                    ntp_servers,
-                    dns_servers,
-                    domain,
-                })
-            }
-            St::Clickhouse { address } => {
-                Ok(AutoSt::Clickhouse { address: address.to_string() })
-            }
-            St::ClickhouseKeeper { address } => {
-                Ok(AutoSt::ClickhouseKeeper { address: address.to_string() })
-            }
-            St::CockroachDb { address } => {
-                Ok(AutoSt::CockroachDb { address: address.to_string() })
-            }
-            St::Crucible { address } => {
-                Ok(AutoSt::Crucible { address: address.to_string() })
-            }
-            St::ManagementGatewayService
-            | St::SpSim
-            | St::Wicketd { .. }
-            | St::Dendrite { .. }
-            | St::Tfport { .. }
-            | St::Uplink
-            | St::Mgd
-            | St::MgDdm { .. } => Err(AutonomousServiceOnlyError),
-        }
-    }
-}
-
+// XXX-dap do a pass over this file to see which of these types can be removed
+// altogether.  Those only needed for migration could go into a separate module.
 /// The type of zone which may be requested from Sled Agent
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
@@ -551,24 +447,6 @@ pub enum ZoneType {
     Ntp,
     Oximeter,
     Switch,
-}
-
-impl From<ZoneType> for sled_agent_client::types::ZoneType {
-    fn from(zt: ZoneType) -> Self {
-        match zt {
-            ZoneType::Clickhouse => Self::Clickhouse,
-            ZoneType::ClickhouseKeeper => Self::ClickhouseKeeper,
-            ZoneType::CockroachDb => Self::CockroachDb,
-            ZoneType::Crucible => Self::Crucible,
-            ZoneType::CruciblePantry => Self::CruciblePantry,
-            ZoneType::InternalDns => Self::InternalDns,
-            ZoneType::ExternalDns => Self::ExternalDns,
-            ZoneType::Nexus => Self::Nexus,
-            ZoneType::Ntp => Self::Ntp,
-            ZoneType::Oximeter => Self::Oximeter,
-            ZoneType::Switch => Self::Switch,
-        }
-    }
 }
 
 impl std::fmt::Display for ZoneType {
@@ -599,16 +477,6 @@ pub struct DatasetRequest {
     pub id: Uuid,
     pub name: crate::storage::dataset::DatasetName,
     pub service_address: SocketAddrV6,
-}
-
-impl From<DatasetRequest> for sled_agent_client::types::DatasetRequest {
-    fn from(d: DatasetRequest) -> Self {
-        Self {
-            id: d.id,
-            name: d.name.into(),
-            service_address: d.service_address.to_string(),
-        }
-    }
 }
 
 /// Describes a request to create a zone running one or more services.
@@ -657,27 +525,6 @@ impl ServiceZoneRequest {
             | ZoneType::Ntp
             | ZoneType::Oximeter => Some(self.id),
         }
-    }
-}
-
-impl TryFrom<ServiceZoneRequest>
-    for sled_agent_client::types::ServiceZoneRequest
-{
-    type Error = AutonomousServiceOnlyError;
-
-    fn try_from(s: ServiceZoneRequest) -> Result<Self, Self::Error> {
-        let mut services = Vec::with_capacity(s.services.len());
-        for service in s.services {
-            services.push(service.try_into()?);
-        }
-
-        Ok(Self {
-            id: s.id,
-            zone_type: s.zone_type.into(),
-            addresses: s.addresses,
-            dataset: s.dataset.map(|d| d.into()),
-            services,
-        })
     }
 }
 
@@ -848,17 +695,6 @@ impl ServiceZoneRequest {
 pub struct ServiceZoneService {
     pub id: Uuid,
     pub details: ServiceType,
-}
-
-impl TryFrom<ServiceZoneService>
-    for sled_agent_client::types::ServiceZoneService
-{
-    type Error = AutonomousServiceOnlyError;
-
-    fn try_from(s: ServiceZoneService) -> Result<Self, Self::Error> {
-        let details = s.details.try_into()?;
-        Ok(Self { id: s.id, details })
-    }
 }
 
 /// Used to request that the Sled initialize multiple services.

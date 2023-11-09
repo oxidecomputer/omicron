@@ -36,18 +36,6 @@ impl DatasetName {
     }
 }
 
-impl From<DatasetName> for sled_agent_client::types::DatasetName {
-    fn from(n: DatasetName) -> Self {
-        Self {
-            pool_name: sled_agent_client::types::ZpoolName::from_str(
-                &n.pool().to_string(),
-            )
-            .unwrap(),
-            kind: n.dataset().clone().into(),
-        }
-    }
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
