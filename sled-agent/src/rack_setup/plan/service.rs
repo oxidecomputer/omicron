@@ -22,7 +22,7 @@ use omicron_common::address::{
     MGD_PORT, MGS_PORT, NTP_PORT, NUM_SOURCE_NAT_PORTS, RSS_RESERVED_ADDRESSES,
     SLED_PREFIX,
 };
-use omicron_common::api::external::{MacAddr, Vni};
+use omicron_common::api::external::{Generation, MacAddr, Vni};
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_common::api::internal::shared::{
     NetworkInterface, NetworkInterfaceKind, SourceNatConfig,
@@ -99,18 +99,25 @@ pub enum PlanError {
     NotEnoughSleds,
 }
 
-#[derive(
-    Clone, Debug, Default, Deserialize, Serialize, PartialEq, JsonSchema,
-)]
-pub struct SledRequest {
-    /// Services to be instantiated.
-    #[serde(default, rename = "service")]
-    pub services: Vec<ServiceZoneRequest>,
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+struct SledConfig {
+    /// generation number to use the next time we try to configure zones on this
+    /// sled
+    next_generation: Generation,
+
+    /// zones configured for this sled
+    zones: Vec<SledAgentTypes::OmicronZoneConfig>,
+}
+
+impl Default for SledConfig {
+    fn default() -> Self {
+        SledConfig { next_generation: Generation::new(), zones: Vec::new() }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct Plan {
-    pub services: HashMap<SocketAddrV6, SledRequest>,
+    pub services: HashMap<SocketAddrV6, SledConfig>,
     pub dns_config: DnsConfigParams,
 }
 
@@ -787,8 +794,8 @@ struct SledInfo {
     is_scrimlet: bool,
     /// allocator for addresses in this Sled's subnet
     addr_alloc: AddressBumpAllocator,
-    /// under-construction list of services being deployed to a Sled
-    request: SledRequest,
+    /// under-construction list of Omicron zones being deployed to a Sled
+    request: SledConfig,
 }
 
 impl SledInfo {

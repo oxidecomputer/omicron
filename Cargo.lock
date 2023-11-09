@@ -8203,6 +8203,7 @@ dependencies = [
  "progenitor",
  "regress",
  "reqwest",
+ "schemars",
  "serde",
  "slog",
  "uuid",

@@ -6,7 +6,6 @@ use crate::params::DatasetKind;
 use illumos_utils::zpool::ZpoolName;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::str::FromStr;
 
 #[derive(
     Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Clone, JsonSchema,

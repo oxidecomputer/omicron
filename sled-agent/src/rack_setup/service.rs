@@ -259,7 +259,7 @@ impl ServiceInner {
     async fn initialize_services_on_sled(
         &self,
         sled_address: SocketAddrV6,
-        services: &Vec<ServiceZoneRequest>,
+        zones_config: &SledAgentTypes::OmicronZonesConfig,
     ) -> Result<(), SetupServiceError> {
         let dur = std::time::Duration::from_secs(60);
         let client = reqwest::ClientBuilder::new()
@@ -272,21 +272,13 @@ impl ServiceInner {
             self.log.new(o!("SledAgentClient" => sled_address.to_string())),
         );
 
-        let services = services
-            .iter()
-            .map(|s| s.clone().try_into())
-            .collect::<Result<Vec<_>, AutonomousServiceOnlyError>>()
-            .map_err(|err| {
-                SetupServiceError::SledInitialization(err.to_string())
-            })?;
-
-        info!(self.log, "sending service requests...");
         let services_put = || async {
-            info!(self.log, "initializing sled services: {:?}", services);
+            info!(
+                self.log,
+                "attempting to set up sled's Omicron zones: {:?}", zones_config
+            );
             client
-                .services_put(&SledAgentTypes::ServiceEnsureBody {
-                    services: services.clone(),
-                })
+                .omicron_zones_put(zones_config)
                 .await
                 .map_err(BackoffError::transient)?;
             Ok::<(), BackoffError<SledAgentError<SledAgentTypes::Error>>>(())
@@ -294,7 +286,7 @@ impl ServiceInner {
         let log_failure = |error, delay| {
             warn!(
                 self.log,
-                "failed to initialize services";
+                "failed to initialize Omicron zones";
                 "error" => ?error,
                 "retry_after" => ?delay,
             );
@@ -316,6 +308,11 @@ impl ServiceInner {
     //
     // Note that after first-time setup, the initialization order of
     // services should not matter.
+    // XXX-dap revisit me -- I think we probably need to store a few different
+    // OmicronZoneConfig objects rather than this approach of slicing only part
+    // of it.  Or else we store the last generation used and all the zones in
+    // one place and use a filter function here and then generate an
+    // OmicronZonesConfig on the fly -- maybe that's a better idea.
     async fn ensure_all_services_of_type(
         &self,
         service_plan: &ServicePlan,
