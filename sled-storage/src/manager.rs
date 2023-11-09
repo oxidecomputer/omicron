@@ -23,6 +23,31 @@ use uuid::Uuid;
 
 // The size of the mpsc bounded channel used to communicate
 // between the `StorageHandle` and `StorageManager`.
+//
+// How did we choose this bound, and why?
+//
+// Picking a bound can be tricky, but in general, you want the channel to act
+// unbounded, such that sends never fail. This makes the channels reliable,
+// such that we never drop messages inside the process, and the caller doesn't
+// have to choose what to do when overloaded. This simplifies things drastically
+// for developers. However, you also don't want to make the channel actually
+// unbounded, because that can lead to run-away memory growth and pathological
+// behaviors, such that requests get slower over time until the system crashes.
+//
+// Our team's chosen solution, and used elsewhere in the codebase, is is to
+// choose a large enough bound such that we should never hit it in practice
+// unless we are truly overloaded. If we hit the bound it means that beyond that
+// requests will start to build up and we will eventually topple over. So when
+// we hit this bound, we just go ahead and panic.
+//
+// Picking a channel bound is hard to do empirically, but practically, if
+// requests are mostly mutating task local state, a bound of 1024 or even 8192
+// should be plenty. Tasks that must perform longer running ops can spawn helper
+// tasks as necessary or include their own handles for replies rather than
+// synchronously waiting. Memory for the queue can be kept small with boxing of
+// large messages.
+//
+// Here we start relatively small so that we can evaluate our choice over time.
 const QUEUE_SIZE: usize = 256;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -186,22 +211,22 @@ impl FakeStorageManager {
     /// Run the main receive loop of the `StorageManager`
     ///
     /// This should be spawned into a tokio task
-    pub async fn run(&mut self) {
+    pub async fn run(mut self) {
         loop {
-            // The sending side should never disappear
-            match self.rx.recv().await.unwrap() {
-                StorageRequest::AddDisk(raw_disk) => {
+            match self.rx.recv().await {
+                Some(StorageRequest::AddDisk(raw_disk)) => {
                     if self.add_disk(raw_disk) {
                         self.resource_updates
                             .send_replace(self.resources.clone());
                     }
                 }
-                StorageRequest::GetLatestResources(tx) => {
+                Some(StorageRequest::GetLatestResources(tx)) => {
                     let _ = tx.send(self.resources.clone());
                 }
-                _ => {
+                Some(_) => {
                     unreachable!();
                 }
+                None => break,
             }
         }
     }
@@ -260,15 +285,23 @@ impl StorageManager {
     /// Run the main receive loop of the `StorageManager`
     ///
     /// This should be spawned into a tokio task
-    pub async fn run(&mut self) {
+    pub async fn run(mut self) {
         loop {
             const QUEUED_DISK_RETRY_TIMEOUT: Duration = Duration::from_secs(10);
             let mut interval = interval(QUEUED_DISK_RETRY_TIMEOUT);
             interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
             tokio::select! {
                 res = self.step() => {
-                    if let Err(e) = res {
-                        warn!(self.log, "{e}");
+                    match res {
+                        Some(Ok(())) => (),
+                        Some(Err(e)) => warn!(self.log, "{e}"),
+                        None => {
+                            info!(
+                                self.log,
+                                "Shutting down StorageManager task: no handles."
+                            );
+                            return;
+                        }
                     }
                 }
                 _ = interval.tick(),
@@ -285,13 +318,20 @@ impl StorageManager {
     /// Process the next event
     ///
     /// This is useful for testing/debugging
-    pub async fn step(&mut self) -> Result<(), Error> {
-        // The sending side should never disappear
-        let req = self.rx.recv().await.unwrap();
+    ///
+    /// Return `None` if the sender side has disappeared and the task should
+    /// shutdown.
+    pub async fn step(&mut self) -> Option<Result<(), Error>> {
+        let Some(req) = self.rx.recv().await else {
+            return None;
+        };
         info!(self.log, "Received {:?}", req);
         let should_send_updates = match req {
             StorageRequest::AddDisk(raw_disk) => {
-                self.add_disk(raw_disk).await?
+                match self.add_disk(raw_disk).await {
+                    Ok(is_new) => is_new,
+                    Err(e) => return Some(Err(e)),
+                }
             }
             StorageRequest::RemoveDisk(raw_disk) => {
                 self.remove_disk(raw_disk).await
@@ -328,7 +368,7 @@ impl StorageManager {
             let _ = self.resource_updates.send_replace(self.resources.clone());
         }
 
-        Ok(())
+        Some(Ok(()))
     }
 
     // Loop through all queued disks inserting them into [`StorageResources`]
@@ -624,7 +664,7 @@ mod tests {
         assert!(manager.resources.all_u2_zpools().is_empty());
         assert_eq!(manager.queued_u2_drives, HashSet::from([raw_disk.clone()]));
 
-        // Check other non-normal stages and enusre disk gets queued
+        // Check other non-normal stages and ensure disk gets queued
         manager.queued_u2_drives.clear();
         manager.state = StorageManagerState::QueuingDisks;
         manager.add_u2_disk(raw_disk.clone()).await.unwrap();
@@ -661,7 +701,7 @@ mod tests {
         let logctx = test_setup_log("wait_for_bootdisk");
         let (mut key_manager, key_requester) =
             KeyManager::new(&logctx.log, HardcodedSecretRetriever::default());
-        let (mut manager, mut handle) =
+        let (manager, mut handle) =
             StorageManager::new(&logctx.log, key_requester);
         // Spawn the key_manager so that it will respond to requests for encryption keys
         tokio::spawn(async move { key_manager.run().await });
@@ -688,8 +728,7 @@ mod tests {
         let logctx = test_setup_log("queued_disks_get_added_as_resources");
         let (mut key_manager, key_requester) =
             KeyManager::new(&logctx.log, HardcodedSecretRetriever::default());
-        let (mut manager, handle) =
-            StorageManager::new(&logctx.log, key_requester);
+        let (manager, handle) = StorageManager::new(&logctx.log, key_requester);
 
         // Spawn the key_manager so that it will respond to requests for encryption keys
         tokio::spawn(async move { key_manager.run().await });
@@ -743,7 +782,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let disk = SyntheticDisk::create_zpool(dir.path(), &zpool_name).into();
         handle.upsert_disk(disk).await;
-        manager.step().await.unwrap();
+        manager.step().await.unwrap().unwrap();
 
         // We can't wait for a reply through the handle as the storage manager task
         // isn't actually running. We just check the resources directly.
@@ -756,7 +795,7 @@ mod tests {
         // Now inform the storage manager that the key manager is ready
         // The queued disk should not be added due to the error
         handle.key_manager_ready().await;
-        manager.step().await.unwrap();
+        manager.step().await.unwrap().unwrap();
         assert!(manager.resources.all_u2_zpools().is_empty());
 
         // Manually simulating a timer tick to add queued disks should also
@@ -779,7 +818,7 @@ mod tests {
         let logctx = test_setup_log("delete_disk_triggers_notification");
         let (mut key_manager, key_requester) =
             KeyManager::new(&logctx.log, HardcodedSecretRetriever::default());
-        let (mut manager, mut handle) =
+        let (manager, mut handle) =
             StorageManager::new(&logctx.log, key_requester);
 
         // Spawn the key_manager so that it will respond to requests for encryption keys
@@ -820,7 +859,7 @@ mod tests {
         let logctx = test_setup_log("ensure_using_exactly_these_disks");
         let (mut key_manager, key_requester) =
             KeyManager::new(&logctx.log, HardcodedSecretRetriever::default());
-        let (mut manager, mut handle) =
+        let (manager, mut handle) =
             StorageManager::new(&logctx.log, key_requester);
 
         // Spawn the key_manager so that it will respond to requests for encryption keys
@@ -937,8 +976,7 @@ mod tests {
         let logctx = test_setup_log("upsert_filesystem");
         let (mut key_manager, key_requester) =
             KeyManager::new(&logctx.log, HardcodedSecretRetriever::default());
-        let (mut manager, handle) =
-            StorageManager::new(&logctx.log, key_requester);
+        let (manager, handle) = StorageManager::new(&logctx.log, key_requester);
 
         // Spawn the key_manager so that it will respond to requests for encryption keys
         tokio::spawn(async move { key_manager.run().await });
