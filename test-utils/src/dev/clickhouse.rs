@@ -9,7 +9,7 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context};
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use tempfile::{Builder, TempDir};
 use thiserror::Error;
 use tokio::{
@@ -32,21 +32,11 @@ pub struct ClickHouseInstance {
     // The HTTP port the server is listening on
     port: u16,
     // The address the server is listening on
-    pub address: Option<SocketAddr>,
+    pub address: SocketAddr,
     // Full list of command-line arguments
     args: Vec<String>,
     // Subprocess handle
     child: Option<tokio::process::Child>,
-}
-
-/// A `ClickHouseCluster` is used to start and manage a 2 replica 3 keeper ClickHouse cluster.
-#[derive(Debug)]
-pub struct ClickHouseCluster {
-    pub replica_1: ClickHouseInstance,
-    pub replica_2: ClickHouseInstance,
-    pub keeper_1: ClickHouseInstance,
-    pub keeper_2: ClickHouseInstance,
-    pub keeper_3: ClickHouseInstance,
 }
 
 #[derive(Debug, Error)]
@@ -109,11 +99,13 @@ impl ClickHouseInstance {
         let data_path = data_dir.path().to_path_buf();
         let port = wait_for_port(log_path).await?;
 
+        let address = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), port);
+
         Ok(Self {
             data_dir: Some(data_dir),
             data_path,
             port,
-            address: None,
+            address: address,
             args,
             child: Some(child),
         })
@@ -161,21 +153,21 @@ impl ClickHouseInstance {
             .env("CH_USER_LOCAL_DIR", access_path)
             .env("CH_FORMAT_SCHEMA_PATH", format_schemas_path)
             .env("CH_REPLICA_NUMBER", r_number)
-            // There seems to be a bug using ipv6 with a replicated set up
-            // when installing all servers and coordinator nodes on the same
-            // server. For this reason we will be using ipv4 for testing.
-            .env("CH_REPLICA_HOST_01", "127.0.0.1")
-            .env("CH_REPLICA_HOST_02", "127.0.0.1")
-            .env("CH_KEEPER_HOST_01", "127.0.0.1")
-            .env("CH_KEEPER_HOST_02", "127.0.0.1")
-            .env("CH_KEEPER_HOST_03", "127.0.0.1")
+            .env("CH_REPLICA_HOST_01", "::1")
+            .env("CH_REPLICA_HOST_02", "::1")
+            // ClickHouse servers have a small quirk, where when setting the keeper hosts as IPv6 localhost
+            // addresses in the replica configuration file, they must be wrapped in square brackets
+            // Otherwise, when running any query, a "Service not found" error appears.
+            .env("CH_KEEPER_HOST_01", "[::1]")
+            .env("CH_KEEPER_HOST_02", "[::1]")
+            .env("CH_KEEPER_HOST_03", "[::1]")
             .spawn()
             .with_context(|| {
                 format!("failed to spawn `clickhouse` (with args: {:?})", &args)
             })?;
 
         let data_path = data_dir.path().to_path_buf();
-        let address = SocketAddr::new("127.0.0.1".parse().unwrap(), port);
+        let address = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), port);
 
         let result = wait_for_ready(log_path).await;
         match result {
@@ -183,7 +175,7 @@ impl ClickHouseInstance {
                 data_dir: Some(data_dir),
                 data_path,
                 port,
-                address: Some(address),
+                address: address,
                 args,
                 child: Some(child),
             }),
@@ -237,12 +229,9 @@ impl ClickHouseInstance {
             .env("CH_KEEPER_ID_01", "1")
             .env("CH_KEEPER_ID_02", "2")
             .env("CH_KEEPER_ID_03", "3")
-            // There seems to be a bug using ipv6 and localhost with a replicated
-            // set up when installing all servers and coordinator nodes on the same
-            // server. For this reason we will be using ipv4 for testing.
-            .env("CH_KEEPER_HOST_01", "127.0.0.1")
-            .env("CH_KEEPER_HOST_02", "127.0.0.1")
-            .env("CH_KEEPER_HOST_03", "127.0.0.1")
+            .env("CH_KEEPER_HOST_01", "::1")
+            .env("CH_KEEPER_HOST_02", "::1")
+            .env("CH_KEEPER_HOST_03", "::1")
             .spawn()
             .with_context(|| {
                 format!(
@@ -252,6 +241,7 @@ impl ClickHouseInstance {
             })?;
 
         let data_path = data_dir.path().to_path_buf();
+        let address = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), port);
 
         let result = wait_for_ready(log_path).await;
         match result {
@@ -259,7 +249,7 @@ impl ClickHouseInstance {
                 data_dir: Some(data_dir),
                 data_path,
                 port,
-                address: None,
+                address: address,
                 args,
                 child: Some(child),
             }),
@@ -330,25 +320,32 @@ impl Drop for ClickHouseInstance {
     }
 }
 
-impl ClickHouseCluster {
-    pub async fn new() -> Result<Self, anyhow::Error> {
-        // Start all Keeper coordinator nodes
-        let cur_dir = std::env::current_dir().unwrap();
-        let keeper_config =
-            cur_dir.as_path().join("src/configs/keeper_config.xml");
+/// A `ClickHouseCluster` is used to start and manage a 2 replica 3 keeper ClickHouse cluster.
+#[derive(Debug)]
+pub struct ClickHouseCluster {
+    pub replica_1: ClickHouseInstance,
+    pub replica_2: ClickHouseInstance,
+    pub keeper_1: ClickHouseInstance,
+    pub keeper_2: ClickHouseInstance,
+    pub keeper_3: ClickHouseInstance,
+    pub replica_config_path: PathBuf,
+    pub keeper_config_path: PathBuf,
+}
 
+impl ClickHouseCluster {
+    pub async fn new(
+        replica_config: PathBuf,
+        keeper_config: PathBuf,
+    ) -> Result<Self, anyhow::Error> {
+        // Start all Keeper coordinator nodes
         let keeper_amount = 3;
         let mut keepers =
-            Self::new_keeper_set(keeper_amount, keeper_config).await?;
+            Self::new_keeper_set(keeper_amount, &keeper_config).await?;
 
         // Start all replica nodes
-        let cur_dir = std::env::current_dir().unwrap();
-        let replica_config =
-            cur_dir.as_path().join("src/configs/replica_config.xml");
-
         let replica_amount = 2;
         let mut replicas =
-            Self::new_replica_set(replica_amount, replica_config).await?;
+            Self::new_replica_set(replica_amount, &replica_config).await?;
 
         let r1 = replicas.swap_remove(0);
         let r2 = replicas.swap_remove(0);
@@ -362,12 +359,14 @@ impl ClickHouseCluster {
             keeper_1: k1,
             keeper_2: k2,
             keeper_3: k3,
+            replica_config_path: replica_config,
+            keeper_config_path: keeper_config,
         })
     }
 
     pub async fn new_keeper_set(
         keeper_amount: u16,
-        config_path: PathBuf,
+        config_path: &PathBuf,
     ) -> Result<Vec<ClickHouseInstance>, anyhow::Error> {
         let mut keepers = vec![];
 
@@ -392,7 +391,7 @@ impl ClickHouseCluster {
 
     pub async fn new_replica_set(
         replica_amount: u16,
-        config_path: PathBuf,
+        config_path: &PathBuf,
     ) -> Result<Vec<ClickHouseInstance>, anyhow::Error> {
         let mut replicas = vec![];
 
@@ -418,6 +417,14 @@ impl ClickHouseCluster {
         }
 
         Ok(replicas)
+    }
+
+    pub fn replica_config_path(&self) -> &Path {
+        &self.replica_config_path
+    }
+
+    pub fn keeper_config_path(&self) -> &Path {
+        &self.keeper_config_path
     }
 }
 

@@ -9,6 +9,7 @@ use super::dns_config;
 use super::dns_propagation;
 use super::dns_servers;
 use super::external_endpoints;
+use super::inventory_collection;
 use super::nat_cleanup;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
@@ -19,6 +20,7 @@ use omicron_common::nexus_config::DnsTasksConfig;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::sync::Arc;
+use uuid::Uuid;
 
 /// Describes ongoing background tasks and provides interfaces for working with
 /// them
@@ -47,6 +49,9 @@ pub struct BackgroundTasks {
     >,
     /// task handle for the ipv4 nat entry garbage collector
     pub nat_cleanup: common::TaskHandle,
+
+    /// task handle for the task that collects inventory
+    pub task_inventory_collection: common::TaskHandle,
 }
 
 impl BackgroundTasks {
@@ -56,6 +61,8 @@ impl BackgroundTasks {
         datastore: Arc<DataStore>,
         config: &BackgroundTaskConfig,
         dpd_clients: &HashMap<SwitchLocation, Arc<dpd_client::Client>>,
+        nexus_id: Uuid,
+        resolver: internal_dns::resolver::Resolver,
     ) -> BackgroundTasks {
         let mut driver = common::Driver::new();
 
@@ -104,12 +111,36 @@ impl BackgroundTasks {
                 ),
                 config.nat_cleanup.period_secs,
                 Box::new(nat_cleanup::Ipv4NatGarbageCollector::new(
-                    datastore,
+                    datastore.clone(),
                     dpd_clients.values().map(|client| client.clone()).collect(),
                 )),
                 opctx.child(BTreeMap::new()),
                 vec![],
             )
+        };
+
+        // Background task: inventory collector
+        let task_inventory_collection = {
+            let collector = inventory_collection::InventoryCollector::new(
+                datastore,
+                resolver,
+                &nexus_id.to_string(),
+                config.inventory.nkeep,
+                config.inventory.disable,
+            );
+            let task = driver.register(
+                String::from("inventory_collection"),
+                String::from(
+                    "collects hardware and software inventory data from the \
+                    whole system",
+                ),
+                config.inventory.period_secs,
+                Box::new(collector),
+                opctx.child(BTreeMap::new()),
+                vec![],
+            );
+
+            task
         };
 
         BackgroundTasks {
@@ -121,6 +152,7 @@ impl BackgroundTasks {
             task_external_endpoints,
             external_endpoints,
             nat_cleanup,
+            task_inventory_collection,
         }
     }
 

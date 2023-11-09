@@ -6,6 +6,8 @@
 
 //! Interface for API requests to a Management Gateway Service (MGS) instance
 
+pub use gateway_messages::SpComponent;
+
 // We specifically want to allow consumers, such as `wicketd`, to embed
 // inventory datatypes into their own APIs, rather than recreate structs. For
 // this purpose, we copied the `omicron_common::generate_logging_api!` macro

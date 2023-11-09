@@ -28,7 +28,8 @@ pub enum SledMode {
 #[serde(rename_all = "snake_case")]
 pub enum SidecarRevision {
     Physical(String),
-    Soft(SoftPortConfig),
+    SoftZone(SoftPortConfig),
+    SoftPropolis(SoftPortConfig),
 }
 
 #[derive(Debug, Clone, Deserialize)]

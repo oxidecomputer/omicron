@@ -350,6 +350,8 @@ impl Nexus {
             Arc::clone(&db_datastore),
             &config.pkg.background_tasks,
             &dpd_clients,
+            config.deployment.id,
+            resolver.clone(),
         );
 
         let external_resolver = {

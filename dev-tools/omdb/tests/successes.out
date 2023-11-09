@@ -1,3 +1,13 @@
+EXECUTING COMMAND: omdb ["db", "disks", "list"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+NAME ID SIZE STATE ATTACHED_TO 
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
+=============================================
 EXECUTING COMMAND: omdb ["db", "dns", "show"]
 termination: Exited(0)
 ---------------------------------------------
@@ -33,6 +43,16 @@ stdout:
 External zone: oxide-dev.test
   NAME                                               RECORDS
   test-suite-silo.sys                                A    127.0.0.1
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
+=============================================
+EXECUTING COMMAND: omdb ["db", "instances"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+ID NAME STATE PROPOLIS_ID SLED_ID HOST_SERIAL 
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
@@ -231,6 +251,10 @@ task: "external_endpoints"
     on each one
 
 
+task: "inventory_collection"
+    collects hardware and software inventory data from the whole system
+
+
 task: "nat_v4_garbage_collector"
     prunes soft-deleted IPV4 NAT entries from ipv4_nat_entry table based on a
     predetermined retention policy
@@ -323,6 +347,15 @@ task: "external_endpoints"
         warning: silo REDACTED_UUID_REDACTED_UUID_REDACTED with DNS name "test-suite-silo.sys.oxide-dev.test" has no usable certificates
 
     TLS certificates: 0
+
+task: "inventory_collection"
+  configured period: every 10m
+  currently executing: no
+  last completed activation: iter 3, triggered by an explicit signal
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last collection id:      REDACTED_UUID_REDACTED_UUID_REDACTED
+    last collection started: <REDACTED_TIMESTAMP>
+    last collection done:    <REDACTED_TIMESTAMP>
 
 ---------------------------------------------
 stderr:

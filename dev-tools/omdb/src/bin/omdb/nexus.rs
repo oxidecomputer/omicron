@@ -6,6 +6,7 @@
 
 use crate::Omdb;
 use anyhow::Context;
+use chrono::DateTime;
 use chrono::SecondsFormat;
 use chrono::Utc;
 use clap::Args;
@@ -144,7 +145,10 @@ async fn cmd_nexus_background_tasks_show(
 ) -> Result<(), anyhow::Error> {
     let response =
         client.bgtask_list().await.context("listing background tasks")?;
-    let mut tasks = response.into_inner();
+    // Convert the HashMap to a BTreeMap because we want the keys in sorted
+    // order.
+    let mut tasks =
+        response.into_inner().into_iter().collect::<BTreeMap<_, _>>();
 
     // We want to pick the order that we print some tasks intentionally.  Then
     // we want to print anything else that we find.
@@ -479,6 +483,38 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 }
             }
         }
+    } else if name == "inventory_collection" {
+        #[derive(Deserialize)]
+        struct InventorySuccess {
+            collection_id: Uuid,
+            time_started: DateTime<Utc>,
+            time_done: DateTime<Utc>,
+        }
+
+        match serde_json::from_value::<InventorySuccess>(details.clone()) {
+            Err(error) => eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            ),
+            Ok(found_inventory) => {
+                println!(
+                    "    last collection id:      {}",
+                    found_inventory.collection_id
+                );
+                println!(
+                    "    last collection started: {}",
+                    found_inventory
+                        .time_started
+                        .to_rfc3339_opts(SecondsFormat::Secs, true),
+                );
+                println!(
+                    "    last collection done:    {}",
+                    found_inventory
+                        .time_done
+                        .to_rfc3339_opts(SecondsFormat::Secs, true),
+                );
+            }
+        };
     } else {
         println!(
             "warning: unknown background task: {:?} \

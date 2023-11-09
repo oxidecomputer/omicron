@@ -11,6 +11,7 @@ use std::{collections::HashMap, fmt};
 use derive_where::derive_where;
 use futures::FutureExt;
 use tokio::sync::{mpsc, oneshot};
+use tokio::time::Instant;
 
 use crate::errors::NestedEngineError;
 use crate::{
@@ -56,10 +57,13 @@ impl<S: StepSpec> StepContext<S> {
     /// Sends a progress update to the update engine.
     #[inline]
     pub async fn send_progress(&self, progress: StepProgress<S>) {
+        let now = Instant::now();
+        let (done, done_rx) = oneshot::channel();
         self.payload_sender
-            .send(StepContextPayload::Progress(progress))
+            .send(StepContextPayload::Progress { now, progress, done })
             .await
-            .expect("our code always keeps the receiver open")
+            .expect("our code always keeps payload_receiver open");
+        _ = done_rx.await;
     }
 
     /// Sends a report from a nested engine, typically one running on a remote
@@ -71,6 +75,8 @@ impl<S: StepSpec> StepContext<S> {
         &self,
         report: EventReport<S2>,
     ) -> Result<(), NestedEngineError<NestedSpec>> {
+        let now = Instant::now();
+
         let mut res = Ok(());
         let delta_report = if let Some(id) = report.root_execution_id {
             let mut nested_buffers = self.nested_buffers.lock().unwrap();
@@ -102,7 +108,7 @@ impl<S: StepSpec> StepContext<S> {
                             component: failed_step.info.component.clone(),
                             id: failed_step.info.id.clone(),
                             description: failed_step.info.description.clone(),
-                            error: NestedError::new(
+                            error: NestedError::from_message_and_causes(
                                 message.clone(),
                                 causes.clone(),
                             ),
@@ -134,17 +140,32 @@ impl<S: StepSpec> StepContext<S> {
                 }
 
                 self.payload_sender
-                    .send(StepContextPayload::Nested(Event::Step(event)))
+                    .send(StepContextPayload::Nested {
+                        now,
+                        event: Event::Step(event),
+                    })
                     .await
-                    .expect("our code always keeps the receiver open");
+                    .expect("our code always keeps payload_receiver open");
             }
 
             for event in delta_report.progress_events {
                 self.payload_sender
-                    .send(StepContextPayload::Nested(Event::Progress(event)))
+                    .send(StepContextPayload::Nested {
+                        now,
+                        event: Event::Progress(event),
+                    })
                     .await
-                    .expect("our code always keeps the receiver open");
+                    .expect("our code always keeps payload_receiver open");
             }
+
+            // Ensure that all reports have been received by the engine before
+            // returning.
+            let (done, done_rx) = oneshot::channel();
+            self.payload_sender
+                .send(StepContextPayload::Sync { done })
+                .await
+                .expect("our code always keeps payload_receiver open");
+            _ = done_rx.await;
         }
 
         res
@@ -163,58 +184,75 @@ impl<S: StepSpec> StepContext<S> {
         F: FnOnce(&mut UpdateEngine<'a, S2>) -> Result<(), S2::Error> + Send,
         S2: StepSpec + 'a,
     {
-        let (sender, mut receiver) = mpsc::channel(128);
-        let mut engine = UpdateEngine::new(&self.log, sender);
+        // Previously, this code was of the form:
+        //
+        //     let (sender, mut receiver) = mpsc::channel(128);
+        //     let mut engine = UpdateEngine::new(&self.log, sender);
+        //
+        // And there was a loop below that selected over `engine` and
+        // `receiver`.
+        //
+        // That approach was abandoned because it had ordering issues, because
+        // it wasn't guaranteed that events were received in the order they were
+        // processed. For example, consider what happens if:
+        //
+        // 1. User code sent an event E1 through a child (nested) StepContext.
+        // 2. Then in quick succession, the same code sent an event E2 through
+        //    self.
+        //
+        // What users would expect to happen is that E1 is received before E2.
+        // However, what actually happened was that:
+        //
+        // 1. `engine` was driven until the next suspend point. This caused E2
+        //    to be sent.
+        // 2. Then, `receiver` was polled. This caused E1 to be received.
+        //
+        // So the order of events was reversed.
+        //
+        // To fix this, we now use a single channel, and send events through it
+        // both from the nested engine and from self.
+        //
+        // An alternative would be to use a oneshot channel as a synchronization
+        // tool. However, just sharing a channel is easier.
+        let mut engine = UpdateEngine::<S2>::new_nested(
+            &self.log,
+            self.payload_sender.clone(),
+        );
+
         // Create the engine's steps.
         (engine_fn)(&mut engine)
             .map_err(|error| NestedEngineError::Creation { error })?;
 
         // Now run the engine.
         let engine = engine.execute();
-        tokio::pin!(engine);
-
-        let mut result = None;
-        let mut events_done = false;
-
-        loop {
-            tokio::select! {
-                ret = &mut engine, if result.is_none() => {
-                    match ret {
-                        Ok(cx) => {
-                            result = Some(Ok(cx));
-                        }
-                        Err(ExecutionError::EventSendError(_)) => {
-                            unreachable!("we always keep the receiver open")
-                        }
-                        Err(ExecutionError::StepFailed { component, id, description, error }) => {
-                            result = Some(Err(NestedEngineError::StepFailed { component, id, description, error }));
-                        }
-                        Err(ExecutionError::Aborted { component, id, description, message }) => {
-                            result = Some(Err(NestedEngineError::Aborted { component, id, description, message }));
-                        }
-                    }
-                }
-                event = receiver.recv(), if !events_done => {
-                    match event {
-                        Some(event) => {
-                            self.payload_sender.send(
-                                StepContextPayload::Nested(event.into_generic())
-                            )
-                            .await
-                            .expect("we always keep the receiver open");
-                        }
-                        None => {
-                            events_done = true;
-                        }
-                    }
-                }
-                else => {
-                    break;
-                }
+        match engine.await {
+            Ok(cx) => Ok(cx),
+            Err(ExecutionError::EventSendError(_)) => {
+                unreachable!("our code always keeps payload_receiver open")
             }
+            Err(ExecutionError::StepFailed {
+                component,
+                id,
+                description,
+                error,
+            }) => Err(NestedEngineError::StepFailed {
+                component,
+                id,
+                description,
+                error,
+            }),
+            Err(ExecutionError::Aborted {
+                component,
+                id,
+                description,
+                message,
+            }) => Err(NestedEngineError::Aborted {
+                component,
+                id,
+                description,
+                message,
+            }),
         }
-
-        result.expect("the loop only exits if result is set")
     }
 
     /// Retrieves a token used to fetch the value out of a [`StepHandle`].
@@ -242,16 +280,37 @@ impl NestedEventBuffer {
         report: EventReport<S>,
     ) -> EventReport<NestedSpec> {
         self.buffer.add_event_report(report.into_generic());
-        let ret = self.buffer.generate_report_since(self.last_seen);
-        self.last_seen = ret.last_seen;
+        let ret = self.buffer.generate_report_since(&mut self.last_seen);
         ret
     }
 }
 
+/// An uninhabited type for oneshot channels, since we only care about them
+/// being dropped.
+#[derive(Debug)]
+pub(crate) enum Never {}
+
 #[derive_where(Debug)]
 pub(crate) enum StepContextPayload<S: StepSpec> {
-    Progress(StepProgress<S>),
-    Nested(Event<NestedSpec>),
+    Progress {
+        now: Instant,
+        progress: StepProgress<S>,
+        done: oneshot::Sender<Never>,
+    },
+    /// A single nested event with synchronization.
+    NestedSingle {
+        now: Instant,
+        event: Event<NestedSpec>,
+        done: oneshot::Sender<Never>,
+    },
+    /// One out of a series of nested events sent in succession.
+    Nested {
+        now: Instant,
+        event: Event<NestedSpec>,
+    },
+    Sync {
+        done: oneshot::Sender<Never>,
+    },
 }
 
 /// Context for a step's metadata-generation function.
