@@ -29,7 +29,6 @@ To run this program:
  oxControlService20/omicron6 fd00:1122:3344:101::e/64
  ```
 - Log into the `oximeter` zone, `zlogin oxz_oximeter_<UUID>`
-- Ensure `oximeter` is _not_ running, e.g., `svcadm disable oximeter`
 - Run this tool, pointing it at the desired schema directory, e.g.:
 
 ```bash

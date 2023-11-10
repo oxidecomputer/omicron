@@ -23,6 +23,8 @@ use dropshot::PaginationOrder;
 use dropshot::ResultsPage;
 use dropshot::WhichPage;
 use oximeter::types::Sample;
+use regex::Regex;
+use regex::RegexBuilder;
 use slog::debug;
 use slog::error;
 use slog::info;
@@ -38,6 +40,7 @@ use std::num::NonZeroU32;
 use std::ops::Bound;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 use tokio::fs;
 use tokio::sync::Mutex;
 use uuid::Uuid;
@@ -406,8 +409,7 @@ impl Client {
     fn verify_schema_upgrades(
         files: &BTreeMap<String, (PathBuf, String)>,
     ) -> Result<(), Error> {
-        let re =
-            regex::Regex::new("(INSERT INTO)|(ALTER TABLE .* DELETE)").unwrap();
+        let re = schema_validation_regex();
         for (path, sql) in files.values() {
             if re.is_match(&sql) {
                 return Err(Error::SchemaUpdateModifiesData {
@@ -1062,6 +1064,28 @@ impl Client {
         }
         Ok(())
     }
+}
+
+// A regex used to validate supported schema updates.
+static SCHEMA_VALIDATION_REGEX: OnceLock<Regex> = OnceLock::new();
+fn schema_validation_regex() -> &'static Regex {
+    SCHEMA_VALIDATION_REGEX.get_or_init(|| {
+        RegexBuilder::new(concat!(
+            // Cannot insert rows
+            r#"(INSERT INTO)|"#,
+            // Cannot delete rows in a table
+            r#"(ALTER TABLE .* DELETE)|"#,
+            // Cannot update values in a table
+            r#"(ALTER TABLE .* UPDATE)|"#,
+            // Cannot drop column values
+            r#"(ALTER TABLE .* CLEAR COLUMN)|"#,
+            // Or issue lightweight deletes
+            r#"(DELETE FROM)"#,
+        ))
+        .case_insensitive(true)
+        .build()
+        .expect("Invalid regex")
+    })
 }
 
 #[derive(Debug)]
