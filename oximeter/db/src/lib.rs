@@ -15,7 +15,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::convert::TryFrom;
+use std::io;
 use std::num::NonZeroU32;
+use std::path::PathBuf;
 use thiserror::Error;
 
 mod client;
@@ -23,7 +25,9 @@ pub mod model;
 pub mod query;
 pub use client::{Client, DbWrite};
 
-#[derive(Clone, Debug, Error)]
+pub use model::OXIMETER_VERSION;
+
+#[derive(Debug, Error)]
 pub enum Error {
     #[error("Oximeter core error: {0}")]
     Oximeter(#[from] oximeter::MetricsError),
@@ -79,6 +83,38 @@ pub enum Error {
 
     #[error("Query must resolve to a single timeseries if limit is specified")]
     InvalidLimitQuery,
+
+    #[error("Database is not at expected version")]
+    DatabaseVersionMismatch { expected: u64, found: u64 },
+
+    #[error("Could not read schema directory")]
+    ReadSchemaDir {
+        context: String,
+        #[source]
+        err: io::Error,
+    },
+
+    #[error("Could not read SQL file from path")]
+    ReadSqlFile {
+        context: String,
+        #[source]
+        err: io::Error,
+    },
+
+    #[error("Non-UTF8 schema directory entry")]
+    NonUtf8SchemaDirEntry(std::ffi::OsString),
+
+    #[error("Missing desired schema version: {0}")]
+    MissingSchemaVersion(u64),
+
+    #[error("Data-modifying operations are not supported in schema updates")]
+    SchemaUpdateModifiesData { path: PathBuf, statement: String },
+
+    #[error("Schema update SQL files should contain at most 1 statement")]
+    MultipleSqlStatementsInSchemaUpdate { path: PathBuf },
+
+    #[error("Schema update versions must be sequential without gaps")]
+    NonSequentialSchemaVersions,
 }
 
 /// A timeseries name.

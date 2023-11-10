@@ -35,7 +35,6 @@ use omicron_common::backoff;
 use omicron_common::FileKv;
 use oximeter::types::ProducerResults;
 use oximeter::types::ProducerResultsItem;
-use oximeter_db::model::OXIMETER_VERSION;
 use oximeter_db::Client;
 use oximeter_db::DbWrite;
 use serde::Deserialize;
@@ -454,9 +453,39 @@ impl OximeterAgent {
                 CLICKHOUSE_PORT,
             )
         };
+
+        // Determine the version of the database.
+        //
+        // There are three cases
+        //
+        // - The database exists and is at the expected version. Continue in
+        // this case.
+        //
+        // - The database exists and is at a lower-than-expected version. We
+        // fail back to the caller here, which will retry indefinitely until the
+        // DB has been updated.
+        //
+        // - The DB doesn't exist at all. This reports a version number of 0. We
+        // need to create the DB here, at the latest version. This is used in
+        // fresh installations and tests.
         let client = Client::new(db_address, &log);
-        let replicated = client.is_oximeter_cluster().await?;
-        client.initialize_db_with_version(replicated, OXIMETER_VERSION).await?;
+        match client.check_db_is_at_expected_version().await {
+            Ok(_) => {}
+            Err(oximeter_db::Error::DatabaseVersionMismatch {
+                found: 0,
+                ..
+            }) => {
+                debug!(log, "oximeter database does not exist, creating");
+                let replicated = client.is_oximeter_cluster().await?;
+                client
+                    .initialize_db_with_version(
+                        replicated,
+                        oximeter_db::OXIMETER_VERSION,
+                    )
+                    .await?;
+            }
+            Err(e) => return Err(Error::from(e)),
+        }
 
         // Spawn the task for aggregating and inserting all metrics
         tokio::spawn(async move {
@@ -712,6 +741,9 @@ impl Oximeter {
     ///
     /// This can be used to override / ignore the logging configuration in
     /// `config`, using `log` instead.
+    ///
+    /// Note that this blocks until the ClickHouse database is available **and
+    /// at the expected version**.
     pub async fn with_logger(
         config: &Config,
         args: &OximeterArguments,
@@ -743,7 +775,8 @@ impl Oximeter {
         let log_client_failure = |error, delay| {
             warn!(
                 log,
-                "failed to initialize ClickHouse database, will retry in {:?}", delay;
+                "failed to create ClickHouse client";
+                "retry_after" => ?delay,
                 "error" => ?error,
             );
         };

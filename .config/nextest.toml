@@ -18,3 +18,15 @@ fail-fast = false
 
 [script.crdb-seed]
 command = 'cargo run -p crdb-seed'
+
+# The ClickHouse cluster tests currently rely on a hard-coded set of ports for
+# the nodes in the cluster. We would like to relax this in the future, at which
+# point this test-group configuration can be removed or at least loosened to
+# support testing in parallel. For now, enforce strict serialization for all
+# tests with `replicated` in the name.
+[test-groups]
+clickhouse-cluster = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = 'package(oximeter-db) and test(replicated)'
+test-group = 'clickhouse-cluster'
