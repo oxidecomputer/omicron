@@ -136,20 +136,20 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pool_lookup: &lookup::IpPool<'_>,
-        ip_pool_dissoc: &params::IpPoolAssociationDelete,
+        ip_pool_dissoc: &params::IpPoolAssociationDeleteValidated,
     ) -> DeleteResult {
         let (.., authz_pool) =
             pool_lookup.lookup_for(authz::Action::Modify).await?;
 
         let (resource_type, resource_id) = match ip_pool_dissoc {
-            params::IpPoolAssociationDelete::Silo(assoc) => {
+            params::IpPoolAssociationDeleteValidated::Silo(assoc) => {
                 let (.., silo) = self
                     .silo_lookup(opctx, assoc.silo.clone())?
                     .fetch()
                     .await?;
                 (IpPoolResourceType::Silo, silo.id())
             }
-            params::IpPoolAssociationDelete::Fleet => {
+            params::IpPoolAssociationDeleteValidated::Fleet => {
                 (IpPoolResourceType::Fleet, *FLEET_ID)
             }
         };

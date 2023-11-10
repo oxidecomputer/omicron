@@ -759,16 +759,46 @@ pub enum IpPoolAssociationCreate {
     Fleet(IpPoolAssociateFleet),
 }
 
+// It would be cool if this was an enum like Silo(NameOrId) | Fleet, but
+// OpenAPI doesn't support fancy schemas on query params. So instead we
+// use this flat struct for the query params directly, and manually parse
+// that into the good struct below.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct IpPoolAssociationDelete {
+    pub silo: Option<NameOrId>,
+    pub resource_type: shared::IpPoolResourceType,
+}
+
+// technically these are not params, but they are used with params
+#[derive(Clone, Debug)]
 pub struct IpPoolSiloAssociationDelete {
     pub silo: NameOrId,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(tag = "resource_type", rename_all = "snake_case")]
-pub enum IpPoolAssociationDelete {
+#[derive(Clone, Debug)]
+pub enum IpPoolAssociationDeleteValidated {
     Silo(IpPoolSiloAssociationDelete),
     Fleet,
+}
+
+impl TryFrom<IpPoolAssociationDelete> for IpPoolAssociationDeleteValidated {
+    type Error = String;
+
+    fn try_from(value: IpPoolAssociationDelete) -> Result<Self, Self::Error> {
+        match (value.silo, value.resource_type) {
+            (Some(silo), shared::IpPoolResourceType::Silo) => {
+                Ok(Self::Silo(IpPoolSiloAssociationDelete { silo }))
+            }
+            (None, shared::IpPoolResourceType::Fleet) => Ok(Self::Fleet),
+            (Some(_), shared::IpPoolResourceType::Fleet) => {
+                Err("Silo must be null if resource_type is fleet".to_string())
+            }
+            (None, shared::IpPoolResourceType::Silo) => {
+                Err("Silo must be specified if resource_type is silo"
+                    .to_string())
+            }
+        }
+    }
 }
 
 // INSTANCES

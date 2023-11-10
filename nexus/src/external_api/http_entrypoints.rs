@@ -1399,7 +1399,6 @@ async fn ip_pool_association_create(
 async fn ip_pool_association_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::IpPoolPath>,
-    // TODO: should this just be a path param? we have been trying to avoid that
     query_params: Query<params::IpPoolAssociationDelete>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
@@ -1408,8 +1407,19 @@ async fn ip_pool_association_delete(
         let nexus = &apictx.nexus;
         let path = path_params.into_inner();
         let query = query_params.into_inner();
+
+        let validated_params =
+            params::IpPoolAssociationDeleteValidated::try_from(query)
+                .map_err(|e| HttpError::for_bad_request(None, e))?;
+
         let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
-        nexus.ip_pool_dissociate_resource(&opctx, &pool_lookup, &query).await?;
+        nexus
+            .ip_pool_dissociate_resource(
+                &opctx,
+                &pool_lookup,
+                &validated_params,
+            )
+            .await?;
         Ok(HttpResponseUpdatedNoContent())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await

@@ -247,18 +247,11 @@ pub struct IpPool {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum IpPoolResourceType {
-    Fleet,
-    Silo,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct IpPoolResource {
     // TODO: is including the pool ID redundant? it's convenient to have and
     // makes this response a cohesive whole
     pub ip_pool_id: Uuid,
-    pub resource_type: IpPoolResourceType,
+    pub resource_type: shared::IpPoolResourceType,
     pub resource_id: Uuid,
     pub is_default: bool,
 }

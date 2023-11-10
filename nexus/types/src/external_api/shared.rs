@@ -245,6 +245,13 @@ pub enum UpdateableComponentType {
     HostOmicron,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum IpPoolResourceType {
+    Fleet,
+    Silo,
+}
+
 #[cfg(test)]
 mod test {
     use super::Policy;

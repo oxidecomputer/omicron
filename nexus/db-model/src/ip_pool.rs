@@ -16,7 +16,7 @@ use db_macros::Resource;
 use diesel::Selectable;
 use ipnetwork::IpNetwork;
 use nexus_types::external_api::params;
-use nexus_types::external_api::shared::IpRange;
+use nexus_types::external_api::shared::{self, IpRange};
 use nexus_types::external_api::views;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
@@ -98,7 +98,7 @@ pub struct IpPoolResource {
     pub is_default: bool,
 }
 
-impl From<IpPoolResourceType> for views::IpPoolResourceType {
+impl From<IpPoolResourceType> for shared::IpPoolResourceType {
     fn from(typ: IpPoolResourceType) -> Self {
         match typ {
             IpPoolResourceType::Fleet => Self::Fleet,

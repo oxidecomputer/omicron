@@ -4708,11 +4708,17 @@
           },
           {
             "in": "query",
-            "name": "resource_id",
+            "name": "resource_type",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/IpPoolResourceType"
+            }
+          },
+          {
+            "in": "query",
+            "name": "silo",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
             }
           }
         ],
