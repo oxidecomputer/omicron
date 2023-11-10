@@ -962,6 +962,11 @@ pub(crate) async fn bootstore_update(
                             asn: *asn,
                             port: switch_port_name.into(),
                             addr,
+                            hold_time: Some(p.hold_time.0.into()),
+                            connect_retry: Some(p.connect_retry.0.into()),
+                            delay_open: Some(p.delay_open.0.into()),
+                            idle_hold_time: Some(p.idle_hold_time.0.into()),
+                            keepalive: Some(p.keepalive.0.into()),
                         }),
                         IpAddr::V6(_) => {
                             warn!(opctx.log, "IPv6 peers not yet supported");

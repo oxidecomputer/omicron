@@ -41,4 +41,4 @@ cabooses found:
     RotSlotB baseboard part "FAKE_SIM_SIDECAR" serial "SimSidecar1": board "SimSidecarRot"
 
 errors:
-error: MGS "http://[100::1]:12345": listing ignition targets: Communication Error: error sending request for url (http://[100::1]:12345/ignition): error trying to connect: tcp connect error: Network is unreachable (os error <<redacted>>): error sending request for url (http://[100::1]:12345/ignition): error trying to connect: tcp connect error: Network is unreachable (os error <<redacted>>): error trying to connect: tcp connect error: Network is unreachable (os error <<redacted>>): tcp connect error: Network is unreachable (os error <<redacted>>): Network is unreachable (os error <<redacted>>)
+error: MGS "http://[100::1]:12345": listing ignition targets: Communication Error <<redacted>>

@@ -132,6 +132,51 @@
           "format": "uint32",
           "minimum": 0.0
         },
+        "connect_retry": {
+          "description": "The interval in seconds between peer connection retry attempts.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "delay_open": {
+          "description": "How long to delay sending open messages to a peer. In seconds.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "hold_time": {
+          "description": "How long to keep a session alive without a keepalive in seconds. Defaults to 6.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "idle_hold_time": {
+          "description": "How long to keep a peer in idle after a state machine reset in seconds.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "keepalive": {
+          "description": "The interval to send keepalive messages at.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
         "port": {
           "description": "Switch port the peer is reachable on.",
           "type": "string"

@@ -280,6 +280,15 @@ mod test {
             let message = regex::Regex::new(r"os error \d+")
                 .unwrap()
                 .replace_all(&e, "os error <<redacted>>");
+            // Communication errors differ based on the configuration of the
+            // machine running the test. For example whether or not the machine
+            // has IPv6 configured will determine if an error is network
+            // unreachable or a timeout due to sending a packet to a known
+            // discard prefix. So just key in on the communication error in a
+            // general sense.
+            let message = regex::Regex::new(r"Communication Error.*")
+                .unwrap()
+                .replace_all(&message, "Communication Error <<redacted>>");
             write!(&mut s, "error: {}\n", message).unwrap();
         }
 
