@@ -98,6 +98,16 @@ impl Collection {
             .get(&which)
             .and_then(|by_bb| by_bb.get(baseboard_id))
     }
+
+    pub fn rot_page_for(
+        &self,
+        which: RotPageWhich,
+        baseboard_id: &BaseboardId,
+    ) -> Option<&RotPageFound> {
+        self.rot_pages_found
+            .get(&which)
+            .and_then(|by_bb| by_bb.get(baseboard_id))
+    }
 }
 
 /// A unique baseboard id found during a collection
@@ -216,4 +226,31 @@ pub enum RotPageWhich {
     CfpaActive,
     CfpaInactive,
     CfpaScratch,
+}
+
+/// Trait to convert between the two MGS root of trust page types and a tuple of
+/// `([RotPageWhich], [RotPage])`.
+///
+/// This cannot use the standard `From` trait due to orphan rules: we do not own
+/// the `gateway_client` type, and tuples are always considered foreign.
+pub trait IntoRotPage {
+    fn into_rot_page(self) -> (RotPageWhich, RotPage);
+}
+
+impl IntoRotPage for gateway_client::types::RotCmpa {
+    fn into_rot_page(self) -> (RotPageWhich, RotPage) {
+        (RotPageWhich::Cmpa, RotPage { data_base64: self.base64_data })
+    }
+}
+
+impl IntoRotPage for gateway_client::types::RotCfpa {
+    fn into_rot_page(self) -> (RotPageWhich, RotPage) {
+        use gateway_client::types::RotCfpaSlot;
+        let which = match self.slot {
+            RotCfpaSlot::Active => RotPageWhich::CfpaActive,
+            RotCfpaSlot::Inactive => RotPageWhich::CfpaInactive,
+            RotCfpaSlot::Scratch => RotPageWhich::CfpaScratch,
+        };
+        (which, RotPage { data_base64: self.base64_data })
+    }
 }

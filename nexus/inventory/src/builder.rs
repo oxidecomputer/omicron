@@ -261,6 +261,75 @@ impl CollectionBuilder {
         }
     }
 
+    /// Returns true if we already found the root of trust page for `which` for
+    /// baseboard `baseboard`
+    ///
+    /// This is used to avoid requesting it multiple times (from multiple MGS
+    /// instances).
+    pub fn found_rot_page_already(
+        &self,
+        baseboard: &BaseboardId,
+        which: RotPageWhich,
+    ) -> bool {
+        self.rot_pages_found
+            .get(&which)
+            .map(|map| map.contains_key(baseboard))
+            .unwrap_or(false)
+    }
+
+    /// Record the given root of trust page found for the given baseboard
+    ///
+    /// The baseboard must previously have been reported using
+    /// `found_sp_state()`.
+    ///
+    /// `source` is an arbitrary string for debugging that describes the MGS
+    /// that reported this data (generally a URL string).
+    pub fn found_rot_page(
+        &mut self,
+        baseboard: &BaseboardId,
+        which: RotPageWhich,
+        source: &str,
+        page: RotPage,
+    ) -> Result<(), anyhow::Error> {
+        // Normalize the page contents: i.e., if we've seen this exact page
+        // before, use the same record from before.  Otherwise, make a new one.
+        let sw_rot_page = Self::normalize_item(&mut self.rot_pages, page);
+        let (baseboard, _) =
+            self.sps.get_key_value(baseboard).ok_or_else(|| {
+                anyhow!(
+                    "reporting rot page for unknown baseboard: {:?} ({:?})",
+                    baseboard,
+                    sw_rot_page
+                )
+            })?;
+        let by_id = self.rot_pages_found.entry(which).or_default();
+        if let Some(previous) = by_id.insert(
+            baseboard.clone(),
+            RotPageFound {
+                time_collected: now(),
+                source: source.to_owned(),
+                page: sw_rot_page.clone(),
+            },
+        ) {
+            let error = if *previous.page == *sw_rot_page {
+                anyhow!("reported multiple times (same value)",)
+            } else {
+                anyhow!(
+                    "reported rot page multiple times (previously {:?}, \
+                    now {:?})",
+                    previous,
+                    sw_rot_page
+                )
+            };
+            Err(error.context(format!(
+                "baseboard {:?} rot page {:?}",
+                baseboard, which
+            )))
+        } else {
+            Ok(())
+        }
+    }
+
     /// Helper function for normalizing items
     ///
     /// If `item` (or its equivalent) is not already in `items`, insert it.
@@ -311,6 +380,8 @@ mod test {
     use crate::examples::representative;
     use crate::examples::sp_state;
     use crate::examples::Representative;
+    use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+    use base64::Engine;
     use gateway_client::types::PowerState;
     use gateway_client::types::RotSlot;
     use gateway_client::types::RotState;
@@ -320,6 +391,8 @@ mod test {
     use nexus_types::inventory::BaseboardId;
     use nexus_types::inventory::Caboose;
     use nexus_types::inventory::CabooseWhich;
+    use nexus_types::inventory::RotPage;
+    use nexus_types::inventory::RotPageWhich;
 
     // Verify the contents of an empty collection.
     #[test]
@@ -336,9 +409,11 @@ mod test {
         assert_eq!(collection.collector, "test_empty");
         assert!(collection.baseboards.is_empty());
         assert!(collection.cabooses.is_empty());
+        assert!(collection.rot_pages.is_empty());
         assert!(collection.sps.is_empty());
         assert!(collection.rots.is_empty());
         assert!(collection.cabooses_found.is_empty());
+        assert!(collection.rot_pages_found.is_empty());
     }
 
     // Simple test of a single, fairly typical collection that contains just
@@ -438,6 +513,33 @@ mod test {
         }
         assert!(collection.cabooses.contains(&common_caboose));
 
+        // Verify the common RoT page data.
+        let common_rot_page_baseboards = [&sled1_bb, &sled3_bb, &switch];
+        let common_rot_page = nexus_types::inventory::RotPage {
+            // base64("1") == "MQ=="
+            data_base64: "MQ==".to_string(),
+        };
+        for bb in &common_rot_page_baseboards {
+            let _ = collection.sps.get(*bb).unwrap();
+            let p0 = collection.rot_page_for(RotPageWhich::Cmpa, bb).unwrap();
+            let p1 =
+                collection.rot_page_for(RotPageWhich::CfpaActive, bb).unwrap();
+            let p2 = collection
+                .rot_page_for(RotPageWhich::CfpaInactive, bb)
+                .unwrap();
+            let p3 =
+                collection.rot_page_for(RotPageWhich::CfpaScratch, bb).unwrap();
+            assert_eq!(p0.source, "test suite");
+            assert_eq!(*p0.page, common_rot_page);
+            assert_eq!(p1.source, "test suite");
+            assert_eq!(*p1.page, common_rot_page);
+            assert_eq!(p2.source, "test suite");
+            assert_eq!(*p2.page, common_rot_page);
+            assert_eq!(p3.source, "test suite");
+            assert_eq!(*p3.page, common_rot_page);
+        }
+        assert!(collection.rot_pages.contains(&common_rot_page));
+
         // Verify the specific, different data for the healthy SPs and RoTs that
         // we reported.
         // sled1
@@ -483,6 +585,20 @@ mod test {
             "slotBdigest2"
         );
         assert_eq!(rot.transient_boot_preference, Some(RotSlot::B));
+
+        // sled 2 did not have any RoT pages reported
+        assert!(collection
+            .rot_page_for(RotPageWhich::Cmpa, &sled2_bb)
+            .is_none());
+        assert!(collection
+            .rot_page_for(RotPageWhich::CfpaActive, &sled2_bb)
+            .is_none());
+        assert!(collection
+            .rot_page_for(RotPageWhich::CfpaInactive, &sled2_bb)
+            .is_none());
+        assert!(collection
+            .rot_page_for(RotPageWhich::CfpaScratch, &sled2_bb)
+            .is_none());
 
         // switch
         let sp = collection.sps.get(&switch).unwrap();
@@ -554,6 +670,38 @@ mod test {
         assert!(collection.cabooses.contains(c));
         assert_eq!(c.board, "board_psc_rot_b");
 
+        // The PSC also has four different RoT pages!
+        let p =
+            &collection.rot_page_for(RotPageWhich::Cmpa, &psc).unwrap().page;
+        assert_eq!(
+            BASE64_STANDARD.decode(&p.data_base64).unwrap(),
+            b"psc cmpa"
+        );
+        let p = &collection
+            .rot_page_for(RotPageWhich::CfpaActive, &psc)
+            .unwrap()
+            .page;
+        assert_eq!(
+            BASE64_STANDARD.decode(&p.data_base64).unwrap(),
+            b"psc cfpa active"
+        );
+        let p = &collection
+            .rot_page_for(RotPageWhich::CfpaInactive, &psc)
+            .unwrap()
+            .page;
+        assert_eq!(
+            BASE64_STANDARD.decode(&p.data_base64).unwrap(),
+            b"psc cfpa inactive"
+        );
+        let p = &collection
+            .rot_page_for(RotPageWhich::CfpaScratch, &psc)
+            .unwrap()
+            .page;
+        assert_eq!(
+            BASE64_STANDARD.decode(&p.data_base64).unwrap(),
+            b"psc cfpa scratch"
+        );
+
         // Verify the reported SP state for sled3, which did not have a healthy
         // RoT, nor any cabooses.
         let sp = collection.sps.get(&sled3_bb).unwrap();
@@ -575,8 +723,9 @@ mod test {
         assert_eq!(collection.sps.len(), collection.rots.len() + 1);
 
         // There should be five cabooses: the four used for the PSC (see above),
-        // plus the common one.
+        // plus the common one; same for RoT pages.
         assert_eq!(collection.cabooses.len(), 5);
+        assert_eq!(collection.rot_pages.len(), 5);
     }
 
     // Exercises all the failure cases that shouldn't happen in real systems.
@@ -714,7 +863,7 @@ mod test {
         assert_eq!(error.to_string(), error2.to_string(),);
 
         // report the same caboose twice with the same contents
-        let _ = builder
+        builder
             .found_caboose(
                 &sled1_bb,
                 CabooseWhich::SpSlot0,
@@ -757,12 +906,74 @@ mod test {
         ));
         assert!(message.contains(", now "));
 
+        // report RoT page for an unknown baseboard
+        let rot_page1 = RotPage { data_base64: "page1".to_string() };
+        let rot_page2 = RotPage { data_base64: "page2".to_string() };
+        assert!(!builder
+            .found_rot_page_already(&bogus_baseboard, RotPageWhich::Cmpa));
+        let error = builder
+            .found_rot_page(
+                &bogus_baseboard,
+                RotPageWhich::Cmpa,
+                "dummy",
+                rot_page1.clone(),
+            )
+            .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "reporting rot page for unknown baseboard: \
+            BaseboardId { part_number: \"p1\", serial_number: \"bogus\" } \
+            (RotPage { data_base64: \"page1\" })"
+        );
+        assert!(!builder
+            .found_rot_page_already(&bogus_baseboard, RotPageWhich::Cmpa));
+
+        // report the same rot page twice with the same contents
+        builder
+            .found_rot_page(
+                &sled1_bb,
+                RotPageWhich::Cmpa,
+                "dummy",
+                rot_page1.clone(),
+            )
+            .unwrap();
+        let error = builder
+            .found_rot_page(
+                &sled1_bb,
+                RotPageWhich::Cmpa,
+                "dummy",
+                rot_page1.clone(),
+            )
+            .unwrap_err();
+        assert_eq!(
+            format!("{:#}", error),
+            "baseboard BaseboardId { part_number: \"model1\", \
+            serial_number: \"s1\" } rot page Cmpa: reported multiple \
+            times (same value)"
+        );
+        // report the same rot page again with different contents
+        let error = builder
+            .found_rot_page(
+                &sled1_bb,
+                RotPageWhich::Cmpa,
+                "dummy",
+                rot_page2.clone(),
+            )
+            .unwrap_err();
+        let message = format!("{:#}", error);
+        println!("found error: {}", message);
+        assert!(message.contains(
+            "rot page Cmpa: reported rot page multiple times (previously"
+        ));
+        assert!(message.contains(", now RotPage { data_base64: \"page2\" }"));
+
         // We should still get a valid collection.
         let collection = builder.build();
         println!("{:#?}", collection);
         assert_eq!(collection.collector, "test_problems");
 
-        // We should still have the one sled and its SP slot0 caboose.
+        // We should still have the one sled, its SP slot0 caboose, and its Cmpa
+        // RoT page.
         assert!(collection.baseboards.contains(&sled1_bb));
         let _ = collection.sps.get(&sled1_bb).unwrap();
         let caboose =
@@ -778,6 +989,28 @@ mod test {
             .is_none());
         assert!(collection
             .caboose_for(CabooseWhich::RotSlotB, &sled1_bb)
+            .is_none());
+        let rot_page =
+            collection.rot_page_for(RotPageWhich::Cmpa, &sled1_bb).unwrap();
+        assert!(collection.rot_pages.contains(&rot_page.page));
+
+        // TODO-correctness Is this test correct? We reported the same RoT page
+        // with different data (rot_page1, then rot_page2). The second
+        // `found_rot_page` returned an error, but we overwrote the original
+        // data and did not record the error in `collection.errors`. Should we
+        // either have kept the original data or returned Ok while returning an
+        // error? It seems a little strange we returned Err but accepted the new
+        // data.
+        assert_eq!(rot_page.page.data_base64, rot_page2.data_base64);
+
+        assert!(collection
+            .rot_page_for(RotPageWhich::CfpaActive, &sled1_bb)
+            .is_none());
+        assert!(collection
+            .rot_page_for(RotPageWhich::CfpaInactive, &sled1_bb)
+            .is_none());
+        assert!(collection
+            .rot_page_for(RotPageWhich::CfpaScratch, &sled1_bb)
             .is_none());
 
         // We should see an error.
