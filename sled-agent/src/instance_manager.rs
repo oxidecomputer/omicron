@@ -43,11 +43,20 @@ pub enum Error {
     #[error("Failed to create reservoir: {0}")]
     Reservoir(#[from] vmm_reservoir::Error),
 
+    #[error("Invalid reservoir configuration: {0}")]
+    ReservoirConfig(String),
+
     #[error("Cannot find data link: {0}")]
     Underlay(#[from] sled_hardware::underlay::Error),
 
     #[error("Zone bundle error")]
     ZoneBundle(#[from] BundleError),
+}
+
+pub enum ReservoirMode {
+    None,
+    Size(u32),
+    Percentage(u8),
 }
 
 struct InstanceManagerInternal {
@@ -108,44 +117,69 @@ impl InstanceManager {
         })
     }
 
-    /// Sets the VMM reservoir size to the requested (nonzero) percentage of
-    /// usable physical RAM, rounded down to nearest aligned size required by
-    /// the control plane.
+    /// Sets the VMM reservoir to the requested percentage of usable physical
+    /// RAM or to a size in MiB. Either mode will round down to the nearest
+    /// aligned size required by the control plane.
     pub fn set_reservoir_size(
         &self,
         hardware: &sled_hardware::HardwareManager,
-        target_percent: u8,
+        mode: ReservoirMode,
     ) -> Result<(), Error> {
-        assert!(
-            target_percent > 0 && target_percent < 100,
-            "target_percent {} must be nonzero and < 100",
-            target_percent
-        );
+        let hardware_physical_ram_bytes = hardware.usable_physical_ram_bytes();
+        let req_bytes = match mode {
+            ReservoirMode::None => return Ok(()),
+            ReservoirMode::Size(mb) => {
+                let bytes = ByteCount::from_mebibytes_u32(mb).to_bytes();
+                if bytes > hardware_physical_ram_bytes {
+                    return Err(Error::ReservoirConfig(format!(
+                        "cannot specify a reservoir of {bytes} bytes when \
+                        physical memory is {hardware_physical_ram_bytes} bytes",
+                    )));
+                }
+                bytes
+            }
+            ReservoirMode::Percentage(percent) => {
+                if !matches!(percent, 1..=99) {
+                    return Err(Error::ReservoirConfig(format!(
+                        "VMM reservoir percentage of {} must be between 0 and \
+                        100",
+                        percent
+                    )));
+                };
+                (hardware_physical_ram_bytes as f64 * (percent as f64 / 100.0))
+                    .floor() as u64
+            }
+        };
 
-        let req_bytes = (hardware.usable_physical_ram_bytes() as f64
-            * (target_percent as f64 / 100.0))
-            .floor() as u64;
         let req_bytes_aligned = vmm_reservoir::align_reservoir_size(req_bytes);
 
         if req_bytes_aligned == 0 {
             warn!(
                 self.inner.log,
-                "Requested reservoir size of {} bytes < minimum aligned size of {} bytes",
-                req_bytes, vmm_reservoir::RESERVOIR_SZ_ALIGN);
+                "Requested reservoir size of {} bytes < minimum aligned size \
+                of {} bytes",
+                req_bytes,
+                vmm_reservoir::RESERVOIR_SZ_ALIGN
+            );
             return Ok(());
         }
 
-        // The max ByteCount value is i64::MAX, which is ~8 million TiB. As this
-        // value is a percentage of DRAM, constructing this should always work.
+        // The max ByteCount value is i64::MAX, which is ~8 million TiB.
+        // As this value is either a percentage of DRAM or a size in MiB
+        // represented as a u32, constructing this should always work.
         let reservoir_size = ByteCount::try_from(req_bytes_aligned).unwrap();
+        if let ReservoirMode::Percentage(percent) = mode {
+            info!(
+                self.inner.log,
+                "{}% of {} physical ram = {} bytes)",
+                percent,
+                hardware_physical_ram_bytes,
+                req_bytes,
+            );
+        }
         info!(
             self.inner.log,
-            "Setting reservoir size to {} bytes \
-            ({}% of {} total = {} bytes requested)",
-            reservoir_size,
-            target_percent,
-            hardware.usable_physical_ram_bytes(),
-            req_bytes,
+            "Setting reservoir size to {reservoir_size} bytes"
         );
         vmm_reservoir::ReservoirControl::set(reservoir_size)?;
 

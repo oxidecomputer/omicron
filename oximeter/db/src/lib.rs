@@ -4,7 +4,7 @@
 
 //! Tools for interacting with the control plane telemetry database.
 
-// Copyright 2021 Oxide Computer Company
+// Copyright 2023 Oxide Computer Company
 
 use crate::query::StringFieldSelector;
 use chrono::{DateTime, Utc};
@@ -13,8 +13,11 @@ pub use oximeter::{DatumType, Field, FieldType, Measurement, Sample};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::convert::TryFrom;
+use std::io;
 use std::num::NonZeroU32;
+use std::path::PathBuf;
 use thiserror::Error;
 
 mod client;
@@ -22,7 +25,9 @@ pub mod model;
 pub mod query;
 pub use client::{Client, DbWrite};
 
-#[derive(Clone, Debug, Error)]
+pub use model::OXIMETER_VERSION;
+
+#[derive(Debug, Error)]
 pub enum Error {
     #[error("Oximeter core error: {0}")]
     Oximeter(#[from] oximeter::MetricsError),
@@ -36,12 +41,8 @@ pub enum Error {
     Database(String),
 
     /// A schema provided when collecting samples did not match the expected schema
-    #[error("Schema mismatch for timeseries '{name}', expected fields {expected:?} found fields {actual:?}")]
-    SchemaMismatch {
-        name: String,
-        expected: BTreeMap<String, FieldType>,
-        actual: BTreeMap<String, FieldType>,
-    },
+    #[error("Schema mismatch for timeseries '{0}'", expected.timeseries_name)]
+    SchemaMismatch { expected: TimeseriesSchema, actual: TimeseriesSchema },
 
     #[error("Timeseries not found for: {0}")]
     TimeseriesNotFound(String),
@@ -82,6 +83,38 @@ pub enum Error {
 
     #[error("Query must resolve to a single timeseries if limit is specified")]
     InvalidLimitQuery,
+
+    #[error("Database is not at expected version")]
+    DatabaseVersionMismatch { expected: u64, found: u64 },
+
+    #[error("Could not read schema directory")]
+    ReadSchemaDir {
+        context: String,
+        #[source]
+        err: io::Error,
+    },
+
+    #[error("Could not read SQL file from path")]
+    ReadSqlFile {
+        context: String,
+        #[source]
+        err: io::Error,
+    },
+
+    #[error("Non-UTF8 schema directory entry")]
+    NonUtf8SchemaDirEntry(std::ffi::OsString),
+
+    #[error("Missing desired schema version: {0}")]
+    MissingSchemaVersion(u64),
+
+    #[error("Data-modifying operations are not supported in schema updates")]
+    SchemaUpdateModifiesData { path: PathBuf, statement: String },
+
+    #[error("Schema update SQL files should contain at most 1 statement")]
+    MultipleSqlStatementsInSchemaUpdate { path: PathBuf },
+
+    #[error("Schema update versions must be sequential without gaps")]
+    NonSequentialSchemaVersions,
 }
 
 /// A timeseries name.
@@ -153,6 +186,13 @@ impl std::convert::TryFrom<String> for TimeseriesName {
     }
 }
 
+impl std::str::FromStr for TimeseriesName {
+    type Err = Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        s.try_into()
+    }
+}
+
 impl<T> PartialEq<T> for TimeseriesName
 where
     T: AsRef<str>,
@@ -177,7 +217,7 @@ fn validate_timeseries_name(s: &str) -> Result<&str, Error> {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct TimeseriesSchema {
     pub timeseries_name: TimeseriesName,
-    pub field_schema: Vec<FieldSchema>,
+    pub field_schema: BTreeSet<FieldSchema>,
     pub datum_type: DatumType,
     pub created: DateTime<Utc>,
 }
@@ -398,6 +438,8 @@ const TIMESERIES_NAME_REGEX: &str =
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::DbFieldList;
+    use crate::model::DbTimeseriesSchema;
     use std::convert::TryFrom;
     use uuid::Uuid;
 
@@ -504,5 +546,123 @@ mod tests {
             "test-output/field-timeseries-keys.txt",
             &output.join("\n"),
         );
+    }
+
+    // Test that we correctly order field across a target and metric.
+    //
+    // In an earlier commit, we switched from storing fields in an unordered Vec
+    // to using a BTree{Map,Set} to ensure ordering by name. However, the
+    // `TimeseriesSchema` type stored all its fields by chaining the sorted
+    // fields from the target and metric, without then sorting _across_ them.
+    //
+    // This was exacerbated by the error reporting, where we did in fact sort
+    // all fields across the target and metric, making it difficult to tell how
+    // the derived schema was different, if at all.
+    //
+    // This test generates a sample with a schema where the target and metric
+    // fields are sorted within them, but not across them. We check that the
+    // derived schema are actually equal, which means we've imposed that
+    // ordering when deriving the schema.
+    #[test]
+    fn test_schema_field_ordering_across_target_metric() {
+        let target_field = FieldSchema {
+            name: String::from("later"),
+            ty: FieldType::U64,
+            source: FieldSource::Target,
+        };
+        let metric_field = FieldSchema {
+            name: String::from("earlier"),
+            ty: FieldType::U64,
+            source: FieldSource::Metric,
+        };
+        let timeseries_name: TimeseriesName = "foo:bar".parse().unwrap();
+        let datum_type = DatumType::U64;
+        let field_schema =
+            [target_field.clone(), metric_field.clone()].into_iter().collect();
+        let expected_schema = TimeseriesSchema {
+            timeseries_name,
+            field_schema,
+            datum_type,
+            created: Utc::now(),
+        };
+
+        #[derive(oximeter::Target)]
+        struct Foo {
+            later: u64,
+        }
+        #[derive(oximeter::Metric)]
+        struct Bar {
+            earlier: u64,
+            datum: u64,
+        }
+
+        let target = Foo { later: 1 };
+        let metric = Bar { earlier: 2, datum: 10 };
+        let sample = Sample::new(&target, &metric).unwrap();
+        let derived_schema = model::schema_for(&sample);
+        assert_eq!(derived_schema, expected_schema);
+    }
+
+    #[test]
+    fn test_unsorted_db_fields_are_sorted_on_read() {
+        let target_field = FieldSchema {
+            name: String::from("later"),
+            ty: FieldType::U64,
+            source: FieldSource::Target,
+        };
+        let metric_field = FieldSchema {
+            name: String::from("earlier"),
+            ty: FieldType::U64,
+            source: FieldSource::Metric,
+        };
+        let timeseries_name: TimeseriesName = "foo:bar".parse().unwrap();
+        let datum_type = DatumType::U64;
+        let field_schema =
+            [target_field.clone(), metric_field.clone()].into_iter().collect();
+        let expected_schema = TimeseriesSchema {
+            timeseries_name: timeseries_name.clone(),
+            field_schema,
+            datum_type,
+            created: Utc::now(),
+        };
+
+        // The fields here are sorted by target and then metric, which is how we
+        // used to insert them into the DB. We're checking that they are totally
+        // sorted when we read them out of the DB, even though they are not in
+        // the extracted model type.
+        let db_fields = DbFieldList {
+            names: vec![target_field.name.clone(), metric_field.name.clone()],
+            types: vec![target_field.ty.into(), metric_field.ty.into()],
+            sources: vec![
+                target_field.source.into(),
+                metric_field.source.into(),
+            ],
+        };
+        let db_schema = DbTimeseriesSchema {
+            timeseries_name: timeseries_name.to_string(),
+            field_schema: db_fields,
+            datum_type: datum_type.into(),
+            created: expected_schema.created,
+        };
+        assert_eq!(expected_schema, TimeseriesSchema::from(db_schema));
+    }
+
+    #[test]
+    fn test_field_schema_ordering() {
+        let mut fields = BTreeSet::new();
+        fields.insert(FieldSchema {
+            name: String::from("second"),
+            ty: FieldType::U64,
+            source: FieldSource::Target,
+        });
+        fields.insert(FieldSchema {
+            name: String::from("first"),
+            ty: FieldType::U64,
+            source: FieldSource::Target,
+        });
+        let mut iter = fields.iter();
+        assert_eq!(iter.next().unwrap().name, "first");
+        assert_eq!(iter.next().unwrap().name, "second");
+        assert!(iter.next().is_none());
     }
 }

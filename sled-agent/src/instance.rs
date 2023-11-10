@@ -32,7 +32,6 @@ use illumos_utils::svc::wait_for_service;
 use illumos_utils::zone::Zones;
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use omicron_common::address::NEXUS_INTERNAL_PORT;
-use omicron_common::address::PROPOLIS_PORT;
 use omicron_common::api::internal::nexus::{
     InstanceRuntimeState, SledInstanceState, VmmRuntimeState,
 };
@@ -196,8 +195,8 @@ struct InstanceInner {
     // The ID of the Propolis server (and zone) running this instance
     propolis_id: Uuid,
 
-    // The IP address of the Propolis server running this instance
-    propolis_ip: IpAddr,
+    // The socket address of the Propolis server running this instance
+    propolis_addr: SocketAddr,
 
     // NIC-related properties
     vnic_allocator: VnicAllocator<Etherstub>,
@@ -662,7 +661,7 @@ impl Instance {
                 vcpus: hardware.properties.ncpus.0 as u8,
             },
             propolis_id,
-            propolis_ip: propolis_addr.ip(),
+            propolis_addr,
             vnic_allocator,
             port_manager,
             requested_nics: hardware.nics,
@@ -964,9 +963,13 @@ impl Instance {
             .add_property(
                 "listen_addr",
                 "astring",
-                &inner.propolis_ip.to_string(),
+                &inner.propolis_addr.ip().to_string(),
             )
-            .add_property("listen_port", "astring", &PROPOLIS_PORT.to_string())
+            .add_property(
+                "listen_port",
+                "astring",
+                &inner.propolis_addr.port().to_string(),
+            )
             .add_property("metric_addr", "astring", &metric_addr.to_string());
 
         let profile = ProfileBuilder::new("omicron").add_service(
@@ -984,18 +987,16 @@ impl Instance {
         // but it helps distinguish "online in SMF" from "responding to HTTP
         // requests".
         let fmri = fmri_name();
-        wait_for_service(Some(&zname), &fmri)
+        wait_for_service(Some(&zname), &fmri, inner.log.clone())
             .await
             .map_err(|_| Error::Timeout(fmri.to_string()))?;
         info!(inner.log, "Propolis SMF service is online");
-
-        let server_addr = SocketAddr::new(inner.propolis_ip, PROPOLIS_PORT);
 
         // We use a custom client builder here because the default progenitor
         // one has a timeout of 15s but we want to be able to wait indefinitely.
         let reqwest_client = reqwest::ClientBuilder::new().build().unwrap();
         let client = Arc::new(PropolisClient::new_with_client(
-            &format!("http://{}", server_addr),
+            &format!("http://{}", &inner.propolis_addr),
             reqwest_client,
         ));
 

@@ -42,6 +42,7 @@ use uuid::Uuid;
     JsonSchema,
     Serialize,
     Deserialize,
+    strum::EnumIter,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum FieldType {
@@ -275,6 +276,7 @@ pub struct Field {
     JsonSchema,
     Serialize,
     Deserialize,
+    strum::EnumIter,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum DatumType {

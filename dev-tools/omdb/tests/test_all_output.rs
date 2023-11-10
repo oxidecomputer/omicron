@@ -37,10 +37,12 @@ async fn test_omdb_usage_errors() {
         // Command help output
         &["db"],
         &["db", "--help"],
+        &["db", "disks"],
         &["db", "dns"],
         &["db", "dns", "diff"],
         &["db", "dns", "names"],
         &["db", "services"],
+        &["db", "snapshots"],
         &["db", "network"],
         &["mgs"],
         &["nexus"],
@@ -71,9 +73,11 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
     let mgs_url = format!("http://{}/", gwtestctx.client.bind_address);
     let mut output = String::new();
     let invocations: &[&[&'static str]] = &[
+        &["db", "disks", "list"],
         &["db", "dns", "show"],
         &["db", "dns", "diff", "external", "2"],
         &["db", "dns", "names", "external", "2"],
+        &["db", "instances"],
         &["db", "services", "list-instances"],
         &["db", "services", "list-by-sled"],
         &["db", "sleds"],
@@ -303,6 +307,17 @@ fn redact_variable(input: &str) -> String {
         .unwrap()
         .replace_all(&s, "<REDACTED DURATION>ms")
         .to_string();
+
+    let s = regex::Regex::new(
+        r"note: database schema version matches expected \(\d+\.\d+\.\d+\)",
+    )
+    .unwrap()
+    .replace_all(
+        &s,
+        "note: database schema version matches expected \
+        (<redacted database version>)",
+    )
+    .to_string();
 
     s
 }

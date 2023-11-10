@@ -24,6 +24,7 @@ use omicron_common::api::internal::shared::PortFec as OmicronPortFec;
 use omicron_common::api::internal::shared::PortSpeed as OmicronPortSpeed;
 use omicron_common::api::internal::shared::RackNetworkConfig;
 use omicron_common::api::internal::shared::SwitchLocation;
+use omicron_common::OMICRON_DPD_TAG;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -185,16 +186,17 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
 
                 // Create and configure the link.
                 match dpd_client
-                    .port_settings_apply(&port_id, &port_settings)
+                    .port_settings_apply(
+                        &port_id,
+                        Some(OMICRON_DPD_TAG),
+                        &port_settings,
+                    )
                     .await
                 {
                     Ok(_response) => {
                         let metadata = vec![format!(
-                            "configured {}/{}: ips {:#?}, routes {:#?}",
-                            *port_id,
-                            link_id.0,
-                            uplink.addresses,
-                            uplink.routes
+                            "configured {:?}/{}: ips {:#?}, routes {:#?}",
+                            port_id, link_id.0, uplink.addresses, uplink.routes
                         )];
                         StepSuccess::new((port_id, link_id))
                             .with_metadata(metadata)
@@ -717,8 +719,8 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
                 dpd_client
                     .port_settings_apply(
                         &port_id,
+                        Some(OMICRON_DPD_TAG),
                         &PortSettings {
-                            tag: WICKETD_TAG.to_string(),
                             links: HashMap::new(),
                             v4_routes: HashMap::new(),
                             v6_routes: HashMap::new(),
@@ -761,7 +763,6 @@ fn build_port_settings(
     };
 
     let mut port_settings = PortSettings {
-        tag: WICKETD_TAG.to_string(),
         links: HashMap::new(),
         v4_routes: HashMap::new(),
         v6_routes: HashMap::new(),
@@ -780,6 +781,7 @@ fn build_port_settings(
                 kr: false,
                 fec,
                 speed,
+                lane: Some(LinkId(0)),
             },
         },
     );
@@ -790,7 +792,7 @@ fn build_port_settings(
         {
             port_settings.v4_routes.insert(
                 dst.to_string(),
-                RouteSettingsV4 { link_id: link_id.0, nexthop, vid: None },
+                vec![RouteSettingsV4 { link_id: link_id.0, nexthop }],
             );
         }
     }

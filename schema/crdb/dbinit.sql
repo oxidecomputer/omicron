@@ -2523,12 +2523,230 @@ CREATE TABLE IF NOT EXISTS omicron.public.bootstore_keys (
 );
 
 /*
+ * Hardware/software inventory
+ *
+ * See RFD 433 for details.  Here are the highlights.
+ *
+ * Omicron periodically collects hardware/software inventory data from the
+ * running system and stores it into the database.  Each discrete set of data is
+ * called a **collection**.  Each collection contains lots of different kinds of
+ * data, so there are many tables here.  For clarity, these tables are prefixed
+ * with:
+ *
+ *     `inv_*` (examples: `inv_collection`, `inv_service_processor`)
+ *
+ *         Describes the complete set of hardware and software in the system.
+ *         Rows in these tables are immutable, but they describe mutable facts
+ *         about hardware and software (e.g., the slot that a disk is in).  When
+ *         these facts change (e.g., a disk moves between slots), a new set of
+ *         records is written.
+ *
+ * All rows in the `inv_*` tables point back to a particular collection.  They
+ * represent the state observed at some particular time.  Generally, if two
+ * observations came from two different places, they're not put into the same
+ * row of the same table.  For example, caboose information comes from the SP,
+ * but it doesn't go into the `inv_service_processor` table.  It goes in a
+ * separate `inv_caboose` table.  This is debatable but it preserves a clearer
+ * record of exactly what information came from where, since the separate record
+ * has its own "source" and "time_collected".
+ *
+ * Information about service processors and roots of trust are joined with
+ * information reported by sled agents via the baseboard id.
+ *
+ * Hardware and software identifiers are normalized for the usual database
+ * design reasons.  This means instead of storing hardware and software
+ * identifiers directly in the `inv_*` tables, these tables instead store
+ * foreign keys into one of these groups of tables, whose names are also
+ * prefixed for clarity:
+ *
+ *     `hw_*` (example: `hw_baseboard_id`)
+ *
+ *         Maps hardware-provided identifiers to UUIDs that are used as foreign
+ *         keys in the rest of the schema. (Avoids embedding these identifiers
+ *         into all the other tables.)
+ *
+ *     `sw_*` (example: `sw_caboose`)
+ *
+ *         Maps software-provided identifiers to UUIDs that are used as foreign
+ *         keys in the rest of the schema. (Avoids embedding these identifiers
+ *         into all the other tables.)
+ *
+ * Records in these tables are shared across potentially many collections.  To
+ * see why this is useful, consider that `sw_caboose` records contain several
+ * long identifiers (e.g., git commit, SHA sums) and in practice, most of the
+ * time, we expect that all components of a given type will have the exact same
+ * cabooses.  Rather than store the caboose contents in each
+ * `inv_service_processor` row (for example), often replicating the exact same
+ * contents for each SP for each collection, these rows just have pointers into
+ * the `sw_caboose` table that stores this data once.  (This also makes it much
+ * easier to determine that these components _do_ have the same cabooses.)
+ *
+ * On PC systems (i.e., non-Oxide hardware), most of these tables will be empty
+ * because we do not support hardware inventory on these systems.
+ *
+ * Again, see RFD 433 for more on all this.
+ */
+
+/*
+ * baseboard ids: this table assigns uuids to distinct part/serial values
+ *
+ * Usually we include the baseboard revision number when we reference the part
+ * number and serial number.  The revision number is deliberately left out here.
+ * If we happened to see the same baseboard part number and serial number with
+ * different revisions, that's the same baseboard.
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.hw_baseboard_id (
+    id UUID PRIMARY KEY,
+    part_number TEXT NOT NULL,
+    serial_number TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_baseboard_id_by_props
+    ON omicron.public.hw_baseboard_id (part_number, serial_number);
+
+/* power states reportable by the SP */
+CREATE TYPE IF NOT EXISTS omicron.public.hw_power_state AS ENUM (
+    'A0',
+    'A1',
+    'A2'
+);
+
+/* root of trust firmware slots */
+CREATE TYPE IF NOT EXISTS omicron.public.hw_rot_slot AS ENUM (
+    'A',
+    'B'
+);
+
+/* cabooses: this table assigns unique ids to distinct caboose contents */
+CREATE TABLE IF NOT EXISTS omicron.public.sw_caboose (
+    id UUID PRIMARY KEY,
+    board TEXT NOT NULL,
+    git_commit TEXT NOT NULL,
+    name TEXT NOT NULL,
+    -- The MGS response that provides this field indicates that it can be NULL.
+    -- But that's only to support old software that we no longer support.
+    version TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS caboose_properties
+    on omicron.public.sw_caboose (board, git_commit, name, version);
+
+/* Inventory Collections */
+
+-- list of all collections
+CREATE TABLE IF NOT EXISTS omicron.public.inv_collection (
+    id UUID PRIMARY KEY,
+    time_started TIMESTAMPTZ NOT NULL,
+    time_done TIMESTAMPTZ NOT NULL,
+    collector TEXT NOT NULL
+);
+-- Supports finding latest collection (to use) or the oldest collection (to
+-- clean up)
+CREATE INDEX IF NOT EXISTS inv_collection_by_time_started
+    ON omicron.public.inv_collection (time_started);
+
+-- list of errors generated during a collection
+CREATE TABLE IF NOT EXISTS omicron.public.inv_collection_error (
+    inv_collection_id UUID NOT NULL,
+    idx INT4 NOT NULL,
+    message TEXT
+);
+CREATE INDEX IF NOT EXISTS errors_by_collection
+    ON omicron.public.inv_collection_error (inv_collection_id, idx);
+
+/* what kind of slot MGS reported a device in */
+CREATE TYPE IF NOT EXISTS omicron.public.sp_type AS ENUM (
+    'sled',
+    'switch',
+    'power'
+);
+
+-- observations from and about service processors
+-- also see `inv_root_of_trust`
+CREATE TABLE IF NOT EXISTS omicron.public.inv_service_processor (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+    -- which system this SP reports it is part of
+    -- (foreign key into `hw_baseboard_id` table)
+    hw_baseboard_id UUID NOT NULL,
+    -- when this observation was made
+    time_collected TIMESTAMPTZ NOT NULL,
+    -- which MGS instance reported this data
+    source TEXT NOT NULL,
+
+    -- identity of this device according to MGS
+    sp_type omicron.public.sp_type NOT NULL,
+    sp_slot INT4 NOT NULL,
+
+    -- Data from MGS "Get SP Info" API.  See MGS API documentation.
+    baseboard_revision INT8 NOT NULL,
+    hubris_archive_id TEXT NOT NULL,
+    power_state omicron.public.hw_power_state NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, hw_baseboard_id)
+);
+
+-- root of trust information reported by SP
+-- There's usually one row here for each row in inv_service_processor, but not
+-- necessarily.
+CREATE TABLE IF NOT EXISTS omicron.public.inv_root_of_trust (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+    -- which system this SP reports it is part of
+    -- (foreign key into `hw_baseboard_id` table)
+    hw_baseboard_id UUID NOT NULL,
+    -- when this observation was made
+    time_collected TIMESTAMPTZ NOT NULL,
+    -- which MGS instance reported this data
+    source TEXT NOT NULL,
+
+    slot_active omicron.public.hw_rot_slot NOT NULL,
+    slot_boot_pref_transient omicron.public.hw_rot_slot, -- nullable
+    slot_boot_pref_persistent omicron.public.hw_rot_slot NOT NULL,
+    slot_boot_pref_persistent_pending omicron.public.hw_rot_slot, -- nullable
+    slot_a_sha3_256 TEXT, -- nullable
+    slot_b_sha3_256 TEXT, -- nullable
+
+    PRIMARY KEY (inv_collection_id, hw_baseboard_id)
+);
+
+CREATE TYPE IF NOT EXISTS omicron.public.caboose_which AS ENUM (
+    'sp_slot_0',
+    'sp_slot_1',
+    'rot_slot_A',
+    'rot_slot_B'
+);
+
+-- cabooses found
+CREATE TABLE IF NOT EXISTS omicron.public.inv_caboose (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+    -- which system this SP reports it is part of
+    -- (foreign key into `hw_baseboard_id` table)
+    hw_baseboard_id UUID NOT NULL,
+    -- when this observation was made
+    time_collected TIMESTAMPTZ NOT NULL,
+    -- which MGS instance reported this data
+    source TEXT NOT NULL,
+
+    which omicron.public.caboose_which NOT NULL,
+    sw_caboose_id UUID NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, hw_baseboard_id, which)
+);
+
+/*******************************************************************/
+
+/*
  * The `sled_instance` view's definition needs to be modified in a separate
  * transaction from the transaction that created it.
  */
 
 COMMIT;
 BEGIN;
+
+/*******************************************************************/
 
 /*
  * Metadata for the schema itself. This version number isn't great, as there's
