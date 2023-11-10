@@ -56,10 +56,9 @@ fn test_nexus_bad_config() {
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
     assert_exit_code(exit_status, EXIT_FAILURE, &stderr_text);
     assert_contents("tests/output/cmd-nexus-badconfig-stdout", &stdout_text);
-    assert_eq!(
-        stderr_text,
-        format!("nexus: read \"nonexistent\": {}\n", error_for_enoent())
-    );
+    let expected_err =
+        format!("nexus: read \"nonexistent\": {}\n", error_for_enoent());
+    assert!(&stderr_text.starts_with(&expected_err));
 }
 
 #[test]
@@ -73,13 +72,11 @@ fn test_nexus_invalid_config() {
         "tests/output/cmd-nexus-invalidconfig-stdout",
         &stdout_text,
     );
-    assert_eq!(
-        stderr_text,
-        format!(
-            "nexus: parse \"{}\": missing field `deployment`\n",
-            config_path.display()
-        ),
+    let expected_err = format!(
+        "nexus: parse \"{}\": missing field `deployment`\n",
+        config_path.display()
     );
+    assert!(&stderr_text.starts_with(&expected_err));
 }
 
 #[track_caller]

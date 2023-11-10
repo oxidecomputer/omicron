@@ -10,6 +10,7 @@ use std::time::Duration;
 mod cli;
 mod dispatch;
 mod events;
+mod helpers;
 mod keymap;
 mod runner;
 mod state;

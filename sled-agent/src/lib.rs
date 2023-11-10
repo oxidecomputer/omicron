@@ -23,6 +23,7 @@ pub mod config;
 mod http_entrypoints;
 mod instance;
 mod instance_manager;
+mod metrics;
 mod nexus;
 pub mod params;
 mod profile;

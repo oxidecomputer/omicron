@@ -131,44 +131,31 @@
         }
       }
     },
-    "/clear-update-state/{type}/{slot}": {
+    "/clear-update-state": {
       "post": {
         "summary": "Resets update state for a sled.",
         "description": "Use this to clear update state after a failed update.",
         "operationId": "post_clear_update_state",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "slot",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 0
-            }
-          },
-          {
-            "in": "path",
-            "name": "type",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/SpType"
-            }
-          }
-        ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ClearUpdateStateOptions"
+                "$ref": "#/components/schemas/ClearUpdateStateParams"
               }
             }
           },
           "required": true
         },
         "responses": {
-          "204": {
-            "description": "resource updated"
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClearUpdateStateResponse"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -1013,6 +1000,56 @@
             ]
           }
         }
+      },
+      "ClearUpdateStateParams": {
+        "type": "object",
+        "properties": {
+          "options": {
+            "description": "Options for clearing update state",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ClearUpdateStateOptions"
+              }
+            ]
+          },
+          "targets": {
+            "description": "The SP identifiers to clear the update state for. Must be non-empty.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpIdentifier"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "options",
+          "targets"
+        ]
+      },
+      "ClearUpdateStateResponse": {
+        "type": "object",
+        "properties": {
+          "cleared": {
+            "description": "The SPs for which update data was cleared.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpIdentifier"
+            },
+            "uniqueItems": true
+          },
+          "no_update_data": {
+            "description": "The SPs that had no update state to clear.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpIdentifier"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "cleared",
+          "no_update_data"
+        ]
       },
       "CurrentRssUserConfig": {
         "type": "object",
