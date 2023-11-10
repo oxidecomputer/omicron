@@ -19,6 +19,8 @@ jobs:
 
   check-omicron-deployment:
     runs-on: ${{ matrix.os }}
+    env:
+      CARGO_INCREMENTAL: 0
     strategy:
       fail-fast: false
       matrix:
@@ -49,6 +51,8 @@ jobs:
   # of our code.
   clippy-lint:
     runs-on: ubuntu-22.04
+    env:
+      CARGO_INCREMENTAL: 0
     steps:
     # This repo is unstable and unnecessary: https://github.com/microsoft/linux-package-repositories/issues/34
     - name: Disable packages.microsoft.com repo
@@ -75,6 +79,8 @@ jobs:
   # the separate "rustdocs" repo.
   build-docs:
     runs-on: ubuntu-22.04
+    env:
+      CARGO_INCREMENTAL: 0
     steps:
     # This repo is unstable and unnecessary: https://github.com/microsoft/linux-package-repositories/issues/34
     - name: Disable packages.microsoft.com repo
