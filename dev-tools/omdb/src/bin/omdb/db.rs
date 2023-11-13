@@ -65,6 +65,7 @@ use nexus_types::internal_api::params::DnsRecord;
 use nexus_types::internal_api::params::Srv;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
+use nexus_types::inventory::RotPageWhich;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Generation;
 use omicron_common::postgres_config::PostgresConfigWithUrl;
@@ -2112,6 +2113,29 @@ async fn inv_collection_print_devices(
             })
             .collect();
         let table = tabled::Table::new(caboose_rows)
+            .with(tabled::settings::Style::empty())
+            .with(tabled::settings::Padding::new(0, 1, 0, 0))
+            .to_string();
+        println!("{}", textwrap::indent(&table.to_string(), "        "));
+
+        #[derive(Tabled)]
+        #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+        struct RotPageRow<'a> {
+            slot: String,
+            data_base64: &'a str,
+        }
+
+        println!("    RoT pages:");
+        let rot_page_rows: Vec<_> = RotPageWhich::iter()
+            .filter_map(|which| {
+                collection.rot_page_for(which, baseboard_id).map(|d| (which, d))
+            })
+            .map(|(which, found_page)| RotPageRow {
+                slot: format!("{which:?}"),
+                data_base64: &found_page.page.data_base64,
+            })
+            .collect();
+        let table = tabled::Table::new(rot_page_rows)
             .with(tabled::settings::Style::empty())
             .with(tabled::settings::Padding::new(0, 1, 0, 0))
             .to_string();
