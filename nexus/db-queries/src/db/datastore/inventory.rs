@@ -865,7 +865,7 @@ impl DataStore {
         // start removing it and we'd also need to make sure we didn't leak a
         // collection if we crash while deleting it.
         let conn = self.pool_connection_authorized(opctx).await?;
-        let (ncollections, nsps, nrots, ncabooses, nerrors) = conn
+        let (ncollections, nsps, nrots, ncabooses, nrot_pages, nerrors) = conn
             .transaction_async(|conn| async move {
                 // Remove the record describing the collection itself.
                 let ncollections = {
@@ -910,6 +910,17 @@ impl DataStore {
                     .await?
                 };
 
+                // Remove rows for root of trust pages found.
+                let nrot_pages = {
+                    use db::schema::inv_root_of_trust_page::dsl;
+                    diesel::delete(
+                        dsl::inv_root_of_trust_page
+                            .filter(dsl::inv_collection_id.eq(collection_id)),
+                    )
+                    .execute_async(&conn)
+                    .await?
+                };
+
                 // Remove rows for errors encountered.
                 let nerrors = {
                     use db::schema::inv_collection_error::dsl;
@@ -921,7 +932,7 @@ impl DataStore {
                     .await?
                 };
 
-                Ok((ncollections, nsps, nrots, ncabooses, nerrors))
+                Ok((ncollections, nsps, nrots, ncabooses, nrot_pages, nerrors))
             })
             .await
             .map_err(|error| match error {
@@ -937,6 +948,7 @@ impl DataStore {
             "nsps" => nsps,
             "nrots" => nrots,
             "ncabooses" => ncabooses,
+            "nrot_pages" => nrot_pages,
             "nerrors" => nerrors,
         );
 
