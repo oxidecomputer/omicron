@@ -38,11 +38,12 @@ use uuid::Uuid;
 
 /// Describes the version of the Oximeter database.
 ///
-/// See: [crate::Client::initialize_db_with_version] for usage.
+/// For usage and details see:
 ///
-/// TODO(#4271): The current implementation of versioning will wipe the metrics
-/// database if this number is incremented.
-pub const OXIMETER_VERSION: u64 = 2;
+/// - [`crate::Client::initialize_db_with_version`]
+/// - [`crate::Client::ensure_schema`]
+/// - The `clickhouse-schema-updater` binary in this crate
+pub const OXIMETER_VERSION: u64 = 3;
 
 // Wrapper type to represent a boolean in the database.
 //

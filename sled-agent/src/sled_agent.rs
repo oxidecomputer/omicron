@@ -10,7 +10,7 @@ use crate::bootstrap::early_networking::{
 };
 use crate::bootstrap::params::StartSledAgentRequest;
 use crate::config::Config;
-use crate::instance_manager::InstanceManager;
+use crate::instance_manager::{InstanceManager, ReservoirMode};
 use crate::long_running_tasks::LongRunningTaskHandles;
 use crate::metrics::MetricsManager;
 use crate::nexus::{NexusClientWithResolver, NexusRequestQueue};
@@ -383,26 +383,36 @@ impl SledAgent {
             long_running_task_handles.zone_bundler.clone(),
         )?;
 
-        match config.vmm_reservoir_percentage {
-            Some(sz) if sz > 0 && sz < 100 => {
+        // Configure the VMM reservoir as either a percentage of DRAM or as an
+        // exact size in MiB.
+        let reservoir_mode = match (
+            config.vmm_reservoir_percentage,
+            config.vmm_reservoir_size_mb,
+        ) {
+            (None, None) => ReservoirMode::None,
+            (Some(p), None) => ReservoirMode::Percentage(p),
+            (None, Some(mb)) => ReservoirMode::Size(mb),
+            (Some(_), Some(_)) => panic!(
+                "only one of vmm_reservoir_percentage and \
+                vmm_reservoir_size_mb is allowed"
+            ),
+        };
+
+        match reservoir_mode {
+            ReservoirMode::None => warn!(log, "Not using VMM reservoir"),
+            ReservoirMode::Size(0) | ReservoirMode::Percentage(0) => {
+                warn!(log, "Not using VMM reservoir (size 0 bytes requested)")
+            }
+            _ => {
                 instances
                     .set_reservoir_size(
                         &long_running_task_handles.hardware_manager,
-                        sz,
+                        reservoir_mode,
                     )
                     .map_err(|e| {
-                        error!(log, "Failed to set VMM reservoir size: {e}");
+                        error!(log, "Failed to setup VMM reservoir: {e}");
                         e
                     })?;
-            }
-            Some(0) => {
-                warn!(log, "Not using VMM reservoir (size 0 bytes requested)");
-            }
-            None => {
-                warn!(log, "Not using VMM reservoir");
-            }
-            Some(sz) => {
-                panic!("invalid requested VMM reservoir percentage: {}", sz);
             }
         }
 

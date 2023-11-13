@@ -613,6 +613,11 @@ impl ServiceInner {
                                     addr: b.addr,
                                     asn: b.asn,
                                     port: b.port.clone(),
+                                    hold_time: b.hold_time,
+                                    connect_retry: b.connect_retry,
+                                    delay_open: b.delay_open,
+                                    idle_hold_time: b.idle_hold_time,
+                                    keepalive: b.keepalive,
                                 })
                                 .collect(),
                         })

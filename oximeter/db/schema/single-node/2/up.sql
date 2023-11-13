@@ -1,5 +1,6 @@
 CREATE DATABASE IF NOT EXISTS oximeter;
---
+
+/* The version table contains metadata about the `oximeter` database */
 CREATE TABLE IF NOT EXISTS oximeter.version
 (
     value UInt64,
@@ -7,7 +8,17 @@ CREATE TABLE IF NOT EXISTS oximeter.version
 )
 ENGINE = MergeTree()
 ORDER BY (value, timestamp);
---
+
+/* The measurement tables contain all individual samples from each timeseries.
+ *
+ * Each table stores a single datum type, and otherwise contains nearly the same
+ * structure. The primary sorting key is on the timeseries name, key, and then
+ * timestamp, so that all timeseries from the same schema are grouped, followed
+ * by all samples from the same timeseries.
+ *
+ * This reflects that one usually looks up the _key_ in one or more field table,
+ * and then uses that to index quickly into the measurements tables.
+ */
 CREATE TABLE IF NOT EXISTS oximeter.measurements_bool
 (
     timeseries_name String,
@@ -18,7 +29,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_bool
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
---
+
 CREATE TABLE IF NOT EXISTS oximeter.measurements_i8
 (
     timeseries_name String,
@@ -29,7 +40,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_i8
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
---
+
 CREATE TABLE IF NOT EXISTS oximeter.measurements_u8
 (
     timeseries_name String,
@@ -40,7 +51,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_u8
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
---
+
 CREATE TABLE IF NOT EXISTS oximeter.measurements_i16
 (
     timeseries_name String,
@@ -51,7 +62,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_i16
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
---
+
 CREATE TABLE IF NOT EXISTS oximeter.measurements_u16
 (
     timeseries_name String,
@@ -62,7 +73,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_u16
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
---
+
 CREATE TABLE IF NOT EXISTS oximeter.measurements_i32
 (
     timeseries_name String,
@@ -73,7 +84,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_i32
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
---
+
 CREATE TABLE IF NOT EXISTS oximeter.measurements_u32
 (
     timeseries_name String,
@@ -84,7 +95,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_u32
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
---
+
 CREATE TABLE IF NOT EXISTS oximeter.measurements_i64
 (
     timeseries_name String,
@@ -95,7 +106,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_i64
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
---
+
 CREATE TABLE IF NOT EXISTS oximeter.measurements_u64
 (
     timeseries_name String,
@@ -106,7 +117,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_u64
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
---
+
 CREATE TABLE IF NOT EXISTS oximeter.measurements_f32
 (
     timeseries_name String,
@@ -117,7 +128,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_f32
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
---
+
 CREATE TABLE IF NOT EXISTS oximeter.measurements_f64
 (
     timeseries_name String,
@@ -128,7 +139,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_f64
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
---
+
 CREATE TABLE IF NOT EXISTS oximeter.measurements_string
 (
     timeseries_name String,
@@ -139,7 +150,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_string
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
---
+
 CREATE TABLE IF NOT EXISTS oximeter.measurements_bytes
 (
     timeseries_name String,
@@ -150,7 +161,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_bytes
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
---
+
 CREATE TABLE IF NOT EXISTS oximeter.measurements_cumulativei64
 (
     timeseries_name String,
@@ -162,7 +173,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_cumulativei64
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
---
+
 CREATE TABLE IF NOT EXISTS oximeter.measurements_cumulativeu64
 (
     timeseries_name String,
@@ -174,7 +185,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_cumulativeu64
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
---
+
 CREATE TABLE IF NOT EXISTS oximeter.measurements_cumulativef32
 (
     timeseries_name String,
@@ -186,8 +197,8 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_cumulativef32
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
---
---
+
+
 CREATE TABLE IF NOT EXISTS oximeter.measurements_cumulativef64
 (
     timeseries_name String,
@@ -199,7 +210,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_cumulativef64
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
---
+
 CREATE TABLE IF NOT EXISTS oximeter.measurements_histogrami8
 (
     timeseries_name String,
@@ -212,7 +223,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogrami8
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
---
+
 CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramu8
 (
     timeseries_name String,
@@ -225,7 +236,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramu8
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
---
+
 CREATE TABLE IF NOT EXISTS oximeter.measurements_histogrami16
 (
     timeseries_name String,
@@ -238,7 +249,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogrami16
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
---
+
 CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramu16
 (
     timeseries_name String,
@@ -251,7 +262,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramu16
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
---
+
 CREATE TABLE IF NOT EXISTS oximeter.measurements_histogrami32
 (
     timeseries_name String,
@@ -264,7 +275,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogrami32
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
---
+
 CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramu32
 (
     timeseries_name String,
@@ -277,7 +288,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramu32
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
---
+
 CREATE TABLE IF NOT EXISTS oximeter.measurements_histogrami64
 (
     timeseries_name String,
@@ -290,7 +301,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogrami64
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
---
+
 CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramu64
 (
     timeseries_name String,
@@ -303,7 +314,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramu64
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
---
+
 CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramf32
 (
     timeseries_name String,
@@ -316,7 +327,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramf32
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
---
+
 CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramf64
 (
     timeseries_name String,
@@ -329,7 +340,24 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramf64
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
---
+
+/* The field tables store named dimensions of each timeseries.
+ *
+ * As with the measurement tables, there is one field table for each field data
+ * type. Fields are deduplicated by using the "replacing merge tree", though
+ * this behavior **must not** be relied upon for query correctness.
+ *
+ * The index for the fields differs from the measurements, however. Rows are
+ * sorted by timeseries name, then field name, field value, and finally
+ * timeseries key. This reflects the most common pattern for looking them up:
+ * by field name and possibly value, within a timeseries. The resulting keys are
+ * usually then used to look up measurements.
+ *
+ * NOTE: We may want to consider a secondary index on these tables, sorting by
+ * timeseries name and then key, since it would improve lookups where one
+ * already has the key. Realistically though, these tables are quite small and
+ * so performance benefits will be low in absolute terms.
+ */
 CREATE TABLE IF NOT EXISTS oximeter.fields_bool
 (
     timeseries_name String,
@@ -339,7 +367,7 @@ CREATE TABLE IF NOT EXISTS oximeter.fields_bool
 )
 ENGINE = ReplacingMergeTree()
 ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
---
+
 CREATE TABLE IF NOT EXISTS oximeter.fields_i8
 (
     timeseries_name String,
@@ -349,7 +377,7 @@ CREATE TABLE IF NOT EXISTS oximeter.fields_i8
 )
 ENGINE = ReplacingMergeTree()
 ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
---
+
 CREATE TABLE IF NOT EXISTS oximeter.fields_u8
 (
     timeseries_name String,
@@ -359,7 +387,7 @@ CREATE TABLE IF NOT EXISTS oximeter.fields_u8
 )
 ENGINE = ReplacingMergeTree()
 ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
---
+
 CREATE TABLE IF NOT EXISTS oximeter.fields_i16
 (
     timeseries_name String,
@@ -369,7 +397,7 @@ CREATE TABLE IF NOT EXISTS oximeter.fields_i16
 )
 ENGINE = ReplacingMergeTree()
 ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
---
+
 CREATE TABLE IF NOT EXISTS oximeter.fields_u16
 (
     timeseries_name String,
@@ -379,7 +407,7 @@ CREATE TABLE IF NOT EXISTS oximeter.fields_u16
 )
 ENGINE = ReplacingMergeTree()
 ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
---
+
 CREATE TABLE IF NOT EXISTS oximeter.fields_i32
 (
     timeseries_name String,
@@ -389,7 +417,7 @@ CREATE TABLE IF NOT EXISTS oximeter.fields_i32
 )
 ENGINE = ReplacingMergeTree()
 ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
---
+
 CREATE TABLE IF NOT EXISTS oximeter.fields_u32
 (
     timeseries_name String,
@@ -399,7 +427,7 @@ CREATE TABLE IF NOT EXISTS oximeter.fields_u32
 )
 ENGINE = ReplacingMergeTree()
 ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
---
+
 CREATE TABLE IF NOT EXISTS oximeter.fields_i64
 (
     timeseries_name String,
@@ -409,7 +437,7 @@ CREATE TABLE IF NOT EXISTS oximeter.fields_i64
 )
 ENGINE = ReplacingMergeTree()
 ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
---
+
 CREATE TABLE IF NOT EXISTS oximeter.fields_u64
 (
     timeseries_name String,
@@ -419,7 +447,7 @@ CREATE TABLE IF NOT EXISTS oximeter.fields_u64
 )
 ENGINE = ReplacingMergeTree()
 ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
---
+
 CREATE TABLE IF NOT EXISTS oximeter.fields_ipaddr
 (
     timeseries_name String,
@@ -429,7 +457,7 @@ CREATE TABLE IF NOT EXISTS oximeter.fields_ipaddr
 )
 ENGINE = ReplacingMergeTree()
 ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
---
+
 CREATE TABLE IF NOT EXISTS oximeter.fields_string
 (
     timeseries_name String,
@@ -439,7 +467,7 @@ CREATE TABLE IF NOT EXISTS oximeter.fields_string
 )
 ENGINE = ReplacingMergeTree()
 ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
---
+
 CREATE TABLE IF NOT EXISTS oximeter.fields_uuid
 (
     timeseries_name String,
@@ -449,7 +477,10 @@ CREATE TABLE IF NOT EXISTS oximeter.fields_uuid
 )
 ENGINE = ReplacingMergeTree()
 ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
---
+
+/* The timeseries schema table stores the extracted schema for the samples
+ * oximeter collects.
+ */
 CREATE TABLE IF NOT EXISTS oximeter.timeseries_schema
 (
     timeseries_name String,
