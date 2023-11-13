@@ -29,42 +29,49 @@ impl DataStore {
         opctx: &OpContext,
         nat_entry: Ipv4NatValues,
     ) -> CreateResult<()> {
-        // Ensure that the record with the parameters we want exists in the
-        // database. If an entry exists with the same external ip but
-        // different target sled / vpc / mac, we will violate a uniqueness
-        // constraint (which is desired in this case).
-        //
-        // It seems that this isn't straightforward to express in diesel
-        sql_query(
-            "
-            INSERT INTO omicron.public.ipv4_nat_entry (
-                external_address,
-                first_port,
-                last_port,
-                sled_address,
-                vni,
-                mac
-            )
-            SELECT external_address, first_port, last_port, sled_address, vni, mac
-            FROM ( VALUES ($1, $2, $3, $4, $5, $6) ) AS data (external_address, first_port, last_port, sled_address, vni, mac)
-            WHERE NOT EXISTS (
-                SELECT external_address, first_port, last_port, sled_address, vni, mac
-                FROM omicron.public.ipv4_nat_entry as entry
-                WHERE data.external_address = entry.external_address
-                AND data.first_port = entry.first_port
-                AND data.last_port = entry.last_port
-                AND data.sled_address = entry.sled_address
-                AND data.vni = entry.vni
-                AND data.mac = entry.mac
-            )
-            ",
-        )
-            .bind::<Inet, _>(nat_entry.external_address)
-            .bind::<Integer, _>(nat_entry.first_port)
-            .bind::<Integer, _>(nat_entry.last_port)
-            .bind::<Inet, _>(nat_entry.sled_address)
-            .bind::<Integer, _>(nat_entry.vni)
-            .bind::<BigInt, _>(nat_entry.mac)
+        use db::schema::ipv4_nat_entry::dsl;
+        use diesel::sql_types;
+
+        // Look up any NAT entries that already have the exact parameters
+        // we're trying to INSERT.
+        let matching_entry_subquery = dsl::ipv4_nat_entry
+            .filter(dsl::external_address.eq(nat_entry.external_address))
+            .filter(dsl::first_port.eq(nat_entry.first_port))
+            .filter(dsl::last_port.eq(nat_entry.last_port))
+            .filter(dsl::sled_address.eq(nat_entry.sled_address))
+            .filter(dsl::vni.eq(nat_entry.vni))
+            .filter(dsl::mac.eq(nat_entry.mac))
+            .select((
+                dsl::external_address,
+                dsl::first_port,
+                dsl::last_port,
+                dsl::sled_address,
+                dsl::vni,
+                dsl::mac,
+            ));
+
+        // SELECT exactly the values we're trying to INSERT, but only
+        // if it does not already exist.
+        let new_entry_subquery = diesel::dsl::select((
+            nat_entry.external_address.into_sql::<sql_types::Inet>(),
+            nat_entry.first_port.into_sql::<sql_types::Int4>(),
+            nat_entry.last_port.into_sql::<sql_types::Int4>(),
+            nat_entry.sled_address.into_sql::<sql_types::Inet>(),
+            nat_entry.vni.into_sql::<sql_types::Int4>(),
+            nat_entry.mac.into_sql::<sql_types::BigInt>(),
+        ))
+        .filter(diesel::dsl::not(diesel::dsl::exists(matching_entry_subquery)));
+
+        diesel::insert_into(dsl::ipv4_nat_entry)
+            .values(new_entry_subquery)
+            .into_columns((
+                dsl::external_address,
+                dsl::first_port,
+                dsl::last_port,
+                dsl::sled_address,
+                dsl::vni,
+                dsl::mac,
+            ))
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
