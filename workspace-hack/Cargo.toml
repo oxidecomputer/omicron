@@ -66,12 +66,11 @@ num-bigint = { version = "0.4.4", features = ["rand"] }
 num-integer = { version = "0.1.45", features = ["i128"] }
 num-iter = { version = "0.1.43", default-features = false, features = ["i128"] }
 num-traits = { version = "0.2.16", features = ["i128", "libm"] }
-openapiv3 = { version = "1.0.3", default-features = false, features = ["skip_serializing_defaults"] }
 petgraph = { version = "0.6.4", features = ["serde-1"] }
 postgres-types = { version = "0.2.6", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 ppv-lite86 = { version = "0.2.17", default-features = false, features = ["simd", "std"] }
 predicates = { version = "3.0.4" }
-proc-macro2 = { version = "1.0.67" }
+proc-macro2 = { version = "1.0.69" }
 rand = { version = "0.8.5", features = ["min_const_gen", "small_rng"] }
 rand_chacha = { version = "0.3.1" }
 regex = { version = "1.10.2" }
@@ -81,7 +80,7 @@ reqwest = { version = "0.11.20", features = ["blocking", "json", "rustls-tls", "
 ring = { version = "0.16.20", features = ["std"] }
 schemars = { version = "0.8.13", features = ["bytes", "chrono", "uuid1"] }
 semver = { version = "1.0.20", features = ["serde"] }
-serde = { version = "1.0.188", features = ["alloc", "derive", "rc"] }
+serde = { version = "1.0.192", features = ["alloc", "derive", "rc"] }
 serde_json = { version = "1.0.108", features = ["raw_value"] }
 sha2 = { version = "0.10.8", features = ["oid"] }
 signature = { version = "2.1.0", default-features = false, features = ["digest", "rand_core", "std"] }
@@ -162,12 +161,11 @@ num-bigint = { version = "0.4.4", features = ["rand"] }
 num-integer = { version = "0.1.45", features = ["i128"] }
 num-iter = { version = "0.1.43", default-features = false, features = ["i128"] }
 num-traits = { version = "0.2.16", features = ["i128", "libm"] }
-openapiv3 = { version = "1.0.3", default-features = false, features = ["skip_serializing_defaults"] }
 petgraph = { version = "0.6.4", features = ["serde-1"] }
 postgres-types = { version = "0.2.6", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 ppv-lite86 = { version = "0.2.17", default-features = false, features = ["simd", "std"] }
 predicates = { version = "3.0.4" }
-proc-macro2 = { version = "1.0.67" }
+proc-macro2 = { version = "1.0.69" }
 rand = { version = "0.8.5", features = ["min_const_gen", "small_rng"] }
 rand_chacha = { version = "0.3.1" }
 regex = { version = "1.10.2" }
@@ -178,7 +176,7 @@ reqwest = { version = "0.11.20", features = ["blocking", "json", "rustls-tls", "
 ring = { version = "0.16.20", features = ["std"] }
 schemars = { version = "0.8.13", features = ["bytes", "chrono", "uuid1"] }
 semver = { version = "1.0.20", features = ["serde"] }
-serde = { version = "1.0.188", features = ["alloc", "derive", "rc"] }
+serde = { version = "1.0.192", features = ["alloc", "derive", "rc"] }
 serde_json = { version = "1.0.108", features = ["raw_value"] }
 sha2 = { version = "0.10.8", features = ["oid"] }
 signature = { version = "2.1.0", default-features = false, features = ["digest", "rand_core", "std"] }

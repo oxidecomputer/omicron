@@ -679,18 +679,6 @@
     }
   },
   "components": {
-    "responses": {
-      "Error": {
-        "description": "Error",
-        "content": {
-          "application/json": {
-            "schema": {
-              "$ref": "#/components/schemas/Error"
-            }
-          }
-        }
-      }
-    },
     "schemas": {
       "ActivationReason": {
         "description": "Describes why a background task was activated\n\nThis is only used for debugging.  This is deliberately not made available to the background task itself.  See \"Design notes\" in the module-level documentation for details.",
@@ -5409,6 +5397,18 @@
             ]
           }
         ]
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "Error",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
       }
     }
   }
