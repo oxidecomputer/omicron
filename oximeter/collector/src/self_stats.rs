@@ -13,6 +13,7 @@ use oximeter::Metric;
 use oximeter::MetricsError;
 use oximeter::Sample;
 use oximeter::Target;
+use reqwest::StatusCode;
 use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::time::Duration;
@@ -50,27 +51,25 @@ pub struct Collections {
 
 /// Small enum to help understand why oximeter failed to collect from a
 /// producer.
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Eq,
-    Hash,
-    Ord,
-    PartialEq,
-    PartialOrd,
-    strum::EnumIter,
-    strum::Display,
-)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[non_exhaustive]
-#[strum(serialize_all = "snake_case")]
 pub enum FailureReason {
     /// The producer could not be reached.
     Unreachable,
     /// Error during deserialization.
     Deserialization,
-    /// Some unknown reason.
-    Other,
+    /// Some other reason, which includes the status code.
+    Other(StatusCode),
+}
+
+impl std::fmt::Display for FailureReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            Self::Unreachable => write!(f, "unreachable"),
+            Self::Deserialization => write!(f, "deserialization"),
+            Self::Other(c) => write!(f, "{}", c.as_u16()),
+        }
+    }
 }
 
 /// The number of failed collections from a single producer.
@@ -150,5 +149,23 @@ impl CollectionTaskStats {
                 .map(|metric| to_item(Sample::new(&self.collector, metric))),
         );
         samples
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FailureReason;
+    use super::StatusCode;
+
+    #[test]
+    fn test_failure_reason_serialization() {
+        let data = &[
+            (FailureReason::Deserialization, "deserialization"),
+            (FailureReason::Unreachable, "unreachable"),
+            (FailureReason::Other(StatusCode::INTERNAL_SERVER_ERROR), "500"),
+        ];
+        for (variant, as_str) in data.iter() {
+            assert_eq!(variant.to_string(), *as_str);
+        }
     }
 }

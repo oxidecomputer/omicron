@@ -107,19 +107,23 @@ async fn perform_collection(
                     "status_code" => res.status().as_u16(),
                 );
                 self_target
-                    .failures_for_reason(
-                        self_stats::FailureReason::Deserialization,
-                    )
+                    .failures_for_reason(self_stats::FailureReason::Other(
+                        res.status(),
+                    ))
                     .datum
                     .increment()
             }
         }
         Err(e) => {
-            warn!(
+            error!(
                 log,
                 "failed to send collection request to producer";
                 "error" => ?e
             );
+            self_target
+                .failures_for_reason(self_stats::FailureReason::Unreachable)
+                .datum
+                .increment()
         }
     }
 }
@@ -313,6 +317,9 @@ async fn results_sink(
             // TODO-correctness The `insert_samples` call above may fail. The method itself needs
             // better handling of partially-inserted results in that case, but we may need to retry
             // or otherwise handle an error here as well.
+            //
+            // See https://github.com/oxidecomputer/omicron/issues/740 for a
+            // disucssion.
             batch.clear();
         }
 
@@ -425,6 +432,13 @@ impl OximeterAgent {
     }
 
     /// Construct a new standalone `oximeter` collector.
+    ///
+    /// In this mode, `oximeter` can be used to test the collection of metrics
+    /// from producers, without requiring all the normal machinery of the
+    /// control plane. The collector is run as usual, but additionally starts a
+    /// API server to stand-in for Nexus. The registrations of the producers and
+    /// collectors occurs through the normal code path, but uses this mock Nexus
+    /// instead of the real thing.
     pub async fn new_standalone(
         id: Uuid,
         address: SocketAddrV6,
