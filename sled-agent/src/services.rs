@@ -3729,8 +3729,8 @@ mod test {
         let ddmd_client = DdmAdminClient::localhost(&log).unwrap();
         let bootstrap_networking = make_bootstrap_networking_config();
 
-        // First, spin up a ServiceManager, create a new service, and tear it
-        // down.
+        // First, spin up a ServiceManager, create a new zone, and then tear
+        // down the ServiceManager.
         let resources = StorageResources::new_for_test();
         let zone_bundler = ZoneBundler::new(
             log.clone(),
@@ -3767,10 +3767,10 @@ mod test {
         ensure_new_service(&mgr, id).await;
         drop_service_manager(mgr);
 
-        // Next, delete the ledger. This means the service we just created will
-        // not be remembered on the next initialization.
+        // Next, delete the ledger. This means the zone we just created will not
+        // be remembered on the next initialization.
         std::fs::remove_file(
-            test_config.config_dir.path().join(SERVICES_LEDGER_FILENAME),
+            test_config.config_dir.path().join(ZONES_LEDGER_FILENAME),
         )
         .unwrap();
 
