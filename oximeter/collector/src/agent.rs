@@ -54,6 +54,11 @@ enum CollectionMessage {
     Update(ProducerEndpoint),
     // Request that the task exit
     Shutdown,
+    // Return the current statistics from a single task.
+    #[cfg(test)]
+    Statistics {
+        reply_tx: oneshot::Sender<self_stats::CollectionTaskStats>,
+    },
 }
 
 async fn perform_collection(
@@ -181,6 +186,14 @@ async fn collection_task(
                         );
                         collection_timer = interval(producer.interval);
                         collection_timer.tick().await; // completes immediately
+                    }
+                    #[cfg(test)]
+                    Some(CollectionMessage::Statistics { reply_tx }) => {
+                        debug!(
+                            log,
+                            "received request for current task statistics"
+                        );
+                        reply_tx.send(stats.clone()).expect("failed to send statistics");
                     }
                 }
             }
@@ -490,9 +503,6 @@ impl OximeterAgent {
             collector_ip: (*address.ip()).into(),
             collector_port: address.port(),
         };
-
-        // Construct the ClickHouse client first, propagate an error if we can't reach the
-        // database.
         Ok(Self {
             id,
             log,
@@ -622,5 +632,258 @@ impl OximeterAgent {
             ),
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CollectionMessage;
+    use super::OximeterAgent;
+    use super::ProducerEndpoint;
+    use crate::self_stats::FailureReason;
+    use hyper::service::make_service_fn;
+    use hyper::service::service_fn;
+    use hyper::Body;
+    use hyper::Request;
+    use hyper::Response;
+    use hyper::Server;
+    use hyper::StatusCode;
+    use omicron_test_utils::dev::test_setup_log;
+    use std::convert::Infallible;
+    use std::net::Ipv6Addr;
+    use std::net::SocketAddr;
+    use std::net::SocketAddrV6;
+    use std::time::Duration;
+    use tokio::sync::oneshot;
+    use tokio::time::Instant;
+    use uuid::Uuid;
+
+    // Test that we count successful collections from a target correctly.
+    #[tokio::test]
+    async fn test_self_stat_collection_count() {
+        let logctx = test_setup_log("test_self_stat_collection_count");
+        let log = &logctx.log;
+
+        // Spawn an oximeter collector ...
+        let collector = OximeterAgent::new_standalone(
+            Uuid::new_v4(),
+            SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0),
+            None,
+            log,
+        )
+        .await
+        .unwrap();
+
+        // And a dummy server that will always report empty statistics. There
+        // will be no actual data here, but the sample counter will increment.
+        let addr =
+            SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0));
+        async fn handler(
+            _: Request<Body>,
+        ) -> Result<Response<Body>, Infallible> {
+            Ok(Response::new(Body::from("[]")))
+        }
+        let make_svc = make_service_fn(|_conn| async {
+            Ok::<_, Infallible>(service_fn(handler))
+        });
+        let server = Server::bind(&addr).serve(make_svc);
+        let address = server.local_addr();
+        let _task = tokio::task::spawn(server);
+
+        // Register the dummy producer.
+        let interval = Duration::from_secs(1);
+        let endpoint = ProducerEndpoint {
+            id: Uuid::new_v4(),
+            address,
+            base_route: String::from("/"),
+            interval,
+        };
+        collector
+            .register_producer(endpoint)
+            .await
+            .expect("failed to register dummy producer");
+
+        // Step time until there has been exactly `N_COLLECTIONS` collections.
+        tokio::time::pause();
+        let now = Instant::now();
+        const N_COLLECTIONS: usize = 5;
+        let wait_for = interval * N_COLLECTIONS as u32 + interval / 2;
+        while now.elapsed() < wait_for {
+            tokio::time::advance(interval / 10).await;
+        }
+
+        // Request the statistics from the task itself.
+        let (reply_tx, rx) = oneshot::channel();
+        collector
+            .collection_tasks
+            .lock()
+            .await
+            .values()
+            .next()
+            .unwrap()
+            .1
+            .inbox
+            .send(CollectionMessage::Statistics { reply_tx })
+            .await
+            .expect("failed to request statistics from task");
+        let stats = rx.await.expect("failed to receive statistics from task");
+        assert_eq!(stats.collections.datum.value(), N_COLLECTIONS as u64);
+        assert!(stats.failed_collections.is_empty());
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_self_stat_unreachable_counter() {
+        let logctx = test_setup_log("test_self_stat_unreachable_counter");
+        let log = &logctx.log;
+
+        // Spawn an oximeter collector ...
+        let collector = OximeterAgent::new_standalone(
+            Uuid::new_v4(),
+            SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0),
+            None,
+            log,
+        )
+        .await
+        .unwrap();
+
+        // Register a bogus producer, which is equivalent to a producer that is
+        // unreachable.
+        let interval = Duration::from_secs(1);
+        let endpoint = ProducerEndpoint {
+            id: Uuid::new_v4(),
+            address: SocketAddr::V6(SocketAddrV6::new(
+                Ipv6Addr::LOCALHOST,
+                0,
+                0,
+                0,
+            )),
+            base_route: String::from("/"),
+            interval,
+        };
+        collector
+            .register_producer(endpoint)
+            .await
+            .expect("failed to register bogus producer");
+
+        // Step time until there has been exactly `N_COLLECTIONS` collections.
+        tokio::time::pause();
+        let now = Instant::now();
+        const N_COLLECTIONS: usize = 5;
+        let wait_for = interval * N_COLLECTIONS as u32 + interval / 2;
+        while now.elapsed() < wait_for {
+            tokio::time::advance(interval / 10).await;
+        }
+
+        // Request the statistics from the task itself.
+        let (reply_tx, rx) = oneshot::channel();
+        collector
+            .collection_tasks
+            .lock()
+            .await
+            .values()
+            .next()
+            .unwrap()
+            .1
+            .inbox
+            .send(CollectionMessage::Statistics { reply_tx })
+            .await
+            .expect("failed to request statistics from task");
+        let stats = rx.await.expect("failed to receive statistics from task");
+        assert_eq!(stats.collections.datum.value(), 0);
+        assert_eq!(
+            stats
+                .failed_collections
+                .get(&FailureReason::Unreachable)
+                .unwrap()
+                .datum
+                .value(),
+            N_COLLECTIONS as u64
+        );
+        assert_eq!(stats.failed_collections.len(), 1);
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_self_stat_error_counter() {
+        let logctx = test_setup_log("test_self_stat_error_counter");
+        let log = &logctx.log;
+
+        // Spawn an oximeter collector ...
+        let collector = OximeterAgent::new_standalone(
+            Uuid::new_v4(),
+            SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0),
+            None,
+            log,
+        )
+        .await
+        .unwrap();
+
+        // And a dummy server that will always fail with a 500.
+        let addr =
+            SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0));
+        async fn handler(
+            _: Request<Body>,
+        ) -> Result<Response<Body>, Infallible> {
+            let mut res = Response::new(Body::from("im ded"));
+            *res.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+            Ok(res)
+        }
+        let make_svc = make_service_fn(|_conn| async {
+            Ok::<_, Infallible>(service_fn(handler))
+        });
+        let server = Server::bind(&addr).serve(make_svc);
+        let address = server.local_addr();
+        let _task = tokio::task::spawn(server);
+
+        // Register the rather flaky producer.
+        let interval = Duration::from_secs(1);
+        let endpoint = ProducerEndpoint {
+            id: Uuid::new_v4(),
+            address,
+            base_route: String::from("/"),
+            interval,
+        };
+        collector
+            .register_producer(endpoint)
+            .await
+            .expect("failed to register flaky producer");
+
+        // Step time until there has been exactly `N_COLLECTIONS` collections.
+        tokio::time::pause();
+        let now = Instant::now();
+        const N_COLLECTIONS: usize = 5;
+        let wait_for = interval * N_COLLECTIONS as u32 + interval / 2;
+        while now.elapsed() < wait_for {
+            tokio::time::advance(interval / 10).await;
+        }
+
+        // Request the statistics from the task itself.
+        let (reply_tx, rx) = oneshot::channel();
+        collector
+            .collection_tasks
+            .lock()
+            .await
+            .values()
+            .next()
+            .unwrap()
+            .1
+            .inbox
+            .send(CollectionMessage::Statistics { reply_tx })
+            .await
+            .expect("failed to request statistics from task");
+        let stats = rx.await.expect("failed to receive statistics from task");
+        assert_eq!(stats.collections.datum.value(), 0);
+        assert_eq!(
+            stats
+                .failed_collections
+                .get(&FailureReason::Other(StatusCode::INTERNAL_SERVER_ERROR))
+                .unwrap()
+                .datum
+                .value(),
+            N_COLLECTIONS as u64
+        );
+        assert_eq!(stats.failed_collections.len(), 1);
+        logctx.cleanup_successful();
     }
 }

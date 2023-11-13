@@ -34,7 +34,7 @@ pub struct OximeterCollector {
 }
 
 /// The number of successful collections from a single producer.
-#[derive(Debug, Metric)]
+#[derive(Clone, Debug, Metric)]
 pub struct Collections {
     /// The producer's ID.
     pub producer_id: Uuid,
@@ -73,7 +73,7 @@ impl std::fmt::Display for FailureReason {
 }
 
 /// The number of failed collections from a single producer.
-#[derive(Debug, Metric)]
+#[derive(Clone, Debug, Metric)]
 pub struct FailedCollections {
     /// The producer's ID.
     pub producer_id: Uuid,
@@ -93,7 +93,7 @@ pub struct FailedCollections {
 }
 
 /// Oximeter collection statistics maintained by each collection task.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct CollectionTaskStats {
     pub collector: OximeterCollector,
     pub collections: Collections,

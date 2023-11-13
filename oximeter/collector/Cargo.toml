@@ -36,6 +36,7 @@ omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 expectorate.workspace = true
+hyper.workspace = true
 omicron-test-utils.workspace = true
 openapi-lint.workspace = true
 openapiv3.workspace = true

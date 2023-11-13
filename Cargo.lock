@@ -5809,6 +5809,7 @@ dependencies = [
  "dropshot",
  "expectorate",
  "futures",
+ "hyper",
  "internal-dns 0.1.0",
  "nexus-client 0.1.0",
  "nexus-types",
