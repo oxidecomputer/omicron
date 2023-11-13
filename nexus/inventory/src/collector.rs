@@ -6,8 +6,13 @@
 
 use crate::builder::CollectionBuilder;
 use anyhow::Context;
+use gateway_client::types::GetCfpaParams;
+use gateway_client::types::RotCfpaSlot;
+use gateway_messages::SpComponent;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
+use nexus_types::inventory::RotPage;
+use nexus_types::inventory::RotPageWhich;
 use slog::{debug, error};
 use std::sync::Arc;
 use strum::IntoEnumIterator;
@@ -195,6 +200,84 @@ impl Collector {
                     );
                 }
             }
+
+            // For each kind of RoT page that we care about, if it hasn't been
+            // fetched already, fetch it and record it.  Generally, we'd only
+            // get here for the first MGS client.  Assuming that one succeeds,
+            // the other(s) will skip this loop.
+            for which in RotPageWhich::iter() {
+                if self.in_progress.found_rot_page_already(&baseboard_id, which)
+                {
+                    continue;
+                }
+
+                let component = SpComponent::ROT.const_as_str();
+
+                let result = match which {
+                    RotPageWhich::Cmpa => client
+                        .sp_rot_cmpa_get(sp.type_, sp.slot, component)
+                        .await
+                        .map(|response| response.into_inner().base64_data),
+                    RotPageWhich::CfpaActive => client
+                        .sp_rot_cfpa_get(
+                            sp.type_,
+                            sp.slot,
+                            component,
+                            &GetCfpaParams { slot: RotCfpaSlot::Active },
+                        )
+                        .await
+                        .map(|response| response.into_inner().base64_data),
+                    RotPageWhich::CfpaInactive => client
+                        .sp_rot_cfpa_get(
+                            sp.type_,
+                            sp.slot,
+                            component,
+                            &GetCfpaParams { slot: RotCfpaSlot::Inactive },
+                        )
+                        .await
+                        .map(|response| response.into_inner().base64_data),
+                    RotPageWhich::CfpaScratch => client
+                        .sp_rot_cfpa_get(
+                            sp.type_,
+                            sp.slot,
+                            component,
+                            &GetCfpaParams { slot: RotCfpaSlot::Scratch },
+                        )
+                        .await
+                        .map(|response| response.into_inner().base64_data),
+                }
+                .with_context(|| {
+                    format!(
+                        "MGS {:?}: SP {:?}: rot page {:?}",
+                        client.baseurl(),
+                        sp,
+                        which
+                    )
+                });
+
+                let page = match result {
+                    Err(error) => {
+                        self.in_progress.found_error(error);
+                        continue;
+                    }
+                    Ok(data_base64) => RotPage { data_base64 },
+                };
+                if let Err(error) = self.in_progress.found_rot_page(
+                    &baseboard_id,
+                    which,
+                    client.baseurl(),
+                    page,
+                ) {
+                    error!(
+                        &self.log,
+                        "error reporting rot page: {:?} {:?} {:?}: {:#}",
+                        baseboard_id,
+                        which,
+                        client.baseurl(),
+                        error
+                    );
+                }
+            }
         }
     }
 }
@@ -236,6 +319,11 @@ mod test {
             .unwrap();
         }
 
+        write!(&mut s, "\nrot pages:\n").unwrap();
+        for p in &collection.rot_pages {
+            write!(&mut s, "    data_base64 {:?}\n", p.data_base64).unwrap();
+        }
+
         // All we really need to check here is that we're reporting the right
         // SPs, RoTs, and cabooses.  The actual SP data, RoT data, and caboose
         // data comes straight from MGS.  And proper handling of that data is
@@ -267,6 +355,22 @@ mod test {
                     &mut s,
                     "    {:?} baseboard part {:?} serial {:?}: board {:?}\n",
                     kind, bb.part_number, bb.serial_number, found.caboose.board,
+                )
+                .unwrap();
+            }
+        }
+
+        write!(&mut s, "\nrot pages found:\n").unwrap();
+        for (kind, bb_to_found) in &collection.rot_pages_found {
+            for (bb, found) in bb_to_found {
+                write!(
+                    &mut s,
+                    "    {:?} baseboard part {:?} serial {:?}: \
+                              data_base64 {:?}\n",
+                    kind,
+                    bb.part_number,
+                    bb.serial_number,
+                    found.page.data_base64
                 )
                 .unwrap();
             }
