@@ -336,18 +336,20 @@ mod test {
 
         // Each change (creation / deletion) to the NAT table should increment the
         // version number of the row in the NAT table
-        let external_address =
-            ipnetwork::IpNetwork::try_from("10.0.0.100").unwrap();
+        let external_address = external::Ipv4Net(
+            ipnetwork::Ipv4Network::try_from("10.0.0.100").unwrap(),
+        );
 
-        let sled_address =
-            ipnetwork::IpNetwork::try_from("fd00:1122:3344:104::1").unwrap();
+        let sled_address = external::Ipv6Net(
+            ipnetwork::Ipv6Network::try_from("fd00:1122:3344:104::1").unwrap(),
+        );
 
         // Add a nat entry.
         let nat1 = Ipv4NatValues {
-            external_address,
+            external_address: external_address.into(),
             first_port: 0.into(),
             last_port: 999.into(),
-            sled_address,
+            sled_address: sled_address.into(),
             vni: Vni(external::Vni::random()),
             mac: MacAddr(
                 external::MacAddr::from_str("A8:40:25:F5:EB:2A").unwrap(),
@@ -372,10 +374,10 @@ mod test {
 
         // Add another nat entry.
         let nat2 = Ipv4NatValues {
-            external_address,
+            external_address: external_address.into(),
             first_port: 1000.into(),
             last_port: 1999.into(),
-            sled_address,
+            sled_address: sled_address.into(),
             vni: Vni(external::Vni::random()),
             mac: MacAddr(
                 external::MacAddr::from_str("A8:40:25:F5:EB:2B").unwrap(),

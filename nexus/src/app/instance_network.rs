@@ -6,6 +6,7 @@
 
 use crate::app::sagas::retry_until_known_result;
 use ipnetwork::IpNetwork;
+use ipnetwork::Ipv6Network;
 use nexus_db_model::Ipv4NatValues;
 use nexus_db_model::Vni as DbVni;
 use nexus_db_queries::authz;
@@ -15,12 +16,13 @@ use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::lookup::LookupPath;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::Ipv4Net;
+use omicron_common::api::external::Ipv6Net;
 use omicron_common::api::internal::nexus;
 use omicron_common::api::internal::shared::SwitchLocation;
 use sled_agent_client::types::DeleteVirtualNetworkInterfaceHost;
 use sled_agent_client::types::SetVirtualNetworkInterfaceHost;
 use std::collections::HashSet;
-use std::net::IpAddr;
 use std::str::FromStr;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -351,6 +353,9 @@ impl super::Nexus {
             }
         }
 
+        let sled_address =
+            Ipv6Net(Ipv6Network::new(*sled_ip_address.ip(), 128).unwrap());
+
         for target_ip in ips
             .iter()
             .enumerate()
@@ -364,21 +369,14 @@ impl super::Nexus {
             .map(|(_, ip)| ip)
         {
             // For each external ip, add a nat entry to the database
-            let nat_entry = Ipv4NatValues {
-                external_address: target_ip.ip,
-                first_port: target_ip.first_port,
-                last_port: target_ip.last_port,
-                sled_address: IpNetwork::new(
-                    IpAddr::V6(*sled_ip_address.ip()),
-                    128,
-                )
-                .unwrap(),
-                vni: DbVni(network_interface.vni.clone().into()),
-                mac: nexus_db_model::MacAddr(
-                    omicron_common::api::external::MacAddr(mac_address),
-                ),
-            };
-            self.db_datastore.ensure_ipv4_nat_entry(opctx, nat_entry).await?;
+            self.ensure_nat_entry(
+                target_ip,
+                sled_address,
+                &network_interface,
+                mac_address,
+                opctx,
+            )
+            .await?;
         }
 
         // Notify dendrite that there are changes for it to reconcile.
@@ -388,6 +386,37 @@ impl super::Nexus {
             error!(self.log, "failed to notify dendrite of nat updates"; "error" => ?e);
         };
 
+        Ok(())
+    }
+
+    async fn ensure_nat_entry(
+        &self,
+        target_ip: &nexus_db_model::ExternalIp,
+        sled_address: Ipv6Net,
+        network_interface: &sled_agent_client::types::NetworkInterface,
+        mac_address: macaddr::MacAddr6,
+        opctx: &OpContext,
+    ) -> Result<(), Error> {
+        match target_ip.ip {
+            IpNetwork::V4(v4net) => {
+                let nat_entry = Ipv4NatValues {
+                    external_address: Ipv4Net(v4net).into(),
+                    first_port: target_ip.first_port,
+                    last_port: target_ip.last_port,
+                    sled_address: sled_address.into(),
+                    vni: DbVni(network_interface.vni.clone().into()),
+                    mac: nexus_db_model::MacAddr(
+                        omicron_common::api::external::MacAddr(mac_address),
+                    ),
+                };
+                self.db_datastore
+                    .ensure_ipv4_nat_entry(opctx, nat_entry)
+                    .await?;
+            }
+            IpNetwork::V6(_v6net) => {
+                // TODO: implement handling of v6 nat.
+            }
+        };
         Ok(())
     }
 
