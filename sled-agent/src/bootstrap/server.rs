@@ -452,7 +452,15 @@ async fn start_sled_agent(
 
     if request.body.use_trust_quorum && request.body.is_lrtq_learner {
         info!(log, "Initializing sled as learner");
-        bootstore.init_learner().await?;
+        match bootstore.init_learner().await {
+            Err(bootstore::NodeRequestError::Fsm(
+                bootstore::ApiError::AlreadyInitialized,
+            )) => {
+                // This is a cold boot. Let's ignore this error and continue.
+            }
+            Err(e) => return Err(e.into()),
+            Ok(()) => (),
+        }
     }
 
     // Inform the storage service that the key manager is available

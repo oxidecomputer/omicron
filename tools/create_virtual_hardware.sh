@@ -63,8 +63,9 @@ function ensure_softnpu_zone {
             --omicron-zone \
             --ports sc0_0,tfportrear0_0 \
             --ports sc0_1,tfportqsfp0_0 \
-            --sidecar-lite-branch main
-    }
+            --sidecar-lite-commit f0585a29fb0285f7a1220c1118856b0e5c1f75c5 \
+            --softnpu-commit dec63e67156fe6e958991bbfa090629868115ab5
+     }
     "$SOURCE_DIR"/scrimlet/softnpu-init.sh
     success "softnpu zone exists"
 }

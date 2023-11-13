@@ -23,6 +23,8 @@ use dropshot::PaginationOrder;
 use dropshot::ResultsPage;
 use dropshot::WhichPage;
 use oximeter::types::Sample;
+use regex::Regex;
+use regex::RegexBuilder;
 use slog::debug;
 use slog::error;
 use slog::info;
@@ -35,6 +37,11 @@ use std::collections::BTreeSet;
 use std::convert::TryFrom;
 use std::net::SocketAddr;
 use std::num::NonZeroU32;
+use std::ops::Bound;
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::OnceLock;
+use tokio::fs;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
@@ -267,13 +274,318 @@ impl Client {
         .map_err(|e| Error::Database(e.to_string()))
     }
 
+    /// Read the available schema versions in the provided directory.
+    pub async fn read_available_schema_versions(
+        log: &Logger,
+        is_replicated: bool,
+        schema_dir: impl AsRef<Path>,
+    ) -> Result<BTreeSet<u64>, Error> {
+        let dir = schema_dir.as_ref().join(if is_replicated {
+            "replicated"
+        } else {
+            "single-node"
+        });
+        let mut rd =
+            fs::read_dir(&dir).await.map_err(|err| Error::ReadSchemaDir {
+                context: format!(
+                    "Failed to read schema directory '{}'",
+                    dir.display()
+                ),
+                err,
+            })?;
+        let mut versions = BTreeSet::new();
+        debug!(log, "reading entries from schema dir"; "dir" => dir.display());
+        while let Some(entry) =
+            rd.next_entry().await.map_err(|err| Error::ReadSchemaDir {
+                context: String::from("Failed to read directory entry"),
+                err,
+            })?
+        {
+            let name = entry
+                .file_name()
+                .into_string()
+                .map_err(|bad| Error::NonUtf8SchemaDirEntry(bad.to_owned()))?;
+            let md =
+                entry.metadata().await.map_err(|err| Error::ReadSchemaDir {
+                    context: String::from("Failed to fetch entry metatdata"),
+                    err,
+                })?;
+            if !md.is_dir() {
+                debug!(log, "skipping non-directory"; "name" => &name);
+                continue;
+            }
+            match name.parse() {
+                Ok(ver) => {
+                    debug!(log, "valid version dir"; "ver" => ver);
+                    assert!(versions.insert(ver), "Versions should be unique");
+                }
+                Err(e) => warn!(
+                    log,
+                    "found directory with non-u64 name, skipping";
+                    "name" => name,
+                    "error" => ?e,
+                ),
+            }
+        }
+        Ok(versions)
+    }
+
+    /// Ensure that the database is upgraded to the desired version of the
+    /// schema.
+    ///
+    /// NOTE: This function is not safe for concurrent usage!
+    pub async fn ensure_schema(
+        &self,
+        replicated: bool,
+        desired_version: u64,
+        schema_dir: impl AsRef<Path>,
+    ) -> Result<(), Error> {
+        let schema_dir = schema_dir.as_ref();
+        let latest = self.read_latest_version().await?;
+        if latest == desired_version {
+            debug!(
+                self.log,
+                "database already at desired version";
+                "version" => latest,
+            );
+            return Ok(());
+        }
+        debug!(
+            self.log,
+            "starting upgrade to desired version {}", desired_version
+        );
+        let available = Self::read_available_schema_versions(
+            &self.log, replicated, schema_dir,
+        )
+        .await?;
+        // We explicitly ignore version 0, which implies the database doesn't
+        // exist at all.
+        if latest > 0 && !available.contains(&latest) {
+            return Err(Error::MissingSchemaVersion(latest));
+        }
+        if !available.contains(&desired_version) {
+            return Err(Error::MissingSchemaVersion(desired_version));
+        }
+
+        // Check we have no gaps in version numbers, starting with the latest
+        // version and walking through all available ones strictly greater. This
+        // is to check that the _next_ version is also 1 greater than the
+        // latest.
+        let range = (Bound::Excluded(latest), Bound::Included(desired_version));
+        if available
+            .range(latest..)
+            .zip(available.range(range))
+            .any(|(current, next)| next - current != 1)
+        {
+            return Err(Error::NonSequentialSchemaVersions);
+        }
+
+        // Walk through all changes between current version (exclusive) and
+        // the desired version (inclusive).
+        let versions_to_apply = available.range(range);
+        let mut current = latest;
+        for version in versions_to_apply {
+            if let Err(e) = self
+                .apply_one_schema_upgrade(replicated, *version, schema_dir)
+                .await
+            {
+                error!(
+                    self.log,
+                    "failed to apply schema upgrade";
+                    "current_version" => current,
+                    "next_version" => *version,
+                    "replicated" => replicated,
+                    "schema_dir" => schema_dir.display(),
+                    "error" => ?e,
+                );
+                return Err(e);
+            }
+            current = *version;
+            self.insert_version(current).await?;
+        }
+        Ok(())
+    }
+
+    fn verify_schema_upgrades(
+        files: &BTreeMap<String, (PathBuf, String)>,
+    ) -> Result<(), Error> {
+        let re = schema_validation_regex();
+        for (path, sql) in files.values() {
+            if re.is_match(&sql) {
+                return Err(Error::SchemaUpdateModifiesData {
+                    path: path.clone(),
+                    statement: sql.clone(),
+                });
+            }
+            if sql.matches(';').count() > 1 {
+                return Err(Error::MultipleSqlStatementsInSchemaUpdate {
+                    path: path.clone(),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    async fn apply_one_schema_upgrade(
+        &self,
+        replicated: bool,
+        next_version: u64,
+        schema_dir: impl AsRef<Path>,
+    ) -> Result<(), Error> {
+        let schema_dir = schema_dir.as_ref();
+        let upgrade_file_contents = Self::read_schema_upgrade_sql_files(
+            &self.log,
+            replicated,
+            next_version,
+            schema_dir,
+        )
+        .await?;
+
+        // We need to be pretty careful at this point with any data-modifying
+        // statements. There should be no INSERT queries, for example, which we
+        // check here. ClickHouse doesn't support much in the way of data
+        // modification, which makes this pretty easy.
+        Self::verify_schema_upgrades(&upgrade_file_contents)?;
+
+        // Apply each file in sequence in the upgrade directory.
+        for (name, (path, sql)) in upgrade_file_contents.into_iter() {
+            debug!(
+                self.log,
+                "apply schema upgrade file";
+                "version" => next_version,
+                "path" => path.display(),
+                "filename" => &name,
+            );
+            match self.execute(sql).await {
+                Ok(_) => debug!(
+                    self.log,
+                    "successfully applied schema upgrade file";
+                    "version" => next_version,
+                    "path" => path.display(),
+                    "name" => name,
+                ),
+                Err(e) => {
+                    return Err(e);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn full_upgrade_path(
+        replicated: bool,
+        version: u64,
+        schema_dir: impl AsRef<Path>,
+    ) -> PathBuf {
+        schema_dir
+            .as_ref()
+            .join(if replicated { "replicated" } else { "single-node" })
+            .join(version.to_string())
+    }
+
+    // Read all SQL files, in order, in the schema directory for the provided
+    // version.
+    async fn read_schema_upgrade_sql_files(
+        log: &Logger,
+        replicated: bool,
+        version: u64,
+        schema_dir: impl AsRef<Path>,
+    ) -> Result<BTreeMap<String, (PathBuf, String)>, Error> {
+        let version_schema_dir =
+            Self::full_upgrade_path(replicated, version, schema_dir.as_ref());
+        let mut rd =
+            fs::read_dir(&version_schema_dir).await.map_err(|err| {
+                Error::ReadSchemaDir {
+                    context: format!(
+                        "Failed to read schema directory '{}'",
+                        version_schema_dir.display()
+                    ),
+                    err,
+                }
+            })?;
+
+        let mut upgrade_files = BTreeMap::new();
+        debug!(log, "reading SQL files from schema dir"; "dir" => version_schema_dir.display());
+        while let Some(entry) =
+            rd.next_entry().await.map_err(|err| Error::ReadSchemaDir {
+                context: String::from("Failed to read directory entry"),
+                err,
+            })?
+        {
+            let path = entry.path();
+            let Some(ext) = path.extension() else {
+                warn!(
+                    log,
+                    "skipping schema dir entry without an extension";
+                    "dir" => version_schema_dir.display(),
+                    "path" => path.display(),
+                );
+                continue;
+            };
+            let Some(ext) = ext.to_str() else {
+                warn!(
+                    log,
+                    "skipping schema dir entry with non-UTF8 extension";
+                    "dir" => version_schema_dir.display(),
+                    "path" => path.display(),
+                );
+                continue;
+            };
+            if ext.eq_ignore_ascii_case("sql") {
+                let Some(stem) = path.file_stem() else {
+                    warn!(
+                        log,
+                        "skipping schema SQL file with no name";
+                        "dir" => version_schema_dir.display(),
+                        "path" => path.display(),
+                    );
+                    continue;
+                };
+                let Some(name) = stem.to_str() else {
+                    warn!(
+                        log,
+                        "skipping schema SQL file with non-UTF8 name";
+                        "dir" => version_schema_dir.display(),
+                        "path" => path.display(),
+                    );
+                    continue;
+                };
+                let contents =
+                    fs::read_to_string(&path).await.map_err(|err| {
+                        Error::ReadSqlFile {
+                            context: format!(
+                                "Reading SQL file '{}' for upgrade",
+                                path.display(),
+                            ),
+                            err,
+                        }
+                    })?;
+                upgrade_files
+                    .insert(name.to_string(), (path.to_owned(), contents));
+            } else {
+                warn!(
+                    log,
+                    "skipping non-SQL schema dir entry";
+                    "dir" => version_schema_dir.display(),
+                    "path" => path.display(),
+                );
+                continue;
+            }
+        }
+        Ok(upgrade_files)
+    }
+
     /// Validates that the schema used by the DB matches the version used by
     /// the executable using it.
     ///
-    /// This function will wipe metrics data if the version stored within
+    /// This function will **wipe** metrics data if the version stored within
     /// the DB is less than the schema version of Oximeter.
     /// If the version in the DB is newer than what is known to Oximeter, an
     /// error is returned.
+    ///
+    /// If you would like to non-destructively upgrade the database, then either
+    /// the included binary `clickhouse-schema-updater` or the method
+    /// [`Client::ensure_schema()`] should be used instead.
     ///
     /// NOTE: This function is not safe for concurrent usage!
     pub async fn initialize_db_with_version(
@@ -304,11 +616,10 @@ impl Client {
         } else if version > expected_version {
             // If the on-storage version is greater than the constant embedded
             // into this binary, we may have downgraded.
-            return Err(Error::Database(
-                format!(
-                    "Expected version {expected_version}, saw {version}. Downgrading is not supported.",
-                )
-            ));
+            return Err(Error::DatabaseVersionMismatch {
+                expected: crate::model::OXIMETER_VERSION,
+                found: version,
+            });
         } else {
             // If the version matches, we don't need to update the DB
             return Ok(());
@@ -319,7 +630,8 @@ impl Client {
         Ok(())
     }
 
-    async fn read_latest_version(&self) -> Result<u64, Error> {
+    /// Read the latest version applied in the database.
+    pub async fn read_latest_version(&self) -> Result<u64, Error> {
         let sql = format!(
             "SELECT MAX(value) FROM {db_name}.version;",
             db_name = crate::DATABASE_NAME,
@@ -354,6 +666,20 @@ impl Client {
         Ok(version)
     }
 
+    /// Return Ok if the DB is at exactly the version compatible with this
+    /// client.
+    pub async fn check_db_is_at_expected_version(&self) -> Result<(), Error> {
+        let ver = self.read_latest_version().await?;
+        if ver == crate::model::OXIMETER_VERSION {
+            Ok(())
+        } else {
+            Err(Error::DatabaseVersionMismatch {
+                expected: crate::model::OXIMETER_VERSION,
+                found: ver,
+            })
+        }
+    }
+
     async fn insert_version(&self, version: u64) -> Result<(), Error> {
         let sql = format!(
             "INSERT INTO {db_name}.version (*) VALUES ({version}, now());",
@@ -365,7 +691,7 @@ impl Client {
 
     /// Verifies if instance is part of oximeter_cluster
     pub async fn is_oximeter_cluster(&self) -> Result<bool, Error> {
-        let sql = String::from("SHOW CLUSTERS FORMAT JSONEachRow;");
+        let sql = "SHOW CLUSTERS FORMAT JSONEachRow;";
         let res = self.execute_with_body(sql).await?;
         Ok(res.contains("oximeter_cluster"))
     }
@@ -501,7 +827,11 @@ impl Client {
         S: AsRef<str>,
     {
         let sql = sql.as_ref().to_string();
-        trace!(self.log, "executing SQL query: {}", sql);
+        trace!(
+            self.log,
+            "executing SQL query";
+            "sql" => &sql,
+        );
         let id = usdt::UniqueId::new();
         probes::query__start!(|| (&id, &sql));
         let response = handle_db_response(
@@ -720,6 +1050,42 @@ impl Client {
         // many as one per sample. It's not clear how to structure this in a way that's useful.
         Ok(())
     }
+
+    // Run one or more SQL statements.
+    //
+    // This is intended to be used for the methods which run SQL from one of the
+    // SQL files in the crate, e.g., the DB initialization or update files.
+    async fn run_many_sql_statements(
+        &self,
+        sql: impl AsRef<str>,
+    ) -> Result<(), Error> {
+        for stmt in sql.as_ref().split(';').filter(|s| !s.trim().is_empty()) {
+            self.execute(stmt).await?;
+        }
+        Ok(())
+    }
+}
+
+// A regex used to validate supported schema updates.
+static SCHEMA_VALIDATION_REGEX: OnceLock<Regex> = OnceLock::new();
+fn schema_validation_regex() -> &'static Regex {
+    SCHEMA_VALIDATION_REGEX.get_or_init(|| {
+        RegexBuilder::new(concat!(
+            // Cannot insert rows
+            r#"(INSERT INTO)|"#,
+            // Cannot delete rows in a table
+            r#"(ALTER TABLE .* DELETE)|"#,
+            // Cannot update values in a table
+            r#"(ALTER TABLE .* UPDATE)|"#,
+            // Cannot drop column values
+            r#"(ALTER TABLE .* CLEAR COLUMN)|"#,
+            // Or issue lightweight deletes
+            r#"(DELETE FROM)"#,
+        ))
+        .case_insensitive(true)
+        .build()
+        .expect("Invalid regex")
+    })
 }
 
 #[derive(Debug)]
@@ -767,40 +1133,38 @@ impl DbWrite for Client {
 
     /// Initialize the replicated telemetry database, creating tables as needed.
     async fn init_replicated_db(&self) -> Result<(), Error> {
-        // The HTTP client doesn't support multiple statements per query, so we break them out here
-        // manually.
         debug!(self.log, "initializing ClickHouse database");
-        let sql = include_str!("./db-replicated-init.sql");
-        for query in sql.split("\n--\n") {
-            self.execute(query.to_string()).await?;
-        }
-        Ok(())
-    }
-
-    /// Initialize a single node telemetry database, creating tables as needed.
-    async fn init_single_node_db(&self) -> Result<(), Error> {
-        // The HTTP client doesn't support multiple statements per query, so we break them out here
-        // manually.
-        debug!(self.log, "initializing ClickHouse database");
-        let sql = include_str!("./db-single-node-init.sql");
-        for query in sql.split("\n--\n") {
-            self.execute(query.to_string()).await?;
-        }
-        Ok(())
-    }
-
-    /// Wipe the ClickHouse database entirely from a single node set up.
-    async fn wipe_single_node_db(&self) -> Result<(), Error> {
-        debug!(self.log, "wiping ClickHouse database");
-        let sql = include_str!("./db-wipe-single-node.sql").to_string();
-        self.execute(sql).await
+        self.run_many_sql_statements(include_str!(
+            "../schema/replicated/db-init.sql"
+        ))
+        .await
     }
 
     /// Wipe the ClickHouse database entirely from a replicated set up.
     async fn wipe_replicated_db(&self) -> Result<(), Error> {
         debug!(self.log, "wiping ClickHouse database");
-        let sql = include_str!("./db-wipe-replicated.sql").to_string();
-        self.execute(sql).await
+        self.run_many_sql_statements(include_str!(
+            "../schema/replicated/db-wipe.sql"
+        ))
+        .await
+    }
+
+    /// Initialize a single node telemetry database, creating tables as needed.
+    async fn init_single_node_db(&self) -> Result<(), Error> {
+        debug!(self.log, "initializing ClickHouse database");
+        self.run_many_sql_statements(include_str!(
+            "../schema/single-node/db-init.sql"
+        ))
+        .await
+    }
+
+    /// Wipe the ClickHouse database entirely from a single node set up.
+    async fn wipe_single_node_db(&self) -> Result<(), Error> {
+        debug!(self.log, "wiping ClickHouse database");
+        self.run_many_sql_statements(include_str!(
+            "../schema/single-node/db-wipe.sql"
+        ))
+        .await
     }
 }
 
@@ -839,7 +1203,9 @@ mod tests {
     use oximeter::Metric;
     use oximeter::Target;
     use std::net::Ipv6Addr;
+    use std::path::PathBuf;
     use std::time::Duration;
+    use tempfile::TempDir;
     use tokio::time::sleep;
     use uuid::Uuid;
 
@@ -1062,18 +1428,20 @@ mod tests {
         db.cleanup().await.expect("Failed to cleanup ClickHouse server");
     }
 
-    #[tokio::test]
-    async fn test_replicated() {
-        let cur_dir = std::env::current_dir().unwrap();
+    async fn create_cluster() -> ClickHouseCluster {
+        let cur_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let replica_config =
             cur_dir.as_path().join("src/configs/replica_config.xml");
-        let cur_dir = std::env::current_dir().unwrap();
         let keeper_config =
             cur_dir.as_path().join("src/configs/keeper_config.xml");
-
-        let mut cluster = ClickHouseCluster::new(replica_config, keeper_config)
+        ClickHouseCluster::new(replica_config, keeper_config)
             .await
-            .expect("Failed to initialise ClickHouse Cluster");
+            .expect("Failed to initialise ClickHouse Cluster")
+    }
+
+    #[tokio::test]
+    async fn test_replicated() {
+        let mut cluster = create_cluster().await;
 
         // Tests that the expected error is returned on a wrong address
         bad_db_connection_test().await.unwrap();
@@ -3164,7 +3532,7 @@ mod tests {
     ) -> Result<(), Error> {
         use strum::IntoEnumIterator;
         usdt::register_probes().unwrap();
-        let logctx = test_setup_log("test_update_schema_cache_on_new_sample");
+        let logctx = test_setup_log("test_select_all_datum_types");
         let log = &logctx.log;
 
         let client = Client::new(address, &log);
@@ -3344,5 +3712,522 @@ mod tests {
                 "Incorrect field value in timeseries metric"
             );
         }
+    }
+
+    async fn create_test_upgrade_schema_directory(
+        replicated: bool,
+        versions: &[u64],
+    ) -> (TempDir, Vec<PathBuf>) {
+        assert!(!versions.is_empty());
+        let schema_dir = TempDir::new().expect("failed to create tempdir");
+        let mut paths = Vec::with_capacity(versions.len());
+        for version in versions.iter() {
+            let version_dir = Client::full_upgrade_path(
+                replicated,
+                *version,
+                schema_dir.as_ref(),
+            );
+            fs::create_dir_all(&version_dir)
+                .await
+                .expect("failed to make version directory");
+            paths.push(version_dir);
+        }
+        (schema_dir, paths)
+    }
+
+    #[tokio::test]
+    async fn test_read_schema_upgrade_sql_files() {
+        let logctx = test_setup_log("test_read_schema_upgrade_sql_files");
+        let log = &logctx.log;
+        const REPLICATED: bool = false;
+        const VERSION: u64 = 1;
+        let (schema_dir, version_dirs) =
+            create_test_upgrade_schema_directory(REPLICATED, &[VERSION]).await;
+        let version_dir = &version_dirs[0];
+
+        // Create a few SQL files in there.
+        const SQL: &str = "SELECT NOW();";
+        let filenames: Vec<_> = (0..3).map(|i| format!("up-{i}.sql")).collect();
+        for name in filenames.iter() {
+            let full_path = version_dir.join(name);
+            fs::write(full_path, SQL).await.expect("Failed to write dummy SQL");
+        }
+
+        let upgrade_files = Client::read_schema_upgrade_sql_files(
+            log,
+            REPLICATED,
+            VERSION,
+            schema_dir.path(),
+        )
+        .await
+        .expect("Failed to read schema upgrade files");
+        for filename in filenames.iter() {
+            let stem = filename.split_once('.').unwrap().0;
+            assert_eq!(
+                upgrade_files.get(stem).unwrap().1,
+                SQL,
+                "upgrade SQL file contents are not correct"
+            );
+        }
+        logctx.cleanup_successful();
+    }
+
+    async fn test_apply_one_schema_upgrade_impl(
+        log: &Logger,
+        address: SocketAddr,
+        replicated: bool,
+    ) {
+        let test_name = format!(
+            "test_apply_one_schema_upgrade_{}",
+            if replicated { "replicated" } else { "single_node" }
+        );
+        let client = Client::new(address, &log);
+
+        // We'll test moving from version 1, which just creates a database and
+        // table, to version 2, which adds two columns to that table in
+        // different SQL files.
+        client.execute(format!("CREATE DATABASE {test_name};")).await.unwrap();
+        client
+            .execute(format!(
+                "\
+            CREATE TABLE {test_name}.tbl (\
+                `col0` UInt8 \
+            )\
+            ENGINE = MergeTree()
+            ORDER BY `col0`;\
+        "
+            ))
+            .await
+            .unwrap();
+
+        // Write out the upgrading SQL files.
+        //
+        // Note that all of these statements are going in the version 2 schema
+        // directory.
+        let (schema_dir, version_dirs) =
+            create_test_upgrade_schema_directory(replicated, &[NEXT_VERSION])
+                .await;
+        const NEXT_VERSION: u64 = 2;
+        let first_sql =
+            format!("ALTER TABLE {test_name}.tbl ADD COLUMN `col1` UInt16;");
+        let second_sql =
+            format!("ALTER TABLE {test_name}.tbl ADD COLUMN `col2` String;");
+        let all_sql = [first_sql, second_sql];
+        let version_dir = &version_dirs[0];
+        for (i, sql) in all_sql.iter().enumerate() {
+            let path = version_dir.join(format!("up-{i}.sql"));
+            fs::write(path, sql)
+                .await
+                .expect("failed to write out upgrade SQL file");
+        }
+
+        // Apply the upgrade itself.
+        client
+            .apply_one_schema_upgrade(
+                replicated,
+                NEXT_VERSION,
+                schema_dir.path(),
+            )
+            .await
+            .expect("Failed to apply one schema upgrade");
+
+        // Check that it actually worked!
+        let body = client
+            .execute_with_body(format!(
+                "\
+            SELECT name, type FROM system.columns \
+            WHERE database = '{test_name}' AND table = 'tbl' \
+            ORDER BY name \
+            FORMAT CSV;\
+        "
+            ))
+            .await
+            .unwrap();
+        let mut lines = body.lines();
+        assert_eq!(lines.next().unwrap(), "\"col0\",\"UInt8\"");
+        assert_eq!(lines.next().unwrap(), "\"col1\",\"UInt16\"");
+        assert_eq!(lines.next().unwrap(), "\"col2\",\"String\"");
+        assert!(lines.next().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_apply_one_schema_upgrade_replicated() {
+        const TEST_NAME: &str = "test_apply_one_schema_upgrade_replicated";
+        let logctx = test_setup_log(TEST_NAME);
+        let log = &logctx.log;
+        let mut cluster = create_cluster().await;
+        let address = cluster.replica_1.address;
+        test_apply_one_schema_upgrade_impl(log, address, true).await;
+
+        // TODO-cleanup: These should be arrays.
+        // See https://github.com/oxidecomputer/omicron/issues/4460.
+        cluster
+            .keeper_1
+            .cleanup()
+            .await
+            .expect("Failed to cleanup ClickHouse keeper 1");
+        cluster
+            .keeper_2
+            .cleanup()
+            .await
+            .expect("Failed to cleanup ClickHouse keeper 2");
+        cluster
+            .keeper_3
+            .cleanup()
+            .await
+            .expect("Failed to cleanup ClickHouse keeper 3");
+        cluster
+            .replica_1
+            .cleanup()
+            .await
+            .expect("Failed to cleanup ClickHouse server 1");
+        cluster
+            .replica_2
+            .cleanup()
+            .await
+            .expect("Failed to cleanup ClickHouse server 2");
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_apply_one_schema_upgrade_single_node() {
+        const TEST_NAME: &str = "test_apply_one_schema_upgrade_single_node";
+        let logctx = test_setup_log(TEST_NAME);
+        let log = &logctx.log;
+        let mut db = ClickHouseInstance::new_single_node(0)
+            .await
+            .expect("Failed to start ClickHouse");
+        let address = SocketAddr::new(Ipv6Addr::LOCALHOST.into(), db.port());
+        test_apply_one_schema_upgrade_impl(log, address, false).await;
+        db.cleanup().await.expect("Failed to cleanup ClickHouse server");
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_ensure_schema_with_version_gaps_fails() {
+        let logctx =
+            test_setup_log("test_ensure_schema_with_version_gaps_fails");
+        let log = &logctx.log;
+        let mut db = ClickHouseInstance::new_single_node(0)
+            .await
+            .expect("Failed to start ClickHouse");
+        let address = SocketAddr::new(Ipv6Addr::LOCALHOST.into(), db.port());
+        let client = Client::new(address, &log);
+        const REPLICATED: bool = false;
+        client
+            .initialize_db_with_version(
+                REPLICATED,
+                crate::model::OXIMETER_VERSION,
+            )
+            .await
+            .expect("failed to initialize DB");
+
+        const BOGUS_VERSION: u64 = u64::MAX;
+        let (schema_dir, _) = create_test_upgrade_schema_directory(
+            REPLICATED,
+            &[crate::model::OXIMETER_VERSION, BOGUS_VERSION],
+        )
+        .await;
+
+        let err = client
+            .ensure_schema(REPLICATED, BOGUS_VERSION, schema_dir.path())
+            .await
+            .expect_err(
+                "Should have received an error when ensuring \
+                non-sequential version numbers",
+            );
+        let Error::NonSequentialSchemaVersions = err else {
+            panic!(
+                "Expected an Error::NonSequentialSchemaVersions, found {err:?}"
+            );
+        };
+        db.cleanup().await.expect("Failed to cleanup ClickHouse server");
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_ensure_schema_with_missing_desired_schema_version_fails() {
+        let logctx = test_setup_log(
+            "test_ensure_schema_with_missing_desired_schema_version_fails",
+        );
+        let log = &logctx.log;
+        let mut db = ClickHouseInstance::new_single_node(0)
+            .await
+            .expect("Failed to start ClickHouse");
+        let address = SocketAddr::new(Ipv6Addr::LOCALHOST.into(), db.port());
+        let client = Client::new(address, &log);
+        const REPLICATED: bool = false;
+        client
+            .initialize_db_with_version(
+                REPLICATED,
+                crate::model::OXIMETER_VERSION,
+            )
+            .await
+            .expect("failed to initialize DB");
+
+        let (schema_dir, _) = create_test_upgrade_schema_directory(
+            REPLICATED,
+            &[crate::model::OXIMETER_VERSION],
+        )
+        .await;
+
+        const BOGUS_VERSION: u64 = u64::MAX;
+        let err = client.ensure_schema(
+            REPLICATED,
+            BOGUS_VERSION,
+            schema_dir.path(),
+        ).await
+            .expect_err("Should have received an error when ensuring a non-existing version");
+        let Error::MissingSchemaVersion(missing) = err else {
+            panic!("Expected an Error::MissingSchemaVersion, found {err:?}");
+        };
+        assert_eq!(missing, BOGUS_VERSION);
+
+        db.cleanup().await.expect("Failed to cleanup ClickHouse server");
+        logctx.cleanup_successful();
+    }
+
+    async fn test_ensure_schema_walks_through_multiple_steps_impl(
+        log: &Logger,
+        address: SocketAddr,
+        replicated: bool,
+    ) {
+        let test_name = format!(
+            "test_ensure_schema_walks_through_multiple_steps_{}",
+            if replicated { "replicated" } else { "single_node" }
+        );
+        let client = Client::new(address, &log);
+
+        // We need to actually have the oximeter DB here, and the version table,
+        // since `ensure_schema()` writes out versions to the DB as they're
+        // applied.
+        client.initialize_db_with_version(replicated, 1).await.unwrap();
+
+        // We'll test moving from version 1, which just creates a database and
+        // table, to version 3, stopping off at version 2. This is similar to
+        // the `test_apply_one_schema_upgrade` test, but we split the two
+        // modifications over two versions, rather than as multiple schema
+        // upgrades in one version bump.
+        client.execute(format!("CREATE DATABASE {test_name};")).await.unwrap();
+        client
+            .execute(format!(
+                "\
+            CREATE TABLE {test_name}.tbl (\
+                `col0` UInt8 \
+            )\
+            ENGINE = MergeTree()
+            ORDER BY `col0`;\
+        "
+            ))
+            .await
+            .unwrap();
+
+        // Write out the upgrading SQL files.
+        //
+        // Note that each statement goes into a different version.
+        const VERSIONS: [u64; 3] = [1, 2, 3];
+        let (schema_dir, version_dirs) =
+            create_test_upgrade_schema_directory(replicated, &VERSIONS).await;
+        let first_sql = String::new();
+        let second_sql =
+            format!("ALTER TABLE {test_name}.tbl ADD COLUMN `col1` UInt16;");
+        let third_sql =
+            format!("ALTER TABLE {test_name}.tbl ADD COLUMN `col2` String;");
+        let all_sql = [first_sql, second_sql, third_sql];
+        for (version_dir, sql) in version_dirs.iter().zip(all_sql) {
+            let path = version_dir.join("up.sql");
+            fs::write(path, sql)
+                .await
+                .expect("failed to write out upgrade SQL file");
+        }
+
+        // Apply the sequence of upgrades.
+        client
+            .ensure_schema(
+                replicated,
+                *VERSIONS.last().unwrap(),
+                schema_dir.path(),
+            )
+            .await
+            .expect("Failed to apply one schema upgrade");
+
+        // Check that it actually worked!
+        let body = client
+            .execute_with_body(format!(
+                "\
+            SELECT name, type FROM system.columns \
+            WHERE database = '{test_name}' AND table = 'tbl' \
+            ORDER BY name \
+            FORMAT CSV;\
+        "
+            ))
+            .await
+            .unwrap();
+        let mut lines = body.lines();
+        assert_eq!(lines.next().unwrap(), "\"col0\",\"UInt8\"");
+        assert_eq!(lines.next().unwrap(), "\"col1\",\"UInt16\"");
+        assert_eq!(lines.next().unwrap(), "\"col2\",\"String\"");
+        assert!(lines.next().is_none());
+
+        let latest_version = client.read_latest_version().await.unwrap();
+        assert_eq!(
+            latest_version,
+            *VERSIONS.last().unwrap(),
+            "Updated version not written to the database"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_ensure_schema_walks_through_multiple_steps_single_node() {
+        const TEST_NAME: &str =
+            "test_ensure_schema_walks_through_multiple_steps_single_node";
+        let logctx = test_setup_log(TEST_NAME);
+        let log = &logctx.log;
+        let mut db = ClickHouseInstance::new_single_node(0)
+            .await
+            .expect("Failed to start ClickHouse");
+        let address = SocketAddr::new(Ipv6Addr::LOCALHOST.into(), db.port());
+        test_ensure_schema_walks_through_multiple_steps_impl(
+            log, address, false,
+        )
+        .await;
+        db.cleanup().await.expect("Failed to cleanup ClickHouse server");
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_ensure_schema_walks_through_multiple_steps_replicated() {
+        const TEST_NAME: &str =
+            "test_ensure_schema_walks_through_multiple_steps_replicated";
+        let logctx = test_setup_log(TEST_NAME);
+        let log = &logctx.log;
+        let mut cluster = create_cluster().await;
+        let address = cluster.replica_1.address;
+        test_ensure_schema_walks_through_multiple_steps_impl(
+            log, address, true,
+        )
+        .await;
+        cluster
+            .keeper_1
+            .cleanup()
+            .await
+            .expect("Failed to cleanup ClickHouse keeper 1");
+        cluster
+            .keeper_2
+            .cleanup()
+            .await
+            .expect("Failed to cleanup ClickHouse keeper 2");
+        cluster
+            .keeper_3
+            .cleanup()
+            .await
+            .expect("Failed to cleanup ClickHouse keeper 3");
+        cluster
+            .replica_1
+            .cleanup()
+            .await
+            .expect("Failed to cleanup ClickHouse server 1");
+        cluster
+            .replica_2
+            .cleanup()
+            .await
+            .expect("Failed to cleanup ClickHouse server 2");
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_verify_schema_upgrades() {
+        let mut map = BTreeMap::new();
+
+        // Check that we fail if the upgrade tries to insert data.
+        map.insert(
+            "up".into(),
+            (
+                PathBuf::from("/foo/bar/up.sql"),
+                String::from(
+                    "INSERT INTO oximeter.version (*) VALUES (100, now());",
+                ),
+            ),
+        );
+        assert!(Client::verify_schema_upgrades(&map).is_err());
+
+        // Sanity check for the normal case.
+        map.clear();
+        map.insert(
+            "up".into(),
+            (
+                PathBuf::from("/foo/bar/up.sql"),
+                String::from("ALTER TABLE oximeter.measurements_bool ADD COLUMN foo UInt64;")
+            ),
+        );
+        assert!(Client::verify_schema_upgrades(&map).is_ok());
+
+        // Check that we fail if the upgrade ties to delete any data.
+        map.clear();
+        map.insert(
+            "up".into(),
+            (
+                PathBuf::from("/foo/bar/up.sql"),
+                String::from("ALTER TABLE oximeter.measurements_bool DELETE WHERE timestamp < NOW();")
+            ),
+        );
+        assert!(Client::verify_schema_upgrades(&map).is_err());
+
+        // Check that we fail if the upgrade contains multiple SQL statements.
+        map.clear();
+        map.insert(
+            "up".into(),
+            (
+                PathBuf::from("/foo/bar/up.sql"),
+                String::from(
+                    "\
+                    ALTER TABLE oximeter.measurements_bool \
+                        ADD COLUMN foo UInt8; \
+                    ALTER TABLE oximeter.measurements_bool \
+                        ADD COLUMN bar UInt8; \
+                    ",
+                ),
+            ),
+        );
+        assert!(Client::verify_schema_upgrades(&map).is_err());
+    }
+
+    // Regression test for https://github.com/oxidecomputer/omicron/issues/4369.
+    //
+    // This tests that we can successfully query all extant field types from the
+    // schema table. There may be no such values, but the query itself should
+    // succeed.
+    #[tokio::test]
+    async fn test_select_all_field_types() {
+        use strum::IntoEnumIterator;
+        usdt::register_probes().unwrap();
+        let logctx = test_setup_log("test_select_all_field_types");
+        let log = &logctx.log;
+
+        let mut db = ClickHouseInstance::new_single_node(0)
+            .await
+            .expect("Failed to start ClickHouse");
+        let address = SocketAddr::new(Ipv6Addr::LOCALHOST.into(), db.port());
+        let client = Client::new(address, &log);
+        client
+            .init_single_node_db()
+            .await
+            .expect("Failed to initialize timeseries database");
+
+        // Attempt to select all schema with each field type.
+        for ty in oximeter::FieldType::iter() {
+            let sql = format!(
+                "SELECT COUNT() \
+                FROM {}.timeseries_schema \
+                WHERE arrayFirstIndex(x -> x = '{:?}', fields.type) > 0;",
+                crate::DATABASE_NAME,
+                crate::model::DbFieldType::from(ty),
+            );
+            let res = client.execute_with_body(sql).await.unwrap();
+            let count = res.trim().parse::<usize>().unwrap();
+            assert_eq!(count, 0);
+        }
+        db.cleanup().await.expect("Failed to cleanup ClickHouse server");
+        logctx.cleanup_successful();
     }
 }
