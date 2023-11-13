@@ -568,7 +568,7 @@ impl From<OmicronZoneConfig> for sled_agent_client::types::OmicronZoneConfig {
     fn from(local: OmicronZoneConfig) -> Self {
         Self {
             id: local.id,
-            underlay_address: local.underlay_address.into(),
+            underlay_address: local.underlay_address,
             zone_type: local.zone_type.into(),
         }
     }

@@ -64,9 +64,7 @@ use crate::bootstrap::params::BootstrapAddressDiscovery;
 use crate::bootstrap::params::StartSledAgentRequest;
 use crate::bootstrap::rss_handle::BootstrapAgentHandle;
 use crate::nexus::d2n_params;
-use crate::params::{
-    OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig, TimeSync,
-};
+use crate::params::{OmicronZoneType, OmicronZonesConfig, TimeSync};
 use crate::rack_setup::plan::service::{
     Plan as ServicePlan, PlanError as ServicePlanError,
 };
@@ -543,7 +541,7 @@ impl ServiceInner {
             for zone in &sled_config.zones {
                 // XXX-dap TODO-cleanup kind of a cheating way to use the
                 // existing implementation
-                let native_zone_config = OmicronZoneConfig::from(zone.clone());
+                let native_zone_config = zone.clone();
                 if let Some((dataset_name, dataset_address)) =
                     native_zone_config.dataset_name_and_address()
                 {
