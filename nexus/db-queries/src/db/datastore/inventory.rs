@@ -39,6 +39,7 @@ use nexus_db_model::InvCollectionError;
 use nexus_db_model::InvRootOfTrust;
 use nexus_db_model::InvRotPage;
 use nexus_db_model::InvServiceProcessor;
+use nexus_db_model::RotPageWhichEnum;
 use nexus_db_model::SpType;
 use nexus_db_model::SpTypeEnum;
 use nexus_db_model::SwCaboose;
@@ -78,6 +79,11 @@ impl DataStore {
             .cabooses
             .iter()
             .map(|s| SwCaboose::from((**s).clone()))
+            .collect::<Vec<_>>();
+        let rot_pages = collection
+            .rot_pages
+            .iter()
+            .map(|p| SwRotPage::from((**p).clone()))
             .collect::<Vec<_>>();
         let error_values = collection
             .errors
@@ -138,6 +144,19 @@ impl DataStore {
                 use db::schema::sw_caboose::dsl;
                 let _ = diesel::insert_into(dsl::sw_caboose)
                     .values(cabooses)
+                    .on_conflict_do_nothing()
+                    .execute_async(&conn)
+                    .await?;
+            }
+
+            // Insert records (and generate ids) for each distinct RoT page that
+            // we've found.  Like baseboards, these might already be present and
+            // rows in this table are not scoped to a particular collection
+            // because they only map (immutable) identifiers to UUIDs.
+            {
+                use db::schema::sw_root_of_trust_page::dsl;
+                let _ = diesel::insert_into(dsl::sw_root_of_trust_page)
+                    .values(rot_pages)
                     .on_conflict_do_nothing()
                     .execute_async(&conn)
                     .await?;
@@ -468,6 +487,128 @@ impl DataStore {
                         _source,
                         _which,
                     ) = dsl_inv_caboose::inv_caboose::all_columns();
+                }
+            }
+
+            // Insert rows for the root of trust pages that we found. This is
+            // almost identical to inserting cabooses above, and just like for
+            // cabooses, we do this using INSERT INTO ... SELECT. We have these
+            // three tables:
+            //
+            // - `hw_baseboard` with an "id" primary key and lookup columns
+            //   "part_number" and "serial_number"
+            // - `sw_root_of_trust_page` with an "id" primary key and lookup
+            //   column "data_base64"
+            // - `inv_root_of_trust_page` with foreign keys "hw_baseboard_id",
+            //   "sw_root_of_trust_page_id", and various other columns
+            //
+            // We want to INSERT INTO `inv_root_of_trust_page` a row with:
+            //
+            // - hw_baseboard_id (foreign key) the result of looking up an
+            //   hw_baseboard row by a specific part number and serial number
+            //
+            // - sw_root_of_trust_page_id (foreign key) the result of looking up
+            //   a specific sw_root_of_trust_page row by data_base64
+            //
+            // - the other columns being literals
+            //
+            // To achieve this, we're going to generate something like:
+            //
+            //     INSERT INTO
+            //         inv_root_of_trust_page (
+            //             hw_baseboard_id,
+            //             sw_root_of_trust_page_id,
+            //             inv_collection_id,
+            //             time_collected,
+            //             source,
+            //             which,
+            //         )
+            //         SELECT (
+            //             hw_baseboard_id.id,
+            //             sw_root_of_trust_page.id,
+            //             ...              /* literal collection id */
+            //             ...              /* literal time collected */
+            //             ...              /* literal source */
+            //             ...              /* literal 'which' */
+            //         )
+            //         FROM
+            //             hw_baseboard
+            //         INNER JOIN
+            //             sw_root_of_trust_page
+            //         ON  hw_baseboard.part_number = ...
+            //         AND hw_baseboard.serial_number = ...
+            //         AND sw_root_of_trust_page.data_base64 = ...;
+            //
+            // Again, the whole point is to avoid back-and-forth between the
+            // client and the database.  Those back-and-forth interactions can
+            // significantly increase latency and the probability of transaction
+            // conflicts.  See RFD 192 for details.  (Unfortunately, we still
+            // _are_ going back and forth here to issue each of these queries.
+            // But that's an artifact of the interface we currently have for
+            // sending queries.  It should be possible to send all of these in
+            // one batch.
+            for (which, tree) in &collection.rot_pages_found {
+                use db::schema::hw_baseboard_id::dsl as dsl_baseboard_id;
+                use db::schema::inv_root_of_trust_page::dsl as dsl_inv_rot_page;
+                use db::schema::sw_root_of_trust_page::dsl as dsl_sw_rot_page;
+                let db_which = nexus_db_model::RotPageWhich::from(*which);
+                for (baseboard_id, found_rot_page) in tree {
+                    let selection = db::schema::hw_baseboard_id::table
+                        .inner_join(
+                            db::schema::sw_root_of_trust_page::table.on(
+                                dsl_baseboard_id::part_number
+                                    .eq(baseboard_id.part_number.clone())
+                                    .and(
+                                        dsl_baseboard_id::serial_number.eq(
+                                            baseboard_id.serial_number.clone(),
+                                        ),
+                                    )
+                                    .and(dsl_sw_rot_page::data_base64.eq(
+                                        found_rot_page.page.data_base64.clone(),
+                                    )),
+                            ),
+                        )
+                        .select((
+                            dsl_baseboard_id::id,
+                            dsl_sw_rot_page::id,
+                            collection_id.into_sql::<diesel::sql_types::Uuid>(),
+                            found_rot_page
+                                .time_collected
+                                .into_sql::<diesel::sql_types::Timestamptz>(),
+                            found_rot_page
+                                .source
+                                .clone()
+                                .into_sql::<diesel::sql_types::Text>(),
+                            db_which.into_sql::<RotPageWhichEnum>(),
+                        ));
+
+                    let _ = diesel::insert_into(
+                        db::schema::inv_root_of_trust_page::table,
+                    )
+                    .values(selection)
+                    .into_columns((
+                        dsl_inv_rot_page::hw_baseboard_id,
+                        dsl_inv_rot_page::sw_root_of_trust_page_id,
+                        dsl_inv_rot_page::inv_collection_id,
+                        dsl_inv_rot_page::time_collected,
+                        dsl_inv_rot_page::source,
+                        dsl_inv_rot_page::which,
+                    ))
+                    .execute_async(&conn)
+                    .await?;
+
+                    // See the comments above.  The same applies here.  If you
+                    // update the statement below because the schema for
+                    // `inv_root_of_trust_page` has changed, be sure to update
+                    // the code above, too!
+                    let (
+                        _hw_baseboard_id,
+                        _sw_root_of_trust_page_id,
+                        _inv_collection_id,
+                        _time_collected,
+                        _source,
+                        _which,
+                    ) = dsl_inv_rot_page::inv_root_of_trust_page::all_columns();
                 }
             }
 
