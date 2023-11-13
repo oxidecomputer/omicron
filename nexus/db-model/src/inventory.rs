@@ -136,7 +136,7 @@ impl From<CabooseWhich> for nexus_types::inventory::CabooseWhich {
 // See [`nexus_types::inventory::RotPageWhich`].
 impl_enum_type!(
     #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "caboose_which"))]
+    #[diesel(postgres_type(name = "root_of_trust_page_which"))]
     pub struct RotPageWhichEnum;
 
     #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
