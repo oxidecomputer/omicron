@@ -873,7 +873,7 @@ impl DataStore {
                         dsl::inv_collection.filter(dsl::id.eq(collection_id)),
                     )
                     .execute_async(&conn)
-                    .await?;
+                    .await?
                 };
 
                 // Remove rows for service processors.
@@ -884,7 +884,7 @@ impl DataStore {
                             .filter(dsl::inv_collection_id.eq(collection_id)),
                     )
                     .execute_async(&conn)
-                    .await?;
+                    .await?
                 };
 
                 // Remove rows for roots of trust.
@@ -895,7 +895,7 @@ impl DataStore {
                             .filter(dsl::inv_collection_id.eq(collection_id)),
                     )
                     .execute_async(&conn)
-                    .await?;
+                    .await?
                 };
 
                 // Remove rows for cabooses found.
@@ -906,7 +906,7 @@ impl DataStore {
                             .filter(dsl::inv_collection_id.eq(collection_id)),
                     )
                     .execute_async(&conn)
-                    .await?;
+                    .await?
                 };
 
                 // Remove rows for errors encountered.
@@ -917,7 +917,7 @@ impl DataStore {
                             .filter(dsl::inv_collection_id.eq(collection_id)),
                     )
                     .execute_async(&conn)
-                    .await?;
+                    .await?
                 };
 
                 Ok((ncollections, nsps, nrots, ncabooses, nerrors))
