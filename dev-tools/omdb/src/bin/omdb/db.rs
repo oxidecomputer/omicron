@@ -48,6 +48,7 @@ use nexus_db_model::Sled;
 use nexus_db_model::Snapshot;
 use nexus_db_model::SnapshotState;
 use nexus_db_model::SwCaboose;
+use nexus_db_model::SwRotPage;
 use nexus_db_model::Vmm;
 use nexus_db_model::Zpool;
 use nexus_db_queries::context::OpContext;
@@ -235,6 +236,8 @@ enum InventoryCommands {
     BaseboardIds,
     /// list all cabooses ever found
     Cabooses,
+    /// list all root of trust pages every found
+    RotPages,
     /// list and show details from particular collections
     Collections(CollectionsArgs),
 }
@@ -1763,6 +1766,9 @@ async fn cmd_db_inventory(
         InventoryCommands::Cabooses => {
             cmd_db_inventory_cabooses(&conn, limit).await
         }
+        InventoryCommands::RotPages => {
+            cmd_db_inventory_rot_pages(&conn, limit).await
+        }
         InventoryCommands::Collections(CollectionsArgs {
             command: CollectionsCommands::List,
         }) => cmd_db_inventory_collections_list(&conn, limit).await,
@@ -1839,6 +1845,41 @@ async fn cmd_db_inventory_cabooses(
         name: caboose.name,
         version: caboose.version,
         git_commit: caboose.git_commit,
+    });
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
+
+    Ok(())
+}
+
+async fn cmd_db_inventory_rot_pages(
+    conn: &DataStoreConnection<'_>,
+    limit: NonZeroU32,
+) -> Result<(), anyhow::Error> {
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct RotPageRow {
+        id: Uuid,
+        data_base64: String,
+    }
+
+    use db::schema::sw_root_of_trust_page::dsl;
+    let mut rot_pages = dsl::sw_root_of_trust_page
+        .limit(i64::from(u32::from(limit)))
+        .select(SwRotPage::as_select())
+        .load_async(&**conn)
+        .await
+        .context("loading rot_pages")?;
+    check_limit(&rot_pages, limit, || "loading rot_pages");
+    rot_pages.sort();
+
+    let rows = rot_pages.into_iter().map(|rot_page| RotPageRow {
+        id: rot_page.id,
+        data_base64: rot_page.data_base64,
     });
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())
