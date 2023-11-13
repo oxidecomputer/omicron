@@ -21,7 +21,6 @@ use omicron_common::api::internal::shared::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use sled_hardware::Baseboard;
 pub use sled_hardware::DendriteAsic;
 use std::fmt::{Debug, Display, Formatter, Result as FormatResult};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
@@ -317,37 +316,6 @@ pub enum ServiceType {
     Oximeter {
         address: SocketAddrV6,
     },
-    // We should never receive external requests to start wicketd, MGS, sp-sim
-    // dendrite, tfport, or maghemite: these are all services running in the
-    // global zone or switch zone that we start autonomously. We tag them with
-    // `serde(skip)` both to omit them from our OpenAPI definition and to avoid
-    // needing their contained types to implement `JsonSchema + Deserialize +
-    // Serialize`.
-    #[serde(skip)]
-    ManagementGatewayService,
-    #[serde(skip)]
-    Wicketd {
-        baseboard: Baseboard,
-    },
-    #[serde(skip)]
-    Dendrite {
-        asic: DendriteAsic,
-    },
-    #[serde(skip)]
-    Tfport {
-        pkt_source: String,
-        asic: DendriteAsic,
-    },
-    #[serde(skip)]
-    Uplink,
-    #[serde(skip)]
-    MgDdm {
-        mode: String,
-    },
-    #[serde(skip)]
-    Mgd,
-    #[serde(skip)]
-    SpSim,
     CruciblePantry {
         address: SocketAddrV6,
     },
@@ -388,17 +356,10 @@ impl std::fmt::Display for ServiceType {
             ServiceType::ExternalDns { .. } => write!(f, "external_dns"),
             ServiceType::InternalDns { .. } => write!(f, "internal_dns"),
             ServiceType::Oximeter { .. } => write!(f, "oximeter"),
-            ServiceType::ManagementGatewayService => write!(f, "mgs"),
-            ServiceType::Wicketd { .. } => write!(f, "wicketd"),
-            ServiceType::Dendrite { .. } => write!(f, "dendrite"),
-            ServiceType::Tfport { .. } => write!(f, "tfport"),
-            ServiceType::Uplink { .. } => write!(f, "uplink"),
             ServiceType::CruciblePantry { .. } => write!(f, "crucible/pantry"),
             ServiceType::BoundaryNtp { .. }
             | ServiceType::InternalNtp { .. } => write!(f, "ntp"),
-            ServiceType::MgDdm { .. } => write!(f, "mg-ddm"),
-            ServiceType::Mgd => write!(f, "mgd"),
-            ServiceType::SpSim => write!(f, "sp-sim"),
+
             ServiceType::Clickhouse { .. } => write!(f, "clickhouse"),
             ServiceType::ClickhouseKeeper { .. } => {
                 write!(f, "clickhouse_keeper")

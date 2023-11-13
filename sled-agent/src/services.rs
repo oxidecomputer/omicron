@@ -32,8 +32,8 @@ use crate::bootstrap::BootstrapNetworking;
 use crate::config::SidecarRevision;
 use crate::params::{
     DendriteAsic, OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
-    ServiceType, ServiceZoneRequest, ServiceZoneService, TimeSync,
-    ZoneBundleCause, ZoneBundleMetadata, ZoneType,
+    ServiceZoneRequest, TimeSync, ZoneBundleCause, ZoneBundleMetadata,
+    ZoneType,
 };
 use crate::profile::*;
 use crate::smf_helper::Service;
@@ -90,7 +90,6 @@ use omicron_common::nexus_config::{
 };
 use once_cell::sync::OnceCell;
 use rand::prelude::SliceRandom;
-use rand::SeedableRng;
 use sled_hardware::disk::ZONE_DATASET;
 use sled_hardware::is_gimlet;
 use sled_hardware::underlay;
@@ -350,12 +349,64 @@ impl ZonesConfig {
     }
 }
 
+#[derive(Clone)]
+struct SwitchZoneConfig {
+    id: Uuid,
+    addresses: Vec<Ipv6Addr>,
+    services: Vec<ServiceType>,
+}
+
+// XXX-dap towards the end, rename this to SwitchService.  Saving it for later
+// to avoid having to deal with it more than necessary in merge conflicts.
+#[derive(Clone)]
+enum ServiceType {
+    ManagementGatewayService,
+    Wicketd { baseboard: Baseboard },
+    Dendrite { asic: DendriteAsic },
+    Tfport { pkt_source: String, asic: DendriteAsic },
+    Uplink,
+    MgDdm { mode: String },
+    Mgd,
+    SpSim,
+}
+
+impl crate::smf_helper::Service for ServiceType {
+    fn service_name(&self) -> String {
+        // XXX-dap came from `Display` and could be moved into that if it makes
+        // sense
+        match self {
+            ServiceType::ManagementGatewayService => "mgs",
+            ServiceType::Wicketd { .. } => "wicketd",
+            ServiceType::Dendrite { .. } => "dendrite",
+            ServiceType::Tfport { .. } => "tfport",
+            ServiceType::Uplink { .. } => "uplink",
+            ServiceType::MgDdm { .. } => "mg-ddm",
+            ServiceType::Mgd => "mgd",
+            ServiceType::SpSim => "sp-sim",
+        }
+        .to_owned()
+    }
+    fn smf_name(&self) -> String {
+        format!("svc:/oxide/{}", self.service_name())
+    }
+    fn should_import(&self) -> bool {
+        true
+    }
+}
+
+// XXX-dap needs better naming.  Maybe we can even combine this with ZoneConfig
+// / ZoneArgs?  ZoneArgs is only used to differentiate two cases that now have
+// either a SwitchZoneState (which is a SwitchZoneConfig + root) or a ZoneConfig
+// (which is an OmicronZoneConfig plus a root).
+struct SwitchZoneState {
+    zone: SwitchZoneConfig,
+    root: Utf8PathBuf,
+}
+
 // XXX-dap TODO-doc
 enum ZoneArgs<'a> {
     Omicron(&'a ZoneConfig),
-
-    // XXX-dap make this a more specific struct
-    SledLocal(&'a ZoneRequestV1),
+    SledLocal(&'a SwitchZoneState),
 }
 
 impl<'a> ZoneArgs<'a> {
@@ -372,7 +423,7 @@ impl<'a> ZoneArgs<'a> {
         match self {
             ZoneArgs::Omicron(_) => Box::new(std::iter::empty()),
             ZoneArgs::SledLocal(request) => {
-                Box::new(request.zone.services.iter().map(|s| &s.details))
+                Box::new(request.zone.services.iter())
             }
         }
     }
@@ -410,7 +461,7 @@ enum SledLocalZone {
     // of certain links.
     Initializing {
         // The request for the zone
-        request: ServiceZoneRequest,
+        request: SwitchZoneConfig,
         // A background task which keeps looping until the zone is initialized
         worker: Option<Task>,
         // Filesystems for the switch zone to mount
@@ -423,7 +474,7 @@ enum SledLocalZone {
     // The Zone is currently running.
     Running {
         // The original request for the zone
-        request: ServiceZoneRequest,
+        request: SwitchZoneConfig,
         // The currently running zone
         zone: RunningZone,
     },
@@ -779,18 +830,13 @@ impl ServiceManager {
         &self,
         zone_args: &ZoneArgs<'_>,
     ) -> Result<Option<(Link, Ipv6Addr)>, Error> {
-        if let ZoneArgs::SledLocal(req) = zone_args {
-            match req.zone.zone_type {
-                ZoneType::Switch => {
-                    let link = self
-                        .inner
-                        .bootstrap_vnic_allocator
-                        .new_bootstrap()
-                        .map_err(Error::SledLocalVnicCreation)?;
-                    Ok(Some((link, self.inner.switch_zone_bootstrap_address)))
-                }
-                _ => Ok(None),
-            }
+        if let ZoneArgs::SledLocal(_) = zone_args {
+            let link = self
+                .inner
+                .bootstrap_vnic_allocator
+                .new_bootstrap()
+                .map_err(Error::SledLocalVnicCreation)?;
+            Ok(Some((link, self.inner.switch_zone_bootstrap_address)))
         } else {
             Ok(None)
         }
@@ -1040,8 +1086,14 @@ impl ServiceManager {
                     needed.push("default".to_string());
                     needed.push("sys_dl_config".to_string());
                 }
-                ServiceType::BoundaryNtp { .. }
-                | ServiceType::InternalNtp { .. } => {
+                _ => (),
+            }
+        }
+
+        if let Some(omicron_zone_type) = zone_args.omicron_type() {
+            match omicron_zone_type {
+                OmicronZoneType::BoundaryNtp { .. }
+                | OmicronZoneType::InternalNtp { .. } => {
                     needed.push("default".to_string());
                     needed.push("sys_time".to_string());
                     needed.push("proc_priocntl".to_string());
@@ -1210,7 +1262,7 @@ impl ServiceManager {
             ZoneArgs::Omicron(zone_config) => {
                 zone_config.zone.zone_type.zone_type_str().to_owned()
             }
-            ZoneArgs::SledLocal(req) => req.zone.zone_type.to_string(),
+            ZoneArgs::SledLocal(_) => "switch".to_string(),
         };
         let installed_zone = InstalledZone::install(
             &self.inner.log,
@@ -1899,10 +1951,10 @@ impl ServiceManager {
                     // avoid importing this manifest?
                     debug!(self.inner.log, "importing manifest");
 
-                    let smfh = SmfHelper::new(&running_zone, &service.details);
+                    let smfh = SmfHelper::new(&running_zone, service);
                     smfh.import_manifest()?;
 
-                    match &service.details {
+                    match service {
                         ServiceType::ManagementGatewayService => {
                             info!(self.inner.log, "Setting up MGS service");
                             smfh.setprop("config/id", request.zone.id)?;
@@ -2277,24 +2329,6 @@ impl ServiceManager {
                             smfh.setprop("config/dendrite", "true")?;
 
                             smfh.refresh()?;
-                        }
-
-                        ServiceType::Nexus { .. }
-                        | ServiceType::Oximeter { .. }
-                        | ServiceType::BoundaryNtp { .. }
-                        | ServiceType::InternalNtp { .. }
-                        | ServiceType::ExternalDns { .. }
-                        | ServiceType::InternalDns { .. }
-                        | ServiceType::CockroachDb { .. }
-                        | ServiceType::Crucible { .. }
-                        | ServiceType::CruciblePantry { .. }
-                        | ServiceType::Clickhouse { .. }
-                        | ServiceType::ClickhouseKeeper { .. } => {
-                            panic!(
-                                "unexpected service type for sled-local \
-                                zone: {:?}",
-                                service.details
-                            );
                         }
                     }
 
@@ -2887,19 +2921,10 @@ impl ServiceManager {
             if let Some((ip, _)) = underlay_info { vec![ip] } else { vec![] };
         addresses.push(Ipv6Addr::LOCALHOST);
 
-        let request = ServiceZoneRequest {
-            id: Uuid::new_v4(),
-            zone_type: ZoneType::Switch,
-            addresses,
-            dataset: None,
-            services: services
-                .into_iter()
-                .map(|s| ServiceZoneService { id: Uuid::new_v4(), details: s })
-                .collect(),
-        };
+        let request =
+            SwitchZoneConfig { id: Uuid::new_v4(), addresses, services };
 
         self.ensure_zone(
-            ZoneType::Switch,
             // request=
             Some(request),
             // filesystems=
@@ -2992,7 +3017,6 @@ impl ServiceManager {
     /// Ensures that no switch zone is active.
     pub async fn deactivate_switch(&self) -> Result<(), Error> {
         self.ensure_zone(
-            ZoneType::Switch,
             // request=
             None,
             // filesystems=
@@ -3009,12 +3033,11 @@ impl ServiceManager {
     fn start_zone(
         self,
         zone: &mut SledLocalZone,
-        request: ServiceZoneRequest,
+        request: SwitchZoneConfig,
         filesystems: Vec<zone::Fs>,
         data_links: Vec<String>,
     ) {
         let (exit_tx, exit_rx) = oneshot::channel();
-        let zone_type = request.zone_type.clone();
         *zone = SledLocalZone::Initializing {
             request,
             filesystems,
@@ -3022,7 +3045,7 @@ impl ServiceManager {
             worker: Some(Task {
                 exit_tx,
                 initializer: tokio::task::spawn(async move {
-                    self.initialize_zone_loop(zone_type, exit_rx).await
+                    self.initialize_zone_loop(exit_rx).await
                 }),
             }),
         };
@@ -3031,21 +3054,14 @@ impl ServiceManager {
     // Moves the current state to align with the "request".
     async fn ensure_zone(
         &self,
-        zone_type: ZoneType,
-        request: Option<ServiceZoneRequest>,
+        request: Option<SwitchZoneConfig>,
         filesystems: Vec<zone::Fs>,
         data_links: Vec<String>,
     ) -> Result<(), Error> {
         let log = &self.inner.log;
 
-        let mut sled_zone;
-        match zone_type {
-            ZoneType::Switch => {
-                sled_zone = self.inner.switch_zone.lock().await;
-            }
-            _ => panic!("Unhandled zone type"),
-        }
-        let zone_typestr = zone_type.to_string();
+        let mut sled_zone = self.inner.switch_zone.lock().await;
+        let zone_typestr = "switch";
 
         match (&mut *sled_zone, request) {
             (SledLocalZone::Disabled, Some(request)) => {
@@ -3114,9 +3130,9 @@ impl ServiceManager {
                 }
 
                 for service in &request.services {
-                    let smfh = SmfHelper::new(&zone, &service.details);
+                    let smfh = SmfHelper::new(&zone, service);
 
-                    match &service.details {
+                    match service {
                         ServiceType::ManagementGatewayService => {
                             // Remove any existing `config/address` values
                             // without deleting the property itself.
@@ -3267,19 +3283,8 @@ impl ServiceManager {
         // switch zone were on a U.2 device we would not be able to run RSS, as
         // we could not create the U.2 disks due to lack of encryption. To break
         // the cycle we put the switch zone root fs on the ramdisk.
-        let root = if request.zone_type == ZoneType::Switch {
-            Utf8PathBuf::from(ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT)
-        } else {
-            let all_u2_roots =
-                self.inner.storage.all_u2_mountpoints(ZONE_DATASET).await;
-            let mut rng = rand::rngs::StdRng::from_entropy();
-            all_u2_roots
-                .choose(&mut rng)
-                .ok_or_else(|| Error::U2NotFound)?
-                .clone()
-        };
-
-        let zone_request = ZoneRequestV1 { root, zone: request.clone() };
+        let root = Utf8PathBuf::from(ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT);
+        let zone_request = SwitchZoneState { root, zone: request.clone() };
         let zone_args = ZoneArgs::SledLocal(&zone_request);
         let zone =
             self.initialize_zone(zone_args, filesystems, data_links).await?;
@@ -3289,26 +3294,16 @@ impl ServiceManager {
 
     // Body of a tokio task responsible for running until the switch zone is
     // inititalized, or it has been told to stop.
-    async fn initialize_zone_loop(
-        &self,
-        zone_type: ZoneType,
-        mut exit_rx: oneshot::Receiver<()>,
-    ) {
+    async fn initialize_zone_loop(&self, mut exit_rx: oneshot::Receiver<()>) {
         loop {
             {
-                let mut sled_zone;
-                match zone_type {
-                    ZoneType::Switch => {
-                        sled_zone = self.inner.switch_zone.lock().await;
-                    }
-                    _ => panic!("Unhandled zone type"),
-                }
+                let mut sled_zone = self.inner.switch_zone.lock().await;
                 match self.try_initialize_sled_local_zone(&mut sled_zone).await
                 {
                     Ok(()) => return,
                     Err(e) => warn!(
                         self.inner.log,
-                        "Failed to initialize {zone_type}: {e}"
+                        "Failed to initialize switch zone: {e}"
                     ),
                 }
             }
