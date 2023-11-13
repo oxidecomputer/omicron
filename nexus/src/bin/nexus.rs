@@ -27,6 +27,7 @@ struct Args {
         short = 'O',
         long = "openapi",
         help = "Print the external OpenAPI Spec document and exit",
+        conflicts_with = "openapi_internal",
         action
     )]
     openapi: bool,
@@ -40,7 +41,7 @@ struct Args {
     openapi_internal: bool,
 
     #[clap(name = "CONFIG_FILE_PATH", action)]
-    config_file_path: PathBuf,
+    config_file_path: Option<PathBuf>,
 }
 
 #[tokio::main]
@@ -53,14 +54,25 @@ async fn main() {
 async fn do_run() -> Result<(), CmdError> {
     let args = Args::parse();
 
-    let config = Config::from_file(args.config_file_path)
-        .map_err(|e| CmdError::Failure(anyhow!(e)))?;
-
     if args.openapi {
         run_openapi_external().map_err(|err| CmdError::Failure(anyhow!(err)))
     } else if args.openapi_internal {
         run_openapi_internal().map_err(|err| CmdError::Failure(anyhow!(err)))
     } else {
+        let config_path = match args.config_file_path {
+            Some(path) => path,
+            None => {
+                use clap::CommandFactory;
+
+                eprintln!("{}", Args::command().render_help());
+                return Err(CmdError::Usage(
+                    "CONFIG_FILE_PATH is required".to_string(),
+                ));
+            }
+        };
+        let config = Config::from_file(config_path)
+            .map_err(|e| CmdError::Failure(anyhow!(e)))?;
+
         run_server(&config).await.map_err(|err| CmdError::Failure(anyhow!(err)))
     }
 }

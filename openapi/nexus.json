@@ -7838,18 +7838,6 @@
     }
   },
   "components": {
-    "responses": {
-      "Error": {
-        "description": "Error",
-        "content": {
-          "application/json": {
-            "schema": {
-              "$ref": "#/components/schemas/Error"
-            }
-          }
-        }
-      }
-    },
     "schemas": {
       "Address": {
         "description": "An address tied to an address lot.",
@@ -16057,6 +16045,18 @@
             ]
           }
         ]
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "Error",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
       }
     }
   },

@@ -95,18 +95,6 @@
     }
   },
   "components": {
-    "responses": {
-      "Error": {
-        "description": "Error",
-        "content": {
-          "application/json": {
-            "schema": {
-              "$ref": "#/components/schemas/Error"
-            }
-          }
-        }
-      }
-    },
     "schemas": {
       "Duration": {
         "type": "object",
@@ -2322,6 +2310,18 @@
           "slots_attempted",
           "slots_written"
         ]
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "Error",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
       }
     }
   }

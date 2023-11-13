@@ -2007,7 +2007,7 @@ dependencies = [
  "omicron-test-utils",
  "omicron-workspace-hack",
  "openapi-lint",
- "openapiv3",
+ "openapiv3 1.0.3",
  "pretty-hex 0.3.0",
  "schemars",
  "serde",
@@ -2111,7 +2111,7 @@ dependencies = [
 [[package]]
 name = "dropshot"
 version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#fa728d07970824fd5f3bd57a3d4dc0fdbea09bfd"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#ff87a0175a6c8ce4462cfe7486edd7000f01be6e"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -2128,7 +2128,7 @@ dependencies = [
  "hyper",
  "indexmap 2.1.0",
  "multer",
- "openapiv3",
+ "openapiv3 2.0.0-rc.1",
  "paste",
  "percent-encoding",
  "proc-macro2",
@@ -2147,7 +2147,7 @@ dependencies = [
  "slog-term",
  "tokio",
  "tokio-rustls",
- "toml 0.7.8",
+ "toml 0.8.8",
  "usdt",
  "uuid",
  "version_check",
@@ -2157,7 +2157,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#fa728d07970824fd5f3bd57a3d4dc0fdbea09bfd"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#ff87a0175a6c8ce4462cfe7486edd7000f01be6e"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3527,7 +3527,7 @@ dependencies = [
  "omicron-test-utils",
  "omicron-workspace-hack",
  "openapi-lint",
- "openapiv3",
+ "openapiv3 1.0.3",
  "schemars",
  "serde",
  "serde_json",
@@ -4392,7 +4392,7 @@ dependencies = [
  "omicron-sled-agent",
  "omicron-test-utils",
  "omicron-workspace-hack",
- "openapiv3",
+ "openapiv3 1.0.3",
  "openssl",
  "oso",
  "oximeter 0.1.0",
@@ -4992,7 +4992,7 @@ dependencies = [
  "omicron-workspace-hack",
  "once_cell",
  "openapi-lint",
- "openapiv3",
+ "openapiv3 1.0.3",
  "schemars",
  "serde",
  "serde_json",
@@ -5068,7 +5068,7 @@ dependencies = [
  "omicron-workspace-hack",
  "once_cell",
  "openapi-lint",
- "openapiv3",
+ "openapiv3 1.0.3",
  "openssl",
  "oxide-client",
  "oximeter 0.1.0",
@@ -5278,7 +5278,7 @@ dependencies = [
  "omicron-workspace-hack",
  "once_cell",
  "openapi-lint",
- "openapiv3",
+ "openapiv3 1.0.3",
  "opte-ioctl",
  "oximeter 0.1.0",
  "oximeter-instruments",
@@ -5409,7 +5409,6 @@ dependencies = [
  "num-iter",
  "num-traits",
  "once_cell",
- "openapiv3",
  "petgraph",
  "postgres-types",
  "ppv-lite86",
@@ -5508,7 +5507,7 @@ dependencies = [
  "heck 0.4.1",
  "indexmap 2.1.0",
  "lazy_static",
- "openapiv3",
+ "openapiv3 1.0.3",
  "regex",
 ]
 
@@ -5517,6 +5516,17 @@ name = "openapiv3"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "75e56d5c441965b6425165b7e3223cc933ca469834f4a8b4786817a1f9dc4f13"
+dependencies = [
+ "indexmap 2.1.0",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "openapiv3"
+version = "2.0.0-rc.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "25316406f0191559189c56d99731b63130775de7284d98df5e976ce67882ca8a"
 dependencies = [
  "indexmap 2.1.0",
  "serde",
@@ -5752,7 +5762,7 @@ dependencies = [
  "omicron-test-utils",
  "omicron-workspace-hack",
  "openapi-lint",
- "openapiv3",
+ "openapiv3 1.0.3",
  "oximeter 0.1.0",
  "oximeter-client",
  "oximeter-db",
@@ -6551,9 +6561,9 @@ dependencies = [
 
 [[package]]
 name = "proc-macro2"
-version = "1.0.67"
+version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3d433d9f1a3e8c1263d9456598b16fec66f4acc9a74dacffd35c7bb09b3a1328"
+checksum = "134c189feb4956b20f6f547d2cf727d4c0fe06722b20a0eec87ed445a97f92da"
 dependencies = [
  "unicode-ident",
 ]
@@ -6592,7 +6602,7 @@ dependencies = [
  "heck 0.4.1",
  "http",
  "indexmap 2.1.0",
- "openapiv3",
+ "openapiv3 1.0.3",
  "proc-macro2",
  "quote",
  "regex",
@@ -6610,7 +6620,7 @@ name = "progenitor-macro"
 version = "0.3.0"
 source = "git+https://github.com/oxidecomputer/progenitor?branch=main#5c941c0b41b0235031f3ade33a9c119945f1fd51"
 dependencies = [
- "openapiv3",
+ "openapiv3 1.0.3",
  "proc-macro2",
  "progenitor-impl",
  "quote",
@@ -7774,9 +7784,9 @@ dependencies = [
 
 [[package]]
 name = "serde"
-version = "1.0.188"
+version = "1.0.192"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf9e0fcba69a370eed61bcf2b728575f726b50b55cba78064753d708ddc7549e"
+checksum = "bca2a08484b285dcb282d0f67b26cadc0df8b19f8c12502c13d966bf9482f001"
 dependencies = [
  "serde_derive",
 ]
@@ -7821,9 +7831,9 @@ dependencies = [
 
 [[package]]
 name = "serde_derive"
-version = "1.0.188"
+version = "1.0.192"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4eca7ac642d82aa35b60049a6eccb4be6be75e599bd2e9adb5f875a737654af2"
+checksum = "d6c7207fbec9faa48073f3e3074cbe553af6ea512d7c21ba46e434e70ea9fbc1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -8003,9 +8013,9 @@ dependencies = [
 
 [[package]]
 name = "sha1"
-version = "0.10.5"
+version = "0.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f04293dc80c3993519f2d7f6f511707ee7094fe0c6d3406feb330cdb3540eba3"
+checksum = "e3bf829a2d51ab4a5ddf1352d8470c140cadc8301b2ae1789db023f01cedd6ba"
 dependencies = [
  "cfg-if 1.0.0",
  "cpufeatures",
@@ -9550,7 +9560,7 @@ version = "1.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97fee6b57c6a41524a810daee9286c02d7752c4253064d0b05472833a438f675"
 dependencies = [
- "cfg-if 1.0.0",
+ "cfg-if 0.1.10",
  "rand 0.8.5",
  "static_assertions",
 ]
@@ -10205,7 +10215,7 @@ dependencies = [
  "omicron-test-utils",
  "omicron-workspace-hack",
  "openapi-lint",
- "openapiv3",
+ "openapiv3 1.0.3",
  "rand 0.8.5",
  "reqwest",
  "schemars",
