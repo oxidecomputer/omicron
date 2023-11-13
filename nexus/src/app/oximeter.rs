@@ -187,6 +187,58 @@ impl super::Nexus {
         Ok(())
     }
 
+    /// Idempotently un-assign a producer from an oximeter collector.
+    pub(crate) async fn unassign_producer(
+        &self,
+        id: &Uuid,
+    ) -> Result<(), Error> {
+        if let Some(collector_id) =
+            self.db_datastore.producer_endpoint_delete(id).await?
+        {
+            debug!(
+                self.log,
+                "deleted metric producer assignment";
+                "producer_id" => %id,
+                "collector_id" => %collector_id,
+            );
+            let oximeter_info =
+                self.db_datastore.oximeter_lookup(&collector_id).await?;
+            let address =
+                SocketAddr::new(oximeter_info.ip.ip(), *oximeter_info.port);
+            let client = self.build_oximeter_client(&id, address);
+            if let Err(e) = client.producer_delete(&id).await {
+                error!(
+                    self.log,
+                    "failed to delete producer from collector";
+                    "producer_id" => %id,
+                    "collector_id" => %collector_id,
+                    "address" => %address,
+                    "error" => ?e,
+                );
+                return Err(Error::internal_error(
+                    format!("failed to delete producer from collector: {e:?}")
+                        .as_str(),
+                ));
+            } else {
+                debug!(
+                    self.log,
+                    "successfully deleted producer from collector";
+                    "producer_id" => %id,
+                    "collector_id" => %collector_id,
+                    "address" => %address,
+                );
+                Ok(())
+            }
+        } else {
+            trace!(
+                self.log,
+                "un-assigned non-existent metric producer";
+                "producer_id" => %id,
+            );
+            Ok(())
+        }
+    }
+
     /// Returns a results from the timeseries DB based on the provided query
     /// parameters.
     ///

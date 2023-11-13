@@ -1320,7 +1320,9 @@ impl super::Nexus {
         .await?;
 
         // If the supplied instance state indicates that the instance no longer
-        // has an active VMM, attempt to delete the virtual provisioning record
+        // has an active VMM, attempt to delete the virtual provisioning record,
+        // and the assignment of the Propolis metric producer to an oximeter
+        // collector.
         //
         // As with updating networking state, this must be done before
         // committing the new runtime state to the database: once the DB is
@@ -1338,6 +1340,7 @@ impl super::Nexus {
                     (&new_runtime_state.instance_state.gen).into(),
                 )
                 .await?;
+            self.unassign_producer(instance_id).await?;
         }
 
         // Write the new instance and VMM states back to CRDB. This needs to be
