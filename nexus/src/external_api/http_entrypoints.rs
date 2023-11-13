@@ -3992,6 +3992,7 @@ async fn vpc_firewall_rules_update(
     method = GET,
     path = "/v1/vpc-routers",
     tags = ["vpcs"],
+    unpublished = true,
 }]
 async fn vpc_router_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4027,6 +4028,7 @@ async fn vpc_router_list(
     method = GET,
     path = "/v1/vpc-routers/{router}",
     tags = ["vpcs"],
+    unpublished = true,
 }]
 async fn vpc_router_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4056,6 +4058,7 @@ async fn vpc_router_view(
     method = POST,
     path = "/v1/vpc-routers",
     tags = ["vpcs"],
+    unpublished = true,
 }]
 async fn vpc_router_create(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4087,6 +4090,7 @@ async fn vpc_router_create(
     method = DELETE,
     path = "/v1/vpc-routers/{router}",
     tags = ["vpcs"],
+    unpublished = true,
 }]
 async fn vpc_router_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4116,6 +4120,7 @@ async fn vpc_router_delete(
     method = PUT,
     path = "/v1/vpc-routers/{router}",
     tags = ["vpcs"],
+    unpublished = true,
 }]
 async fn vpc_router_update(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4151,6 +4156,7 @@ async fn vpc_router_update(
     method = GET,
     path = "/v1/vpc-router-routes",
     tags = ["vpcs"],
+    unpublished = true,
 }]
 async fn vpc_router_route_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4188,6 +4194,7 @@ async fn vpc_router_route_list(
     method = GET,
     path = "/v1/vpc-router-routes/{route}",
     tags = ["vpcs"],
+    unpublished = true,
 }]
 async fn vpc_router_route_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4220,6 +4227,7 @@ async fn vpc_router_route_view(
     method = POST,
     path = "/v1/vpc-router-routes",
     tags = ["vpcs"],
+    unpublished = true,
 }]
 async fn vpc_router_route_create(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4251,6 +4259,7 @@ async fn vpc_router_route_create(
     method = DELETE,
     path = "/v1/vpc-router-routes/{route}",
     tags = ["vpcs"],
+    unpublished = true,
 }]
 async fn vpc_router_route_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4282,6 +4291,7 @@ async fn vpc_router_route_delete(
     method = PUT,
     path = "/v1/vpc-router-routes/{route}",
     tags = ["vpcs"],
+    unpublished = true,
 }]
 async fn vpc_router_route_update(
     rqctx: RequestContext<Arc<ServerContext>>,
