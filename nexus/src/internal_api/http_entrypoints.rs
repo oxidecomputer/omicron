@@ -589,5 +589,5 @@ async fn ipv4_nat_changeset(
         changeset.sort_by_key(|e| e.gen);
         Ok(HttpResponseOk(changeset))
     };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
