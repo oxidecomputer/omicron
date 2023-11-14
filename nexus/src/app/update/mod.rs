@@ -26,9 +26,11 @@ use std::path::Path;
 use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
-mod sp_updater;
+mod mgs_clients;
 mod rot_updater;
+mod sp_updater;
 
+pub use mgs_clients::MgsClients;
 pub use sp_updater::{SpUpdateError, SpUpdater};
 
 #[derive(Debug, PartialEq, Clone)]

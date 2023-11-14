@@ -4,14 +4,12 @@
 
 //! Module containing types for updating SPs via MGS.
 
+use super::MgsClients;
 use super::UpdateProgress;
-use futures::Future;
 use gateway_client::types::SpType;
 use gateway_client::types::SpUpdateStatus;
 use gateway_client::SpComponent;
 use slog::Logger;
-use std::collections::VecDeque;
-use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
 use uuid::Uuid;
@@ -49,6 +47,7 @@ impl SpUpdater {
         log: &Logger,
     ) -> Self {
         let log = log.new(slog::o!(
+            "component" => "SpUpdater",
             "sp_type" => format!("{sp_type:?}"),
             "sp_slot" => sp_slot,
             "update_id" => format!("{update_id}"),
@@ -67,78 +66,39 @@ impl SpUpdater {
     /// multiple MGS instances are available and passed to this method and an
     /// error occurs communicating with one instance, `SpUpdater` will try the
     /// remaining instances before failing.
-    ///
-    /// # Panics
-    ///
-    /// If `mgs_clients` is empty.
-    pub async fn update<T: Into<VecDeque<Arc<gateway_client::Client>>>>(
+    pub async fn update(
         self,
-        mgs_clients: T,
+        mut mgs_clients: MgsClients,
     ) -> Result<(), SpUpdateError> {
-        let mut mgs_clients = mgs_clients.into();
-        assert!(!mgs_clients.is_empty());
-
         // The async blocks below want `&self` references, but we take `self`
         // for API clarity (to start a new SP update, the caller should
         // construct a new `SpUpdater`). Create a `&self` ref that we use
         // through the remainder of this method.
         let me = &self;
 
-        me.try_all_mgs_clients(&mut mgs_clients, |client| async move {
-            me.start_update_one_mgs(&client).await
-        })
-        .await?;
+        mgs_clients
+            .try_all(
+                |client| async move { me.start_update_one_mgs(&client).await },
+            )
+            .await?;
+
+        mgs_clients
+            .try_all(
+                |client| async move { me.start_update_one_mgs(&client).await },
+            )
+            .await?;
 
         // `wait_for_update_completion` uses `try_all_mgs_clients` internally,
         // so we don't wrap it here.
         me.wait_for_update_completion(&mut mgs_clients).await?;
 
-        me.try_all_mgs_clients(&mut mgs_clients, |client| async move {
-            me.finalize_update_via_reset_one_mgs(&client).await
-        })
-        .await?;
+        mgs_clients
+            .try_all(|client| async move {
+                me.finalize_update_via_reset_one_mgs(&client).await
+            })
+            .await?;
 
         Ok(())
-    }
-
-    // Helper method to run `op` against all clients. If `op` returns
-    // successfully for one client, that client will be rotated to the front of
-    // the list (so any subsequent operations can start with the first client).
-    async fn try_all_mgs_clients<T, F, Fut>(
-        &self,
-        mgs_clients: &mut VecDeque<Arc<gateway_client::Client>>,
-        op: F,
-    ) -> Result<T, GatewayClientError>
-    where
-        F: Fn(Arc<gateway_client::Client>) -> Fut,
-        Fut: Future<Output = Result<T, GatewayClientError>>,
-    {
-        let mut last_err = None;
-        for (i, client) in mgs_clients.iter().enumerate() {
-            match op(Arc::clone(client)).await {
-                Ok(val) => {
-                    // Shift our list of MGS clients such that the one we just
-                    // used is at the front for subsequent requests.
-                    mgs_clients.rotate_left(i);
-                    return Ok(val);
-                }
-                // If we have an error communicating with an MGS instance
-                // (timeout, unexpected connection close, etc.), we'll move on
-                // and try the next MGS client. If this was the last client,
-                // we'll stash the error in `last_err` and return it below the
-                // loop.
-                Err(GatewayClientError::CommunicationError(err)) => {
-                    last_err = Some(err);
-                    continue;
-                }
-                Err(err) => return Err(err),
-            }
-        }
-
-        // We know we have at least one `mgs_client`, so the only way to get
-        // here is if all clients failed with connection errors. Return the
-        // error from the last MGS we tried.
-        Err(GatewayClientError::CommunicationError(last_err.unwrap()))
     }
 
     async fn start_update_one_mgs(
@@ -174,14 +134,14 @@ impl SpUpdater {
 
     async fn wait_for_update_completion(
         &self,
-        mgs_clients: &mut VecDeque<Arc<gateway_client::Client>>,
+        mgs_clients: &mut MgsClients,
     ) -> Result<(), SpUpdateError> {
         // How frequently do we poll MGS for the update progress?
         const STATUS_POLL_INTERVAL: Duration = Duration::from_secs(3);
 
         loop {
-            let update_status = self
-                .try_all_mgs_clients(mgs_clients, |client| async move {
+            let update_status = mgs_clients
+                .try_all(|client| async move {
                     let update_status = client
                         .sp_component_update_status(
                             self.sp_type,

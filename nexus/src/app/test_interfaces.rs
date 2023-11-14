@@ -10,6 +10,7 @@ use sled_agent_client::Client as SledAgentClient;
 use std::sync::Arc;
 use uuid::Uuid;
 
+pub use super::update::MgsClients;
 pub use super::update::SpUpdateError;
 pub use super::update::SpUpdater;
 pub use super::update::UpdateProgress;
