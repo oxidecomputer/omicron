@@ -312,7 +312,7 @@ struct ZoneRequestV1 {
 
 // XXX-dap TODO-doc and maybe rename it?
 #[derive(Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
-struct ZoneConfig {
+struct OmicronZoneConfigComplete {
     zone: OmicronZoneConfig,
     // TODO: Consider collapsing "root" into OmicronZoneConfig?
     #[schemars(with = "String")]
@@ -326,7 +326,7 @@ const ZONES_LEDGER_FILENAME: &str = "omicron_zones.json";
 #[derive(Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 struct ZonesConfig {
     generation: Generation,
-    zones: Vec<ZoneConfig>,
+    zones: Vec<OmicronZoneConfigComplete>,
 }
 
 impl Ledgerable for ZonesConfig {
@@ -372,8 +372,6 @@ enum ServiceType {
 
 impl crate::smf_helper::Service for ServiceType {
     fn service_name(&self) -> String {
-        // XXX-dap came from `Display` and could be moved into that if it makes
-        // sense
         match self {
             ServiceType::ManagementGatewayService => "mgs",
             ServiceType::Wicketd { .. } => "wicketd",
@@ -394,19 +392,15 @@ impl crate::smf_helper::Service for ServiceType {
     }
 }
 
-// XXX-dap needs better naming.  Maybe we can even combine this with ZoneConfig
-// / ZoneArgs?  ZoneArgs is only used to differentiate two cases that now have
-// either a SwitchZoneState (which is a SwitchZoneConfig + root) or a ZoneConfig
-// (which is an OmicronZoneConfig plus a root).
-struct SwitchZoneState {
+struct SwitchZoneConfigComplete {
     zone: SwitchZoneConfig,
     root: Utf8PathBuf,
 }
 
 // XXX-dap TODO-doc
 enum ZoneArgs<'a> {
-    Omicron(&'a ZoneConfig),
-    SledLocal(&'a SwitchZoneState),
+    Omicron(&'a OmicronZoneConfigComplete),
+    SledLocal(&'a SwitchZoneConfigComplete),
 }
 
 impl<'a> ZoneArgs<'a> {
@@ -1287,7 +1281,7 @@ impl ServiceManager {
         // These zones are self-assembling -- after they boot, there should
         // be no "zlogin" necessary to initialize.
         match &request {
-            ZoneArgs::Omicron(ZoneConfig {
+            ZoneArgs::Omicron(OmicronZoneConfigComplete {
                 zone:
                     OmicronZoneConfig {
                         zone_type: OmicronZoneType::Clickhouse { .. },
@@ -1331,7 +1325,7 @@ impl ServiceManager {
                 return Ok(RunningZone::boot(installed_zone).await?);
             }
 
-            ZoneArgs::Omicron(ZoneConfig {
+            ZoneArgs::Omicron(OmicronZoneConfigComplete {
                 zone:
                     OmicronZoneConfig {
                         zone_type: OmicronZoneType::ClickhouseKeeper { .. },
@@ -1378,7 +1372,7 @@ impl ServiceManager {
                 return Ok(RunningZone::boot(installed_zone).await?);
             }
 
-            ZoneArgs::Omicron(ZoneConfig {
+            ZoneArgs::Omicron(OmicronZoneConfigComplete {
                 zone:
                     OmicronZoneConfig {
                         zone_type: OmicronZoneType::CockroachDb { .. },
@@ -1427,7 +1421,7 @@ impl ServiceManager {
                 return Ok(RunningZone::boot(installed_zone).await?);
             }
 
-            ZoneArgs::Omicron(ZoneConfig {
+            ZoneArgs::Omicron(OmicronZoneConfigComplete {
                 zone:
                     zone @ OmicronZoneConfig {
                         zone_type: OmicronZoneType::Crucible { .. },
@@ -1470,7 +1464,7 @@ impl ServiceManager {
                 return Ok(RunningZone::boot(installed_zone).await?);
             }
 
-            ZoneArgs::Omicron(ZoneConfig {
+            ZoneArgs::Omicron(OmicronZoneConfigComplete {
                 zone:
                     OmicronZoneConfig {
                         zone_type: OmicronZoneType::CruciblePantry { .. },
@@ -1560,7 +1554,7 @@ impl ServiceManager {
         }
 
         let addresses = match &request {
-            ZoneArgs::Omicron(ZoneConfig {
+            ZoneArgs::Omicron(OmicronZoneConfigComplete {
                 zone: OmicronZoneConfig { underlay_address, .. },
                 ..
             }) => vec![*underlay_address],
@@ -2345,7 +2339,7 @@ impl ServiceManager {
     async fn initialize_omicron_zones_locked(
         &self,
         existing_zones: &mut BTreeMap<String, RunningZone>,
-        requests: &Vec<ZoneConfig>,
+        requests: &Vec<OmicronZoneConfigComplete>,
     ) -> Result<(), Error> {
         if let Some(name) = requests
             .iter()
@@ -2623,7 +2617,7 @@ impl ServiceManager {
                 .ok_or_else(|| Error::U2NotFound)?
                 .clone();
 
-            new_zones.push(ZoneConfig { zone: zone.clone(), root });
+            new_zones.push(OmicronZoneConfigComplete { zone: zone.clone(), root });
         }
 
         self.initialize_omicron_zones_locked(existing_zones, &new_zones)
@@ -3284,7 +3278,7 @@ impl ServiceManager {
         // we could not create the U.2 disks due to lack of encryption. To break
         // the cycle we put the switch zone root fs on the ramdisk.
         let root = Utf8PathBuf::from(ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT);
-        let zone_request = SwitchZoneState { root, zone: request.clone() };
+        let zone_request = SwitchZoneConfigComplete { root, zone: request.clone() };
         let zone_args = ZoneArgs::SledLocal(&zone_request);
         let zone =
             self.initialize_zone(zone_args, filesystems, data_links).await?;
