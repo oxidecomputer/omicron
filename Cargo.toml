@@ -170,7 +170,6 @@ criterion = { version = "0.5.1", features = [ "async_tokio" ] }
 crossbeam = "0.8"
 crossterm = { version = "0.27.0", features = ["event-stream"] }
 crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "da534e73380f3cc53ca0de073e1ea862ae32109b" }
-crucible-client-types = { git = "https://github.com/oxidecomputer/crucible", rev = "da534e73380f3cc53ca0de073e1ea862ae32109b" }
 crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "da534e73380f3cc53ca0de073e1ea862ae32109b" }
 crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "da534e73380f3cc53ca0de073e1ea862ae32109b" }
 curve25519-dalek = "4"
@@ -291,9 +290,9 @@ pretty-hex = "0.3.0"
 proc-macro2 = "1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "4019eb10fc2f4ba9bf210d0461dc6292b68309c2" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "4019eb10fc2f4ba9bf210d0461dc6292b68309c2", features = [ "generated-migration" ] }
-propolis-server = { git = "https://github.com/oxidecomputer/propolis", rev = "4019eb10fc2f4ba9bf210d0461dc6292b68309c2", default-features = false, features = ["mock-only"] }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "5ed82315541271e2734746a9ca79e39f35c12283" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "5ed82315541271e2734746a9ca79e39f35c12283" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "5ed82315541271e2734746a9ca79e39f35c12283" }
 proptest = "1.3.1"
 quote = "1.0"
 rand = "0.8.5"
@@ -547,9 +546,9 @@ opt-level = 3
 #steno = { path = "../steno" }
 #[patch."https://github.com/oxidecomputer/propolis"]
 #propolis-client = { path = "../propolis/lib/propolis-client" }
+#propolis-mock-server = { path = "../propolis/bin/mock-server" }
 #[patch."https://github.com/oxidecomputer/crucible"]
 #crucible-agent-client = { path = "../crucible/agent-client" }
-#crucible-client-types = { path = "../crucible/crucible-client-types" }
 #crucible-pantry-client = { path = "../crucible/pantry-client" }
 #crucible-smf = { path = "../crucible/smf" }
 #[patch.crates-io]

@@ -19,7 +19,6 @@ cfg-if.workspace = true
 chrono.workspace = true
 clap.workspace = true
 # Only used by the simulated sled agent.
-crucible-client-types.workspace = true
 crucible-agent-client.workspace = true
 ddm-admin-client.workspace = true
 derive_more.workspace = true
@@ -47,8 +46,8 @@ once_cell.workspace = true
 oximeter.workspace = true
 oximeter-instruments.workspace = true
 oximeter-producer.workspace = true
-propolis-client = { workspace = true, features = [ "generated-migration" ] }
-propolis-server.workspace = true # Only used by the simulated sled agent
+propolis-client.workspace = true
+propolis-mock-server.workspace = true # Only used by the simulated sled agent
 rand = { workspace = true, features = ["getrandom"] }
 reqwest = { workspace = true, features = ["rustls-tls", "stream"] }
 schemars = { workspace = true, features = [ "chrono", "uuid1" ] }

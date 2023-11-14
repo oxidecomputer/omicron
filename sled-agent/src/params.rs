@@ -71,8 +71,8 @@ pub struct InstanceHardware {
     pub external_ips: Vec<IpAddr>,
     pub firewall_rules: Vec<VpcFirewallRule>,
     pub dhcp_config: DhcpConfig,
-    // TODO: replace `propolis_client::handmade::*` with locally-modeled request type
-    pub disks: Vec<propolis_client::handmade::api::DiskRequest>,
+    // TODO: replace `propolis_client::*` with locally-modeled request type
+    pub disks: Vec<propolis_client::types::DiskRequest>,
     pub cloud_init_bytes: Option<String>,
 }
 

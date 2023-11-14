@@ -21,7 +21,6 @@ PACKAGES=(
 
 CRATES=(
   "crucible-agent-client"
-  "crucible-client-types"
   "crucible-pantry-client"
   "crucible-smf"
 )
