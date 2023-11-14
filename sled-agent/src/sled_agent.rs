@@ -43,6 +43,7 @@ use omicron_common::address::{
 };
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
+use omicron_common::api::internal::nexus::ProducerKind;
 use omicron_common::api::internal::nexus::{
     SledInstanceState, VmmRuntimeState,
 };
@@ -504,6 +505,7 @@ impl SledAgent {
         // Nexus. This should not block progress here.
         let endpoint = ProducerEndpoint {
             id: request.body.id,
+            kind: Some(ProducerKind::SledAgent),
             address: sled_address.into(),
             base_route: String::from("/metrics/collect"),
             interval: crate::metrics::METRIC_COLLECTION_INTERVAL,
