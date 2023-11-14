@@ -415,6 +415,9 @@ impl super::Nexus {
             }
             IpNetwork::V6(_v6net) => {
                 // TODO: implement handling of v6 nat.
+                return Err(Error::InternalError {
+                    internal_message: "ipv6 nat is not yet implemented".into(),
+                });
             }
         };
         Ok(())
