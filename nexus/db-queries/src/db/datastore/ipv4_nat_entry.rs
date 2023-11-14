@@ -332,7 +332,7 @@ mod test {
         // The NAT table has undergone one change. One entry has been added,
         // none deleted, so we should be at version 1.
         assert_eq!(nat_entries.len(), 1);
-        assert_eq!(nat_entries.last().unwrap().version_added(), 1);
+        assert_eq!(nat_entries.last().unwrap().version_added, 1);
         assert_eq!(
             datastore.ipv4_nat_current_version(&opctx).await.unwrap(),
             1
@@ -358,9 +358,9 @@ mod test {
         // The NAT table has undergone two changes. Two entries have been
         // added, none deleted, so we should be at version 2.
         let nat_entry =
-            nat_entries.iter().find(|e| e.version_added() == 2).unwrap();
+            nat_entries.iter().find(|e| e.version_added == 2).unwrap();
         assert_eq!(nat_entries.len(), 2);
-        assert_eq!(nat_entry.version_added(), 2);
+        assert_eq!(nat_entry.version_added, 2);
         assert_eq!(
             datastore.ipv4_nat_current_version(&opctx).await.unwrap(),
             2
@@ -393,9 +393,9 @@ mod test {
         // first entry was marked for deletion (and it was the third change),
         // the first entry's version number should now be 3.
         let nat_entry =
-            nat_entries.iter().find(|e| e.version_removed().is_some()).unwrap();
+            nat_entries.iter().find(|e| e.version_removed.is_some()).unwrap();
         assert_eq!(nat_entries.len(), 2);
-        assert_eq!(nat_entry.version_removed(), Some(3));
+        assert_eq!(nat_entry.version_removed, Some(3));
         assert_eq!(nat_entry.id, first_entry.id);
         assert_eq!(
             datastore.ipv4_nat_current_version(&opctx).await.unwrap(),

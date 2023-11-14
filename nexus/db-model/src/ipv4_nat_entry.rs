@@ -3,7 +3,7 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 use super::MacAddr;
 use crate::{
     schema::{ipv4_nat_entry, ipv4_nat_version},
-    Ipv4Net, Ipv6Net, SqlU16, SqlU32, Vni,
+    Ipv4Net, Ipv6Net, SqlU16, Vni,
 };
 use chrono::{DateTime, Utc};
 use omicron_common::api::external;
@@ -34,8 +34,8 @@ pub struct Ipv4NatEntry {
     pub sled_address: Ipv6Net,
     pub vni: Vni,
     pub mac: MacAddr,
-    pub version_added: SqlU32,
-    pub version_removed: Option<SqlU32>,
+    pub version_added: i64,
+    pub version_removed: Option<i64>,
     pub time_created: DateTime<Utc>,
     pub time_deleted: Option<DateTime<Utc>>,
 }
@@ -48,22 +48,14 @@ impl Ipv4NatEntry {
     pub fn last_port(&self) -> u16 {
         self.last_port.into()
     }
-
-    pub fn version_added(&self) -> u32 {
-        self.version_added.into()
-    }
-
-    pub fn version_removed(&self) -> Option<u32> {
-        self.version_removed.map(|i| i.into())
-    }
 }
 
 /// Database representation of an Ipv4 NAT Generation.
 #[derive(Queryable, Debug, Clone, Selectable)]
 #[diesel(table_name = ipv4_nat_version)]
 pub struct Ipv4NatGen {
-    pub last_value: SqlU32,
-    pub log_cnt: SqlU32,
+    pub last_value: i64,
+    pub log_cnt: i64,
     pub is_called: bool,
 }
 
@@ -76,15 +68,15 @@ pub struct Ipv4NatEntryView {
     pub sled_address: Ipv6Addr,
     pub vni: external::Vni,
     pub mac: external::MacAddr,
-    pub gen: u32,
+    pub gen: i64,
     pub deleted: bool,
 }
 
 impl From<Ipv4NatEntry> for Ipv4NatEntryView {
     fn from(value: Ipv4NatEntry) -> Self {
         let (gen, deleted) = match value.version_removed {
-            Some(gen) => (*gen, true),
-            None => (*value.version_added, false),
+            Some(gen) => (gen, true),
+            None => (value.version_added, false),
         };
 
         Self {

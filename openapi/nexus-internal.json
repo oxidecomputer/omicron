@@ -3810,8 +3810,7 @@
           },
           "gen": {
             "type": "integer",
-            "format": "uint32",
-            "minimum": 0
+            "format": "int64"
           },
           "last_port": {
             "type": "integer",
