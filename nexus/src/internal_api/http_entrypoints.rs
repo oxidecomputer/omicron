@@ -569,7 +569,7 @@ struct RpwNatQueryParam {
 /// empty vec is returned.
 #[endpoint {
    method = GET,
-    path = "/rpw/nat/ipv4/changeset/{from_gen}"
+    path = "/nat/ipv4/changeset/{from_gen}"
 }]
 async fn ipv4_nat_changeset(
     rqctx: RequestContext<Arc<ServerContext>>,

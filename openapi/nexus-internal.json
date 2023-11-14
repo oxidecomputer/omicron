@@ -323,6 +323,57 @@
         }
       }
     },
+    "/nat/ipv4/changeset/{from_gen}": {
+      "get": {
+        "summary": "Fetch NAT ChangeSet",
+        "description": "Caller provides their generation as `from_gen`, along with a query parameter for the page size (`limit`). Endpoint will return changes that have occured since the caller's generation number up to the latest change or until the `limit` is reached. If there are no changes, an empty vec is returned.",
+        "operationId": "ipv4_nat_changeset",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "from_gen",
+            "description": "which change number to start generating the change set from",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_Ipv4NatEntryView",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Ipv4NatEntryView"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/physical-disk": {
       "put": {
         "summary": "Report that a physical disk for the specified sled has come online.",
@@ -411,57 +462,6 @@
         "responses": {
           "204": {
             "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/rpw/nat/ipv4/changeset/{from_gen}": {
-      "get": {
-        "summary": "Fetch NAT ChangeSet",
-        "description": "Caller provides their generation as `from_gen`, along with a query parameter for the page size (`limit`). Endpoint will return changes that have occured since the caller's generation number up to the latest change or until the `limit` is reached. If there are no changes, an empty vec is returned.",
-        "operationId": "ipv4_nat_changeset",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "from_gen",
-            "description": "which change number to start generating the change set from",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 0
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "title": "Array_of_Ipv4NatEntryView",
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/Ipv4NatEntryView"
-                  }
-                }
-              }
-            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
