@@ -477,12 +477,11 @@ impl SledAgent {
         Ok(sled_agent)
     }
 
-    /// Load services for which we're responsible; only meaningful to call
-    /// during a cold boot.
+    /// Load services for which we're responsible.
     ///
     /// Blocks until all services have started, retrying indefinitely on
     /// failure.
-    pub(crate) async fn cold_boot_load_services(&self) {
+    pub(crate) async fn load_services(&self) {
         retry_notify(
             retry_policy_internal_service_aggressive(),
             || async {

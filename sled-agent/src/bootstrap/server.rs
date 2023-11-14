@@ -326,7 +326,7 @@ impl Server {
             // notifications. This cannot fail: we retry indefinitely until
             // we're done loading services.
             wait_while_handling_hardware_updates(
-                sled_agent.cold_boot_load_services(),
+                sled_agent.load_services(),
                 &mut hardware_monitor,
                 &managers,
                 Some(&sled_agent),
