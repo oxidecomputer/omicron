@@ -25,7 +25,6 @@ use dropshot::ResultsPage;
 use dropshot::TypedBody;
 use hyper::Body;
 use nexus_db_model::Ipv4NatEntryView;
-use nexus_db_model::Ipv4NatGenView;
 use nexus_types::internal_api::params::SwitchPutRequest;
 use nexus_types::internal_api::params::SwitchPutResponse;
 use nexus_types::internal_api::views::to_list;
@@ -69,8 +68,8 @@ pub(crate) fn internal_api() -> NexusApiDescription {
 
         api.register(saga_list)?;
         api.register(saga_view)?;
+
         api.register(ipv4_nat_changeset)?;
-        api.register(ipv4_nat_gen)?;
 
         api.register(bgtask_list)?;
         api.register(bgtask_view)?;
@@ -589,34 +588,6 @@ async fn ipv4_nat_changeset(
             .await?;
         changeset.sort_by_key(|e| e.gen);
         Ok(HttpResponseOk(changeset))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-// TODO: Remove (maybe)
-// This endpoint may be more trouble than it's worth. The reason this endpoint
-// may be a headache is because the underlying SEQUENCE in the DB will advance,
-// even on failed transactions. This is not a big deal, but it will lead to
-// callers trying to catch up to entries that don't exist if they check this
-// endpoint first. As an alternative, we could just page through the
-// changesets until we get nothing back, then revert to periodic polling
-// of the changeset endpoint.
-
-/// Fetch NAT generation
-#[endpoint {
-   method = GET,
-    path = "/rpw/nat/ipv4/gen"
-}]
-async fn ipv4_nat_gen(
-    rqctx: RequestContext<Arc<ServerContext>>,
-) -> Result<HttpResponseOk<Ipv4NatGenView>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
-        let nexus = &apictx.nexus;
-        let gen = nexus.datastore().ipv4_nat_current_version(&opctx).await?;
-        let view = Ipv4NatGenView { gen };
-        Ok(HttpResponseOk(view))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

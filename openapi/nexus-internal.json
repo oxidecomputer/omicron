@@ -473,30 +473,6 @@
         }
       }
     },
-    "/rpw/nat/ipv4/gen": {
-      "get": {
-        "summary": "Fetch NAT generation",
-        "operationId": "ipv4_nat_gen",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Ipv4NatGenView"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/sagas": {
       "get": {
         "summary": "List sagas",
@@ -3862,20 +3838,6 @@
           "mac",
           "sled_address",
           "vni"
-        ]
-      },
-      "Ipv4NatGenView": {
-        "description": "NAT Generation",
-        "type": "object",
-        "properties": {
-          "gen": {
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "gen"
         ]
       },
       "Ipv4Network": {
