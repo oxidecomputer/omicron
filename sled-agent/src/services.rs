@@ -32,7 +32,7 @@ use crate::bootstrap::BootstrapNetworking;
 use crate::config::SidecarRevision;
 use crate::params::{
     DendriteAsic, OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
-    ServiceZoneRequest, TimeSync, ZoneBundleCause, ZoneBundleMetadata,
+    TimeSync, ZoneBundleCause, ZoneBundleMetadata,
     ZoneType,
 };
 use crate::profile::*;
@@ -269,44 +269,6 @@ impl Config {
     pub fn new(sled_id: Uuid, sidecar_revision: SidecarRevision) -> Self {
         Self { sled_id, sidecar_revision }
     }
-}
-
-// The filename of the ledger, within the provided directory.
-const SERVICES_LEDGER_FILENAME: &str = "services.json";
-
-// A wrapper around `ZoneRequest`, which allows it to be serialized
-// to a JSON file.
-// XXX-dap TODO-doc
-#[derive(Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
-struct AllZoneRequestsV1 {
-    generation: Generation,
-    requests: Vec<ZoneRequestV1>,
-}
-
-impl Default for AllZoneRequestsV1 {
-    fn default() -> Self {
-        Self { generation: Generation::new(), requests: vec![] }
-    }
-}
-
-impl Ledgerable for AllZoneRequestsV1 {
-    fn is_newer_than(&self, other: &AllZoneRequestsV1) -> bool {
-        self.generation >= other.generation
-    }
-
-    fn generation_bump(&mut self) {
-        self.generation = self.generation.next();
-    }
-}
-
-// This struct represents the combo of "what zone did you ask for" + "where did
-// we put it".
-#[derive(Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
-struct ZoneRequestV1 {
-    zone: ServiceZoneRequest,
-    // TODO: Consider collapsing "root" into ServiceZoneRequest
-    #[schemars(with = "String")]
-    root: Utf8PathBuf,
 }
 
 // XXX-dap TODO-doc and maybe rename it?
@@ -591,18 +553,19 @@ impl ServiceManager {
         self.inner.switch_zone_bootstrap_address
     }
 
-    async fn all_service_ledgers(&self) -> Vec<Utf8PathBuf> {
-        if let Some(dir) = self.inner.ledger_directory_override.get() {
-            return vec![dir.join(SERVICES_LEDGER_FILENAME)];
-        }
-        self.inner
-            .storage
-            .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
-            .await
-            .into_iter()
-            .map(|p| p.join(SERVICES_LEDGER_FILENAME))
-            .collect()
-    }
+    // XXX-dap
+    // async fn all_service_ledgers(&self) -> Vec<Utf8PathBuf> {
+    //     if let Some(dir) = self.inner.ledger_directory_override.get() {
+    //         return vec![dir.join(SERVICES_LEDGER_FILENAME)];
+    //     }
+    //     self.inner
+    //         .storage
+    //         .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
+    //         .await
+    //         .into_iter()
+    //         .map(|p| p.join(SERVICES_LEDGER_FILENAME))
+    //         .collect()
+    // }
 
     async fn all_omicron_zone_ledgers(&self) -> Vec<Utf8PathBuf> {
         if let Some(dir) = self.inner.ledger_directory_override.get() {
@@ -3806,15 +3769,6 @@ mod test {
         assert_eq!(prefix1.segments()[1..], ba.segments()[1..]);
         assert_eq!(prefix0.segments()[0], 0xfdb1);
         assert_eq!(prefix1.segments()[0], 0xfdb2);
-    }
-
-    #[test]
-    fn test_all_zone_requests_schema() {
-        let schema = schemars::schema_for!(AllZoneRequestsV1);
-        expectorate::assert_contents(
-            "../schema/all-zone-requests.json",
-            &serde_json::to_string_pretty(&schema).unwrap(),
-        );
     }
 
     #[test]

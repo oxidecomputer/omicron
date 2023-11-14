@@ -29,6 +29,7 @@ mod profile;
 pub mod rack_setup;
 pub mod server;
 mod services;
+mod services_migration;
 mod sled_agent;
 mod smf_helper;
 pub(crate) mod storage;
