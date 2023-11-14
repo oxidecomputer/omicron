@@ -19,7 +19,6 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::Mutex;
 use tokio::sync::broadcast;
-use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 mod gpt;
@@ -589,11 +588,11 @@ async fn hardware_tracking_task(
 ///
 /// This structure provides interfaces for both querying and for receiving new
 /// events.
+#[derive(Clone)]
 pub struct HardwareManager {
     log: Logger,
     inner: Arc<Mutex<HardwareView>>,
     tx: broadcast::Sender<HardwareUpdate>,
-    _worker: JoinHandle<()>,
 }
 
 impl HardwareManager {
@@ -663,11 +662,11 @@ impl HardwareManager {
         let log2 = log.clone();
         let inner2 = inner.clone();
         let tx2 = tx.clone();
-        let _worker = tokio::task::spawn(async move {
+        tokio::task::spawn(async move {
             hardware_tracking_task(log2, inner2, tx2).await
         });
 
-        Ok(Self { log, inner, tx, _worker })
+        Ok(Self { log, inner, tx })
     }
 
     pub fn baseboard(&self) -> Baseboard {

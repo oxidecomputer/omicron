@@ -57,6 +57,7 @@ members = [
     "rpaths",
     "sled-agent",
     "sled-hardware",
+    "sled-storage",
     "sp-sim",
     "test-utils",
     "tufaceous-lib",
@@ -122,6 +123,7 @@ default-members = [
     "rpaths",
     "sled-agent",
     "sled-hardware",
+    "sled-storage",
     "sp-sim",
     "test-utils",
     "tufaceous-lib",
@@ -329,6 +331,7 @@ similar-asserts = "1.5.0"
 sled = "0.34"
 sled-agent-client = { path = "clients/sled-agent-client" }
 sled-hardware = { path = "sled-hardware" }
+sled-storage = { path = "sled-storage" }
 slog = { version = "2.7", features = [ "dynamic-keys", "max_level_trace", "release_max_level_debug" ] }
 slog-async = "2.8"
 slog-dtrace = "0.2"

@@ -128,7 +128,7 @@ pub(crate) fn ensure_backing_fs(
         let dataset = format!(
             "{}/{}/{}",
             boot_zpool_name,
-            sled_hardware::disk::M2_BACKING_DATASET,
+            sled_storage::dataset::M2_BACKING_DATASET,
             bfs.name
         );
         let mountpoint = Mountpoint::Path(Utf8PathBuf::from(bfs.mountpoint));

@@ -388,3 +388,36 @@ impl From<omicron_common::api::internal::shared::ExternalPortDiscovery>
         }
     }
 }
+
+impl From<sled_hardware::DiskVariant> for types::PhysicalDiskKind {
+    fn from(value: sled_hardware::DiskVariant) -> Self {
+        match value {
+            sled_hardware::DiskVariant::U2 => types::PhysicalDiskKind::U2,
+            sled_hardware::DiskVariant::M2 => types::PhysicalDiskKind::M2,
+        }
+    }
+}
+
+impl From<sled_hardware::Baseboard> for types::Baseboard {
+    fn from(b: sled_hardware::Baseboard) -> types::Baseboard {
+        types::Baseboard {
+            serial_number: b.identifier().to_string(),
+            part_number: b.model().to_string(),
+            revision: b.revision(),
+        }
+    }
+}
+
+impl From<sled_storage::dataset::DatasetKind> for types::DatasetKind {
+    fn from(k: sled_storage::dataset::DatasetKind) -> Self {
+        use sled_storage::dataset::DatasetKind::*;
+        match k {
+            CockroachDb => Self::Cockroach,
+            Crucible => Self::Crucible,
+            Clickhouse => Self::Clickhouse,
+            ClickhouseKeeper => Self::ClickhouseKeeper,
+            ExternalDns => Self::ExternalDns,
+            InternalDns => Self::InternalDns,
+        }
+    }
+}

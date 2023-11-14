@@ -3480,6 +3480,7 @@ dependencies = [
  "reqwest",
  "sha2",
  "sled-hardware",
+ "sled-storage",
  "slog",
  "slog-async",
  "slog-envlogger",
@@ -4293,6 +4294,8 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "sled-hardware",
+ "sled-storage",
  "slog",
  "uuid",
 ]
@@ -5297,6 +5300,7 @@ dependencies = [
  "sha3",
  "sled-agent-client",
  "sled-hardware",
+ "sled-storage",
  "slog",
  "slog-async",
  "slog-dtrace",
@@ -8180,6 +8184,7 @@ dependencies = [
  "regress",
  "reqwest",
  "serde",
+ "sled-storage",
  "slog",
  "uuid",
 ]
@@ -8194,11 +8199,9 @@ dependencies = [
  "futures",
  "illumos-devinfo",
  "illumos-utils",
- "key-manager",
  "libc",
  "libefi-illumos",
  "macaddr",
- "nexus-client 0.1.0",
  "omicron-common 0.1.0",
  "omicron-test-utils",
  "omicron-workspace-hack",
@@ -8209,6 +8212,32 @@ dependencies = [
  "slog",
  "thiserror",
  "tofino",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "sled-storage"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "camino",
+ "camino-tempfile",
+ "cfg-if 1.0.0",
+ "derive_more",
+ "glob",
+ "illumos-utils",
+ "key-manager",
+ "omicron-common 0.1.0",
+ "omicron-test-utils",
+ "omicron-workspace-hack",
+ "rand 0.8.5",
+ "schemars",
+ "serde",
+ "serde_json",
+ "sled-hardware",
+ "slog",
+ "thiserror",
  "tokio",
  "uuid",
 ]
