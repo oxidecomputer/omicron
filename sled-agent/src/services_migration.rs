@@ -5,7 +5,12 @@
 //! XXX-dap TODO-doc this is probably where we could use a big block comment
 //! explaining the big picture here
 
-use crate::params::ZoneType;
+use crate::params::{
+    DatasetKind, OmicronZoneConfig, OmicronZoneDataset, OmicronZoneType,
+    ZoneType,
+};
+use crate::services::{OmicronZoneConfigComplete, ZonesConfig};
+use anyhow::{anyhow, ensure, Context};
 use camino::Utf8PathBuf;
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::{
@@ -188,10 +193,35 @@ pub struct DatasetRequest {
     pub service_address: SocketAddrV6,
 }
 
+impl DatasetRequest {
+    fn to_omicron_zone_dataset(
+        self,
+        kind: DatasetKind,
+        service_address: SocketAddrV6,
+    ) -> Result<OmicronZoneDataset, anyhow::Error> {
+        ensure!(
+            kind == *self.name.dataset(),
+            "expected dataset kind {:?}, found {:?}",
+            kind,
+            self.name.dataset(),
+        );
+
+        ensure!(
+            self.service_address == service_address,
+            "expected dataset kind {:?} service address to be {}, found {}",
+            kind,
+            service_address,
+            self.service_address,
+        );
+
+        Ok(OmicronZoneDataset { pool_name: self.name.pool().clone() })
+    }
+}
+
 // This struct represents the combo of "what zone did you ask for" + "where did
 // we put it".
 #[derive(Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
-struct ZoneRequestV1 {
+struct ServiceRequest {
     zone: ServiceZoneRequest,
     // TODO: Consider collapsing "root" into ServiceZoneRequest
     #[schemars(with = "String")]
@@ -199,25 +229,25 @@ struct ZoneRequestV1 {
 }
 
 // The filename of the ledger, within the provided directory.
-const SERVICES_LEDGER_FILENAME: &str = "services.json";
+pub const SERVICES_LEDGER_FILENAME: &str = "services.json";
 
 // A wrapper around `ZoneRequest`, which allows it to be serialized
 // to a JSON file.
 // XXX-dap TODO-doc
 #[derive(Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
-struct AllZoneRequestsV1 {
+pub struct AllServiceRequests {
     generation: Generation,
-    requests: Vec<ZoneRequestV1>,
+    requests: Vec<ServiceRequest>,
 }
 
-impl Default for AllZoneRequestsV1 {
+impl Default for AllServiceRequests {
     fn default() -> Self {
         Self { generation: Generation::new(), requests: vec![] }
     }
 }
 
-impl Ledgerable for AllZoneRequestsV1 {
-    fn is_newer_than(&self, other: &AllZoneRequestsV1) -> bool {
+impl Ledgerable for AllServiceRequests {
+    fn is_newer_than(&self, other: &AllServiceRequests) -> bool {
         self.generation >= other.generation
     }
 
@@ -226,13 +256,276 @@ impl Ledgerable for AllZoneRequestsV1 {
     }
 }
 
+impl TryFrom<AllServiceRequests> for ZonesConfig {
+    type Error = anyhow::Error;
+
+    fn try_from(input: AllServiceRequests) -> Result<Self, Self::Error> {
+        // XXX-dap starting to think that the generation in OmicronZonesConfig
+        // (at least the one stored on disk) ought to be an Option or something?
+        // There's no correct value here.  Any Nexus one needs to be treated as
+        // newer.  The generation from the ledger does not matter.
+        // XXX-dap TODO-doc explain why the generation from the ledger does not
+        // matter here (they _all_ predate the Nexus-provided one).
+        let zones = input
+            .requests
+            .into_iter()
+            .map(OmicronZoneConfigComplete::try_from)
+            .collect::<Result<Vec<_>, _>>()
+            .context("mapping `AllServiceRequests` to `ZonesConfig`")?;
+        Ok(ZonesConfig { generation: Generation::new(), zones })
+    }
+}
+
+impl TryFrom<ServiceRequest> for OmicronZoneConfigComplete {
+    type Error = anyhow::Error;
+
+    fn try_from(input: ServiceRequest) -> Result<Self, Self::Error> {
+        Ok(OmicronZoneConfigComplete {
+            zone: OmicronZoneConfig::try_from(input.zone)?,
+            root: input.root,
+        })
+    }
+}
+
+impl TryFrom<ServiceZoneRequest> for OmicronZoneConfig {
+    type Error = anyhow::Error;
+
+    fn try_from(input: ServiceZoneRequest) -> Result<Self, Self::Error> {
+        let error_context = || {
+            format!(
+                "zone {} (type {:?})",
+                input.id,
+                input.zone_type.to_string()
+            )
+        };
+
+        // Historically, this type was used to describe two distinct kinds of
+        // thing:
+        //
+        // 1. an "Omicron" zone: Clickhouse, CockroachDb, Nexus, etc.  We call
+        //    these Omicron zones because they're managed by the control plane
+        //    (Omicron).  Nexus knows about these, stores information in
+        //    CockroachDB about them, and is responsible for using Sled Agent
+        //    APIs to configure these zones.
+        //
+        // 2. a "sled-local" zone.  The only such zone is the "switch" zone.
+        //    This is not really known to Nexus nor exposed outside Sled Agent.
+        //    It's configured either based on Sled Agent's config file or else
+        //    autodetection of whether this system _is_ a Scrimlet.
+        //
+        // All of the types in this file describe the ledgered configuration of
+        // the Omicron zones.  We don't care about the switch zone here.  Even
+        // for Omicron zones, the `ServiceZoneRequest` type is much more general
+        // than was strictly necessary to represent the kinds of zones we
+        // defined in practice.  The more constrained schema is described by
+        // `OmicronZoneConfig`.  This function verifies that the structures we
+        // find conform to that more constrained schema.
+        //
+        // Many of these properties were determined by code inspection.  They
+        // could be wrong!  But we've tried hard to make sure we're not wrong.
+
+        match input.zone_type {
+            ZoneType::Clickhouse
+            | ZoneType::ClickhouseKeeper
+            | ZoneType::CockroachDb
+            | ZoneType::CruciblePantry
+            | ZoneType::Crucible
+            | ZoneType::ExternalDns
+            | ZoneType::InternalDns
+            | ZoneType::Nexus
+            | ZoneType::Ntp
+            | ZoneType::Oximeter => (),
+            ZoneType::Switch => {
+                return Err(anyhow!("unsupported zone type"))
+                    .with_context(error_context)
+            }
+        }
+
+        let id = input.id;
+
+        // In production systems, Omicron zones only ever had exactly one
+        // address here.  Multiple addresses were used for the "switch" zone,
+        // which cannot appear here.
+        if input.addresses.len() != 1 {
+            return Err(anyhow!(
+                "expected exactly one address, found {}",
+                input.addresses.len()
+            ))
+            .with_context(error_context);
+        }
+
+        let underlay_address = input.addresses[0];
+
+        // In production systems, Omicron zones only ever had exactly one
+        // "service" inside them.  (Multiple services were only supported for
+        // the "switch" zone and for Omicron zones in pre-release versions of
+        // Omicron, neither of which we expect to see here.)
+        if input.services.len() != 1 {
+            return Err(anyhow!(
+                "expected exactly one service, found {}",
+                input.services.len(),
+            ))
+            .with_context(error_context);
+        }
+
+        let service = input.services.into_iter().next().unwrap();
+
+        // The id for the one service we found must match the overall request
+        // id.
+        if service.id != input.id {
+            return Err(anyhow!(
+                "expected service id ({}) to match id ({})",
+                service.id,
+                input.id,
+            ))
+            .with_context(error_context);
+        }
+
+        // If there's a dataset, its id must match the overall request id.
+        let has_dataset = input.dataset.is_some();
+        if let Some(dataset) = &input.dataset {
+            if dataset.id != input.id {
+                return Err(anyhow!(
+                    "expected dataset id ({}) to match id ({})",
+                    dataset.id,
+                    input.id,
+                ))
+                .with_context(error_context);
+            }
+        }
+
+        let dataset_request = input
+            .dataset
+            .ok_or_else(|| anyhow!("missing dataset"))
+            .with_context(error_context);
+
+        let zone_type = match service.details {
+            ServiceType::Nexus {
+                internal_address,
+                external_ip,
+                nic,
+                external_tls,
+                external_dns_servers,
+            } => OmicronZoneType::Nexus {
+                internal_address,
+                external_ip,
+                nic,
+                external_tls,
+                external_dns_servers,
+            },
+            ServiceType::ExternalDns { http_address, dns_address, nic } => {
+                OmicronZoneType::ExternalDns {
+                    dataset: dataset_request?.to_omicron_zone_dataset(
+                        DatasetKind::ExternalDns,
+                        http_address,
+                    )?,
+                    http_address,
+                    dns_address,
+                    nic,
+                }
+            }
+            ServiceType::InternalDns {
+                http_address,
+                dns_address,
+                gz_address,
+                gz_address_index,
+            } => OmicronZoneType::InternalDns {
+                dataset: dataset_request?.to_omicron_zone_dataset(
+                    DatasetKind::InternalDns,
+                    http_address,
+                )?,
+                http_address,
+                dns_address,
+                gz_address,
+                gz_address_index,
+            },
+            ServiceType::Oximeter { address } => {
+                OmicronZoneType::Oximeter { address }
+            }
+            ServiceType::CruciblePantry { address } => {
+                OmicronZoneType::CruciblePantry { address }
+            }
+            ServiceType::BoundaryNtp {
+                address,
+                ntp_servers,
+                dns_servers,
+                domain,
+                nic,
+                snat_cfg,
+            } => OmicronZoneType::BoundaryNtp {
+                address,
+                ntp_servers,
+                dns_servers,
+                domain,
+                nic,
+                snat_cfg,
+            },
+            ServiceType::InternalNtp {
+                address,
+                ntp_servers,
+                dns_servers,
+                domain,
+            } => OmicronZoneType::InternalNtp {
+                address,
+                ntp_servers,
+                dns_servers,
+                domain,
+            },
+            ServiceType::Clickhouse { address } => {
+                OmicronZoneType::Clickhouse {
+                    address,
+                    dataset: dataset_request?.to_omicron_zone_dataset(
+                        DatasetKind::Clickhouse,
+                        address,
+                    )?,
+                }
+            }
+            ServiceType::ClickhouseKeeper { address } => {
+                OmicronZoneType::ClickhouseKeeper {
+                    address,
+                    dataset: dataset_request?.to_omicron_zone_dataset(
+                        DatasetKind::Clickhouse,
+                        address,
+                    )?,
+                }
+            }
+            ServiceType::CockroachDb { address } => {
+                OmicronZoneType::CockroachDb {
+                    address,
+                    dataset: dataset_request?.to_omicron_zone_dataset(
+                        DatasetKind::CockroachDb,
+                        address,
+                    )?,
+                }
+            }
+            ServiceType::Crucible { address } => OmicronZoneType::Crucible {
+                address,
+                dataset: dataset_request?
+                    .to_omicron_zone_dataset(DatasetKind::Crucible, address)?,
+            },
+        };
+
+        if zone_type.dataset_name().is_none() && has_dataset {
+            // This indicates that the legacy form specified a dataset for a
+            // zone type that we do not (today) believe should have one.  This
+            // should be impossible.  If it happens, we need to re-evaluate our
+            // assumptions in designing `OmicronZoneType`.
+            return Err(anyhow!("found dataset that went unused"))
+                .with_context(error_context);
+        }
+
+        Ok(OmicronZoneConfig { id, underlay_address, zone_type })
+    }
+}
+
 #[cfg(test)]
 mod test {
-    use super::AllZoneRequestsV1;
+    use super::AllServiceRequests;
 
+    // XXX-dap add similar test for new ledger
     #[test]
-    fn test_all_zone_requests_schema() {
-        let schema = schemars::schema_for!(AllZoneRequestsV1);
+    fn test_all_services_requests_schema() {
+        let schema = schemars::schema_for!(AllServiceRequests);
         expectorate::assert_contents(
             "../schema/all-zone-requests.json",
             &serde_json::to_string_pretty(&schema).unwrap(),

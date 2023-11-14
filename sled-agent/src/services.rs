@@ -32,10 +32,10 @@ use crate::bootstrap::BootstrapNetworking;
 use crate::config::SidecarRevision;
 use crate::params::{
     DendriteAsic, OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
-    TimeSync, ZoneBundleCause, ZoneBundleMetadata,
-    ZoneType,
+    TimeSync, ZoneBundleCause, ZoneBundleMetadata, ZoneType,
 };
 use crate::profile::*;
+use crate::services_migration::SERVICES_LEDGER_FILENAME;
 use crate::smf_helper::Service;
 use crate::smf_helper::SmfHelper;
 use crate::storage_manager::StorageResources;
@@ -273,21 +273,22 @@ impl Config {
 
 // XXX-dap TODO-doc and maybe rename it?
 #[derive(Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
-struct OmicronZoneConfigComplete {
-    zone: OmicronZoneConfig,
+pub struct OmicronZoneConfigComplete {
+    pub zone: OmicronZoneConfig,
     // TODO: Consider collapsing "root" into OmicronZoneConfig?
     #[schemars(with = "String")]
-    root: Utf8PathBuf,
+    pub root: Utf8PathBuf,
 }
 
 // The filename of the ledger, within the provided directory.
 const ZONES_LEDGER_FILENAME: &str = "omicron_zones.json";
 
 // XXX-dap TODO-doc
+// XXX-dap could be OmicronZonesConfigComplete? OmicronZonesConfigLocal?
 #[derive(Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
-struct ZonesConfig {
-    generation: Generation,
-    zones: Vec<OmicronZoneConfigComplete>,
+pub struct ZonesConfig {
+    pub generation: Generation,
+    pub zones: Vec<OmicronZoneConfigComplete>,
 }
 
 impl Ledgerable for ZonesConfig {
@@ -296,7 +297,12 @@ impl Ledgerable for ZonesConfig {
     }
 
     fn generation_bump(&mut self) {
-        // XXX-dap what do we do here?  this is not right.
+        // XXX-dap what do we do here?  this is not right.  The only one who
+        // can bump this is Nexus.  Maybe we just keep it as is?
+        //
+        // This gets invoked when the ledger is committed.  I think we could
+        // either keep a separate generation number (and use that in
+        // `is_newer_than()`) or else make this a noop?
         self.generation = self.generation.next();
     }
 }
@@ -553,19 +559,18 @@ impl ServiceManager {
         self.inner.switch_zone_bootstrap_address
     }
 
-    // XXX-dap
-    // async fn all_service_ledgers(&self) -> Vec<Utf8PathBuf> {
-    //     if let Some(dir) = self.inner.ledger_directory_override.get() {
-    //         return vec![dir.join(SERVICES_LEDGER_FILENAME)];
-    //     }
-    //     self.inner
-    //         .storage
-    //         .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
-    //         .await
-    //         .into_iter()
-    //         .map(|p| p.join(SERVICES_LEDGER_FILENAME))
-    //         .collect()
-    // }
+    async fn all_service_ledgers(&self) -> Vec<Utf8PathBuf> {
+        if let Some(dir) = self.inner.ledger_directory_override.get() {
+            return vec![dir.join(SERVICES_LEDGER_FILENAME)];
+        }
+        self.inner
+            .storage
+            .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
+            .await
+            .into_iter()
+            .map(|p| p.join(SERVICES_LEDGER_FILENAME))
+            .collect()
+    }
 
     async fn all_omicron_zone_ledgers(&self) -> Vec<Utf8PathBuf> {
         if let Some(dir) = self.inner.ledger_directory_override.get() {

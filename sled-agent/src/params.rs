@@ -358,42 +358,13 @@ impl OmicronZoneConfig {
     // eliminates one reason why Sled Agent needs to know about what kind of
     // dataset it's looking at.
     pub fn dataset_name(&self) -> Option<DatasetName> {
-        self.dataset_name_and_address().map(|d| d.0)
+        self.zone_type.dataset_name()
     }
 
     pub fn dataset_name_and_address(
         &self,
     ) -> Option<(DatasetName, SocketAddrV6)> {
-        let (dataset, dataset_kind, address) = match &self.zone_type {
-            OmicronZoneType::BoundaryNtp { .. }
-            | OmicronZoneType::InternalNtp { .. }
-            | OmicronZoneType::Nexus { .. }
-            | OmicronZoneType::Oximeter { .. }
-            | OmicronZoneType::CruciblePantry { .. } => None,
-            OmicronZoneType::Clickhouse { dataset, address, .. } => {
-                Some((dataset, DatasetKind::Clickhouse, address))
-            }
-            OmicronZoneType::ClickhouseKeeper { dataset, address, .. } => {
-                Some((dataset, DatasetKind::ClickhouseKeeper, address))
-            }
-            OmicronZoneType::CockroachDb { dataset, address, .. } => {
-                Some((dataset, DatasetKind::CockroachDb, address))
-            }
-            OmicronZoneType::Crucible { dataset, address, .. } => {
-                Some((dataset, DatasetKind::Crucible, address))
-            }
-            OmicronZoneType::ExternalDns { dataset, http_address, .. } => {
-                Some((dataset, DatasetKind::ExternalDns, http_address))
-            }
-            OmicronZoneType::InternalDns { dataset, http_address, .. } => {
-                Some((dataset, DatasetKind::InternalDns, http_address))
-            }
-        }?;
-
-        Some((
-            DatasetName::new(dataset.pool_name.clone(), dataset_kind),
-            *address,
-        ))
+        self.zone_type.dataset_name_and_address()
     }
 
     // XXX-dap TODO-doc
@@ -672,6 +643,48 @@ impl OmicronZoneType {
             OmicronZoneType::Nexus { .. } => "nexus",
             OmicronZoneType::Oximeter { .. } => "oximeter",
         }
+    }
+
+    // XXX-dap should the caller (RSS) should specify this directly?  That
+    // eliminates one reason why Sled Agent needs to know about what kind of
+    // dataset it's looking at.
+    pub fn dataset_name(&self) -> Option<DatasetName> {
+        self.dataset_name_and_address().map(|d| d.0)
+    }
+
+    pub fn dataset_name_and_address(
+        &self,
+    ) -> Option<(DatasetName, SocketAddrV6)> {
+        let (dataset, dataset_kind, address) = match self {
+            OmicronZoneType::BoundaryNtp { .. }
+            | OmicronZoneType::InternalNtp { .. }
+            | OmicronZoneType::Nexus { .. }
+            | OmicronZoneType::Oximeter { .. }
+            | OmicronZoneType::CruciblePantry { .. } => None,
+            OmicronZoneType::Clickhouse { dataset, address, .. } => {
+                Some((dataset, DatasetKind::Clickhouse, address))
+            }
+            OmicronZoneType::ClickhouseKeeper { dataset, address, .. } => {
+                Some((dataset, DatasetKind::ClickhouseKeeper, address))
+            }
+            OmicronZoneType::CockroachDb { dataset, address, .. } => {
+                Some((dataset, DatasetKind::CockroachDb, address))
+            }
+            OmicronZoneType::Crucible { dataset, address, .. } => {
+                Some((dataset, DatasetKind::Crucible, address))
+            }
+            OmicronZoneType::ExternalDns { dataset, http_address, .. } => {
+                Some((dataset, DatasetKind::ExternalDns, http_address))
+            }
+            OmicronZoneType::InternalDns { dataset, http_address, .. } => {
+                Some((dataset, DatasetKind::InternalDns, http_address))
+            }
+        }?;
+
+        Some((
+            DatasetName::new(dataset.pool_name.clone(), dataset_kind),
+            *address,
+        ))
     }
 }
 
