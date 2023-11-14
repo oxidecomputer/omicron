@@ -2757,58 +2757,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.db_metadata (
     CHECK (singleton = true)
 );
 
-CREATE SEQUENCE IF NOT EXISTS omicron.public.ipv4_nat_version START 1 INCREMENT 1;
-
-CREATE TABLE IF NOT EXISTS omicron.public.ipv4_nat_entry (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    external_address INET NOT NULL,
-    first_port INT4 NOT NULL,
-    last_port INT4 NOT NULL,
-    sled_address INET NOT NULL,
-    vni INT4 NOT NULL,
-    mac INT8 NOT NULL,
-    version_added INT8 NOT NULL DEFAULT nextval('omicron.public.ipv4_nat_version'),
-    version_removed INT8,
-    time_created TIMESTAMPTZ NOT NULL DEFAULT now(),
-    time_deleted TIMESTAMPTZ
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS ipv4_nat_version_added ON omicron.public.ipv4_nat_entry (
-    version_added
-)
-STORING (
-    external_address,
-    first_port,
-    last_port,
-    sled_address,
-    vni,
-    mac,
-    time_created,
-    time_deleted
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS overlapping_ipv4_nat_entry ON omicron.public.ipv4_nat_entry (
-    external_address,
-    first_port,
-    last_port
-) WHERE time_deleted IS NULL;
-
-CREATE INDEX IF NOT EXISTS ipv4_nat_lookup ON omicron.public.ipv4_nat_entry (external_address, first_port, last_port, sled_address, vni, mac);
-
-CREATE UNIQUE INDEX IF NOT EXISTS ipv4_nat_version_removed ON omicron.public.ipv4_nat_entry (
-    version_removed
-)
-STORING (
-    external_address,
-    first_port,
-    last_port,
-    sled_address,
-    vni,
-    mac,
-    time_created,
-    time_deleted
-);
-
 -- Per-VMM state.
 CREATE TABLE IF NOT EXISTS omicron.public.vmm (
     id UUID PRIMARY KEY,
@@ -2899,6 +2847,59 @@ CREATE TABLE IF NOT EXISTS omicron.public.db_metadata (
     CHECK (singleton = true)
 );
 
+
+CREATE SEQUENCE IF NOT EXISTS omicron.public.ipv4_nat_version START 1 INCREMENT 1;
+
+CREATE TABLE IF NOT EXISTS omicron.public.ipv4_nat_entry (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    external_address INET NOT NULL,
+    first_port INT4 NOT NULL,
+    last_port INT4 NOT NULL,
+    sled_address INET NOT NULL,
+    vni INT4 NOT NULL,
+    mac INT8 NOT NULL,
+    version_added INT8 NOT NULL DEFAULT nextval('omicron.public.ipv4_nat_version'),
+    version_removed INT8,
+    time_created TIMESTAMPTZ NOT NULL DEFAULT now(),
+    time_deleted TIMESTAMPTZ
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ipv4_nat_version_added ON omicron.public.ipv4_nat_entry (
+    version_added
+)
+STORING (
+    external_address,
+    first_port,
+    last_port,
+    sled_address,
+    vni,
+    mac,
+    time_created,
+    time_deleted
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS overlapping_ipv4_nat_entry ON omicron.public.ipv4_nat_entry (
+    external_address,
+    first_port,
+    last_port
+) WHERE time_deleted IS NULL;
+
+CREATE INDEX IF NOT EXISTS ipv4_nat_lookup ON omicron.public.ipv4_nat_entry (external_address, first_port, last_port, sled_address, vni, mac);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ipv4_nat_version_removed ON omicron.public.ipv4_nat_entry (
+    version_removed
+)
+STORING (
+    external_address,
+    first_port,
+    last_port,
+    sled_address,
+    vni,
+    mac,
+    time_created,
+    time_deleted
+);
+
 INSERT INTO omicron.public.db_metadata (
     singleton,
     time_created,
@@ -2906,7 +2907,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '9.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '10.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
