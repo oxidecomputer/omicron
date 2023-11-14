@@ -1147,6 +1147,7 @@ impl SpHandler for Handler {
             RotRequest::ReadCfpa(CfpaPage::Scratch) => "sidecar-cfpa-scratch",
         };
         buf[..dummy_page.len()].copy_from_slice(dummy_page.as_bytes());
+        buf[dummy_page.len()..].fill(0);
         Ok(RotResponse::Ok)
     }
 }
