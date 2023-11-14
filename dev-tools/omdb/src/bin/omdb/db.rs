@@ -69,6 +69,7 @@ use nexus_types::inventory::RotPageWhich;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Generation;
 use omicron_common::postgres_config::PostgresConfigWithUrl;
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -261,6 +262,9 @@ enum CollectionsCommands {
 struct CollectionsShowArgs {
     /// id of the collection
     id: Uuid,
+    /// show long strings in their entirety
+    #[clap(long)]
+    show_long_strings: bool,
 }
 
 #[derive(Debug, Args)]
@@ -1774,8 +1778,22 @@ async fn cmd_db_inventory(
             command: CollectionsCommands::List,
         }) => cmd_db_inventory_collections_list(&conn, limit).await,
         InventoryCommands::Collections(CollectionsArgs {
-            command: CollectionsCommands::Show(CollectionsShowArgs { id }),
-        }) => cmd_db_inventory_collections_show(datastore, id, limit).await,
+            command:
+                CollectionsCommands::Show(CollectionsShowArgs {
+                    id,
+                    show_long_strings,
+                }),
+        }) => {
+            let long_string_formatter =
+                LongStringFormatter { show_long_strings };
+            cmd_db_inventory_collections_show(
+                datastore,
+                id,
+                limit,
+                long_string_formatter,
+            )
+            .await
+        }
     }
 }
 
@@ -1973,6 +1991,7 @@ async fn cmd_db_inventory_collections_show(
     datastore: &DataStore,
     id: Uuid,
     limit: NonZeroU32,
+    long_string_formatter: LongStringFormatter,
 ) -> Result<(), anyhow::Error> {
     let (collection, incomplete) = datastore
         .inventory_collection_read_best_effort(id, limit)
@@ -1984,7 +2003,7 @@ async fn cmd_db_inventory_collections_show(
 
     inv_collection_print(&collection).await?;
     let nerrors = inv_collection_print_errors(&collection).await?;
-    inv_collection_print_devices(&collection).await?;
+    inv_collection_print_devices(&collection, &long_string_formatter).await?;
 
     if nerrors > 0 {
         eprintln!(
@@ -2040,6 +2059,7 @@ async fn inv_collection_print_errors(
 
 async fn inv_collection_print_devices(
     collection: &Collection,
+    long_string_formatter: &LongStringFormatter,
 ) -> Result<(), anyhow::Error> {
     // Assemble a list of baseboard ids, sorted first by device type (sled,
     // switch, power), then by slot number.  This is the order in which we will
@@ -2122,7 +2142,7 @@ async fn inv_collection_print_devices(
         #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
         struct RotPageRow<'a> {
             slot: String,
-            data_base64: &'a str,
+            data_base64: Cow<'a, str>,
         }
 
         println!("    RoT pages:");
@@ -2132,7 +2152,8 @@ async fn inv_collection_print_devices(
             })
             .map(|(which, found_page)| RotPageRow {
                 slot: format!("{which:?}"),
-                data_base64: &found_page.page.data_base64,
+                data_base64: long_string_formatter
+                    .maybe_truncate(&found_page.page.data_base64),
             })
             .collect();
         let table = tabled::Table::new(rot_page_rows)
@@ -2212,4 +2233,42 @@ async fn inv_collection_print_devices(
     }
 
     Ok(())
+}
+
+#[derive(Debug)]
+struct LongStringFormatter {
+    show_long_strings: bool,
+}
+
+impl LongStringFormatter {
+    fn maybe_truncate<'a>(&self, s: &'a str) -> Cow<'a, str> {
+        use unicode_width::UnicodeWidthChar;
+
+        // pick an arbitrary width at which we'll truncate, knowing that these
+        // strings are probably contained in tables with other columns
+        const TRUNCATE_AT_WIDTH: usize = 32;
+
+        // quick check for short strings or if we should show long strings in
+        // their entirety
+        if self.show_long_strings || s.len() <= TRUNCATE_AT_WIDTH {
+            return s.into();
+        }
+
+        // longer check; we'll do the proper thing here and check the unicode
+        // width, and we don't really care about speed, so we can just iterate
+        // over chars
+        let mut width = 0;
+        for (pos, ch) in s.char_indices() {
+            let ch_width = UnicodeWidthChar::width(ch).unwrap_or(0);
+            if width + ch_width > TRUNCATE_AT_WIDTH {
+                let (prefix, _) = s.split_at(pos);
+                return format!("{prefix}...").into();
+            }
+            width += ch_width;
+        }
+
+        // if we didn't break out of the loop, `s` in its entirety is not too
+        // wide, so return it as-is
+        s.into()
+    }
 }
