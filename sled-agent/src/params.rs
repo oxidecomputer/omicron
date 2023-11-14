@@ -752,7 +752,6 @@ impl From<OmicronZoneDataset> for sled_agent_client::types::OmicronZoneDataset {
 ///
 /// XXX-dap ideally this would not be necessary at all!  Sled Agent shouldn't
 /// have to know about the things running on it, I think?
-/// XXX-dap commonize with ServiceType (well, probably remove ServiceType)
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
 )]

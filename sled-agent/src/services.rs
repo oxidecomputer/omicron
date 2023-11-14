@@ -109,7 +109,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::oneshot;
 use tokio::sync::Mutex;
-use tokio::sync::MutexGuard;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
@@ -666,8 +665,8 @@ impl ServiceManager {
 
         // Initialize NTP services next as they are required for time
         // synchronization, which is a pre-requisite for the other services. We
-        // keep `ZoneType::InternalDns` because `ensure_all_omicron_zones` is
-        // additive.
+        // keep `OmicronZoneType::InternalDns` because
+        // `ensure_all_omicron_zones` is additive.
         // XXX-dap This looks like a duplicate of the block above -- why do we
         // do this?
         let all_zones_request = self
@@ -2511,8 +2510,7 @@ impl ServiceManager {
     // re-instantiated on boot.
     async fn ensure_all_omicron_zones<F>(
         &self,
-        // XXX-dap drop MutexGuard part
-        existing_zones: &mut MutexGuard<'_, BTreeMap<String, RunningZone>>,
+        existing_zones: &mut BTreeMap<String, RunningZone>,
         old_config: Option<&ZonesConfig>,
         new_request: OmicronZonesConfig,
         filter: F,
@@ -2617,7 +2615,8 @@ impl ServiceManager {
                 .ok_or_else(|| Error::U2NotFound)?
                 .clone();
 
-            new_zones.push(OmicronZoneConfigComplete { zone: zone.clone(), root });
+            new_zones
+                .push(OmicronZoneConfigComplete { zone: zone.clone(), root });
         }
 
         self.initialize_omicron_zones_locked(existing_zones, &new_zones)
@@ -3278,7 +3277,8 @@ impl ServiceManager {
         // we could not create the U.2 disks due to lack of encryption. To break
         // the cycle we put the switch zone root fs on the ramdisk.
         let root = Utf8PathBuf::from(ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT);
-        let zone_request = SwitchZoneConfigComplete { root, zone: request.clone() };
+        let zone_request =
+            SwitchZoneConfigComplete { root, zone: request.clone() };
         let zone_args = ZoneArgs::SledLocal(&zone_request);
         let zone =
             self.initialize_zone(zone_args, filesystems, data_links).await?;
