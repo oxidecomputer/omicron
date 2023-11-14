@@ -99,9 +99,3 @@ impl From<Ipv4NatEntry> for Ipv4NatEntryView {
         }
     }
 }
-
-/// NAT Generation
-#[derive(Clone, Debug, Serialize, JsonSchema)]
-pub struct Ipv4NatGenView {
-    pub gen: u32,
-}
