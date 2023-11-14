@@ -85,7 +85,6 @@ impl_enum_type!(
      #[diesel(sql_type = IpPoolResourceTypeEnum)]
      pub enum IpPoolResourceType;
 
-     Fleet => b"fleet"
      Silo => b"silo"
 );
 
@@ -101,7 +100,6 @@ pub struct IpPoolResource {
 impl From<IpPoolResourceType> for shared::IpPoolResourceType {
     fn from(typ: IpPoolResourceType) -> Self {
         match typ {
-            IpPoolResourceType::Fleet => Self::Fleet,
             IpPoolResourceType::Silo => Self::Silo,
         }
     }

@@ -1323,14 +1323,10 @@ async fn ip_pool_update(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-// TODO: associate just seems like the wrong word and I'd like to change it
-// across the board. What I really mean is "make available to" or "make availale
-// for use in"
-
-/// List IP pool resource associations
+/// List an IP pool's associated silo configuration
 #[endpoint {
     method = GET,
-    path = "/v1/system/ip-pools/{pool}/associations",
+    path = "/v1/system/ip-pools/{pool}/silos",
     tags = ["system/networking"],
 }]
 async fn ip_pool_association_list(
@@ -1368,10 +1364,10 @@ async fn ip_pool_association_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Associate an IP Pool with a silo or the fleet
+/// Associate an IP Pool with a silo
 #[endpoint {
     method = POST,
-    path = "/v1/system/ip-pools/{pool}/associations",
+    path = "/v1/system/ip-pools/{pool}/silos",
     tags = ["system/networking"],
 }]
 async fn ip_pool_association_create(
@@ -1397,7 +1393,7 @@ async fn ip_pool_association_create(
 /// Remove an IP pool's association with a silo or project
 #[endpoint {
     method = DELETE,
-    path = "/v1/system/ip-pools/{pool}/associations",
+    path = "/v1/system/ip-pools/{pool}/silos",
     tags = ["system/networking"],
 }]
 async fn ip_pool_association_delete(
@@ -1412,17 +1408,10 @@ async fn ip_pool_association_delete(
         let path = path_params.into_inner();
         let query = query_params.into_inner();
 
-        let validated_params =
-            params::IpPoolAssociationDeleteValidated::try_from(query)
-                .map_err(|e| HttpError::for_bad_request(None, e))?;
-
         let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
+        let silo_lookup = nexus.silo_lookup(&opctx, query.silo)?;
         nexus
-            .ip_pool_dissociate_resource(
-                &opctx,
-                &pool_lookup,
-                &validated_params,
-            )
+            .ip_pool_dissociate_resource(&opctx, &pool_lookup, &silo_lookup)
             .await?;
         Ok(HttpResponseUpdatedNoContent())
     };

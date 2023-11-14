@@ -248,7 +248,6 @@ pub enum UpdateableComponentType {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum IpPoolResourceType {
-    Fleet,
     Silo,
 }
 
