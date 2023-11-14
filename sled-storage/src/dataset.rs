@@ -324,7 +324,10 @@ pub(crate) async fn ensure_zpool_has_datasets(
                     Zfs::destroy_dataset(name).or_else(|err| {
                         // If we can't find the dataset, that's fine -- it might
                         // not have been formatted yet.
-                        if let DestroyDatasetErrorVariant::NotFound = err.err {
+                        if matches!(
+                            err.err,
+                            DestroyDatasetErrorVariant::NotFound
+                        ) {
                             Ok(())
                         } else {
                             Err(err)
