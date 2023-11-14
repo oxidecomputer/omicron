@@ -1,10 +1,7 @@
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 use super::MacAddr;
-use crate::{
-    schema::{ipv4_nat_entry, ipv4_nat_version},
-    Ipv4Net, Ipv6Net, SqlU16, Vni,
-};
+use crate::{schema::ipv4_nat_entry, Ipv4Net, Ipv6Net, SqlU16, Vni};
 use chrono::{DateTime, Utc};
 use omicron_common::api::external;
 use schemars::JsonSchema;
@@ -48,15 +45,6 @@ impl Ipv4NatEntry {
     pub fn last_port(&self) -> u16 {
         self.last_port.into()
     }
-}
-
-/// Database representation of an Ipv4 NAT Generation.
-#[derive(Queryable, Debug, Clone, Selectable)]
-#[diesel(table_name = ipv4_nat_version)]
-pub struct Ipv4NatGen {
-    pub last_value: i64,
-    pub log_cnt: i64,
-    pub is_called: bool,
 }
 
 /// NAT Record
