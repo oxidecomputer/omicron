@@ -252,27 +252,23 @@ pub(super) async fn delete_crucible_region(
             match region.state {
                 RegionState::Tombstoned => {
                     Err(BackoffError::transient(WaitError::Transient(anyhow!(
-                        "region {} not deleted yet",
-                        region_id.to_string(),
+                        "region {region_id} not deleted yet",
                     ))))
                 }
 
                 RegionState::Destroyed => {
-                    info!(log, "region {} deleted", region_id.to_string(),);
+                    info!(log, "region {region_id} deleted");
 
                     Ok(())
                 }
 
-                _ => {
-                    Err(BackoffError::transient(WaitError::Transient(anyhow!(
-                        "region {} unexpected state",
-                        region_id.to_string(),
-                    ))))
-                }
+                _ => Err(BackoffError::transient(WaitError::Transient(
+                    anyhow!("region {region_id} unexpected state"),
+                ))),
             }
         },
         |e: WaitError, delay| {
-            info!(log, "{:?}, trying again in {:?}", e, delay,);
+            info!(log, "{:?}, trying again in {:?}", e, delay);
         },
     )
     .await
@@ -409,9 +405,7 @@ pub(super) async fn delete_crucible_running_snapshot(
                 Some(running_snapshot) => {
                     info!(
                         log,
-                        "region {} snapshot {} running_snapshot is Some, state is {}",
-                        region_id.to_string(),
-                        snapshot_id.to_string(),
+                        "region {region_id} snapshot {snapshot_id} running_snapshot is Some, state is {}",
                         running_snapshot.state.to_string(),
                     );
 
@@ -419,9 +413,7 @@ pub(super) async fn delete_crucible_running_snapshot(
                         RegionState::Tombstoned => {
                             Err(BackoffError::transient(
                                 WaitError::Transient(anyhow!(
-                                    "region {} snapshot {} running_snapshot not deleted yet",
-                                    region_id.to_string(),
-                                    snapshot_id.to_string(),
+                                    "region {region_id} snapshot {snapshot_id} running_snapshot not deleted yet",
                                 )
                             )))
                         }
@@ -429,9 +421,7 @@ pub(super) async fn delete_crucible_running_snapshot(
                         RegionState::Destroyed => {
                             info!(
                                 log,
-                                "region {} snapshot {} running_snapshot deleted",
-                                region_id.to_string(),
-                                snapshot_id.to_string(),
+                                "region {region_id} snapshot {snapshot_id} running_snapshot deleted",
                             );
 
                             Ok(())
@@ -440,9 +430,7 @@ pub(super) async fn delete_crucible_running_snapshot(
                         _ => {
                             Err(BackoffError::transient(
                                 WaitError::Transient(anyhow!(
-                                    "region {} snapshot {} running_snapshot unexpected state",
-                                    region_id.to_string(),
-                                    snapshot_id.to_string(),
+                                    "region {region_id} snapshot {snapshot_id} running_snapshot unexpected state",
                                 )
                             )))
                         }
@@ -453,9 +441,7 @@ pub(super) async fn delete_crucible_running_snapshot(
                     // deleted?
                     info!(
                         log,
-                        "region {} snapshot {} running_snapshot is None",
-                        region_id.to_string(),
-                        snapshot_id.to_string(),
+                        "region {region_id} snapshot {snapshot_id} running_snapshot is None",
                     );
 
                     // break here - it's possible that the running snapshot
@@ -500,12 +486,7 @@ pub(super) async fn delete_crucible_snapshot(
     // effect right away. Wait until the snapshot no longer appears in the list
     // of region snapshots, meaning it was not returned from `zfs list`.
 
-    info!(
-        log,
-        "deleting region {} snapshot {}",
-        region_id.to_string(),
-        snapshot_id.to_string(),
-    );
+    info!(log, "deleting region {region_id} snapshot {snapshot_id}");
 
     retry_until_known_result(log, || async {
         client
@@ -588,22 +569,16 @@ pub(super) async fn delete_crucible_snapshot(
             {
                 info!(
                     log,
-                    "region {} snapshot {} still exists, waiting",
-                    region_id.to_string(),
-                    snapshot_id.to_string(),
+                    "region {region_id} snapshot {snapshot_id} still exists, waiting",
                 );
 
                 Err(BackoffError::transient(WaitError::Transient(anyhow!(
-                    "region {} snapshot {} not deleted yet",
-                    region_id.to_string(),
-                    snapshot_id.to_string(),
+                    "region {region_id} snapshot {snapshot_id} not deleted yet",
                 ))))
             } else {
                 info!(
                     log,
-                    "region {} snapshot {} deleted",
-                    region_id.to_string(),
-                    snapshot_id.to_string(),
+                    "region {region_id} snapshot {snapshot_id} deleted",
                 );
 
                 Ok(())
@@ -744,10 +719,8 @@ pub(crate) async fn call_pantry_attach_for_disk(
 
     info!(
         log,
-        "sending attach for disk {} volume {} to endpoint {}",
-        disk_id,
+        "sending attach for disk {disk_id} volume {} to endpoint {endpoint}",
         disk.volume_id,
-        endpoint,
     );
 
     let volume_construction_request: crucible_pantry_client::types::VolumeConstructionRequest =
@@ -783,7 +756,7 @@ pub(crate) async fn call_pantry_detach_for_disk(
 ) -> Result<(), ActionError> {
     let endpoint = format!("http://{}", pantry_address);
 
-    info!(log, "sending detach for disk {} to endpoint {}", disk_id, endpoint,);
+    info!(log, "sending detach for disk {disk_id} to endpoint {endpoint}");
 
     let client = crucible_pantry_client::Client::new(&endpoint);
 
