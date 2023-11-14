@@ -434,8 +434,7 @@
             "required": true,
             "schema": {
               "type": "integer",
-              "format": "uint32",
-              "minimum": 0
+              "format": "int64"
             }
           },
           {

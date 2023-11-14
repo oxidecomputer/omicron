@@ -551,7 +551,7 @@ async fn bgtask_view(
 struct RpwNatPathParam {
     /// which change number to start generating
     /// the change set from
-    from_gen: u32,
+    from_gen: i64,
 }
 
 /// Query parameters for NAT ChangeSet

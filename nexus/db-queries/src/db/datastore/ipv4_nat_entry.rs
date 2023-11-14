@@ -194,11 +194,10 @@ impl DataStore {
     pub async fn ipv4_nat_list_since_version(
         &self,
         opctx: &OpContext,
-        version: u32,
+        version: i64,
         limit: u32,
     ) -> ListResultVec<Ipv4NatEntry> {
         use db::schema::ipv4_nat_entry::dsl;
-        let version: SqlU32 = version.into();
 
         let list = dsl::ipv4_nat_entry
             .filter(
@@ -218,7 +217,7 @@ impl DataStore {
     pub async fn ipv4_nat_changeset(
         &self,
         opctx: &OpContext,
-        version: u32,
+        version: i64,
         limit: u32,
     ) -> ListResultVec<Ipv4NatEntryView> {
         let nat_entries =
