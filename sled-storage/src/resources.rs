@@ -9,6 +9,7 @@ use crate::disk::Disk;
 use crate::error::Error;
 use crate::pool::Pool;
 use camino::Utf8PathBuf;
+use cfg_if::cfg_if;
 use illumos_utils::zpool::ZpoolName;
 use omicron_common::disk::DiskIdentity;
 use sled_hardware::DiskVariant;
@@ -20,6 +21,21 @@ const BUNDLE_DIRECTORY: &str = "bundle";
 
 // The directory for zone bundles.
 const ZONE_BUNDLE_DIRECTORY: &str = "zone";
+
+pub enum AddDiskResult {
+    DiskInserted,
+    DiskAlreadyInserted,
+    DiskQueued,
+}
+
+impl AddDiskResult {
+    pub fn disk_inserted(&self) -> bool {
+        match self {
+            AddDiskResult::DiskInserted => true,
+            _ => false,
+        }
+    }
+}
 
 /// Storage related resources: disks and zpools
 ///
@@ -50,12 +66,16 @@ impl StorageResources {
 
     /// Insert a disk and its zpool
     ///
-    /// If the disk passed in is new or modified, or its pool size or pool name
-    /// changed, then insert the changed values and return `true`. Otherwise,
-    /// do not insert anything and return false. For instance, if only the pool
-    /// health changes, because it is not one of the checked values, we will not
-    /// insert the update and will return `false`.
-    pub(crate) fn insert_disk(&mut self, disk: Disk) -> Result<bool, Error> {
+    /// If the disk passed in is new or modified, or its pool size or pool
+    /// name changed, then insert the changed values and return `DiskInserted`.
+    /// Otherwise, do not insert anything and return `DiskAlreadyInserted`.
+    /// For instance, if only the pool health changes, because it is not one
+    /// of the checked values, we will not insert the update and will return
+    /// `DiskAlreadyInserted`.
+    pub(crate) fn insert_disk(
+        &mut self,
+        disk: Disk,
+    ) -> Result<AddDiskResult, Error> {
         let disk_id = disk.identity().clone();
         let zpool_name = disk.zpool_name().clone();
         let zpool = Pool::new(zpool_name, disk_id.clone())?;
@@ -64,63 +84,55 @@ impl StorageResources {
                 && stored_pool.info.size() == zpool.info.size()
                 && stored_pool.name == zpool.name
             {
-                return Ok(false);
+                return Ok(AddDiskResult::DiskAlreadyInserted);
             }
         }
         // Either the disk or zpool changed
         Arc::make_mut(&mut self.disks).insert(disk_id, (disk, zpool));
-        Ok(true)
+        Ok(AddDiskResult::DiskInserted)
     }
 
     /// Insert a disk while creating a fake pool
     /// This is a workaround for current mock based testing strategies
     /// in the sled-agent.
-    ///
-    /// Return true if data was changed, false otherwise
     #[cfg(feature = "testing")]
-    pub fn insert_fake_disk(&mut self, disk: Disk) -> bool {
+    pub fn insert_fake_disk(&mut self, disk: Disk) -> AddDiskResult {
         let disk_id = disk.identity().clone();
         let zpool_name = disk.zpool_name().clone();
         let zpool = Pool::new_with_fake_info(zpool_name, disk_id.clone());
         if self.disks.contains_key(&disk_id) {
-            return false;
+            return AddDiskResult::DiskAlreadyInserted;
         }
         // Either the disk or zpool changed
         Arc::make_mut(&mut self.disks).insert(disk_id, (disk, zpool));
-        true
+        AddDiskResult::DiskInserted
     }
 
     /// Delete a disk and its zpool
     ///
     /// Return true, if data was changed, false otherwise
     ///
-    /// Note: We never allow removal of synthetic disks as they are only added
-    /// once.
-    #[cfg(not(test))]
+    /// Note: We never allow removal of synthetic disks in production as they
+    /// are only added once.
     pub(crate) fn remove_disk(&mut self, id: &DiskIdentity) -> bool {
-        if let Some((disk, _)) = self.disks.get(id) {
-            if disk.is_synthetic() {
-                return false;
-            }
-        } else {
+        let Some((disk, _)) = self.disks.get(id) else {
             return false;
-        }
-        // Safe to unwrap as we just checked the key existed above
-        Arc::make_mut(&mut self.disks).remove(id).unwrap();
-        true
-    }
+        };
 
-    /// Delete a real disk and its zpool
-    ///
-    /// Return true, if data was changed, false otherwise
-    ///
-    /// Note: For testing purposes of this crate, we allow synthetic disks to
-    /// be deleted.
-    #[cfg(test)]
-    pub(crate) fn remove_disk(&mut self, id: &DiskIdentity) -> bool {
-        if !self.disks.contains_key(id) {
-            return false;
+        cfg_if! {
+            if #[cfg(test)] {
+                // For testing purposes, we allow synthetic disks to be deleted.
+                // Silence an unused variable warning.
+                _ = disk;
+            } else {
+                // In production, we disallow removal of synthetic disks as they
+                // are only added once.
+                if disk.is_synthetic() {
+                    return false;
+                }
+            }
         }
+
         // Safe to unwrap as we just checked the key existed above
         Arc::make_mut(&mut self.disks).remove(id).unwrap();
         true

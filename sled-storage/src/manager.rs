@@ -9,7 +9,7 @@ use std::collections::HashSet;
 use crate::dataset::{DatasetError, DatasetName};
 use crate::disk::{Disk, DiskError, RawDisk};
 use crate::error::Error;
-use crate::resources::StorageResources;
+use crate::resources::{AddDiskResult, StorageResources};
 use camino::Utf8PathBuf;
 use illumos_utils::zfs::{Mountpoint, Zfs};
 use illumos_utils::zpool::ZpoolName;
@@ -55,31 +55,6 @@ pub enum StorageManagerState {
     WaitingForKeyManager,
     QueueingDisks,
     Normal,
-}
-
-enum AddDiskResult {
-    DiskInserted,
-    DiskAlreadyInserted,
-    DiskQueued,
-}
-
-impl AddDiskResult {
-    fn disk_inserted(&self) -> bool {
-        match self {
-            AddDiskResult::DiskInserted => true,
-            _ => false,
-        }
-    }
-}
-
-impl From<bool> for AddDiskResult {
-    fn from(value: bool) -> Self {
-        if value {
-            AddDiskResult::DiskInserted
-        } else {
-            AddDiskResult::DiskAlreadyInserted
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -240,7 +215,7 @@ impl FakeStorageManager {
         loop {
             match self.rx.recv().await {
                 Some(StorageRequest::AddDisk(raw_disk)) => {
-                    if self.add_disk(raw_disk) {
+                    if self.add_disk(raw_disk).disk_inserted() {
                         self.resource_updates
                             .send_replace(self.resources.clone());
                     }
@@ -257,7 +232,7 @@ impl FakeStorageManager {
     }
 
     // Add a disk to `StorageResources` if it is new and return true if so
-    fn add_disk(&mut self, raw_disk: RawDisk) -> bool {
+    fn add_disk(&mut self, raw_disk: RawDisk) -> AddDiskResult {
         let disk = match raw_disk {
             RawDisk::Real(_) => {
                 panic!(
@@ -340,9 +315,6 @@ impl StorageManager {
     /// Process the next event
     ///
     /// This is useful for testing/debugging
-    ///
-    /// Return `None` if the sender side has disappeared and the task should
-    /// shutdown.
     pub async fn step(&mut self) -> Result<(), Error> {
         const CAPACITY_LOG_THRESHOLD: usize = 10;
         // We check the capacity and log it every time it changes by at least 10
@@ -485,7 +457,7 @@ impl StorageManager {
         match Disk::new(&self.log, raw_disk.clone(), Some(&self.key_requester))
             .await
         {
-            Ok(disk) => self.resources.insert_disk(disk).map(Into::into),
+            Ok(disk) => self.resources.insert_disk(disk),
             Err(err @ DiskError::Dataset(DatasetError::KeyManager(_))) => {
                 warn!(
                     self.log,
@@ -519,7 +491,7 @@ impl StorageManager {
         let disk =
             Disk::new(&self.log, raw_disk.clone(), Some(&self.key_requester))
                 .await?;
-        self.resources.insert_disk(disk).map(Into::into)
+        self.resources.insert_disk(disk)
     }
 
     // Delete a real disk and return `true` if the disk was actually removed

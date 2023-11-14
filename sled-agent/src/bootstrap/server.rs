@@ -565,14 +565,23 @@ impl Inner {
                 underlay_available_tx,
             ) => {
                 let request_id = request.body.id;
-                // Extract from an option to satisfy the borrow checker
+
+                // Extract from options to satisfy the borrow checker.
+                // It is not possible for `start_sled_agent` to be cancelled
+                // or fail in a safe, restartable manner. Therefore, for now,
+                // we explicitly unwrap here, and panic on error below.
+                //
+                // See https://github.com/oxidecomputer/omicron/issues/4494
                 let sled_agent_started_tx =
                     sled_agent_started_tx.take().unwrap();
+                let underlay_available_tx =
+                    underlay_available_tx.take().unwrap();
+
                 let response = match start_sled_agent(
                     &self.config,
                     request,
                     self.long_running_task_handles.clone(),
-                    underlay_available_tx.take().unwrap(),
+                    underlay_available_tx,
                     self.service_manager.clone(),
                     &self.ddm_admin_localhost_client,
                     &self.base_log,
@@ -591,7 +600,12 @@ impl Inner {
                         self.state = SledAgentState::ServerStarted(server);
                         Ok(SledAgentResponse { id: request_id })
                     }
-                    Err(err) => Err(format!("{err:#}")),
+                    Err(err) => {
+                        // This error is unrecoverable, and if returned we'd
+                        // end up in maintenance mode anyway.
+                        error!(log, "Failed to start sled agent: {err:#}");
+                        panic!("Failed to start sled agent");
+                    }
                 };
                 _ = response_tx.send(response);
             }
