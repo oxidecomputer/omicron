@@ -406,9 +406,6 @@ async fn svd_delete_crucible_snapshot_records(
 async fn svd_delete_freed_crucible_regions(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
-    // bail!
-    return Ok(());
-
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
 
