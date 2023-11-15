@@ -30,8 +30,8 @@ skip_timesync = false
 zpools = [
   "oxi_a462a7f7-b628-40fe-80ff-4e4189e2d62b",
   "oxi_b462a7f7-b628-40fe-80ff-4e4189e2d62b",
-  "oxp_d462a7f7-b628-40fe-80ff-4e4189e2d62b",
-  "oxp_e4b4dc87-ab46-49fb-a4b4-d361ae214c03",
+#  "oxp_d462a7f7-b628-40fe-80ff-4e4189e2d62b",
+#  "oxp_e4b4dc87-ab46-49fb-a4b4-d361ae214c03",
   "oxp_f4b4dc87-ab46-49fb-a4b4-d361ae214c03",
   "oxp_14b4dc87-ab46-49fb-a4b4-d361ae214c03",
   "oxp_24b4dc87-ab46-49fb-a4b4-d361ae214c03",
@@ -62,7 +62,7 @@ swap_device_size_gb = 64
 #
 # If empty, this will be equivalent to the first result from:
 # $ dladm show-phys -p -o LINK
-# data_link = "igb0"
+data_link = "igb0"
 
 # On a multi-sled system, transit-mode Maghemite runs in the `oxz_switch` zone
 # to configure routes between sleds.  This runs over the Sidecar's rear ports
