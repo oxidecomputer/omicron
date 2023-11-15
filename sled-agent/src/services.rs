@@ -3928,4 +3928,13 @@ mod test {
             &serde_json::to_string_pretty(&schema).unwrap(),
         );
     }
+
+    #[test]
+    fn test_all_zones_requests_schema() {
+        let schema = schemars::schema_for!(ZonesConfig);
+        expectorate::assert_contents(
+            "../schema/all-zones-requests.json",
+            &serde_json::to_string_pretty(&schema).unwrap(),
+        );
+    }
 }

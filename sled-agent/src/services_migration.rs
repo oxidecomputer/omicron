@@ -487,7 +487,6 @@ impl TryFrom<ServiceZoneRequest> for OmicronZoneConfig {
 mod test {
     use super::AllServiceRequests;
 
-    // XXX-dap add similar test for new ledger
     #[test]
     fn test_all_services_requests_schema() {
         let schema = schemars::schema_for!(AllServiceRequests);
