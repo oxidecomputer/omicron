@@ -14,6 +14,7 @@ use crate::db::identity::Resource;
 use crate::db::model::IdentityProvider;
 use crate::db::model::Name;
 use crate::db::pagination::paginated;
+use crate::transaction_retry::RetryHelper;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
@@ -62,38 +63,62 @@ impl DataStore {
         opctx.authorize(authz::Action::CreateChild, authz_idp_list).await?;
         assert_eq!(provider.silo_id, authz_idp_list.silo().id());
 
+        let retry_helper = RetryHelper::new(
+            &self.transaction_retry_producer,
+            "saml_identity_provider_create",
+        );
         let name = provider.identity().name.to_string();
         self.pool_connection_authorized(opctx)
             .await?
-            .transaction_async(|conn| async move {
-                // insert silo identity provider record with type Saml
-                use db::schema::identity_provider::dsl as idp_dsl;
-                diesel::insert_into(idp_dsl::identity_provider)
-                    .values(db::model::IdentityProvider {
-                        identity: db::model::IdentityProviderIdentity {
-                            id: provider.identity.id,
-                            name: provider.identity.name.clone(),
-                            description: provider.identity.description.clone(),
-                            time_created: provider.identity.time_created,
-                            time_modified: provider.identity.time_modified,
-                            time_deleted: provider.identity.time_deleted,
-                        },
-                        silo_id: provider.silo_id,
-                        provider_type: db::model::IdentityProviderType::Saml,
-                    })
-                    .execute_async(&conn)
-                    .await?;
+            .transaction_async_with_retry(
+                |conn| {
+                    let provider = provider.clone();
+                    async move {
+                        // insert silo identity provider record with type Saml
+                        use db::schema::identity_provider::dsl as idp_dsl;
+                        diesel::insert_into(idp_dsl::identity_provider)
+                            .values(db::model::IdentityProvider {
+                                identity: db::model::IdentityProviderIdentity {
+                                    id: provider.identity.id,
+                                    name: provider.identity.name.clone(),
+                                    description: provider
+                                        .identity
+                                        .description
+                                        .clone(),
+                                    time_created: provider
+                                        .identity
+                                        .time_created,
+                                    time_modified: provider
+                                        .identity
+                                        .time_modified,
+                                    time_deleted: provider
+                                        .identity
+                                        .time_deleted,
+                                },
+                                silo_id: provider.silo_id,
+                                provider_type:
+                                    db::model::IdentityProviderType::Saml,
+                            })
+                            .execute_async(&conn)
+                            .await?;
 
-                // insert silo saml identity provider record
-                use db::schema::saml_identity_provider::dsl;
-                let result = diesel::insert_into(dsl::saml_identity_provider)
-                    .values(provider)
-                    .returning(db::model::SamlIdentityProvider::as_returning())
-                    .get_result_async(&conn)
-                    .await?;
+                        // insert silo saml identity provider record
+                        use db::schema::saml_identity_provider::dsl;
+                        let result = diesel::insert_into(
+                            dsl::saml_identity_provider,
+                        )
+                        .values(provider)
+                        .returning(
+                            db::model::SamlIdentityProvider::as_returning(),
+                        )
+                        .get_result_async(&conn)
+                        .await?;
 
-                Ok(result)
-            })
+                        Ok(result)
+                    }
+                },
+                retry_helper.as_callback(),
+            )
             .await
             .map_err(|e| {
                 public_error_from_diesel(

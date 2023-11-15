@@ -11,7 +11,6 @@ use crate::db::datastore::address_lot::{
 use crate::db::datastore::UpdatePrecondition;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
-use crate::db::error::TransactionError;
 use crate::db::model::{
     LldpServiceConfig, Name, SwitchInterfaceConfig, SwitchPort,
     SwitchPortAddressConfig, SwitchPortBgpPeerConfig, SwitchPortConfig,
@@ -870,7 +869,6 @@ impl DataStore {
         enum SwitchPortCreateError {
             RackNotFound,
         }
-        type TxnError = TransactionError<SwitchPortCreateError>;
 
         let conn = self.pool_connection_authorized(opctx).await?;
         let switch_port = SwitchPort::new(
@@ -879,47 +877,64 @@ impl DataStore {
             port.to_string(),
         );
 
+        let err = Arc::new(OnceLock::new());
+        let retry_helper = RetryHelper::new(
+            &self.transaction_retry_producer,
+            "switch_port_create",
+        );
+
         // TODO https://github.com/oxidecomputer/omicron/issues/2811
         // Audit external networking database transaction usage
-        conn.transaction_async(|conn| async move {
-            use db::schema::rack;
-            use db::schema::rack::dsl as rack_dsl;
-            rack_dsl::rack
-                .filter(rack::id.eq(rack_id))
-                .select(rack::id)
-                .limit(1)
-                .first_async::<Uuid>(&conn)
-                .await
-                .map_err(|_| {
-                    TxnError::CustomError(SwitchPortCreateError::RackNotFound)
-                })?;
+        conn.transaction_async_with_retry(
+            |conn| {
+                let err = err.clone();
+                let switch_port = switch_port.clone();
+                async move {
+                    use db::schema::rack;
+                    use db::schema::rack::dsl as rack_dsl;
+                    rack_dsl::rack
+                        .filter(rack::id.eq(rack_id))
+                        .select(rack::id)
+                        .limit(1)
+                        .first_async::<Uuid>(&conn)
+                        .await
+                        .map_err(|_| {
+                            err.set(SwitchPortCreateError::RackNotFound)
+                                .unwrap();
+                            DieselError::RollbackTransaction
+                        })?;
 
-            // insert switch port
-            use db::schema::switch_port::dsl as switch_port_dsl;
-            let db_switch_port: SwitchPort =
-                diesel::insert_into(switch_port_dsl::switch_port)
-                    .values(switch_port)
-                    .returning(SwitchPort::as_returning())
-                    .get_result_async(&conn)
-                    .await?;
+                    // insert switch port
+                    use db::schema::switch_port::dsl as switch_port_dsl;
+                    let db_switch_port: SwitchPort =
+                        diesel::insert_into(switch_port_dsl::switch_port)
+                            .values(switch_port)
+                            .returning(SwitchPort::as_returning())
+                            .get_result_async(&conn)
+                            .await?;
 
-            Ok(db_switch_port)
-        })
+                    Ok(db_switch_port)
+                }
+            },
+            retry_helper.as_callback(),
+        )
         .await
-        .map_err(|e| match e {
-            TxnError::CustomError(SwitchPortCreateError::RackNotFound) => {
-                Error::invalid_request("rack not found")
-            }
-            TxnError::Database(e) => match e {
-                DieselError::DatabaseError(_, _) => public_error_from_diesel(
+        .map_err(|e| {
+            if let Some(err) = err.get() {
+                match err {
+                    SwitchPortCreateError::RackNotFound => {
+                        Error::invalid_request("rack not found")
+                    }
+                }
+            } else {
+                public_error_from_diesel(
                     e,
                     ErrorHandler::Conflict(
                         ResourceType::SwitchPort,
                         &format!("{}/{}/{}", rack_id, &switch_location, &port,),
                     ),
-                ),
-                _ => public_error_from_diesel(e, ErrorHandler::Server),
-            },
+                )
+            }
         })
     }
 
