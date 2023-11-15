@@ -6,6 +6,7 @@
 
 use futures::Future;
 use gateway_client::Client;
+use slog::Logger;
 use std::collections::VecDeque;
 use std::sync::Arc;
 
@@ -50,6 +51,7 @@ impl MgsClients {
     /// any future accesses will attempt the most-recently-successful client.
     pub(super) async fn try_all<T, F, Fut>(
         &mut self,
+        log: &Logger,
         op: F,
     ) -> Result<T, GatewayClientError>
     where
@@ -68,6 +70,14 @@ impl MgsClients {
                     return Ok(value);
                 }
                 Err(GatewayClientError::CommunicationError(err)) => {
+                    if i < self.clients.len() {
+                        warn!(
+                            log, "communication error with MGS; \
+                                  will try next client";
+                            "mgs_addr" => client.baseurl(),
+                            "err" => %err,
+                        );
+                    }
                     last_err = Some(err);
                     continue;
                 }

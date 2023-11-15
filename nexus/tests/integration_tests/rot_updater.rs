@@ -2,19 +2,18 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Tests `SpUpdater`'s delivery of updates to SPs via MGS
+//! Tests `RotUpdater`'s delivery of updates to RoTs via MGS
 
-use gateway_client::types::SpType;
+use gateway_client::types::{RotSlot, SpType};
 use gateway_messages::{SpPort, UpdateInProgressStatus, UpdateStatus};
 use gateway_test_utils::setup as mgs_setup;
 use hubtools::RawHubrisArchive;
 use hubtools::{CabooseBuilder, HubrisArchiveBuilder};
 use omicron_nexus::app::test_interfaces::{
-    MgsClients, SpUpdater, UpdateProgress,
+    MgsClients, RotUpdater, UpdateProgress,
 };
 use sp_sim::SimulatedSp;
-use sp_sim::SIM_GIMLET_BOARD;
-use sp_sim::SIM_SIDECAR_BOARD;
+use sp_sim::SIM_ROT_BOARD;
 use std::mem;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -25,10 +24,10 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-fn make_fake_sp_image(board: &str) -> Vec<u8> {
+fn make_fake_rot_image() -> Vec<u8> {
     let caboose = CabooseBuilder::default()
         .git_commit("fake-git-commit")
-        .board(board)
+        .board(SIM_ROT_BOARD)
         .version("0.0.0")
         .name("fake-name")
         .build();
@@ -39,10 +38,10 @@ fn make_fake_sp_image(board: &str) -> Vec<u8> {
 }
 
 #[tokio::test]
-async fn test_sp_updater_updates_sled() {
+async fn test_rot_updater_updates_sled() {
     // Start MGS + Sim SP.
     let mgstestctx =
-        mgs_setup::test_setup("test_sp_updater_updates_sled", SpPort::One)
+        mgs_setup::test_setup("test_rot_updater_updates_sled", SpPort::One)
             .await;
 
     // Configure an MGS client.
@@ -51,35 +50,37 @@ async fn test_sp_updater_updates_sled() {
         mgstestctx.logctx.log.new(slog::o!("component" => "MgsClient")),
     )]);
 
-    // Configure and instantiate an `SpUpdater`.
+    // Configure and instantiate an `RotUpdater`.
     let sp_type = SpType::Sled;
     let sp_slot = 0;
     let update_id = Uuid::new_v4();
-    let hubris_archive = make_fake_sp_image(SIM_GIMLET_BOARD);
+    let hubris_archive = make_fake_rot_image();
+    let target_rot_slot = RotSlot::B;
 
-    let sp_updater = SpUpdater::new(
+    let rot_updater = RotUpdater::new(
         sp_type,
         sp_slot,
+        target_rot_slot,
         update_id,
         hubris_archive.clone(),
         &mgstestctx.logctx.log,
     );
 
     // Run the update.
-    sp_updater.update(mgs_clients).await.expect("update failed");
+    rot_updater.update(mgs_clients).await.expect("update failed");
 
-    // Ensure the SP received the complete update.
+    // Ensure the RoT received the complete update.
     let last_update_image = mgstestctx.simrack.gimlets[sp_slot as usize]
-        .last_sp_update_data()
+        .last_rot_update_data()
         .await
-        .expect("simulated SP did not receive an update");
+        .expect("simulated RoT did not receive an update");
 
     let hubris_archive = RawHubrisArchive::from_vec(hubris_archive).unwrap();
 
     assert_eq!(
         hubris_archive.image.data.as_slice(),
         &*last_update_image,
-        "simulated SP update contents (len {}) \
+        "simulated RoT update contents (len {}) \
          do not match test generated fake image (len {})",
         last_update_image.len(),
         hubris_archive.image.data.len()
@@ -89,10 +90,10 @@ async fn test_sp_updater_updates_sled() {
 }
 
 #[tokio::test]
-async fn test_sp_updater_updates_switch() {
+async fn test_rot_updater_updates_switch() {
     // Start MGS + Sim SP.
     let mgstestctx =
-        mgs_setup::test_setup("test_sp_updater_updates_switch", SpPort::One)
+        mgs_setup::test_setup("test_rot_updater_updates_switch", SpPort::One)
             .await;
 
     // Configure an MGS client.
@@ -104,29 +105,31 @@ async fn test_sp_updater_updates_switch() {
     let sp_type = SpType::Switch;
     let sp_slot = 0;
     let update_id = Uuid::new_v4();
-    let hubris_archive = make_fake_sp_image(SIM_SIDECAR_BOARD);
+    let hubris_archive = make_fake_rot_image();
+    let target_rot_slot = RotSlot::B;
 
-    let sp_updater = SpUpdater::new(
+    let rot_updater = RotUpdater::new(
         sp_type,
         sp_slot,
+        target_rot_slot,
         update_id,
         hubris_archive.clone(),
         &mgstestctx.logctx.log,
     );
 
-    sp_updater.update(mgs_clients).await.expect("update failed");
+    rot_updater.update(mgs_clients).await.expect("update failed");
 
     let last_update_image = mgstestctx.simrack.sidecars[sp_slot as usize]
-        .last_sp_update_data()
+        .last_rot_update_data()
         .await
-        .expect("simulated SP did not receive an update");
+        .expect("simulated RoT did not receive an update");
 
     let hubris_archive = RawHubrisArchive::from_vec(hubris_archive).unwrap();
 
     assert_eq!(
         hubris_archive.image.data.as_slice(),
         &*last_update_image,
-        "simulated SP update contents (len {}) \
+        "simulated RoT update contents (len {}) \
          do not match test generated fake image (len {})",
         last_update_image.len(),
         hubris_archive.image.data.len()
@@ -136,10 +139,10 @@ async fn test_sp_updater_updates_switch() {
 }
 
 #[tokio::test]
-async fn test_sp_updater_remembers_successful_mgs_instance() {
+async fn test_rot_updater_remembers_successful_mgs_instance() {
     // Start MGS + Sim SP.
     let mgstestctx = mgs_setup::test_setup(
-        "test_sp_updater_remembers_successful_mgs_instance",
+        "test_rot_updater_remembers_successful_mgs_instance",
         SpPort::One,
     )
     .await;
@@ -147,7 +150,7 @@ async fn test_sp_updater_remembers_successful_mgs_instance() {
     // Also start a local TCP server that we will claim is an MGS instance, but
     // it will close connections immediately after accepting them. This will
     // allow us to count how many connections it receives, while simultaneously
-    // causing errors in the SpUpdater when it attempts to use this "MGS".
+    // causing errors in the RotUpdater when it attempts to use this "MGS".
     let (failing_mgs_task, failing_mgs_addr, failing_mgs_conn_counter) = {
         let socket = TcpListener::bind("[::1]:0").await.unwrap();
         let addr = socket.local_addr().unwrap();
@@ -168,11 +171,11 @@ async fn test_sp_updater_remembers_successful_mgs_instance() {
     };
 
     // Order the MGS clients such that the bogus MGS that immediately closes
-    // connections comes first. `SpUpdater` should remember that the second MGS
+    // connections comes first. `RotUpdater` should remember that the second MGS
     // instance succeeds, and only send subsequent requests to it: we should
     // only see a single attempted connection to the bogus MGS, even though
     // delivering an update requires a bare minimum of three requests (start the
-    // update, query the status, reset the SP) and often more (if repeated
+    // update, query the status, reset the RoT) and often more (if repeated
     // queries are required to wait for completion).
     let mgs_clients = MgsClients::from_clients([
         gateway_client::Client::new(
@@ -188,36 +191,38 @@ async fn test_sp_updater_remembers_successful_mgs_instance() {
     let sp_type = SpType::Sled;
     let sp_slot = 0;
     let update_id = Uuid::new_v4();
-    let hubris_archive = make_fake_sp_image(SIM_GIMLET_BOARD);
+    let hubris_archive = make_fake_rot_image();
+    let target_rot_slot = RotSlot::B;
 
-    let sp_updater = SpUpdater::new(
+    let rot_updater = RotUpdater::new(
         sp_type,
         sp_slot,
+        target_rot_slot,
         update_id,
         hubris_archive.clone(),
         &mgstestctx.logctx.log,
     );
 
-    sp_updater.update(mgs_clients).await.expect("update failed");
+    rot_updater.update(mgs_clients).await.expect("update failed");
 
     let last_update_image = mgstestctx.simrack.gimlets[sp_slot as usize]
-        .last_sp_update_data()
+        .last_rot_update_data()
         .await
-        .expect("simulated SP did not receive an update");
+        .expect("simulated RoT did not receive an update");
 
     let hubris_archive = RawHubrisArchive::from_vec(hubris_archive).unwrap();
 
     assert_eq!(
         hubris_archive.image.data.as_slice(),
         &*last_update_image,
-        "simulated SP update contents (len {}) \
+        "simulated RoT update contents (len {}) \
          do not match test generated fake image (len {})",
         last_update_image.len(),
         hubris_archive.image.data.len()
     );
 
     // Check that our bogus MGS only received a single connection attempt.
-    // (After SpUpdater failed to talk to this instance, it should have fallen
+    // (After RotUpdater failed to talk to this instance, it should have fallen
     // back to the valid one for all further requests.)
     assert_eq!(
         failing_mgs_conn_counter.load(Ordering::SeqCst),
@@ -230,7 +235,7 @@ async fn test_sp_updater_remembers_successful_mgs_instance() {
 }
 
 #[tokio::test]
-async fn test_sp_updater_switches_mgs_instances_on_failure() {
+async fn test_rot_updater_switches_mgs_instances_on_failure() {
     enum MgsProxy {
         One(TcpStream),
         Two(TcpStream),
@@ -238,7 +243,7 @@ async fn test_sp_updater_switches_mgs_instances_on_failure() {
 
     // Start MGS + Sim SP.
     let mgstestctx = mgs_setup::test_setup(
-        "test_sp_updater_switches_mgs_instances_on_failure",
+        "test_rot_updater_switches_mgs_instances_on_failure",
         SpPort::One,
     )
     .await;
@@ -306,18 +311,20 @@ async fn test_sp_updater_switches_mgs_instances_on_failure() {
     let sp_type = SpType::Sled;
     let sp_slot = 0;
     let update_id = Uuid::new_v4();
-    let hubris_archive = make_fake_sp_image(SIM_GIMLET_BOARD);
+    let hubris_archive = make_fake_rot_image();
+    let target_rot_slot = RotSlot::B;
 
-    let sp_updater = SpUpdater::new(
+    let rot_updater = RotUpdater::new(
         sp_type,
         sp_slot,
+        target_rot_slot,
         update_id,
         hubris_archive.clone(),
         &mgstestctx.logctx.log,
     );
 
     // Spawn the actual update task.
-    let mut update_task = tokio::spawn(sp_updater.update(mgs_clients));
+    let mut update_task = tokio::spawn(rot_updater.update(mgs_clients));
 
     // Loop over incoming requests. We expect this sequence:
     //
@@ -354,7 +361,7 @@ async fn test_sp_updater_switches_mgs_instances_on_failure() {
                     }
                 };
 
-                // Should we trigger `SpUpdater` to swap to the other MGS
+                // Should we trigger `RotUpdater` to swap to the other MGS
                 // (proxy)? If so, do that by dropping this connection (which
                 // will cause a client failure) and note that we expect the next
                 // incoming request to come on the other proxy.
@@ -384,18 +391,20 @@ async fn test_sp_updater_switches_mgs_instances_on_failure() {
         }
     }
 
-    // An SP update requires a minimum of 3 requests to MGS: post the update,
-    // check the status, and post an SP reset. There may be more requests if the
-    // update is not yet complete when the status is checked, but we can just
-    // check that each of our proxies received at least 2 incoming requests;
-    // based on our outline above, if we got the minimum of 3 requests, it would
-    // look like this:
+    // An RoT update requires a minimum of 4 requests to MGS: post the update,
+    // check the status, post to mark the new target slot active, and post an
+    // RoT reset. There may be more requests if the update is not yet complete
+    // when the status is checked, but we can just check that each of our
+    // proxies received at least 2 incoming requests; based on our outline
+    // above, if we got the minimum of 4 requests, it would look like this:
     //
     // 1. POST update -> first proxy (success)
     // 2. GET status -> first proxy (fail)
     // 3. GET status retry -> second proxy (success)
-    // 4. POST reset -> second proxy (fail)
-    // 5. POST reset -> first proxy (success)
+    // 4. POST new target slot -> second proxy (fail)
+    // 5. POST new target slot -> first proxy (success)
+    // 6. POST reset -> first proxy (fail)
+    // 7. POST reset -> second proxy (success)
     //
     // This pattern would repeat if multiple status requests were required, so
     // we always expect the first proxy to see exactly one more connection
@@ -410,16 +419,16 @@ async fn test_sp_updater_switches_mgs_instances_on_failure() {
     );
 
     let last_update_image = mgstestctx.simrack.gimlets[sp_slot as usize]
-        .last_sp_update_data()
+        .last_rot_update_data()
         .await
-        .expect("simulated SP did not receive an update");
+        .expect("simulated RoT did not receive an update");
 
     let hubris_archive = RawHubrisArchive::from_vec(hubris_archive).unwrap();
 
     assert_eq!(
         hubris_archive.image.data.as_slice(),
         &*last_update_image,
-        "simulated SP update contents (len {}) \
+        "simulated RoT update contents (len {}) \
          do not match test generated fake image (len {})",
         last_update_image.len(),
         hubris_archive.image.data.len()
@@ -429,11 +438,13 @@ async fn test_sp_updater_switches_mgs_instances_on_failure() {
 }
 
 #[tokio::test]
-async fn test_sp_updater_delivers_progress() {
+async fn test_rot_updater_delivers_progress() {
     // Start MGS + Sim SP.
-    let mgstestctx =
-        mgs_setup::test_setup("test_sp_updater_delivers_progress", SpPort::One)
-            .await;
+    let mgstestctx = mgs_setup::test_setup(
+        "test_rot_updater_delivers_progress",
+        SpPort::One,
+    )
+    .await;
 
     // Configure an MGS client.
     let mgs_clients = MgsClients::from_clients([gateway_client::Client::new(
@@ -444,22 +455,24 @@ async fn test_sp_updater_delivers_progress() {
     let sp_type = SpType::Sled;
     let sp_slot = 0;
     let update_id = Uuid::new_v4();
-    let hubris_archive = make_fake_sp_image(SIM_GIMLET_BOARD);
+    let hubris_archive = make_fake_rot_image();
+    let target_rot_slot = RotSlot::B;
 
-    let sp_updater = SpUpdater::new(
+    let rot_updater = RotUpdater::new(
         sp_type,
         sp_slot,
+        target_rot_slot,
         update_id,
         hubris_archive.clone(),
         &mgstestctx.logctx.log,
     );
 
     let hubris_archive = RawHubrisArchive::from_vec(hubris_archive).unwrap();
-    let sp_image_len = hubris_archive.image.data.len() as u32;
+    let rot_image_len = hubris_archive.image.data.len() as u32;
 
     // Subscribe to update progress, and check that there is no status yet; we
     // haven't started the update.
-    let mut progress = sp_updater.progress_watcher();
+    let mut progress = rot_updater.progress_watcher();
     assert_eq!(*progress.borrow_and_update(), None);
 
     // Install a semaphore on the requests our target SP will receive so we can
@@ -470,12 +483,12 @@ async fn test_sp_updater_delivers_progress() {
 
     // Spawn the update on a background task so we can watch `progress` as it is
     // applied.
-    let do_update_task = tokio::spawn(sp_updater.update(mgs_clients));
+    let do_update_task = tokio::spawn(rot_updater.update(mgs_clients));
 
-    // Allow the SP to respond to 2 messages: the caboose check and the "prepare
-    // update" messages that trigger the start of an update, then ensure we see
-    // the "started" progress.
-    sp_accept_sema.send(2).unwrap();
+    // Allow the SP to respond to 1 message: the "prepare update" messages that
+    // trigger the start of an update, then ensure we see the "started"
+    // progress.
+    sp_accept_sema.send(1).unwrap();
     progress.changed().await.unwrap();
     assert_eq!(*progress.borrow_and_update(), Some(UpdateProgress::Started));
 
@@ -486,7 +499,7 @@ async fn test_sp_updater_delivers_progress() {
         UpdateStatus::InProgress(UpdateInProgressStatus {
             id: update_id.into(),
             bytes_received: 0,
-            total_size: sp_image_len,
+            total_size: rot_image_len,
         })
     );
 
@@ -499,20 +512,20 @@ async fn test_sp_updater_delivers_progress() {
     // simulated SP:
     //
     // 1. MGS is trying to deliver the update
-    // 2. `sp_updater` is trying to poll (via MGS) for update status
+    // 2. `rot_updater` is trying to poll (via MGS) for update status
     //
     // and we want to ensure that we see any relevant progress reports from
-    // `sp_updater`. We'll let one MGS -> SP message through at a time (waiting
+    // `rot_updater`. We'll let one MGS -> SP message through at a time (waiting
     // until our SP has responded by waiting for a change to `sp_responses`)
     // then check its update state: if it changed, the packet we let through was
-    // data from MGS; otherwise, it was a status request from `sp_updater`.
+    // data from MGS; otherwise, it was a status request from `rot_updater`.
     //
     // This loop will continue until either:
     //
     // 1. We see an `UpdateStatus::InProgress` message indicating 100% delivery,
     //    at which point we break out of the loop
     // 2. We time out waiting for the previous step (by timing out for either
-    //    the SP to process a request or `sp_updater` to realize there's been
+    //    the SP to process a request or `rot_updater` to realize there's been
     //    progress), at which point we panic and fail this test.
     let mut prev_bytes_received = 0;
     let mut expect_progress_change = false;
@@ -531,18 +544,18 @@ async fn test_sp_updater_delivers_progress() {
 
         // Inspec the SP's in-memory update state; we expect only `InProgress`
         // or `Complete`, and in either case we note whether we expect to see
-        // status changes from `sp_updater`.
+        // status changes from `rot_updater`.
         match target_sp.current_update_status().await {
-            UpdateStatus::InProgress(sp_progress) => {
-                if sp_progress.bytes_received > prev_bytes_received {
-                    prev_bytes_received = sp_progress.bytes_received;
+            UpdateStatus::InProgress(rot_progress) => {
+                if rot_progress.bytes_received > prev_bytes_received {
+                    prev_bytes_received = rot_progress.bytes_received;
                     expect_progress_change = true;
                     continue;
                 }
             }
             UpdateStatus::Complete(_) => {
-                if prev_bytes_received < sp_image_len {
-                    prev_bytes_received = sp_image_len;
+                if prev_bytes_received < rot_image_len {
+                    prev_bytes_received = rot_image_len;
                     continue;
                 }
             }
@@ -557,10 +570,10 @@ async fn test_sp_updater_delivers_progress() {
         }
 
         // If we get here, the most recent packet did _not_ change the SP's
-        // internal update state, so it was a status request from `sp_updater`.
+        // internal update state, so it was a status request from `rot_updater`.
         // If we expect the updater to see new progress, wait for that change
         // here.
-        if expect_progress_change || prev_bytes_received == sp_image_len {
+        if expect_progress_change || prev_bytes_received == rot_image_len {
             // Safety rail that we haven't screwed up our untangle-the-race
             // logic: if we don't see a new progress after several seconds, our
             // test is broken, so fail.
@@ -584,7 +597,7 @@ async fn test_sp_updater_delivers_progress() {
     }
 
     // The update has been fully delivered to the SP, but we don't see an
-    // `UpdateStatus::Complete` message until the SP is reset. Release the SP
+    // `UpdateStatus::Complete` message until the RoT is reset. Release the SP
     // semaphore since we're no longer racing to observe intermediate progress,
     // and wait for the completion message.
     sp_accept_sema.send(usize::MAX).unwrap();
@@ -594,14 +607,14 @@ async fn test_sp_updater_delivers_progress() {
     do_update_task.await.expect("update task panicked").expect("update failed");
 
     let last_update_image = target_sp
-        .last_sp_update_data()
+        .last_rot_update_data()
         .await
-        .expect("simulated SP did not receive an update");
+        .expect("simulated RoT did not receive an update");
 
     assert_eq!(
         hubris_archive.image.data.as_slice(),
         &*last_update_image,
-        "simulated SP update contents (len {}) \
+        "simulated RoT update contents (len {}) \
          do not match test generated fake image (len {})",
         last_update_image.len(),
         hubris_archive.image.data.len()

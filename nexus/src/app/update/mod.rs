@@ -31,6 +31,7 @@ mod rot_updater;
 mod sp_updater;
 
 pub use mgs_clients::MgsClients;
+pub use rot_updater::{RotUpdateError, RotUpdater};
 pub use sp_updater::{SpUpdateError, SpUpdater};
 
 #[derive(Debug, PartialEq, Clone)]

@@ -77,15 +77,15 @@ impl SpUpdater {
         let me = &self;
 
         mgs_clients
-            .try_all(
-                |client| async move { me.start_update_one_mgs(&client).await },
-            )
+            .try_all(&self.log, |client| async move {
+                me.start_update_one_mgs(&client).await
+            })
             .await?;
 
         mgs_clients
-            .try_all(
-                |client| async move { me.start_update_one_mgs(&client).await },
-            )
+            .try_all(&self.log, |client| async move {
+                me.start_update_one_mgs(&client).await
+            })
             .await?;
 
         // `wait_for_update_completion` uses `try_all_mgs_clients` internally,
@@ -93,7 +93,7 @@ impl SpUpdater {
         me.wait_for_update_completion(&mut mgs_clients).await?;
 
         mgs_clients
-            .try_all(|client| async move {
+            .try_all(&self.log, |client| async move {
                 me.finalize_update_via_reset_one_mgs(&client).await
             })
             .await?;
@@ -141,7 +141,7 @@ impl SpUpdater {
 
         loop {
             let update_status = mgs_clients
-                .try_all(|client| async move {
+                .try_all(&self.log, |client| async move {
                     let update_status = client
                         .sp_component_update_status(
                             self.sp_type,
