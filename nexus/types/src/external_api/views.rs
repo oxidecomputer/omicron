@@ -274,10 +274,37 @@ pub struct Rack {
     pub identity: AssetIdentityMetadata,
 }
 
+/// View of a sled that has not been added to an initialized rack yet
+#[derive(
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    PartialOrd,
+    Ord,
+    PartialEq,
+    Eq,
+)]
+pub struct UninitializedSled {
+    pub baseboard: Baseboard,
+    pub cubby: u16,
+}
+
 // FRUs
 
 /// Properties that uniquely identify an Oxide hardware component
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    PartialOrd,
+    Ord,
+    PartialEq,
+    Eq,
+)]
 pub struct Baseboard {
     pub serial: String,
     pub part: String,

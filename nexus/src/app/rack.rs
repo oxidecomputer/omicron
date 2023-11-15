@@ -9,6 +9,7 @@ use crate::external_api::params;
 use crate::external_api::params::CertificateCreate;
 use crate::external_api::shared::ServiceUsingCertificate;
 use crate::internal_api::params::RackInitializationRequest;
+use gateway_client::types::SpType;
 use ipnetwork::IpNetwork;
 use nexus_db_model::DnsGroup;
 use nexus_db_model::InitialDnsGroup;
@@ -31,6 +32,9 @@ use nexus_types::external_api::params::{
 use nexus_types::external_api::shared::FleetRole;
 use nexus_types::external_api::shared::SiloIdentityMode;
 use nexus_types::external_api::shared::SiloRole;
+use nexus_types::external_api::views;
+use nexus_types::external_api::views::Baseboard;
+use nexus_types::external_api::views::UninitializedSled;
 use nexus_types::internal_api::params::DnsRecord;
 use omicron_common::api::external::AddressLotKind;
 use omicron_common::api::external::DataPageParams;
@@ -51,6 +55,7 @@ use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
+use std::num::NonZeroU32;
 use std::str::FromStr;
 use uuid::Uuid;
 
@@ -614,20 +619,7 @@ impl super::Nexus {
         opctx: &OpContext,
     ) -> Result<EarlyNetworkConfig, Error> {
         let rack = self.rack_lookup(opctx, &self.rack_id).await?;
-
-        let subnet = match rack.rack_subnet {
-            Some(IpNetwork::V6(subnet)) => subnet,
-            Some(IpNetwork::V4(_)) => {
-                return Err(Error::InternalError {
-                    internal_message: "rack subnet not IPv6".into(),
-                })
-            }
-            None => {
-                return Err(Error::InternalError {
-                    internal_message: "rack subnet not set".into(),
-                })
-            }
-        };
+        let subnet = rack.get_subnet()?;
 
         let db_ports = self.active_port_settings(opctx).await?;
         let mut ports = Vec::new();
@@ -723,5 +715,52 @@ impl super::Nexus {
         };
 
         Ok(result)
+    }
+
+    /// Return the list of sleds that are inserted into an initialized rack
+    /// but not yet initialized as part of a rack.
+    pub(crate) async fn uninitialized_sled_list(
+        &self,
+        opctx: &OpContext,
+    ) -> ListResultVec<UninitializedSled> {
+        // Grab the SPs from the last collection
+        let limit = NonZeroU32::new(50).unwrap();
+        let collection = self
+            .db_datastore
+            .inventory_get_latest_collection(opctx, limit)
+            .await?;
+        let pagparams = DataPageParams {
+            marker: None,
+            direction: dropshot::PaginationOrder::Descending,
+            // TODO: This limit is only suitable for a single sled cluster
+            limit: NonZeroU32::new(32).unwrap(),
+        };
+        let sleds = self.db_datastore.sled_list(opctx, &pagparams).await?;
+
+        let mut uninitialized_sleds: Vec<UninitializedSled> = collection
+            .sps
+            .into_iter()
+            .filter_map(|(k, v)| {
+                if v.sp_type == SpType::Sled {
+                    Some(UninitializedSled {
+                        baseboard: Baseboard {
+                            serial: k.serial_number.clone(),
+                            part: k.part_number.clone(),
+                            revision: v.baseboard_revision.into(),
+                        },
+                        cubby: v.sp_slot,
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let sled_baseboards: BTreeSet<Baseboard> =
+            sleds.into_iter().map(|s| views::Sled::from(s).baseboard).collect();
+
+        // Retain all sleds that exist but are not in the sled table
+        uninitialized_sleds.retain(|s| !sled_baseboards.contains(&s.baseboard));
+        Ok(uninitialized_sleds)
     }
 }

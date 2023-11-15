@@ -122,6 +122,7 @@ sled_physical_disk_list                  GET      /v1/system/hardware/sleds/{sle
 sled_view                                GET      /v1/system/hardware/sleds/{sled_id}
 switch_list                              GET      /v1/system/hardware/switches
 switch_view                              GET      /v1/system/hardware/switches/{switch_id}
+uninitialized_sled_list                  GET      /v1/system/hardware/uninitialized-sleds
 
 API operations found with tag "system/metrics"
 OPERATION ID                             METHOD   URL PATH

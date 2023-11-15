@@ -53,7 +53,6 @@ use nexus_db_model::Zpool;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::datastore::DataStoreConnection;
-use nexus_db_queries::db::datastore::DataStoreInventoryTest;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::lookup::LookupPath;
@@ -383,8 +382,13 @@ impl DbArgs {
                     .await
             }
             DbCommands::Inventory(inventory_args) => {
-                cmd_db_inventory(&datastore, self.fetch_limit, inventory_args)
-                    .await
+                cmd_db_inventory(
+                    &opctx,
+                    &datastore,
+                    self.fetch_limit,
+                    inventory_args,
+                )
+                .await
             }
             DbCommands::Services(ServicesArgs {
                 command: ServicesCommands::ListInstances,
@@ -1751,6 +1755,7 @@ fn format_record(record: &DnsRecord) -> impl Display {
 // Inventory
 
 async fn cmd_db_inventory(
+    opctx: &OpContext,
     datastore: &DataStore,
     limit: NonZeroU32,
     inventory_args: &InventoryArgs,
@@ -1768,7 +1773,9 @@ async fn cmd_db_inventory(
         }) => cmd_db_inventory_collections_list(&conn, limit).await,
         InventoryCommands::Collections(CollectionsArgs {
             command: CollectionsCommands::Show(CollectionsShowArgs { id }),
-        }) => cmd_db_inventory_collections_show(datastore, id, limit).await,
+        }) => {
+            cmd_db_inventory_collections_show(opctx, datastore, id, limit).await
+        }
     }
 }
 
@@ -1928,12 +1935,13 @@ async fn cmd_db_inventory_collections_list(
 }
 
 async fn cmd_db_inventory_collections_show(
+    opctx: &OpContext,
     datastore: &DataStore,
     id: Uuid,
     limit: NonZeroU32,
 ) -> Result<(), anyhow::Error> {
     let (collection, incomplete) = datastore
-        .inventory_collection_read_best_effort(id, limit)
+        .inventory_collection_read_best_effort(opctx, id, limit)
         .await
         .context("reading collection")?;
     if incomplete {
