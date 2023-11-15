@@ -87,7 +87,6 @@ impl DataStore {
             NotFound,
         }
         let err = Arc::new(OnceLock::new());
-
         let retry_helper = RetryHelper::new(
             &self.transaction_retry_producer,
             "sled_reservation_create",
