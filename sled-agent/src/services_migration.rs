@@ -177,12 +177,6 @@ impl std::fmt::Display for ServiceType {
     }
 }
 
-/// Used to request that the Sled initialize multiple services.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-pub struct ServiceEnsureBody {
-    pub services: Vec<ServiceZoneRequest>,
-}
-
 /// Describes a request to provision a specific dataset
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,

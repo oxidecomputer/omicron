@@ -672,6 +672,49 @@ impl ServiceManager {
                 );
 
                 ledger.commit().await?;
+
+                // We could consider removing the old ledger here.  That would
+                // not guarantee that it would be gone, though, because we could
+                // crash during `ledger.commit()` above having written at least
+                // one of the new ledgers.  In that case, we won't go through
+                // this code path again on restart.  If we wanted to ensure the
+                // old-format ledger was gone after the migration, we could
+                // consider unconditionally removing the old ledger paths in the
+                // caller, after we've got a copy of the new-format ledger.
+                //
+                // Should we?  In principle, it shouldn't matter either way
+                // because we will never look at the old-format ledger unless we
+                // don't have a new-format one, and we should now have a
+                // new-format one forever now.
+                //
+                // When might it matter?  Two cases:
+                //
+                // (1) If the sled agent is downgraded to a previous version
+                //     that doesn't know about the new-format ledger.  Do we
+                //     want that sled agent to use the old-format one?  It
+                //     depends.  If that downgrade happens immediately because
+                //     the upgrade to the first new-format version was a
+                //     disaster, then we'd probably rather the downgraded sled
+                //     agent _did_ start its zones.  If the downgrade happens
+                //     months later, potentially after various additional
+                //     reconfigurations, then that old-format ledger is probably
+                //     out of date and shouldn't be used.  There's no way to
+                //     really know which case we're in, but the latter seems
+                //     quite unlikely (why would we downgrade so far back after
+                //     so long?).  So that's a reason to keep the old-format
+                //     ledger.
+                //
+                // (2) Suppose a developer or Oxide support engineer removes the
+                //     new ledger for some reason, maybe thinking sled agent
+                //     would come up with no zones running.  They'll be
+                //     surprised to discover that it actually starts running a
+                //     potentially old set of zones.  This probably only matters
+                //     on a production system, and even then, it probably
+                //     shouldn't happen.
+                //
+                // Given these cases, we're left ambivalent.  We choose to keep
+                // the old ledger around.  If nothing else, if something goes
+                // wrong, we'll have a copy of its last contents!
                 Ok(Some(ledger))
             }
         }
