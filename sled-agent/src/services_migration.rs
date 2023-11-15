@@ -27,58 +27,29 @@ use uuid::Uuid;
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
 )]
-pub struct ServiceZoneRequest {
+struct ServiceZoneRequest {
     // The UUID of the zone to be initialized.
     // TODO: Should this be removed? If we have UUIDs on the services, what's
     // the point of this?
-    pub id: Uuid,
+    id: Uuid,
     // The type of the zone to be created.
-    pub zone_type: ZoneType,
+    zone_type: ZoneType,
     // The addresses on which the service should listen for requests.
-    pub addresses: Vec<Ipv6Addr>,
+    addresses: Vec<Ipv6Addr>,
     // Datasets which should be managed by this service.
     #[serde(default)]
-    pub dataset: Option<DatasetRequest>,
+    dataset: Option<DatasetRequest>,
     // Services that should be run in the zone
-    pub services: Vec<ServiceZoneService>,
-}
-
-impl ServiceZoneRequest {
-    // The full name of the zone, if it was to be created as a zone.
-    pub fn zone_name(&self) -> String {
-        illumos_utils::running_zone::InstalledZone::get_zone_name(
-            &self.zone_type.to_string(),
-            self.zone_name_unique_identifier(),
-        )
-    }
-
-    // The name of a unique identifier for the zone, if one is necessary.
-    pub fn zone_name_unique_identifier(&self) -> Option<Uuid> {
-        match &self.zone_type {
-            // The switch zone is necessarily a singleton.
-            ZoneType::Switch => None,
-            // All other zones should be identified by their zone UUID.
-            ZoneType::Clickhouse
-            | ZoneType::ClickhouseKeeper
-            | ZoneType::CockroachDb
-            | ZoneType::Crucible
-            | ZoneType::ExternalDns
-            | ZoneType::InternalDns
-            | ZoneType::Nexus
-            | ZoneType::CruciblePantry
-            | ZoneType::Ntp
-            | ZoneType::Oximeter => Some(self.id),
-        }
-    }
+    services: Vec<ServiceZoneService>,
 }
 
 /// Used to request that the Sled initialize a single service.
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
 )]
-pub struct ServiceZoneService {
-    pub id: Uuid,
-    pub details: ServiceType,
+struct ServiceZoneService {
+    id: Uuid,
+    details: ServiceType,
 }
 
 /// Describes service-specific parameters.
@@ -86,7 +57,7 @@ pub struct ServiceZoneService {
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
 )]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum ServiceType {
+enum ServiceType {
     Nexus {
         /// The address at which the internal nexus server is reachable.
         internal_address: SocketAddrV6,
@@ -181,10 +152,10 @@ impl std::fmt::Display for ServiceType {
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
 )]
-pub struct DatasetRequest {
-    pub id: Uuid,
-    pub name: crate::storage::dataset::DatasetName,
-    pub service_address: SocketAddrV6,
+struct DatasetRequest {
+    id: Uuid,
+    name: crate::storage::dataset::DatasetName,
+    service_address: SocketAddrV6,
 }
 
 impl DatasetRequest {

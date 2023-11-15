@@ -274,9 +274,7 @@ impl std::fmt::Display for DatasetKind {
     }
 }
 
-// XXX-dap do a pass over this file to see which of these types can be removed
-// altogether.  Those only needed for migration could go into a separate module.
-/// The type of zone which may be requested from Sled Agent
+/// The type of zone that Sled Agent may run
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
 )]
