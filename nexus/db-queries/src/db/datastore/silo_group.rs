@@ -145,6 +145,11 @@ impl DataStore {
     ) -> UpdateResult<()> {
         opctx.authorize(authz::Action::Modify, authz_silo_user).await?;
 
+        let retry_helper = crate::transaction_retry::RetryHelper::new(
+            &self.transaction_retry_producer,
+            "silo_group_membership_replace_for_user",
+        );
+
         self.pool_connection_authorized(opctx)
             .await?
             .transaction_async_with_retry(
@@ -179,7 +184,7 @@ impl DataStore {
                         Ok(())
                     }
                 },
-                || async { true },
+                retry_helper.as_callback(),
             )
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
