@@ -9,7 +9,7 @@ use crate::params::{
     DatasetKind, OmicronZoneConfig, OmicronZoneDataset, OmicronZoneType,
     ZoneType,
 };
-use crate::services::{OmicronZoneConfigComplete, ZonesConfig};
+use crate::services::{OmicronZoneConfigLocal, OmicronZonesConfigLocal};
 use anyhow::{anyhow, ensure, Context};
 use camino::Utf8PathBuf;
 use omicron_common::api::external::Generation;
@@ -221,7 +221,7 @@ impl Ledgerable for AllZoneRequests {
     }
 }
 
-impl TryFrom<AllZoneRequests> for ZonesConfig {
+impl TryFrom<AllZoneRequests> for OmicronZonesConfigLocal {
     type Error = anyhow::Error;
 
     fn try_from(input: AllZoneRequests) -> Result<Self, Self::Error> {
@@ -234,18 +234,18 @@ impl TryFrom<AllZoneRequests> for ZonesConfig {
         let zones = input
             .requests
             .into_iter()
-            .map(OmicronZoneConfigComplete::try_from)
+            .map(OmicronZoneConfigLocal::try_from)
             .collect::<Result<Vec<_>, _>>()
             .context("mapping `AllServiceRequests` to `ZonesConfig`")?;
-        Ok(ZonesConfig { generation: Generation::new(), zones })
+        Ok(OmicronZonesConfigLocal { generation: Generation::new(), zones })
     }
 }
 
-impl TryFrom<ZoneRequest> for OmicronZoneConfigComplete {
+impl TryFrom<ZoneRequest> for OmicronZoneConfigLocal {
     type Error = anyhow::Error;
 
     fn try_from(input: ZoneRequest) -> Result<Self, Self::Error> {
-        Ok(OmicronZoneConfigComplete {
+        Ok(OmicronZoneConfigLocal {
             zone: OmicronZoneConfig::try_from(input.zone)?,
             root: input.root,
         })

@@ -352,9 +352,6 @@ impl From<OmicronZoneConfig> for sled_agent_client::types::OmicronZoneConfig {
 }
 
 impl OmicronZoneConfig {
-    // XXX-dap should the caller (RSS) should specify this directly?  That
-    // eliminates one reason why Sled Agent needs to know about what kind of
-    // dataset it's looking at.
     pub fn dataset_name(&self) -> Option<DatasetName> {
         self.zone_type.dataset_name()
     }
@@ -536,9 +533,6 @@ impl From<OmicronZoneDataset> for sled_agent_client::types::OmicronZoneDataset {
 
 /// Describes what component is running in this zone and its associated
 /// type-specific configuration
-///
-/// XXX-dap ideally this would not be necessary at all!  Sled Agent shouldn't
-/// have to know about the things running on it, I think?
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
 )]

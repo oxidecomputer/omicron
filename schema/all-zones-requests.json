@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "ZonesConfig",
+  "title": "OmicronZonesConfigLocal",
   "type": "object",
   "required": [
     "generation",
@@ -13,7 +13,7 @@
     "zones": {
       "type": "array",
       "items": {
-        "$ref": "#/definitions/OmicronZoneConfigComplete"
+        "$ref": "#/definitions/OmicronZoneConfigLocal"
       }
     }
   },
@@ -196,7 +196,7 @@
         }
       }
     },
-    "OmicronZoneConfigComplete": {
+    "OmicronZoneConfigLocal": {
       "type": "object",
       "required": [
         "root",
@@ -224,7 +224,7 @@
       }
     },
     "OmicronZoneType": {
-      "description": "Describes what component is running in this zone and its associated type-specific configuration\n\nXXX-dap ideally this would not be necessary at all!  Sled Agent shouldn't have to know about the things running on it, I think?",
+      "description": "Describes what component is running in this zone and its associated type-specific configuration",
       "oneOf": [
         {
           "type": "object",

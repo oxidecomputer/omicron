@@ -2430,7 +2430,7 @@
         ]
       },
       "OmicronZoneType": {
-        "description": "Describes what component is running in this zone and its associated type-specific configuration\n\nXXX-dap ideally this would not be necessary at all!  Sled Agent shouldn't have to know about the things running on it, I think?",
+        "description": "Describes what component is running in this zone and its associated type-specific configuration",
         "oneOf": [
           {
             "type": "object",

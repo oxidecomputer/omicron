@@ -274,11 +274,11 @@ impl Config {
     }
 }
 
-// XXX-dap TODO-doc and maybe rename it?
+// XXX-dap TODO-doc
 #[derive(
     Clone, Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
-pub struct OmicronZoneConfigComplete {
+pub struct OmicronZoneConfigLocal {
     pub zone: OmicronZoneConfig,
     // TODO: Consider collapsing "root" into OmicronZoneConfig?
     #[schemars(with = "String")]
@@ -289,17 +289,16 @@ pub struct OmicronZoneConfigComplete {
 const ZONES_LEDGER_FILENAME: &str = "omicron_zones.json";
 
 // XXX-dap TODO-doc
-// XXX-dap could be OmicronZonesConfigComplete? OmicronZonesConfigLocal?
 #[derive(
     Clone, Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
-pub struct ZonesConfig {
+pub struct OmicronZonesConfigLocal {
     pub generation: Generation,
-    pub zones: Vec<OmicronZoneConfigComplete>,
+    pub zones: Vec<OmicronZoneConfigLocal>,
 }
 
-impl Ledgerable for ZonesConfig {
-    fn is_newer_than(&self, other: &ZonesConfig) -> bool {
+impl Ledgerable for OmicronZonesConfigLocal {
+    fn is_newer_than(&self, other: &OmicronZonesConfigLocal) -> bool {
         self.generation >= other.generation
     }
 
@@ -314,7 +313,7 @@ impl Ledgerable for ZonesConfig {
     }
 }
 
-impl ZonesConfig {
+impl OmicronZonesConfigLocal {
     pub fn to_omicron_zones_config(self) -> OmicronZonesConfig {
         OmicronZonesConfig {
             generation: self.generation,
@@ -366,15 +365,15 @@ impl crate::smf_helper::Service for ServiceType {
     }
 }
 
-struct SwitchZoneConfigComplete {
+struct SwitchZoneConfigLocal {
     zone: SwitchZoneConfig,
     root: Utf8PathBuf,
 }
 
 // XXX-dap TODO-doc
 enum ZoneArgs<'a> {
-    Omicron(&'a OmicronZoneConfigComplete),
-    SledLocal(&'a SwitchZoneConfigComplete),
+    Omicron(&'a OmicronZoneConfigLocal),
+    SledLocal(&'a SwitchZoneConfigLocal),
 }
 
 impl<'a> ZoneArgs<'a> {
@@ -598,14 +597,15 @@ impl ServiceManager {
         // This argument attempts to ensure that the caller holds the right
         // lock.
         _map: &MutexGuard<'_, BTreeMap<String, RunningZone>>,
-    ) -> Result<Option<Ledger<ZonesConfig>>, Error> {
+    ) -> Result<Option<Ledger<OmicronZonesConfigLocal>>, Error> {
         // First, try to load the current software's zone ledger.  If that
         // works, we're done.
         let log = &self.inner.log;
         let ledger_paths = self.all_omicron_zone_ledgers().await;
         info!(log, "Loading Omicron zones from: {ledger_paths:?}");
         let maybe_ledger =
-            Ledger::<ZonesConfig>::new(log, ledger_paths.clone()).await;
+            Ledger::<OmicronZonesConfigLocal>::new(log, ledger_paths.clone())
+                .await;
 
         if let Some(ledger) = maybe_ledger {
             info!(
@@ -637,7 +637,7 @@ impl ServiceManager {
         };
 
         let all_services = ledger.into_inner();
-        match ZonesConfig::try_from(all_services) {
+        match OmicronZonesConfigLocal::try_from(all_services) {
             Err(error) => {
                 // We've tried to test thoroughly so that this should never
                 // happen.  If for some reason it does happen, engineering
@@ -665,7 +665,7 @@ impl ServiceManager {
                     "Successfully migrated old-format services ledger to \
                     zones ledger"
                 );
-                let mut ledger = Ledger::<ZonesConfig>::new_with(
+                let mut ledger = Ledger::<OmicronZonesConfigLocal>::new_with(
                     log,
                     ledger_paths.clone(),
                     new_config,
@@ -1390,7 +1390,7 @@ impl ServiceManager {
         // These zones are self-assembling -- after they boot, there should
         // be no "zlogin" necessary to initialize.
         match &request {
-            ZoneArgs::Omicron(OmicronZoneConfigComplete {
+            ZoneArgs::Omicron(OmicronZoneConfigLocal {
                 zone:
                     OmicronZoneConfig {
                         zone_type: OmicronZoneType::Clickhouse { .. },
@@ -1434,7 +1434,7 @@ impl ServiceManager {
                 return Ok(RunningZone::boot(installed_zone).await?);
             }
 
-            ZoneArgs::Omicron(OmicronZoneConfigComplete {
+            ZoneArgs::Omicron(OmicronZoneConfigLocal {
                 zone:
                     OmicronZoneConfig {
                         zone_type: OmicronZoneType::ClickhouseKeeper { .. },
@@ -1481,7 +1481,7 @@ impl ServiceManager {
                 return Ok(RunningZone::boot(installed_zone).await?);
             }
 
-            ZoneArgs::Omicron(OmicronZoneConfigComplete {
+            ZoneArgs::Omicron(OmicronZoneConfigLocal {
                 zone:
                     OmicronZoneConfig {
                         zone_type: OmicronZoneType::CockroachDb { .. },
@@ -1530,7 +1530,7 @@ impl ServiceManager {
                 return Ok(RunningZone::boot(installed_zone).await?);
             }
 
-            ZoneArgs::Omicron(OmicronZoneConfigComplete {
+            ZoneArgs::Omicron(OmicronZoneConfigLocal {
                 zone:
                     zone @ OmicronZoneConfig {
                         zone_type: OmicronZoneType::Crucible { .. },
@@ -1573,7 +1573,7 @@ impl ServiceManager {
                 return Ok(RunningZone::boot(installed_zone).await?);
             }
 
-            ZoneArgs::Omicron(OmicronZoneConfigComplete {
+            ZoneArgs::Omicron(OmicronZoneConfigLocal {
                 zone:
                     OmicronZoneConfig {
                         zone_type: OmicronZoneType::CruciblePantry { .. },
@@ -1663,7 +1663,7 @@ impl ServiceManager {
         }
 
         let addresses = match &request {
-            ZoneArgs::Omicron(OmicronZoneConfigComplete {
+            ZoneArgs::Omicron(OmicronZoneConfigLocal {
                 zone: OmicronZoneConfig { underlay_address, .. },
                 ..
             }) => vec![*underlay_address],
@@ -2448,7 +2448,7 @@ impl ServiceManager {
     async fn initialize_omicron_zones_locked(
         &self,
         existing_zones: &mut BTreeMap<String, RunningZone>,
-        requests: &Vec<OmicronZoneConfigComplete>,
+        requests: &Vec<OmicronZoneConfigLocal>,
     ) -> Result<(), Error> {
         if let Some(name) = requests
             .iter()
@@ -2535,22 +2535,24 @@ impl ServiceManager {
 
         // Read the existing set of services from the ledger.
         let zone_ledger_paths = self.all_omicron_zone_ledgers().await;
-        let ledger =
-            match Ledger::<ZonesConfig>::new(log, zone_ledger_paths.clone())
-                .await
-            {
-                Some(ledger) => ledger,
-                None => Ledger::<ZonesConfig>::new_with(
-                    log,
-                    zone_ledger_paths.clone(),
-                    ZonesConfig {
-                        // XXX-dap this means Nexus must use a newer generation
-                        // for its first one
-                        generation: Generation::new(),
-                        zones: vec![],
-                    },
-                ),
-            };
+        let ledger = match Ledger::<OmicronZonesConfigLocal>::new(
+            log,
+            zone_ledger_paths.clone(),
+        )
+        .await
+        {
+            Some(ledger) => ledger,
+            None => Ledger::<OmicronZonesConfigLocal>::new_with(
+                log,
+                zone_ledger_paths.clone(),
+                OmicronZonesConfigLocal {
+                    // XXX-dap this means Nexus must use a newer generation
+                    // for its first one
+                    generation: Generation::new(),
+                    zones: vec![],
+                },
+            ),
+        };
 
         let ledger_zone_config = ledger.data();
         Ok(OmicronZonesConfig {
@@ -2578,23 +2580,25 @@ impl ServiceManager {
 
         // Read the existing set of services from the ledger.
         let zone_ledger_paths = self.all_omicron_zone_ledgers().await;
-        let mut ledger =
-            match Ledger::<ZonesConfig>::new(log, zone_ledger_paths.clone())
-                .await
-            {
-                Some(ledger) => ledger,
-                None => Ledger::<ZonesConfig>::new_with(
-                    log,
-                    zone_ledger_paths.clone(),
-                    ZonesConfig {
-                        // XXX-dap this means Nexus must use a newer generation
-                        // for its first one.  Even better would be if this
-                        // whole object could be `None`
-                        generation: Generation::new(),
-                        zones: vec![],
-                    },
-                ),
-            };
+        let mut ledger = match Ledger::<OmicronZonesConfigLocal>::new(
+            log,
+            zone_ledger_paths.clone(),
+        )
+        .await
+        {
+            Some(ledger) => ledger,
+            None => Ledger::<OmicronZonesConfigLocal>::new_with(
+                log,
+                zone_ledger_paths.clone(),
+                OmicronZonesConfigLocal {
+                    // XXX-dap this means Nexus must use a newer generation
+                    // for its first one.  Even better would be if this
+                    // whole object could be `None`
+                    generation: Generation::new(),
+                    zones: vec![],
+                },
+            ),
+        };
 
         let ledger_zone_config = ledger.data_mut();
 
@@ -2623,10 +2627,10 @@ impl ServiceManager {
         // The MutexGuard here attempts to ensure that the caller has the right
         // lock held when calling this function.
         existing_zones: &mut MutexGuard<'_, BTreeMap<String, RunningZone>>,
-        old_config: Option<&ZonesConfig>,
+        old_config: Option<&OmicronZonesConfigLocal>,
         new_request: OmicronZonesConfig,
         filter: F,
-    ) -> Result<ZonesConfig, Error>
+    ) -> Result<OmicronZonesConfigLocal, Error>
     where
         F: Fn(&OmicronZoneConfig) -> bool,
     {
@@ -2634,7 +2638,6 @@ impl ServiceManager {
 
         // Do some data-normalization to ensure we can compare the "requested
         // set" vs the "existing set" as HashSets.
-        // XXX-dap can we not skip this clone?
         let old_zones_set: HashSet<OmicronZoneConfig> = old_config
             .map(|old_config| {
                 HashSet::from_iter(
@@ -2727,8 +2730,7 @@ impl ServiceManager {
                 .ok_or_else(|| Error::U2NotFound)?
                 .clone();
 
-            new_zones
-                .push(OmicronZoneConfigComplete { zone: zone.clone(), root });
+            new_zones.push(OmicronZoneConfigLocal { zone: zone.clone(), root });
         }
 
         self.initialize_omicron_zones_locked(existing_zones, &new_zones)
@@ -2742,7 +2744,10 @@ impl ServiceManager {
             }
         }
 
-        Ok(ZonesConfig { generation: new_request.generation, zones: new_zones })
+        Ok(OmicronZonesConfigLocal {
+            generation: new_request.generation,
+            zones: new_zones,
+        })
     }
 
     pub async fn cockroachdb_initialize(&self) -> Result<(), Error> {
@@ -3390,7 +3395,7 @@ impl ServiceManager {
         // the cycle we put the switch zone root fs on the ramdisk.
         let root = Utf8PathBuf::from(ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT);
         let zone_request =
-            SwitchZoneConfigComplete { root, zone: request.clone() };
+            SwitchZoneConfigLocal { root, zone: request.clone() };
         let zone_args = ZoneArgs::SledLocal(&zone_request);
         let zone =
             self.initialize_zone(zone_args, filesystems, data_links).await?;
@@ -3931,7 +3936,7 @@ mod test {
 
     #[test]
     fn test_all_zones_requests_schema() {
-        let schema = schemars::schema_for!(ZonesConfig);
+        let schema = schemars::schema_for!(OmicronZonesConfigLocal);
         expectorate::assert_contents(
             "../schema/all-zones-requests.json",
             &serde_json::to_string_pretty(&schema).unwrap(),
