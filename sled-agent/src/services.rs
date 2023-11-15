@@ -100,13 +100,11 @@ use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::collections::HashSet;
-use std::iter;
 use std::iter::FromIterator;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::oneshot;
 use tokio::sync::Mutex;
@@ -2389,10 +2387,7 @@ impl ServiceManager {
         Ok(())
     }
 
-    pub fn boottime_rewrite<'a>(
-        &self,
-        zones: impl Iterator<Item = &'a RunningZone>,
-    ) {
+    pub fn boottime_rewrite(&self) {
         if self
             .inner
             .time_synced
@@ -2403,33 +2398,13 @@ impl ServiceManager {
             return;
         }
 
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("SystemTime before UNIX EPOCH");
-
-        info!(self.inner.log, "Setting boot time to {:?}", now);
-
-        let files: Vec<Utf8PathBuf> = zones
-            .map(|z| z.root())
-            .chain(iter::once(Utf8PathBuf::from("/")))
-            .flat_map(|r| [r.join("var/adm/utmpx"), r.join("var/adm/wtmpx")])
-            .collect();
-
-        for file in files {
-            let mut command = std::process::Command::new(PFEXEC);
-            let cmd = command.args(&[
-                "/usr/platform/oxide/bin/tmpx",
-                &format!("{}", now.as_secs()),
-                &file.as_str(),
-            ]);
-            match execute(cmd) {
-                Err(e) => {
-                    warn!(self.inner.log, "Updating {} failed: {}", &file, e);
-                }
-                Ok(_) => {
-                    info!(self.inner.log, "Updated {}", &file);
-                }
-            }
+        // Call out to the 'tmpx' utility program which will rewrite the wtmpx
+        // and utmpx databases in every zone, including the global zone, to
+        // reflect the adjusted system boot time.
+        let mut command = std::process::Command::new(PFEXEC);
+        let cmd = command.args(&["/usr/platform/oxide/bin/tmpx", "-Z"]);
+        if let Err(e) = execute(cmd) {
+            warn!(self.inner.log, "Updating [wu]tmpx databases failed: {}", e);
         }
     }
 
@@ -2438,7 +2413,7 @@ impl ServiceManager {
 
         if let Some(true) = self.inner.skip_timesync {
             info!(self.inner.log, "Configured to skip timesync checks");
-            self.boottime_rewrite(existing_zones.values());
+            self.boottime_rewrite();
             return Ok(TimeSync {
                 sync: true,
                 ref_id: 0,
@@ -2492,7 +2467,7 @@ impl ServiceManager {
                         && correction.abs() <= 0.05;
 
                     if sync {
-                        self.boottime_rewrite(existing_zones.values());
+                        self.boottime_rewrite();
                     }
 
                     Ok(TimeSync {
