@@ -30,7 +30,7 @@ mod mgs_clients;
 mod rot_updater;
 mod sp_updater;
 
-pub use mgs_clients::MgsClients;
+pub use mgs_clients::{MgsClients, UpdateStatusError};
 pub use rot_updater::{RotUpdateError, RotUpdater};
 pub use sp_updater::{SpUpdateError, SpUpdater};
 

@@ -591,6 +591,9 @@ async fn test_sp_updater_delivers_progress() {
     progress.changed().await.unwrap();
     assert_eq!(*progress.borrow_and_update(), Some(UpdateProgress::Complete));
 
+    // drop our progress receiver so `do_update_task` can complete
+    mem::drop(progress);
+
     do_update_task.await.expect("update task panicked").expect("update failed");
 
     let last_update_image = target_sp

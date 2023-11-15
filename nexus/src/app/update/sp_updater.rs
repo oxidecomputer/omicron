@@ -4,10 +4,13 @@
 
 //! Module containing types for updating SPs via MGS.
 
+use crate::app::update::mgs_clients::PollUpdateStatus;
+
+use super::mgs_clients::PollUpdateStatusError;
 use super::MgsClients;
 use super::UpdateProgress;
+use super::UpdateStatusError;
 use gateway_client::types::SpType;
-use gateway_client::types::SpUpdateStatus;
 use gateway_client::SpComponent;
 use slog::Logger;
 use std::time::Duration;
@@ -21,10 +24,17 @@ pub enum SpUpdateError {
     #[error("error communicating with MGS")]
     MgsCommunication(#[from] GatewayClientError),
 
-    // Error returned when we successfully start an update but it fails to
-    // complete successfully.
-    #[error("SP update failed to complete: {0}")]
-    FailedToComplete(String),
+    #[error("failed checking update status: {0}")]
+    PollUpdateStatus(#[from] UpdateStatusError),
+}
+
+impl From<PollUpdateStatusError> for SpUpdateError {
+    fn from(err: PollUpdateStatusError) -> Self {
+        match err {
+            PollUpdateStatusError::StatusError(err) => err.into(),
+            PollUpdateStatusError::ClientError(err) => err.into(),
+        }
+    }
 }
 
 pub struct SpUpdater {
@@ -82,12 +92,6 @@ impl SpUpdater {
             })
             .await?;
 
-        mgs_clients
-            .try_all(&self.log, |client| async move {
-                me.start_update_one_mgs(&client).await
-            })
-            .await?;
-
         // `wait_for_update_completion` uses `try_all_mgs_clients` internally,
         // so we don't wrap it here.
         me.wait_for_update_completion(&mut mgs_clients).await?;
@@ -97,6 +101,11 @@ impl SpUpdater {
                 me.finalize_update_via_reset_one_mgs(&client).await
             })
             .await?;
+
+        // wait for any progress watchers to be dropped before we return;
+        // otherwise, they'll get `RecvError`s when trying to check the current
+        // status
+        self.progress.closed().await;
 
         Ok(())
     }
@@ -140,136 +149,36 @@ impl SpUpdater {
         const STATUS_POLL_INTERVAL: Duration = Duration::from_secs(3);
 
         loop {
-            let update_status = mgs_clients
-                .try_all(&self.log, |client| async move {
-                    let update_status = client
-                        .sp_component_update_status(
-                            self.sp_type,
-                            self.sp_slot,
-                            SpComponent::SP_ITSELF.const_as_str(),
-                        )
-                        .await?;
+            let status = mgs_clients
+                .poll_update_status(
+                    self.sp_type,
+                    self.sp_slot,
+                    SpComponent::SP_ITSELF.const_as_str(),
+                    self.update_id,
+                    &self.log,
+                )
+                .await?;
 
-                    info!(
-                        self.log, "got SP update status";
-                        "mgs_addr" => client.baseurl(),
-                        "status" => ?update_status,
-                    );
+            match status {
+                PollUpdateStatus::Preparing { progress } => {
+                    self.progress.send_replace(Some(
+                        UpdateProgress::Preparing { progress },
+                    ));
+                }
+                PollUpdateStatus::InProgress { progress } => {
+                    self.progress.send_replace(Some(
+                        UpdateProgress::InProgress { progress },
+                    ));
+                }
+                PollUpdateStatus::Complete => {
+                    self.progress.send_replace(Some(
+                        UpdateProgress::InProgress { progress: Some(1.0) },
+                    ));
+                    return Ok(());
+                }
+            }
 
-                    Ok(update_status)
-                })
-                .await?
-                .into_inner();
-
-            // The majority of possible update statuses indicate failure; we'll
-            // handle the small number of non-failure cases by either
-            // `continue`ing or `return`ing; all other branches will give us an
-            // error string that we can report.
-            let error_message = match update_status {
-                // For `Preparing` and `InProgress`, we could check the progress
-                // information returned by these steps and try to check that
-                // we're still _making_ progress, but every Nexus instance needs
-                // to do that anyway in case we (or the MGS instance delivering
-                // the update) crash, so we'll omit that check here. Instead, we
-                // just sleep and we'll poll again shortly.
-                SpUpdateStatus::Preparing { id, progress } => {
-                    if id == self.update_id {
-                        let progress = progress.and_then(|progress| {
-                            if progress.current > progress.total {
-                                warn!(
-                                    self.log, "nonsense SP preparing progress";
-                                    "current" => progress.current,
-                                    "total" => progress.total,
-                                );
-                                None
-                            } else if progress.total == 0 {
-                                None
-                            } else {
-                                Some(
-                                    f64::from(progress.current)
-                                        / f64::from(progress.total),
-                                )
-                            }
-                        });
-                        self.progress.send_replace(Some(
-                            UpdateProgress::Preparing { progress },
-                        ));
-                        tokio::time::sleep(STATUS_POLL_INTERVAL).await;
-                        continue;
-                    } else {
-                        format!("different update is now preparing ({id})")
-                    }
-                }
-                SpUpdateStatus::InProgress {
-                    id,
-                    bytes_received,
-                    total_bytes,
-                } => {
-                    if id == self.update_id {
-                        let progress = if bytes_received > total_bytes {
-                            warn!(
-                                self.log, "nonsense SP progress";
-                                "bytes_received" => bytes_received,
-                                "total_bytes" => total_bytes,
-                            );
-                            None
-                        } else if total_bytes == 0 {
-                            None
-                        } else {
-                            Some(
-                                f64::from(bytes_received)
-                                    / f64::from(total_bytes),
-                            )
-                        };
-                        self.progress.send_replace(Some(
-                            UpdateProgress::InProgress { progress },
-                        ));
-                        tokio::time::sleep(STATUS_POLL_INTERVAL).await;
-                        continue;
-                    } else {
-                        format!("different update is now in progress ({id})")
-                    }
-                }
-                SpUpdateStatus::Complete { id } => {
-                    if id == self.update_id {
-                        self.progress.send_replace(Some(
-                            UpdateProgress::InProgress { progress: Some(1.0) },
-                        ));
-                        return Ok(());
-                    } else {
-                        format!("different update is now in complete ({id})")
-                    }
-                }
-                SpUpdateStatus::None => {
-                    "update status lost (did the SP reset?)".to_string()
-                }
-                SpUpdateStatus::Aborted { id } => {
-                    if id == self.update_id {
-                        "update was aborted".to_string()
-                    } else {
-                        format!("different update is now in complete ({id})")
-                    }
-                }
-                SpUpdateStatus::Failed { code, id } => {
-                    if id == self.update_id {
-                        format!("update failed (error code {code})")
-                    } else {
-                        format!("different update failed ({id})")
-                    }
-                }
-                SpUpdateStatus::RotError { id, message } => {
-                    if id == self.update_id {
-                        format!("update failed (rot error: {message})")
-                    } else {
-                        format!("different update failed with rot error ({id})")
-                    }
-                }
-            };
-
-            self.progress.send_replace(Some(UpdateProgress::Failed(
-                error_message.clone(),
-            )));
-            return Err(SpUpdateError::FailedToComplete(error_message));
+            tokio::time::sleep(STATUS_POLL_INTERVAL).await;
         }
     }
 
