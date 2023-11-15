@@ -201,11 +201,11 @@ impl DataStore {
                             resources,
                         );
 
-                        Ok(diesel::insert_into(resource_dsl::sled_resource)
+                        diesel::insert_into(resource_dsl::sled_resource)
                             .values(resource)
                             .returning(SledResource::as_returning())
                             .get_result_async(&conn)
-                            .await?)
+                            .await
                     }
                 },
                 retry_helper.as_callback(),

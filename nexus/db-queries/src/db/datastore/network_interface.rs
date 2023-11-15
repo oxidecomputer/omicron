@@ -511,7 +511,7 @@ impl DataStore {
                     }
 
                     // In any case, update the actual target
-                    Ok(update_target_query.get_result_async(&conn).await?)
+                    update_target_query.get_result_async(&conn).await
                 }
             },
             retry_helper.as_callback()
@@ -527,16 +527,16 @@ impl DataStore {
                 let stopped = stopped.clone();
                 let update_target_query = update_target_query.clone();
                 async move {
-                        let instance_state =
-                            instance_query.get_result_async(&conn).await?.runtime_state;
-                        if instance_state.propolis_id.is_some()
-                            || instance_state.nexus_state != stopped
-                        {
-                            err.set(NetworkInterfaceUpdateError::InstanceNotStopped).unwrap();
-                            return Err(diesel::result::Error::RollbackTransaction);
-                        }
-                        Ok(update_target_query.get_result_async(&conn).await?)
+                    let instance_state =
+                        instance_query.get_result_async(&conn).await?.runtime_state;
+                    if instance_state.propolis_id.is_some()
+                        || instance_state.nexus_state != stopped
+                    {
+                        err.set(NetworkInterfaceUpdateError::InstanceNotStopped).unwrap();
+                        return Err(diesel::result::Error::RollbackTransaction);
                     }
+                    update_target_query.get_result_async(&conn).await
+                }
                 },
                 retry_helper.as_callback()
             )
