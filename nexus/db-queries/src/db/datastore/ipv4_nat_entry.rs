@@ -10,7 +10,6 @@ use diesel::prelude::*;
 use diesel::sql_types::BigInt;
 use nexus_db_model::ExternalIp;
 use nexus_db_model::Ipv4NatEntryView;
-use nexus_db_model::SqlU32;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
@@ -230,17 +229,17 @@ impl DataStore {
     pub async fn ipv4_nat_current_version(
         &self,
         opctx: &OpContext,
-    ) -> LookupResult<u32> {
+    ) -> LookupResult<i64> {
         use db::schema::ipv4_nat_version::dsl;
 
-        let latest: Option<SqlU32> = dsl::ipv4_nat_version
+        let latest: Option<i64> = dsl::ipv4_nat_version
             .select(diesel::dsl::max(dsl::last_value))
             .first_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         match latest {
-            Some(value) => Ok(*value),
+            Some(value) => Ok(value),
             None => Err(Error::InvalidRequest {
                 message: "sequence table is empty!".to_string(),
             }),
@@ -250,11 +249,10 @@ impl DataStore {
     pub async fn ipv4_nat_cleanup(
         &self,
         opctx: &OpContext,
-        before_version: u32,
+        version: i64,
         before_timestamp: DateTime<Utc>,
     ) -> DeleteResult {
         use db::schema::ipv4_nat_entry::dsl;
-        let version: SqlU32 = before_version.into();
 
         diesel::delete(dsl::ipv4_nat_entry)
             .filter(dsl::version_removed.lt(version))
