@@ -35,7 +35,7 @@ use crate::params::{
     TimeSync, ZoneBundleCause, ZoneBundleMetadata, ZoneType,
 };
 use crate::profile::*;
-use crate::services_migration::SERVICES_LEDGER_FILENAME;
+use crate::services_migration::{AllServiceRequests, SERVICES_LEDGER_FILENAME};
 use crate::smf_helper::Service;
 use crate::smf_helper::SmfHelper;
 use crate::storage_manager::StorageResources;
@@ -107,8 +107,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::io::AsyncWriteExt;
-use tokio::sync::oneshot;
 use tokio::sync::Mutex;
+use tokio::sync::{oneshot, MutexGuard};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
@@ -222,6 +222,9 @@ pub enum Error {
 
     #[error("Error querying simnet devices")]
     Simnet(#[from] GetSimnetError),
+
+    #[error("Error migrating old-format services ledger")]
+    ServicesMigration(anyhow::Error),
 }
 
 impl Error {
@@ -272,7 +275,9 @@ impl Config {
 }
 
 // XXX-dap TODO-doc and maybe rename it?
-#[derive(Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[derive(
+    Clone, Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct OmicronZoneConfigComplete {
     pub zone: OmicronZoneConfig,
     // TODO: Consider collapsing "root" into OmicronZoneConfig?
@@ -285,7 +290,9 @@ const ZONES_LEDGER_FILENAME: &str = "omicron_zones.json";
 
 // XXX-dap TODO-doc
 // XXX-dap could be OmicronZonesConfigComplete? OmicronZonesConfigLocal?
-#[derive(Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[derive(
+    Clone, Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct ZonesConfig {
     pub generation: Generation,
     pub zones: Vec<OmicronZoneConfigComplete>,
@@ -585,6 +592,91 @@ impl ServiceManager {
             .collect()
     }
 
+    // XXX-dap TODO-doc
+    async fn load_ledgered_zones(
+        &self,
+        // This argument attempts to ensure that the caller holds the right
+        // lock.
+        _map: &MutexGuard<'_, BTreeMap<String, RunningZone>>,
+    ) -> Result<Option<Ledger<ZonesConfig>>, Error> {
+        // First, try to load the current software's zone ledger.  If that
+        // works, we're done.
+        let log = &self.inner.log;
+        let ledger_paths = self.all_omicron_zone_ledgers().await;
+        info!(log, "Loading Omicron zones from: {ledger_paths:?}");
+        let maybe_ledger =
+            Ledger::<ZonesConfig>::new(log, ledger_paths.clone()).await;
+
+        if let Some(ledger) = maybe_ledger {
+            info!(
+                log,
+                "Loaded Omicron zones";
+                "zones_config" => ?ledger.data()
+            );
+            return Ok(Some(ledger));
+        }
+
+        // Now look for the ledger used by previous versions.  If we find it,
+        // we'll convert it and write out a new ledger used by the current
+        // software.
+        info!(
+            log,
+            "Loading Omicron zones - No zones detected \
+            (will look for old-format services)"
+        );
+        let services_ledger_paths = self.all_service_ledgers().await;
+        info!(
+            log,
+            "Loading old-format services from: {services_ledger_paths:?}"
+        );
+
+        let Some(ledger) =
+            Ledger::<AllServiceRequests>::new(log, services_ledger_paths).await
+        else {
+            return Ok(None);
+        };
+
+        let all_services = ledger.into_inner();
+        match ZonesConfig::try_from(all_services) {
+            Err(error) => {
+                // We've tried to test thoroughly so that this should never
+                // happen.  If for some reason it does happen, engineering
+                // intervention is likely to be required to figure out how to
+                // proceed.  The current software does not directly support
+                // whatever was in the ledger, and it's not safe to just come up
+                // with no zones when we're supposed to be running stuff.  We'll
+                // need to figure out what's unexpected about what we found in
+                // the ledger and figure out how to fix the
+                // conversion.
+                error!(
+                    log,
+                    "Loading Omicron zones - found services but failed \
+                    to convert them (support intervention required): \
+                    {:#}",
+                    error
+                );
+                return Err(Error::ServicesMigration(error));
+            }
+            Ok(new_config) => {
+                // We've successfully converted the old ledger.  Write a new
+                // one.
+                info!(
+                    log,
+                    "Successfully migrated old-format services ledger to \
+                    zones ledger"
+                );
+                let mut ledger = Ledger::<ZonesConfig>::new_with(
+                    log,
+                    ledger_paths.clone(),
+                    new_config,
+                );
+
+                ledger.commit().await?;
+                Ok(Some(ledger))
+            }
+        }
+    }
+
     // TODO(https://github.com/oxidecomputer/omicron/issues/2973):
     //
     // The sled agent retries this function indefinitely at the call-site, but
@@ -595,18 +687,25 @@ impl ServiceManager {
     // more clearly.
     pub async fn load_services(&self) -> Result<(), Error> {
         let log = &self.inner.log;
-        // XXX-dap look for legacy service ledger if this isn't present
-        let ledger_paths = self.all_omicron_zone_ledgers().await;
-        info!(log, "Loading services from: {ledger_paths:?}");
-
         let mut existing_zones = self.inner.zones.lock().await;
         let Some(mut ledger) =
-            Ledger::<ZonesConfig>::new(log, ledger_paths).await
+            self.load_ledgered_zones(&existing_zones).await?
         else {
-            info!(log, "Loading services - No services detected");
+            // Nothing found -- nothing to do.
+            info!(
+                log,
+                "Loading Omicron zones - \
+                no zones nor old-format services found"
+            );
             return Ok(());
         };
+
         let zones_config = ledger.data_mut();
+        info!(
+            log,
+            "Loaded Omicron zones";
+            "zones_config" => ?zones_config
+        );
         let omicron_zones_config =
             zones_config.clone().to_omicron_zones_config();
 
@@ -2478,7 +2577,9 @@ impl ServiceManager {
     // re-instantiated on boot.
     async fn ensure_all_omicron_zones<F>(
         &self,
-        existing_zones: &mut BTreeMap<String, RunningZone>,
+        // The MutexGuard here attempts to ensure that the caller has the right
+        // lock held when calling this function.
+        existing_zones: &mut MutexGuard<'_, BTreeMap<String, RunningZone>>,
         old_config: Option<&ZonesConfig>,
         new_request: OmicronZonesConfig,
         filter: F,
