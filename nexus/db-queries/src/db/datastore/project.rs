@@ -24,6 +24,7 @@ use crate::db::model::ProjectUpdate;
 use crate::db::model::Silo;
 use crate::db::model::VirtualProvisioningCollection;
 use crate::db::pagination::paginated;
+use crate::transaction_retry::RetryHelper;
 use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl};
 use chrono::Utc;
 use diesel::prelude::*;
@@ -37,6 +38,7 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use ref_cast::RefCast;
+use std::sync::{Arc, OnceLock};
 
 // Generates internal functions used for validation during project deletion.
 // Used simply to reduce boilerplate.
@@ -151,49 +153,69 @@ impl DataStore {
 
         use db::schema::project::dsl;
 
+        let err = Arc::new(OnceLock::new());
+        let retry_helper = RetryHelper::new(
+            &self.transaction_retry_producer,
+            "project_create_in_silo",
+        );
         let name = project.name().as_str().to_string();
         let db_project = self
             .pool_connection_authorized(opctx)
             .await?
-            .transaction_async(|conn| async move {
-                let project: Project = Silo::insert_resource(
-                    silo_id,
-                    diesel::insert_into(dsl::project).values(project),
-                )
-                .insert_and_get_result_async(&conn)
-                .await
-                .map_err(|e| match e {
-                    AsyncInsertError::CollectionNotFound => {
-                        authz_silo_inner.not_found()
-                    }
-                    AsyncInsertError::DatabaseError(e) => {
-                        public_error_from_diesel(
-                            e,
-                            ErrorHandler::Conflict(
-                                ResourceType::Project,
-                                &name,
-                            ),
-                        )
-                    }
-                })?;
+            .transaction_async_with_retry(|conn| {
+                let err = err.clone();
 
-                // Create resource provisioning for the project.
-                self.virtual_provisioning_collection_create_on_connection(
-                    &conn,
-                    VirtualProvisioningCollection::new(
-                        project.id(),
-                        CollectionTypeProvisioned::Project,
-                    ),
-                )
-                .await?;
-                Ok(project)
-            })
-            .await
-            .map_err(|e| match e {
-                TransactionError::CustomError(e) => e,
-                TransactionError::Database(e) => {
-                    public_error_from_diesel(e, ErrorHandler::Server)
+                let authz_silo_inner = authz_silo_inner.clone();
+                let name = name.clone();
+                let project = project.clone();
+                async move {
+                    let project: Project = Silo::insert_resource(
+                        silo_id,
+                        diesel::insert_into(dsl::project).values(project),
+                    )
+                    .insert_and_get_result_async(&conn)
+                    .await
+                    .map_err(|e| match e {
+                        AsyncInsertError::CollectionNotFound => {
+                            err.set(authz_silo_inner.not_found()).unwrap();
+                            return diesel::result::Error::RollbackTransaction;
+                        }
+                        AsyncInsertError::DatabaseError(e) => {
+                            err.set(public_error_from_diesel(
+                                e,
+                                ErrorHandler::Conflict(
+                                    ResourceType::Project,
+                                    &name,
+                                ),
+                            )).unwrap();
+                            return diesel::result::Error::RollbackTransaction;
+                        }
+                    })?;
+
+                    // Create resource provisioning for the project.
+                    self.virtual_provisioning_collection_create_on_connection(
+                        &conn,
+                        VirtualProvisioningCollection::new(
+                            project.id(),
+                            CollectionTypeProvisioned::Project,
+                        ),
+                    )
+                    .await
+                    .map_err(|e| {
+                        err.set(e).unwrap();
+                        return diesel::result::Error::RollbackTransaction;
+                    })?;
+                    Ok(project)
                 }
+            },
+            retry_helper.as_callback(),
+            )
+            .await
+            .map_err(|e| {
+                if let Some(err) = err.get() {
+                    return err.clone();
+                }
+                public_error_from_diesel(e, ErrorHandler::Server)
             })?;
 
         Ok((

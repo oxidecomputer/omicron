@@ -15,6 +15,7 @@ use crate::db::error::TransactionError;
 use crate::db::model::SiloGroup;
 use crate::db::model::SiloGroupMembership;
 use crate::db::pagination::paginated;
+use crate::transaction_retry::RetryHelper;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
@@ -145,7 +146,7 @@ impl DataStore {
     ) -> UpdateResult<()> {
         opctx.authorize(authz::Action::Modify, authz_silo_user).await?;
 
-        let retry_helper = crate::transaction_retry::RetryHelper::new(
+        let retry_helper = RetryHelper::new(
             &self.transaction_retry_producer,
             "silo_group_membership_replace_for_user",
         );

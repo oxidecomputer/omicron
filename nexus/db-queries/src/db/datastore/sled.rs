@@ -10,11 +10,11 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
-use crate::db::error::TransactionError;
 use crate::db::identity::Asset;
 use crate::db::model::Sled;
 use crate::db::model::SledResource;
 use crate::db::pagination::paginated;
+use crate::transaction_retry::RetryHelper;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
@@ -25,6 +25,7 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::ResourceType;
+use std::sync::{Arc, OnceLock};
 use uuid::Uuid;
 
 impl DataStore {
@@ -85,118 +86,143 @@ impl DataStore {
         enum SledReservationError {
             NotFound,
         }
-        type TxnError = TransactionError<SledReservationError>;
+        let err = Arc::new(OnceLock::new());
+
+        let retry_helper = RetryHelper::new(
+            &self.transaction_retry_producer,
+            "sled_reservation_create",
+        );
 
         self.pool_connection_authorized(opctx)
             .await?
-            .transaction_async(|conn| async move {
-                use db::schema::sled_resource::dsl as resource_dsl;
-                // Check if resource ID already exists - if so, return it.
-                let old_resource = resource_dsl::sled_resource
-                    .filter(resource_dsl::id.eq(resource_id))
-                    .select(SledResource::as_select())
-                    .limit(1)
-                    .load_async(&conn)
-                    .await?;
+            .transaction_async_with_retry(
+                |conn| {
+                    // Clone variables into retryable function
+                    let err = err.clone();
+                    let constraints = constraints.clone();
+                    let resources = resources.clone();
 
-                if !old_resource.is_empty() {
-                    return Ok(old_resource[0].clone());
-                }
+                    async move {
+                        use db::schema::sled_resource::dsl as resource_dsl;
+                        // Check if resource ID already exists - if so, return it.
+                        let old_resource = resource_dsl::sled_resource
+                            .filter(resource_dsl::id.eq(resource_id))
+                            .select(SledResource::as_select())
+                            .limit(1)
+                            .load_async(&conn)
+                            .await?;
 
-                // If it doesn't already exist, find a sled with enough space
-                // for the resources we're requesting.
-                use db::schema::sled::dsl as sled_dsl;
-                // This answers the boolean question:
-                // "Does the SUM of all hardware thread usage, plus the one we're trying
-                // to allocate, consume less threads than exists on the sled?"
-                let sled_has_space_for_threads =
-                    (diesel::dsl::sql::<diesel::sql_types::BigInt>(&format!(
-                        "COALESCE(SUM(CAST({} as INT8)), 0)",
-                        resource_dsl::hardware_threads::NAME
-                    )) + resources.hardware_threads)
-                        .le(sled_dsl::usable_hardware_threads);
+                        if !old_resource.is_empty() {
+                            return Ok(old_resource[0].clone());
+                        }
 
-                // This answers the boolean question:
-                // "Does the SUM of all RAM usage, plus the one we're trying
-                // to allocate, consume less RAM than exists on the sled?"
-                let sled_has_space_for_rss =
-                    (diesel::dsl::sql::<diesel::sql_types::BigInt>(&format!(
-                        "COALESCE(SUM(CAST({} as INT8)), 0)",
-                        resource_dsl::rss_ram::NAME
-                    )) + resources.rss_ram)
-                        .le(sled_dsl::usable_physical_ram);
+                        // If it doesn't already exist, find a sled with enough space
+                        // for the resources we're requesting.
+                        use db::schema::sled::dsl as sled_dsl;
+                        // This answers the boolean question:
+                        // "Does the SUM of all hardware thread usage, plus the one we're trying
+                        // to allocate, consume less threads than exists on the sled?"
+                        let sled_has_space_for_threads =
+                            (diesel::dsl::sql::<diesel::sql_types::BigInt>(
+                                &format!(
+                                    "COALESCE(SUM(CAST({} as INT8)), 0)",
+                                    resource_dsl::hardware_threads::NAME
+                                ),
+                            ) + resources.hardware_threads)
+                                .le(sled_dsl::usable_hardware_threads);
 
-                // Determine whether adding this service's reservoir allocation
-                // to what's allocated on the sled would avoid going over quota.
-                let sled_has_space_in_reservoir =
-                    (diesel::dsl::sql::<diesel::sql_types::BigInt>(&format!(
-                        "COALESCE(SUM(CAST({} as INT8)), 0)",
-                        resource_dsl::reservoir_ram::NAME
-                    )) + resources.reservoir_ram)
-                        .le(sled_dsl::reservoir_size);
+                        // This answers the boolean question:
+                        // "Does the SUM of all RAM usage, plus the one we're trying
+                        // to allocate, consume less RAM than exists on the sled?"
+                        let sled_has_space_for_rss =
+                            (diesel::dsl::sql::<diesel::sql_types::BigInt>(
+                                &format!(
+                                    "COALESCE(SUM(CAST({} as INT8)), 0)",
+                                    resource_dsl::rss_ram::NAME
+                                ),
+                            ) + resources.rss_ram)
+                                .le(sled_dsl::usable_physical_ram);
 
-                // Generate a query describing all of the sleds that have space
-                // for this reservation.
-                let mut sled_targets = sled_dsl::sled
-                    .left_join(
-                        resource_dsl::sled_resource
-                            .on(resource_dsl::sled_id.eq(sled_dsl::id)),
-                    )
-                    .group_by(sled_dsl::id)
-                    .having(
-                        sled_has_space_for_threads
-                            .and(sled_has_space_for_rss)
-                            .and(sled_has_space_in_reservoir),
-                    )
-                    .filter(sled_dsl::time_deleted.is_null())
-                    .select(sled_dsl::id)
-                    .into_boxed();
+                        // Determine whether adding this service's reservoir allocation
+                        // to what's allocated on the sled would avoid going over quota.
+                        let sled_has_space_in_reservoir =
+                            (diesel::dsl::sql::<diesel::sql_types::BigInt>(
+                                &format!(
+                                    "COALESCE(SUM(CAST({} as INT8)), 0)",
+                                    resource_dsl::reservoir_ram::NAME
+                                ),
+                            ) + resources.reservoir_ram)
+                                .le(sled_dsl::reservoir_size);
 
-                // Further constrain the sled IDs according to any caller-
-                // supplied constraints.
-                if let Some(must_select_from) = constraints.must_select_from() {
-                    sled_targets = sled_targets
-                        .filter(sled_dsl::id.eq_any(must_select_from.to_vec()));
-                }
+                        // Generate a query describing all of the sleds that have space
+                        // for this reservation.
+                        let mut sled_targets = sled_dsl::sled
+                            .left_join(
+                                resource_dsl::sled_resource
+                                    .on(resource_dsl::sled_id.eq(sled_dsl::id)),
+                            )
+                            .group_by(sled_dsl::id)
+                            .having(
+                                sled_has_space_for_threads
+                                    .and(sled_has_space_for_rss)
+                                    .and(sled_has_space_in_reservoir),
+                            )
+                            .filter(sled_dsl::time_deleted.is_null())
+                            .select(sled_dsl::id)
+                            .into_boxed();
 
-                sql_function!(fn random() -> diesel::sql_types::Float);
-                let sled_targets = sled_targets
-                    .order(random())
-                    .limit(1)
-                    .get_results_async::<Uuid>(&conn)
-                    .await?;
+                        // Further constrain the sled IDs according to any caller-
+                        // supplied constraints.
+                        if let Some(must_select_from) =
+                            constraints.must_select_from()
+                        {
+                            sled_targets = sled_targets.filter(
+                                sled_dsl::id.eq_any(must_select_from.to_vec()),
+                            );
+                        }
 
-                if sled_targets.is_empty() {
-                    return Err(TxnError::CustomError(
-                        SledReservationError::NotFound,
-                    ));
-                }
+                        sql_function!(fn random() -> diesel::sql_types::Float);
+                        let sled_targets = sled_targets
+                            .order(random())
+                            .limit(1)
+                            .get_results_async::<Uuid>(&conn)
+                            .await?;
 
-                // Create a SledResource record, associate it with the target
-                // sled.
-                let resource = SledResource::new(
-                    resource_id,
-                    sled_targets[0],
-                    resource_kind,
-                    resources,
-                );
+                        if sled_targets.is_empty() {
+                            err.set(SledReservationError::NotFound).unwrap();
+                            return Err(diesel::result::Error::NotFound);
+                        }
 
-                Ok(diesel::insert_into(resource_dsl::sled_resource)
-                    .values(resource)
-                    .returning(SledResource::as_returning())
-                    .get_result_async(&conn)
-                    .await?)
-            })
+                        // Create a SledResource record, associate it with the target
+                        // sled.
+                        let resource = SledResource::new(
+                            resource_id,
+                            sled_targets[0],
+                            resource_kind,
+                            resources,
+                        );
+
+                        Ok(diesel::insert_into(resource_dsl::sled_resource)
+                            .values(resource)
+                            .returning(SledResource::as_returning())
+                            .get_result_async(&conn)
+                            .await?)
+                    }
+                },
+                retry_helper.as_callback(),
+            )
             .await
-            .map_err(|e| match e {
-                TxnError::CustomError(SledReservationError::NotFound) => {
-                    external::Error::unavail(
-                        "No sleds can fit the requested instance",
-                    )
+            .map_err(|e| {
+                if let Some(err) = err.get() {
+                    match err {
+                        SledReservationError::NotFound => {
+                            return external::Error::unavail(
+                                "No sleds can fit the requested instance",
+                            );
+                        }
+                    }
                 }
-                TxnError::Database(e) => {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                }
+                public_error_from_diesel(e, ErrorHandler::Server)
             })
     }
 

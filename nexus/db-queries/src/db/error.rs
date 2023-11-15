@@ -34,29 +34,6 @@ impl From<PublicError> for TransactionError<PublicError> {
     }
 }
 
-impl<T> TransactionError<T> {
-    /// Based on [the CRDB][1] docs, return true if this transaction must be
-    /// retried.
-    ///
-    /// [1]: https://www.cockroachlabs.com/docs/v23.1/transaction-retry-error-reference#client-side-retry-handling
-    pub fn retry_transaction(&self) -> bool {
-        match &self {
-            Self::Database(DieselError::DatabaseError(
-                kind,
-                boxed_error_information,
-            )) => match kind {
-                DieselErrorKind::SerializationFailure => {
-                    return boxed_error_information
-                        .message()
-                        .starts_with("restart transaction");
-                }
-                _ => false,
-            },
-            _ => false,
-        }
-    }
-}
-
 /// Summarizes details provided with a database error.
 fn format_database_error(
     kind: DieselErrorKind,
