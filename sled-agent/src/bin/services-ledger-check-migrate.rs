@@ -11,7 +11,7 @@ use clap::Parser;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
 use omicron_sled_agent::services::ZonesConfig;
-use omicron_sled_agent::services_migration::AllServiceRequests;
+use omicron_sled_agent::services_migration::AllZoneRequests;
 
 #[tokio::main]
 async fn main() {
@@ -36,7 +36,7 @@ async fn do_run() -> Result<(), anyhow::Error> {
         let contents = tokio::fs::read_to_string(file_path)
             .await
             .with_context(|| format!("read {:?}", &file_path))?;
-        let parsed: AllServiceRequests = serde_json::from_str(&contents)
+        let parsed: AllZoneRequests = serde_json::from_str(&contents)
             .with_context(|| format!("parse {:?}", &file_path))?;
         let converted = ZonesConfig::try_from(parsed)
             .with_context(|| format!("migrate contents of {:?}", &file_path))?;

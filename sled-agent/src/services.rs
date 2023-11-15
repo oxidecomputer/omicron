@@ -35,7 +35,7 @@ use crate::params::{
     TimeSync, ZoneBundleCause, ZoneBundleMetadata, ZoneType,
 };
 use crate::profile::*;
-use crate::services_migration::{AllServiceRequests, SERVICES_LEDGER_FILENAME};
+use crate::services_migration::{AllZoneRequests, SERVICES_LEDGER_FILENAME};
 use crate::smf_helper::Service;
 use crate::smf_helper::SmfHelper;
 use crate::storage_manager::StorageResources;
@@ -631,7 +631,7 @@ impl ServiceManager {
         );
 
         let Some(ledger) =
-            Ledger::<AllServiceRequests>::new(log, services_ledger_paths).await
+            Ledger::<AllZoneRequests>::new(log, services_ledger_paths).await
         else {
             return Ok(None);
         };

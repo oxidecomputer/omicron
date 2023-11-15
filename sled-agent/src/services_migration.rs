@@ -186,7 +186,7 @@ impl DatasetRequest {
 // This struct represents the combo of "what zone did you ask for" + "where did
 // we put it".
 #[derive(Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
-struct ServiceRequest {
+struct ZoneRequest {
     zone: ServiceZoneRequest,
     // TODO: Consider collapsing "root" into ServiceZoneRequest
     #[schemars(with = "String")]
@@ -200,19 +200,19 @@ pub const SERVICES_LEDGER_FILENAME: &str = "services.json";
 // to a JSON file.
 // XXX-dap TODO-doc
 #[derive(Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
-pub struct AllServiceRequests {
+pub struct AllZoneRequests {
     generation: Generation,
-    requests: Vec<ServiceRequest>,
+    requests: Vec<ZoneRequest>,
 }
 
-impl Default for AllServiceRequests {
+impl Default for AllZoneRequests {
     fn default() -> Self {
         Self { generation: Generation::new(), requests: vec![] }
     }
 }
 
-impl Ledgerable for AllServiceRequests {
-    fn is_newer_than(&self, other: &AllServiceRequests) -> bool {
+impl Ledgerable for AllZoneRequests {
+    fn is_newer_than(&self, other: &AllZoneRequests) -> bool {
         self.generation >= other.generation
     }
 
@@ -221,10 +221,10 @@ impl Ledgerable for AllServiceRequests {
     }
 }
 
-impl TryFrom<AllServiceRequests> for ZonesConfig {
+impl TryFrom<AllZoneRequests> for ZonesConfig {
     type Error = anyhow::Error;
 
-    fn try_from(input: AllServiceRequests) -> Result<Self, Self::Error> {
+    fn try_from(input: AllZoneRequests) -> Result<Self, Self::Error> {
         // XXX-dap starting to think that the generation in OmicronZonesConfig
         // (at least the one stored on disk) ought to be an Option or something?
         // There's no correct value here.  Any Nexus one needs to be treated as
@@ -241,10 +241,10 @@ impl TryFrom<AllServiceRequests> for ZonesConfig {
     }
 }
 
-impl TryFrom<ServiceRequest> for OmicronZoneConfigComplete {
+impl TryFrom<ZoneRequest> for OmicronZoneConfigComplete {
     type Error = anyhow::Error;
 
-    fn try_from(input: ServiceRequest) -> Result<Self, Self::Error> {
+    fn try_from(input: ZoneRequest) -> Result<Self, Self::Error> {
         Ok(OmicronZoneConfigComplete {
             zone: OmicronZoneConfig::try_from(input.zone)?,
             root: input.root,
@@ -485,11 +485,11 @@ impl TryFrom<ServiceZoneRequest> for OmicronZoneConfig {
 
 #[cfg(test)]
 mod test {
-    use super::AllServiceRequests;
+    use super::AllZoneRequests;
 
     #[test]
     fn test_all_services_requests_schema() {
-        let schema = schemars::schema_for!(AllServiceRequests);
+        let schema = schemars::schema_for!(AllZoneRequests);
         expectorate::assert_contents(
             "../schema/all-zone-requests.json",
             &serde_json::to_string_pretty(&schema).unwrap(),
