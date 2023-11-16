@@ -21,7 +21,7 @@ use omicron_common::address::{
     MGD_PORT, MGS_PORT, NTP_PORT, NUM_SOURCE_NAT_PORTS, RSS_RESERVED_ADDRESSES,
     SLED_PREFIX,
 };
-use omicron_common::api::external::{Generation, MacAddr, Vni};
+use omicron_common::api::external::{MacAddr, Vni};
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_common::api::internal::shared::{
     NetworkInterface, NetworkInterfaceKind, SourceNatConfig,
@@ -100,17 +100,13 @@ pub enum PlanError {
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct SledConfig {
-    /// generation number to use the next time we try to configure zones on this
-    /// sled
-    pub next_generation: Generation,
-
     /// zones configured for this sled
     pub zones: Vec<OmicronZoneConfig>,
 }
 
 impl Default for SledConfig {
     fn default() -> Self {
-        SledConfig { next_generation: Generation::new(), zones: Vec::new() }
+        SledConfig { zones: Vec::new() }
     }
 }
 

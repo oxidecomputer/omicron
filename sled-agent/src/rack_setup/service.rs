@@ -81,6 +81,7 @@ use nexus_client::{
     types as NexusTypes, Client as NexusClient, Error as NexusError,
 };
 use omicron_common::address::get_sled_address;
+use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
@@ -298,33 +299,24 @@ impl ServiceInner {
         Ok(())
     }
 
-    // Ensure that all services of a particular type are running.
+    // Ensure that all services for a particular generation are running.
     //
     // This is useful in a rack-setup context, where initial boot ordering
     // can matter for first-time-setup.
     //
     // Note that after first-time setup, the initialization order of
     // services should not matter.
-    async fn ensure_zones_of_type(
+    //
+    // Further, it's possible that the target sled is already running a newer
+    // version.  That's not an error here.
+    async fn ensure_zone_config_at_least(
         &self,
-        service_plan: &mut ServicePlan,
-        // XXX-dap better way to deal with this filtering that doesn't require a
-        // box and also doesn't require that the caller has done this correctly
-        zone_filter: &(dyn Fn(&OmicronZoneType) -> bool + Send + Sync),
+        configs: &HashMap<SocketAddrV6, OmicronZonesConfig>,
     ) -> Result<(), SetupServiceError> {
-        futures::future::join_all(service_plan.services.iter_mut().map(
-            |(sled_address, sled_config)| async move {
-                let zones: Vec<_> = sled_config
-                    .zones
-                    .iter()
-                    .filter(|z| zone_filter(&z.zone_type))
-                    .cloned()
-                    .collect();
-                let generation = sled_config.next_generation;
-                sled_config.next_generation =
-                    sled_config.next_generation.next();
-                let zones_config = OmicronZonesConfig { generation, zones };
-                self.initialize_zones_on_sled(*sled_address, &zones_config)
+        futures::future::join_all(configs.iter().map(
+            |(sled_address, zones_config)| async move {
+                // XXX-dap check for the error indicating an older generation
+                self.initialize_zones_on_sled(*sled_address, zones_config)
                     .await?;
                 Ok(())
             },
@@ -333,6 +325,68 @@ impl ServiceInner {
         .into_iter()
         .collect::<Result<_, SetupServiceError>>()?;
         Ok(())
+    }
+
+    // XXX-dap TODO-doc and mention that this should always be generation 1?
+    // XXX-dap TODO-coverage
+    fn generate_omicron_zone_configs_gen1(
+        service_plan: &ServicePlan,
+        zone_filter: &(dyn Fn(&OmicronZoneType) -> bool + Send + Sync),
+    ) -> HashMap<SocketAddrV6, OmicronZonesConfig> {
+        let generation = Generation::new();
+        service_plan
+            .services
+            .iter()
+            .map(|(sled_address, sled_config)| {
+                let zones: Vec<_> = sled_config
+                    .zones
+                    .iter()
+                    .filter(|z| zone_filter(&z.zone_type))
+                    .cloned()
+                    .collect();
+                let config = OmicronZonesConfig { generation, zones };
+                (*sled_address, config)
+            })
+            .collect()
+    }
+
+    // XXX-dap TODO-doc
+    // XXX-dap TODO-coverage
+    fn augment_omicron_zone_configs(
+        generation: Generation,
+        service_plan: &ServicePlan,
+        last_configs: &HashMap<SocketAddrV6, OmicronZonesConfig>,
+        zone_filter: &(dyn Fn(&OmicronZoneType) -> bool + Send + Sync),
+    ) -> HashMap<SocketAddrV6, OmicronZonesConfig> {
+        service_plan
+            .services
+            .iter()
+            .map(|(sled_address, sled_config)| {
+                let mut zones = match last_configs.get(sled_address) {
+                    Some(config) => {
+                        assert!(generation > config.generation.next());
+                        config.zones.clone()
+                    }
+                    None => Vec::new(),
+                };
+
+                let zones_already =
+                    zones.iter().map(|z| z.id).collect::<HashSet<_>>();
+                zones.extend(
+                    sled_config
+                        .zones
+                        .iter()
+                        .filter(|z| {
+                            !zones_already.contains(&z.id)
+                                && zone_filter(&z.zone_type)
+                        })
+                        .cloned(),
+                );
+
+                let config = OmicronZonesConfig { generation, zones };
+                (*sled_address, config)
+            })
+            .collect()
     }
 
     // Configure the internal DNS servers with the initial DNS data
@@ -919,11 +973,7 @@ impl ServiceInner {
                 get_sled_address(initialization_request.subnet)
             })
             .collect();
-        // XXX-dap annoying that we need a `mut` service plan.  it's just to
-        // update the generation numbers.  It'd maybe better not to store those?
-        // XXX-dap will this work if we make it partway through and then
-        // crash?  The next time we may try to put an earlier generation first
-        let mut service_plan = if let Some(plan) =
+        let service_plan = if let Some(plan) =
             ServicePlan::load(&self.log, storage_resources).await?
         {
             plan
@@ -937,13 +987,38 @@ impl ServiceInner {
             .await?
         };
 
+        // The service plan describes all the zones that we will eventually
+        // deploy on each sled.  But we cannot currently just deploy them all
+        // concurrently.  We'll do it in four stages, each corresponding to a
+        // "generation" of each sled's configuration.
+        //
+        // - generation 1: internal DNS only
+        // - generation 2: internal DNS + NTP servers
+        // - generation 3: internal DNS + NTP servers + CockroachDB
+        // - generation 4: everything
+        //
+        // At each stage, we're specifying a complete configuration of what
+        // should be running on the sled -- including this generation number.
+        // And Sled Agents will reject requests for generations older than the
+        // one they're currently running.  Thus, the generation number is
+        // a piece of global, distributed state.
+        //
+        // For now, we hardcode the three requests we make to use these three
+        // generation numbers (1, 2, and 3).
+        let generation1_dns_only = Generation::new();
+        let generation2_dns_and_ntp = generation1_dns_only.next();
+        let generation3_cockroachdb = generation2_dns_and_ntp.next();
+        let generation4_everything = generation3_cockroachdb.next();
+
         // Set up internal DNS services first and write the initial
         // DNS configuration to the internal DNS servers.
-        let zone_filter1 = |zone_type: &OmicronZoneType| {
-            matches!(zone_type, OmicronZoneType::InternalDns { .. })
-        };
-        self.ensure_zones_of_type(&mut service_plan, &(zone_filter1.clone()))
-            .await?;
+        let gen1_configs = Self::generate_omicron_zone_configs_gen1(
+            &service_plan,
+            &|zone_type: &OmicronZoneType| {
+                matches!(zone_type, OmicronZoneType::InternalDns { .. })
+            },
+        );
+        self.ensure_zone_config_at_least(&gen1_configs).await?;
         self.initialize_internal_dns_records(&service_plan).await?;
 
         // Ask MGS in each switch zone which switch it is.
@@ -952,18 +1027,19 @@ impl ServiceInner {
             .await;
 
         // Next start up the NTP services.
-        // Note we also specify internal DNS services again because it
-        // can ony be additive.
-        let zone_filter2 = |zone_type: &OmicronZoneType| {
-            zone_filter1(zone_type)
-                || matches!(
+        let gen2_configs = Self::augment_omicron_zone_configs(
+            generation2_dns_and_ntp,
+            &service_plan,
+            &gen1_configs,
+            &|zone_type: &OmicronZoneType| {
+                matches!(
                     zone_type,
                     OmicronZoneType::BoundaryNtp { .. }
                         | OmicronZoneType::InternalNtp { .. }
                 )
-        };
-        self.ensure_zones_of_type(&mut service_plan, &(zone_filter2.clone()))
-            .await?;
+            },
+        );
+        self.ensure_zone_config_at_least(&gen2_configs).await?;
 
         // Wait until time is synchronized on all sleds before proceeding.
         self.wait_for_timesync(&sled_addresses).await?;
@@ -971,35 +1047,28 @@ impl ServiceInner {
         info!(self.log, "Finished setting up Internal DNS and NTP");
 
         // Wait until Cockroach has been initialized before running Nexus.
-        let zone_filter3 = |zone_type: &OmicronZoneType| {
-            zone_filter2(zone_type)
-                || matches!(zone_type, OmicronZoneType::CockroachDb { .. })
-        };
-        self.ensure_zones_of_type(&mut service_plan, &(zone_filter3.clone()))
-            .await?;
+        let gen3_configs = Self::augment_omicron_zone_configs(
+            generation3_cockroachdb,
+            &service_plan,
+            &gen2_configs,
+            &|zone_type: &OmicronZoneType| {
+                matches!(zone_type, OmicronZoneType::CockroachDb { .. })
+            },
+        );
+        self.ensure_zone_config_at_least(&gen3_configs).await?;
 
         // Now that datasets and zones have started for CockroachDB,
         // perform one-time initialization of the cluster.
         self.initialize_cockroach(&service_plan).await?;
 
         // Issue the rest of the zone initialization requests.
-        futures::future::join_all(service_plan.services.iter_mut().map(
-            |(sled_address, sled_config)| async move {
-                let generation = sled_config.next_generation;
-                sled_config.next_generation =
-                    sled_config.next_generation.next();
-                let zones_config = OmicronZonesConfig {
-                    generation,
-                    zones: sled_config.zones.clone(),
-                };
-                self.initialize_zones_on_sled(*sled_address, &zones_config)
-                    .await?;
-                Ok(())
-            },
-        ))
-        .await
-        .into_iter()
-        .collect::<Result<Vec<()>, SetupServiceError>>()?;
+        let gen4_configs = Self::augment_omicron_zone_configs(
+            generation4_everything,
+            &service_plan,
+            &gen3_configs,
+            &|_| true,
+        );
+        self.ensure_zone_config_at_least(&gen4_configs).await?;
 
         info!(self.log, "Finished setting up services");
 
