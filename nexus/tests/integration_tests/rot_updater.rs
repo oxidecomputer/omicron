@@ -45,10 +45,11 @@ async fn test_rot_updater_updates_sled() {
             .await;
 
     // Configure an MGS client.
-    let mgs_clients = MgsClients::from_clients([gateway_client::Client::new(
-        &mgstestctx.client.url("/").to_string(),
-        mgstestctx.logctx.log.new(slog::o!("component" => "MgsClient")),
-    )]);
+    let mut mgs_clients =
+        MgsClients::from_clients([gateway_client::Client::new(
+            &mgstestctx.client.url("/").to_string(),
+            mgstestctx.logctx.log.new(slog::o!("component" => "MgsClient")),
+        )]);
 
     // Configure and instantiate an `RotUpdater`.
     let sp_type = SpType::Sled;
@@ -67,7 +68,7 @@ async fn test_rot_updater_updates_sled() {
     );
 
     // Run the update.
-    rot_updater.update(mgs_clients).await.expect("update failed");
+    rot_updater.update(&mut mgs_clients).await.expect("update failed");
 
     // Ensure the RoT received the complete update.
     let last_update_image = mgstestctx.simrack.gimlets[sp_slot as usize]
@@ -97,10 +98,11 @@ async fn test_rot_updater_updates_switch() {
             .await;
 
     // Configure an MGS client.
-    let mgs_clients = MgsClients::from_clients([gateway_client::Client::new(
-        &mgstestctx.client.url("/").to_string(),
-        mgstestctx.logctx.log.new(slog::o!("component" => "MgsClient")),
-    )]);
+    let mut mgs_clients =
+        MgsClients::from_clients([gateway_client::Client::new(
+            &mgstestctx.client.url("/").to_string(),
+            mgstestctx.logctx.log.new(slog::o!("component" => "MgsClient")),
+        )]);
 
     let sp_type = SpType::Switch;
     let sp_slot = 0;
@@ -117,7 +119,7 @@ async fn test_rot_updater_updates_switch() {
         &mgstestctx.logctx.log,
     );
 
-    rot_updater.update(mgs_clients).await.expect("update failed");
+    rot_updater.update(&mut mgs_clients).await.expect("update failed");
 
     let last_update_image = mgstestctx.simrack.sidecars[sp_slot as usize]
         .last_rot_update_data()
@@ -177,7 +179,7 @@ async fn test_rot_updater_remembers_successful_mgs_instance() {
     // delivering an update requires a bare minimum of three requests (start the
     // update, query the status, reset the RoT) and often more (if repeated
     // queries are required to wait for completion).
-    let mgs_clients = MgsClients::from_clients([
+    let mut mgs_clients = MgsClients::from_clients([
         gateway_client::Client::new(
             &format!("http://{failing_mgs_addr}"),
             mgstestctx.logctx.log.new(slog::o!("component" => "MgsClient1")),
@@ -203,7 +205,7 @@ async fn test_rot_updater_remembers_successful_mgs_instance() {
         &mgstestctx.logctx.log,
     );
 
-    rot_updater.update(mgs_clients).await.expect("update failed");
+    rot_updater.update(&mut mgs_clients).await.expect("update failed");
 
     let last_update_image = mgstestctx.simrack.gimlets[sp_slot as usize]
         .last_rot_update_data()
@@ -295,7 +297,7 @@ async fn test_rot_updater_switches_mgs_instances_on_failure() {
         reqwest::Client::builder().pool_max_idle_per_host(0).build().unwrap();
 
     // Configure two MGS clients pointed at our two proxy tasks.
-    let mgs_clients = MgsClients::from_clients([
+    let mut mgs_clients = MgsClients::from_clients([
         gateway_client::Client::new_with_client(
             &format!("http://{mgs_proxy_one_addr}"),
             client.clone(),
@@ -324,7 +326,8 @@ async fn test_rot_updater_switches_mgs_instances_on_failure() {
     );
 
     // Spawn the actual update task.
-    let mut update_task = tokio::spawn(rot_updater.update(mgs_clients));
+    let mut update_task =
+        tokio::spawn(async move { rot_updater.update(&mut mgs_clients).await });
 
     // Loop over incoming requests. We expect this sequence:
     //
@@ -447,10 +450,11 @@ async fn test_rot_updater_delivers_progress() {
     .await;
 
     // Configure an MGS client.
-    let mgs_clients = MgsClients::from_clients([gateway_client::Client::new(
-        &mgstestctx.client.url("/").to_string(),
-        mgstestctx.logctx.log.new(slog::o!("component" => "MgsClient")),
-    )]);
+    let mut mgs_clients =
+        MgsClients::from_clients([gateway_client::Client::new(
+            &mgstestctx.client.url("/").to_string(),
+            mgstestctx.logctx.log.new(slog::o!("component" => "MgsClient")),
+        )]);
 
     let sp_type = SpType::Sled;
     let sp_slot = 0;
@@ -483,7 +487,8 @@ async fn test_rot_updater_delivers_progress() {
 
     // Spawn the update on a background task so we can watch `progress` as it is
     // applied.
-    let do_update_task = tokio::spawn(rot_updater.update(mgs_clients));
+    let do_update_task =
+        tokio::spawn(async move { rot_updater.update(&mut mgs_clients).await });
 
     // Allow the SP to respond to 1 message: the "prepare update" messages that
     // trigger the start of an update, then ensure we see the "started"

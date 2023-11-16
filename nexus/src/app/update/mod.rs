@@ -26,13 +26,15 @@ use std::path::Path;
 use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
+mod common_sp_update;
 mod mgs_clients;
 mod rot_updater;
 mod sp_updater;
 
-pub use mgs_clients::{MgsClients, UpdateStatusError};
-pub use rot_updater::{RotUpdateError, RotUpdater};
-pub use sp_updater::{SpUpdateError, SpUpdater};
+pub use common_sp_update::SpComponentUpdateError;
+pub use mgs_clients::MgsClients;
+pub use rot_updater::RotUpdater;
+pub use sp_updater::SpUpdater;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum UpdateProgress {
