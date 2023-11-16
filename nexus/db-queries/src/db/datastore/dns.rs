@@ -67,7 +67,9 @@ impl DataStore {
         dns_group: DnsGroup,
     ) -> ListResultVec<DnsZone> {
         let conn = self.pool_connection_authorized(opctx).await?;
-        self.dns_zones_list_all_on_connection(opctx, &conn, dns_group).await
+        Ok(self
+            .dns_zones_list_all_on_connection(opctx, &conn, dns_group)
+            .await?)
     }
 
     /// Variant of [`Self::dns_zones_list_all`] which may be called from a
@@ -77,7 +79,7 @@ impl DataStore {
         opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         dns_group: DnsGroup,
-    ) -> ListResultVec<DnsZone> {
+    ) -> Result<Vec<DnsZone>, TransactionError<Error>> {
         use db::schema::dns_zone::dsl;
         const LIMIT: usize = 5;
 
@@ -88,8 +90,7 @@ impl DataStore {
             .limit(i64::try_from(LIMIT).unwrap())
             .select(DnsZone::as_select())
             .load_async(conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+            .await?;
 
         bail_unless!(
             list.len() < LIMIT,

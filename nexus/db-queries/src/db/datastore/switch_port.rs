@@ -10,6 +10,7 @@ use crate::db::datastore::address_lot::{
 };
 use crate::db::datastore::UpdatePrecondition;
 use crate::db::error::public_error_from_diesel;
+use crate::db::error::retryable;
 use crate::db::error::ErrorHandler;
 use crate::db::model::{
     LldpServiceConfig, Name, SwitchInterfaceConfig, SwitchPort,
@@ -368,7 +369,10 @@ impl DataStore {
                                 .limit(1)
                                 .first_async::<Uuid>(&conn)
                                 .await
-                                .map_err(|_| {
+                                .map_err(|e| {
+                                    if retryable(&e) {
+                                        return e;
+                                    }
                                     err.set(SwitchPortSettingsCreateError::AddressLotNotFound).unwrap();
                                     DieselError::RollbackTransaction
                                 })?
@@ -487,7 +491,10 @@ impl DataStore {
                             .limit(1)
                             .first_async::<Uuid>(&conn)
                             .await
-                            .map_err(|_| {
+                            .map_err(|e| {
+                                if retryable(&e) {
+                                    return e;
+                                }
                                 err.set(SwitchPortSettingsDeleteError::SwitchPortSettingsNotFound).unwrap();
                                 DieselError::RollbackTransaction
                             })?
@@ -704,7 +711,10 @@ impl DataStore {
                             .limit(1)
                             .first_async::<Uuid>(&conn)
                             .await
-                            .map_err(|_| {
+                            .map_err(|e| {
+                                if retryable(&e) {
+                                    return e;
+                                }
                                 err.set(
                                     SwitchPortSettingsGetError::NotFound(
                                         name.clone(),
@@ -898,7 +908,10 @@ impl DataStore {
                         .limit(1)
                         .first_async::<Uuid>(&conn)
                         .await
-                        .map_err(|_| {
+                        .map_err(|e| {
+                            if retryable(&e) {
+                                return e;
+                            }
                             err.set(SwitchPortCreateError::RackNotFound)
                                 .unwrap();
                             DieselError::RollbackTransaction
@@ -980,7 +993,10 @@ impl DataStore {
                         .limit(1)
                         .first_async::<SwitchPort>(&conn)
                         .await
-                        .map_err(|_| {
+                        .map_err(|e| {
+                            if retryable(&e) {
+                                return e;
+                            }
                             err.set(SwitchPortDeleteError::NotFound).unwrap();
                             DieselError::RollbackTransaction
                         })?;

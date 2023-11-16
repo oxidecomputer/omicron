@@ -12,6 +12,7 @@ use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::cte_utils::BoxedQuery;
 use crate::db::error::public_error_from_diesel;
+use crate::db::error::retryable;
 use crate::db::error::ErrorHandler;
 use crate::db::model::IncompleteNetworkInterface;
 use crate::db::model::Instance;
@@ -505,6 +506,9 @@ impl DataStore {
                             .execute_async(&conn)
                             .await
                         {
+                            if retryable(&e) {
+                                return Err(e);
+                            }
                             err.set(NetworkInterfaceUpdateError::FailedToUnsetPrimary(e)).unwrap();
                             return Err(diesel::result::Error::RollbackTransaction);
                         }

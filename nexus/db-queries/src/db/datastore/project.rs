@@ -12,8 +12,8 @@ use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::error::public_error_from_diesel;
+use crate::db::error::retryable;
 use crate::db::error::ErrorHandler;
-use crate::db::error::TransactionError;
 use crate::db::fixed_data::project::SERVICES_PROJECT;
 use crate::db::fixed_data::silo::INTERNAL_SILO_ID;
 use crate::db::identity::Resource;
@@ -28,6 +28,7 @@ use crate::transaction_retry::RetryHelper;
 use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl};
 use chrono::Utc;
 use diesel::prelude::*;
+use diesel::result::Error as DieselError;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
@@ -178,9 +179,12 @@ impl DataStore {
                     .map_err(|e| match e {
                         AsyncInsertError::CollectionNotFound => {
                             err.set(authz_silo_inner.not_found()).unwrap();
-                            return diesel::result::Error::RollbackTransaction;
+                            return DieselError::RollbackTransaction;
                         }
                         AsyncInsertError::DatabaseError(e) => {
+                            if retryable(&e) {
+                                return e;
+                            }
                             err.set(public_error_from_diesel(
                                 e,
                                 ErrorHandler::Conflict(
@@ -188,7 +192,7 @@ impl DataStore {
                                     &name,
                                 ),
                             )).unwrap();
-                            return diesel::result::Error::RollbackTransaction;
+                            return DieselError::RollbackTransaction;
                         }
                     })?;
 
@@ -200,11 +204,7 @@ impl DataStore {
                             CollectionTypeProvisioned::Project,
                         ),
                     )
-                    .await
-                    .map_err(|e| {
-                        err.set(e).unwrap();
-                        return diesel::result::Error::RollbackTransaction;
-                    })?;
+                    .await?;
                     Ok(project)
                 }
             },
@@ -252,47 +252,58 @@ impl DataStore {
 
         use db::schema::project::dsl;
 
-        type TxnError = TransactionError<Error>;
+        let err = Arc::new(OnceLock::new());
+        let retry_helper = RetryHelper::new(
+            &self.transaction_retry_producer,
+            "project_delete",
+        );
         self.pool_connection_authorized(opctx)
             .await?
-            .transaction_async(|conn| async move {
-                let now = Utc::now();
-                let updated_rows = diesel::update(dsl::project)
-                    .filter(dsl::time_deleted.is_null())
-                    .filter(dsl::id.eq(authz_project.id()))
-                    .filter(dsl::rcgen.eq(db_project.rcgen))
-                    .set(dsl::time_deleted.eq(now))
-                    .returning(Project::as_returning())
-                    .execute_async(&conn)
-                    .await
-                    .map_err(|e| {
-                        public_error_from_diesel(
-                            e,
-                            ErrorHandler::NotFoundByResource(authz_project),
-                        )
-                    })?;
+            .transaction_async_with_retry(|conn| {
+                let err = err.clone();
+                async move {
+                    let now = Utc::now(); let updated_rows = diesel::update(dsl::project)
+                        .filter(dsl::time_deleted.is_null())
+                        .filter(dsl::id.eq(authz_project.id()))
+                        .filter(dsl::rcgen.eq(db_project.rcgen))
+                        .set(dsl::time_deleted.eq(now))
+                        .returning(Project::as_returning())
+                        .execute_async(&conn)
+                        .await
+                        .map_err(|e| {
+                            if retryable(&e) {
+                                return e;
+                            }
+                            err.set(public_error_from_diesel(
+                                e,
+                                ErrorHandler::NotFoundByResource(authz_project),
+                            )).unwrap();
+                            DieselError::RollbackTransaction
+                        })?;
 
-                if updated_rows == 0 {
-                    return Err(TxnError::CustomError(Error::InvalidRequest {
-                        message:
-                            "deletion failed due to concurrent modification"
-                                .to_string(),
-                    }));
+                    if updated_rows == 0 {
+                        err.set(Error::InvalidRequest {
+                            message:
+                                "deletion failed due to concurrent modification"
+                                    .to_string(),
+                        }).unwrap();
+                        return Err(DieselError::RollbackTransaction);
+                    }
+
+                    self.virtual_provisioning_collection_delete_on_connection(
+                        &conn,
+                        db_project.id(),
+                    )
+                    .await?;
+                    Ok(())
                 }
-
-                self.virtual_provisioning_collection_delete_on_connection(
-                    &conn,
-                    db_project.id(),
-                )
-                .await?;
-                Ok(())
-            })
+            }, retry_helper.as_callback())
             .await
-            .map_err(|e| match e {
-                TxnError::CustomError(e) => e,
-                TxnError::Database(e) => {
-                    public_error_from_diesel(e, ErrorHandler::Server)
+            .map_err(|e| {
+                if let Some(err) = err.get() {
+                    return err.clone();
                 }
+                public_error_from_diesel(e, ErrorHandler::Server)
             })?;
         Ok(())
     }

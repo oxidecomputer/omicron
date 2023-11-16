@@ -417,10 +417,10 @@ impl DataStore {
 
         // NOTE: This transaction cannot yet be made retryable, as it uses
         // nested transactions.
-//        let retry_helper = RetryHelper::new(
-//            &self.transaction_retry_producer,
-//            "rack_set_initialized",
-//        );
+        //        let retry_helper = RetryHelper::new(
+        //            &self.transaction_retry_producer,
+        //            "rack_set_initialized",
+        //        );
         let rack = self
             .pool_connection_authorized(opctx)
             .await?
@@ -683,9 +683,12 @@ impl DataStore {
                                 DnsGroup::External,
                             )
                             .await
-                            .map_err(|e| {
-                                err.set(e).unwrap();
-                                DieselError::RollbackTransaction
+                            .map_err(|e| match e.take_retryable() {
+                                Ok(e) => return e,
+                                Err(e) => {
+                                    err.set(e).unwrap();
+                                    DieselError::RollbackTransaction
+                                }
                             })?;
 
                         Ok((ips, dns_zones))
@@ -696,7 +699,7 @@ impl DataStore {
             .await
             .map_err(|e| {
                 if let Some(err) = Arc::try_unwrap(err).unwrap().take() {
-                    return err;
+                    return err.into();
                 }
                 public_error_from_diesel(e, ErrorHandler::Server)
             })

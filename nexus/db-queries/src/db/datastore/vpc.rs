@@ -627,7 +627,7 @@ impl DataStore {
                                 .unwrap();
                                 return DieselError::RollbackTransaction;
                             }
-                            AsyncInsertError::DatabaseError(e) => e.into(),
+                            AsyncInsertError::DatabaseError(e) => e,
                         })
                     }
                 },

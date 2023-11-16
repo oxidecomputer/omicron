@@ -15,6 +15,7 @@ use crate::db::pool::DbConnection;
 use crate::db::queries::virtual_provisioning_collection_update::VirtualProvisioningCollectionUpdate;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
+use diesel::result::Error as DieselError;
 use omicron_common::api::external::{DeleteResult, Error};
 use uuid::Uuid;
 
@@ -52,13 +53,14 @@ impl DataStore {
             virtual_provisioning_collection,
         )
         .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     pub(crate) async fn virtual_provisioning_collection_create_on_connection(
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         virtual_provisioning_collection: VirtualProvisioningCollection,
-    ) -> Result<Vec<VirtualProvisioningCollection>, Error> {
+    ) -> Result<Vec<VirtualProvisioningCollection>, DieselError> {
         use db::schema::virtual_provisioning_collection::dsl;
 
         let provisions: Vec<VirtualProvisioningCollection> =
@@ -66,12 +68,10 @@ impl DataStore {
                 .values(virtual_provisioning_collection)
                 .on_conflict_do_nothing()
                 .get_results_async(conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
-        self.virtual_provisioning_collection_producer
-            .append_all_metrics(&provisions)?;
+                .await?;
+        let _ = self
+            .virtual_provisioning_collection_producer
+            .append_all_metrics(&provisions);
         Ok(provisions)
     }
 
@@ -105,6 +105,7 @@ impl DataStore {
         let conn = self.pool_connection_authorized(opctx).await?;
         self.virtual_provisioning_collection_delete_on_connection(&conn, id)
             .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Delete a [`VirtualProvisioningCollection`] object.
@@ -112,7 +113,7 @@ impl DataStore {
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         id: Uuid,
-    ) -> DeleteResult {
+    ) -> Result<(), DieselError> {
         use db::schema::virtual_provisioning_collection::dsl;
 
         // NOTE: We don't really need to extract the value we're deleting from
@@ -122,8 +123,7 @@ impl DataStore {
             .filter(dsl::id.eq(id))
             .returning(VirtualProvisioningCollection::as_select())
             .get_result_async(conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+            .await?;
         assert!(
             collection.is_empty(),
             "Collection deleted while non-empty: {collection:?}"

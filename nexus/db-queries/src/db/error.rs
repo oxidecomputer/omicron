@@ -28,9 +28,54 @@ pub enum TransactionError<T> {
     Database(#[from] DieselError),
 }
 
+pub fn retryable(error: &DieselError) -> bool {
+    match error {
+        DieselError::DatabaseError(kind, boxed_error_information) => match kind
+        {
+            DieselErrorKind::SerializationFailure => {
+                return boxed_error_information
+                    .message()
+                    .starts_with("restart transaction");
+            }
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+impl TransactionError<PublicError> {
+    /// If this error is a retryable DieselError, unpack it as Ok(err).
+    ///
+    /// Otherwise, return Self as an error, so the error still can be used
+    /// in other cases.
+    pub fn take_retryable(self) -> Result<DieselError, Self> {
+        match self {
+            TransactionError::CustomError(_) => Err(self),
+            TransactionError::Database(err) => {
+                if retryable(&err) {
+                    Ok(err)
+                } else {
+                    Err(TransactionError::Database(err))
+                }
+            }
+        }
+    }
+}
+
 impl From<PublicError> for TransactionError<PublicError> {
     fn from(err: PublicError) -> Self {
         TransactionError::CustomError(err)
+    }
+}
+
+impl From<TransactionError<PublicError>> for PublicError {
+    fn from(err: TransactionError<PublicError>) -> Self {
+        match err {
+            TransactionError::CustomError(err) => err,
+            TransactionError::Database(err) => {
+                public_error_from_diesel(err, ErrorHandler::Server)
+            }
+        }
     }
 }
 

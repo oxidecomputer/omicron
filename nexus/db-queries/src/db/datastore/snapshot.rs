@@ -56,7 +56,7 @@ impl DataStore {
             ResourceAlreadyExists,
 
             #[error("saw AsyncInsertError")]
-            InsertError(AsyncInsertError),
+            InsertError(Error),
         }
 
         let snapshot_name = snapshot.name().to_string();
@@ -140,9 +140,20 @@ impl DataStore {
                         )
                         .insert_and_get_result_async(&conn)
                         .await
-                        .map_err(|e| {
-                            err.set(CustomError::InsertError(e)).unwrap();
-                            DieselError::RollbackTransaction
+                        .map_err(|e| match e {
+                            AsyncInsertError::CollectionNotFound => {
+                                err.set(CustomError::InsertError(
+                                    Error::ObjectNotFound {
+                                        type_name: ResourceType::Project,
+                                        lookup_type: LookupType::ById(
+                                            project_id,
+                                        ),
+                                    },
+                                ))
+                                .unwrap();
+                                DieselError::RollbackTransaction
+                            }
+                            AsyncInsertError::DatabaseError(e) => e,
                         })
                     }
                 },
@@ -158,20 +169,7 @@ impl DataStore {
                                 object_name: snapshot_name,
                             }
                         }
-                        CustomError::InsertError(e) => match e {
-                            AsyncInsertError::CollectionNotFound => {
-                                Error::ObjectNotFound {
-                                    type_name: ResourceType::Project,
-                                    lookup_type: LookupType::ById(project_id),
-                                }
-                            }
-                            AsyncInsertError::DatabaseError(e) => {
-                                public_error_from_diesel(
-                                    e,
-                                    ErrorHandler::Server,
-                                )
-                            }
-                        },
+                        CustomError::InsertError(e) => e,
                     }
                 } else {
                     public_error_from_diesel(e, ErrorHandler::Server)
