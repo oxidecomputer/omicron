@@ -274,21 +274,12 @@ impl Config {
     }
 }
 
-// XXX-dap TODO-doc
-#[derive(
-    Clone, Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
-pub struct OmicronZoneConfigLocal {
-    pub zone: OmicronZoneConfig,
-    // TODO: Consider collapsing "root" into OmicronZoneConfig?
-    #[schemars(with = "String")]
-    pub root: Utf8PathBuf,
-}
-
 // The filename of the ledger, within the provided directory.
 const ZONES_LEDGER_FILENAME: &str = "omicron_zones.json";
 
-// XXX-dap TODO-doc
+/// Combines the Nexus-provided `OmicronZonesConfig` (which describes what Nexus
+/// wants for all of its zones) with the locally-determined configuration for
+/// these zones.
 #[derive(
     Clone, Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
@@ -322,6 +313,22 @@ impl OmicronZonesConfigLocal {
     }
 }
 
+/// Combines the Nexus-provided `OmicronZoneConfig` (which describes what Nexus
+/// wants for this zone) with any locally-determined configuration (like the
+/// path to the root filesystem)
+#[derive(
+    Clone, Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+pub struct OmicronZoneConfigLocal {
+    pub zone: OmicronZoneConfig,
+    #[schemars(with = "String")]
+    pub root: Utf8PathBuf,
+}
+
+/// Describes how we want a switch zone to be configured
+///
+/// This is analogous to `OmicronZoneConfig`, but for the switch zone (which is
+/// operated autonomously by the Sled Agent, not managed by Omicron).
 #[derive(Clone)]
 struct SwitchZoneConfig {
     id: Uuid,
@@ -329,6 +336,11 @@ struct SwitchZoneConfig {
     services: Vec<ServiceType>,
 }
 
+/// Describes one of several services that may be deployed in a switch zone
+///
+/// Some of these are only present in certain configurations (e.g., with a real
+/// Tofino vs. SoftNPU) or are configured differently depending on the
+/// configuration.
 // XXX-dap towards the end, rename this to SwitchService.  Saving it for later
 // to avoid having to deal with it more than necessary in merge conflicts.
 #[derive(Clone)]
@@ -365,18 +377,24 @@ impl crate::smf_helper::Service for ServiceType {
     }
 }
 
+/// Combines the generic `SwitchZoneConfig` with other locally-determined
+/// configuration
+///
+/// This is analogous to `OmicronZoneConfigLocal`, but for the switch zone.
 struct SwitchZoneConfigLocal {
     zone: SwitchZoneConfig,
     root: Utf8PathBuf,
 }
 
-// XXX-dap TODO-doc
+/// Describes either an Omicron-managed zone or the switch zone, used for
+/// functions that operate on either one or the other
 enum ZoneArgs<'a> {
     Omicron(&'a OmicronZoneConfigLocal),
     SledLocal(&'a SwitchZoneConfigLocal),
 }
 
 impl<'a> ZoneArgs<'a> {
+    /// If this is an Omicron zone, return its type
     pub fn omicron_type(&self) -> Option<&'a OmicronZoneType> {
         match self {
             ZoneArgs::Omicron(zone_config) => Some(&zone_config.zone.zone_type),
@@ -384,6 +402,8 @@ impl<'a> ZoneArgs<'a> {
         }
     }
 
+    /// If this is a sled-local (switch) zone, iterate over the services it's
+    /// supposed to be running
     pub fn sled_local_services(
         &self,
     ) -> Box<dyn Iterator<Item = &'a ServiceType> + 'a> {
@@ -395,6 +415,7 @@ impl<'a> ZoneArgs<'a> {
         }
     }
 
+    /// Return the root filesystem path for this zone
     pub fn root(&self) -> &Utf8Path {
         match self {
             ZoneArgs::Omicron(zone_config) => &zone_config.root,
@@ -591,7 +612,14 @@ impl ServiceManager {
             .collect()
     }
 
-    // XXX-dap TODO-doc
+    // Loads persistent configuration about any Omicron-managed zones that we're
+    // supposed to be running.
+    //
+    // For historical reasons, there are two possible places this configuration
+    // could live, each with its own format.  This function first checks the
+    // newer one.  If no configuration was found there, it checks the older
+    // one.  If only the older one was found, it is converted into the new form
+    // so that future calls will only look at the new form.
     async fn load_ledgered_zones(
         &self,
         // This argument attempts to ensure that the caller holds the right
@@ -777,8 +805,8 @@ impl ServiceManager {
         // synchronization, which is a pre-requisite for the other services. We
         // keep `OmicronZoneType::InternalDns` because
         // `ensure_all_omicron_zones` is additive.
-        // XXX-dap This looks like a duplicate of the block above -- why do we
-        // do this?
+        // TODO This looks like a duplicate of the block above -- why do we do
+        // this?
         let all_zones_request = self
             .ensure_all_omicron_zones(
                 &mut existing_zones,
@@ -1126,7 +1154,7 @@ impl ServiceManager {
         let port = port_manager
             .create_port(nic, snat, external_ips, &[], DhcpCfg::default())
             .map_err(|err| Error::ServicePortCreation {
-                service: zone_type_str.to_owned(),
+                service: zone_type_str.clone(),
                 err: Box::new(err),
             })?;
 
@@ -1142,7 +1170,7 @@ impl ServiceManager {
             let nat_create = || async {
                 info!(
                     self.inner.log, "creating NAT entry for service";
-                    "zone_type" => zone_type_str.to_owned(),
+                    "zone_type" => &zone_type_str,
                 );
 
                 dpd_client
@@ -1166,7 +1194,7 @@ impl ServiceManager {
                 warn!(
                     self.inner.log, "failed to create NAT entry for service";
                     "error" => ?error,
-                    "zone_type" => zone_type_str.to_owned(),
+                    "zone_type" => &zone_type_str,
                 );
             };
             retry_notify(
@@ -1363,7 +1391,7 @@ impl ServiceManager {
 
         let zone_type_str = match &request {
             ZoneArgs::Omicron(zone_config) => {
-                zone_config.zone.zone_type.zone_type_str().to_owned()
+                zone_config.zone.zone_type.zone_type_str()
             }
             ZoneArgs::SledLocal(_) => "switch".to_string(),
         };
@@ -1641,7 +1669,7 @@ impl ServiceManager {
                 self.inner.log,
                 "Ensuring bootstrap address {} exists in {} zone",
                 bootstrap_address.to_string(),
-                zone_type_str,
+                &zone_type_str,
             );
             running_zone.ensure_bootstrap_address(*bootstrap_address).await?;
             info!(
@@ -2039,7 +2067,7 @@ impl ServiceManager {
                         panic!(
                             "{} is a service which exists as part of a \
                             self-assembling zone",
-                            zone_config.zone.zone_type.zone_type_str(),
+                            &zone_config.zone.zone_type.zone_type_str(),
                         )
                     }
                 };

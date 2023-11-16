@@ -313,12 +313,23 @@ impl std::fmt::Display for ZoneType {
     }
 }
 
-/// Describes the set of Omicron zones running on a sled
+/// Describes the set of Omicron-managed zones running on a sled
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
 )]
 pub struct OmicronZonesConfig {
+    /// generation number of this configuration
+    ///
+    /// This generation number is owned by the control plane (i.e., RSS or
+    /// Nexus, depending on whether RSS-to-Nexus handoff has happened).  It
+    /// should not be bumped within Sled Agent.
+    ///
+    /// Sled Agent rejects attempts to set the configuration to a generation
+    /// older than the one it's currently running.
+    // XXX-dap rename this to version
     pub generation: Generation,
+
+    /// list of running zones
     pub zones: Vec<OmicronZoneConfig>,
 }
 
@@ -331,7 +342,7 @@ impl From<OmicronZonesConfig> for sled_agent_client::types::OmicronZonesConfig {
     }
 }
 
-/// Describes one Omicron zone running on a sled
+/// Describes one Omicron-managed zone running on a sled
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
 )]
@@ -352,24 +363,31 @@ impl From<OmicronZoneConfig> for sled_agent_client::types::OmicronZoneConfig {
 }
 
 impl OmicronZoneConfig {
+    /// If this kind of zone has an associated dataset, returns the dataset's
+    /// name.  Othrwise, returns `None`.
     pub fn dataset_name(&self) -> Option<DatasetName> {
         self.zone_type.dataset_name()
     }
 
+    /// If this kind of zone has an associated dataset, return the dataset's
+    /// name and the associated "service address".  Otherwise, returns `None`.
     pub fn dataset_name_and_address(
         &self,
     ) -> Option<(DatasetName, SocketAddrV6)> {
         self.zone_type.dataset_name_and_address()
     }
 
-    // XXX-dap TODO-doc
+    /// Returns the name that is (or will be) used for the illumos zone
+    /// associated with this zone
     pub fn zone_name(&self) -> String {
         illumos_utils::running_zone::InstalledZone::get_zone_name(
-            self.zone_type.zone_type_str(),
+            &self.zone_type.zone_type_str(),
             Some(self.id),
         )
     }
 
+    /// Returns the structure that describes this zone to Nexus during rack
+    /// initialization
     pub fn into_nexus_service_req(
         &self,
         sled_id: Uuid,
@@ -531,8 +549,8 @@ impl From<OmicronZoneDataset> for sled_agent_client::types::OmicronZoneDataset {
     }
 }
 
-/// Describes what component is running in this zone and its associated
-/// type-specific configuration
+/// Describes what kind of zone this is (i.e., what component is running in it)
+/// as well as any type-specific configuration
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
 )]
@@ -619,24 +637,31 @@ pub enum OmicronZoneType {
 }
 
 impl OmicronZoneType {
-    // XXX-dap TODO-doc must match ZoneType
-    pub fn zone_type_str(&self) -> &str {
+    /// Returns a canonical string identifying the type of zone this is
+    ///
+    /// This is used to construct zone names, SMF service names, etc.
+    pub fn zone_type_str(&self) -> String {
         match self {
-            OmicronZoneType::BoundaryNtp { .. } => "ntp",
-            OmicronZoneType::InternalNtp { .. } => "ntp",
+            OmicronZoneType::BoundaryNtp { .. }
+            | OmicronZoneType::InternalNtp { .. } => ZoneType::Ntp,
 
-            OmicronZoneType::Clickhouse { .. } => "clickhouse",
-            OmicronZoneType::ClickhouseKeeper { .. } => "clickhouse_keeper",
-            OmicronZoneType::CockroachDb { .. } => "cockroachdb",
-            OmicronZoneType::Crucible { .. } => "crucible",
-            OmicronZoneType::CruciblePantry { .. } => "crucible_pantry",
-            OmicronZoneType::ExternalDns { .. } => "external_dns",
-            OmicronZoneType::InternalDns { .. } => "internal_dns",
-            OmicronZoneType::Nexus { .. } => "nexus",
-            OmicronZoneType::Oximeter { .. } => "oximeter",
+            OmicronZoneType::Clickhouse { .. } => ZoneType::Clickhouse,
+            OmicronZoneType::ClickhouseKeeper { .. } => {
+                ZoneType::ClickhouseKeeper
+            }
+            OmicronZoneType::CockroachDb { .. } => ZoneType::CockroachDb,
+            OmicronZoneType::Crucible { .. } => ZoneType::Crucible,
+            OmicronZoneType::CruciblePantry { .. } => ZoneType::CruciblePantry,
+            OmicronZoneType::ExternalDns { .. } => ZoneType::ExternalDns,
+            OmicronZoneType::InternalDns { .. } => ZoneType::InternalDns,
+            OmicronZoneType::Nexus { .. } => ZoneType::Nexus,
+            OmicronZoneType::Oximeter { .. } => ZoneType::Oximeter,
         }
+        .to_string()
     }
 
+    /// If this kind of zone has an associated dataset, returns the dataset's
+    /// name.  Othrwise, returns `None`.
     // XXX-dap should the caller (RSS) should specify this directly?  That
     // eliminates one reason why Sled Agent needs to know about what kind of
     // dataset it's looking at.
@@ -644,6 +669,8 @@ impl OmicronZoneType {
         self.dataset_name_and_address().map(|d| d.0)
     }
 
+    /// If this kind of zone has an associated dataset, return the dataset's
+    /// name and the associated "service address".  Otherwise, returns `None`.
     pub fn dataset_name_and_address(
         &self,
     ) -> Option<(DatasetName, SocketAddrV6)> {
@@ -682,7 +709,15 @@ impl OmicronZoneType {
 
 impl crate::smf_helper::Service for OmicronZoneType {
     fn service_name(&self) -> String {
-        self.zone_type_str().to_owned()
+        // For historical reasons, crucible-pantry is the only zone type whose
+        // SMF service does not match the canonical name that we use for the
+        // zone.
+        match self {
+            OmicronZoneType::CruciblePantry { .. } => {
+                "crucible/pantry".to_owned()
+            }
+            _ => self.zone_type_str(),
+        }
     }
     fn smf_name(&self) -> String {
         format!("svc:/oxide/{}", self.service_name())

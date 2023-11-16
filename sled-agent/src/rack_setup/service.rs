@@ -342,7 +342,11 @@ impl ServiceInner {
         Ok(())
     }
 
-    // XXX-dap TODO-doc and mention that this should always be generation 1?
+    // Given a service plan (which describes all the zones that we want to
+    // deploy to all sleds), generate configurations for each sled for the very
+    // first config version that includes only the zones from the service plan
+    // matching `zone_filter`.  This is used to deploy the Internal DNS zones
+    // before all the other zones.
     // XXX-dap TODO-coverage
     fn generate_omicron_zone_configs_gen1(
         service_plan: &ServicePlan,
@@ -365,7 +369,13 @@ impl ServiceInner {
             .collect()
     }
 
-    // XXX-dap TODO-doc
+    // Given a service plan (which describes all the zones that we want to
+    // deploy to all sleds) and a set of configurations for each sled, generate
+    // a new configuration for each sled that adds all zones from the service
+    // plan matching `zone_filter`.  The new configurations all have generation
+    // `generation`, which must be newer than the input configurations.  This is
+    // used to deploy a new round of Omicron zones while leaving existing zones
+    // intact.  See the caller for more context.
     // XXX-dap TODO-coverage
     fn augment_omicron_zone_configs(
         generation: Generation,

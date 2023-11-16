@@ -2,14 +2,33 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! XXX-dap TODO-doc this is probably where we could use a big block comment
-//! explaining the big picture here
+//! Sled Agents are responsible for running zones that make up much of the
+//! control plane (Omicron).  Configuration for these zones is owned by the
+//! control plane, but that configuration must be persisted locally in order to
+//! support cold boot of the control plane.  (The control plane can't very well
+//! tell sled agents what to run if it's not online yet!)
+//!
+//! Historically, these configurations were represented as an
+//! `AllZonesRequests`, which contains a bunch of `ZoneRequest`s, each
+//! containing a `ServiceZoneRequest`.  This last structure was quite general
+//! and made it possible to express a world of configurations that are not
+//! actually valid.  To avoid spreading extra complexity, these structures were
+//! replaced with `OmicronZonesConfigLocal` and `OmicronZonesConfig`,
+//! respectively.  Upgrading production systems across this change requires
+//! migrating any locally-stored configuration in the old format into the new
+//! one.
+//!
+//! This file defines these old-format types and functions to convert them to
+//! the new types, solely to perform that migration.  We can remove all this
+//! when we're satified that all deployed systems that we care about have moved
+//! past this change.
 
 use crate::params::{
     DatasetKind, OmicronZoneConfig, OmicronZoneDataset, OmicronZoneType,
     ZoneType,
 };
 use crate::services::{OmicronZoneConfigLocal, OmicronZonesConfigLocal};
+use crate::storage::dataset::DatasetName;
 use anyhow::{anyhow, ensure, Context};
 use camino::Utf8PathBuf;
 use omicron_common::api::external::Generation;
@@ -19,188 +38,18 @@ use omicron_common::api::internal::shared::{
 use omicron_common::ledger::Ledgerable;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::fmt::{Debug, Formatter, Result as FormatResult};
+use std::fmt::Debug;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use uuid::Uuid;
 
-/// Describes a request to create a zone running one or more services.
-#[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
-)]
-struct ServiceZoneRequest {
-    // The UUID of the zone to be initialized.
-    // TODO: Should this be removed? If we have UUIDs on the services, what's
-    // the point of this?
-    id: Uuid,
-    // The type of the zone to be created.
-    zone_type: ZoneType,
-    // The addresses on which the service should listen for requests.
-    addresses: Vec<Ipv6Addr>,
-    // Datasets which should be managed by this service.
-    #[serde(default)]
-    dataset: Option<DatasetRequest>,
-    // Services that should be run in the zone
-    services: Vec<ServiceZoneService>,
-}
-
-/// Used to request that the Sled initialize a single service.
-#[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
-)]
-struct ServiceZoneService {
-    id: Uuid,
-    details: ServiceType,
-}
-
-/// Describes service-specific parameters.
-#[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
-)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum ServiceType {
-    Nexus {
-        /// The address at which the internal nexus server is reachable.
-        internal_address: SocketAddrV6,
-        /// The address at which the external nexus server is reachable.
-        external_ip: IpAddr,
-        /// The service vNIC providing external connectivity using OPTE.
-        nic: NetworkInterface,
-        /// Whether Nexus's external endpoint should use TLS
-        external_tls: bool,
-        /// External DNS servers Nexus can use to resolve external hosts.
-        external_dns_servers: Vec<IpAddr>,
-    },
-    ExternalDns {
-        /// The address at which the external DNS server API is reachable.
-        http_address: SocketAddrV6,
-        /// The address at which the external DNS server is reachable.
-        dns_address: SocketAddr,
-        /// The service vNIC providing external connectivity using OPTE.
-        nic: NetworkInterface,
-    },
-    InternalDns {
-        http_address: SocketAddrV6,
-        dns_address: SocketAddrV6,
-        /// The addresses in the global zone which should be created
-        ///
-        /// For the DNS service, which exists outside the sleds's typical subnet - adding an
-        /// address in the GZ is necessary to allow inter-zone traffic routing.
-        gz_address: Ipv6Addr,
-
-        /// The address is also identified with an auxiliary bit of information
-        /// to ensure that the created global zone address can have a unique name.
-        gz_address_index: u32,
-    },
-    Oximeter {
-        address: SocketAddrV6,
-    },
-    CruciblePantry {
-        address: SocketAddrV6,
-    },
-    BoundaryNtp {
-        address: SocketAddrV6,
-        ntp_servers: Vec<String>,
-        dns_servers: Vec<IpAddr>,
-        domain: Option<String>,
-        /// The service vNIC providing outbound connectivity using OPTE.
-        nic: NetworkInterface,
-        /// The SNAT configuration for outbound connections.
-        snat_cfg: SourceNatConfig,
-    },
-    InternalNtp {
-        address: SocketAddrV6,
-        ntp_servers: Vec<String>,
-        dns_servers: Vec<IpAddr>,
-        domain: Option<String>,
-    },
-    Clickhouse {
-        address: SocketAddrV6,
-    },
-    ClickhouseKeeper {
-        address: SocketAddrV6,
-    },
-    CockroachDb {
-        address: SocketAddrV6,
-    },
-    Crucible {
-        address: SocketAddrV6,
-    },
-}
-
-impl std::fmt::Display for ServiceType {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
-        match self {
-            ServiceType::Nexus { .. } => write!(f, "nexus"),
-            ServiceType::ExternalDns { .. } => write!(f, "external_dns"),
-            ServiceType::InternalDns { .. } => write!(f, "internal_dns"),
-            ServiceType::Oximeter { .. } => write!(f, "oximeter"),
-            ServiceType::CruciblePantry { .. } => write!(f, "crucible/pantry"),
-            ServiceType::BoundaryNtp { .. }
-            | ServiceType::InternalNtp { .. } => write!(f, "ntp"),
-
-            ServiceType::Clickhouse { .. } => write!(f, "clickhouse"),
-            ServiceType::ClickhouseKeeper { .. } => {
-                write!(f, "clickhouse_keeper")
-            }
-            ServiceType::CockroachDb { .. } => write!(f, "cockroachdb"),
-            ServiceType::Crucible { .. } => write!(f, "crucible"),
-        }
-    }
-}
-
-/// Describes a request to provision a specific dataset
-#[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
-)]
-struct DatasetRequest {
-    id: Uuid,
-    name: crate::storage::dataset::DatasetName,
-    service_address: SocketAddrV6,
-}
-
-impl DatasetRequest {
-    fn to_omicron_zone_dataset(
-        self,
-        kind: DatasetKind,
-        service_address: SocketAddrV6,
-    ) -> Result<OmicronZoneDataset, anyhow::Error> {
-        ensure!(
-            kind == *self.name.dataset(),
-            "expected dataset kind {:?}, found {:?}",
-            kind,
-            self.name.dataset(),
-        );
-
-        ensure!(
-            self.service_address == service_address,
-            "expected dataset kind {:?} service address to be {}, found {}",
-            kind,
-            service_address,
-            self.service_address,
-        );
-
-        Ok(OmicronZoneDataset { pool_name: self.name.pool().clone() })
-    }
-}
-
-// This struct represents the combo of "what zone did you ask for" + "where did
-// we put it".
-#[derive(Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
-struct ZoneRequest {
-    zone: ServiceZoneRequest,
-    // TODO: Consider collapsing "root" into ServiceZoneRequest
-    #[schemars(with = "String")]
-    root: Utf8PathBuf,
-}
-
-// The filename of the ledger, within the provided directory.
+/// The filename of the ledger containing this old-format configuration.
 pub const SERVICES_LEDGER_FILENAME: &str = "services.json";
 
-// A wrapper around `ZoneRequest`, which allows it to be serialized
-// to a JSON file.
-// XXX-dap TODO-doc
+/// A wrapper around `ZoneRequest` that allows it to be serialized to a JSON
+/// file.
 #[derive(Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct AllZoneRequests {
+    /// ledger generation (not an Omicron-provided generation)
     generation: Generation,
     requests: Vec<ZoneRequest>,
 }
@@ -236,9 +85,18 @@ impl TryFrom<AllZoneRequests> for OmicronZonesConfigLocal {
             .into_iter()
             .map(OmicronZoneConfigLocal::try_from)
             .collect::<Result<Vec<_>, _>>()
-            .context("mapping `AllServiceRequests` to `ZonesConfig`")?;
+            .context("mapping `AllZonesRequests` to `ZonesConfig`")?;
         Ok(OmicronZonesConfigLocal { generation: Generation::new(), zones })
     }
+}
+
+/// This struct represents the combo of "what zone did you ask for" + "where did
+/// we put it".
+#[derive(Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+struct ZoneRequest {
+    zone: ServiceZoneRequest,
+    #[schemars(with = "String")]
+    root: Utf8PathBuf,
 }
 
 impl TryFrom<ZoneRequest> for OmicronZoneConfigLocal {
@@ -250,6 +108,24 @@ impl TryFrom<ZoneRequest> for OmicronZoneConfigLocal {
             root: input.root,
         })
     }
+}
+
+/// Describes a request to create a zone running one or more services.
+#[derive(
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+)]
+struct ServiceZoneRequest {
+    // The UUID of the zone to be initialized.
+    id: Uuid,
+    // The type of the zone to be created.
+    zone_type: ZoneType,
+    // The addresses on which the service should listen for requests.
+    addresses: Vec<Ipv6Addr>,
+    // Datasets which should be managed by this service.
+    #[serde(default)]
+    dataset: Option<DatasetRequest>,
+    // Services that should be run in the zone
+    services: Vec<ServiceZoneService>,
 }
 
 impl TryFrom<ServiceZoneRequest> for OmicronZoneConfig {
@@ -480,6 +356,127 @@ impl TryFrom<ServiceZoneRequest> for OmicronZoneConfig {
         }
 
         Ok(OmicronZoneConfig { id, underlay_address, zone_type })
+    }
+}
+
+/// Used to request that the Sled initialize a single service.
+#[derive(
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+)]
+struct ServiceZoneService {
+    id: Uuid,
+    details: ServiceType,
+}
+
+/// Describes service-specific parameters.
+#[derive(
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum ServiceType {
+    Nexus {
+        /// The address at which the internal nexus server is reachable.
+        internal_address: SocketAddrV6,
+        /// The address at which the external nexus server is reachable.
+        external_ip: IpAddr,
+        /// The service vNIC providing external connectivity using OPTE.
+        nic: NetworkInterface,
+        /// Whether Nexus's external endpoint should use TLS
+        external_tls: bool,
+        /// External DNS servers Nexus can use to resolve external hosts.
+        external_dns_servers: Vec<IpAddr>,
+    },
+    ExternalDns {
+        /// The address at which the external DNS server API is reachable.
+        http_address: SocketAddrV6,
+        /// The address at which the external DNS server is reachable.
+        dns_address: SocketAddr,
+        /// The service vNIC providing external connectivity using OPTE.
+        nic: NetworkInterface,
+    },
+    InternalDns {
+        http_address: SocketAddrV6,
+        dns_address: SocketAddrV6,
+        /// The addresses in the global zone which should be created
+        ///
+        /// For the DNS service, which exists outside the sleds's typical subnet
+        /// - adding an address in the GZ is necessary to allow inter-zone
+        /// traffic routing.
+        gz_address: Ipv6Addr,
+
+        /// The address is also identified with an auxiliary bit of information
+        /// to ensure that the created global zone address can have a unique
+        /// name.
+        gz_address_index: u32,
+    },
+    Oximeter {
+        address: SocketAddrV6,
+    },
+    CruciblePantry {
+        address: SocketAddrV6,
+    },
+    BoundaryNtp {
+        address: SocketAddrV6,
+        ntp_servers: Vec<String>,
+        dns_servers: Vec<IpAddr>,
+        domain: Option<String>,
+        /// The service vNIC providing outbound connectivity using OPTE.
+        nic: NetworkInterface,
+        /// The SNAT configuration for outbound connections.
+        snat_cfg: SourceNatConfig,
+    },
+    InternalNtp {
+        address: SocketAddrV6,
+        ntp_servers: Vec<String>,
+        dns_servers: Vec<IpAddr>,
+        domain: Option<String>,
+    },
+    Clickhouse {
+        address: SocketAddrV6,
+    },
+    ClickhouseKeeper {
+        address: SocketAddrV6,
+    },
+    CockroachDb {
+        address: SocketAddrV6,
+    },
+    Crucible {
+        address: SocketAddrV6,
+    },
+}
+
+/// Describes a request to provision a specific dataset
+#[derive(
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+)]
+struct DatasetRequest {
+    id: Uuid,
+    name: DatasetName,
+    service_address: SocketAddrV6,
+}
+
+impl DatasetRequest {
+    fn to_omicron_zone_dataset(
+        self,
+        kind: DatasetKind,
+        service_address: SocketAddrV6,
+    ) -> Result<OmicronZoneDataset, anyhow::Error> {
+        ensure!(
+            kind == *self.name.dataset(),
+            "expected dataset kind {:?}, found {:?}",
+            kind,
+            self.name.dataset(),
+        );
+
+        ensure!(
+            self.service_address == service_address,
+            "expected dataset kind {:?} service address to be {}, found {}",
+            kind,
+            service_address,
+            self.service_address,
+        );
+
+        Ok(OmicronZoneDataset { pool_name: self.name.pool().clone() })
     }
 }
 
