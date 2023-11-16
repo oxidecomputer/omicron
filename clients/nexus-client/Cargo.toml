@@ -10,8 +10,6 @@ futures.workspace = true
 ipnetwork.workspace = true
 omicron-common.workspace = true
 omicron-passwords.workspace = true
-sled-hardware.workspace = true
-sled-storage.workspace = true
 progenitor.workspace = true
 regress.workspace = true
 reqwest = { workspace = true, features = ["rustls-tls", "stream"] }

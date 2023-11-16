@@ -7,7 +7,7 @@
 //! code.
 
 use crate::dump_setup::DumpSetup;
-use crate::nexus::NexusClientWithResolver;
+use crate::nexus::{ConvertInto, NexusClientWithResolver};
 use derive_more::From;
 use futures::stream::FuturesOrdered;
 use futures::FutureExt;
@@ -338,7 +338,7 @@ fn compute_resource_diffs(
                         model: disk_id.model.clone(),
                         serial: disk_id.serial.clone(),
                         vendor: disk_id.vendor.clone(),
-                        variant: updated_disk.variant().into(),
+                        variant: updated_disk.variant().convert(),
                     });
                 }
                 if pool != updated_pool {
@@ -363,7 +363,7 @@ fn compute_resource_diffs(
                 model: disk_id.model.clone(),
                 serial: disk_id.serial.clone(),
                 vendor: disk_id.vendor.clone(),
-                variant: updated_disk.variant().into(),
+                variant: updated_disk.variant().convert(),
             });
             put_pool(disk_id, updated_pool);
         }
