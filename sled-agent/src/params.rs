@@ -318,16 +318,15 @@ impl std::fmt::Display for ZoneType {
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
 )]
 pub struct OmicronZonesConfig {
-    /// generation number of this configuration
+    /// version number of this configuration
     ///
-    /// This generation number is owned by the control plane (i.e., RSS or
+    /// This version number is owned by the control plane (i.e., RSS or
     /// Nexus, depending on whether RSS-to-Nexus handoff has happened).  It
     /// should not be bumped within Sled Agent.
     ///
-    /// Sled Agent rejects attempts to set the configuration to a generation
+    /// Sled Agent rejects attempts to set the configuration to a version
     /// older than the one it's currently running.
-    // XXX-dap rename this to version
-    pub generation: Generation,
+    pub version: Generation,
 
     /// list of running zones
     pub zones: Vec<OmicronZoneConfig>,
@@ -336,7 +335,7 @@ pub struct OmicronZonesConfig {
 impl From<OmicronZonesConfig> for sled_agent_client::types::OmicronZonesConfig {
     fn from(local: OmicronZonesConfig) -> Self {
         Self {
-            generation: local.generation.into(),
+            version: local.version.into(),
             zones: local.zones.into_iter().map(|s| s.into()).collect(),
         }
     }
@@ -662,9 +661,6 @@ impl OmicronZoneType {
 
     /// If this kind of zone has an associated dataset, returns the dataset's
     /// name.  Othrwise, returns `None`.
-    // XXX-dap should the caller (RSS) should specify this directly?  That
-    // eliminates one reason why Sled Agent needs to know about what kind of
-    // dataset it's looking at.
     pub fn dataset_name(&self) -> Option<DatasetName> {
         self.dataset_name_and_address().map(|d| d.0)
     }

@@ -1,6 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "AllZoneRequests",
+  "description": "A wrapper around `ZoneRequest` that allows it to be serialized to a JSON file.",
   "type": "object",
   "required": [
     "generation",
@@ -8,7 +9,12 @@
   ],
   "properties": {
     "generation": {
-      "$ref": "#/definitions/Generation"
+      "description": "ledger generation (not an Omicron-provided generation)",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Generation"
+        }
+      ]
     },
     "requests": {
       "type": "array",
@@ -719,6 +725,7 @@
       "minimum": 0.0
     },
     "ZoneRequest": {
+      "description": "This struct represents the combo of \"what zone did you ask for\" + \"where did we put it\".",
       "type": "object",
       "required": [
         "root",

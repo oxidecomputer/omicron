@@ -86,7 +86,7 @@ impl TryFrom<AllZoneRequests> for OmicronZonesConfigLocal {
             .map(OmicronZoneConfigLocal::try_from)
             .collect::<Result<Vec<_>, _>>()
             .context("mapping `AllZonesRequests` to `ZonesConfig`")?;
-        Ok(OmicronZonesConfigLocal { generation: Generation::new(), zones })
+        Ok(OmicronZonesConfigLocal { version: Generation::new(), zones })
     }
 }
 

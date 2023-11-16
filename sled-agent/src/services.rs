@@ -220,7 +220,7 @@ pub enum Error {
     #[error("Error querying simnet devices")]
     Simnet(#[from] GetSimnetError),
 
-    #[error("Requested generation ({0}) is older than current ({0})")]
+    #[error("Requested version ({0}) is older than current ({0})")]
     RequestedConfigOutdated(Generation, Generation),
 
     #[error("Error migrating old-format services ledger")]
@@ -284,13 +284,13 @@ const ZONES_LEDGER_FILENAME: &str = "omicron_zones.json";
     Clone, Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
 pub struct OmicronZonesConfigLocal {
-    pub generation: Generation,
+    pub version: Generation,
     pub zones: Vec<OmicronZoneConfigLocal>,
 }
 
 impl Ledgerable for OmicronZonesConfigLocal {
     fn is_newer_than(&self, other: &OmicronZonesConfigLocal) -> bool {
-        self.generation >= other.generation
+        self.version >= other.version
     }
 
     fn generation_bump(&mut self) {
@@ -300,14 +300,14 @@ impl Ledgerable for OmicronZonesConfigLocal {
         // This gets invoked when the ledger is committed.  I think we could
         // either keep a separate generation number (and use that in
         // `is_newer_than()`) or else make this a noop?
-        self.generation = self.generation.next();
+        self.version = self.version.next();
     }
 }
 
 impl OmicronZonesConfigLocal {
     pub fn to_omicron_zones_config(self) -> OmicronZonesConfig {
         OmicronZonesConfig {
-            generation: self.generation,
+            version: self.version,
             zones: self.zones.into_iter().map(|z| z.zone).collect(),
         }
     }
@@ -2576,7 +2576,7 @@ impl ServiceManager {
                 OmicronZonesConfigLocal {
                     // XXX-dap this means Nexus must use a newer generation
                     // for its first one
-                    generation: Generation::new(),
+                    version: Generation::new(),
                     zones: vec![],
                 },
             ),
@@ -2584,7 +2584,7 @@ impl ServiceManager {
 
         let ledger_zone_config = ledger.data();
         Ok(OmicronZonesConfig {
-            generation: ledger_zone_config.generation,
+            version: ledger_zone_config.version,
             zones: ledger_zone_config
                 .zones
                 .iter()
@@ -2622,17 +2622,17 @@ impl ServiceManager {
                     // XXX-dap this means Nexus must use a newer generation
                     // for its first one.  Even better would be if this
                     // whole object could be `None`
-                    generation: Generation::new(),
+                    version: Generation::new(),
                     zones: vec![],
                 },
             ),
         };
 
         let ledger_zone_config = ledger.data_mut();
-        if ledger_zone_config.generation > request.generation {
+        if ledger_zone_config.version > request.version {
             return Err(Error::RequestedConfigOutdated(
-                request.generation,
-                ledger_zone_config.generation,
+                request.version,
+                ledger_zone_config.version,
             ));
         }
 
@@ -2779,7 +2779,7 @@ impl ServiceManager {
         }
 
         Ok(OmicronZonesConfigLocal {
-            generation: new_request.generation,
+            version: new_request.version,
             zones: new_zones,
         })
     }
@@ -3577,7 +3577,7 @@ mod test {
         let address =
             SocketAddrV6::new(Ipv6Addr::LOCALHOST, OXIMETER_PORT, 0, 0);
         mgr.ensure_all_omicron_zones_persistent(OmicronZonesConfig {
-            generation: Generation::new().next(),
+            version: Generation::new().next(),
             zones: vec![OmicronZoneConfig {
                 id,
                 underlay_address: Ipv6Addr::LOCALHOST,
@@ -3594,7 +3594,7 @@ mod test {
         let address =
             SocketAddrV6::new(Ipv6Addr::LOCALHOST, OXIMETER_PORT, 0, 0);
         mgr.ensure_all_omicron_zones_persistent(OmicronZonesConfig {
-            generation: Generation::new().next(),
+            version: Generation::new().next(),
             zones: vec![OmicronZoneConfig {
                 id,
                 underlay_address: Ipv6Addr::LOCALHOST,

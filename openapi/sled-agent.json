@@ -2396,7 +2396,7 @@
         ]
       },
       "OmicronZoneConfig": {
-        "description": "Describes one Omicron zone running on a sled",
+        "description": "Describes one Omicron-managed zone running on a sled",
         "type": "object",
         "properties": {
           "id": {
@@ -2430,7 +2430,7 @@
         ]
       },
       "OmicronZoneType": {
-        "description": "Describes what component is running in this zone and its associated type-specific configuration",
+        "description": "Describes what kind of zone this is (i.e., what component is running in it) as well as any type-specific configuration",
         "oneOf": [
           {
             "type": "object",
@@ -2775,13 +2775,19 @@
         ]
       },
       "OmicronZonesConfig": {
-        "description": "Describes the set of Omicron zones running on a sled",
+        "description": "Describes the set of Omicron-managed zones running on a sled",
         "type": "object",
         "properties": {
-          "generation": {
-            "$ref": "#/components/schemas/Generation"
+          "version": {
+            "description": "version number of this configuration\n\nThis version number is owned by the control plane (i.e., RSS or Nexus, depending on whether RSS-to-Nexus handoff has happened).  It should not be bumped within Sled Agent.\n\nSled Agent rejects attempts to set the configuration to a version older than the one it's currently running.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
           },
           "zones": {
+            "description": "list of running zones",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/OmicronZoneConfig"
@@ -2789,7 +2795,7 @@
           }
         },
         "required": [
-          "generation",
+          "version",
           "zones"
         ]
       },

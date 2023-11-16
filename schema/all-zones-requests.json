@@ -1,13 +1,14 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "OmicronZonesConfigLocal",
+  "description": "Combines the Nexus-provided `OmicronZonesConfig` (which describes what Nexus wants for all of its zones) with the locally-determined configuration for these zones.",
   "type": "object",
   "required": [
-    "generation",
+    "version",
     "zones"
   ],
   "properties": {
-    "generation": {
+    "version": {
       "$ref": "#/definitions/Generation"
     },
     "zones": {
@@ -175,7 +176,7 @@
       ]
     },
     "OmicronZoneConfig": {
-      "description": "Describes one Omicron zone running on a sled",
+      "description": "Describes one Omicron-managed zone running on a sled",
       "type": "object",
       "required": [
         "id",
@@ -197,6 +198,7 @@
       }
     },
     "OmicronZoneConfigLocal": {
+      "description": "Combines the Nexus-provided `OmicronZoneConfig` (which describes what Nexus wants for this zone) with any locally-determined configuration (like the path to the root filesystem)",
       "type": "object",
       "required": [
         "root",
@@ -224,7 +226,7 @@
       }
     },
     "OmicronZoneType": {
-      "description": "Describes what component is running in this zone and its associated type-specific configuration",
+      "description": "Describes what kind of zone this is (i.e., what component is running in it) as well as any type-specific configuration",
       "oneOf": [
         {
           "type": "object",
