@@ -326,7 +326,10 @@ impl DataStore {
                                 .limit(1)
                                 .first_async::<Uuid>(&conn)
                                 .await
-                                .map_err(|_| {
+                                .map_err(|e| {
+                                    if retryable(&e) {
+                                        return e;
+                                    }
                                     err.set(SwitchPortSettingsCreateError::BgpConfigNotFound).unwrap();
                                     DieselError::RollbackTransaction
                                 })?
