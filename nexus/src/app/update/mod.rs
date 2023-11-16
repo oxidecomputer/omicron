@@ -27,11 +27,13 @@ use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
 mod common_sp_update;
+mod host_phase1_updater;
 mod mgs_clients;
 mod rot_updater;
 mod sp_updater;
 
 pub use common_sp_update::SpComponentUpdateError;
+pub use host_phase1_updater::HostPhase1Updater;
 pub use mgs_clients::MgsClients;
 pub use rot_updater::RotUpdater;
 pub use sp_updater::SpUpdater;
