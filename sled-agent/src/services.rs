@@ -196,9 +196,6 @@ pub enum Error {
     #[error("Could not initialize service {service} as requested: {message}")]
     BadServiceRequest { service: String, message: String },
 
-    #[error("Services already configured for this Sled Agent")]
-    ServicesAlreadyConfigured,
-
     #[error("Failed to get address: {0}")]
     GetAddressFailure(#[from] illumos_utils::zone::GetAddressError),
 
@@ -222,6 +219,9 @@ pub enum Error {
 
     #[error("Error querying simnet devices")]
     Simnet(#[from] GetSimnetError),
+
+    #[error("Requested generation ({0}) is older than current ({0})")]
+    RequestedConfigOutdated(Generation, Generation),
 
     #[error("Error migrating old-format services ledger")]
     ServicesMigration(anyhow::Error),
@@ -2601,6 +2601,12 @@ impl ServiceManager {
         };
 
         let ledger_zone_config = ledger.data_mut();
+        if ledger_zone_config.generation > request.generation {
+            return Err(Error::RequestedConfigOutdated(
+                request.generation,
+                ledger_zone_config.generation,
+            ));
+        }
 
         let new_config = self
             .ensure_all_omicron_zones(

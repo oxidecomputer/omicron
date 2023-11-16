@@ -275,11 +275,27 @@ impl ServiceInner {
                 self.log,
                 "attempting to set up sled's Omicron zones: {:?}", zones_config
             );
-            client
-                .omicron_zones_put(&zones_config.clone().into())
-                .await
-                .map_err(BackoffError::transient)?;
-            Ok::<(), BackoffError<SledAgentError<SledAgentTypes::Error>>>(())
+            let result =
+                client.omicron_zones_put(&zones_config.clone().into()).await;
+            let Err(error) = result else {
+                return Ok::<
+                    (),
+                    BackoffError<SledAgentError<SledAgentTypes::Error>>,
+                >(());
+            };
+
+            if let sled_agent_client::Error::ErrorResponse(response) = &error {
+                if let Some(code) = &response.error_code {
+                    if code == "RequestedConfigOutdated" {
+                        // XXX-dap is this really how to do this?  look at what
+                        // nexus does when propagating DNS maybe?  or maybe the
+                        // DNS tests?
+                        return Ok(());
+                    }
+                }
+            }
+
+            return Err(BackoffError::transient(error));
         };
         let log_failure = |error, delay| {
             warn!(
@@ -315,7 +331,6 @@ impl ServiceInner {
     ) -> Result<(), SetupServiceError> {
         futures::future::join_all(configs.iter().map(
             |(sled_address, zones_config)| async move {
-                // XXX-dap check for the error indicating an older generation
                 self.initialize_zones_on_sled(*sled_address, zones_config)
                     .await?;
                 Ok(())
