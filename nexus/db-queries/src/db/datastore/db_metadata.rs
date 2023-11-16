@@ -8,7 +8,6 @@ use super::DataStore;
 use crate::db;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
-use crate::db::TransactionError;
 use async_bb8_diesel::{
     AsyncConnection, AsyncRunQueryDsl, AsyncSimpleConnection,
 };
@@ -341,7 +340,7 @@ impl DataStore {
         target: &SemverVersion,
         sql: &String,
     ) -> Result<(), Error> {
-        let result = self.pool_connection_unauthorized().await?.transaction_async(|conn| async move {
+        let result = self.pool_connection_unauthorized().await?.transaction_async_with_retry(|conn| async move {
             if target.to_string() != EARLIEST_SUPPORTED_VERSION {
                 let validate_version_query = format!("SELECT CAST(\
                         IF(\
@@ -356,15 +355,12 @@ impl DataStore {
                 conn.batch_execute_async(&validate_version_query).await?;
             }
             conn.batch_execute_async(&sql).await?;
-            Ok::<_, TransactionError<()>>(())
-        }).await;
+            Ok(())
+        }, || async move { true }).await;
 
         match result {
             Ok(()) => Ok(()),
-            Err(TransactionError::CustomError(())) => panic!("No custom error"),
-            Err(TransactionError::Database(e)) => {
-                Err(public_error_from_diesel(e, ErrorHandler::Server))
-            }
+            Err(e) => Err(public_error_from_diesel(e, ErrorHandler::Server)),
         }
     }
 
