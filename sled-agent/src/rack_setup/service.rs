@@ -593,11 +593,8 @@ impl ServiceInner {
             }
 
             for zone in &sled_config.zones {
-                // XXX-dap TODO-cleanup kind of a cheating way to use the
-                // existing implementation
-                let native_zone_config = zone.clone();
                 if let Some((dataset_name, dataset_address)) =
-                    native_zone_config.dataset_name_and_address()
+                    zone.dataset_name_and_address()
                 {
                     datasets.push(NexusTypes::DatasetCreateRequest {
                         zpool_id: dataset_name.pool().id(),
