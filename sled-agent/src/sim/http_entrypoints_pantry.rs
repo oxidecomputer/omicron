@@ -4,11 +4,11 @@
 
 //! HTTP entrypoint functions for simulating the crucible pantry API.
 
-use crucible_client_types::VolumeConstructionRequest;
 use dropshot::{
     endpoint, ApiDescription, HttpError, HttpResponseDeleted, HttpResponseOk,
     HttpResponseUpdatedNoContent, Path as TypedPath, RequestContext, TypedBody,
 };
+use propolis_client::types::VolumeConstructionRequest;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;

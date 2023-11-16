@@ -1,6 +1,13 @@
-error: the following required arguments were not provided:
-  <CONFIG_FILE_PATH>
+See README.adoc for more information
 
-Usage: nexus <CONFIG_FILE_PATH>
+Usage: nexus [OPTIONS] [CONFIG_FILE_PATH]
 
-For more information, try '--help'.
+Arguments:
+  [CONFIG_FILE_PATH]  
+
+Options:
+  -O, --openapi           Print the external OpenAPI Spec document and exit
+  -I, --openapi-internal  Print the internal OpenAPI Spec document and exit
+  -h, --help              Print help
+
+nexus: CONFIG_FILE_PATH is required

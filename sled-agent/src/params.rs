@@ -20,6 +20,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_hardware::Baseboard;
 pub use sled_hardware::DendriteAsic;
+use sled_storage::dataset::DatasetName;
 use std::fmt::{Debug, Display, Formatter, Result as FormatResult};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::time::Duration;
@@ -70,8 +71,8 @@ pub struct InstanceHardware {
     pub external_ips: Vec<IpAddr>,
     pub firewall_rules: Vec<VpcFirewallRule>,
     pub dhcp_config: DhcpConfig,
-    // TODO: replace `propolis_client::handmade::*` with locally-modeled request type
-    pub disks: Vec<propolis_client::handmade::api::DiskRequest>,
+    // TODO: replace `propolis_client::*` with locally-modeled request type
+    pub disks: Vec<propolis_client::types::DiskRequest>,
     pub cloud_init_bytes: Option<String>,
 }
 
@@ -226,64 +227,6 @@ impl From<sled_hardware::DiskVariant> for DiskType {
 pub struct Zpool {
     pub id: Uuid,
     pub disk_type: DiskType,
-}
-
-/// The type of a dataset, and an auxiliary information necessary
-/// to successfully launch a zone managing the associated data.
-#[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
-)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum DatasetKind {
-    CockroachDb,
-    Crucible,
-    Clickhouse,
-    ClickhouseKeeper,
-    ExternalDns,
-    InternalDns,
-}
-
-impl From<DatasetKind> for sled_agent_client::types::DatasetKind {
-    fn from(k: DatasetKind) -> Self {
-        use DatasetKind::*;
-        match k {
-            CockroachDb => Self::CockroachDb,
-            Crucible => Self::Crucible,
-            Clickhouse => Self::Clickhouse,
-            ClickhouseKeeper => Self::ClickhouseKeeper,
-            ExternalDns => Self::ExternalDns,
-            InternalDns => Self::InternalDns,
-        }
-    }
-}
-
-impl From<DatasetKind> for nexus_client::types::DatasetKind {
-    fn from(k: DatasetKind) -> Self {
-        use DatasetKind::*;
-        match k {
-            CockroachDb => Self::Cockroach,
-            Crucible => Self::Crucible,
-            Clickhouse => Self::Clickhouse,
-            ClickhouseKeeper => Self::ClickhouseKeeper,
-            ExternalDns => Self::ExternalDns,
-            InternalDns => Self::InternalDns,
-        }
-    }
-}
-
-impl std::fmt::Display for DatasetKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use DatasetKind::*;
-        let s = match self {
-            Crucible => "crucible",
-            CockroachDb { .. } => "cockroachdb",
-            Clickhouse => "clickhouse",
-            ClickhouseKeeper => "clickhouse_keeper",
-            ExternalDns { .. } => "external_dns",
-            InternalDns { .. } => "internal_dns",
-        };
-        write!(f, "{}", s)
-    }
 }
 
 /// Describes service-specific parameters.
@@ -594,7 +537,7 @@ impl std::fmt::Display for ZoneType {
 )]
 pub struct DatasetRequest {
     pub id: Uuid,
-    pub name: crate::storage::dataset::DatasetName,
+    pub name: DatasetName,
     pub service_address: SocketAddrV6,
 }
 

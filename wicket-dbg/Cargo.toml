@@ -11,7 +11,6 @@ camino.workspace = true
 ciborium.workspace = true
 clap.workspace = true
 crossterm.workspace = true
-ratatui.workspace = true
 serde.workspace = true
 slog.workspace = true
 slog-async.workspace = true

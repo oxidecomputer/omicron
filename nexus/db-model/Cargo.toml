@@ -20,7 +20,6 @@ parse-display.workspace = true
 pq-sys = "*"
 rand.workspace = true
 ref-cast.workspace = true
-thiserror.workspace = true
 schemars = { workspace = true, features = ["chrono", "uuid1"] }
 semver.workspace = true
 serde.workspace = true

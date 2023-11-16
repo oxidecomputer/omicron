@@ -12,7 +12,6 @@ use super::BootstrapError;
 use super::RssAccessError;
 use crate::bootstrap::params::RackInitializeRequest;
 use crate::bootstrap::rack_ops::{RackInitId, RackResetId};
-use crate::storage_manager::StorageResources;
 use crate::updates::ConfigUpdates;
 use crate::updates::{Component, UpdateManager};
 use bootstore::schemes::v0 as bootstore;
@@ -25,6 +24,7 @@ use omicron_common::api::external::Error;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_hardware::Baseboard;
+use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::net::Ipv6Addr;
 use tokio::sync::mpsc::error::TrySendError;
@@ -33,7 +33,7 @@ use tokio::sync::{mpsc, oneshot};
 pub(crate) struct BootstrapServerContext {
     pub(crate) base_log: Logger,
     pub(crate) global_zone_bootstrap_ip: Ipv6Addr,
-    pub(crate) storage_resources: StorageResources,
+    pub(crate) storage_manager: StorageHandle,
     pub(crate) bootstore_node_handle: bootstore::NodeHandle,
     pub(crate) baseboard: Baseboard,
     pub(crate) rss_access: RssAccess,
@@ -50,7 +50,7 @@ impl BootstrapServerContext {
         self.rss_access.start_initializing(
             &self.base_log,
             self.global_zone_bootstrap_ip,
-            &self.storage_resources,
+            &self.storage_manager,
             &self.bootstore_node_handle,
             request,
         )

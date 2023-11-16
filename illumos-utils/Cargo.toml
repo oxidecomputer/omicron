@@ -44,3 +44,6 @@ toml.workspace = true
 [features]
 # Enable to generate MockZones
 testing = ["mockall"]
+# Useful for tests that want real functionality and ability to run without
+# pfexec
+tmp_keypath = []
