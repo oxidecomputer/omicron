@@ -3934,8 +3934,6 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "sled-hardware",
- "sled-storage",
  "slog",
  "uuid",
 ]
