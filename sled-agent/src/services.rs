@@ -238,8 +238,16 @@ impl Error {
 
 impl From<Error> for omicron_common::api::external::Error {
     fn from(err: Error) -> Self {
-        omicron_common::api::external::Error::InternalError {
-            internal_message: err.to_string(),
+        match err {
+            err @ Error::RequestedConfigOutdated(_, _) => {
+                omicron_common::api::external::Error::conflict(&format!(
+                    "{:#}",
+                    err
+                ))
+            }
+            _ => omicron_common::api::external::Error::InternalError {
+                internal_message: err.to_string(),
+            },
         }
     }
 }

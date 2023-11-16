@@ -288,16 +288,21 @@ impl ServiceInner {
             };
 
             if let sled_agent_client::Error::ErrorResponse(response) = &error {
-                if let Some(code) = &response.error_code {
-                    if code == "RequestedConfigOutdated" {
-                        // XXX-dap is this really how to do this?  look at what
-                        // nexus does when propagating DNS maybe?  or maybe the
-                        // DNS tests?
-                        return Ok(());
-                    }
+                if response.status() == http::StatusCode::CONFLICT {
+                    warn!(
+                        self.log,
+                        "ignoring attempt to initialize zones because \
+                        the server seems to be newer";
+                        "attempted_version" => i64::from(&zones_config.version),
+                        "req_id" => &response.request_id,
+                        "server_message" => &response.message,
+                    );
+
+                    return Ok(());
                 }
             }
 
+            // TODO Many other codes here should not be retried.
             return Err(BackoffError::transient(error));
         };
         let log_failure = |error, delay| {
