@@ -169,7 +169,7 @@ impl ExtractedArtifacts {
     ///
     /// As the returned file is written to, the data will be hashed; once
     /// writing is complete, call [`ExtractedArtifacts::store_tempfile()`] to
-    /// persist the temporary file into an [`ExtractedArtifactDataHandle()`].
+    /// persist the temporary file into an [`ExtractedArtifactDataHandle`].
     pub(super) fn new_tempfile(
         &self,
     ) -> Result<HashingNamedUtf8TempFile, RepositoryError> {

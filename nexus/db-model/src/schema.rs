@@ -1140,6 +1140,87 @@ table! {
     }
 }
 
+/* hardware inventory */
+
+table! {
+    hw_baseboard_id (id) {
+        id -> Uuid,
+        part_number -> Text,
+        serial_number -> Text,
+    }
+}
+
+table! {
+    sw_caboose (id) {
+        id -> Uuid,
+        board -> Text,
+        git_commit -> Text,
+        name -> Text,
+        version -> Text,
+    }
+}
+
+table! {
+    inv_collection (id) {
+        id -> Uuid,
+        time_started -> Timestamptz,
+        time_done -> Timestamptz,
+        collector -> Text,
+    }
+}
+
+table! {
+    inv_collection_error (inv_collection_id, idx) {
+        inv_collection_id -> Uuid,
+        idx -> Int4,
+        message -> Text,
+    }
+}
+
+table! {
+    inv_service_processor (inv_collection_id, hw_baseboard_id) {
+        inv_collection_id -> Uuid,
+        hw_baseboard_id -> Uuid,
+        time_collected -> Timestamptz,
+        source -> Text,
+
+        sp_type -> crate::SpTypeEnum,
+        sp_slot -> Int4,
+
+        baseboard_revision -> Int8,
+        hubris_archive_id -> Text,
+        power_state -> crate::HwPowerStateEnum,
+    }
+}
+
+table! {
+    inv_root_of_trust (inv_collection_id, hw_baseboard_id) {
+        inv_collection_id -> Uuid,
+        hw_baseboard_id -> Uuid,
+        time_collected -> Timestamptz,
+        source -> Text,
+
+        slot_active -> crate::HwRotSlotEnum,
+        slot_boot_pref_transient -> Nullable<crate::HwRotSlotEnum>,
+        slot_boot_pref_persistent -> crate::HwRotSlotEnum,
+        slot_boot_pref_persistent_pending -> Nullable<crate::HwRotSlotEnum>,
+        slot_a_sha3_256 -> Nullable<Text>,
+        slot_b_sha3_256 -> Nullable<Text>,
+    }
+}
+
+table! {
+    inv_caboose (inv_collection_id, hw_baseboard_id, which) {
+        inv_collection_id -> Uuid,
+        hw_baseboard_id -> Uuid,
+        time_collected -> Timestamptz,
+        source -> Text,
+
+        which -> crate::CabooseWhichEnum,
+        sw_caboose_id -> Uuid,
+    }
+}
+
 table! {
     bootstore_keys (key, generation) {
         key -> Text,
@@ -1162,7 +1243,7 @@ table! {
 ///
 /// This should be updated whenever the schema is changed. For more details,
 /// refer to: schema/crdb/README.adoc
-pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(8, 0, 0);
+pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(10, 0, 0);
 
 allow_tables_to_appear_in_same_query!(
     system_update,
@@ -1173,6 +1254,10 @@ joinable!(system_update_component_update -> component_update (component_update_i
 
 allow_tables_to_appear_in_same_query!(ip_pool_range, ip_pool);
 joinable!(ip_pool_range -> ip_pool (ip_pool_id));
+
+allow_tables_to_appear_in_same_query!(inv_collection, inv_collection_error);
+joinable!(inv_collection_error -> inv_collection (inv_collection_id));
+allow_tables_to_appear_in_same_query!(hw_baseboard_id, sw_caboose, inv_caboose);
 
 allow_tables_to_appear_in_same_query!(
     dataset,

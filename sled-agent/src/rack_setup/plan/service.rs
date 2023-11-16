@@ -6,12 +6,10 @@
 
 use crate::bootstrap::params::StartSledAgentRequest;
 use crate::params::{
-    DatasetKind, DatasetRequest, ServiceType, ServiceZoneRequest,
-    ServiceZoneService, ZoneType,
+    DatasetRequest, ServiceType, ServiceZoneRequest, ServiceZoneService,
+    ZoneType,
 };
 use crate::rack_setup::config::SetupServiceConfig as Config;
-use crate::storage::dataset::DatasetName;
-use crate::storage_manager::StorageResources;
 use camino::Utf8PathBuf;
 use dns_service_client::types::DnsConfigParams;
 use illumos_utils::zpool::ZpoolName;
@@ -36,6 +34,8 @@ use serde::{Deserialize, Serialize};
 use sled_agent_client::{
     types as SledAgentTypes, Client as SledAgentClient, Error as SledAgentError,
 };
+use sled_storage::dataset::{DatasetKind, DatasetName, CONFIG_DATASET};
+use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
@@ -125,11 +125,12 @@ const RSS_SERVICE_PLAN_FILENAME: &str = "rss-service-plan.json";
 impl Plan {
     pub async fn load(
         log: &Logger,
-        storage: &StorageResources,
+        storage_manager: &StorageHandle,
     ) -> Result<Option<Plan>, PlanError> {
-        let paths: Vec<Utf8PathBuf> = storage
-            .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
+        let paths: Vec<Utf8PathBuf> = storage_manager
+            .get_latest_resources()
             .await
+            .all_m2_mountpoints(CONFIG_DATASET)
             .into_iter()
             .map(|p| p.join(RSS_SERVICE_PLAN_FILENAME))
             .collect();
@@ -237,7 +238,7 @@ impl Plan {
     pub async fn create(
         log: &Logger,
         config: &Config,
-        storage: &StorageResources,
+        storage_manager: &StorageHandle,
         sleds: &HashMap<SocketAddrV6, StartSledAgentRequest>,
     ) -> Result<Self, PlanError> {
         let mut dns_builder = internal_dns::DnsConfigBuilder::new();
@@ -249,7 +250,7 @@ impl Plan {
             let result: Result<Vec<SledInfo>, PlanError> =
                 futures::future::try_join_all(sleds.values().map(
                     |sled_request| async {
-                        let subnet = sled_request.subnet;
+                        let subnet = sled_request.body.subnet;
                         let sled_address = get_sled_address(subnet);
                         let u2_zpools =
                             Self::get_u2_zpools_from_sled(log, sled_address)
@@ -257,7 +258,7 @@ impl Plan {
                         let is_scrimlet =
                             Self::is_sled_scrimlet(log, sled_address).await?;
                         Ok(SledInfo::new(
-                            sled_request.id,
+                            sled_request.body.id,
                             subnet,
                             sled_address,
                             u2_zpools,
@@ -737,9 +738,10 @@ impl Plan {
         let plan = Self { services, dns_config };
 
         // Once we've constructed a plan, write it down to durable storage.
-        let paths: Vec<Utf8PathBuf> = storage
-            .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
+        let paths: Vec<Utf8PathBuf> = storage_manager
+            .get_latest_resources()
             .await
+            .all_m2_mountpoints(CONFIG_DATASET)
             .into_iter()
             .map(|p| p.join(RSS_SERVICE_PLAN_FILENAME))
             .collect();

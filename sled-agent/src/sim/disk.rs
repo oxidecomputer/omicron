@@ -19,7 +19,7 @@ use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
-use propolis_client::api::DiskAttachmentState as PropolisDiskState;
+use propolis_client::types::DiskAttachmentState as PropolisDiskState;
 use std::net::{Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;

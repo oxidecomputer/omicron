@@ -21,7 +21,20 @@ use omicron_common::api::external::ResourceType;
 use uuid::Uuid;
 
 impl DataStore {
-    // Create a record for a new Oximeter instance
+    /// Lookup an oximeter instance by its ID.
+    pub async fn oximeter_lookup(
+        &self,
+        id: &Uuid,
+    ) -> Result<OximeterInfo, Error> {
+        use db::schema::oximeter::dsl;
+        dsl::oximeter
+            .find(*id)
+            .first_async(&*self.pool_connection_unauthorized().await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Create a record for a new Oximeter instance
     pub async fn oximeter_create(
         &self,
         info: &OximeterInfo,
@@ -55,7 +68,7 @@ impl DataStore {
         Ok(())
     }
 
-    // List the oximeter collector instances
+    /// List the oximeter collector instances
     pub async fn oximeter_list(
         &self,
         page_params: &DataPageParams<'_, Uuid>,
@@ -69,7 +82,7 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    // Create a record for a new producer endpoint
+    /// Create a record for a new producer endpoint
     pub async fn producer_endpoint_create(
         &self,
         producer: &ProducerEndpoint,
@@ -102,7 +115,27 @@ impl DataStore {
         Ok(())
     }
 
-    // List the producer endpoint records by the oximeter instance to which they're assigned.
+    /// Delete a record for a producer endpoint, by its ID.
+    ///
+    /// This is idempotent, and deleting a record that is already removed is a
+    /// no-op. If the record existed, then the ID of the `oximeter` collector is
+    /// returned. If there was no record, `None` is returned.
+    pub async fn producer_endpoint_delete(
+        &self,
+        id: &Uuid,
+    ) -> Result<Option<Uuid>, Error> {
+        use db::schema::metric_producer::dsl;
+        diesel::delete(dsl::metric_producer.find(*id))
+            .returning(dsl::oximeter_id)
+            .get_result_async::<Uuid>(
+                &*self.pool_connection_unauthorized().await?,
+            )
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// List the producer endpoint records by the oximeter instance to which they're assigned.
     pub async fn producers_list_by_oximeter_id(
         &self,
         oximeter_id: Uuid,

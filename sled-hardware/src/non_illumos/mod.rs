@@ -2,7 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::disk::{DiskError, DiskPaths, DiskVariant, Partition, UnparsedDisk};
+use crate::disk::{
+    DiskPaths, DiskVariant, Partition, PooledDiskError, UnparsedDisk,
+};
 use crate::{Baseboard, SledMode};
 use slog::Logger;
 use std::collections::HashSet;
@@ -16,6 +18,7 @@ use tokio::sync::broadcast;
 ///
 /// If you're actually trying to run the Sled Agent on non-illumos platforms,
 /// use the simulated sled agent, which does not attempt to abstract hardware.
+#[derive(Clone)]
 pub struct HardwareManager {}
 
 impl HardwareManager {
@@ -56,7 +59,7 @@ pub fn ensure_partition_layout(
     _log: &Logger,
     _paths: &DiskPaths,
     _variant: DiskVariant,
-) -> Result<Vec<Partition>, DiskError> {
+) -> Result<Vec<Partition>, PooledDiskError> {
     unimplemented!("Accessing hardware unsupported on non-illumos");
 }
 

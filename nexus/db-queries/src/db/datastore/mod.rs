@@ -61,6 +61,7 @@ mod external_ip;
 mod identity_provider;
 mod image;
 mod instance;
+mod inventory;
 mod ip_pool;
 mod network_interface;
 mod oximeter;
@@ -96,6 +97,7 @@ pub use db_metadata::{
 };
 pub use dns::DnsVersionUpdateBuilder;
 pub use instance::InstanceAndActiveVmm;
+pub use inventory::DataStoreInventoryTest;
 pub use rack::RackInit;
 pub use silo::Discoverability;
 pub use switch_port::SwitchPortSettingsCombinedResult;
@@ -138,6 +140,9 @@ impl<U, T> RunnableQuery<U> for T where
     T: RunnableQueryNoReturn + LoadQuery<'static, DbConnection, U>
 {
 }
+
+pub type DataStoreConnection<'a> =
+    bb8::PooledConnection<'a, ConnectionManager<DbConnection>>;
 
 pub struct DataStore {
     pool: Arc<Pool>,
@@ -206,21 +211,13 @@ impl DataStore {
             .unwrap();
     }
 
-    async fn pool_authorized(
-        &self,
-        opctx: &OpContext,
-    ) -> Result<&bb8::Pool<ConnectionManager<DbConnection>>, Error> {
-        opctx.authorize(authz::Action::Query, &authz::DATABASE).await?;
-        Ok(self.pool.pool())
-    }
-
     /// Returns a connection to a connection from the database connection pool.
     pub(super) async fn pool_connection_authorized(
         &self,
         opctx: &OpContext,
-    ) -> Result<bb8::PooledConnection<ConnectionManager<DbConnection>>, Error>
-    {
-        let pool = self.pool_authorized(opctx).await?;
+    ) -> Result<DataStoreConnection, Error> {
+        opctx.authorize(authz::Action::Query, &authz::DATABASE).await?;
+        let pool = self.pool.pool();
         let connection = pool.get().await.map_err(|err| {
             Error::unavail(&format!("Failed to access DB connection: {err}"))
         })?;
@@ -234,8 +231,7 @@ impl DataStore {
     /// "pool_connection_authorized".
     pub(super) async fn pool_connection_unauthorized(
         &self,
-    ) -> Result<bb8::PooledConnection<ConnectionManager<DbConnection>>, Error>
-    {
+    ) -> Result<DataStoreConnection, Error> {
         let connection = self.pool.pool().get().await.map_err(|err| {
             Error::unavail(&format!("Failed to access DB connection: {err}"))
         })?;
@@ -246,8 +242,7 @@ impl DataStore {
     #[doc(hidden)]
     pub async fn pool_connection_for_tests(
         &self,
-    ) -> Result<bb8::PooledConnection<ConnectionManager<DbConnection>>, Error>
-    {
+    ) -> Result<DataStoreConnection, Error> {
         self.pool_connection_unauthorized().await
     }
 

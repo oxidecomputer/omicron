@@ -16,6 +16,7 @@ set -x
 
 SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 OMICRON_TOP="$SOURCE_DIR/.."
+SOFTNPU_MODE=${SOFTNPU_MODE:-zone};
 
 . "$SOURCE_DIR/virtual_hardware.sh"
 
@@ -62,8 +63,9 @@ function ensure_softnpu_zone {
             --omicron-zone \
             --ports sc0_0,tfportrear0_0 \
             --ports sc0_1,tfportqsfp0_0 \
-            --sidecar-lite-branch main
-    }
+            --sidecar-lite-commit f0585a29fb0285f7a1220c1118856b0e5c1f75c5 \
+            --softnpu-commit dec63e67156fe6e958991bbfa090629868115ab5
+     }
     "$SOURCE_DIR"/scrimlet/softnpu-init.sh
     success "softnpu zone exists"
 }
@@ -83,6 +85,9 @@ in the SoftNPU zone later to add those entries."
 
 ensure_run_as_root
 ensure_zpools
-ensure_simulated_links "$PHYSICAL_LINK"
-warn_if_no_proxy_arp
-ensure_softnpu_zone
+
+if [[ "$SOFTNPU_MODE" == "zone" ]]; then
+    ensure_simulated_links "$PHYSICAL_LINK"
+    warn_if_no_proxy_arp
+    ensure_softnpu_zone
+fi

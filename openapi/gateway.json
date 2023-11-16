@@ -1393,18 +1393,6 @@
     }
   },
   "components": {
-    "responses": {
-      "Error": {
-        "description": "Error",
-        "content": {
-          "application/json": {
-            "schema": {
-              "$ref": "#/components/schemas/Error"
-            }
-          }
-        }
-      }
-    },
     "schemas": {
       "Duration": {
         "type": "object",
@@ -2385,14 +2373,14 @@
             "type": "string"
           },
           "version": {
-            "nullable": true,
             "type": "string"
           }
         },
         "required": [
           "board",
           "git_commit",
-          "name"
+          "name",
+          "version"
         ]
       },
       "SpComponentDetails": {
@@ -3108,6 +3096,18 @@
           "power_off",
           "power_reset"
         ]
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "Error",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
       }
     }
   }

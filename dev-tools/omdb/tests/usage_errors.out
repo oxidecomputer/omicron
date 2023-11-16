@@ -92,6 +92,7 @@ Usage: omdb db [OPTIONS] <COMMAND>
 Commands:
   disks      Print information about disks
   dns        Print information about internal and external DNS
+  inventory  Print information about collected hardware/software inventory
   services   Print information about control plane services
   sleds      Print information about sleds
   instances  Print information about customer instances
@@ -117,6 +118,7 @@ Usage: omdb db [OPTIONS] <COMMAND>
 Commands:
   disks      Print information about disks
   dns        Print information about internal and external DNS
+  inventory  Print information about collected hardware/software inventory
   services   Print information about control plane services
   sleds      Print information about sleds
   instances  Print information about customer instances

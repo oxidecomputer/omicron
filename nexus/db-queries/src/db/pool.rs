@@ -45,6 +45,8 @@ pub struct Pool {
 
 impl Pool {
     pub fn new(log: &slog::Logger, db_config: &DbConfig) -> Self {
+        // Make sure diesel-dtrace's USDT probes are enabled.
+        usdt::register_probes().expect("Failed to register USDT DTrace probes");
         Self::new_builder(log, db_config, bb8::Builder::new())
     }
 

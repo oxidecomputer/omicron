@@ -37,13 +37,14 @@ rustc --version
 # trampoline global zone images.
 #
 COMMIT=$(git rev-parse HEAD)
-VERSION="1.0.3-0.ci+git${COMMIT:0:11}"
+VERSION="1.0.4-0.ci+git${COMMIT:0:11}"
 echo "$VERSION" >/work/version.txt
 
 ptime -m ./tools/install_builder_prerequisites.sh -yp
 ptime -m ./tools/ci_download_softnpu_machinery
 
 # Build the test target
+export CARGO_INCREMENTAL=0
 ptime -m cargo run --locked --release --bin omicron-package -- \
   -t test target create -i standard -m non-gimlet -s softnpu -r single-sled
 ptime -m cargo run --locked --release --bin omicron-package -- \

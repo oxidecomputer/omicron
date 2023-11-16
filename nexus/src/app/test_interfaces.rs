@@ -10,6 +10,11 @@ use sled_agent_client::Client as SledAgentClient;
 use std::sync::Arc;
 use uuid::Uuid;
 
+pub use super::update::SpUpdateError;
+pub use super::update::SpUpdater;
+pub use super::update::UpdateProgress;
+pub use gateway_client::types::SpType;
+
 /// Exposes additional [`super::Nexus`] interfaces for use by the test suite
 #[async_trait]
 pub trait TestInterfaces {
