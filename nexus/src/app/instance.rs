@@ -1320,7 +1320,9 @@ impl super::Nexus {
         .await?;
 
         // If the supplied instance state indicates that the instance no longer
-        // has an active VMM, attempt to delete the virtual provisioning record
+        // has an active VMM, attempt to delete the virtual provisioning record,
+        // and the assignment of the Propolis metric producer to an oximeter
+        // collector.
         //
         // As with updating networking state, this must be done before
         // committing the new runtime state to the database: once the DB is
@@ -1338,6 +1340,21 @@ impl super::Nexus {
                     (&new_runtime_state.instance_state.gen).into(),
                 )
                 .await?;
+
+            // TODO-correctness: The `notify_instance_updated` method can run
+            // concurrently with itself in some situations, such as where a
+            // sled-agent attempts to update Nexus about a stopped instance;
+            // that times out; and it makes another request to a different
+            // Nexus. The call to `unassign_producer` is racy in those
+            // situations, and we may end with instances with no metrics.
+            //
+            // This unfortunate case should be handled as part of
+            // instance-lifecycle improvements, notably using a reliable
+            // persistent workflow to correctly update the oximete assignment as
+            // an instance's state changes.
+            //
+            // Tracked in https://github.com/oxidecomputer/omicron/issues/3742.
+            self.unassign_producer(instance_id).await?;
         }
 
         // Write the new instance and VMM states back to CRDB. This needs to be

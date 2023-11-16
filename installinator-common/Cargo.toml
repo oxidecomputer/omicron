@@ -8,7 +8,6 @@ license = "MPL-2.0"
 anyhow.workspace = true
 camino.workspace = true
 illumos-utils.workspace = true
-omicron-common.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true

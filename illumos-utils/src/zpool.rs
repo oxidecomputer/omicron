@@ -40,6 +40,13 @@ pub struct CreateError {
 }
 
 #[derive(thiserror::Error, Debug)]
+#[error("Failed to destroy zpool: {err}")]
+pub struct DestroyError {
+    #[from]
+    err: Error,
+}
+
+#[derive(thiserror::Error, Debug)]
 #[error("Failed to list zpools: {err}")]
 pub struct ListError {
     #[from]
@@ -89,7 +96,7 @@ impl FromStr for ZpoolHealth {
 }
 
 /// Describes a Zpool.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ZpoolInfo {
     name: String,
     size: u64,
@@ -120,6 +127,17 @@ impl ZpoolInfo {
     #[allow(dead_code)]
     pub fn health(&self) -> ZpoolHealth {
         self.health
+    }
+
+    #[cfg(any(test, feature = "testing"))]
+    pub fn new_hardcoded(name: String) -> ZpoolInfo {
+        ZpoolInfo {
+            name,
+            size: 1024 * 1024 * 64,
+            allocated: 1024,
+            free: 1024 * 1023 * 64,
+            health: ZpoolHealth::Online,
+        }
     }
 }
 
@@ -167,7 +185,10 @@ pub struct Zpool {}
 
 #[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
 impl Zpool {
-    pub fn create(name: ZpoolName, vdev: &Utf8Path) -> Result<(), CreateError> {
+    pub fn create(
+        name: &ZpoolName,
+        vdev: &Utf8Path,
+    ) -> Result<(), CreateError> {
         let mut cmd = std::process::Command::new(PFEXEC);
         cmd.env_clear();
         cmd.env("LC_ALL", "C.UTF-8");
@@ -189,7 +210,17 @@ impl Zpool {
         Ok(())
     }
 
-    pub fn import(name: ZpoolName) -> Result<(), Error> {
+    pub fn destroy(name: &ZpoolName) -> Result<(), DestroyError> {
+        let mut cmd = std::process::Command::new(PFEXEC);
+        cmd.env_clear();
+        cmd.env("LC_ALL", "C.UTF-8");
+        cmd.arg(ZPOOL).arg("destroy");
+        cmd.arg(&name.to_string());
+        execute(&mut cmd).map_err(Error::from)?;
+        Ok(())
+    }
+
+    pub fn import(name: &ZpoolName) -> Result<(), Error> {
         let mut cmd = std::process::Command::new(PFEXEC);
         cmd.env_clear();
         cmd.env("LC_ALL", "C.UTF-8");

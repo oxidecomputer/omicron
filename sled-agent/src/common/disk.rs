@@ -9,7 +9,7 @@ use chrono::Utc;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
-use propolis_client::api::DiskAttachmentState as PropolisDiskState;
+use propolis_client::types::DiskAttachmentState as PropolisDiskState;
 use uuid::Uuid;
 
 /// Action to be taken on behalf of state transition.
