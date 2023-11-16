@@ -25,7 +25,7 @@
 
 use crate::params::{
     DatasetKind, OmicronZoneConfig, OmicronZoneDataset, OmicronZoneType,
-    ZoneType,
+    ZoneType, OMICRON_ZONES_CONFIG_INITIAL_VERSION,
 };
 use crate::services::{OmicronZoneConfigLocal, OmicronZonesConfigLocal};
 use crate::storage::dataset::DatasetName;
@@ -74,19 +74,51 @@ impl TryFrom<AllZoneRequests> for OmicronZonesConfigLocal {
     type Error = anyhow::Error;
 
     fn try_from(input: AllZoneRequests) -> Result<Self, Self::Error> {
-        // XXX-dap starting to think that the generation in OmicronZonesConfig
-        // (at least the one stored on disk) ought to be an Option or something?
-        // There's no correct value here.  Any Nexus one needs to be treated as
-        // newer.  The generation from the ledger does not matter.
-        // XXX-dap TODO-doc explain why the generation from the ledger does not
-        // matter here (they _all_ predate the Nexus-provided one).
+        // The Omicron version number that we choose here (2) deserves some
+        // explanation.
+        //
+        // This is supposed to be the control-plane-issued version number for
+        // this configuration.  But any configuration that we're converting here
+        // predates the point where the control plane issued version numbers at
+        // all.  So what should we assign it?  Well, what are the constraints?
+        //
+        // - It must be newer than version 1 because version 1 canonically
+        //   represents the initial state of having no zones deployed.  If we
+        //   used version 1 here, any code could ignore this configuration on
+        //   the grounds that it's no newer than what it already has.  (The
+        //   contents of a given version are supposed to be immutable.)
+        //
+        // - It should be older than anything else that the control plane might
+        //   try to send us so that if the control plane wants to change
+        //   anything, we won't ignore its request because we think this
+        //   configuration is newer.  But really this has to be the control
+        //   plane's responsibility, not ours.  That is: Nexus needs to ask us
+        //   what our version number is and subsequent configurations should use
+        //   newer version numbers.  It's not a great plan for it to assume
+        //   anything about the version numbers deployed on sleds whose
+        //   configurations it's never seen.  (In practice, newly deployed
+        //   systems currently wind up with generation 5, so it _could_ choose
+        //   something like 6 to start with -- or some larger number to leave
+        //   some buffer.)
+        //
+        // In summary, 2 seems fine.
+        let omicron_version =
+            Generation::from(OMICRON_ZONES_CONFIG_INITIAL_VERSION).next();
+
+        // The ledger version doesn't really matter.  In case it's useful, we
+        // pick the version from the ledger that we loaded.
+        let ledger_version = input.generation;
+
         let zones = input
             .requests
             .into_iter()
             .map(OmicronZoneConfigLocal::try_from)
             .collect::<Result<Vec<_>, _>>()
-            .context("mapping `AllZonesRequests` to `ZonesConfig`")?;
-        Ok(OmicronZonesConfigLocal { version: Generation::new(), zones })
+            .context(
+                "mapping `AllZoneRequests` to `OmicronZonesConfigLocal`",
+            )?;
+
+        Ok(OmicronZonesConfigLocal { omicron_version, ledger_version, zones })
     }
 }
 

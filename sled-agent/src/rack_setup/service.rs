@@ -64,7 +64,10 @@ use crate::bootstrap::params::BootstrapAddressDiscovery;
 use crate::bootstrap::params::StartSledAgentRequest;
 use crate::bootstrap::rss_handle::BootstrapAgentHandle;
 use crate::nexus::d2n_params;
-use crate::params::{OmicronZoneType, OmicronZonesConfig, TimeSync};
+use crate::params::{
+    OmicronZoneType, OmicronZonesConfig, TimeSync,
+    OMICRON_ZONES_CONFIG_INITIAL_VERSION,
+};
 use crate::rack_setup::plan::service::{
     Plan as ServicePlan, PlanError as ServicePlanError,
 };
@@ -1011,13 +1014,18 @@ impl ServiceInner {
 
         // The service plan describes all the zones that we will eventually
         // deploy on each sled.  But we cannot currently just deploy them all
-        // concurrently.  We'll do it in four stages, each corresponding to a
+        // concurrently.  We'll do it in a few stages, each corresponding to a
         // version of each sled's configuration.
         //
-        // - version 1: internal DNS only
-        // - version 2: internal DNS + NTP servers
-        // - version 3: internal DNS + NTP servers + CockroachDB
-        // - version 4: everything
+        // - version 1: no services running
+        //              (We don't have to do anything for this.  But we do
+        //              reserve this version number for "no services running" so
+        //              that sled agents can begin with an initial, valid
+        //              OmicronZonesConfig before they've got anything running.)
+        // - version 2: internal DNS only
+        // - version 3: internal DNS + NTP servers
+        // - version 4: internal DNS + NTP servers + CockroachDB
+        // - version 5: everything
         //
         // At each stage, we're specifying a complete configuration of what
         // should be running on the sled -- including this version number.
@@ -1027,20 +1035,22 @@ impl ServiceInner {
         //
         // For now, we hardcode the three requests we make to use these three
         // version numbers (1, 2, and 3).
-        let version1_dns_only = Generation::new();
-        let version2_dns_and_ntp = version1_dns_only.next();
-        let version3_cockroachdb = version2_dns_and_ntp.next();
-        let version4_everything = version3_cockroachdb.next();
+        let version1_nothing =
+            Generation::from(OMICRON_ZONES_CONFIG_INITIAL_VERSION);
+        let version2_dns_only = version1_nothing.next();
+        let version3_dns_and_ntp = version2_dns_only.next();
+        let version4_cockroachdb = version3_dns_and_ntp.next();
+        let version5_everything = version4_cockroachdb.next();
 
         // Set up internal DNS services first and write the initial
         // DNS configuration to the internal DNS servers.
-        let v1_configs = Self::generate_omicron_zone_configs_gen1(
+        let v2configs = Self::generate_omicron_zone_configs_gen1(
             &service_plan,
             &|zone_type: &OmicronZoneType| {
                 matches!(zone_type, OmicronZoneType::InternalDns { .. })
             },
         );
-        self.ensure_zone_config_at_least(&v1_configs).await?;
+        self.ensure_zone_config_at_least(&v2configs).await?;
         self.initialize_internal_dns_records(&service_plan).await?;
 
         // Ask MGS in each switch zone which switch it is.
@@ -1049,10 +1059,10 @@ impl ServiceInner {
             .await;
 
         // Next start up the NTP services.
-        let v2_configs = Self::augment_omicron_zone_configs(
-            version2_dns_and_ntp,
+        let v3configs = Self::augment_omicron_zone_configs(
+            version3_dns_and_ntp,
             &service_plan,
-            &v1_configs,
+            &v2configs,
             &|zone_type: &OmicronZoneType| {
                 matches!(
                     zone_type,
@@ -1061,7 +1071,7 @@ impl ServiceInner {
                 )
             },
         );
-        self.ensure_zone_config_at_least(&v2_configs).await?;
+        self.ensure_zone_config_at_least(&v3configs).await?;
 
         // Wait until time is synchronized on all sleds before proceeding.
         self.wait_for_timesync(&sled_addresses).await?;
@@ -1069,28 +1079,28 @@ impl ServiceInner {
         info!(self.log, "Finished setting up Internal DNS and NTP");
 
         // Wait until Cockroach has been initialized before running Nexus.
-        let v3_configs = Self::augment_omicron_zone_configs(
-            version3_cockroachdb,
+        let v4configs = Self::augment_omicron_zone_configs(
+            version4_cockroachdb,
             &service_plan,
-            &v2_configs,
+            &v3configs,
             &|zone_type: &OmicronZoneType| {
                 matches!(zone_type, OmicronZoneType::CockroachDb { .. })
             },
         );
-        self.ensure_zone_config_at_least(&v3_configs).await?;
+        self.ensure_zone_config_at_least(&v4configs).await?;
 
         // Now that datasets and zones have started for CockroachDB,
         // perform one-time initialization of the cluster.
         self.initialize_cockroach(&service_plan).await?;
 
         // Issue the rest of the zone initialization requests.
-        let v4_configs = Self::augment_omicron_zone_configs(
-            version4_everything,
+        let v5configs = Self::augment_omicron_zone_configs(
+            version5_everything,
             &service_plan,
-            &v3_configs,
+            &v4configs,
             &|_| true,
         );
-        self.ensure_zone_config_at_least(&v4_configs).await?;
+        self.ensure_zone_config_at_least(&v5configs).await?;
 
         info!(self.log, "Finished setting up services");
 

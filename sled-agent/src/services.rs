@@ -284,30 +284,45 @@ const ZONES_LEDGER_FILENAME: &str = "omicron_zones.json";
     Clone, Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
 pub struct OmicronZonesConfigLocal {
-    pub version: Generation,
+    /// version of the Omicron-provided part of the configuration
+    ///
+    /// This version number is outside of Sled Agent's control.  We store
+    /// exactly what we were given and use this number to decide when to
+    /// fail requests to establish an outdated configuration.
+    ///
+    /// You can think of this as a major version number, with `ledger_version`
+    /// being a minor version number.  See `is_newer_than()`.
+    pub omicron_version: Generation,
+
+    /// ledger-managed version
+    ///
+    /// This version is managed by the ledger facility itself.  It's bumped
+    /// whenever we write a new ledger.  In practice, we don't currently have
+    /// any reason to bump this _for a given Omicron version_ so it's somewhat
+    /// redundant.  In principle, if we needed to modify the ledgered
+    /// configuration due to some event that doesn't change the Omicron config
+    /// (e.g., if we wanted to move the root filesystem to a different path), we
+    /// could do that by bumping this version.
+    pub ledger_version: Generation,
     pub zones: Vec<OmicronZoneConfigLocal>,
 }
 
 impl Ledgerable for OmicronZonesConfigLocal {
     fn is_newer_than(&self, other: &OmicronZonesConfigLocal) -> bool {
-        self.version >= other.version
+        self.omicron_version > other.omicron_version
+            || (self.omicron_version == other.omicron_version
+                && self.ledger_version >= other.ledger_version)
     }
 
     fn generation_bump(&mut self) {
-        // XXX-dap what do we do here?  this is not right.  The only one who
-        // can bump this is Nexus.  Maybe we just keep it as is?
-        //
-        // This gets invoked when the ledger is committed.  I think we could
-        // either keep a separate generation number (and use that in
-        // `is_newer_than()`) or else make this a noop?
-        self.version = self.version.next();
+        self.ledger_version = self.ledger_version.next();
     }
 }
 
 impl OmicronZonesConfigLocal {
     pub fn to_omicron_zones_config(self) -> OmicronZonesConfig {
         OmicronZonesConfig {
-            version: self.version,
+            version: self.omicron_version,
             zones: self.zones.into_iter().map(|z| z.zone).collect(),
         }
     }
@@ -2574,23 +2589,14 @@ impl ServiceManager {
                 log,
                 zone_ledger_paths.clone(),
                 OmicronZonesConfigLocal {
-                    // XXX-dap this means Nexus must use a newer generation
-                    // for its first one
-                    version: Generation::new(),
+                    omicron_version: Generation::new(),
+                    ledger_version: Generation::new(),
                     zones: vec![],
                 },
             ),
         };
 
-        let ledger_zone_config = ledger.data();
-        Ok(OmicronZonesConfig {
-            version: ledger_zone_config.version,
-            zones: ledger_zone_config
-                .zones
-                .iter()
-                .map(|z| z.zone.clone())
-                .collect(),
-        })
+        Ok(ledger.data().clone().to_omicron_zones_config())
     }
 
     /// Ensures that particular Omicron zones are running
@@ -2619,20 +2625,18 @@ impl ServiceManager {
                 log,
                 zone_ledger_paths.clone(),
                 OmicronZonesConfigLocal {
-                    // XXX-dap this means Nexus must use a newer generation
-                    // for its first one.  Even better would be if this
-                    // whole object could be `None`
-                    version: Generation::new(),
+                    omicron_version: request.version,
+                    ledger_version: Generation::new(),
                     zones: vec![],
                 },
             ),
         };
 
         let ledger_zone_config = ledger.data_mut();
-        if ledger_zone_config.version > request.version {
+        if ledger_zone_config.omicron_version > request.version {
             return Err(Error::RequestedConfigOutdated(
                 request.version,
-                ledger_zone_config.version,
+                ledger_zone_config.omicron_version,
             ));
         }
 
@@ -2779,7 +2783,10 @@ impl ServiceManager {
         }
 
         Ok(OmicronZonesConfigLocal {
-            version: new_request.version,
+            omicron_version: new_request.version,
+            ledger_version: old_config
+                .map(|c| c.ledger_version)
+                .unwrap_or_else(Generation::new),
             zones: new_zones,
         })
     }

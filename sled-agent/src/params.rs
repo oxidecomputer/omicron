@@ -313,6 +313,9 @@ impl std::fmt::Display for ZoneType {
     }
 }
 
+/// Version 1 of `OmicronZonesConfig` is always the set of no zones.
+pub const OMICRON_ZONES_CONFIG_INITIAL_VERSION: u32 = 1;
+
 /// Describes the set of Omicron-managed zones running on a sled
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
