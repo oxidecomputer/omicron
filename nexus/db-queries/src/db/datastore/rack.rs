@@ -414,14 +414,17 @@ impl DataStore {
         // the low-frequency of calls, this optimization has been deferred.
         let log = opctx.log.clone();
         let err = Arc::new(OnceLock::new());
-        let retry_helper = RetryHelper::new(
-            &self.transaction_retry_producer,
-            "rack_set_initialized",
-        );
+
+        // NOTE: This transaction cannot yet be made retryable, as it uses
+        // nested transactions.
+//        let retry_helper = RetryHelper::new(
+//            &self.transaction_retry_producer,
+//            "rack_set_initialized",
+//        );
         let rack = self
             .pool_connection_authorized(opctx)
             .await?
-            .transaction_async_with_retry(|conn| {
+            .transaction_async(|conn| {
                 let err = err.clone();
                 let log = log.clone();
                 let authz_service_pool = authz_service_pool.clone();
@@ -451,7 +454,7 @@ impl DataStore {
                         })?;
                     if rack.initialized {
                         info!(log, "Early exit: Rack already initialized");
-                        return Ok(rack);
+                        return Ok::<_, DieselError>(rack);
                     }
 
                     // Otherwise, insert services and datasets.
@@ -577,7 +580,6 @@ impl DataStore {
                     Ok(rack)
                 }
             },
-            retry_helper.as_callback(),
             )
             .await
             .map_err(|e| {
