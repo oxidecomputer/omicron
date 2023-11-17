@@ -57,6 +57,13 @@ pub(super) enum RepositoryError {
     )]
     MissingTarget(String),
 
+    #[error("error reading artifact of kind `{kind}` from repository")]
+    ReadArtifact {
+        kind: ArtifactKind,
+        #[source]
+        error: tough::error::Error,
+    },
+
     #[error("error copying artifact of kind `{kind}` from repository")]
     CopyExtractedArtifact {
         kind: ArtifactKind,
@@ -160,6 +167,7 @@ impl RepositoryError {
             | RepositoryError::LoadRepository(_)
             | RepositoryError::ReadArtifactsDocument(_)
             | RepositoryError::TargetHashRead { .. }
+            | RepositoryError::ReadArtifact { .. }
             | RepositoryError::CopyExtractedArtifact { .. } => {
                 HttpError::for_bad_request(None, message)
             }

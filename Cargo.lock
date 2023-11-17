@@ -4578,6 +4578,7 @@ dependencies = [
  "async-bb8-diesel",
  "async-trait",
  "base64 0.21.5",
+ "buf-list",
  "camino",
  "cancel-safe-futures",
  "chrono",
@@ -8834,6 +8835,7 @@ dependencies = [
  "slog-envlogger",
  "slog-term",
  "tempfile",
+ "tokio",
  "tufaceous-lib",
 ]
 
@@ -8842,6 +8844,7 @@ name = "tufaceous-lib"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "buf-list",
  "bytes",
  "bytesize",
@@ -8851,6 +8854,7 @@ dependencies = [
  "debug-ignore",
  "flate2",
  "fs-err",
+ "futures",
  "hex",
  "hubtools",
  "itertools 0.11.0",
@@ -8865,6 +8869,7 @@ dependencies = [
  "sha2",
  "slog",
  "tar",
+ "tokio",
  "toml 0.8.8",
  "tough",
  "url",
@@ -9508,6 +9513,7 @@ dependencies = [
  "async-trait",
  "base64 0.21.5",
  "bootstrap-agent-client",
+ "buf-list",
  "bytes",
  "camino",
  "camino-tempfile",

@@ -7,6 +7,8 @@ use anyhow::Context;
 use camino::Utf8PathBuf;
 use camino_tempfile::NamedUtf8TempFile;
 use camino_tempfile::Utf8TempDir;
+use futures::Stream;
+use futures::StreamExt;
 use omicron_common::update::ArtifactHash;
 use omicron_common::update::ArtifactHashId;
 use omicron_common::update::ArtifactKind;
@@ -17,7 +19,6 @@ use slog::Logger;
 use std::fs::File;
 use std::io;
 use std::io::BufWriter;
-use std::io::Read;
 use std::io::Write;
 use std::sync::Arc;
 use tokio::io::AsyncRead;
@@ -125,10 +126,10 @@ impl ExtractedArtifacts {
 
     /// Copy from `reader` into our temp directory, returning a handle to the
     /// extracted artifact on success.
-    pub(super) fn store(
+    pub(super) async fn store(
         &mut self,
         artifact_hash_id: ArtifactHashId,
-        mut reader: impl Read,
+        stream: impl Stream<Item = Result<bytes::Bytes, tough::error::Error>>,
     ) -> Result<ExtractedArtifactDataHandle, RepositoryError> {
         let output_path = self.path_for_artifact(&artifact_hash_id);
 
@@ -143,12 +144,24 @@ impl ExtractedArtifacts {
                 })?,
         );
 
-        let file_size = io::copy(&mut reader, &mut writer)
-            .with_context(|| format!("failed writing to {output_path}"))
-            .map_err(|error| RepositoryError::CopyExtractedArtifact {
+        let mut stream = std::pin::pin!(stream);
+
+        let mut file_size = 0;
+
+        while let Some(res) = stream.next().await {
+            let chunk = res.map_err(|error| RepositoryError::ReadArtifact {
                 kind: artifact_hash_id.kind.clone(),
                 error,
-            })? as usize;
+            })?;
+            file_size += chunk.len();
+            writer
+                .write_all(&chunk)
+                .with_context(|| format!("failed writing to {output_path}"))
+                .map_err(|error| RepositoryError::CopyExtractedArtifact {
+                    kind: artifact_hash_id.kind.clone(),
+                    error,
+                })?;
+        }
 
         writer
             .flush()
