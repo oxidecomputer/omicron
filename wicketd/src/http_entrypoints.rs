@@ -904,7 +904,8 @@ async fn post_start_update(
     //    out of an abundance of caution).
     //
     // First, get our most-recently-cached inventory view. (Only wait 80% of
-    // WICKETD_TIMEOUT for this -- if the inventory isn't available, then we
+    // WICKETD_TIMEOUT for this: if even a cached inventory isn't available,
+    // it's because we've never established contact with MGS. In that case, we
     // should produce a useful error message rather than timing out on the
     // client.)
     let inventory = match tokio::time::timeout(
@@ -921,12 +922,16 @@ async fn post_start_update(
             ));
         }
         Err(_) => {
-            // Use 400 Bad Request instead of 503 Service Unavailable so that
-            // the error message is propagated to the client.
-            return Err(HttpError::for_bad_request(
-                None,
-                "Rack inventory not yet available (is MGS alive?)".into(),
-            ));
+            // Have to construct an HttpError manually because
+            // HttpError::for_unavail doesn't accept an external message.
+            let message =
+                "Rack inventory not yet available (is MGS alive?)".to_owned();
+            return Err(HttpError {
+                status_code: http::StatusCode::SERVICE_UNAVAILABLE,
+                error_code: None,
+                external_message: message.clone(),
+                internal_message: message,
+            });
         }
     };
 
