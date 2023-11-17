@@ -51,6 +51,7 @@ use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use wicket_common::rack_setup::PutRssUserConfigInsensitive;
 use wicket_common::update_events::EventReport;
+use wicket_common::WICKETD_TIMEOUT;
 
 use crate::ServerContext;
 
@@ -896,19 +897,35 @@ async fn post_start_update(
     // 1. We haven't pulled its state in our inventory (most likely cause: the
     //    cubby is empty; less likely cause: the SP is misbehaving, which will
     //    make updating it very unlikely to work anyway)
-    // 2. We have pulled its state but our hardware manager says we can't update
-    //    it (most likely cause: the target is the sled we're currently running
-    //    on; less likely cause: our hardware manager failed to get our local
-    //    identifying information, and it refuses to update this target out of
-    //    an abundance of caution).
+    // 2. We have pulled its state but our hardware manager says we can't
+    //    update it (most likely cause: the target is the sled we're currently
+    //    running on; less likely cause: our hardware manager failed to get our
+    //    local identifying information, and it refuses to update this target
+    //    out of an abundance of caution).
     //
-    // First, get our most-recently-cached inventory view.
-    let inventory = match rqctx.mgs_handle.get_cached_inventory().await {
-        Ok(inventory) => inventory,
-        Err(ShutdownInProgress) => {
+    // First, get our most-recently-cached inventory view. (Only wait 80% of
+    // WICKETD_TIMEOUT for this -- if the inventory isn't available, then we
+    // should produce a useful error message rather than timing out on the
+    // client.)
+    let inventory = match tokio::time::timeout(
+        WICKETD_TIMEOUT.mul_f32(0.8),
+        rqctx.mgs_handle.get_cached_inventory(),
+    )
+    .await
+    {
+        Ok(Ok(inventory)) => inventory,
+        Ok(Err(ShutdownInProgress)) => {
             return Err(HttpError::for_unavail(
                 None,
                 "Server is shutting down".into(),
+            ));
+        }
+        Err(_) => {
+            // Use 400 Bad Request instead of 503 Service Unavailable so that
+            // the error message is propagated to the client.
+            return Err(HttpError::for_bad_request(
+                None,
+                "Rack inventory not yet available (is MGS alive?)".into(),
             ));
         }
     };
