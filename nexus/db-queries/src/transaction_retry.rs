@@ -6,12 +6,13 @@
 
 use chrono::Utc;
 use oximeter::{types::Sample, Metric, MetricsError, Target};
+use rand::{thread_rng, Rng};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 // Identifies "which" transaction is retrying
 #[derive(Debug, Clone, Target)]
-struct Transaction {
+struct DatabaseTransaction {
     name: String,
 }
 
@@ -22,6 +23,7 @@ struct Transaction {
 struct RetryData {
     #[datum]
     latency: f64,
+    attempt: u32,
 }
 
 // Collects all transaction retry samples
@@ -37,14 +39,10 @@ impl Producer {
 
     fn append(
         &self,
-        transaction: &Transaction,
-        latency: Duration,
+        transaction: &DatabaseTransaction,
+        data: &RetryData,
     ) -> Result<(), MetricsError> {
-        let sample = Sample::new_with_timestamp(
-            Utc::now(),
-            transaction,
-            &RetryData { latency: latency.as_secs_f64() },
-        )?;
+        let sample = Sample::new_with_timestamp(Utc::now(), transaction, data)?;
         self.samples.lock().unwrap().push(sample);
         Ok(())
     }
@@ -52,7 +50,7 @@ impl Producer {
 
 struct RetryHelperInner {
     start: chrono::DateTime<Utc>,
-    attempts: usize,
+    attempts: u32,
 }
 
 impl RetryHelperInner {
@@ -79,7 +77,9 @@ pub(crate) struct RetryHelper {
     inner: Mutex<RetryHelperInner>,
 }
 
-const MAX_RETRY_ATTEMPTS: usize = 10;
+const MIN_RETRY_BACKOFF: Duration = Duration::from_millis(0);
+const MAX_RETRY_BACKOFF: Duration = Duration::from_millis(50);
+const MAX_RETRY_ATTEMPTS: u32 = 10;
 
 impl RetryHelper {
     /// Creates a new RetryHelper, and starts a timer tracking the transaction
@@ -96,14 +96,24 @@ impl RetryHelper {
     //
     // This function:
     // - Appends a metric identifying the duration of the transaction operation
-    // - Performs a randomly generated backoff (limited to less than 50 ms)
+    // - Performs a random (uniform) backoff (limited to less than 50 ms)
     // - Returns "true" if the transaction should be restarted
     async fn retry_callback(&self) -> bool {
-        let inner = self.inner.lock().unwrap().tick();
+        // Look at the current attempt and start time so we can log this
+        // information before we start sleeping.
+        let (start, attempt) = {
+            let inner = self.inner.lock().unwrap();
+            (inner.start, inner.attempts)
+        };
+
+        let latency = (Utc::now() - start)
+            .to_std()
+            .unwrap_or(Duration::ZERO)
+            .as_secs_f64();
 
         let _ = self.producer.append(
-            &Transaction { name: self.name.into() },
-            (Utc::now() - inner.start).to_std().unwrap_or(Duration::ZERO),
+            &DatabaseTransaction { name: self.name.into() },
+            &RetryData { latency, attempt },
         );
 
         // This backoff is not exponential, but I'm not sure we actually want
@@ -111,9 +121,15 @@ impl RetryHelper {
         // probably be better to fail the operation, at which point Oximeter
         // will keep track of the failing transaction and identify that it's a
         // high-priority target for CTE conversion.
-        tokio::time::sleep(Duration::from_millis(rand::random::<u64>() % 50))
-            .await;
+        let duration = {
+            let mut rng = thread_rng();
+            rng.gen_range(MIN_RETRY_BACKOFF..MAX_RETRY_BACKOFF)
+        };
+        tokio::time::sleep(duration).await;
 
+        // Now that we've finished sleeping, reset the timer and bump the number
+        // of attempts we've tried.
+        let inner = self.inner.lock().unwrap().tick();
         return inner.attempts < MAX_RETRY_ATTEMPTS;
     }
 
@@ -134,8 +150,7 @@ impl oximeter::Producer for Producer {
     fn produce(
         &mut self,
     ) -> Result<Box<dyn Iterator<Item = Sample> + 'static>, MetricsError> {
-        let samples =
-            std::mem::replace(&mut *self.samples.lock().unwrap(), vec![]);
+        let samples = std::mem::take(&mut *self.samples.lock().unwrap());
         Ok(Box::new(samples.into_iter()))
     }
 }
