@@ -356,11 +356,11 @@ impl ServiceInner {
     // matching `zone_filter`.  This is used to deploy the Internal DNS zones
     // before all the other zones.
     // XXX-dap TODO-coverage
-    fn generate_omicron_zone_configs_gen1(
+    fn generate_initial_omicron_zone_configs(
+        version: Generation,
         service_plan: &ServicePlan,
         zone_filter: &(dyn Fn(&OmicronZoneType) -> bool + Send + Sync),
     ) -> HashMap<SocketAddrV6, OmicronZonesConfig> {
-        let version = Generation::new();
         service_plan
             .services
             .iter()
@@ -397,7 +397,7 @@ impl ServiceInner {
             .map(|(sled_address, sled_config)| {
                 let mut zones = match last_configs.get(sled_address) {
                     Some(config) => {
-                        assert!(version > config.version.next());
+                        assert!(version > config.version);
                         config.zones.clone()
                     }
                     None => Vec::new(),
@@ -1049,7 +1049,8 @@ impl ServiceInner {
 
         // Set up internal DNS services first and write the initial
         // DNS configuration to the internal DNS servers.
-        let v2configs = Self::generate_omicron_zone_configs_gen1(
+        let v2configs = Self::generate_initial_omicron_zone_configs(
+            version2_dns_only,
             &service_plan,
             &|zone_type: &OmicronZoneType| {
                 matches!(zone_type, OmicronZoneType::InternalDns { .. })
