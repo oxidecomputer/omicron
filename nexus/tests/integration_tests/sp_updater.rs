@@ -46,10 +46,11 @@ async fn test_sp_updater_updates_sled() {
             .await;
 
     // Configure an MGS client.
-    let mut mgs_clients = MgsClients::from_clients([gateway_client::Client::new(
-        &mgstestctx.client.url("/").to_string(),
-        mgstestctx.logctx.log.new(slog::o!("component" => "MgsClient")),
-    )]);
+    let mut mgs_clients =
+        MgsClients::from_clients([gateway_client::Client::new(
+            &mgstestctx.client.url("/").to_string(),
+            mgstestctx.logctx.log.new(slog::o!("component" => "MgsClient")),
+        )]);
 
     // Configure and instantiate an `SpUpdater`.
     let sp_type = SpType::Sled;
@@ -96,10 +97,11 @@ async fn test_sp_updater_updates_switch() {
             .await;
 
     // Configure an MGS client.
-    let mut mgs_clients = MgsClients::from_clients([gateway_client::Client::new(
-        &mgstestctx.client.url("/").to_string(),
-        mgstestctx.logctx.log.new(slog::o!("component" => "MgsClient")),
-    )]);
+    let mut mgs_clients =
+        MgsClients::from_clients([gateway_client::Client::new(
+            &mgstestctx.client.url("/").to_string(),
+            mgstestctx.logctx.log.new(slog::o!("component" => "MgsClient")),
+        )]);
 
     let sp_type = SpType::Switch;
     let sp_slot = 0;
@@ -317,7 +319,8 @@ async fn test_sp_updater_switches_mgs_instances_on_failure() {
     );
 
     // Spawn the actual update task.
-    let mut update_task = tokio::spawn(async move { sp_updater.update(&mut mgs_clients).await });
+    let mut update_task =
+        tokio::spawn(async move { sp_updater.update(&mut mgs_clients).await });
 
     // Loop over incoming requests. We expect this sequence:
     //
@@ -436,10 +439,11 @@ async fn test_sp_updater_delivers_progress() {
             .await;
 
     // Configure an MGS client.
-    let mut mgs_clients = MgsClients::from_clients([gateway_client::Client::new(
-        &mgstestctx.client.url("/").to_string(),
-        mgstestctx.logctx.log.new(slog::o!("component" => "MgsClient")),
-    )]);
+    let mut mgs_clients =
+        MgsClients::from_clients([gateway_client::Client::new(
+            &mgstestctx.client.url("/").to_string(),
+            mgstestctx.logctx.log.new(slog::o!("component" => "MgsClient")),
+        )]);
 
     let sp_type = SpType::Sled;
     let sp_slot = 0;
@@ -470,9 +474,8 @@ async fn test_sp_updater_delivers_progress() {
 
     // Spawn the update on a background task so we can watch `progress` as it is
     // applied.
-    let do_update_task = tokio::spawn(async move {
-        sp_updater.update(&mut mgs_clients).await
-    });
+    let do_update_task =
+        tokio::spawn(async move { sp_updater.update(&mut mgs_clients).await });
 
     // Allow the SP to respond to 2 messages: the caboose check and the "prepare
     // update" messages that trigger the start of an update, then ensure we see
