@@ -63,6 +63,10 @@ pub(super) trait SpComponentUpdater {
     fn update_id(&self) -> Uuid;
 
     /// The update payload data to send to MGS.
+    // TODO-performance This has to be convertible into a `reqwest::Body`, so we
+    // return an owned Vec. That requires all our implementors to clone the data
+    // at least once; maybe we should use `Bytes` instead (which is cheap to
+    // clone and also convertible into a reqwest::Body)?
     fn update_data(&self) -> Vec<u8>;
 
     /// The sending half of the watch channel to report update progress.

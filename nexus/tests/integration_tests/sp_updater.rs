@@ -545,7 +545,6 @@ async fn test_sp_updater_delivers_progress() {
             UpdateStatus::Complete(_) => {
                 if prev_bytes_received < sp_image_len {
                     prev_bytes_received = sp_image_len;
-                    continue;
                 }
             }
             status @ (UpdateStatus::None

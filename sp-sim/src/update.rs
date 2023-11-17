@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::collections::BTreeMap;
 use std::io::Cursor;
 use std::mem;
 
@@ -15,6 +16,8 @@ pub(crate) struct SimSpUpdate {
     state: UpdateState,
     last_sp_update_data: Option<Box<[u8]>>,
     last_rot_update_data: Option<Box<[u8]>>,
+    last_host_phase1_update_data: BTreeMap<u16, Box<[u8]>>,
+    active_host_slot: Option<u16>,
 }
 
 impl Default for SimSpUpdate {
@@ -23,6 +26,13 @@ impl Default for SimSpUpdate {
             state: UpdateState::NotPrepared,
             last_sp_update_data: None,
             last_rot_update_data: None,
+            last_host_phase1_update_data: BTreeMap::new(),
+
+            // In the real SP, there is always _some_ active host slot. We could
+            // emulate that by always defaulting to slot 0, but instead we'll
+            // ensure any tests that expect to read or write a particular slot
+            // set that slot as active first.
+            active_host_slot: None,
         }
     }
 }
@@ -43,9 +53,20 @@ impl SimSpUpdate {
             UpdateState::NotPrepared
             | UpdateState::Aborted(_)
             | UpdateState::Completed { .. } => {
+                let slot = if component == SpComponent::HOST_CPU_BOOT_FLASH {
+                    match self.active_host_slot {
+                        Some(slot) => slot,
+                        None => return Err(SpError::InvalidSlotForComponent),
+                    }
+                } else {
+                    // We don't manage SP or RoT slots, so just use 0
+                    0
+                };
+
                 self.state = UpdateState::Prepared {
                     component,
                     id,
+                    slot,
                     data: Cursor::new(vec![0u8; total_size].into_boxed_slice()),
                 };
                 Ok(())
@@ -63,7 +84,7 @@ impl SimSpUpdate {
         chunk_data: &[u8],
     ) -> Result<(), SpError> {
         match &mut self.state {
-            UpdateState::Prepared { component, id, data } => {
+            UpdateState::Prepared { component, id, slot, data } => {
                 // Ensure that the update ID and target component are correct.
                 if chunk.id != *id || chunk.component != *component {
                     return Err(SpError::InvalidUpdateId { sp_update_id: *id });
@@ -84,10 +105,17 @@ impl SimSpUpdate {
                 if data.position() == data.get_ref().len() as u64 {
                     let mut stolen = Cursor::new(Box::default());
                     mem::swap(data, &mut stolen);
+                    let data = stolen.into_inner();
+
+                    if *component == SpComponent::HOST_CPU_BOOT_FLASH {
+                        self.last_host_phase1_update_data
+                            .insert(*slot, data.clone());
+                    }
+
                     self.state = UpdateState::Completed {
                         component: *component,
                         id: *id,
-                        data: stolen.into_inner(),
+                        data,
                     };
                 }
 
@@ -150,6 +178,17 @@ impl SimSpUpdate {
     pub(crate) fn last_rot_update_data(&self) -> Option<Box<[u8]>> {
         self.last_rot_update_data.clone()
     }
+
+    pub(crate) fn last_host_phase1_update_data(
+        &self,
+        slot: u16,
+    ) -> Option<Box<[u8]>> {
+        self.last_host_phase1_update_data.get(&slot).cloned()
+    }
+
+    pub(crate) fn set_active_host_slot(&mut self, slot: u16) {
+        self.active_host_slot = Some(slot);
+    }
 }
 
 enum UpdateState {
@@ -157,6 +196,7 @@ enum UpdateState {
     Prepared {
         component: SpComponent,
         id: UpdateId,
+        slot: u16,
         // data would ordinarily be a Cursor<Vec<u8>>, but that can grow and
         // reallocate. We want to ensure that we don't receive any more data
         // than originally promised, so use a Cursor<Box<[u8]>> to ensure that

@@ -90,11 +90,7 @@ impl SpUpdater {
         client: &gateway_client::Client,
     ) -> Result<(), GatewayClientError> {
         client
-            .sp_component_reset(
-                self.sp_type,
-                self.sp_slot,
-                SpComponent::SP_ITSELF.const_as_str(),
-            )
+            .sp_component_reset(self.sp_type, self.sp_slot, self.component())
             .await?;
 
         self.progress.send_replace(Some(UpdateProgress::Complete));

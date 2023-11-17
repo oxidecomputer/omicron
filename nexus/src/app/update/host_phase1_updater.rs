@@ -9,11 +9,14 @@ use super::common_sp_update::SpComponentUpdater;
 use super::MgsClients;
 use super::SpComponentUpdateError;
 use super::UpdateProgress;
+use gateway_client::types::SpComponentFirmwareSlot;
 use gateway_client::types::SpType;
 use gateway_client::SpComponent;
 use slog::Logger;
 use tokio::sync::watch;
 use uuid::Uuid;
+
+type GatewayClientError = gateway_client::Error<gateway_client::types::Error>;
 
 pub struct HostPhase1Updater {
     log: Logger,
@@ -69,13 +72,71 @@ impl HostPhase1Updater {
         mut self,
         mgs_clients: &mut MgsClients,
     ) -> Result<(), SpComponentUpdateError> {
+        // The async block below wants a `&self` reference, but we take `self`
+        // for API clarity (to start a new update, the caller should construct a
+        // new instance of the updater). Create a `&self` ref that we use
+        // through the remainder of this method.
+        let me = &self;
+
+        // Prior to delivering the update, ensure the correct target slot is
+        // activated.
+        //
+        // TODO-correctness Should we be doing this, or should a higher level
+        // executor set this up before calling us?
+        mgs_clients
+            .try_all(&self.log, |client| async move {
+                me.mark_target_slot_active(&client).await
+            })
+            .await?;
+
         // Deliver and drive the update to completion
         deliver_update(&mut self, mgs_clients).await?;
+
+        // Unlike SP and RoT updates, we have nothing to do after delivery of
+        // the update completes; signal to any watchers that we're done.
+        self.progress.send_replace(Some(UpdateProgress::Complete));
 
         // wait for any progress watchers to be dropped before we return;
         // otherwise, they'll get `RecvError`s when trying to check the current
         // status
         self.progress.closed().await;
+
+        Ok(())
+    }
+
+    async fn mark_target_slot_active(
+        &self,
+        client: &gateway_client::Client,
+    ) -> Result<(), GatewayClientError> {
+        // TODO-correctness Should we always persist this choice?
+        let persist = true;
+
+        let slot = self.firmware_slot();
+
+        // TODO-correctness Until
+        // https://github.com/oxidecomputer/hubris/issues/1172 is fixed, the
+        // host must be in A2 for this operation to succeed. After it is fixed,
+        // there will still be a window while a host is booting where this
+        // operation can fail. How do we handle this?
+        client
+            .sp_component_active_slot_set(
+                self.sp_type,
+                self.sp_slot,
+                self.component(),
+                persist,
+                &SpComponentFirmwareSlot { slot },
+            )
+            .await?;
+
+        // TODO-correctness Should we send some kind of update to
+        // `self.progress`? We haven't actually started delivering an update
+        // yet, but it seems weird to give no indication that we have
+        // successfully (potentially) modified the state of the target sled.
+
+        info!(
+            self.log, "host phase1 target slot marked active";
+            "mgs_addr" => client.baseurl(),
+        );
 
         Ok(())
     }
