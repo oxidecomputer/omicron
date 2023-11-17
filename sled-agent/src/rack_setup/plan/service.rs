@@ -236,40 +236,12 @@ impl Plan {
         Ok(u2_zpools)
     }
 
-    pub async fn create(
-        log: &Logger,
+    pub fn create_transient(
         config: &Config,
-        storage: &StorageResources,
-        sleds: &HashMap<SocketAddrV6, StartSledAgentRequest>,
+        mut sled_info: Vec<SledInfo>,
     ) -> Result<Self, PlanError> {
         let mut dns_builder = internal_dns::DnsConfigBuilder::new();
         let mut svc_port_builder = ServicePortBuilder::new(config);
-
-        // Load the information we need about each Sled to be able to allocate
-        // components on it.
-        let mut sled_info = {
-            let result: Result<Vec<SledInfo>, PlanError> =
-                futures::future::try_join_all(sleds.values().map(
-                    |sled_request| async {
-                        let subnet = sled_request.subnet;
-                        let sled_address = get_sled_address(subnet);
-                        let u2_zpools =
-                            Self::get_u2_zpools_from_sled(log, sled_address)
-                                .await?;
-                        let is_scrimlet =
-                            Self::is_sled_scrimlet(log, sled_address).await?;
-                        Ok(SledInfo::new(
-                            sled_request.id,
-                            subnet,
-                            sled_address,
-                            u2_zpools,
-                            is_scrimlet,
-                        ))
-                    },
-                ))
-                .await;
-            result?
-        };
 
         // Scrimlets get DNS records for running Dendrite.
         let scrimlets: Vec<_> =
@@ -681,7 +653,42 @@ impl Plan {
             .collect();
 
         let dns_config = dns_builder.build();
-        let plan = Self { services, dns_config };
+        Ok(Self { services, dns_config })
+    }
+
+    pub async fn create(
+        log: &Logger,
+        config: &Config,
+        storage: &StorageResources,
+        sleds: &HashMap<SocketAddrV6, StartSledAgentRequest>,
+    ) -> Result<Self, PlanError> {
+        // Load the information we need about each Sled to be able to allocate
+        // components on it.
+        let sled_info = {
+            let result: Result<Vec<SledInfo>, PlanError> =
+                futures::future::try_join_all(sleds.values().map(
+                    |sled_request| async {
+                        let subnet = sled_request.subnet;
+                        let sled_address = get_sled_address(subnet);
+                        let u2_zpools =
+                            Self::get_u2_zpools_from_sled(log, sled_address)
+                                .await?;
+                        let is_scrimlet =
+                            Self::is_sled_scrimlet(log, sled_address).await?;
+                        Ok(SledInfo::new(
+                            sled_request.id,
+                            subnet,
+                            sled_address,
+                            u2_zpools,
+                            is_scrimlet,
+                        ))
+                    },
+                ))
+                .await;
+            result?
+        };
+
+        let plan = Self::create_transient(config, sled_info)?;
 
         // Once we've constructed a plan, write it down to durable storage.
         let paths: Vec<Utf8PathBuf> = storage
@@ -718,13 +725,13 @@ impl AddressBumpAllocator {
 }
 
 /// Wraps up the information used to allocate components to a Sled
-struct SledInfo {
+pub struct SledInfo {
     /// unique id for the sled agent
-    sled_id: Uuid,
+    pub sled_id: Uuid,
     /// the sled's unique IPv6 subnet
     subnet: Ipv6Subnet<SLED_PREFIX>,
     /// the address of the Sled Agent on the sled's subnet
-    sled_address: SocketAddrV6,
+    pub sled_address: SocketAddrV6,
     /// the list of zpools on the Sled
     u2_zpools: Vec<ZpoolName>,
     /// spreads components across a Sled's zpools
@@ -739,7 +746,7 @@ struct SledInfo {
 }
 
 impl SledInfo {
-    fn new(
+    pub fn new(
         sled_id: Uuid,
         subnet: Ipv6Subnet<SLED_PREFIX>,
         sled_address: SocketAddrV6,

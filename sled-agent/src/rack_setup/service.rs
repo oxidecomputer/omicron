@@ -350,78 +350,6 @@ impl ServiceInner {
         Ok(())
     }
 
-    // Given a service plan (which describes all the zones that we want to
-    // deploy to all sleds), generate configurations for each sled for the very
-    // first config version that includes only the zones from the service plan
-    // matching `zone_filter`.  This is used to deploy the Internal DNS zones
-    // before all the other zones.
-    // XXX-dap TODO-coverage
-    fn generate_initial_omicron_zone_configs(
-        version: Generation,
-        service_plan: &ServicePlan,
-        zone_filter: &(dyn Fn(&OmicronZoneType) -> bool + Send + Sync),
-    ) -> HashMap<SocketAddrV6, OmicronZonesConfig> {
-        service_plan
-            .services
-            .iter()
-            .map(|(sled_address, sled_config)| {
-                let zones: Vec<_> = sled_config
-                    .zones
-                    .iter()
-                    .filter(|z| zone_filter(&z.zone_type))
-                    .cloned()
-                    .collect();
-                let config = OmicronZonesConfig { version, zones };
-                (*sled_address, config)
-            })
-            .collect()
-    }
-
-    // Given a service plan (which describes all the zones that we want to
-    // deploy to all sleds) and a set of configurations for each sled, generate
-    // a new configuration for each sled that adds all zones from the service
-    // plan matching `zone_filter`.  The new configurations all have version
-    // `version`, which must be newer than the input configurations.  This is
-    // used to deploy a new round of Omicron zones while leaving existing zones
-    // intact.  See the caller for more context.
-    // XXX-dap TODO-coverage
-    fn augment_omicron_zone_configs(
-        version: Generation,
-        service_plan: &ServicePlan,
-        last_configs: &HashMap<SocketAddrV6, OmicronZonesConfig>,
-        zone_filter: &(dyn Fn(&OmicronZoneType) -> bool + Send + Sync),
-    ) -> HashMap<SocketAddrV6, OmicronZonesConfig> {
-        service_plan
-            .services
-            .iter()
-            .map(|(sled_address, sled_config)| {
-                let mut zones = match last_configs.get(sled_address) {
-                    Some(config) => {
-                        assert!(version > config.version);
-                        config.zones.clone()
-                    }
-                    None => Vec::new(),
-                };
-
-                let zones_already =
-                    zones.iter().map(|z| z.id).collect::<HashSet<_>>();
-                zones.extend(
-                    sled_config
-                        .zones
-                        .iter()
-                        .filter(|z| {
-                            !zones_already.contains(&z.id)
-                                && zone_filter(&z.zone_type)
-                        })
-                        .cloned(),
-                );
-
-                let config = OmicronZonesConfig { version, zones };
-                (*sled_address, config)
-            })
-            .collect()
-    }
-
     // Configure the internal DNS servers with the initial DNS data
     async fn initialize_internal_dns_records(
         &self,
@@ -1049,14 +977,17 @@ impl ServiceInner {
 
         // Set up internal DNS services first and write the initial
         // DNS configuration to the internal DNS servers.
-        let v2configs = Self::generate_initial_omicron_zone_configs(
-            version2_dns_only,
+        let v1generator = OmicronZonesConfigGenerator::initial_version(
             &service_plan,
+            version1_nothing,
+        );
+        let v2generator = v1generator.new_version_with(
+            version2_dns_only,
             &|zone_type: &OmicronZoneType| {
                 matches!(zone_type, OmicronZoneType::InternalDns { .. })
             },
         );
-        self.ensure_zone_config_at_least(&v2configs).await?;
+        self.ensure_zone_config_at_least(v2generator.sled_configs()).await?;
         self.initialize_internal_dns_records(&service_plan).await?;
 
         // Ask MGS in each switch zone which switch it is.
@@ -1065,10 +996,8 @@ impl ServiceInner {
             .await;
 
         // Next start up the NTP services.
-        let v3configs = Self::augment_omicron_zone_configs(
+        let v3generator = v2generator.new_version_with(
             version3_dns_and_ntp,
-            &service_plan,
-            &v2configs,
             &|zone_type: &OmicronZoneType| {
                 matches!(
                     zone_type,
@@ -1077,7 +1006,7 @@ impl ServiceInner {
                 )
             },
         );
-        self.ensure_zone_config_at_least(&v3configs).await?;
+        self.ensure_zone_config_at_least(&v3generator.sled_configs()).await?;
 
         // Wait until time is synchronized on all sleds before proceeding.
         self.wait_for_timesync(&sled_addresses).await?;
@@ -1085,28 +1014,22 @@ impl ServiceInner {
         info!(self.log, "Finished setting up Internal DNS and NTP");
 
         // Wait until Cockroach has been initialized before running Nexus.
-        let v4configs = Self::augment_omicron_zone_configs(
+        let v4generator = v3generator.new_version_with(
             version4_cockroachdb,
-            &service_plan,
-            &v3configs,
             &|zone_type: &OmicronZoneType| {
                 matches!(zone_type, OmicronZoneType::CockroachDb { .. })
             },
         );
-        self.ensure_zone_config_at_least(&v4configs).await?;
+        self.ensure_zone_config_at_least(&v4generator.sled_configs()).await?;
 
         // Now that datasets and zones have started for CockroachDB,
         // perform one-time initialization of the cluster.
         self.initialize_cockroach(&service_plan).await?;
 
         // Issue the rest of the zone initialization requests.
-        let v5configs = Self::augment_omicron_zone_configs(
-            version5_everything,
-            &service_plan,
-            &v4configs,
-            &|_| true,
-        );
-        self.ensure_zone_config_at_least(&v5configs).await?;
+        let v5generator =
+            v4generator.new_version_with(version5_everything, &|_| true);
+        self.ensure_zone_config_at_least(&v5generator.sled_configs()).await?;
 
         info!(self.log, "Finished setting up services");
 
@@ -1137,5 +1060,274 @@ impl ServiceInner {
         // it get a /64?
 
         Ok(())
+    }
+}
+
+/// Facilitates creating a sequence of OmicronZonesConfig objects for each sled
+/// in a service plan to enable phased rollout of services
+///
+/// The service plan itself defines which zones should appear on every sled.
+/// However, we want to deploy these zones in phases: first internal DNS, then
+/// NTP, then CockroachDB, etc.  This interface generates sled configs for each
+/// phase and enforces that:
+///
+/// - each version includes all zones deployed in the previous iteration
+/// - each sled's version number increases with each iteration
+///
+struct OmicronZonesConfigGenerator<'a> {
+    service_plan: &'a ServicePlan,
+    last_configs: HashMap<SocketAddrV6, OmicronZonesConfig>,
+}
+
+impl<'a> OmicronZonesConfigGenerator<'a> {
+    /// Make a set of sled configurations for an initial version where each sled
+    /// has nothing deployed on it
+    fn initial_version(
+        service_plan: &'a ServicePlan,
+        initial_version: Generation,
+    ) -> Self {
+        let last_configs = service_plan
+            .services
+            .keys()
+            .map(|sled_address| {
+                (
+                    *sled_address,
+                    OmicronZonesConfig {
+                        version: initial_version,
+                        zones: vec![],
+                    },
+                )
+            })
+            .collect();
+        Self { service_plan, last_configs }
+    }
+
+    /// Returns the set of sled configurations produced for this version
+    fn sled_configs(&self) -> &HashMap<SocketAddrV6, OmicronZonesConfig> {
+        &self.last_configs
+    }
+
+    /// Produces a new set of configs for each sled based on the current set of
+    /// configurations, adding zones from the service plan matching
+    /// `zone_filter`.
+    ///
+    /// # Panics
+    ///
+    /// If `version` is not larger than the current version
+    fn new_version_with(
+        self,
+        version: Generation,
+        zone_filter: &(dyn Fn(&OmicronZoneType) -> bool + Send + Sync),
+    ) -> OmicronZonesConfigGenerator<'a> {
+        let last_configs = self
+            .service_plan
+            .services
+            .iter()
+            .map(|(sled_address, sled_config)| {
+                let mut zones = match self.last_configs.get(sled_address) {
+                    Some(config) => {
+                        assert!(version > config.version);
+                        config.zones.clone()
+                    }
+                    None => Vec::new(),
+                };
+
+                let zones_already =
+                    zones.iter().map(|z| z.id).collect::<HashSet<_>>();
+                zones.extend(
+                    sled_config
+                        .zones
+                        .iter()
+                        .filter(|z| {
+                            !zones_already.contains(&z.id)
+                                && zone_filter(&z.zone_type)
+                        })
+                        .cloned(),
+                );
+
+                let config = OmicronZonesConfig { version, zones };
+                (*sled_address, config)
+            })
+            .collect();
+        Self { service_plan: self.service_plan, last_configs }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::OmicronZonesConfigGenerator;
+    use crate::{
+        params::OmicronZoneType,
+        rack_setup::plan::service::{Plan as ServicePlan, SledInfo},
+    };
+    use illumos_utils::zpool::ZpoolName;
+    use omicron_common::{address::Ipv6Subnet, api::external::Generation};
+
+    fn make_test_service_plan() -> ServicePlan {
+        let rss_config = crate::bootstrap::params::test_config();
+        let fake_sleds = vec![
+            SledInfo::new(
+                "d4ba4bbe-8542-4907-bc8f-48df53eb5089".parse().unwrap(),
+                Ipv6Subnet::new("fd00:1122:3344:101::1".parse().unwrap()),
+                "[fd00:1122:3344:101::1]:80".parse().unwrap(),
+                vec![
+                    ZpoolName::new_internal(
+                        "c5885278-0ae2-4f1e-9223-07f2ada818e1".parse().unwrap(),
+                    ),
+                    ZpoolName::new_internal(
+                        "57465977-8275-43aa-a320-b6cd5cb20ca6".parse().unwrap(),
+                    ),
+                    ZpoolName::new_external(
+                        "886f9fe7-bf70-4ddd-ae92-764dc3ed14ab".parse().unwrap(),
+                    ),
+                    ZpoolName::new_external(
+                        "4c9061b1-345b-4985-8cbd-a2a899f15b68".parse().unwrap(),
+                    ),
+                    ZpoolName::new_external(
+                        "b2bd488e-b187-42a0-b157-9ab0f70d91a8".parse().unwrap(),
+                    ),
+                ],
+                true,
+            ),
+            SledInfo::new(
+                "b4359dea-665d-41ca-a681-f55912f2d5d0".parse().unwrap(),
+                Ipv6Subnet::new("fd00:1122:3344:102::1".parse().unwrap()),
+                "[fd00:1122:3344:102::1]:80".parse().unwrap(),
+                vec![
+                    ZpoolName::new_internal(
+                        "34d6b5e5-a09f-4e96-a599-fa306ce6d983".parse().unwrap(),
+                    ),
+                    ZpoolName::new_internal(
+                        "e9b8d1ea-da29-4b61-a493-c0ed319098da".parse().unwrap(),
+                    ),
+                    ZpoolName::new_external(
+                        "37f8e903-2adb-4613-b78c-198122c289f0".parse().unwrap(),
+                    ),
+                    ZpoolName::new_external(
+                        "b50f787c-97b3-4b91-a5bd-99d11fc86fb8".parse().unwrap(),
+                    ),
+                    ZpoolName::new_external(
+                        "809e50c8-930e-413a-950c-69a540b688e2".parse().unwrap(),
+                    ),
+                ],
+                true,
+            ),
+        ];
+        let service_plan =
+            ServicePlan::create_transient(&rss_config, fake_sleds)
+                .expect("failed to create service plan");
+
+        service_plan
+    }
+
+    #[test]
+    fn test_omicron_zone_configs() {
+        let service_plan = make_test_service_plan();
+
+        // Verify the initial state.
+        let g1 = Generation::new();
+        let v1 =
+            OmicronZonesConfigGenerator::initial_version(&service_plan, g1);
+        assert_eq!(
+            service_plan.services.keys().len(),
+            v1.sled_configs().keys().len()
+        );
+        for (_, configs) in v1.sled_configs() {
+            assert_eq!(configs.version, g1);
+            assert!(configs.zones.is_empty());
+        }
+
+        // Verify that we can add a bunch of zones of a given type.
+        let g2 = g1.next();
+        let v2 = v1.new_version_with(g2, &|zone_type| {
+            matches!(zone_type, OmicronZoneType::InternalDns { .. })
+        });
+        let mut v2_nfound = 0;
+        for (_, config) in v2.sled_configs() {
+            assert_eq!(config.version, g2);
+            v2_nfound += config.zones.len();
+            for z in &config.zones {
+                // The only zones we should find are the Internal DNS ones.
+                assert!(matches!(
+                    &z.zone_type,
+                    OmicronZoneType::InternalDns { .. }
+                ));
+            }
+        }
+        // There should have been at least one InternalDns zone.
+        assert!(v2_nfound > 0);
+
+        // Try again to add zones of the same type.  This should be a no-op.
+        let g3 = g2.next();
+        let v3 = v2.new_version_with(g3, &|zone_type| {
+            matches!(zone_type, OmicronZoneType::InternalDns { .. })
+        });
+        let mut v3_nfound = 0;
+        for (_, config) in v3.sled_configs() {
+            assert_eq!(config.version, g3);
+            v3_nfound += config.zones.len();
+            for z in &config.zones {
+                // The only zones we should find are the Internal DNS ones.
+                assert!(matches!(
+                    &z.zone_type,
+                    OmicronZoneType::InternalDns { .. }
+                ));
+            }
+        }
+        assert_eq!(v2_nfound, v3_nfound);
+
+        // Now try adding zones of a different type.  We should still have all
+        // the Internal DNS ones, plus a few more.
+        let g4 = g3.next();
+        let v4 = v3.new_version_with(g4, &|zone_type| {
+            matches!(zone_type, OmicronZoneType::Nexus { .. })
+        });
+        let mut v4_nfound_dns = 0;
+        let mut v4_nfound = 0;
+        for (_, config) in v4.sled_configs() {
+            assert_eq!(config.version, g4);
+            v4_nfound += config.zones.len();
+            for z in &config.zones {
+                match &z.zone_type {
+                    OmicronZoneType::InternalDns { .. } => v4_nfound_dns += 1,
+                    OmicronZoneType::Nexus { .. } => (),
+                    _ => panic!("unexpectedly found a wrong zone type"),
+                }
+            }
+        }
+        assert_eq!(v4_nfound_dns, v3_nfound);
+        assert!(v4_nfound > v3_nfound);
+
+        // Now try adding zones that match no filter.  Again, this should be a
+        // no-op but we should still have all the same zones we had before.
+        let g5 = g4.next();
+        let v5 = v4.new_version_with(g5, &|_| false);
+        let mut v5_nfound = 0;
+        for (_, config) in v5.sled_configs() {
+            assert_eq!(config.version, g5);
+            v5_nfound += config.zones.len();
+            for z in &config.zones {
+                assert!(matches!(
+                    &z.zone_type,
+                    OmicronZoneType::InternalDns { .. }
+                        | OmicronZoneType::Nexus { .. }
+                ));
+            }
+        }
+        assert_eq!(v4_nfound, v5_nfound);
+
+        // Finally, try adding the rest of the zones.
+        let g6 = g5.next();
+        let v6 = v5.new_version_with(g6, &|_| true);
+        let mut v6_nfound = 0;
+        for (sled_address, config) in v6.sled_configs() {
+            assert_eq!(config.version, g6);
+            v6_nfound += config.zones.len();
+            assert_eq!(
+                config.zones.len(),
+                service_plan.services.get(sled_address).unwrap().zones.len()
+            );
+        }
+        assert!(v6_nfound > v5_nfound);
     }
 }
