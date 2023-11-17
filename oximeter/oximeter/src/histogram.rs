@@ -1353,13 +1353,10 @@ mod tests {
     }
 
     #[test]
-    fn test_foo() {
-        let bins: Vec<f64> = 10u16.bins(1, 3, 30.try_into().unwrap()).unwrap();
-        println!("{bins:?}");
-        dbg!(bins.len());
-        let hist = Histogram::new(&bins).unwrap();
-        for bin in hist.iter() {
-            println!("{}", bin.range);
-        }
+    fn test_empty_bins_not_supported() {
+        assert!(matches!(
+            Histogram::<u64>::new(&[]).unwrap_err(),
+            HistogramError::EmptyBins
+        ));
     }
 }
