@@ -8,7 +8,6 @@ use nexus_db_queries::db;
 use omicron_common::update::ArtifactsDocument;
 use std::convert::TryInto;
 
-// TODO(iliana): make async/.await. awslabs/tough#213
 pub(crate) async fn read_artifacts(
     trusted_root: &[u8],
     mut base_url: String,
