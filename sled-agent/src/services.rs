@@ -223,6 +223,9 @@ pub enum Error {
     #[error("Requested version ({0}) is older than current ({0})")]
     RequestedConfigOutdated(Generation, Generation),
 
+    #[error("Requested version {0} with different zones than before")]
+    RequestedConfigConflicts(Generation),
+
     #[error("Error migrating old-format services ledger")]
     ServicesMigration(anyhow::Error),
 }
@@ -239,6 +242,12 @@ impl Error {
 impl From<Error> for omicron_common::api::external::Error {
     fn from(err: Error) -> Self {
         match err {
+            err @ Error::RequestedConfigConflicts(_) => {
+                omicron_common::api::external::Error::invalid_request(&format!(
+                    "{:#}",
+                    err
+                ))
+            }
             err @ Error::RequestedConfigOutdated(_, _) => {
                 omicron_common::api::external::Error::conflict(&format!(
                     "{:#}",
@@ -2633,7 +2642,7 @@ impl ServiceManager {
                 log,
                 zone_ledger_paths.clone(),
                 OmicronZonesConfigLocal {
-                    omicron_version: request.version,
+                    omicron_version: Generation::new(),
                     ledger_version: Generation::new(),
                     zones: vec![],
                 },
@@ -2641,11 +2650,26 @@ impl ServiceManager {
         };
 
         let ledger_zone_config = ledger.data_mut();
+        debug!(log, "ensure_all_omicron_zones_persistent";
+            "request_version" => request.version.to_string(),
+            "ledger_version" => ledger_zone_config.omicron_version.to_string(),
+        );
+
+        // Absolutely refuse to downgrade the configuration.
         if ledger_zone_config.omicron_version > request.version {
             return Err(Error::RequestedConfigOutdated(
                 request.version,
                 ledger_zone_config.omicron_version,
             ));
+        }
+
+        // If the version is the same as what we're running, but the contents
+        // aren't, that's a problem, too.
+        if ledger_zone_config.omicron_version == request.version
+            && ledger_zone_config.clone().to_omicron_zones_config().zones
+                != request.zones
+        {
+            return Err(Error::RequestedConfigConflicts(request.version));
         }
 
         let new_config = self
@@ -3587,12 +3611,16 @@ mod test {
     }
 
     // Prepare to call "ensure" for a new service, then actually call "ensure".
-    async fn ensure_new_service(mgr: &ServiceManager, id: Uuid) {
+    async fn ensure_new_service(
+        mgr: &ServiceManager,
+        id: Uuid,
+        version: Generation,
+    ) {
         let _expectations = expect_new_service();
         let address =
             SocketAddrV6::new(Ipv6Addr::LOCALHOST, OXIMETER_PORT, 0, 0);
         mgr.ensure_all_omicron_zones_persistent(OmicronZonesConfig {
-            version: Generation::new().next(),
+            version,
             zones: vec![OmicronZoneConfig {
                 id,
                 underlay_address: Ipv6Addr::LOCALHOST,
@@ -3605,11 +3633,15 @@ mod test {
 
     // Prepare to call "ensure" for a service which already exists. We should
     // return the service without actually installing a new zone.
-    async fn ensure_existing_service(mgr: &ServiceManager, id: Uuid) {
+    async fn ensure_existing_service(
+        mgr: &ServiceManager,
+        id: Uuid,
+        version: Generation,
+    ) {
         let address =
             SocketAddrV6::new(Ipv6Addr::LOCALHOST, OXIMETER_PORT, 0, 0);
         mgr.ensure_all_omicron_zones_persistent(OmicronZonesConfig {
-            version: Generation::new().next(),
+            version,
             zones: vec![OmicronZoneConfig {
                 id,
                 underlay_address: Ipv6Addr::LOCALHOST,
@@ -3735,7 +3767,7 @@ mod test {
         .unwrap();
 
         let id = Uuid::new_v4();
-        ensure_new_service(&mgr, id).await;
+        ensure_new_service(&mgr, id, Generation::new().next()).await;
         drop_service_manager(mgr);
 
         logctx.cleanup_successful();
@@ -3783,8 +3815,9 @@ mod test {
         .unwrap();
 
         let id = Uuid::new_v4();
-        ensure_new_service(&mgr, id).await;
-        ensure_existing_service(&mgr, id).await;
+        let v = Generation::new().next();
+        ensure_new_service(&mgr, id, v).await;
+        ensure_existing_service(&mgr, id, v).await;
         drop_service_manager(mgr);
 
         logctx.cleanup_successful();
@@ -3836,7 +3869,7 @@ mod test {
         .unwrap();
 
         let id = Uuid::new_v4();
-        ensure_new_service(&mgr, id).await;
+        ensure_new_service(&mgr, id, Generation::new().next()).await;
         drop_service_manager(mgr);
 
         // Before we re-create the service manager - notably, using the same
@@ -3919,7 +3952,7 @@ mod test {
         .unwrap();
 
         let id = Uuid::new_v4();
-        ensure_new_service(&mgr, id).await;
+        ensure_new_service(&mgr, id, Generation::new().next()).await;
         drop_service_manager(mgr);
 
         // Next, delete the ledger. This means the zone we just created will not
