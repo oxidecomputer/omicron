@@ -95,6 +95,8 @@ impl AsRef<str> for DumpContentType {
     }
 }
 
+/// Invokes `dumpadm(8)` to configure the kernel to dump core into the given
+/// `dump_slice` block device in the event of a panic.
 pub struct DumpAdm {
     cmd: Command,
     content_type: Option<DumpContentType>,
@@ -102,8 +104,6 @@ pub struct DumpAdm {
     savecore_dir: Utf8PathBuf,
 }
 
-/// Invokes `dumpadm(8)` to configure the kernel to dump core into the given
-/// `dump_slice` block device in the event of a panic.
 impl DumpAdm {
     pub fn new(dump_slice: Utf8PathBuf, savecore_dir: Utf8PathBuf) -> Self {
         let mut cmd = Command::new(DUMPADM);
@@ -137,24 +137,28 @@ impl DumpAdm {
     }
 }
 
-/// Invokes savecore(8) according to the system-wide config set by dumpadm.
-/// savecore(8) creates a file in the savecore directory called `vmdump.<n>`,
-/// where `<n>` is the number in the neighboring plaintext file called `bounds`,
-/// or 0 if the file doesn't exist.
-/// If savecore(8) successfully copies the data from the dump slice to the
-/// vmdump file, it clears the "valid" flag in the dump slice's header and
-/// increments the number in `bounds` by 1.
-/// In the event that savecore(8) terminates before it finishes copying the
-/// dump, the incomplete dump will remain in the target directory, but the next
-/// invocation will overwrite it, because `bounds` wasn't created/incremented.
-pub fn savecore() -> Result<Option<OsString>, ExecutionError> {
-    let mut cmd = Command::new(SAVECORE);
-    cmd.env_clear();
-    cmd.arg("-v");
-    let out = execute(&mut cmd)?;
-    if out.stdout.is_empty() || out.stdout == vec![b'\n'] {
-        Ok(None)
-    } else {
-        Ok(Some(OsString::from_vec(out.stdout)))
+pub struct SaveCore;
+
+impl SaveCore {
+    /// Invokes savecore(8) according to the system-wide config set by dumpadm.
+    /// savecore(8) creates a file in the savecore directory called `vmdump.<n>`,
+    /// where `<n>` is the number in the neighboring plaintext file called `bounds`,
+    /// or 0 if the file doesn't exist.
+    /// If savecore(8) successfully copies the data from the dump slice to the
+    /// vmdump file, it clears the "valid" flag in the dump slice's header and
+    /// increments the number in `bounds` by 1.
+    /// In the event that savecore(8) terminates before it finishes copying the
+    /// dump, the incomplete dump will remain in the target directory, but the next
+    /// invocation will overwrite it, because `bounds` wasn't created/incremented.
+    pub fn execute(&self) -> Result<Option<OsString>, ExecutionError> {
+        let mut cmd = Command::new(SAVECORE);
+        cmd.env_clear();
+        cmd.arg("-v");
+        let out = execute(&mut cmd)?;
+        if out.stdout.is_empty() || out.stdout == vec![b'\n'] {
+            Ok(None)
+        } else {
+            Ok(Some(OsString::from_vec(out.stdout)))
+        }
     }
 }

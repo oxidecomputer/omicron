@@ -1,3 +1,87 @@
+//! This module is responsible for moving debug info (kernel crash dumps,
+//! userspace process core dumps, and rotated logs) onto external drives for
+//! perusal/archival, and to prevent internal drives from filling up.
+//! (For background on the paths and datasets being used, see RFD 118)
+//!
+//! The behaviors documented below describe current behavior, but are not
+//! necessarily a long-term guarantee, and details may be subject to change.
+//!
+//! ## Choice of destination external drive for archived logs and dumps
+//! As zpools on external (U.2) drives come online, their proportion of space
+//! used is checked, any that are over 70% are skipped, and of the remaining
+//! candidates the one with the *most* content is designated as the target onto
+//! which diagnostic files will be archived every 5 minutes.
+//!
+//! If *all* drives are over 70% utilization, the one with the oldest average
+//! file modification time is chosen for cleanup, wherein its oldest archived
+//! file are removed until the space used is under the 70% threshold again.
+//!
+//! If the chosen drive eventually exceeds 80% of its capacity used, then a
+//! different drive is chosen by the same algorithm.
+//!
+//! ## Kernel crash dumps
+//! As internal (M.2) drives are discovered, their designated dump slices are
+//! checked for the presence of a previous kernel crash dump that hasn't been
+//! archived. If a dump is present that has not yet been archived, and an
+//! external debug directory has been chosen, `savecore(8)` is invoked to save
+//! the dump slice's contents there and mark the slice as processed.
+//!
+//! If an active dump slice (into which the running kernel should dump) has not
+//! yet been designated, and the slice being observed was either successfully
+//! archived or vacant to begin with, that slice is configured as the running
+//! system's dump slice with `dumpadm(8)`.
+//!
+//! If no vacant slices are available and no external volume is online with
+//! sufficient free space to serve as a `savecore(8)` destination, we simply
+//! do not configure a dump slice, preferring to preserve evidence of the
+//! original root cause of an issue rather than overwriting it with confounding
+//! variables (in the event adjacent systems begin behaving erratically due to
+//! the initial failure).
+//! In this event, as soon as an external drive becomes available to archive
+//! one or all of the occupied dump slices' contents, the golden-path procedure
+//! detailed above occurs and a dump slice is configured.
+//!
+//! ## Process core dumps
+//! As zpools on internal (M.2) drives come online, the first one seen by the
+//! poll loop is chosen to be the destination of process cores in all zones:
+//! ```text
+//!     /pool/int/*/crash/core.[zone-name].[exe-filename].[pid].[time]
+//! ```
+//!
+//! For reference, at time of writing, the invocation of coreadm(8) looks like:
+//! ```sh
+//!     coreadm \
+//!       -d process -d proc-setid \
+//!       -e global -e global-setid \
+//!       -g "/pool/int/${CHOSEN_ZFS}/crash/core.%z.%f.%p.%t" \
+//!       -G default+debug
+//! ```
+//!
+//! Every 5 minutes, all core files found on internal drives are moved to the
+//! DUMP_DATASET of the (similarly chosen) removable U.2 drive, like so:
+//! ```text
+//!     /pool/int/*/crash/core.global.sled-agent.101.34784217
+//!         -> /pool/ext/*/crypt/debug/core.global.sled-agent.101.34784217
+//! ```
+//!
+//! ## Log rotation and archival
+//! Every 5 minutes, each log that logadm(8) has rotated (in every zone) gets
+//! archived into the DUMP_DATASET of the chosen U.2, with the suffixed
+//! number replaced by the modified timestamp, like so:
+//! ```text
+//!     /var/svc/log/foo.log.0
+//!         -> /pool/ext/*/crypt/debug/global/foo.log.34784217
+//!     /pool/int/*/crypt/zone/oxz_bar/root/var/svc/log/baz.log.0
+//!         -> /pool/ext/*/crypt/debug/oxz_bar/baz.log.34784217
+//! ```
+//!
+//! If the log file's modified time is unavailable or invalid, we fall back to
+//! the time of archival, and if that fails, we simply count up from 0.
+//!
+//! In the event of filename collisions (i.e. several instances of a service's
+//! rotated log files having the same modified time to the second), the
+//! number is incremented by 1 until no conflict remains.
+
 use camino::Utf8PathBuf;
 use derive_more::{AsRef, From};
 use illumos_utils::coreadm::{CoreAdm, CoreFileOption};
@@ -351,7 +435,7 @@ impl CoreDumpAdmInvoker for RealCoreDumpAdm {
             if let Ok(true) =
                 illumos_utils::dumpadm::dump_flag_is_valid(dump_slice)
             {
-                return illumos_utils::dumpadm::savecore();
+                return illumos_utils::dumpadm::SaveCore.execute();
             }
         }
         Ok(None)
@@ -961,12 +1045,12 @@ struct CleanupDirInfo {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
     use super::*;
     use illumos_utils::dumpadm::{
         DF_VALID, DUMP_MAGIC, DUMP_OFFSET, DUMP_VERSION,
     };
     use sled_storage::dataset::{CRASH_DATASET, DUMP_DATASET};
+    use std::collections::HashMap;
     use std::io::Write;
     use std::str::FromStr;
     use tempfile::TempDir;
