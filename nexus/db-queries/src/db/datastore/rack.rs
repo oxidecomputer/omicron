@@ -41,6 +41,7 @@ use nexus_db_model::InitialDnsGroup;
 use nexus_db_model::PasswordHashString;
 use nexus_db_model::SiloUser;
 use nexus_db_model::SiloUserPasswordHash;
+use nexus_db_model::SledUnderlaySubnetAllocation;
 use nexus_types::external_api::params as external_params;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::IdentityType;
@@ -211,6 +212,63 @@ impl DataStore {
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
+        Ok(())
+    }
+
+    // Return the subnet for the rack
+    pub async fn rack_subnet(
+        &self,
+        opctx: &OpContext,
+        rack_id: Uuid,
+    ) -> Result<IpNetwork, Error> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        use db::schema::rack::dsl;
+        // It's safe to unwrap the returned `rack_subnet` because
+        // we filter on `rack_subnet.is_not_null()`
+        dsl::rack
+            .filter(dsl::id.eq(rack_id))
+            .filter(dsl::rack_subnet.is_not_null())
+            .select(dsl::rack_subnet)
+            .limit(1)
+            .first_async::<Option<IpNetwork>>(&*conn)
+            .await
+            .map(|net| net.unwrap())
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Return all current underlay allocations for the rack.
+    ///
+    /// Order allocations by `subnet_octet`
+    pub async fn rack_subnet_allocations(
+        &self,
+        opctx: &OpContext,
+        rack_id: Uuid,
+    ) -> Result<Vec<SledUnderlaySubnetAllocation>, Error> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        use db::schema::sled_underlay_subnet_allocation::dsl as subnet_dsl;
+        subnet_dsl::sled_underlay_subnet_allocation
+            .filter(subnet_dsl::rack_id.eq(rack_id))
+            .select(SledUnderlaySubnetAllocation::as_select())
+            .order_by(subnet_dsl::subnet_octet.asc())
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Store a new sled subnet allocation in the database
+    pub async fn sled_subnet_allocation_insert(
+        &self,
+        opctx: &OpContext,
+        allocation: &SledUnderlaySubnetAllocation,
+    ) -> Result<(), Error> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        use db::schema::sled_underlay_subnet_allocation::dsl;
+        diesel::insert_into(dsl::sled_underlay_subnet_allocation)
+            .values(allocation.clone())
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
         Ok(())
     }
 

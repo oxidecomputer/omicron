@@ -10,9 +10,10 @@ use crate::external_api::params::CertificateCreate;
 use crate::external_api::shared::ServiceUsingCertificate;
 use crate::internal_api::params::RackInitializationRequest;
 use gateway_client::types::SpType;
-use ipnetwork::IpNetwork;
+use ipnetwork::{IpNetwork, Ipv6Network};
 use nexus_db_model::DnsGroup;
 use nexus_db_model::InitialDnsGroup;
+use nexus_db_model::SledUnderlaySubnetAllocation;
 use nexus_db_model::{SwitchLinkFec, SwitchLinkSpeed};
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
@@ -36,6 +37,7 @@ use nexus_types::external_api::views;
 use nexus_types::external_api::views::Baseboard;
 use nexus_types::external_api::views::UninitializedSled;
 use nexus_types::internal_api::params::DnsRecord;
+use omicron_common::address::{get_64_subnet, Ipv6Subnet, RACK_PREFIX};
 use omicron_common::api::external::AddressLotKind;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -45,7 +47,11 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
+use omicron_common::bail_unless;
+use sled_agent_client::types::AddSledRequest;
 use sled_agent_client::types::EarlyNetworkConfigBody;
+use sled_agent_client::types::StartSledAgentRequest;
+use sled_agent_client::types::StartSledAgentRequestBody;
 use sled_agent_client::types::{
     BgpConfig, BgpPeerConfig, EarlyNetworkConfig, PortConfigV1,
     RackNetworkConfigV1, RouteConfig as SledRouteConfig,
@@ -584,20 +590,7 @@ impl super::Nexus {
         if rack.rack_subnet.is_some() {
             return Ok(());
         }
-        let addr = self
-            .sled_list(opctx, &DataPageParams::max_page())
-            .await?
-            .get(0)
-            .ok_or(Error::InternalError {
-                internal_message: "no sleds at time of bootstore sync".into(),
-            })?
-            .address();
-
-        let sa = sled_agent_client::Client::new(
-            &format!("http://{}", addr),
-            self.log.clone(),
-        );
-
+        let sa = self.get_any_sled_agent(opctx).await?;
         let result = sa
             .read_network_bootstore_config_cache()
             .await
@@ -619,7 +612,7 @@ impl super::Nexus {
         opctx: &OpContext,
     ) -> Result<EarlyNetworkConfig, Error> {
         let rack = self.rack_lookup(opctx, &self.rack_id).await?;
-        let subnet = rack.subnet()?;
+        let subnet = rack_subnet(rack.rack_subnet)?;
 
         let db_ports = self.active_port_settings(opctx).await?;
         let mut ports = Vec::new();
@@ -766,5 +759,144 @@ impl super::Nexus {
         // Retain all sleds that exist but are not in the sled table
         uninitialized_sleds.retain(|s| !sled_baseboards.contains(&s.baseboard));
         Ok(uninitialized_sleds)
+    }
+
+    /// Add a sled to an intialized rack
+    pub(crate) async fn add_sled_to_initialized_rack(
+        &self,
+        opctx: &OpContext,
+        sled: UninitializedSled,
+    ) -> Result<(), Error> {
+        let baseboard_id = sled.baseboard.clone().into();
+        let hw_baseboard_id =
+            self.db_datastore.find_hw_baseboard_id(opctx, baseboard_id).await?;
+
+        // Fetch all the existing allocations via self.rack_id
+        let allocations = self
+            .db_datastore
+            .rack_subnet_allocations(opctx, sled.rack_id)
+            .await?;
+
+        // Calculate the allocation for the new sled by choosing the minimim
+        // octet. The returned allocations are ordered by octet, so we will know
+        // when we have a free one. However, if we already have an allocation
+        // for the given sled then reuse that one.
+        // TODO: This could all actually be done in SQL using a `next_item` query.
+        // See https://github.com/oxidecomputer/omicron/issues/4544
+        const MIN_SUBNET_OCTET: i16 = 33;
+        let mut new_allocation = SledUnderlaySubnetAllocation {
+            rack_id: sled.rack_id,
+            sled_id: Uuid::new_v4(),
+            subnet_octet: MIN_SUBNET_OCTET,
+            hw_baseboard_id,
+        };
+        let subnet = self.db_datastore.rack_subnet(opctx, sled.rack_id).await?;
+        let mut allocation_already_exists = false;
+        for allocation in allocations {
+            if allocation.hw_baseboard_id == new_allocation.hw_baseboard_id {
+                // We already have an allocation for this sled.
+                new_allocation = allocation;
+                allocation_already_exists = true;
+                break;
+            }
+            if allocation.subnet_octet == new_allocation.subnet_octet {
+                bail_unless!(
+                    new_allocation.subnet_octet < 255,
+                    "Too many sled subnets allocated"
+                );
+                new_allocation.subnet_octet += 1;
+            }
+        }
+        let rack_subnet =
+            Ipv6Subnet::<RACK_PREFIX>::from(rack_subnet(Some(subnet))?);
+
+        // Write the new allocation row to CRDB. The UNIQUE constraint
+        // on `subnet_octet` will prevent dueling administrators reusing
+        // allocations when sleds are being added. We will need another
+        // mechanism ala generation numbers when we must interleave additions
+        // and removals of sleds.
+        if !allocation_already_exists {
+            self.db_datastore
+                .sled_subnet_allocation_insert(opctx, &new_allocation)
+                .await?;
+        }
+
+        // Convert the baseboard as necessary
+        let baseboard = sled_agent_client::types::Baseboard::Gimlet {
+            identifier: sled.baseboard.serial.clone(),
+            model: sled.baseboard.serial.clone(),
+            revision: sled.baseboard.revision,
+        };
+
+        // Make the call to sled-agent
+        let req = AddSledRequest {
+            sled_id: baseboard,
+            start_request: StartSledAgentRequest {
+                generation: 0,
+                schema_version: 1,
+                body: StartSledAgentRequestBody {
+                    id: new_allocation.sled_id,
+                    rack_id: new_allocation.rack_id,
+                    use_trust_quorum: true,
+                    is_lrtq_learner: true,
+                    subnet: sled_agent_client::types::Ipv6Subnet {
+                        net: get_64_subnet(
+                            rack_subnet,
+                            new_allocation.subnet_octet.try_into().unwrap(),
+                        )
+                        .net()
+                        .into(),
+                    },
+                },
+            },
+        };
+        let sa = self.get_any_sled_agent(opctx).await?;
+        sa.add_sled_to_initialized_rack(&req).await.map_err(|e| {
+            Error::InternalError {
+                internal_message: format!(
+                    "failed to add sled with baseboard {:?} to rack {}: {e}",
+                    sled.baseboard, new_allocation.rack_id
+                ),
+            }
+        })?;
+
+        Ok(())
+    }
+
+    async fn get_any_sled_agent(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<sled_agent_client::Client, Error> {
+        let addr = self
+            .sled_list(opctx, &DataPageParams::max_page())
+            .await?
+            .get(0)
+            .ok_or(Error::InternalError {
+                internal_message: "no sleds at time of bootstore sync".into(),
+            })?
+            .address();
+
+        Ok(sled_agent_client::Client::new(
+            &format!("http://{}", addr),
+            self.log.clone(),
+        ))
+    }
+}
+
+pub fn rack_subnet(
+    rack_subnet: Option<IpNetwork>,
+) -> Result<Ipv6Network, Error> {
+    match rack_subnet {
+        Some(IpNetwork::V6(subnet)) => Ok(subnet),
+        Some(IpNetwork::V4(_)) => {
+            return Err(Error::InternalError {
+                internal_message: "rack subnet not IPv6".into(),
+            })
+        }
+        None => {
+            return Err(Error::InternalError {
+                internal_message: "rack subnet not set".into(),
+            })
+        }
     }
 }

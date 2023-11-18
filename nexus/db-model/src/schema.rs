@@ -755,6 +755,16 @@ table! {
 }
 
 table! {
+    sled_underlay_subnet_allocation (rack_id, sled_id) {
+        rack_id -> Uuid,
+        sled_id -> Uuid,
+        subnet_octet -> Int2,
+        hw_baseboard_id -> Uuid,
+    }
+}
+allow_tables_to_appear_in_same_query!(rack, sled_underlay_subnet_allocation);
+
+table! {
     switch (id) {
         id -> Uuid,
         time_created -> Timestamptz,

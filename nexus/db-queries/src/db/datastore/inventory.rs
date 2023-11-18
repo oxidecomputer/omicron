@@ -39,6 +39,7 @@ use nexus_db_model::InvServiceProcessor;
 use nexus_db_model::SpType;
 use nexus_db_model::SpTypeEnum;
 use nexus_db_model::SwCaboose;
+use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
@@ -796,6 +797,25 @@ impl DataStore {
         );
 
         Ok(())
+    }
+
+    // Find the primary key for `hw_baseboard_id` given a `BaseboardId`
+    pub async fn find_hw_baseboard_id(
+        &self,
+        opctx: &OpContext,
+        baseboard_id: BaseboardId,
+    ) -> Result<Uuid, Error> {
+        opctx.authorize(authz::Action::Read, &authz::INVENTORY).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        use db::schema::hw_baseboard_id::dsl;
+        dsl::hw_baseboard_id
+            .filter(dsl::serial_number.eq(baseboard_id.serial_number))
+            .filter(dsl::part_number.eq(baseboard_id.part_number))
+            .select(dsl::id)
+            .limit(1)
+            .first_async::<Uuid>(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Attempt to read the latest collection while limiting queries to `limit`
