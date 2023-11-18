@@ -7,6 +7,7 @@
 // - test that an unknown artifact returns 404, not 500
 // - tests around target names and artifact names that contain dangerous paths like `../`
 
+use async_trait::async_trait;
 use chrono::{Duration, Utc};
 use dropshot::test_util::LogContext;
 use dropshot::{
@@ -48,7 +49,7 @@ async fn test_update_end_to_end() {
 
     // build the TUF repo
     let rng = SystemRandom::new();
-    let tuf_repo = new_tuf_repo(&rng);
+    let tuf_repo = new_tuf_repo(&rng).await;
 
     // serve it over HTTP
     let dropshot_config = Default::default();
@@ -132,7 +133,7 @@ async fn static_content(
 
 const TARGET_CONTENTS: &[u8] = b"hello world".as_slice();
 
-fn new_tuf_repo(rng: &dyn SecureRandom) -> TempDir {
+async fn new_tuf_repo(rng: &(dyn SecureRandom + Sync)) -> TempDir {
     let version =
         NonZeroU64::new(Utc::now().timestamp().try_into().unwrap()).unwrap();
     let expires = Utc::now() + Duration::minutes(5);
@@ -180,13 +181,14 @@ fn new_tuf_repo(rng: &dyn SecureRandom) -> TempDir {
         &signing_keys,
         rng,
     )
+    .await
     .unwrap();
 
     // TODO(iliana): there's no way to create a `RepositoryEditor` without having the root.json on
     // disk. this is really unergonomic. write and upstream a fix
     let mut root_tmp = NamedTempFile::new().unwrap();
     root_tmp.as_file_mut().write_all(signed_root.buffer()).unwrap();
-    let mut editor = RepositoryEditor::new(&root_tmp).unwrap();
+    let mut editor = RepositoryEditor::new(&root_tmp).await.unwrap();
     root_tmp.close().unwrap();
 
     editor
@@ -200,19 +202,20 @@ fn new_tuf_repo(rng: &dyn SecureRandom) -> TempDir {
         .timestamp_expires(expires);
     let (targets_dir, target_names) = generate_targets();
     for target in target_names {
-        editor.add_target_path(targets_dir.path().join(target)).unwrap();
+        editor.add_target_path(targets_dir.path().join(target)).await.unwrap();
     }
 
-    let signed_repo = editor.sign(&signing_keys).unwrap();
+    let signed_repo = editor.sign(&signing_keys).await.unwrap();
 
     let repo = TempDir::new().unwrap();
-    signed_repo.write(repo.path().join("metadata")).unwrap();
+    signed_repo.write(repo.path().join("metadata")).await.unwrap();
     signed_repo
         .copy_targets(
             targets_dir,
             repo.path().join("targets"),
             PathExists::Fail,
         )
+        .await
         .unwrap();
 
     repo
@@ -257,8 +260,9 @@ impl Debug for KeyKeySource {
     }
 }
 
+#[async_trait]
 impl KeySource for KeyKeySource {
-    fn as_sign(
+    async fn as_sign(
         &self,
     ) -> Result<Box<dyn Sign>, Box<dyn std::error::Error + Send + Sync + 'static>>
     {
@@ -267,7 +271,7 @@ impl KeySource for KeyKeySource {
         Ok(Box::new(Ed25519KeyPair::from_pkcs8(self.0.as_ref()).unwrap()))
     }
 
-    fn write(
+    async fn write(
         &self,
         _value: &str,
         _key_id_hex: &str,

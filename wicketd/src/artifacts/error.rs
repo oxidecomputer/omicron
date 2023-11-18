@@ -61,7 +61,7 @@ pub(super) enum RepositoryError {
     ReadArtifact {
         kind: ArtifactKind,
         #[source]
-        error: tough::error::Error,
+        error: Box<tough::error::Error>,
     },
 
     #[error("error copying artifact of kind `{kind}` from repository")]

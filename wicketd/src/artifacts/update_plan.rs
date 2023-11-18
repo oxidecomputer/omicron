@@ -249,7 +249,7 @@ impl<'a> UpdatePlanBuilder<'a> {
         while let Some(res) = stream.next().await {
             let chunk = res.map_err(|error| RepositoryError::ReadArtifact {
                 kind: artifact_kind.into(),
-                error,
+                error: Box::new(error),
             })?;
             data.extend_from_slice(&chunk);
         }

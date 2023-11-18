@@ -151,7 +151,7 @@ impl ExtractedArtifacts {
         while let Some(res) = stream.next().await {
             let chunk = res.map_err(|error| RepositoryError::ReadArtifact {
                 kind: artifact_hash_id.kind.clone(),
-                error,
+                error: Box::new(error),
             })?;
             file_size += chunk.len();
             writer
