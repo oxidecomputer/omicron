@@ -63,7 +63,7 @@ use crate::bootstrap::early_networking::{
 use crate::bootstrap::params::BootstrapAddressDiscovery;
 use crate::bootstrap::params::StartSledAgentRequest;
 use crate::bootstrap::rss_handle::BootstrapAgentHandle;
-use crate::nexus::d2n_params;
+use crate::nexus::{d2n_params, ConvertInto};
 use crate::params::{
     AutonomousServiceOnlyError, ServiceType, ServiceZoneRequest,
     ServiceZoneService, TimeSync, ZoneType,
@@ -564,7 +564,7 @@ impl ServiceInner {
                         dataset_id: dataset.id,
                         request: NexusTypes::DatasetPutRequest {
                             address: dataset.service_address.to_string(),
-                            kind: dataset.name.dataset().clone().into(),
+                            kind: dataset.name.dataset().clone().convert(),
                         },
                     })
                 }
