@@ -3766,8 +3766,22 @@ mod test {
         )
         .unwrap();
 
+        let v1 = Generation::new();
+        let found =
+            mgr.omicron_zones_list().await.expect("failed to list zones");
+        assert_eq!(found.version, v1);
+        assert!(found.zones.is_empty());
+
+        let v2 = v1.next();
         let id = Uuid::new_v4();
-        ensure_new_service(&mgr, id, Generation::new().next()).await;
+        ensure_new_service(&mgr, id, v2).await;
+
+        let found =
+            mgr.omicron_zones_list().await.expect("failed to list zones");
+        assert_eq!(found.version, v2);
+        assert_eq!(found.zones.len(), 1);
+        assert_eq!(found.zones[0].id, id);
+
         drop_service_manager(mgr);
 
         logctx.cleanup_successful();
@@ -3814,10 +3828,17 @@ mod test {
         )
         .unwrap();
 
+        let v2 = Generation::new().next();
         let id = Uuid::new_v4();
-        let v = Generation::new().next();
-        ensure_new_service(&mgr, id, v).await;
-        ensure_existing_service(&mgr, id, v).await;
+        ensure_new_service(&mgr, id, v2).await;
+        let v3 = v2.next();
+        ensure_existing_service(&mgr, id, v3).await;
+        let found =
+            mgr.omicron_zones_list().await.expect("failed to list zones");
+        assert_eq!(found.version, v3);
+        assert_eq!(found.zones.len(), 1);
+        assert_eq!(found.zones[0].id, id);
+
         drop_service_manager(mgr);
 
         logctx.cleanup_successful();
@@ -3868,8 +3889,9 @@ mod test {
         )
         .unwrap();
 
+        let v2 = Generation::new().next();
         let id = Uuid::new_v4();
-        ensure_new_service(&mgr, id, Generation::new().next()).await;
+        ensure_new_service(&mgr, id, v2).await;
         drop_service_manager(mgr);
 
         // Before we re-create the service manager - notably, using the same
@@ -3900,6 +3922,12 @@ mod test {
             None,
         )
         .unwrap();
+
+        let found =
+            mgr.omicron_zones_list().await.expect("failed to list zones");
+        assert_eq!(found.version, v2);
+        assert_eq!(found.zones.len(), 1);
+        assert_eq!(found.zones[0].id, id);
 
         drop_service_manager(mgr);
 
@@ -3951,8 +3979,10 @@ mod test {
         )
         .unwrap();
 
+        let v1 = Generation::new();
+        let v2 = v1.next();
         let id = Uuid::new_v4();
-        ensure_new_service(&mgr, id, Generation::new().next()).await;
+        ensure_new_service(&mgr, id, v2).await;
         drop_service_manager(mgr);
 
         // Next, delete the ledger. This means the zone we just created will not
@@ -3988,6 +4018,11 @@ mod test {
             None,
         )
         .unwrap();
+
+        let found =
+            mgr.omicron_zones_list().await.expect("failed to list zones");
+        assert_eq!(found.version, v1);
+        assert!(found.zones.is_empty());
 
         drop_service_manager(mgr);
 
