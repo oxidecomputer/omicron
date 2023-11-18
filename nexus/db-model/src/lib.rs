@@ -53,6 +53,7 @@ mod system_update;
 // These actually represent subqueries, not real table.
 // However, they must be defined in the same crate as our tables
 // for join-based marker trait generation.
+mod ipv4_nat_entry;
 pub mod queries;
 mod rack;
 mod region;
@@ -124,6 +125,7 @@ pub use instance_cpu_count::*;
 pub use instance_state::*;
 pub use inventory::*;
 pub use ip_pool::*;
+pub use ipv4_nat_entry::*;
 pub use ipv4net::*;
 pub use ipv6::*;
 pub use ipv6net::*;

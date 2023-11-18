@@ -24,6 +24,7 @@ use dropshot::RequestContext;
 use dropshot::ResultsPage;
 use dropshot::TypedBody;
 use hyper::Body;
+use nexus_db_model::Ipv4NatEntryView;
 use nexus_types::internal_api::params::SwitchPutRequest;
 use nexus_types::internal_api::params::SwitchPutResponse;
 use nexus_types::internal_api::views::to_list;
@@ -67,6 +68,8 @@ pub(crate) fn internal_api() -> NexusApiDescription {
 
         api.register(saga_list)?;
         api.register(saga_view)?;
+
+        api.register(ipv4_nat_changeset)?;
 
         api.register(bgtask_list)?;
         api.register(bgtask_view)?;
@@ -537,6 +540,54 @@ async fn bgtask_view(
         let path = path_params.into_inner();
         let bgtask = nexus.bgtask_status(&opctx, &path.bgtask_name).await?;
         Ok(HttpResponseOk(bgtask))
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+// NAT RPW internal APIs
+
+/// Path parameters for NAT ChangeSet
+#[derive(Deserialize, JsonSchema)]
+struct RpwNatPathParam {
+    /// which change number to start generating
+    /// the change set from
+    from_gen: i64,
+}
+
+/// Query parameters for NAT ChangeSet
+#[derive(Deserialize, JsonSchema)]
+struct RpwNatQueryParam {
+    limit: u32,
+}
+
+/// Fetch NAT ChangeSet
+///
+/// Caller provides their generation as `from_gen`, along with a query
+/// parameter for the page size (`limit`). Endpoint will return changes
+/// that have occured since the caller's generation number up to the latest
+/// change or until the `limit` is reached. If there are no changes, an
+/// empty vec is returned.
+#[endpoint {
+   method = GET,
+    path = "/nat/ipv4/changeset/{from_gen}"
+}]
+async fn ipv4_nat_changeset(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<RpwNatPathParam>,
+    query_params: Query<RpwNatQueryParam>,
+) -> Result<HttpResponseOk<Vec<Ipv4NatEntryView>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let mut changeset = nexus
+            .datastore()
+            .ipv4_nat_changeset(&opctx, path.from_gen, query.limit)
+            .await?;
+        changeset.sort_by_key(|e| e.gen);
+        Ok(HttpResponseOk(changeset))
     };
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
