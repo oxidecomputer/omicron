@@ -226,7 +226,7 @@ pub enum Error {
     #[error("Requested version {0} with different zones than before")]
     RequestedConfigConflicts(Generation),
 
-    #[error("Error migrating old-format services ledger")]
+    #[error("Error migrating old-format services ledger: {0:#}")]
     ServicesMigration(anyhow::Error),
 }
 
@@ -690,14 +690,33 @@ impl ServiceManager {
             "Loading old-format services from: {services_ledger_paths:?}"
         );
 
-        let Some(ledger) =
-            Ledger::<AllZoneRequests>::new(log, services_ledger_paths).await
-        else {
-            return Ok(None);
+        let maybe_ledger =
+            Ledger::<AllZoneRequests>::new(log, services_ledger_paths.clone())
+                .await;
+        let maybe_converted = match maybe_ledger {
+            None => {
+                // The ledger ignores all errors attempting to load files.  That
+                // might be fine most of the time.  In this case, we want to
+                // raise a big red flag if we find an old-format ledger that we
+                // can't process.
+                if services_ledger_paths.iter().any(|p| p.exists()) {
+                    Err(Error::ServicesMigration(anyhow!(
+                        "failed to read or parse old-format ledger, \
+                        but one exists"
+                    )))
+                } else {
+                    // There was no old-format ledger at all.
+                    return Ok(None);
+                }
+            }
+            Some(ledger) => {
+                let all_services = ledger.into_inner();
+                OmicronZonesConfigLocal::try_from(all_services)
+                    .map_err(Error::ServicesMigration)
+            }
         };
 
-        let all_services = ledger.into_inner();
-        match OmicronZonesConfigLocal::try_from(all_services) {
+        match maybe_converted {
             Err(error) => {
                 // We've tried to test thoroughly so that this should never
                 // happen.  If for some reason it does happen, engineering
@@ -715,7 +734,7 @@ impl ServiceManager {
                     {:#}",
                     error
                 );
-                return Err(Error::ServicesMigration(error));
+                return Err(error);
             }
             Ok(new_config) => {
                 // We've successfully converted the old ledger.  Write a new
@@ -4233,6 +4252,195 @@ mod test {
 
         drop_service_manager(mgr);
 
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_old_ledger_migration() {
+        let logctx = omicron_test_utils::dev::test_setup_log(
+            "test_old_ledger_migration",
+        );
+        let log = logctx.log.clone();
+        let test_config = TestConfig::new().await;
+        let ddmd_client = DdmAdminClient::localhost(&log).unwrap();
+        let bootstrap_networking = make_bootstrap_networking_config();
+
+        let resources = StorageResources::new_for_test();
+        let zone_bundler = ZoneBundler::new(
+            log.clone(),
+            resources.clone(),
+            Default::default(),
+        );
+        let mgr = ServiceManager::new(
+            &log,
+            ddmd_client.clone(),
+            bootstrap_networking.clone(),
+            SledMode::Auto,
+            Some(true),
+            SidecarRevision::Physical("rev-test".to_string()),
+            vec![],
+            resources.clone(),
+            zone_bundler.clone(),
+        );
+        test_config.override_paths(&mgr);
+
+        // Before we start things, stuff one of our old-format service ledgers
+        // into place.
+        let contents =
+            include_str!("../tests/old-service-ledgers/rack2-sled10.json");
+        std::fs::write(
+            test_config.config_dir.path().join(SERVICES_LEDGER_FILENAME),
+            contents,
+        )
+        .expect("failed to copy example old-format services ledger into place");
+
+        let port_manager = PortManager::new(
+            log.new(o!("component" => "PortManager")),
+            Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
+        );
+        mgr.sled_agent_started(
+            test_config.make_config(),
+            port_manager,
+            Ipv6Addr::LOCALHOST,
+            Uuid::new_v4(),
+            None,
+        )
+        .unwrap();
+
+        // Trigger the migration code.  (Yes, it's hokey that we create this
+        // fake argument.)
+        let unused = Mutex::new(BTreeMap::new());
+        let migrated_ledger = mgr
+            .load_ledgered_zones(&unused.lock().await)
+            .await
+            .expect("failed to load ledgered zones")
+            .unwrap();
+
+        // As a quick check, the migrated ledger should have some zones.
+        let migrated_config = migrated_ledger.data();
+        assert!(!migrated_config.zones.is_empty());
+
+        // The ServiceManager should now report the migrated zones, meaning that
+        // they've been copied into the new-format ledger.
+        let found =
+            mgr.omicron_zones_list().await.expect("failed to list zones");
+        assert_eq!(found, migrated_config.clone().to_omicron_zones_config());
+        // They should both match the expected converted output.
+        let expected: OmicronZonesConfigLocal = serde_json::from_str(
+            include_str!("../tests/output/new-zones-ledgers/rack2-sled10.json"),
+        )
+        .unwrap();
+        let expected_config = expected.to_omicron_zones_config();
+        assert_eq!(found, expected_config);
+
+        // Just to be sure, shut down the manager and create a new one without
+        // triggering migration again.  It should also report the same zones.
+        drop_service_manager(mgr);
+
+        // XXX-dap comonize this copy/pasted block
+        let mgr = ServiceManager::new(
+            &log,
+            ddmd_client,
+            bootstrap_networking,
+            SledMode::Auto,
+            Some(true),
+            SidecarRevision::Physical("rev-test".to_string()),
+            vec![],
+            resources.clone(),
+            zone_bundler.clone(),
+        );
+        test_config.override_paths(&mgr);
+
+        let port_manager = PortManager::new(
+            log.new(o!("component" => "PortManager")),
+            Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
+        );
+        mgr.sled_agent_started(
+            test_config.make_config(),
+            port_manager,
+            Ipv6Addr::LOCALHOST,
+            Uuid::new_v4(),
+            None,
+        )
+        .unwrap();
+
+        let found =
+            mgr.omicron_zones_list().await.expect("failed to list zones");
+        assert_eq!(found, expected_config);
+
+        drop_service_manager(mgr);
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_old_ledger_migration_bad() {
+        let logctx = omicron_test_utils::dev::test_setup_log(
+            "test_old_ledger_migration_bad",
+        );
+        let log = logctx.log.clone();
+        let test_config = TestConfig::new().await;
+        let ddmd_client = DdmAdminClient::localhost(&log).unwrap();
+        let bootstrap_networking = make_bootstrap_networking_config();
+
+        let resources = StorageResources::new_for_test();
+        let zone_bundler = ZoneBundler::new(
+            log.clone(),
+            resources.clone(),
+            Default::default(),
+        );
+        let mgr = ServiceManager::new(
+            &log,
+            ddmd_client.clone(),
+            bootstrap_networking.clone(),
+            SledMode::Auto,
+            Some(true),
+            SidecarRevision::Physical("rev-test".to_string()),
+            vec![],
+            resources.clone(),
+            zone_bundler.clone(),
+        );
+        test_config.override_paths(&mgr);
+
+        // Before we start things, stuff a broken ledger into place.
+        // For this to test what we want, it needs to be a valid ledger that we
+        // simply failed to convert.
+        std::fs::write(
+            test_config.config_dir.path().join(SERVICES_LEDGER_FILENAME),
+            "{",
+        )
+        .expect("failed to copy example old-format services ledger into place");
+
+        let port_manager = PortManager::new(
+            log.new(o!("component" => "PortManager")),
+            Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
+        );
+        mgr.sled_agent_started(
+            test_config.make_config(),
+            port_manager,
+            Ipv6Addr::LOCALHOST,
+            Uuid::new_v4(),
+            None,
+        )
+        .unwrap();
+
+        let unused = Mutex::new(BTreeMap::new());
+        let error = mgr
+            .load_ledgered_zones(&unused.lock().await)
+            .await
+            .expect_err("succeeded in loading bogus ledgered zones");
+        assert_eq!(
+            "Error migrating old-format services ledger: failed to read or \
+            parse old-format ledger, but one exists",
+            format!("{:#}", error)
+        );
+
+        // XXX-dap other test cases to add:
+        // - what if we change the current ledger after migration?  we should
+        //   see the change
+        // - I feel like there was some other case here but now I can't remember
+        //   it
         logctx.cleanup_successful();
     }
 
