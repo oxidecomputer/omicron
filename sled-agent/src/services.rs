@@ -220,7 +220,7 @@ pub enum Error {
     #[error("Error querying simnet devices")]
     Simnet(#[from] GetSimnetError),
 
-    #[error("Requested version ({0}) is older than current ({0})")]
+    #[error("Requested version ({0}) is older than current ({1})")]
     RequestedConfigOutdated(Generation, Generation),
 
     #[error("Requested version {0} with different zones than before")]
@@ -3610,6 +3610,80 @@ mod test {
         ]
     }
 
+    // Configures our mock implementations to work for cases where we configure
+    // multiple zones in one `ensure_all_omicron_zones_persistent()` call.
+    //
+    // This is looser than the expectations created by ensure_new_service()
+    // because these functions may return any number of times.
+    fn expect_new_services() -> Vec<Box<dyn std::any::Any>> {
+        // Create a VNIC
+        let create_vnic_ctx = MockDladm::create_vnic_context();
+        create_vnic_ctx.expect().returning(
+            |physical_link: &Etherstub, _, _, _, _| {
+                assert_eq!(&physical_link.0, &UNDERLAY_ETHERSTUB_NAME);
+                Ok(())
+            },
+        );
+
+        // Install the Omicron Zone
+        let install_ctx = MockZones::install_omicron_zone_context();
+        install_ctx.expect().returning(|_, _, name, _, _, _, _, _, _| {
+            assert!(name.starts_with(EXPECTED_ZONE_NAME_PREFIX));
+            Ok(())
+        });
+
+        // // Boot the zone.
+        let boot_ctx = MockZones::boot_context();
+        boot_ctx.expect().returning(|name| {
+            assert!(name.starts_with(EXPECTED_ZONE_NAME_PREFIX));
+            Ok(())
+        });
+
+        // After calling `MockZones::boot`, `RunningZone::boot` will then look
+        // up the zone ID for the booted zone. This goes through
+        // `MockZone::id` to find the zone and get its ID.
+        let id_ctx = MockZones::id_context();
+        let id = Arc::new(std::sync::Mutex::new(1));
+        id_ctx.expect().returning(move |name| {
+            assert!(name.starts_with(EXPECTED_ZONE_NAME_PREFIX));
+            let mut value = id.lock().unwrap();
+            let rv = *value;
+            *value = rv + 1;
+            Ok(Some(rv))
+        });
+
+        // Ensure the address exists
+        let ensure_address_ctx = MockZones::ensure_address_context();
+        ensure_address_ctx.expect().returning(|_, _, _| {
+            Ok(ipnetwork::IpNetwork::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 64)
+                .unwrap())
+        });
+
+        // Wait for the networking service.
+        let wait_ctx = svc::wait_for_service_context();
+        wait_ctx.expect().returning(|_, _, _| Ok(()));
+
+        // Import the manifest, enable the service
+        let execute_ctx = illumos_utils::execute_context();
+        execute_ctx.expect().times(..).returning(|_| {
+            Ok(std::process::Output {
+                status: std::process::ExitStatus::from_raw(0),
+                stdout: vec![],
+                stderr: vec![],
+            })
+        });
+
+        vec![
+            Box::new(create_vnic_ctx),
+            Box::new(install_ctx),
+            Box::new(boot_ctx),
+            Box::new(id_ctx),
+            Box::new(ensure_address_ctx),
+            Box::new(wait_ctx),
+            Box::new(execute_ctx),
+        ]
+    }
+
     // Prepare to call "ensure" for a new service, then actually call "ensure".
     async fn ensure_new_service(
         mgr: &ServiceManager,
@@ -4023,6 +4097,139 @@ mod test {
             mgr.omicron_zones_list().await.expect("failed to list zones");
         assert_eq!(found.version, v1);
         assert!(found.zones.is_empty());
+
+        drop_service_manager(mgr);
+
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_bad_versions() {
+        // Start like the normal tests.
+        let logctx =
+            omicron_test_utils::dev::test_setup_log("test_bad_versions");
+        let log = logctx.log.clone();
+        let test_config = TestConfig::new().await;
+
+        let resources = StorageResources::new_for_test();
+        let zone_bundler = ZoneBundler::new(
+            log.clone(),
+            resources.clone(),
+            Default::default(),
+        );
+        let mgr = ServiceManager::new(
+            &log,
+            DdmAdminClient::localhost(&log).unwrap(),
+            make_bootstrap_networking_config(),
+            SledMode::Auto,
+            Some(true),
+            SidecarRevision::Physical("rev-test".to_string()),
+            vec![],
+            resources,
+            zone_bundler,
+        );
+        test_config.override_paths(&mgr);
+
+        let port_manager = PortManager::new(
+            logctx.log.new(o!("component" => "PortManager")),
+            Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
+        );
+        mgr.sled_agent_started(
+            test_config.make_config(),
+            port_manager,
+            Ipv6Addr::LOCALHOST,
+            Uuid::new_v4(),
+            None,
+        )
+        .unwrap();
+
+        // Like the normal tests, set up a generation with one zone in it.
+        let v1 = Generation::new();
+        let v2 = v1.next();
+        let id1 = Uuid::new_v4();
+
+        let _expectations = expect_new_services();
+        let address =
+            SocketAddrV6::new(Ipv6Addr::LOCALHOST, OXIMETER_PORT, 0, 0);
+        let mut zones = vec![OmicronZoneConfig {
+            id: id1,
+            underlay_address: Ipv6Addr::LOCALHOST,
+            zone_type: OmicronZoneType::Oximeter { address },
+        }];
+        mgr.ensure_all_omicron_zones_persistent(OmicronZonesConfig {
+            version: v2,
+            zones: zones.clone(),
+        })
+        .await
+        .unwrap();
+
+        let found =
+            mgr.omicron_zones_list().await.expect("failed to list zones");
+        assert_eq!(found.version, v2);
+        assert_eq!(found.zones.len(), 1);
+        assert_eq!(found.zones[0].id, id1);
+
+        // Make a new list of zones that we're going to try with a bunch of
+        // different generation numbers.
+        let id2 = Uuid::new_v4();
+        zones.push(OmicronZoneConfig {
+            id: id2,
+            underlay_address: Ipv6Addr::LOCALHOST,
+            zone_type: OmicronZoneType::Oximeter { address },
+        });
+
+        // Now try to apply that list with an older version number.  This
+        // shouldn't work and the reported state should be unchanged.
+        let error = mgr
+            .ensure_all_omicron_zones_persistent(OmicronZonesConfig {
+                version: v1,
+                zones: zones.clone(),
+            })
+            .await
+            .expect_err("unexpectedly went backwards in zones version");
+        assert!(matches!(
+            error,
+            Error::RequestedConfigOutdated(vr, vc) if vr == v1 && vc == v2
+        ));
+        let found2 =
+            mgr.omicron_zones_list().await.expect("failed to list zones");
+        assert_eq!(found, found2);
+
+        // Now try to apply that list with the same version number that we used
+        // before.  This shouldn't work either.
+        let error = mgr
+            .ensure_all_omicron_zones_persistent(OmicronZonesConfig {
+                version: v2,
+                zones: zones.clone(),
+            })
+            .await
+            .expect_err("unexpectedly changed a single zone version");
+        assert!(matches!(
+            error,
+            Error::RequestedConfigConflicts(vr) if vr == v2
+        ));
+        let found3 =
+            mgr.omicron_zones_list().await.expect("failed to list zones");
+        assert_eq!(found, found3);
+
+        // But we should be able to apply this new list of zones as long as we
+        // advance the version number.
+        let v3 = v2.next();
+        mgr.ensure_all_omicron_zones_persistent(OmicronZonesConfig {
+            version: v3,
+            zones: zones.clone(),
+        })
+        .await
+        .expect("failed to remove all zones in a new version");
+        let found4 =
+            mgr.omicron_zones_list().await.expect("failed to list zones");
+        assert_eq!(found4.version, v3);
+        let mut our_zones = zones;
+        our_zones.sort_by(|a, b| a.id.cmp(&b.id));
+        let mut found_zones = found4.zones;
+        found_zones.sort_by(|a, b| a.id.cmp(&b.id));
+        assert_eq!(our_zones, found_zones);
 
         drop_service_manager(mgr);
 
