@@ -15,11 +15,11 @@ use toml_edit::InlineTable;
 use toml_edit::Item;
 use toml_edit::Table;
 use toml_edit::Value;
+use wicket_common::rack_update::SpType;
 use wicketd_client::types::BootstrapSledDescription;
 use wicketd_client::types::CurrentRssUserConfigInsensitive;
 use wicketd_client::types::IpRange;
 use wicketd_client::types::RackNetworkConfigV1;
-use wicketd_client::types::SpType;
 
 static TEMPLATE: &str = include_str!("config_template.toml");
 
@@ -274,6 +274,36 @@ fn populate_network_table(
                             "port",
                             Value::String(Formatted::new(p.port.to_string())),
                         );
+                        if let Some(x) = p.hold_time {
+                            peer.insert(
+                                "hold_time",
+                                Value::Integer(Formatted::new(x as i64)),
+                            );
+                        }
+                        if let Some(x) = p.connect_retry {
+                            peer.insert(
+                                "connect_retry",
+                                Value::Integer(Formatted::new(x as i64)),
+                            );
+                        }
+                        if let Some(x) = p.delay_open {
+                            peer.insert(
+                                "delay_open",
+                                Value::Integer(Formatted::new(x as i64)),
+                            );
+                        }
+                        if let Some(x) = p.idle_hold_time {
+                            peer.insert(
+                                "idle_hold_time",
+                                Value::Integer(Formatted::new(x as i64)),
+                            );
+                        }
+                        if let Some(x) = p.keepalive {
+                            peer.insert(
+                                "keepalive",
+                                Value::Integer(Formatted::new(x as i64)),
+                            );
+                        }
                         peers.push(Value::InlineTable(peer));
                     }
                     uplink
@@ -317,6 +347,7 @@ mod tests {
     use omicron_common::api::internal::shared::RackNetworkConfigV1 as InternalRackNetworkConfig;
     use std::net::Ipv6Addr;
     use wicket_common::rack_setup::PutRssUserConfigInsensitive;
+    use wicket_common::rack_update::SpIdentifier;
     use wicketd_client::types::Baseboard;
     use wicketd_client::types::BgpConfig;
     use wicketd_client::types::BgpPeerConfig;
@@ -324,7 +355,6 @@ mod tests {
     use wicketd_client::types::PortFec;
     use wicketd_client::types::PortSpeed;
     use wicketd_client::types::RouteConfig;
-    use wicketd_client::types::SpIdentifier;
     use wicketd_client::types::SwitchLocation;
 
     fn put_config_from_current_config(
@@ -389,6 +419,11 @@ mod tests {
                                 asn: p.asn,
                                 port: p.port.clone(),
                                 addr: p.addr,
+                                hold_time: p.hold_time,
+                                connect_retry: p.connect_retry,
+                                delay_open: p.delay_open,
+                                idle_hold_time: p.idle_hold_time,
+                                keepalive: p.keepalive,
                             })
                             .collect(),
                         port: config.port.clone(),
@@ -486,6 +521,11 @@ mod tests {
                         asn: 47,
                         addr: "10.2.3.4".parse().unwrap(),
                         port: "port0".into(),
+                        hold_time: Some(6),
+                        connect_retry: Some(3),
+                        delay_open: Some(0),
+                        idle_hold_time: Some(3),
+                        keepalive: Some(2),
                     }],
                     uplink_port_speed: PortSpeed::Speed400G,
                     uplink_port_fec: PortFec::Firecode,

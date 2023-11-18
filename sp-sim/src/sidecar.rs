@@ -11,12 +11,15 @@ use crate::helpers::rot_slot_id_to_u16;
 use crate::rot::RotSprocketExt;
 use crate::serial_number_padded;
 use crate::server;
+use crate::server::SimSpHandler;
 use crate::server::UdpServer;
+use crate::update::SimSpUpdate;
 use crate::Responsiveness;
 use crate::SimulatedSp;
 use anyhow::Result;
 use async_trait::async_trait;
 use futures::future;
+use futures::Future;
 use gateway_messages::ignition;
 use gateway_messages::ignition::IgnitionError;
 use gateway_messages::ignition::LinkEvents;
@@ -47,23 +50,27 @@ use sprockets_rot::RotSprocket;
 use sprockets_rot::RotSprocketError;
 use std::iter;
 use std::net::SocketAddrV6;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::Mutex;
 use tokio::select;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
+use tokio::sync::watch;
 use tokio::sync::Mutex as TokioMutex;
 use tokio::task;
 use tokio::task::JoinHandle;
+
+pub const SIM_SIDECAR_BOARD: &str = "SimSidecarSp";
 
 pub struct Sidecar {
     rot: Mutex<RotSprocket>,
     manufacturing_public_key: Ed25519PublicKey,
     local_addrs: Option<[SocketAddrV6; 2]>,
     handler: Option<Arc<TokioMutex<Handler>>>,
-    commands:
-        mpsc::UnboundedSender<(Command, oneshot::Sender<CommandResponse>)>,
+    commands: mpsc::UnboundedSender<Command>,
     inner_task: Option<JoinHandle<()>>,
+    responses_sent_count: Option<watch::Receiver<usize>>,
 }
 
 impl Drop for Sidecar {
@@ -98,7 +105,7 @@ impl SimulatedSp for Sidecar {
     async fn set_responsiveness(&self, r: Responsiveness) {
         let (tx, rx) = oneshot::channel();
         self.commands
-            .send((Command::SetResponsiveness(r), tx))
+            .send(Command::SetResponsiveness(r, tx))
             .map_err(|_| "sidecar task died unexpectedly")
             .unwrap();
         rx.await.unwrap();
@@ -109,6 +116,37 @@ impl SimulatedSp for Sidecar {
         request: RotRequestV1,
     ) -> Result<RotResponseV1, RotSprocketError> {
         self.rot.lock().unwrap().handle_deserialized(request)
+    }
+
+    async fn last_update_data(&self) -> Option<Box<[u8]>> {
+        let handler = self.handler.as_ref()?;
+        let handler = handler.lock().await;
+        handler.update_state.last_update_data()
+    }
+
+    async fn current_update_status(&self) -> gateway_messages::UpdateStatus {
+        let Some(handler) = self.handler.as_ref() else {
+            return gateway_messages::UpdateStatus::None;
+        };
+
+        handler.lock().await.update_state.status()
+    }
+
+    fn responses_sent_count(&self) -> Option<watch::Receiver<usize>> {
+        self.responses_sent_count.clone()
+    }
+
+    async fn install_udp_accept_semaphore(
+        &self,
+    ) -> mpsc::UnboundedSender<usize> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let (resp_tx, resp_rx) = oneshot::channel();
+        if let Ok(()) =
+            self.commands.send(Command::SetThrottler(Some(rx), resp_tx))
+        {
+            resp_rx.await.unwrap();
+        }
+        tx
     }
 }
 
@@ -122,7 +160,7 @@ impl Sidecar {
 
         let (commands, commands_rx) = mpsc::unbounded_channel();
 
-        let (local_addrs, inner_task, handler) =
+        let (local_addrs, inner_task, handler, responses_sent_count) =
             if let Some(bind_addrs) = sidecar.common.bind_addrs {
                 // bind to our two local "KSZ" ports
                 assert_eq!(bind_addrs.len(), 2);
@@ -143,7 +181,7 @@ impl Sidecar {
                 let local_addrs =
                     [servers[0].local_addr(), servers[1].local_addr()];
 
-                let (inner, handler) = Inner::new(
+                let (inner, handler, responses_sent_count) = Inner::new(
                     servers,
                     sidecar.common.components.clone(),
                     sidecar.common.serial_number.clone(),
@@ -154,9 +192,14 @@ impl Sidecar {
                 let inner_task =
                     task::spawn(async move { inner.run().await.unwrap() });
 
-                (Some(local_addrs), Some(inner_task), Some(handler))
+                (
+                    Some(local_addrs),
+                    Some(inner_task),
+                    Some(handler),
+                    Some(responses_sent_count),
+                )
             } else {
-                (None, None, None)
+                (None, None, None, None)
             };
 
         let (manufacturing_public_key, rot) =
@@ -168,40 +211,36 @@ impl Sidecar {
             handler,
             commands,
             inner_task,
+            responses_sent_count,
         })
     }
 
     pub async fn current_ignition_state(&self) -> Vec<IgnitionState> {
         let (tx, rx) = oneshot::channel();
         self.commands
-            .send((Command::CurrentIgnitionState, tx))
+            .send(Command::CurrentIgnitionState(tx))
             .map_err(|_| "sidecar task died unexpectedly")
             .unwrap();
-        match rx.await.unwrap() {
-            CommandResponse::CurrentIgnitionState(state) => state,
-            other => panic!("unexpected response {:?}", other),
-        }
+        rx.await.unwrap()
     }
 }
 
 #[derive(Debug)]
 enum Command {
-    CurrentIgnitionState,
-    SetResponsiveness(Responsiveness),
+    CurrentIgnitionState(oneshot::Sender<Vec<IgnitionState>>),
+    SetResponsiveness(Responsiveness, oneshot::Sender<Ack>),
+    SetThrottler(Option<mpsc::UnboundedReceiver<usize>>, oneshot::Sender<Ack>),
 }
 
 #[derive(Debug)]
-enum CommandResponse {
-    CurrentIgnitionState(Vec<IgnitionState>),
-    SetResponsivenessAck,
-}
+struct Ack;
 
 struct Inner {
     handler: Arc<TokioMutex<Handler>>,
     udp0: UdpServer,
     udp1: UdpServer,
-    commands:
-        mpsc::UnboundedReceiver<(Command, oneshot::Sender<CommandResponse>)>,
+    commands: mpsc::UnboundedReceiver<Command>,
+    responses_sent_count: watch::Sender<usize>,
 }
 
 impl Inner {
@@ -210,12 +249,9 @@ impl Inner {
         components: Vec<SpComponentConfig>,
         serial_number: String,
         ignition: FakeIgnition,
-        commands: mpsc::UnboundedReceiver<(
-            Command,
-            oneshot::Sender<CommandResponse>,
-        )>,
+        commands: mpsc::UnboundedReceiver<Command>,
         log: Logger,
-    ) -> (Self, Arc<TokioMutex<Handler>>) {
+    ) -> (Self, Arc<TokioMutex<Handler>>, watch::Receiver<usize>) {
         let [udp0, udp1] = servers;
         let handler = Arc::new(TokioMutex::new(Handler::new(
             serial_number,
@@ -223,15 +259,40 @@ impl Inner {
             ignition,
             log,
         )));
-        (Self { handler: Arc::clone(&handler), udp0, udp1, commands }, handler)
+        let responses_sent_count = watch::Sender::new(0);
+        let responses_sent_count_rx = responses_sent_count.subscribe();
+        (
+            Self {
+                handler: Arc::clone(&handler),
+                udp0,
+                udp1,
+                commands,
+                responses_sent_count,
+            },
+            handler,
+            responses_sent_count_rx,
+        )
     }
 
     async fn run(mut self) -> Result<()> {
         let mut out_buf = [0; gateway_messages::MAX_SERIALIZED_SIZE];
         let mut responsiveness = Responsiveness::Responsive;
+        let mut throttle_count = usize::MAX;
+        let mut throttler: Option<mpsc::UnboundedReceiver<usize>> = None;
         loop {
+            let incr_throttle_count: Pin<
+                Box<dyn Future<Output = Option<usize>> + Send>,
+            > = if let Some(throttler) = throttler.as_mut() {
+                Box::pin(throttler.recv())
+            } else {
+                Box::pin(future::pending())
+            };
             select! {
-                recv0 = self.udp0.recv_from() => {
+                Some(n) = incr_throttle_count => {
+                    throttle_count = throttle_count.saturating_add(n);
+                }
+
+                recv0 = self.udp0.recv_from(), if throttle_count > 0 => {
                     if let Some((resp, addr)) = server::handle_request(
                         &mut *self.handler.lock().await,
                         recv0,
@@ -239,11 +300,13 @@ impl Inner {
                         responsiveness,
                         SpPort::One,
                     ).await? {
+                        throttle_count -= 1;
                         self.udp0.send_to(resp, addr).await?;
+                        self.responses_sent_count.send_modify(|n| *n += 1);
                     }
                 }
 
-                recv1 = self.udp1.recv_from() => {
+                recv1 = self.udp1.recv_from(), if throttle_count > 0 => {
                     if let Some((resp, addr)) = server::handle_request(
                         &mut *self.handler.lock().await,
                         recv1,
@@ -251,31 +314,45 @@ impl Inner {
                         responsiveness,
                         SpPort::Two,
                     ).await? {
+                        throttle_count -= 1;
                         self.udp1.send_to(resp, addr).await?;
+                        self.responses_sent_count.send_modify(|n| *n += 1);
                     }
                 }
 
                 command = self.commands.recv() => {
                     // if sending half is gone, we're about to be killed anyway
-                    let (command, tx) = match command {
-                        Some((command, tx)) => (command, tx),
+                    let command = match command {
+                        Some(command) => command,
                         None => return Ok(()),
                     };
 
                     match command {
-                        Command::CurrentIgnitionState => {
-                            tx.send(CommandResponse::CurrentIgnitionState(
-                                self.handler
-                                    .lock()
-                                    .await
-                                    .ignition
-                                    .state
-                                    .clone()
-                            )).map_err(|_| "receiving half died").unwrap();
+                        Command::CurrentIgnitionState(tx) => {
+                            tx.send(self.handler
+                                .lock()
+                                .await
+                                .ignition
+                                .state
+                                .clone()
+                            ).map_err(|_| "receiving half died").unwrap();
                         }
-                        Command::SetResponsiveness(r) => {
+                        Command::SetResponsiveness(r, tx) => {
                             responsiveness = r;
-                            tx.send(CommandResponse::SetResponsivenessAck)
+                            tx.send(Ack)
+                                .map_err(|_| "receiving half died").unwrap();
+                        }
+                        Command::SetThrottler(thr, tx) => {
+                            throttler = thr;
+
+                            // Either immediately start throttling, or
+                            // immediately stop throttling.
+                            if throttler.is_some() {
+                                throttle_count = 0;
+                            } else {
+                                throttle_count = usize::MAX;
+                            }
+                            tx.send(Ack)
                                 .map_err(|_| "receiving half died").unwrap();
                         }
                     }
@@ -301,6 +378,16 @@ struct Handler {
     ignition: FakeIgnition,
     rot_active_slot: RotSlotId,
     power_state: PowerState,
+
+    update_state: SimSpUpdate,
+    reset_pending: bool,
+
+    // To simulate an SP reset, we should (after doing whatever housekeeping we
+    // need to track the reset) intentionally _fail_ to respond to the request,
+    // simulating a `-> !` function on the SP that triggers a reset. To provide
+    // this, our caller will pass us a function to call if they should ignore
+    // whatever result we return and fail to respond at all.
+    should_fail_to_respond_signal: Option<Box<dyn FnOnce() + Send>>,
 }
 
 impl Handler {
@@ -331,6 +418,9 @@ impl Handler {
             ignition,
             rot_active_slot: RotSlotId::A,
             power_state: PowerState::A2,
+            update_state: SimSpUpdate::default(),
+            reset_pending: false,
+            should_fail_to_respond_signal: None,
         }
     }
 
@@ -628,14 +718,18 @@ impl SpHandler for Handler {
         port: SpPort,
         update: gateway_messages::SpUpdatePrepare,
     ) -> Result<(), SpError> {
-        warn!(
+        debug!(
             &self.log,
-            "received update prepare request; not supported by simulated sidecar";
+            "received update prepare request";
             "sender" => %sender,
             "port" => ?port,
             "update" => ?update,
         );
-        Err(SpError::RequestUnsupportedForSp)
+        self.update_state.prepare(
+            SpComponent::SP_ITSELF,
+            update.id,
+            update.sp_image_size.try_into().unwrap(),
+        )
     }
 
     fn component_update_prepare(
@@ -644,14 +738,18 @@ impl SpHandler for Handler {
         port: SpPort,
         update: gateway_messages::ComponentUpdatePrepare,
     ) -> Result<(), SpError> {
-        warn!(
+        debug!(
             &self.log,
-            "received update prepare request; not supported by simulated sidecar";
+            "received update prepare request";
             "sender" => %sender,
             "port" => ?port,
             "update" => ?update,
         );
-        Err(SpError::RequestUnsupportedForSp)
+        self.update_state.prepare(
+            update.component,
+            update.id,
+            update.total_size.try_into().unwrap(),
+        )
     }
 
     fn update_status(
@@ -660,14 +758,14 @@ impl SpHandler for Handler {
         port: SpPort,
         component: SpComponent,
     ) -> Result<gateway_messages::UpdateStatus, SpError> {
-        warn!(
+        debug!(
             &self.log,
-            "received update status request; not supported by simulated sidecar";
+            "received update status request";
             "sender" => %sender,
             "port" => ?port,
             "component" => ?component,
         );
-        Err(SpError::RequestUnsupportedForSp)
+        Ok(self.update_state.status())
     }
 
     fn update_chunk(
@@ -675,17 +773,17 @@ impl SpHandler for Handler {
         sender: SocketAddrV6,
         port: SpPort,
         chunk: gateway_messages::UpdateChunk,
-        data: &[u8],
+        chunk_data: &[u8],
     ) -> Result<(), SpError> {
-        warn!(
+        debug!(
             &self.log,
-            "received update chunk; not supported by simulated sidecar";
+            "received update chunk";
             "sender" => %sender,
             "port" => ?port,
             "offset" => chunk.offset,
-            "length" => data.len(),
+            "length" => chunk_data.len(),
         );
-        Err(SpError::RequestUnsupportedForSp)
+        self.update_state.ingest_chunk(chunk, chunk_data)
     }
 
     fn update_abort(
@@ -693,17 +791,17 @@ impl SpHandler for Handler {
         sender: SocketAddrV6,
         port: SpPort,
         component: SpComponent,
-        id: gateway_messages::UpdateId,
+        update_id: gateway_messages::UpdateId,
     ) -> Result<(), SpError> {
-        warn!(
+        debug!(
             &self.log,
             "received update abort; not supported by simulated sidecar";
             "sender" => %sender,
             "port" => ?port,
             "component" => ?component,
-            "id" => ?id,
+            "id" => ?update_id,
         );
-        Err(SpError::RequestUnsupportedForSp)
+        self.update_state.abort(update_id)
     }
 
     fn power_state(
@@ -742,13 +840,18 @@ impl SpHandler for Handler {
         port: SpPort,
         component: SpComponent,
     ) -> Result<(), SpError> {
-        warn!(
-            &self.log, "received reset prepare request; not supported by simulated sidecar";
+        debug!(
+            &self.log, "received reset prepare request";
             "sender" => %sender,
             "port" => ?port,
             "component" => ?component,
         );
-        Err(SpError::RequestUnsupportedForSp)
+        if component == SpComponent::SP_ITSELF {
+            self.reset_pending = true;
+            Ok(())
+        } else {
+            Err(SpError::RequestUnsupportedForComponent)
+        }
     }
 
     fn reset_component_trigger(
@@ -757,13 +860,29 @@ impl SpHandler for Handler {
         port: SpPort,
         component: SpComponent,
     ) -> Result<(), SpError> {
-        warn!(
-            &self.log, "received sys-reset trigger request; not supported by simulated sidecar";
+        debug!(
+            &self.log, "received sys-reset trigger request";
             "sender" => %sender,
             "port" => ?port,
             "component" => ?component,
         );
-        Err(SpError::RequestUnsupportedForSp)
+        if component == SpComponent::SP_ITSELF {
+            if self.reset_pending {
+                self.update_state.sp_reset();
+                self.reset_pending = false;
+                if let Some(signal) = self.should_fail_to_respond_signal.take()
+                {
+                    // Instruct `server::handle_request()` to _not_ respond to
+                    // this request at all, simulating an SP actually resetting.
+                    signal();
+                }
+                Ok(())
+            } else {
+                Err(SpError::ResetComponentTriggerWithoutPrepare)
+            }
+        } else {
+            Err(SpError::RequestUnsupportedForComponent)
+        }
     }
 
     fn num_devices(&mut self, _: SocketAddrV6, _: SpPort) -> u32 {
@@ -977,7 +1096,7 @@ impl SpHandler for Handler {
         buf: &mut [u8],
     ) -> std::result::Result<usize, SpError> {
         static SP_GITC: &[u8] = b"ffffffff";
-        static SP_BORD: &[u8] = b"SimSidecarSp";
+        static SP_BORD: &[u8] = SIM_SIDECAR_BOARD.as_bytes();
         static SP_NAME: &[u8] = b"SimSidecar";
         static SP_VERS: &[u8] = b"0.0.1";
 
@@ -1019,6 +1138,15 @@ impl SpHandler for Handler {
         _buf: &mut [u8],
     ) -> std::result::Result<gateway_messages::RotResponse, SpError> {
         Err(SpError::RequestUnsupportedForSp)
+    }
+}
+
+impl SimSpHandler for Handler {
+    fn set_sp_should_fail_to_respond_signal(
+        &mut self,
+        signal: Box<dyn FnOnce() + Send>,
+    ) {
+        self.should_fail_to_respond_signal = Some(signal);
     }
 }
 

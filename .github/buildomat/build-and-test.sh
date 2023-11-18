@@ -51,6 +51,7 @@ export RUSTFLAGS="-D warnings"
 export RUSTDOCFLAGS="-D warnings"
 export TMPDIR=$TEST_TMPDIR
 export RUST_BACKTRACE=1
+export CARGO_INCREMENTAL=0
 ptime -m cargo test --locked --verbose --no-run
 
 #

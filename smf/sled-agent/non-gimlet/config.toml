@@ -45,6 +45,11 @@ zpools = [
 # guest memory is pulled from.
 vmm_reservoir_percentage = 50
 
+# Optionally you can specify the size of the VMM reservoir in MiB.
+# Note vmm_reservoir_percentage and vmm_reservoir_size_mb cannot be specified
+# at the same time.
+#vmm_reservoir_size_mb = 2048
+
 # Swap device size for the system. The device is a sparsely allocated zvol on
 # the internal zpool of the M.2 that we booted from.
 #

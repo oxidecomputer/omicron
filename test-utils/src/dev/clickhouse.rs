@@ -23,6 +23,9 @@ use crate::dev::poll;
 // Timeout used when starting up ClickHouse subprocess.
 const CLICKHOUSE_TIMEOUT: Duration = Duration::from_secs(30);
 
+// Timeout used when starting a ClickHouse keeper subprocess.
+const CLICKHOUSE_KEEPER_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// A `ClickHouseInstance` is used to start and manage a ClickHouse single node server process.
 #[derive(Debug)]
 pub struct ClickHouseInstance {
@@ -37,16 +40,6 @@ pub struct ClickHouseInstance {
     args: Vec<String>,
     // Subprocess handle
     child: Option<tokio::process::Child>,
-}
-
-/// A `ClickHouseCluster` is used to start and manage a 2 replica 3 keeper ClickHouse cluster.
-#[derive(Debug)]
-pub struct ClickHouseCluster {
-    pub replica_1: ClickHouseInstance,
-    pub replica_2: ClickHouseInstance,
-    pub keeper_1: ClickHouseInstance,
-    pub keeper_2: ClickHouseInstance,
-    pub keeper_3: ClickHouseInstance,
 }
 
 #[derive(Debug, Error)]
@@ -330,25 +323,32 @@ impl Drop for ClickHouseInstance {
     }
 }
 
-impl ClickHouseCluster {
-    pub async fn new() -> Result<Self, anyhow::Error> {
-        // Start all Keeper coordinator nodes
-        let cur_dir = std::env::current_dir().unwrap();
-        let keeper_config =
-            cur_dir.as_path().join("src/configs/keeper_config.xml");
+/// A `ClickHouseCluster` is used to start and manage a 2 replica 3 keeper ClickHouse cluster.
+#[derive(Debug)]
+pub struct ClickHouseCluster {
+    pub replica_1: ClickHouseInstance,
+    pub replica_2: ClickHouseInstance,
+    pub keeper_1: ClickHouseInstance,
+    pub keeper_2: ClickHouseInstance,
+    pub keeper_3: ClickHouseInstance,
+    pub replica_config_path: PathBuf,
+    pub keeper_config_path: PathBuf,
+}
 
+impl ClickHouseCluster {
+    pub async fn new(
+        replica_config: PathBuf,
+        keeper_config: PathBuf,
+    ) -> Result<Self, anyhow::Error> {
+        // Start all Keeper coordinator nodes
         let keeper_amount = 3;
         let mut keepers =
-            Self::new_keeper_set(keeper_amount, keeper_config).await?;
+            Self::new_keeper_set(keeper_amount, &keeper_config).await?;
 
         // Start all replica nodes
-        let cur_dir = std::env::current_dir().unwrap();
-        let replica_config =
-            cur_dir.as_path().join("src/configs/replica_config.xml");
-
         let replica_amount = 2;
         let mut replicas =
-            Self::new_replica_set(replica_amount, replica_config).await?;
+            Self::new_replica_set(replica_amount, &replica_config).await?;
 
         let r1 = replicas.swap_remove(0);
         let r2 = replicas.swap_remove(0);
@@ -362,12 +362,14 @@ impl ClickHouseCluster {
             keeper_1: k1,
             keeper_2: k2,
             keeper_3: k3,
+            replica_config_path: replica_config,
+            keeper_config_path: keeper_config,
         })
     }
 
     pub async fn new_keeper_set(
         keeper_amount: u16,
-        config_path: PathBuf,
+        config_path: &PathBuf,
     ) -> Result<Vec<ClickHouseInstance>, anyhow::Error> {
         let mut keepers = vec![];
 
@@ -392,7 +394,7 @@ impl ClickHouseCluster {
 
     pub async fn new_replica_set(
         replica_amount: u16,
-        config_path: PathBuf,
+        config_path: &PathBuf,
     ) -> Result<Vec<ClickHouseInstance>, anyhow::Error> {
         let mut replicas = vec![];
 
@@ -418,6 +420,14 @@ impl ClickHouseCluster {
         }
 
         Ok(replicas)
+    }
+
+    pub fn replica_config_path(&self) -> &Path {
+        &self.replica_config_path
+    }
+
+    pub fn keeper_config_path(&self) -> &Path {
+        &self.keeper_config_path
     }
 }
 
@@ -520,7 +530,8 @@ async fn find_clickhouse_port_in_log(
 pub async fn wait_for_ready(log_path: PathBuf) -> Result<(), anyhow::Error> {
     let p = poll::wait_for_condition(
         || async {
-            let result = discover_ready(&log_path, CLICKHOUSE_TIMEOUT).await;
+            let result =
+                discover_ready(&log_path, CLICKHOUSE_KEEPER_TIMEOUT).await;
             match result {
                 Ok(ready) => Ok(ready),
                 Err(e) => {
@@ -540,7 +551,7 @@ pub async fn wait_for_ready(log_path: PathBuf) -> Result<(), anyhow::Error> {
             }
         },
         &Duration::from_millis(500),
-        &CLICKHOUSE_TIMEOUT,
+        &CLICKHOUSE_KEEPER_TIMEOUT,
     )
     .await
     .context("waiting to discover if ClickHouse is ready for connections")?;

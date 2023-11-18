@@ -13,7 +13,6 @@ omicron-package.workspace = true
 serde.workspace = true
 serde_derive.workspace = true
 thiserror.workspace = true
-toml.workspace = true
 omicron-workspace-hack.workspace = true
 
 [[bin]]

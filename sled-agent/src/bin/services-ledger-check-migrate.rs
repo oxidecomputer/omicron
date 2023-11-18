@@ -17,7 +17,7 @@ use omicron_sled_agent::services_migration::AllZoneRequests;
 #[tokio::main]
 async fn main() {
     if let Err(message) = do_run().await {
-        fatal(CmdError::Failure(format!("{:#}", message)));
+        fatal(CmdError::Failure(message));
     }
 }
 
