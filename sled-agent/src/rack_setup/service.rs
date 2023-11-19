@@ -63,7 +63,7 @@ use crate::bootstrap::early_networking::{
 use crate::bootstrap::params::BootstrapAddressDiscovery;
 use crate::bootstrap::params::StartSledAgentRequest;
 use crate::bootstrap::rss_handle::BootstrapAgentHandle;
-use crate::nexus::d2n_params;
+use crate::nexus::{d2n_params, ConvertInto};
 use crate::params::{
     OmicronZoneType, OmicronZonesConfig, TimeSync,
     OMICRON_ZONES_CONFIG_INITIAL_VERSION,
@@ -565,7 +565,7 @@ impl ServiceInner {
                         dataset_id: zone.id,
                         request: NexusTypes::DatasetPutRequest {
                             address: dataset_address.to_string(),
-                            kind: dataset_name.dataset().clone().into(),
+                            kind: dataset_name.dataset().clone().convert(),
                         },
                     })
                 }

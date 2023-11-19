@@ -751,6 +751,7 @@ pub enum ResourceType {
     UserBuiltin,
     Zpool,
     Vmm,
+    Ipv4NatEntry,
 }
 
 // IDENTITY METADATA
