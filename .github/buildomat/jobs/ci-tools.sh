@@ -1,6 +1,7 @@
 #!/bin/bash
 #:
 #: name = "helios / CI tools"
+#: enable = false
 #: variety = "basic"
 #: target = "helios-2.0"
 #: rust_toolchain = "1.72.1"

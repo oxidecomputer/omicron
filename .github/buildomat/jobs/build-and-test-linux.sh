@@ -1,6 +1,7 @@
 #!/bin/bash
 #:
 #: name = "build-and-test (ubuntu-22.04)"
+#: enable = false
 #: variety = "basic"
 #: target = "ubuntu-22.04"
 #: rust_toolchain = "1.72.1"

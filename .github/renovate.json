@@ -1,9 +1,0 @@
-{
-  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": [
-    "local>oxidecomputer/renovate-config",
-    "local>oxidecomputer/renovate-config//rust/autocreate",
-    "local>oxidecomputer/renovate-config:post-upgrade",
-    "local>oxidecomputer/renovate-config//actions/pin"
-  ]
-}

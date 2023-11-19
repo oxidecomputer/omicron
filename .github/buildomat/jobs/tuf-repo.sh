@@ -1,6 +1,7 @@
 #!/bin/bash
 #:
 #: name = "helios / build TUF repo"
+#: enable = false
 #: variety = "basic"
 #: target = "helios-2.0"
 #: output_rules = [

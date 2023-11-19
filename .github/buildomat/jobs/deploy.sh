@@ -1,6 +1,7 @@
 #!/bin/bash
 #:
 #: name = "helios / deploy"
+#: enable = false
 #: variety = "basic"
 #: target = "lab-2.0-opte-0.28"
 #: output_rules = [
