@@ -46,17 +46,22 @@ const UPDATE_COMPONENT: &'static str = "omicron-test-component";
 #[tokio::test]
 async fn test_update_end_to_end() {
     let mut config = load_test_config();
+    let logctx = LogContext::new("test_update_end_to_end", &config.pkg.log);
 
     // build the TUF repo
     let rng = SystemRandom::new();
     let tuf_repo = new_tuf_repo(&rng).await;
+    slog::info!(
+        logctx.log,
+        "TUF repo created at {}",
+        tuf_repo.path().display()
+    );
 
     // serve it over HTTP
     let dropshot_config = Default::default();
     let mut api = ApiDescription::new();
     api.register(static_content).unwrap();
     let context = FileServerContext { base: tuf_repo.path().to_owned() };
-    let logctx = LogContext::new("test_update_end_to_end", &config.pkg.log);
     let server =
         HttpServerStarter::new(&dropshot_config, api, context, &logctx.log)
             .unwrap()
@@ -123,9 +128,14 @@ async fn static_content(
     for component in path.into_inner().path {
         fs_path.push(component);
     }
-    let body = tokio::fs::read(fs_path)
-        .await
-        .map_err(|e| HttpError::for_bad_request(None, e.to_string()))?;
+    let body = tokio::fs::read(fs_path).await.map_err(|e| {
+        // tough 0.15+ depend on ENOENT being translated into 404.
+        if e.kind() == std::io::ErrorKind::NotFound {
+            HttpError::for_not_found(None, e.to_string())
+        } else {
+            HttpError::for_bad_request(None, e.to_string())
+        }
+    })?;
     Ok(Response::builder().status(StatusCode::OK).body(body.into())?)
 }
 
