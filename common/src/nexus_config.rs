@@ -335,6 +335,8 @@ pub struct BackgroundTaskConfig {
     pub dns_external: DnsTasksConfig,
     /// configuration for external endpoint list watcher
     pub external_endpoints: ExternalEndpointsConfig,
+    /// configuration for nat table garbage collector
+    pub nat_cleanup: NatCleanupConfig,
     /// configuration for inventory tasks
     pub inventory: InventoryConfig,
 }
@@ -369,6 +371,14 @@ pub struct ExternalEndpointsConfig {
     pub period_secs: Duration,
     // Other policy around the TLS certificates could go here (e.g.,
     // allow/disallow wildcard certs, don't serve expired certs, etc.)
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct NatCleanupConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
 }
 
 #[serde_as]
@@ -498,7 +508,7 @@ mod test {
         BackgroundTaskConfig, Config, ConfigDropshotWithTls, ConsoleConfig,
         Database, DeploymentConfig, DnsTasksConfig, DpdConfig,
         ExternalEndpointsConfig, InternalDns, InventoryConfig, LoadError,
-        LoadErrorKind, MgdConfig, PackageConfig, SchemeName,
+        LoadErrorKind, MgdConfig, NatCleanupConfig, PackageConfig, SchemeName,
         TimeseriesDbConfig, Tunables, UpdatesConfig,
     };
     use crate::address::{Ipv6Subnet, RACK_PREFIX};
@@ -649,6 +659,7 @@ mod test {
             dns_external.period_secs_propagation = 7
             dns_external.max_concurrent_server_updates = 8
             external_endpoints.period_secs = 9
+            nat_cleanup.period_secs = 30
             inventory.period_secs = 10
             inventory.nkeep = 11
             inventory.disable = false
@@ -746,6 +757,9 @@ mod test {
                         external_endpoints: ExternalEndpointsConfig {
                             period_secs: Duration::from_secs(9),
                         },
+                        nat_cleanup: NatCleanupConfig {
+                            period_secs: Duration::from_secs(30),
+                        },
                         inventory: InventoryConfig {
                             period_secs: Duration::from_secs(10),
                             nkeep: 11,
@@ -804,6 +818,7 @@ mod test {
             dns_external.period_secs_propagation = 7
             dns_external.max_concurrent_server_updates = 8
             external_endpoints.period_secs = 9
+            nat_cleanup.period_secs = 30
             inventory.period_secs = 10
             inventory.nkeep = 3
             inventory.disable = false
