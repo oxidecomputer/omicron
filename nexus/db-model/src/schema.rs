@@ -681,6 +681,7 @@ table! {
         initialized -> Bool,
         tuf_base_url -> Nullable<Text>,
         rack_subnet -> Nullable<Inet>,
+        reconfiguration_epoch -> Int8
     }
 }
 
@@ -727,6 +728,16 @@ table! {
         reservoir_ram -> Int8,
     }
 }
+
+table! {
+    sled_underlay_subnet_allocation (rack_id, sled_id) {
+        rack_id -> Uuid,
+        sled_id -> Uuid,
+        subnet_octet -> Int2,
+        hw_baseboard_id -> Uuid,
+    }
+}
+allow_tables_to_appear_in_same_query!(rack, sled_underlay_subnet_allocation);
 
 table! {
     switch (id) {

@@ -182,7 +182,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_resource_by_sled ON omicron.public.sled
 --
 -- All modifications to this table should be guarded by the
 -- `reconfiguration_epoch` row in the `rack` table.
-CREATE TABLE IF NOT EXISTS omicron.public.sled_underlay_subnet_allocations {
+CREATE TABLE IF NOT EXISTS omicron.public.sled_underlay_subnet_allocation {
     -- The rack to which a sled is being added
     -- (foreign key into `rack` table)
     --

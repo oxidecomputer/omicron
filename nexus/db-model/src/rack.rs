@@ -18,6 +18,7 @@ pub struct Rack {
     pub initialized: bool,
     pub tuf_base_url: Option<String>,
     pub rack_subnet: Option<IpNetwork>,
+    pub reconfiguration_epoch: i64,
 }
 
 impl Rack {
@@ -27,6 +28,7 @@ impl Rack {
             initialized: false,
             tuf_base_url: None,
             rack_subnet: None,
+            reconfiguration_epoch: 0,
         }
     }
 

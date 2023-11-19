@@ -767,4 +767,22 @@ impl super::Nexus {
         uninitialized_sleds.retain(|s| !sled_baseboards.contains(&s.baseboard));
         Ok(uninitialized_sleds)
     }
+
+    /// Add a sled to an intialized rack
+    pub(crate) async fn add_sled_to_initialized_rack(
+        &self,
+        opctx: &OpContext,
+        sled: UninitializedSled,
+    ) -> Result<(), Error> {
+        // fetch all the existing allocations via self.rack_id  - This only works for a
+        // a single rack right now
+        //let allocations = self.db_datastore.rack_subnet_allocations(opctx, rack_id)?;
+
+        // Then calculate the allocation for the new sled
+
+        // Then write the allocation and bump the reconfiguration epoch
+
+        // Then make the call to sled-agent
+        todo!()
+    }
 }

@@ -41,6 +41,7 @@ use nexus_db_model::InitialDnsGroup;
 use nexus_db_model::PasswordHashString;
 use nexus_db_model::SiloUser;
 use nexus_db_model::SiloUserPasswordHash;
+use nexus_db_model::SledUnderlaySubnetAllocation;
 use nexus_types::external_api::params as external_params;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::IdentityType;
@@ -212,6 +213,36 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         Ok(())
+    }
+
+    // Return the rack subnet, reconfiguration epoch, and all current
+    // underlay allocations for the rack.
+    pub async fn rack_subnet_allocations(
+        &self,
+        opctx: &OpContext,
+        rack_id: Uuid,
+    ) -> Result<
+        Vec<(Option<IpNetwork>, i64, Option<SledUnderlaySubnetAllocation>)>,
+        Error,
+    > {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        use db::schema::rack::dsl as rack_dsl;
+        use db::schema::sled_underlay_subnet_allocation::dsl as subnet_dsl;
+        rack_dsl::rack
+            .filter(rack_dsl::id.eq(rack_id))
+            .filter(rack_dsl::rack_subnet.is_not_null())
+            .left_join(
+                subnet_dsl::sled_underlay_subnet_allocation
+                    .on(rack_dsl::id.eq(subnet_dsl::rack_id)),
+            )
+            .select((
+                rack_dsl::rack_subnet,
+                rack_dsl::reconfiguration_epoch,
+                Option::<SledUnderlaySubnetAllocation>::as_select(),
+            ))
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     // The following methods which return a `TxnError` take a `conn` parameter
