@@ -20,7 +20,16 @@ pub const ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT: &str = "/zone";
 pub const ZONE_ZFS_RAMDISK_DATASET: &str = "rpool/zone";
 
 pub const ZFS: &str = "/usr/sbin/zfs";
+
+/// This path is intentionally on a `tmpfs` to prevent copy-on-write behavior
+/// and to ensure it goes away on power off.
+///
+/// We want minimize the time the key files are in memory, and so we rederive
+/// the keys and recreate the files on demand when creating and mounting
+/// encrypted filesystems. We then zero them and unlink them.
 pub const KEYPATH_ROOT: &str = "/var/run/oxide/";
+// Use /tmp so we don't have to worry about running tests with pfexec
+pub const TEST_KEYPATH_ROOT: &str = "/tmp";
 
 /// Error returned by [`Zfs::list_datasets`].
 #[derive(thiserror::Error, Debug)]
@@ -158,17 +167,25 @@ impl fmt::Display for Keypath {
     }
 }
 
+#[cfg(not(feature = "tmp_keypath"))]
 impl From<&DiskIdentity> for Keypath {
     fn from(id: &DiskIdentity) -> Self {
-        let filename = format!(
-            "{}-{}-{}-zfs-aes-256-gcm.key",
-            id.vendor, id.serial, id.model
-        );
-        let mut path = Utf8PathBuf::new();
-        path.push(KEYPATH_ROOT);
-        path.push(filename);
-        Keypath(path)
+        build_keypath(id, KEYPATH_ROOT)
     }
+}
+
+#[cfg(feature = "tmp_keypath")]
+impl From<&DiskIdentity> for Keypath {
+    fn from(id: &DiskIdentity) -> Self {
+        build_keypath(id, TEST_KEYPATH_ROOT)
+    }
+}
+
+fn build_keypath(id: &DiskIdentity, root: &str) -> Keypath {
+    let filename =
+        format!("{}-{}-{}-zfs-aes-256-gcm.key", id.vendor, id.serial, id.model);
+    let path: Utf8PathBuf = [root, &filename].iter().collect();
+    Keypath(path)
 }
 
 #[derive(Debug)]

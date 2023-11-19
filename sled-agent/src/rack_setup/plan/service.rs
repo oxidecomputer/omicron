@@ -5,12 +5,8 @@
 //! Plan generation for "where should services be initialized".
 
 use crate::bootstrap::params::StartSledAgentRequest;
-use crate::params::{
-    DatasetKind, OmicronZoneConfig, OmicronZoneDataset, OmicronZoneType,
-};
+use crate::params::{OmicronZoneConfig, OmicronZoneDataset, OmicronZoneType};
 use crate::rack_setup::config::SetupServiceConfig as Config;
-use crate::storage::dataset::DatasetName;
-use crate::storage_manager::StorageResources;
 use camino::Utf8PathBuf;
 use dns_service_client::types::DnsConfigParams;
 use illumos_utils::zpool::ZpoolName;
@@ -35,6 +31,8 @@ use serde::{Deserialize, Serialize};
 use sled_agent_client::{
     types as SledAgentTypes, Client as SledAgentClient, Error as SledAgentError,
 };
+use sled_storage::dataset::{DatasetKind, DatasetName, CONFIG_DATASET};
+use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
@@ -98,16 +96,10 @@ pub enum PlanError {
     NotEnoughSleds,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
 pub struct SledConfig {
     /// zones configured for this sled
     pub zones: Vec<OmicronZoneConfig>,
-}
-
-impl Default for SledConfig {
-    fn default() -> Self {
-        SledConfig { zones: Vec::new() }
-    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -127,11 +119,12 @@ const RSS_SERVICE_PLAN_FILENAME: &str = "rss-service-plan.json";
 impl Plan {
     pub async fn load(
         log: &Logger,
-        storage: &StorageResources,
+        storage_manager: &StorageHandle,
     ) -> Result<Option<Plan>, PlanError> {
-        let paths: Vec<Utf8PathBuf> = storage
-            .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
+        let paths: Vec<Utf8PathBuf> = storage_manager
+            .get_latest_resources()
             .await
+            .all_m2_mountpoints(CONFIG_DATASET)
             .into_iter()
             .map(|p| p.join(RSS_SERVICE_PLAN_FILENAME))
             .collect();
@@ -659,7 +652,7 @@ impl Plan {
     pub async fn create(
         log: &Logger,
         config: &Config,
-        storage: &StorageResources,
+        storage_manager: &StorageHandle,
         sleds: &HashMap<SocketAddrV6, StartSledAgentRequest>,
     ) -> Result<Self, PlanError> {
         // Load the information we need about each Sled to be able to allocate
@@ -691,9 +684,10 @@ impl Plan {
         let plan = Self::create_transient(config, sled_info)?;
 
         // Once we've constructed a plan, write it down to durable storage.
-        let paths: Vec<Utf8PathBuf> = storage
-            .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
+        let paths: Vec<Utf8PathBuf> = storage_manager
+            .get_latest_resources()
             .await
+            .all_m2_mountpoints(CONFIG_DATASET)
             .into_iter()
             .map(|p| p.join(RSS_SERVICE_PLAN_FILENAME))
             .collect();

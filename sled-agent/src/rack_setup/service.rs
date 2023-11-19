@@ -74,7 +74,6 @@ use crate::rack_setup::plan::service::{
 use crate::rack_setup::plan::sled::{
     Plan as SledPlan, PlanError as SledPlanError,
 };
-use crate::storage_manager::StorageResources;
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
 use ddm_admin_client::{Client as DdmAdminClient, DdmError};
@@ -95,6 +94,8 @@ use sled_agent_client::{
     types as SledAgentTypes, Client as SledAgentClient, Error as SledAgentError,
 };
 use sled_hardware::underlay::BootstrapInterface;
+use sled_storage::dataset::CONFIG_DATASET;
+use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::collections::BTreeSet;
 use std::collections::{HashMap, HashSet};
@@ -188,7 +189,7 @@ impl RackSetupService {
     pub(crate) fn new(
         log: Logger,
         config: Config,
-        storage_resources: StorageResources,
+        storage_manager: StorageHandle,
         local_bootstrap_agent: BootstrapAgentHandle,
         bootstore: bootstore::NodeHandle,
     ) -> Self {
@@ -197,7 +198,7 @@ impl RackSetupService {
             if let Err(e) = svc
                 .run(
                     &config,
-                    &storage_resources,
+                    &storage_manager,
                     local_bootstrap_agent,
                     bootstore,
                 )
@@ -776,7 +777,7 @@ impl ServiceInner {
     async fn run(
         &self,
         config: &Config,
-        storage_resources: &StorageResources,
+        storage_manager: &StorageHandle,
         local_bootstrap_agent: BootstrapAgentHandle,
         bootstore: bootstore::NodeHandle,
     ) -> Result<(), SetupServiceError> {
@@ -787,9 +788,10 @@ impl ServiceInner {
             config.az_subnet(),
         )?;
 
-        let marker_paths: Vec<Utf8PathBuf> = storage_resources
-            .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
+        let marker_paths: Vec<Utf8PathBuf> = storage_manager
+            .get_latest_resources()
             .await
+            .all_m2_mountpoints(CONFIG_DATASET)
             .into_iter()
             .map(|p| p.join(RSS_COMPLETED_FILENAME))
             .collect();
@@ -810,7 +812,7 @@ impl ServiceInner {
                 "RSS configuration looks like it has already been applied",
             );
 
-            let sled_plan = SledPlan::load(&self.log, storage_resources)
+            let sled_plan = SledPlan::load(&self.log, storage_manager)
                 .await?
                 .expect("Sled plan should exist if completed marker exists");
             if &sled_plan.config != config {
@@ -818,7 +820,7 @@ impl ServiceInner {
                     "Configuration changed".to_string(),
                 ));
             }
-            let service_plan = ServicePlan::load(&self.log, storage_resources)
+            let service_plan = ServicePlan::load(&self.log, storage_manager)
                 .await?
                 .expect("Service plan should exist if completed marker exists");
 
@@ -852,7 +854,7 @@ impl ServiceInner {
             BootstrapAddressDiscovery::OnlyThese { addrs } => addrs.clone(),
         };
         let maybe_sled_plan =
-            SledPlan::load(&self.log, storage_resources).await?;
+            SledPlan::load(&self.log, storage_manager).await?;
         if let Some(plan) = &maybe_sled_plan {
             let stored_peers: HashSet<Ipv6Addr> =
                 plan.sleds.keys().map(|a| *a.ip()).collect();
@@ -884,7 +886,7 @@ impl ServiceInner {
             SledPlan::create(
                 &self.log,
                 config,
-                &storage_resources,
+                &storage_manager,
                 bootstrap_addrs,
                 config.trust_quorum_peers.is_some(),
             )
@@ -939,14 +941,14 @@ impl ServiceInner {
             })
             .collect();
         let service_plan = if let Some(plan) =
-            ServicePlan::load(&self.log, storage_resources).await?
+            ServicePlan::load(&self.log, storage_manager).await?
         {
             plan
         } else {
             ServicePlan::create(
                 &self.log,
                 &config,
-                &storage_resources,
+                &storage_manager,
                 &plan.sleds,
             )
             .await?

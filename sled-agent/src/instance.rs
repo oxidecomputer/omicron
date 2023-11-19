@@ -17,7 +17,6 @@ use crate::params::{
     InstanceMigrationTargetParams, InstanceStateRequested, VpcFirewallRule,
 };
 use crate::profile::*;
-use crate::storage_manager::StorageResources;
 use crate::zone_bundle::BundleError;
 use crate::zone_bundle::ZoneBundler;
 use anyhow::anyhow;
@@ -42,7 +41,8 @@ use omicron_common::backoff;
 use propolis_client::Client as PropolisClient;
 use rand::prelude::SliceRandom;
 use rand::SeedableRng;
-use sled_hardware::disk::ZONE_DATASET;
+use sled_storage::dataset::ZONE_DATASET;
+use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::net::IpAddr;
 use std::net::{SocketAddr, SocketAddrV6};
@@ -225,7 +225,7 @@ struct InstanceInner {
     nexus_client: NexusClientWithResolver,
 
     // Storage resources
-    storage: StorageResources,
+    storage: StorageHandle,
 
     // Object used to collect zone bundles from this instance when terminated.
     zone_bundler: ZoneBundler,
@@ -899,8 +899,9 @@ impl Instance {
         let mut rng = rand::rngs::StdRng::from_entropy();
         let root = inner
             .storage
-            .all_u2_mountpoints(ZONE_DATASET)
+            .get_latest_resources()
             .await
+            .all_u2_mountpoints(ZONE_DATASET)
             .choose(&mut rng)
             .ok_or_else(|| Error::U2NotFound)?
             .clone();

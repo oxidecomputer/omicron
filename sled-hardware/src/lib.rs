@@ -163,13 +163,3 @@ impl std::fmt::Display for Baseboard {
         }
     }
 }
-
-impl From<Baseboard> for nexus_client::types::Baseboard {
-    fn from(b: Baseboard) -> nexus_client::types::Baseboard {
-        nexus_client::types::Baseboard {
-            serial_number: b.identifier().to_string(),
-            part_number: b.model().to_string(),
-            revision: b.revision(),
-        }
-    }
-}

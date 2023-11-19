@@ -24,11 +24,10 @@
 //! past this change.
 
 use crate::params::{
-    DatasetKind, OmicronZoneConfig, OmicronZoneDataset, OmicronZoneType,
-    ZoneType, OMICRON_ZONES_CONFIG_INITIAL_VERSION,
+    OmicronZoneConfig, OmicronZoneDataset, OmicronZoneType, ZoneType,
+    OMICRON_ZONES_CONFIG_INITIAL_VERSION,
 };
 use crate::services::{OmicronZoneConfigLocal, OmicronZonesConfigLocal};
-use crate::storage::dataset::DatasetName;
 use anyhow::{anyhow, ensure, Context};
 use camino::Utf8PathBuf;
 use omicron_common::api::external::Generation;
@@ -38,6 +37,7 @@ use omicron_common::api::internal::shared::{
 use omicron_common::ledger::Ledgerable;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sled_storage::dataset::{DatasetKind, DatasetName};
 use std::fmt::Debug;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use uuid::Uuid;
