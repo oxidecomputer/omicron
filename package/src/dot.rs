@@ -184,7 +184,7 @@ pub fn do_dot(
                 }
             }
 
-            PackageSource::Local { blobs, rust, paths } => {
+            PackageSource::Local { blobs, rust, paths, .. } => {
                 // Regardless of the type of local package (e.g., files-only or
                 // Rust package or whatever), create nodes showing any S3 blobs
                 // on which it depends.
