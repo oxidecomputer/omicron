@@ -288,6 +288,7 @@ pub struct Rack {
 )]
 pub struct UninitializedSled {
     pub baseboard: Baseboard,
+    pub rack_id: Uuid,
     pub cubby: u16,
 }
 

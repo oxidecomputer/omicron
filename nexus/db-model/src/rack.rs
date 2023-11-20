@@ -30,7 +30,7 @@ impl Rack {
         }
     }
 
-    pub fn get_subnet(&self) -> Result<Ipv6Network, api::external::Error> {
+    pub fn subnet(&self) -> Result<Ipv6Network, api::external::Error> {
         match self.rack_subnet {
             Some(IpNetwork::V6(subnet)) => Ok(subnet),
             Some(IpNetwork::V4(_)) => {

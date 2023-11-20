@@ -1236,6 +1236,18 @@ mod test {
         assert_eq!(collection2.baseboards.len(), nbaseboards);
         assert_eq!(collection2.cabooses.len(), ncabooses);
 
+        // Check that we get an error on the limit being reached for
+        // `read_all_or_nothing`
+        let limit = NonZeroU32::new(1).unwrap();
+        assert!(datastore
+            .inventory_collection_read_all_or_nothing(
+                &opctx,
+                collection2.id,
+                limit
+            )
+            .await
+            .is_err());
+
         // Now insert an equivalent collection again.  Verify the distinct
         // baseboards and cabooses again.  This is important: the insertion
         // process should re-use the baseboards and cabooses from the previous

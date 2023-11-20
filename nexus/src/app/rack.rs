@@ -619,7 +619,7 @@ impl super::Nexus {
         opctx: &OpContext,
     ) -> Result<EarlyNetworkConfig, Error> {
         let rack = self.rack_lookup(opctx, &self.rack_id).await?;
-        let subnet = rack.get_subnet()?;
+        let subnet = rack.subnet()?;
 
         let db_ports = self.active_port_settings(opctx).await?;
         let mut ports = Vec::new();
@@ -719,6 +719,9 @@ impl super::Nexus {
 
     /// Return the list of sleds that are inserted into an initialized rack
     /// but not yet initialized as part of a rack.
+    //
+    // TODO-multirack: We currently limit sleds to a single rack and we also
+    // retrieve the `rack_uuid` from the Nexus instance used.
     pub(crate) async fn uninitialized_sled_list(
         &self,
         opctx: &OpContext,
@@ -748,6 +751,7 @@ impl super::Nexus {
                             part: k.part_number.clone(),
                             revision: v.baseboard_revision.into(),
                         },
+                        rack_id: self.rack_id,
                         cubby: v.sp_slot,
                     })
                 } else {
