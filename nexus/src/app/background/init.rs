@@ -10,12 +10,15 @@ use super::dns_propagation;
 use super::dns_servers;
 use super::external_endpoints;
 use super::inventory_collection;
+use super::nat_cleanup;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_common::nexus_config::BackgroundTaskConfig;
 use omicron_common::nexus_config::DnsTasksConfig;
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -44,6 +47,8 @@ pub struct BackgroundTasks {
     pub external_endpoints: tokio::sync::watch::Receiver<
         Option<external_endpoints::ExternalEndpoints>,
     >,
+    /// task handle for the ipv4 nat entry garbage collector
+    pub nat_cleanup: common::TaskHandle,
 
     /// task handle for the task that collects inventory
     pub task_inventory_collection: common::TaskHandle,
@@ -55,6 +60,7 @@ impl BackgroundTasks {
         opctx: &OpContext,
         datastore: Arc<DataStore>,
         config: &BackgroundTaskConfig,
+        dpd_clients: &HashMap<SwitchLocation, Arc<dpd_client::Client>>,
         nexus_id: Uuid,
         resolver: internal_dns::resolver::Resolver,
     ) -> BackgroundTasks {
@@ -96,6 +102,23 @@ impl BackgroundTasks {
             (task, watcher_channel)
         };
 
+        let nat_cleanup = {
+            driver.register(
+                "nat_v4_garbage_collector".to_string(),
+                String::from(
+                    "prunes soft-deleted IPV4 NAT entries from ipv4_nat_entry table \
+                     based on a predetermined retention policy",
+                ),
+                config.nat_cleanup.period_secs,
+                Box::new(nat_cleanup::Ipv4NatGarbageCollector::new(
+                    datastore.clone(),
+                    dpd_clients.values().map(|client| client.clone()).collect(),
+                )),
+                opctx.child(BTreeMap::new()),
+                vec![],
+            )
+        };
+
         // Background task: inventory collector
         let task_inventory_collection = {
             let collector = inventory_collection::InventoryCollector::new(
@@ -128,6 +151,7 @@ impl BackgroundTasks {
             task_external_dns_servers,
             task_external_endpoints,
             external_endpoints,
+            nat_cleanup,
             task_inventory_collection,
         }
     }

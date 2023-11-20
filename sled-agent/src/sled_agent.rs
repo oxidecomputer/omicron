@@ -13,7 +13,7 @@ use crate::config::Config;
 use crate::instance_manager::{InstanceManager, ReservoirMode};
 use crate::long_running_tasks::LongRunningTaskHandles;
 use crate::metrics::MetricsManager;
-use crate::nexus::{NexusClientWithResolver, NexusRequestQueue};
+use crate::nexus::{ConvertInto, NexusClientWithResolver, NexusRequestQueue};
 use crate::params::{
     DiskStateRequested, InstanceHardware, InstanceMigrationSourceParams,
     InstancePutStateResponse, InstanceStateRequested,
@@ -607,9 +607,7 @@ impl SledAgent {
         let nexus_client = self.inner.nexus_client.clone();
         let sled_address = self.inner.sled_address();
         let is_scrimlet = self.inner.hardware.is_scrimlet();
-        let baseboard = nexus_client::types::Baseboard::from(
-            self.inner.hardware.baseboard(),
-        );
+        let baseboard = self.inner.hardware.baseboard().convert();
         let usable_hardware_threads =
             self.inner.hardware.online_processor_count();
         let usable_physical_ram =

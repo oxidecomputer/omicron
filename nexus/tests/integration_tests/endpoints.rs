@@ -43,6 +43,8 @@ use std::str::FromStr;
 lazy_static! {
     pub static ref HARDWARE_RACK_URL: String =
         format!("/v1/system/hardware/racks/{}", RACK_UUID);
+    pub static ref HARDWARE_UNINITIALIZED_SLEDS: String =
+        format!("/v1/system/hardware/uninitialized-sleds");
     pub static ref HARDWARE_SLED_URL: String =
         format!("/v1/system/hardware/sleds/{}", SLED_AGENT_UUID);
     pub static ref HARDWARE_SWITCH_URL: String =
@@ -1560,6 +1562,13 @@ lazy_static! {
         VerifyEndpoint {
             url: &HARDWARE_RACK_URL,
             visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![AllowedMethod::Get],
+        },
+
+        VerifyEndpoint {
+            url: &HARDWARE_UNINITIALIZED_SLEDS,
+            visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Get],
         },
