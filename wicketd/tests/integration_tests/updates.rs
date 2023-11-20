@@ -31,7 +31,9 @@ use wicketd_client::types::{
     StartUpdateParams,
 };
 
-#[tokio::test]
+// See documentation for extract_nested_artifact_pair in update_plan.rs for why
+// multi_thread is required.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_updates() {
     let gateway = gateway_setup::test_setup("test_updates", SpPort::One).await;
     let wicketd_testctx = WicketdTestContext::setup(gateway).await;
@@ -48,7 +50,7 @@ async fn test_updates() {
     ])
     .expect("args parsed correctly");
 
-    args.exec(log).expect("assemble command completed successfully");
+    args.exec(log).await.expect("assemble command completed successfully");
 
     // Read the archive and upload it to the server.
     let zip_bytes =
@@ -258,7 +260,9 @@ async fn test_updates() {
     wicketd_testctx.teardown().await;
 }
 
-#[tokio::test]
+// See documentation for extract_nested_artifact_pair in update_plan.rs for why
+// multi_thread is required.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_installinator_fetch() {
     let gateway = gateway_setup::test_setup("test_updates", SpPort::One).await;
     let wicketd_testctx = WicketdTestContext::setup(gateway).await;
@@ -275,7 +279,7 @@ async fn test_installinator_fetch() {
     ])
     .expect("args parsed correctly");
 
-    args.exec(log).expect("assemble command completed successfully");
+    args.exec(log).await.expect("assemble command completed successfully");
 
     // Read the archive and upload it to the server.
     let zip_bytes =
@@ -391,7 +395,9 @@ async fn test_installinator_fetch() {
     wicketd_testctx.teardown().await;
 }
 
-#[tokio::test]
+// See documentation for extract_nested_artifact_pair in update_plan.rs for why
+// multi_thread is required.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_update_races() {
     let gateway = gateway_setup::test_setup(
         "test_artifact_upload_while_updating",
@@ -412,7 +418,7 @@ async fn test_update_races() {
     ])
     .expect("args parsed correctly");
 
-    args.exec(log).expect("assemble command completed successfully");
+    args.exec(log).await.expect("assemble command completed successfully");
 
     // Read the archive and upload it to the server.
     let zip_bytes =

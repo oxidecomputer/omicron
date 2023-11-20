@@ -69,14 +69,14 @@ impl super::Nexus {
                 ),
             })?;
 
-        let artifacts = tokio::task::spawn_blocking(move || {
-            crate::updates::read_artifacts(&trusted_root, base_url)
-        })
-        .await
-        .unwrap()
-        .map_err(|e| Error::InternalError {
-            internal_message: format!("error trying to refresh updates: {}", e),
-        })?;
+        let artifacts = crate::updates::read_artifacts(&trusted_root, base_url)
+            .await
+            .map_err(|e| Error::InternalError {
+                internal_message: format!(
+                    "error trying to refresh updates: {}",
+                    e
+                ),
+            })?;
 
         // FIXME: if we hit an error in any of these database calls, the
         // available artifact table will be out of sync with the current
