@@ -4,7 +4,7 @@
 
 //! Bootstrap-related utilities
 
-mod bootstore;
+pub(crate) mod bootstore_setup;
 pub mod client;
 pub mod config;
 pub mod early_networking;
@@ -14,7 +14,7 @@ pub(crate) mod params;
 mod pre_server;
 mod rack_ops;
 pub(crate) mod rss_handle;
-mod secret_retriever;
+pub mod secret_retriever;
 pub mod server;
 mod sprockets_server;
 mod views;

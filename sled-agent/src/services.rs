@@ -5,7 +5,7 @@
 //! Sled-local service management.
 //!
 //! For controlling zone-based storage services, refer to
-//! [crate::storage_manager::StorageManager].
+//! [sled_storage::manager::StorageManager].
 //!
 //! For controlling virtual machine instances, refer to
 //! [crate::instance_manager::InstanceManager].
@@ -38,7 +38,6 @@ use crate::params::{
 use crate::profile::*;
 use crate::smf_helper::Service;
 use crate::smf_helper::SmfHelper;
-use crate::storage_manager::StorageResources;
 use crate::zone_bundle::BundleError;
 use crate::zone_bundle::ZoneBundler;
 use anyhow::anyhow;
@@ -91,12 +90,13 @@ use omicron_common::nexus_config::{
 use once_cell::sync::OnceCell;
 use rand::prelude::SliceRandom;
 use rand::SeedableRng;
-use sled_hardware::disk::ZONE_DATASET;
 use sled_hardware::is_gimlet;
 use sled_hardware::underlay;
 use sled_hardware::underlay::BOOTSTRAP_PREFIX;
 use sled_hardware::Baseboard;
 use sled_hardware::SledMode;
+use sled_storage::dataset::{CONFIG_DATASET, INSTALL_DATASET, ZONE_DATASET};
+use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::collections::HashSet;
@@ -373,7 +373,7 @@ pub struct ServiceManagerInner {
     advertised_prefixes: Mutex<HashSet<Ipv6Subnet<SLED_PREFIX>>>,
     sled_info: OnceCell<SledAgentInfo>,
     switch_zone_bootstrap_address: Ipv6Addr,
-    storage: StorageResources,
+    storage: StorageHandle,
     zone_bundler: ZoneBundler,
     ledger_directory_override: OnceCell<Utf8PathBuf>,
     image_directory_override: OnceCell<Utf8PathBuf>,
@@ -418,10 +418,11 @@ impl ServiceManager {
         skip_timesync: Option<bool>,
         sidecar_revision: SidecarRevision,
         switch_zone_maghemite_links: Vec<PhysicalLink>,
-        storage: StorageResources,
+        storage: StorageHandle,
         zone_bundler: ZoneBundler,
     ) -> Self {
         let log = log.new(o!("component" => "ServiceManager"));
+        info!(log, "Creating ServiceManager");
         Self {
             inner: Arc::new(ServiceManagerInner {
                 log: log.clone(),
@@ -476,10 +477,9 @@ impl ServiceManager {
         if let Some(dir) = self.inner.ledger_directory_override.get() {
             return vec![dir.join(SERVICES_LEDGER_FILENAME)];
         }
-        self.inner
-            .storage
-            .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
-            .await
+        let resources = self.inner.storage.get_latest_resources().await;
+        resources
+            .all_m2_mountpoints(CONFIG_DATASET)
             .into_iter()
             .map(|p| p.join(SERVICES_LEDGER_FILENAME))
             .collect()
@@ -1096,11 +1096,11 @@ impl ServiceManager {
 
         // If the boot disk exists, look for the image in the "install" dataset
         // there too.
-        if let Some((_, boot_zpool)) = self.inner.storage.boot_disk().await {
-            zone_image_paths.push(
-                boot_zpool
-                    .dataset_mountpoint(sled_hardware::disk::INSTALL_DATASET),
-            );
+        if let Some((_, boot_zpool)) =
+            self.inner.storage.get_latest_resources().await.boot_disk()
+        {
+            zone_image_paths
+                .push(boot_zpool.dataset_mountpoint(INSTALL_DATASET));
         }
 
         let installed_zone = InstalledZone::install(
@@ -2252,8 +2252,12 @@ impl ServiceManager {
 
         // Create zones that should be running
         let mut zone_requests = AllZoneRequests::default();
-        let all_u2_roots =
-            self.inner.storage.all_u2_mountpoints(ZONE_DATASET).await;
+        let all_u2_roots = self
+            .inner
+            .storage
+            .get_latest_resources()
+            .await
+            .all_u2_mountpoints(ZONE_DATASET);
         for zone in zones_to_be_added {
             // Check if we think the zone should already be running
             let name = zone.zone_name();
@@ -2979,8 +2983,12 @@ impl ServiceManager {
         let root = if request.zone_type == ZoneType::Switch {
             Utf8PathBuf::from(ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT)
         } else {
-            let all_u2_roots =
-                self.inner.storage.all_u2_mountpoints(ZONE_DATASET).await;
+            let all_u2_roots = self
+                .inner
+                .storage
+                .get_latest_resources()
+                .await
+                .all_u2_mountpoints(ZONE_DATASET);
             let mut rng = rand::rngs::StdRng::from_entropy();
             all_u2_roots
                 .choose(&mut rng)
@@ -3038,7 +3046,7 @@ impl ServiceManager {
 mod test {
     use super::*;
     use crate::params::{ServiceZoneService, ZoneType};
-    use async_trait::async_trait;
+    use illumos_utils::zpool::ZpoolName;
     use illumos_utils::{
         dladm::{
             Etherstub, MockDladm, BOOTSTRAP_ETHERSTUB_NAME,
@@ -3047,10 +3055,10 @@ mod test {
         svc,
         zone::MockZones,
     };
-    use key_manager::{
-        SecretRetriever, SecretRetrieverError, SecretState, VersionedIkm,
-    };
     use omicron_common::address::OXIMETER_PORT;
+    use sled_storage::disk::{RawDisk, SyntheticDisk};
+
+    use sled_storage::manager::{FakeStorageManager, StorageHandle};
     use std::net::{Ipv6Addr, SocketAddrV6};
     use std::os::unix::process::ExitStatusExt;
     use uuid::Uuid;
@@ -3078,6 +3086,7 @@ mod test {
 
     // Returns the expectations for a new service to be created.
     fn expect_new_service() -> Vec<Box<dyn std::any::Any>> {
+        illumos_utils::USE_MOCKS.store(true, Ordering::SeqCst);
         // Create a VNIC
         let create_vnic_ctx = MockDladm::create_vnic_context();
         create_vnic_ctx.expect().return_once(
@@ -3120,8 +3129,7 @@ mod test {
         let wait_ctx = svc::wait_for_service_context();
         wait_ctx.expect().return_once(|_, _, _| Ok(()));
 
-        // Import the manifest, enable the service
-        let execute_ctx = illumos_utils::execute_context();
+        let execute_ctx = illumos_utils::execute_helper_context();
         execute_ctx.expect().times(..).returning(|_| {
             Ok(std::process::Output {
                 status: std::process::ExitStatus::from_raw(0),
@@ -3243,29 +3251,24 @@ mod test {
         }
     }
 
-    pub struct TestSecretRetriever {}
+    async fn setup_storage() -> StorageHandle {
+        let (manager, handle) = FakeStorageManager::new();
 
-    #[async_trait]
-    impl SecretRetriever for TestSecretRetriever {
-        async fn get_latest(
-            &self,
-        ) -> Result<VersionedIkm, SecretRetrieverError> {
-            let epoch = 0;
-            let salt = [0u8; 32];
-            let secret = [0x1d; 32];
+        // Spawn the storage manager as done by sled-agent
+        tokio::spawn(async move {
+            manager.run().await;
+        });
 
-            Ok(VersionedIkm::new(epoch, salt, &secret))
-        }
+        let internal_zpool_name = ZpoolName::new_internal(Uuid::new_v4());
+        let internal_disk: RawDisk =
+            SyntheticDisk::new(internal_zpool_name).into();
+        handle.upsert_disk(internal_disk).await;
+        let external_zpool_name = ZpoolName::new_external(Uuid::new_v4());
+        let external_disk: RawDisk =
+            SyntheticDisk::new(external_zpool_name).into();
+        handle.upsert_disk(external_disk).await;
 
-        async fn get(
-            &self,
-            epoch: u64,
-        ) -> Result<SecretState, SecretRetrieverError> {
-            if epoch != 0 {
-                return Err(SecretRetrieverError::NoSuchEpoch(epoch));
-            }
-            Ok(SecretState::Current(self.get_latest().await?))
-        }
+        handle
     }
 
     #[tokio::test]
@@ -3276,10 +3279,10 @@ mod test {
         let log = logctx.log.clone();
         let test_config = TestConfig::new().await;
 
-        let resources = StorageResources::new_for_test();
+        let storage_handle = setup_storage().await;
         let zone_bundler = ZoneBundler::new(
             log.clone(),
-            resources.clone(),
+            storage_handle.clone(),
             Default::default(),
         );
         let mgr = ServiceManager::new(
@@ -3290,7 +3293,7 @@ mod test {
             Some(true),
             SidecarRevision::Physical("rev-test".to_string()),
             vec![],
-            resources,
+            storage_handle,
             zone_bundler,
         );
         test_config.override_paths(&mgr);
@@ -3324,10 +3327,10 @@ mod test {
         let log = logctx.log.clone();
         let test_config = TestConfig::new().await;
 
-        let resources = StorageResources::new_for_test();
+        let storage_handle = setup_storage().await;
         let zone_bundler = ZoneBundler::new(
             log.clone(),
-            resources.clone(),
+            storage_handle.clone(),
             Default::default(),
         );
         let mgr = ServiceManager::new(
@@ -3338,7 +3341,7 @@ mod test {
             Some(true),
             SidecarRevision::Physical("rev-test".to_string()),
             vec![],
-            resources,
+            storage_handle,
             zone_bundler,
         );
         test_config.override_paths(&mgr);
@@ -3377,10 +3380,10 @@ mod test {
 
         // First, spin up a ServiceManager, create a new service, and tear it
         // down.
-        let resources = StorageResources::new_for_test();
+        let storage_handle = setup_storage().await;
         let zone_bundler = ZoneBundler::new(
             log.clone(),
-            resources.clone(),
+            storage_handle.clone(),
             Default::default(),
         );
         let mgr = ServiceManager::new(
@@ -3391,7 +3394,7 @@ mod test {
             Some(true),
             SidecarRevision::Physical("rev-test".to_string()),
             vec![],
-            resources.clone(),
+            storage_handle.clone(),
             zone_bundler.clone(),
         );
         test_config.override_paths(&mgr);
@@ -3424,7 +3427,7 @@ mod test {
             Some(true),
             SidecarRevision::Physical("rev-test".to_string()),
             vec![],
-            resources.clone(),
+            storage_handle.clone(),
             zone_bundler.clone(),
         );
         test_config.override_paths(&mgr);
@@ -3460,10 +3463,10 @@ mod test {
 
         // First, spin up a ServiceManager, create a new service, and tear it
         // down.
-        let resources = StorageResources::new_for_test();
+        let storage_handle = setup_storage().await;
         let zone_bundler = ZoneBundler::new(
             log.clone(),
-            resources.clone(),
+            storage_handle.clone(),
             Default::default(),
         );
         let mgr = ServiceManager::new(
@@ -3474,7 +3477,7 @@ mod test {
             Some(true),
             SidecarRevision::Physical("rev-test".to_string()),
             vec![],
-            resources.clone(),
+            storage_handle.clone(),
             zone_bundler.clone(),
         );
         test_config.override_paths(&mgr);
@@ -3512,7 +3515,7 @@ mod test {
             Some(true),
             SidecarRevision::Physical("rev-test".to_string()),
             vec![],
-            resources.clone(),
+            storage_handle,
             zone_bundler.clone(),
         );
         test_config.override_paths(&mgr);

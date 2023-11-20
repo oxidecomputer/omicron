@@ -6,6 +6,7 @@
 
 use async_trait::async_trait;
 use std::convert::TryFrom;
+use std::str::FromStr;
 use uuid::Uuid;
 
 progenitor::generate_api!(
@@ -526,5 +527,29 @@ impl TestInterfaces for Client {
             .send()
             .await
             .expect("disk_finish_transition() failed unexpectedly");
+    }
+}
+
+impl From<sled_storage::dataset::DatasetKind> for types::DatasetKind {
+    fn from(k: sled_storage::dataset::DatasetKind) -> Self {
+        use sled_storage::dataset::DatasetKind::*;
+        match k {
+            CockroachDb => Self::CockroachDb,
+            Crucible => Self::Crucible,
+            Clickhouse => Self::Clickhouse,
+            ClickhouseKeeper => Self::ClickhouseKeeper,
+            ExternalDns => Self::ExternalDns,
+            InternalDns => Self::InternalDns,
+        }
+    }
+}
+
+impl From<sled_storage::dataset::DatasetName> for types::DatasetName {
+    fn from(n: sled_storage::dataset::DatasetName) -> Self {
+        Self {
+            pool_name: types::ZpoolName::from_str(&n.pool().to_string())
+                .unwrap(),
+            kind: n.dataset().clone().into(),
+        }
     }
 }

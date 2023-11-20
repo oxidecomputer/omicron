@@ -35,15 +35,16 @@ use uuid::Uuid;
 use std::collections::HashMap;
 use std::str::FromStr;
 
-use crucible_client_types::VolumeConstructionRequest;
 use dropshot::HttpServer;
 use illumos_utils::opte::params::{
     DeleteVirtualNetworkInterfaceHost, SetVirtualNetworkInterfaceHost,
 };
 use nexus_client::types::PhysicalDiskKind;
 use omicron_common::address::PROPOLIS_PORT;
-use propolis_client::Client as PropolisClient;
-use propolis_server::mock_server::Context as PropolisContext;
+use propolis_client::{
+    types::VolumeConstructionRequest, Client as PropolisClient,
+};
+use propolis_mock_server::Context as PropolisContext;
 
 /// Simulates management of the control plane on a sled
 ///
@@ -70,13 +71,14 @@ pub struct SledAgent {
 }
 
 fn extract_targets_from_volume_construction_request(
-    vec: &mut Vec<SocketAddr>,
     vcr: &VolumeConstructionRequest,
-) {
+) -> Result<Vec<SocketAddr>, std::net::AddrParseError> {
     // A snapshot is simply a flush with an extra parameter, and flushes are
     // only sent to sub volumes, not the read only parent. Flushes are only
     // processed by regions, so extract each region that would be affected by a
     // flush.
+
+    let mut res = vec![];
     match vcr {
         VolumeConstructionRequest::Volume {
             id: _,
@@ -85,9 +87,9 @@ fn extract_targets_from_volume_construction_request(
             read_only_parent: _,
         } => {
             for sub_volume in sub_volumes.iter() {
-                extract_targets_from_volume_construction_request(
-                    vec, sub_volume,
-                );
+                res.extend(extract_targets_from_volume_construction_request(
+                    sub_volume,
+                )?);
             }
         }
 
@@ -103,7 +105,7 @@ fn extract_targets_from_volume_construction_request(
             gen: _,
         } => {
             for target in &opts.target {
-                vec.push(*target);
+                res.push(SocketAddr::from_str(target)?);
             }
         }
 
@@ -111,6 +113,7 @@ fn extract_targets_from_volume_construction_request(
             // noop
         }
     }
+    Ok(res)
 }
 
 impl SledAgent {
@@ -171,23 +174,19 @@ impl SledAgent {
         volume_construction_request: &VolumeConstructionRequest,
     ) -> Result<(), Error> {
         let disk_id = match volume_construction_request {
-            VolumeConstructionRequest::Volume {
-                id,
-                block_size: _,
-                sub_volumes: _,
-                read_only_parent: _,
-            } => id,
+            VolumeConstructionRequest::Volume { id, .. } => id,
 
             _ => {
                 panic!("root of volume construction request not a volume!");
             }
         };
 
-        let mut targets = Vec::new();
-        extract_targets_from_volume_construction_request(
-            &mut targets,
+        let targets = extract_targets_from_volume_construction_request(
             &volume_construction_request,
-        );
+        )
+        .map_err(|e| {
+            Error::invalid_request(&format!("bad socketaddr: {e:?}"))
+        })?;
 
         let mut region_ids = Vec::new();
 
@@ -640,11 +639,10 @@ impl SledAgent {
             ..Default::default()
         };
         let propolis_log = log.new(o!("component" => "propolis-server-mock"));
-        let private =
-            Arc::new(PropolisContext::new(Default::default(), propolis_log));
+        let private = Arc::new(PropolisContext::new(propolis_log));
         info!(log, "Starting mock propolis-server...");
         let dropshot_log = log.new(o!("component" => "dropshot"));
-        let mock_api = propolis_server::mock_server::api();
+        let mock_api = propolis_mock_server::api();
 
         let srv = dropshot::HttpServerStarter::new(
             &dropshot_config,

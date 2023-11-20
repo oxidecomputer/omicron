@@ -22,6 +22,7 @@ use update_engine::{
 };
 use wicket_common::{
     rack_update::ClearUpdateStateResponse, update_events::EventReport,
+    WICKETD_TIMEOUT,
 };
 use wicketd_client::types::{ClearUpdateStateParams, StartUpdateParams};
 
@@ -31,7 +32,7 @@ use crate::{
         parse_event_report_map, ComponentId, CreateClearUpdateStateOptions,
         CreateStartUpdateOptions,
     },
-    wicketd::{create_wicketd_client, WICKETD_TIMEOUT},
+    wicketd::create_wicketd_client,
 };
 
 use super::command::CommandOutput;

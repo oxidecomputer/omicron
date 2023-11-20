@@ -17,7 +17,6 @@ use crate::params::{
     InstanceMigrationTargetParams, InstanceStateRequested, VpcFirewallRule,
 };
 use crate::profile::*;
-use crate::storage_manager::StorageResources;
 use crate::zone_bundle::BundleError;
 use crate::zone_bundle::ZoneBundler;
 use anyhow::anyhow;
@@ -42,7 +41,8 @@ use omicron_common::backoff;
 use propolis_client::Client as PropolisClient;
 use rand::prelude::SliceRandom;
 use rand::SeedableRng;
-use sled_hardware::disk::ZONE_DATASET;
+use sled_storage::dataset::ZONE_DATASET;
+use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::net::IpAddr;
 use std::net::{SocketAddr, SocketAddrV6};
@@ -190,7 +190,7 @@ struct InstanceInner {
     log: Logger,
 
     // Properties visible to Propolis
-    properties: propolis_client::api::InstanceProperties,
+    properties: propolis_client::types::InstanceProperties,
 
     // The ID of the Propolis server (and zone) running this instance
     propolis_id: Uuid,
@@ -213,8 +213,7 @@ struct InstanceInner {
     dhcp_config: DhcpCfg,
 
     // Disk related properties
-    // TODO: replace `propolis_client::handmade::*` with properly-modeled local types
-    requested_disks: Vec<propolis_client::handmade::api::DiskRequest>,
+    requested_disks: Vec<propolis_client::types::DiskRequest>,
     cloud_init_bytes: Option<String>,
 
     // Internal State management
@@ -225,7 +224,7 @@ struct InstanceInner {
     nexus_client: NexusClientWithResolver,
 
     // Storage resources
-    storage: StorageResources,
+    storage: StorageHandle,
 
     // Object used to collect zone bundles from this instance when terminated.
     zone_bundler: ZoneBundler,
@@ -379,7 +378,7 @@ impl InstanceInner {
     /// Sends an instance state PUT request to this instance's Propolis.
     async fn propolis_state_put(
         &self,
-        request: propolis_client::api::InstanceStateRequested,
+        request: propolis_client::types::InstanceStateRequested,
     ) -> Result<(), Error> {
         let res = self
             .running_state
@@ -409,11 +408,11 @@ impl InstanceInner {
     ) -> Result<(), Error> {
         let nics = running_zone
             .opte_ports()
-            .map(|port| propolis_client::api::NetworkInterfaceRequest {
+            .map(|port| propolis_client::types::NetworkInterfaceRequest {
                 // TODO-correctness: Remove `.vnic()` call when we use the port
                 // directly.
                 name: port.vnic_name().to_string(),
-                slot: propolis_client::api::Slot(port.slot()),
+                slot: propolis_client::types::Slot(port.slot()),
             })
             .collect();
 
@@ -423,7 +422,7 @@ impl InstanceInner {
                     self.state.instance().migration_id.ok_or_else(|| {
                         Error::Migration(anyhow!("Missing Migration UUID"))
                     })?;
-                Some(propolis_client::api::InstanceMigrateInitiateRequest {
+                Some(propolis_client::types::InstanceMigrateInitiateRequest {
                     src_addr: params.src_propolis_addr.to_string(),
                     src_uuid: params.src_propolis_id,
                     migration_id,
@@ -432,7 +431,7 @@ impl InstanceInner {
             None => None,
         };
 
-        let request = propolis_client::api::InstanceEnsureRequest {
+        let request = propolis_client::types::InstanceEnsureRequest {
             properties: self.properties.clone(),
             nics,
             disks: self
@@ -648,7 +647,7 @@ impl Instance {
         let instance = InstanceInner {
             log: log.new(o!("instance_id" => id.to_string())),
             // NOTE: Mostly lies.
-            properties: propolis_client::api::InstanceProperties {
+            properties: propolis_client::types::InstanceProperties {
                 id,
                 name: hardware.properties.hostname.clone(),
                 description: "Test description".to_string(),
@@ -789,7 +788,7 @@ impl Instance {
         &self,
         state: crate::params::InstanceStateRequested,
     ) -> Result<SledInstanceState, Error> {
-        use propolis_client::api::InstanceStateRequested as PropolisRequest;
+        use propolis_client::types::InstanceStateRequested as PropolisRequest;
         let mut inner = self.inner.lock().await;
         let (propolis_state, next_published) = match state {
             InstanceStateRequested::MigrationTarget(migration_params) => {
@@ -899,8 +898,9 @@ impl Instance {
         let mut rng = rand::rngs::StdRng::from_entropy();
         let root = inner
             .storage
-            .all_u2_mountpoints(ZONE_DATASET)
+            .get_latest_resources()
             .await
+            .all_u2_mountpoints(ZONE_DATASET)
             .choose(&mut rng)
             .ok_or_else(|| Error::U2NotFound)?
             .clone();
@@ -1035,7 +1035,9 @@ impl Instance {
             // known to Propolis.
             let response = client
                 .instance_state_monitor()
-                .body(propolis_client::api::InstanceStateMonitorRequest { gen })
+                .body(propolis_client::types::InstanceStateMonitorRequest {
+                    gen,
+                })
                 .send()
                 .await?
                 .into_inner();

@@ -8,12 +8,10 @@ use super::config::BOOTSTRAP_AGENT_HTTP_PORT;
 use super::http_entrypoints;
 use super::params::RackInitializeRequest;
 use super::params::StartSledAgentRequest;
-use super::pre_server::BootstrapManagers;
 use super::rack_ops::RackInitId;
 use super::views::SledAgentResponse;
 use super::BootstrapError;
 use super::RssAccessError;
-use crate::bootstrap::bootstore::BootstoreHandles;
 use crate::bootstrap::config::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use crate::bootstrap::http_entrypoints::api as http_api;
 use crate::bootstrap::http_entrypoints::BootstrapServerContext;
@@ -24,16 +22,17 @@ use crate::bootstrap::secret_retriever::LrtqOrHardcodedSecretRetriever;
 use crate::bootstrap::sprockets_server::SprocketsServer;
 use crate::config::Config as SledConfig;
 use crate::config::ConfigError;
+use crate::long_running_tasks::LongRunningTaskHandles;
 use crate::server::Server as SledAgentServer;
+use crate::services::ServiceManager;
 use crate::sled_agent::SledAgent;
-use crate::storage_manager::StorageResources;
+use crate::storage_monitor::UnderlayAccess;
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
 use cancel_safe_futures::TryStreamExt;
 use ddm_admin_client::Client as DdmAdminClient;
 use ddm_admin_client::DdmError;
 use dropshot::HttpServer;
-use futures::Future;
 use futures::StreamExt;
 use illumos_utils::dladm;
 use illumos_utils::zfs;
@@ -42,12 +41,12 @@ use illumos_utils::zone::Zones;
 use omicron_common::ledger;
 use omicron_common::ledger::Ledger;
 use sled_hardware::underlay;
-use sled_hardware::HardwareUpdate;
+use sled_storage::dataset::CONFIG_DATASET;
+use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::io;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
-use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
@@ -175,65 +174,18 @@ impl Server {
             ddm_admin_localhost_client,
             base_log,
             startup_log,
-            managers,
-            key_manager_handle,
+            service_manager,
+            long_running_task_handles,
+            sled_agent_started_tx,
+            underlay_available_tx,
         } = BootstrapAgentStartup::run(config).await?;
 
-        // From this point on we will listen for hardware notifications and
-        // potentially start the switch zone and be notified of new disks; we
-        // are responsible for responding to updates from this point on.
-        let mut hardware_monitor = managers.hardware.monitor();
-        let storage_resources = managers.storage.resources();
-
-        // Check the latest hardware snapshot; we could have missed events
-        // between the creation of the hardware manager and our subscription of
-        // its monitor.
-        managers.check_latest_hardware_snapshot(None, &startup_log).await;
-
-        // Wait for our boot M.2 to show up.
-        wait_while_handling_hardware_updates(
-            wait_for_boot_m2(storage_resources, &startup_log),
-            &mut hardware_monitor,
-            &managers,
-            None, // No underlay network yet
-            &startup_log,
-            "waiting for boot M.2",
-        )
-        .await;
-
-        // Wait for the bootstore to start.
-        let bootstore_handles = wait_while_handling_hardware_updates(
-            BootstoreHandles::spawn(
-                storage_resources,
-                ddm_admin_localhost_client.clone(),
-                managers.hardware.baseboard(),
-                global_zone_bootstrap_ip,
-                &base_log,
-            ),
-            &mut hardware_monitor,
-            &managers,
-            None, // No underlay network yet
-            &startup_log,
-            "initializing bootstore",
-        )
-        .await?;
-
         // Do we have a StartSledAgentRequest stored in the ledger?
-        let maybe_ledger = wait_while_handling_hardware_updates(
-            async {
-                let paths = sled_config_paths(storage_resources).await?;
-                let maybe_ledger =
-                    Ledger::<StartSledAgentRequest>::new(&startup_log, paths)
-                        .await;
-                Ok::<_, StartError>(maybe_ledger)
-            },
-            &mut hardware_monitor,
-            &managers,
-            None, // No underlay network yet
-            &startup_log,
-            "loading sled-agent request from ledger",
-        )
-        .await?;
+        let paths =
+            sled_config_paths(&long_running_task_handles.storage_manager)
+                .await?;
+        let maybe_ledger =
+            Ledger::<StartSledAgentRequest>::new(&startup_log, paths).await;
 
         // We don't yet _act_ on the `StartSledAgentRequest` if we have one, but
         // if we have one we init our `RssAccess` noting that we're already
@@ -250,9 +202,9 @@ impl Server {
         let bootstrap_context = BootstrapServerContext {
             base_log: base_log.clone(),
             global_zone_bootstrap_ip,
-            storage_resources: storage_resources.clone(),
-            bootstore_node_handle: bootstore_handles.node_handle.clone(),
-            baseboard: managers.hardware.baseboard(),
+            storage_manager: long_running_task_handles.storage_manager.clone(),
+            bootstore_node_handle: long_running_task_handles.bootstore.clone(),
+            baseboard: long_running_task_handles.hardware_manager.baseboard(),
             rss_access,
             updates: config.updates.clone(),
             sled_reset_tx,
@@ -284,55 +236,36 @@ impl Server {
         // Do we have a persistent sled-agent request that we need to restore?
         let state = if let Some(ledger) = maybe_ledger {
             let start_sled_agent_request = ledger.into_inner();
-            let sled_agent_server = wait_while_handling_hardware_updates(
-                start_sled_agent(
-                    &config,
-                    start_sled_agent_request,
-                    &bootstore_handles.node_handle,
-                    &managers,
-                    &ddm_admin_localhost_client,
-                    &base_log,
-                    &startup_log,
-                ),
-                &mut hardware_monitor,
-                &managers,
-                None, // No underlay network yet
+            let sled_agent_server = start_sled_agent(
+                &config,
+                start_sled_agent_request,
+                long_running_task_handles.clone(),
+                underlay_available_tx,
+                service_manager.clone(),
+                &ddm_admin_localhost_client,
+                &base_log,
                 &startup_log,
-                "restoring sled-agent (cold boot)",
             )
             .await?;
 
+            // Give the HardwareMonitory access to the `SledAgent`
             let sled_agent = sled_agent_server.sled_agent();
-
-            // We've created sled-agent; we need to (possibly) reconfigure the
-            // switch zone, if we're a scrimlet, to give it our underlay network
-            // information.
-            let underlay_network_info = sled_agent.switch_zone_underlay_info();
-            info!(
-                startup_log, "Sled Agent started; rescanning hardware";
-                "underlay_network_info" => ?underlay_network_info,
-            );
-            managers
-                .check_latest_hardware_snapshot(Some(&sled_agent), &startup_log)
-                .await;
+            sled_agent_started_tx
+                .send(sled_agent.clone())
+                .map_err(|_| ())
+                .expect("Failed to send to StorageMonitor");
 
             // For cold boot specifically, we now need to load the services
             // we're responsible for, while continuing to handle hardware
             // notifications. This cannot fail: we retry indefinitely until
             // we're done loading services.
-            wait_while_handling_hardware_updates(
-                sled_agent.cold_boot_load_services(),
-                &mut hardware_monitor,
-                &managers,
-                Some(&sled_agent),
-                &startup_log,
-                "restoring sled-agent services (cold boot)",
-            )
-            .await;
-
+            sled_agent.cold_boot_load_services().await;
             SledAgentState::ServerStarted(sled_agent_server)
         } else {
-            SledAgentState::Bootstrapping
+            SledAgentState::Bootstrapping(
+                Some(sled_agent_started_tx),
+                Some(underlay_available_tx),
+            )
         };
 
         // Spawn our inner task that handles any future hardware updates and any
@@ -340,15 +273,13 @@ impl Server {
         // agent state.
         let inner = Inner {
             config,
-            hardware_monitor,
             state,
             sled_init_rx,
             sled_reset_rx,
-            managers,
             ddm_admin_localhost_client,
-            bootstore_handles,
+            long_running_task_handles,
+            service_manager,
             _sprockets_server_handle: sprockets_server_handle,
-            _key_manager_handle: key_manager_handle,
             base_log,
         };
         let inner_task = tokio::spawn(inner.run());
@@ -377,18 +308,12 @@ impl Server {
 // bootstrap server).
 enum SledAgentState {
     // We're still in the bootstrapping phase, waiting for a sled-agent request.
-    Bootstrapping,
+    Bootstrapping(
+        Option<oneshot::Sender<SledAgent>>,
+        Option<oneshot::Sender<UnderlayAccess>>,
+    ),
     // ... or the sled agent server is running.
     ServerStarted(SledAgentServer),
-}
-
-impl SledAgentState {
-    fn sled_agent(&self) -> Option<&SledAgent> {
-        match self {
-            SledAgentState::Bootstrapping => None,
-            SledAgentState::ServerStarted(server) => Some(server.sled_agent()),
-        }
-    }
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -425,11 +350,13 @@ impl From<SledAgentServerStartError> for StartError {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn start_sled_agent(
     config: &SledConfig,
     request: StartSledAgentRequest,
-    bootstore: &bootstore::NodeHandle,
-    managers: &BootstrapManagers,
+    long_running_task_handles: LongRunningTaskHandles,
+    underlay_available_tx: oneshot::Sender<UnderlayAccess>,
+    service_manager: ServiceManager,
     ddmd_client: &DdmAdminClient,
     base_log: &Logger,
     log: &Logger,
@@ -444,7 +371,10 @@ async fn start_sled_agent(
     if request.body.use_trust_quorum {
         info!(log, "KeyManager: using lrtq secret retriever");
         let salt = request.hash_rack_id();
-        LrtqOrHardcodedSecretRetriever::init_lrtq(salt, bootstore.clone())
+        LrtqOrHardcodedSecretRetriever::init_lrtq(
+            salt,
+            long_running_task_handles.bootstore.clone(),
+        )
     } else {
         info!(log, "KeyManager: using hardcoded secret retriever");
         LrtqOrHardcodedSecretRetriever::init_hardcoded();
@@ -452,7 +382,7 @@ async fn start_sled_agent(
 
     if request.body.use_trust_quorum && request.body.is_lrtq_learner {
         info!(log, "Initializing sled as learner");
-        match bootstore.init_learner().await {
+        match long_running_task_handles.bootstore.init_learner().await {
             Err(bootstore::NodeRequestError::Fsm(
                 bootstore::ApiError::AlreadyInitialized,
             )) => {
@@ -464,7 +394,7 @@ async fn start_sled_agent(
     }
 
     // Inform the storage service that the key manager is available
-    managers.storage.key_manager_ready().await;
+    long_running_task_handles.storage_manager.key_manager_ready().await;
 
     // Start trying to notify ddmd of our sled prefix so it can
     // advertise it to other sleds.
@@ -484,9 +414,9 @@ async fn start_sled_agent(
         config,
         base_log.clone(),
         request.clone(),
-        managers.service.clone(),
-        managers.storage.clone(),
-        bootstore.clone(),
+        long_running_task_handles.clone(),
+        service_manager,
+        underlay_available_tx,
     )
     .await
     .map_err(SledAgentServerStartError::FailedStartingServer)?;
@@ -495,7 +425,8 @@ async fn start_sled_agent(
 
     // Record this request so the sled agent can be automatically
     // initialized on the next boot.
-    let paths = sled_config_paths(managers.storage.resources()).await?;
+    let paths =
+        sled_config_paths(&long_running_task_handles.storage_manager).await?;
 
     let mut ledger = Ledger::new_with(&log, paths, request);
     ledger.commit().await?;
@@ -534,28 +465,6 @@ fn start_dropshot_server(
     Ok(http_server)
 }
 
-/// Wait for at least the M.2 we booted from to show up.
-///
-/// TODO-correctness Subsequent steps may assume all M.2s that will ever be
-/// present are present once we return from this function; see
-/// <https://github.com/oxidecomputer/omicron/issues/3815>.
-async fn wait_for_boot_m2(storage_resources: &StorageResources, log: &Logger) {
-    // Wait for at least the M.2 we booted from to show up.
-    loop {
-        match storage_resources.boot_disk().await {
-            Some(disk) => {
-                info!(log, "Found boot disk M.2: {disk:?}");
-                break;
-            }
-            None => {
-                info!(log, "Waiting for boot disk M.2...");
-                tokio::time::sleep(core::time::Duration::from_millis(250))
-                    .await;
-            }
-        }
-    }
-}
-
 struct MissingM2Paths(&'static str);
 
 impl From<MissingM2Paths> for StartError {
@@ -571,54 +480,19 @@ impl From<MissingM2Paths> for SledAgentServerStartError {
 }
 
 async fn sled_config_paths(
-    storage: &StorageResources,
+    storage: &StorageHandle,
 ) -> Result<Vec<Utf8PathBuf>, MissingM2Paths> {
-    let paths: Vec<_> = storage
-        .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
-        .await
+    let resources = storage.get_latest_resources().await;
+    let paths: Vec<_> = resources
+        .all_m2_mountpoints(CONFIG_DATASET)
         .into_iter()
         .map(|p| p.join(SLED_AGENT_REQUEST_FILE))
         .collect();
 
     if paths.is_empty() {
-        return Err(MissingM2Paths(sled_hardware::disk::CONFIG_DATASET));
+        return Err(MissingM2Paths(CONFIG_DATASET));
     }
     Ok(paths)
-}
-
-// Helper function to wait for `fut` while handling any updates about hardware.
-async fn wait_while_handling_hardware_updates<F: Future<Output = T>, T>(
-    fut: F,
-    hardware_monitor: &mut broadcast::Receiver<HardwareUpdate>,
-    managers: &BootstrapManagers,
-    sled_agent: Option<&SledAgent>,
-    log: &Logger,
-    log_phase: &str,
-) -> T {
-    tokio::pin!(fut);
-    loop {
-        tokio::select! {
-            // Cancel-safe per the docs on `broadcast::Receiver::recv()`.
-            hardware_update = hardware_monitor.recv() => {
-                info!(
-                    log,
-                    "Handling hardware update message";
-                    "phase" => log_phase,
-                    "update" => ?hardware_update,
-                );
-
-                managers.handle_hardware_update(
-                    hardware_update,
-                    sled_agent,
-                    log,
-                ).await;
-            }
-
-            // Cancel-safe: we're using a `&mut Future`; dropping the
-            // reference does not cancel the underlying future.
-            result = &mut fut => return result,
-        }
-    }
 }
 
 /// Runs the OpenAPI generator, emitting the spec to stdout.
@@ -634,18 +508,16 @@ pub fn run_openapi() -> Result<(), String> {
 
 struct Inner {
     config: SledConfig,
-    hardware_monitor: broadcast::Receiver<HardwareUpdate>,
     state: SledAgentState,
     sled_init_rx: mpsc::Receiver<(
         StartSledAgentRequest,
         oneshot::Sender<Result<SledAgentResponse, String>>,
     )>,
     sled_reset_rx: mpsc::Receiver<oneshot::Sender<Result<(), BootstrapError>>>,
-    managers: BootstrapManagers,
     ddm_admin_localhost_client: DdmAdminClient,
-    bootstore_handles: BootstoreHandles,
+    long_running_task_handles: LongRunningTaskHandles,
+    service_manager: ServiceManager,
     _sprockets_server_handle: JoinHandle<()>,
-    _key_manager_handle: JoinHandle<()>,
     base_log: Logger,
 }
 
@@ -653,14 +525,7 @@ impl Inner {
     async fn run(mut self) {
         let log = self.base_log.new(o!("component" => "SledAgentMain"));
         loop {
-            // TODO-correctness We pause handling hardware update messages while
-            // we handle sled init/reset requests - is that okay?
             tokio::select! {
-                // Cancel-safe per the docs on `broadcast::Receiver::recv()`.
-                hardware_update = self.hardware_monitor.recv() => {
-                    self.handle_hardware_update(hardware_update, &log).await;
-                }
-
                 // Cancel-safe per the docs on `mpsc::Receiver::recv()`.
                 Some((request, response_tx)) = self.sled_init_rx.recv() => {
                     self.handle_start_sled_agent_request(
@@ -688,41 +553,36 @@ impl Inner {
         }
     }
 
-    async fn handle_hardware_update(
-        &self,
-        hardware_update: Result<HardwareUpdate, broadcast::error::RecvError>,
-        log: &Logger,
-    ) {
-        info!(
-            log,
-            "Handling hardware update message";
-            "phase" => "bootstore-steady-state",
-            "update" => ?hardware_update,
-        );
-
-        self.managers
-            .handle_hardware_update(
-                hardware_update,
-                self.state.sled_agent(),
-                &log,
-            )
-            .await;
-    }
-
     async fn handle_start_sled_agent_request(
         &mut self,
         request: StartSledAgentRequest,
         response_tx: oneshot::Sender<Result<SledAgentResponse, String>>,
         log: &Logger,
     ) {
-        let request_id = request.body.id;
-        match &self.state {
-            SledAgentState::Bootstrapping => {
+        match &mut self.state {
+            SledAgentState::Bootstrapping(
+                sled_agent_started_tx,
+                underlay_available_tx,
+            ) => {
+                let request_id = request.body.id;
+
+                // Extract from options to satisfy the borrow checker.
+                // It is not possible for `start_sled_agent` to be cancelled
+                // or fail in a safe, restartable manner. Therefore, for now,
+                // we explicitly unwrap here, and panic on error below.
+                //
+                // See https://github.com/oxidecomputer/omicron/issues/4494
+                let sled_agent_started_tx =
+                    sled_agent_started_tx.take().unwrap();
+                let underlay_available_tx =
+                    underlay_available_tx.take().unwrap();
+
                 let response = match start_sled_agent(
                     &self.config,
                     request,
-                    &self.bootstore_handles.node_handle,
-                    &self.managers,
+                    self.long_running_task_handles.clone(),
+                    underlay_available_tx,
+                    self.service_manager.clone(),
                     &self.ddm_admin_localhost_client,
                     &self.base_log,
                     &log,
@@ -733,17 +593,19 @@ impl Inner {
                         // We've created sled-agent; we need to (possibly)
                         // reconfigure the switch zone, if we're a scrimlet, to
                         // give it our underlay network information.
-                        self.managers
-                            .check_latest_hardware_snapshot(
-                                Some(server.sled_agent()),
-                                log,
-                            )
-                            .await;
-
+                        sled_agent_started_tx
+                            .send(server.sled_agent().clone())
+                            .map_err(|_| ())
+                            .expect("Failed to send to StorageMonitor");
                         self.state = SledAgentState::ServerStarted(server);
                         Ok(SledAgentResponse { id: request_id })
                     }
-                    Err(err) => Err(format!("{err:#}")),
+                    Err(err) => {
+                        // This error is unrecoverable, and if returned we'd
+                        // end up in maintenance mode anyway.
+                        error!(log, "Failed to start sled agent: {err:#}");
+                        panic!("Failed to start sled agent");
+                    }
                 };
                 _ = response_tx.send(response);
             }
@@ -787,11 +649,11 @@ impl Inner {
 
     async fn uninstall_sled_local_config(&self) -> Result<(), BootstrapError> {
         let config_dirs = self
-            .managers
-            .storage
-            .resources()
-            .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
+            .long_running_task_handles
+            .storage_manager
+            .get_latest_resources()
             .await
+            .all_m2_mountpoints(CONFIG_DATASET)
             .into_iter();
 
         for dir in config_dirs {

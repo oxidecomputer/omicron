@@ -38,6 +38,7 @@ dns_external.max_concurrent_server_updates = 5
 # certificates it will take _other_ Nexus instances to notice and stop serving
 # them (on a sunny day).
 external_endpoints.period_secs = 60
+nat_cleanup.period_secs = 30
 # How frequently to collect hardware/software inventory from the whole system
 # (even if we don't have reason to believe anything has changed).
 inventory.period_secs = 600
