@@ -48,8 +48,12 @@ pub(crate) async fn run(
     log: Logger,
 ) -> WebsocketChannelResult {
     let upgraded = conn.into_inner();
-    let config =
-        WebSocketConfig { max_send_queue: Some(4096), ..Default::default() };
+    let config = WebSocketConfig {
+        // Maintain a max write buffer size of 2 MB (this is only relevant if
+        // writes are failing).
+        max_write_buffer_size: 1 << 21,
+        ..Default::default()
+    };
     let ws_stream =
         WebSocketStream::from_raw_socket(upgraded, Role::Server, Some(config))
             .await;
