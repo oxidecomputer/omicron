@@ -12,16 +12,17 @@
 -- all of the octets start at 33. This makes the data in this table purely additive
 -- post-RSS, which also implies that we cannot re-use subnet octets if an original
 -- sled that was part of RSS was removed from the cluster.
---
--- All modifications to this table should be guarded by the
--- `reconfiguration_epoch` row in the `rack` table.
-CREATE TABLE IF NOT EXISTS omicron.public.sled_underlay_subnet_allocations {
+CREATE TABLE IF NOT EXISTS omicron.public.sled_underlay_subnet_allocation {
+    -- The physical identity of the sled
+    -- (foreign key into `hw_baseboard_id` table)
+    hw_baseboard_id UUID PRIMARY KEY,
+
     -- The rack to which a sled is being added
     -- (foreign key into `rack` table)
     --
     -- We require this because the sled is not yet part of the sled table when
     -- we first allocate a subnet for it.
-    rack_id UUID NOT NULL
+    rack_id UUID NOT NULL,
 
     -- The sled to which a subnet is being allocated
     --
@@ -33,12 +34,4 @@ CREATE TABLE IF NOT EXISTS omicron.public.sled_underlay_subnet_allocations {
     --
     -- Always between 33 and 255 inclusive
     subnet_octet INT2 NOT NULL UNIQUE,
-
-    -- The physical identity of the sled
-    -- (foreign key into `hw_baseboard_id` table)
-    hw_baseboard_id UUID NOT NULL UNIQUE,
-
-    -- Each update will grab all allocations for a rack to  figure out what
-    -- subnet octets are free
-    PRIMARY KEY (rack_id, sled_id)
 };

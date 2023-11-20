@@ -215,16 +215,16 @@ impl DataStore {
         Ok(())
     }
 
-    // Return the rack subnet, reconfiguration epoch, and all current
-    // underlay allocations for the rack.
-    //
-    // Order allocations by `subnet_octet`
+    /// Return the rack subnet and all current underlay allocations for the
+    /// rack.
+    ///
+    /// Order allocations by `subnet_octet`
     pub async fn rack_subnet_allocations(
         &self,
         opctx: &OpContext,
         rack_id: Uuid,
     ) -> Result<
-        Vec<(Option<IpNetwork>, i64, Option<SledUnderlaySubnetAllocation>)>,
+        Vec<(Option<IpNetwork>, Option<SledUnderlaySubnetAllocation>)>,
         Error,
     > {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
@@ -239,13 +239,28 @@ impl DataStore {
             )
             .select((
                 rack_dsl::rack_subnet,
-                rack_dsl::reconfiguration_epoch,
                 Option::<SledUnderlaySubnetAllocation>::as_select(),
             ))
             .order_by(subnet_dsl::subnet_octet.asc())
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Store a new sled subnet allocation in the database
+    pub async fn sled_subnet_allocation_insert(
+        &self,
+        opctx: &OpContext,
+        allocation: SledUnderlaySubnetAllocation,
+    ) -> Result<(), Error> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        use db::schema::sled_underlay_subnet_allocation::dsl;
+        diesel::insert_into(dsl::sled_underlay_subnet_allocation)
+            .values(allocation)
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        Ok(())
     }
 
     // The following methods which return a `TxnError` take a `conn` parameter

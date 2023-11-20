@@ -66,13 +66,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.rack (
     tuf_base_url STRING(512),
 
     /* The IPv6 underlay /56 prefix for the rack */
-    rack_subnet INET,
-
-    /* A generation number to allow conditional updates and optimisitic
-     * concurrency control when performing rack cluster reconfigurations, such
-     * as adding or removing sleds.
-     */
-    reconfiguration_epoch INT8 NOT NULL DEFAULT 0
+    rack_subnet INET
 );
 
 /*
@@ -179,16 +173,17 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_resource_by_sled ON omicron.public.sled
 -- all of the octets start at 33. This makes the data in this table purely additive
 -- post-RSS, which also implies that we cannot re-use subnet octets if an original
 -- sled that was part of RSS was removed from the cluster.
---
--- All modifications to this table should be guarded by the
--- `reconfiguration_epoch` row in the `rack` table.
 CREATE TABLE IF NOT EXISTS omicron.public.sled_underlay_subnet_allocation {
+    -- The physical identity of the sled
+    -- (foreign key into `hw_baseboard_id` table)
+    hw_baseboard_id UUID PRIMARY KEY,
+
     -- The rack to which a sled is being added
     -- (foreign key into `rack` table)
     --
     -- We require this because the sled is not yet part of the sled table when
     -- we first allocate a subnet for it.
-    rack_id UUID NOT NULL
+    rack_id UUID NOT NULL,
 
     -- The sled to which a subnet is being allocated
     --
@@ -200,14 +195,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.sled_underlay_subnet_allocation {
     --
     -- Always between 33 and 255 inclusive
     subnet_octet INT2 NOT NULL UNIQUE,
+};
 
-    -- The physical identity of the sled
-    -- (foreign key into `hw_baseboard_id` table)
-    hw_baseboard_id UUID NOT NULL UNIQUE,
-
-    -- Each update will grab all allocations for a rack to  figure out what
-    -- subnet octets are free
-    PRIMARY KEY (rack_id, sled_id)
+-- Add an index which allows pagination by {rack_id, sled_id} pairs. 
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_subnet_allocation_by_rack_and_sled ON omicron.public.sled_underlay_subnet_allocation {
+    rack_id,
+    sled_id
 };
 
 /*
@@ -2890,7 +2883,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '11.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '12.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

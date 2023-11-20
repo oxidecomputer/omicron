@@ -776,19 +776,11 @@ impl super::Nexus {
         opctx: &OpContext,
         sled: UninitializedSled,
     ) -> Result<(), Error> {
-        // First, get the hw_baseboard_id for the given UninitializedSled
-        let limit = NonZeroU32::new(50).unwrap();
-        let collection = self
-            .db_datastore
-            .inventory_get_latest_collection(opctx, limit)
-            .await?;
-
         let baseboard_id = sled.baseboard.into();
         let hw_baseboard_id =
             self.db_datastore.find_hw_baseboard_id(opctx, baseboard_id).await?;
 
         // Fetch all the existing allocations via self.rack_id
-        // This only works for a single rack right now
         let allocations = self
             .db_datastore
             .rack_subnet_allocations(opctx, sled.rack_id)
@@ -798,6 +790,8 @@ impl super::Nexus {
         // octet. The returned allocations are ordered by octet, so we will know
         // when we have a free one. However, if we already have an allocation
         // for the given sled then reuse that one.
+        // TODO: This could all actually be done in SQL using a `next_item` query.
+        // See XXX
         const MIN_SUBNET_OCTET: i16 = 33;
         let mut new_allocation = SledUnderlaySubnetAllocation {
             rack_id: sled.rack_id,
@@ -805,12 +799,16 @@ impl super::Nexus {
             subnet_octet: MIN_SUBNET_OCTET,
             hw_baseboard_id,
         };
-        for (subnet, epoch, allocation) in allocations {
+        let mut subnet;
+        let mut allocation_already_exists = false;
+        for (subnet_col, allocation) in allocations {
+            subnet = subnet_col;
             if let Some(allocation) = allocation {
                 if allocation.hw_baseboard_id == new_allocation.hw_baseboard_id
                 {
                     // We already have an allocation for this sled.
                     new_allocation = allocation;
+                    allocation_already_exists = true;
                     break;
                 }
                 if allocation.subnet_octet == new_allocation.subnet_octet {
@@ -822,8 +820,16 @@ impl super::Nexus {
                 }
             }
         }
-
-        // Then write the allocation and bump the reconfiguration epoch
+        // Write the new allocation row to CRDB. The UNIQUE constraint
+        // on `subnet_octet` will prevent dueling administrators reusing
+        // allocations when sleds are being added. We will need another
+        // mechanism ala generation numbers when we must interleave additions
+        // and removals of sleds.
+        if !allocation_already_exists {
+            self.db_datastore
+                .sled_subnet_allocation_insert(opctx, new_allocation)
+                .await?;
+        }
 
         // Then make the call to sled-agent
         todo!()
