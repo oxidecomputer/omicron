@@ -93,13 +93,13 @@ impl RotUpdater {
         mut mgs_clients: MgsClients,
     ) -> Result<(), RotUpdateError> {
         // The async blocks below want `&self` references, but we take `self`
-        // for API clarity (to start a new SP update, the caller should
-        // construct a new `SpUpdater`). Create a `&self` ref that we use
-        // through the remainder of this method.
+        // for API clarity (to start a new update, the caller should construct a
+        // new updater). Create a `&self` ref that we use through the remainder
+        // of this method.
         let me = &self;
 
         mgs_clients
-            .try_all(&self.log, |client| async move {
+            .try_all_serially(&self.log, |client| async move {
                 me.start_update_one_mgs(&client).await
             })
             .await?;
@@ -109,13 +109,13 @@ impl RotUpdater {
         me.wait_for_update_completion(&mut mgs_clients).await?;
 
         mgs_clients
-            .try_all(&self.log, |client| async move {
+            .try_all_serially(&self.log, |client| async move {
                 me.mark_target_slot_active_one_mgs(&client).await
             })
             .await?;
 
         mgs_clients
-            .try_all(&self.log, |client| async move {
+            .try_all_serially(&self.log, |client| async move {
                 me.finalize_update_via_reset_one_mgs(&client).await
             })
             .await?;
@@ -174,6 +174,12 @@ impl RotUpdater {
                 )
                 .await?;
 
+            // For `Preparing` and `InProgress`, we could check the progress
+            // information returned by these steps and try to check that
+            // we're still _making_ progress, but every Nexus instance needs
+            // to do that anyway in case we (or the MGS instance delivering
+            // the update) crash, so we'll omit that check here. Instead, we
+            // just sleep and we'll poll again shortly.
             match status {
                 PollUpdateStatus::Preparing { progress } => {
                     self.progress.send_replace(Some(

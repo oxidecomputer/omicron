@@ -87,7 +87,7 @@ impl SpUpdater {
         let me = &self;
 
         mgs_clients
-            .try_all(&self.log, |client| async move {
+            .try_all_serially(&self.log, |client| async move {
                 me.start_update_one_mgs(&client).await
             })
             .await?;
@@ -97,7 +97,7 @@ impl SpUpdater {
         me.wait_for_update_completion(&mut mgs_clients).await?;
 
         mgs_clients
-            .try_all(&self.log, |client| async move {
+            .try_all_serially(&self.log, |client| async move {
                 me.finalize_update_via_reset_one_mgs(&client).await
             })
             .await?;
@@ -159,6 +159,12 @@ impl SpUpdater {
                 )
                 .await?;
 
+            // For `Preparing` and `InProgress`, we could check the progress
+            // information returned by these steps and try to check that
+            // we're still _making_ progress, but every Nexus instance needs
+            // to do that anyway in case we (or the MGS instance delivering
+            // the update) crash, so we'll omit that check here. Instead, we
+            // just sleep and we'll poll again shortly.
             match status {
                 PollUpdateStatus::Preparing { progress } => {
                     self.progress.send_replace(Some(

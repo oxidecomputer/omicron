@@ -82,13 +82,15 @@ impl MgsClients {
         Self::new(clients)
     }
 
-    /// Run `op` against all clients, returning either the first success, the
-    /// first non-communication error, or the communication error (if all
-    /// clients failed with communication errors).
+    /// Run `op` against all clients in sequence until either one succeeds (in
+    /// which case the success value is returned), one fails with a
+    /// non-communication error (in which case that error is returned), or all
+    /// of them fail with communication errors (in which case the communication
+    /// error from the last-attempted client is returned).
     ///
     /// On a successful return, the internal client list will be reordered so
     /// any future accesses will attempt the most-recently-successful client.
-    pub(super) async fn try_all<T, F, Fut>(
+    pub(super) async fn try_all_serially<T, F, Fut>(
         &mut self,
         log: &Logger,
         op: F,
@@ -139,7 +141,7 @@ impl MgsClients {
         log: &Logger,
     ) -> Result<PollUpdateStatus, PollUpdateStatusError> {
         let update_status = self
-            .try_all(log, |client| async move {
+            .try_all_serially(log, |client| async move {
                 let update_status = client
                     .sp_component_update_status(sp_type, sp_slot, component)
                     .await?;
@@ -156,12 +158,6 @@ impl MgsClients {
             .into_inner();
 
         match update_status {
-            // For `Preparing` and `InProgress`, we could check the progress
-            // information returned by these steps and try to check that
-            // we're still _making_ progress, but every Nexus instance needs
-            // to do that anyway in case we (or the MGS instance delivering
-            // the update) crash, so we'll omit that check here. Instead, we
-            // just sleep and we'll poll again shortly.
             SpUpdateStatus::Preparing { id, progress } => {
                 if id == update_id {
                     let progress = progress.and_then(|progress| {
