@@ -223,7 +223,7 @@ installinator-common = { path = "installinator-common" }
 internal-dns = { path = "internal-dns" }
 ipcc-key-value = { path = "ipcc-key-value" }
 ipnetwork = { version = "0.20", features = ["schemars"] }
-itertools = "0.11.0"
+itertools = "0.12.0"
 key-manager = { path = "key-manager" }
 kstat-rs = "0.2.3"
 lazy_static = "1.4.0"
