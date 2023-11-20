@@ -216,6 +216,13 @@ impl DataStore {
             .unwrap();
     }
 
+    #[cfg(test)]
+    pub(crate) fn transaction_retry_producer(
+        &self,
+    ) -> &crate::transaction_retry::Producer {
+        &self.transaction_retry_producer
+    }
+
     /// Returns a connection to a connection from the database connection pool.
     pub(super) async fn pool_connection_authorized(
         &self,

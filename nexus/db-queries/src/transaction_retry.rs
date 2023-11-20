@@ -154,3 +154,115 @@ impl oximeter::Producer for Producer {
         Ok(Box::new(samples.into_iter()))
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    use crate::db::datastore::datastore_test;
+    use async_bb8_diesel::AsyncConnection;
+    use nexus_test_utils::db::test_setup_database;
+    use omicron_test_utils::dev;
+    use oximeter::types::FieldValue;
+
+    // If a transaction is explicitly rolled back, we should not expect any
+    // samples to be taken. With no retries, this is just a normal operation
+    // failure.
+    #[tokio::test]
+    async fn test_transaction_rollback_produces_no_samples() {
+        let logctx = dev::test_setup_log(
+            "test_transaction_rollback_produces_no_samples",
+        );
+        let mut db = test_setup_database(&logctx.log).await;
+        let (_opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        let retry_helper = RetryHelper::new(
+            datastore.transaction_retry_producer(),
+            "test_transaction_rollback_produces_no_samples",
+        );
+        conn.transaction_async_with_retry(
+            |_conn| async move {
+                Err::<(), _>(diesel::result::Error::RollbackTransaction)
+            },
+            retry_helper.as_callback(),
+        )
+        .await
+        .expect_err("Should have failed");
+
+        let samples = datastore
+            .transaction_retry_producer()
+            .samples
+            .lock()
+            .unwrap()
+            .clone();
+        assert_eq!(samples, vec![]);
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    // If a transaction fails with a retryable error, we record samples,
+    // providing oximeter-level information about the attempts.
+    #[tokio::test]
+    async fn test_transaction_retry_produces_samples() {
+        let logctx =
+            dev::test_setup_log("test_transaction_retry_produces_samples");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (_opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        let retry_helper = RetryHelper::new(
+            datastore.transaction_retry_producer(),
+            "test_transaction_retry_produces_samples",
+        );
+        conn.transaction_async_with_retry(
+            |_conn| async move {
+                Err::<(), _>(diesel::result::Error::DatabaseError(
+                    diesel::result::DatabaseErrorKind::SerializationFailure,
+                    Box::new("restart transaction: Retry forever!".to_string()),
+                ))
+            },
+            retry_helper.as_callback(),
+        )
+        .await
+        .expect_err("Should have failed");
+
+        let samples = datastore
+            .transaction_retry_producer()
+            .samples
+            .lock()
+            .unwrap()
+            .clone();
+        assert_eq!(samples.len(), MAX_RETRY_ATTEMPTS as usize);
+
+        for i in 0..samples.len() {
+            let sample = &samples[i];
+
+            assert_eq!(
+                sample.timeseries_name,
+                "database_transaction:retry_data"
+            );
+
+            let target_fields = sample.sorted_target_fields();
+            assert_eq!(
+                target_fields["name"].value,
+                FieldValue::String(
+                    "test_transaction_retry_produces_samples".to_string()
+                )
+            );
+
+            // Attempts are one-indexed
+            let metric_fields = sample.sorted_metric_fields();
+            assert_eq!(
+                metric_fields["attempt"].value,
+                FieldValue::U32(u32::try_from(i).unwrap() + 1),
+            );
+        }
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+}
