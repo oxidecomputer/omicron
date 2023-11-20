@@ -41,7 +41,6 @@ use installinator_common::InstallinatorSpec;
 use installinator_common::M2Slot;
 use installinator_common::WriteOutput;
 use omicron_common::api::external::SemverVersion;
-use omicron_common::backoff;
 use omicron_common::update::ArtifactHash;
 use slog::error;
 use slog::info;
@@ -103,12 +102,18 @@ struct SpUpdateData {
 }
 
 #[derive(Debug)]
-struct UploadTrampolinePhase2ToMgsStatus {
-    hash: ArtifactHash,
-    // The upload task retries forever until it succeeds, so we don't need to
-    // keep a "tried but failed" variant here; we just need to know the ID of
-    // the uploaded image once it's done.
-    uploaded_image_id: Option<HostPhase2RecoveryImageId>,
+enum UploadTrampolinePhase2ToMgsStatus {
+    Running { hash: ArtifactHash },
+    Done { hash: ArtifactHash, uploaded_image_id: HostPhase2RecoveryImageId },
+}
+
+impl UploadTrampolinePhase2ToMgsStatus {
+    fn hash(&self) -> ArtifactHash {
+        match self {
+            UploadTrampolinePhase2ToMgsStatus::Running { hash }
+            | UploadTrampolinePhase2ToMgsStatus::Done { hash, .. } => *hash,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -308,9 +313,8 @@ impl UpdateTracker {
     ) -> UploadTrampolinePhase2ToMgs {
         let artifact = plan.trampoline_phase_2.clone();
         let (status_tx, status_rx) =
-            watch::channel(UploadTrampolinePhase2ToMgsStatus {
+            watch::channel(UploadTrampolinePhase2ToMgsStatus::Running {
                 hash: artifact.data.hash(),
-                uploaded_image_id: None,
             });
         let task = tokio::spawn(upload_trampoline_phase_2_to_mgs(
             self.mgs_client.clone(),
@@ -426,7 +430,7 @@ impl<'tr> SpawnUpdateDriver for RealSpawnUpdateDriver<'tr> {
                 // this artifact? If not, cancel the old task (which
                 // might still be trying to upload) and start a new one
                 // with our current image.
-                if prev.status.borrow().hash
+                if prev.status.borrow().hash()
                     != plan.trampoline_phase_2.data.hash()
                 {
                     // It does _not_ match - we have a new plan with a
@@ -1147,19 +1151,26 @@ impl UpdateDriver {
                 // We expect this loop to run just once, but iterate just in
                 // case the image ID doesn't get populated the first time.
                 loop {
+                    match &*upload_trampoline_phase_2_to_mgs.borrow_and_update()
+                    {
+                        UploadTrampolinePhase2ToMgsStatus::Running { .. } => {
+                            // fall through to `.changed()` below
+                        },
+                        UploadTrampolinePhase2ToMgsStatus::Done {
+                            uploaded_image_id,
+                            ..
+                        } => {
+                            return StepSuccess::new(
+                                uploaded_image_id.clone(),
+                            ).into();
+                        }
+                    }
+
                     upload_trampoline_phase_2_to_mgs.changed().await.map_err(
                         |_recv_err| {
                             UpdateTerminalError::TrampolinePhase2UploadFailed
                         }
                     )?;
-
-                    if let Some(image_id) = upload_trampoline_phase_2_to_mgs
-                        .borrow()
-                        .uploaded_image_id
-                        .as_ref()
-                    {
-                        return StepSuccess::new(image_id.clone()).into();
-                    }
                 }
             },
         ).register();
@@ -2143,66 +2154,74 @@ enum ComponentUpdateStage {
     InProgress,
 }
 
+// This function is spawned as a task. On failure, no error is returned;
+// instead, `status` watchers detect our failure when we drop `status`, as they
+// will never see the `Done` state.
 async fn upload_trampoline_phase_2_to_mgs(
     mgs_client: gateway_client::Client,
     artifact: ArtifactIdData,
     status: watch::Sender<UploadTrampolinePhase2ToMgsStatus>,
     log: Logger,
 ) {
-    let data = artifact.data;
-    let hash = data.hash();
-    let upload_task = move || {
-        let mgs_client = mgs_client.clone();
-        let data = data.clone();
+    // We make at most 3 attempts to upload the trampoline to our local MGS,
+    // sleeping briefly between attempts if we fail.
+    const MAX_ATTEMPTS: usize = 3;
+    const SLEEP_BETWEEN_ATTEMPTS: Duration = Duration::from_secs(1);
 
-        async move {
-            let image_stream = data.reader_stream().await.map_err(|e| {
-                // TODO-correctness If we get an I/O error opening the file
-                // associated with `data`, is it actually a transient error? If
-                // we change this to `permanent` we'll have to do some different
-                // error handling below and at our call site to retry. We
-                // _shouldn't_ get errors from `reader_stream()` in general, so
-                // it's probably okay either way?
-                backoff::BackoffError::transient(format!("{e:#}"))
-            })?;
-            mgs_client
-                .recovery_host_phase2_upload(reqwest::Body::wrap_stream(
-                    image_stream,
-                ))
-                .await
-                .map_err(|e| backoff::BackoffError::transient(e.to_string()))
+    let mut attempt = 1;
+    loop {
+        let image_stream = match artifact.data.reader_stream().await {
+            Ok(stream) => stream,
+            Err(err) => {
+                error!(
+                    log, "failed to read trampoline phase 2";
+                    "err" => #%err,
+                );
+                return;
+            }
+        };
+
+        match mgs_client
+            .recovery_host_phase2_upload(reqwest::Body::wrap_stream(
+                image_stream,
+            ))
+            .await
+        {
+            Ok(response) => {
+                // Notify all receivers that we've uploaded the image.
+                _ = status.send(UploadTrampolinePhase2ToMgsStatus::Done {
+                    hash: artifact.data.hash(),
+                    uploaded_image_id: response.into_inner(),
+                });
+
+                // Wait for all receivers to be gone before we exit, so they
+                // don't get recv errors unless we're cancelled.
+                status.closed().await;
+                return;
+            }
+            Err(err) => {
+                if attempt < MAX_ATTEMPTS {
+                    error!(
+                        log, "failed to upload trampoline phase 2 to MGS; \
+                              will retry after {SLEEP_BETWEEN_ATTEMPTS:?}";
+                        "attempt" => attempt,
+                        "err" => %DisplayErrorChain::new(&err),
+                    );
+                    tokio::time::sleep(SLEEP_BETWEEN_ATTEMPTS).await;
+                    attempt += 1;
+                    continue;
+                } else {
+                    error!(
+                        log, "failed to upload trampoline phase 2 to MGS; \
+                              giving up";
+                        "attempt" => attempt,
+                        "err" => %DisplayErrorChain::new(&err),
+                    );
+                    return;
+                }
+            }
         }
-    };
-
-    let log_failure = move |err, delay| {
-        warn!(
-            log,
-            "failed to upload trampoline phase 2 to MGS, will retry in {:?}",
-            delay;
-            "err" => %err,
-        );
-    };
-
-    // retry_policy_internal_service_aggressive() retries forever, so we can
-    // unwrap this call to retry_notify
-    let uploaded_image_id = backoff::retry_notify(
-        backoff::retry_policy_internal_service_aggressive(),
-        upload_task,
-        log_failure,
-    )
-    .await
-    .unwrap()
-    .into_inner();
-
-    // Notify all receivers that we've uploaded the image.
-    _ = status.send(UploadTrampolinePhase2ToMgsStatus {
-        hash,
-        uploaded_image_id: Some(uploaded_image_id),
-    });
-
-    // Wait for all receivers to be gone before we exit, so they don't get recv
-    // errors unless we're cancelled.
-    status.closed().await;
+    }
 }
 
 struct SpComponentUpdateContext<'a> {

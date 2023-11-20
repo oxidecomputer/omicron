@@ -175,15 +175,15 @@ async fn test_updates() {
         StepEventKind::ExecutionFailed { failed_step, .. } => {
             // TODO: obviously we shouldn't stop here, get past more of the
             // update process in this test.
-            assert_eq!(failed_step.info.component, UpdateComponent::Rot);
+            assert_eq!(failed_step.info.component, UpdateComponent::Host);
         }
         other => {
             panic!("unexpected terminal event kind: {other:?}");
         }
     }
 
-    // Try starting the update again -- this should fail because we require that update state is
-    // cleared before starting a new one.
+    // Try starting the update again -- this should fail because we require that
+    // update state is cleared before starting a new one.
     {
         let error = wicketd_testctx
             .wicketd_client
@@ -195,8 +195,8 @@ async fn test_updates() {
             );
         let error_str = error.to_string();
         assert!(
-            // Errors lose type information across the OpenAPI boundary, so sadly we have to match on
-            // the error string.
+            // Errors lose type information across the OpenAPI boundary, so
+            // sadly we have to match on the error string.
             error_str.contains("existing update data found"),
             "unexpected error: {error_str}"
         );
