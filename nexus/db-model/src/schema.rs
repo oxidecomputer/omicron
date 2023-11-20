@@ -1328,3 +1328,8 @@ allow_tables_to_appear_in_same_query!(
     switch_port,
     switch_port_settings_route_config
 );
+
+allow_tables_to_appear_in_same_query!(
+    switch_port,
+    switch_port_settings_bgp_peer_config
+);

@@ -23,8 +23,8 @@ use crate::db::pagination::paginated;
 use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl};
 use diesel::result::Error as DieselError;
 use diesel::{
-    ExpressionMethods, JoinOnDsl, NullableExpressionMethods, QueryDsl,
-    SelectableHelper,
+    CombineDsl, ExpressionMethods, JoinOnDsl, NullableExpressionMethods,
+    QueryDsl, SelectableHelper,
 };
 use nexus_types::external_api::params;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -1110,6 +1110,7 @@ impl DataStore {
     ) -> ListResultVec<SwitchPort> {
         use db::schema::{
             switch_port::dsl as switch_port_dsl,
+            switch_port_settings_bgp_peer_config::dsl as bgp_peer_config_dsl,
             switch_port_settings_route_config::dsl as route_config_dsl,
         };
 
@@ -1126,10 +1127,132 @@ impl DataStore {
             // pagination in the future, or maybe a way to constrain the query to
             // a rack?
             .limit(64)
+            .union(
+                switch_port_dsl::switch_port
+                    .filter(switch_port_dsl::port_settings_id.is_not_null())
+                    .inner_join(
+                        bgp_peer_config_dsl::switch_port_settings_bgp_peer_config
+                            .on(switch_port_dsl::port_settings_id
+                                .eq(bgp_peer_config_dsl::port_settings_id.nullable()),
+                        ),
+                    )
+                    .select(SwitchPort::as_select())
+                    .limit(64),
+            )
             .load_async::<SwitchPort>(
                 &*self.pool_connection_authorized(opctx).await?,
             )
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::db::datastore::{datastore_test, UpdatePrecondition};
+    use nexus_test_utils::db::test_setup_database;
+    use nexus_types::external_api::params::{
+        BgpAnnounceSetCreate, BgpConfigCreate, BgpPeerConfig, SwitchPortConfig,
+        SwitchPortGeometry, SwitchPortSettingsCreate,
+    };
+    use omicron_common::api::external::{
+        IdentityMetadataCreateParams, Name, NameOrId,
+    };
+    use omicron_test_utils::dev;
+    use std::collections::HashMap;
+    use uuid::Uuid;
+
+    #[tokio::test]
+    async fn test_bgp_boundary_switches() {
+        let logctx = dev::test_setup_log("test_bgp_boundary_switches");
+        let db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        let rack_id: Uuid =
+            nexus_test_utils::RACK_UUID.parse().expect("parse uuid");
+        let switch0: Name = "switch0".parse().expect("parse switch location");
+        let qsfp0: Name = "qsfp0".parse().expect("parse qsfp0");
+
+        let port_result = datastore
+            .switch_port_create(&opctx, rack_id, switch0.into(), qsfp0.into())
+            .await
+            .expect("switch port create");
+
+        let announce_set = BgpAnnounceSetCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "test-announce-set".parse().unwrap(),
+                description: "test bgp announce set".into(),
+            },
+            announcement: Vec::new(),
+        };
+
+        datastore.bgp_create_announce_set(&opctx, &announce_set).await.unwrap();
+
+        let bgp_config = BgpConfigCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "test-bgp-config".parse().unwrap(),
+                description: "test bgp config".into(),
+            },
+            asn: 47,
+            bgp_announce_set_id: NameOrId::Name(
+                "test-announce-set".parse().unwrap(),
+            ),
+            vrf: None,
+        };
+
+        datastore.bgp_config_set(&opctx, &bgp_config).await.unwrap();
+
+        let settings = SwitchPortSettingsCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "test-settings".parse().unwrap(),
+                description: "test settings".into(),
+            },
+            port_config: SwitchPortConfig {
+                geometry: SwitchPortGeometry::Qsfp28x1,
+            },
+            groups: Vec::new(),
+            links: HashMap::new(),
+            interfaces: HashMap::new(),
+            routes: HashMap::new(),
+            bgp_peers: HashMap::from([(
+                "phy0".into(),
+                BgpPeerConfig {
+                    bgp_announce_set: NameOrId::Name(
+                        "test-announce-set".parse().unwrap(),
+                    ),
+                    bgp_config: NameOrId::Name(
+                        "test-bgp-config".parse().unwrap(),
+                    ),
+                    interface_name: "qsfp0".into(),
+                    addr: "192.168.1.1".parse().unwrap(),
+                    hold_time: 0,
+                    idle_hold_time: 0,
+                    delay_open: 0,
+                    connect_retry: 0,
+                    keepalive: 0,
+                },
+            )]),
+            addresses: HashMap::new(),
+        };
+
+        let settings_result = datastore
+            .switch_port_settings_create(&opctx, &settings, None)
+            .await
+            .unwrap();
+
+        datastore
+            .switch_port_set_settings_id(
+                &opctx,
+                port_result.id,
+                Some(settings_result.settings.identity.id),
+                UpdatePrecondition::DontCare,
+            )
+            .await
+            .unwrap();
+
+        let uplink_ports =
+            datastore.switch_ports_with_uplinks(&opctx).await.unwrap();
+
+        assert_eq!(uplink_ports.len(), 1);
     }
 }
