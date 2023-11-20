@@ -1165,7 +1165,7 @@ mod test {
     #[tokio::test]
     async fn test_bgp_boundary_switches() {
         let logctx = dev::test_setup_log("test_bgp_boundary_switches");
-        let db = test_setup_database(&logctx.log).await;
+        let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
         let rack_id: Uuid =
@@ -1254,5 +1254,8 @@ mod test {
             datastore.switch_ports_with_uplinks(&opctx).await.unwrap();
 
         assert_eq!(uplink_ports.len(), 1);
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
     }
 }
