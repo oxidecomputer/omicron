@@ -938,6 +938,8 @@ mod tests {
         builder.build_to_vec().unwrap()
     }
 
+    // See documentation for extract_nested_artifact_pair for why multi_thread
+    // is required.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_update_plan_from_artifacts() {
         const VERSION_0: SemverVersion = SemverVersion::new(0, 0, 0);

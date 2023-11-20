@@ -31,6 +31,8 @@ use wicketd_client::types::{
     StartUpdateParams,
 };
 
+// See documentation for extract_nested_artifact_pair in update_plan.rs for why
+// multi_thread is required.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_updates() {
     let gateway = gateway_setup::test_setup("test_updates", SpPort::One).await;
@@ -258,6 +260,8 @@ async fn test_updates() {
     wicketd_testctx.teardown().await;
 }
 
+// See documentation for extract_nested_artifact_pair in update_plan.rs for why
+// multi_thread is required.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_installinator_fetch() {
     let gateway = gateway_setup::test_setup("test_updates", SpPort::One).await;
@@ -391,6 +395,8 @@ async fn test_installinator_fetch() {
     wicketd_testctx.teardown().await;
 }
 
+// See documentation for extract_nested_artifact_pair in update_plan.rs for why
+// multi_thread is required.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_update_races() {
     let gateway = gateway_setup::test_setup(

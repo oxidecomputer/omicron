@@ -30,6 +30,7 @@ serde_path_to_error.workspace = true
 sha2.workspace = true
 slog.workspace = true
 tar.workspace = true
+tokio.workspace = true
 toml.workspace = true
 tough.workspace = true
 url = "2.4.1"

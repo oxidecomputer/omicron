@@ -223,6 +223,9 @@ mod tests {
 
     /// Test that `ArtifactsWithPlan` can extract the fake repository generated
     /// by tufaceous.
+    ///
+    /// See documentation for extract_nested_artifact_pair in update_plan.rs
+    /// for why multi_thread is required.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_extract_fake() -> Result<()> {
         let logctx = test_setup_log("test_extract_fake");

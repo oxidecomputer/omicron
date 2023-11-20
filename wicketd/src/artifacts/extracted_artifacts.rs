@@ -16,12 +16,11 @@ use sha2::Digest;
 use sha2::Sha256;
 use slog::info;
 use slog::Logger;
-use std::fs::File;
 use std::io;
-use std::io::BufWriter;
 use std::io::Write;
 use std::sync::Arc;
 use tokio::io::AsyncRead;
+use tokio::io::AsyncWriteExt;
 use tokio_util::io::ReaderStream;
 
 /// Handle to the data of an extracted artifact.
@@ -124,7 +123,7 @@ impl ExtractedArtifacts {
         self.tempdir.path().join(format!("{}", artifact_hash_id.hash))
     }
 
-    /// Copy from `reader` into our temp directory, returning a handle to the
+    /// Copy from `stream` into our temp directory, returning a handle to the
     /// extracted artifact on success.
     pub(super) async fn store(
         &mut self,
@@ -133,8 +132,9 @@ impl ExtractedArtifacts {
     ) -> Result<ExtractedArtifactDataHandle, RepositoryError> {
         let output_path = self.path_for_artifact(&artifact_hash_id);
 
-        let mut writer = BufWriter::new(
-            File::create(&output_path)
+        let mut writer = tokio::io::BufWriter::new(
+            tokio::fs::File::create(&output_path)
+                .await
                 .with_context(|| {
                     format!("failed to create temp file {output_path}")
                 })
@@ -156,6 +156,7 @@ impl ExtractedArtifacts {
             file_size += chunk.len();
             writer
                 .write_all(&chunk)
+                .await
                 .with_context(|| format!("failed writing to {output_path}"))
                 .map_err(|error| RepositoryError::CopyExtractedArtifact {
                     kind: artifact_hash_id.kind.clone(),
@@ -165,6 +166,7 @@ impl ExtractedArtifacts {
 
         writer
             .flush()
+            .await
             .with_context(|| format!("failed flushing {output_path}"))
             .map_err(|error| RepositoryError::CopyExtractedArtifact {
                 kind: artifact_hash_id.kind.clone(),

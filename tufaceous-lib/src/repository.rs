@@ -89,7 +89,8 @@ impl OmicronRepo {
         let log = log.new(slog::o!("component" => "OmicronRepo"));
         let repo_path = repo_path.canonicalize_utf8()?;
         let root_json = repo_path.join("metadata").join("1.root.json");
-        let root = std::fs::read(&root_json)
+        let root = tokio::fs::read(&root_json)
+            .await
             .with_context(|| format!("error reading from {root_json}"))?;
 
         let repo = RepositoryLoader::new(
