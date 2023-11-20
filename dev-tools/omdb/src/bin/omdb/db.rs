@@ -248,10 +248,10 @@ enum InventoryCommands {
     BaseboardIds,
     /// list all cabooses ever found
     Cabooses,
-    /// list all root of trust pages every found
-    RotPages,
     /// list and show details from particular collections
     Collections(CollectionsArgs),
+    /// list all root of trust pages ever found
+    RotPages,
 }
 
 #[derive(Debug, Args)]
@@ -2237,9 +2237,6 @@ async fn cmd_db_inventory(
         InventoryCommands::Cabooses => {
             cmd_db_inventory_cabooses(&conn, limit).await
         }
-        InventoryCommands::RotPages => {
-            cmd_db_inventory_rot_pages(&conn, limit).await
-        }
         InventoryCommands::Collections(CollectionsArgs {
             command: CollectionsCommands::List,
         }) => cmd_db_inventory_collections_list(&conn, limit).await,
@@ -2260,6 +2257,9 @@ async fn cmd_db_inventory(
                 long_string_formatter,
             )
             .await
+        }
+        InventoryCommands::RotPages => {
+            cmd_db_inventory_rot_pages(&conn, limit).await
         }
     }
 }

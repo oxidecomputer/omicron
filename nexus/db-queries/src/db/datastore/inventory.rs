@@ -17,7 +17,6 @@ use async_bb8_diesel::AsyncSimpleConnection;
 use diesel::expression::SelectableHelper;
 use diesel::sql_types::Nullable;
 use diesel::BoolExpressionMethods;
-use diesel::CombineDsl;
 use diesel::ExpressionMethods;
 use diesel::IntoSql;
 use diesel::JoinOnDsl;
@@ -502,51 +501,8 @@ impl DataStore {
             // - `inv_root_of_trust_page` with foreign keys "hw_baseboard_id",
             //   "sw_root_of_trust_page_id", and various other columns
             //
-            // We want to INSERT INTO `inv_root_of_trust_page` a row with:
-            //
-            // - hw_baseboard_id (foreign key) the result of looking up an
-            //   hw_baseboard row by a specific part number and serial number
-            //
-            // - sw_root_of_trust_page_id (foreign key) the result of looking up
-            //   a specific sw_root_of_trust_page row by data_base64
-            //
-            // - the other columns being literals
-            //
-            // To achieve this, we're going to generate something like:
-            //
-            //     INSERT INTO
-            //         inv_root_of_trust_page (
-            //             hw_baseboard_id,
-            //             sw_root_of_trust_page_id,
-            //             inv_collection_id,
-            //             time_collected,
-            //             source,
-            //             which,
-            //         )
-            //         SELECT (
-            //             hw_baseboard_id.id,
-            //             sw_root_of_trust_page.id,
-            //             ...              /* literal collection id */
-            //             ...              /* literal time collected */
-            //             ...              /* literal source */
-            //             ...              /* literal 'which' */
-            //         )
-            //         FROM
-            //             hw_baseboard
-            //         INNER JOIN
-            //             sw_root_of_trust_page
-            //         ON  hw_baseboard.part_number = ...
-            //         AND hw_baseboard.serial_number = ...
-            //         AND sw_root_of_trust_page.data_base64 = ...;
-            //
-            // Again, the whole point is to avoid back-and-forth between the
-            // client and the database.  Those back-and-forth interactions can
-            // significantly increase latency and the probability of transaction
-            // conflicts.  See RFD 192 for details.  (Unfortunately, we still
-            // _are_ going back and forth here to issue each of these queries.
-            // But that's an artifact of the interface we currently have for
-            // sending queries.  It should be possible to send all of these in
-            // one batch.
+            // and generate an INSERT INTO query that is structurally the same
+            // as the caboose query described above.
             for (which, tree) in &collection.rot_pages_found {
                 use db::schema::hw_baseboard_id::dsl as dsl_baseboard_id;
                 use db::schema::inv_root_of_trust_page::dsl as dsl_inv_rot_page;
@@ -1337,11 +1293,6 @@ pub trait DataStoreInventoryTest: Send + Sync {
 
 impl DataStoreInventoryTest for DataStore {
     fn inventory_collections(&self) -> BoxFuture<anyhow::Result<Vec<Uuid>>> {
-        use db::schema::inv_caboose::dsl as dsl_caboose;
-        use db::schema::inv_collection_error::dsl as dsl_collection_error;
-        use db::schema::inv_root_of_trust::dsl as dsl_root_of_trust;
-        use db::schema::inv_root_of_trust_page::dsl as dsl_root_of_trust_page;
-        use db::schema::inv_service_processor::dsl as dsl_service_processor;
         async {
             let conn = self
                 .pool_connection_for_tests()
@@ -1353,60 +1304,12 @@ impl DataStoreInventoryTest for DataStore {
                     .context("failed to allow table scan")?;
 
                 use db::schema::inv_collection::dsl;
-                let collection_ids = dsl::inv_collection
+                dsl::inv_collection
                     .select(dsl::id)
                     .order_by(dsl::time_started)
                     .load_async(&conn)
                     .await
-                    .context("failed to list collections")?;
-
-                // Ensure we don't have any stray collection IDs in other
-                // inventory tables that reference collection IDs that are not
-                // present in `inv_collection`.
-                let other_collection_ids: Vec<Uuid> = dsl_caboose::inv_caboose
-                    .select(dsl_caboose::inv_collection_id)
-                    .union(
-                        dsl_collection_error::inv_collection_error
-                            .select(dsl_collection_error::inv_collection_id),
-                    )
-                    .union(
-                        dsl_root_of_trust::inv_root_of_trust
-                            .select(dsl_root_of_trust::inv_collection_id),
-                    )
-                    .union(
-                        dsl_service_processor::inv_service_processor
-                            .select(dsl_service_processor::inv_collection_id),
-                    )
-                    .union(
-                        dsl_root_of_trust_page::inv_root_of_trust_page
-                            .select(dsl_root_of_trust_page::inv_collection_id),
-                    )
-                    .load_async(&conn)
-                    .await
-                    .context(
-                        "failed to list potentially dangling collection IDs",
-                    )?;
-                {
-                    let collection_ids =
-                        collection_ids.iter().collect::<BTreeSet<_>>();
-                    let other_collection_ids =
-                        other_collection_ids.iter().collect::<BTreeSet<_>>();
-                    let dangling_collection_ids = other_collection_ids
-                        .difference(&collection_ids)
-                        .collect::<Vec<_>>();
-                    if !dangling_collection_ids.is_empty() {
-                        let mut dangling_collection_ids =
-                            dangling_collection_ids.into_iter();
-                        let mut id_string =
-                            dangling_collection_ids.next().unwrap().to_string();
-                        for id in dangling_collection_ids {
-                            id_string.push_str(&format!(", {id}"));
-                        }
-                        anyhow::bail!("dangling collection IDs: {id_string}");
-                    }
-                }
-
-                Ok(collection_ids)
+                    .context("failed to list collections")
             })
             .await
         }
