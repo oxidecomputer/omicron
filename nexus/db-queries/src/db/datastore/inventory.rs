@@ -1231,9 +1231,11 @@ impl DataStore {
                 .filter(dsl::inv_collection_id.eq(id))
                 .limit(sql_limit)
                 .select(InvRotPage::as_select())
-                .load_async(&**conn)
+                .load_async(&*conn)
                 .await
-                .context("loading inv_root_of_trust_page")?
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?
         };
         limit_reached = limit_reached || inv_rot_page_rows.len() == usize_limit;
 
@@ -1249,9 +1251,9 @@ impl DataStore {
                 .filter(dsl::id.eq_any(sw_rot_page_ids))
                 .limit(sql_limit)
                 .select(SwRotPage::as_select())
-                .load_async(&**conn)
+                .load_async(&*conn)
                 .await
-                .context("loading sw_root_of_trust_page")?
+                .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
                 .into_iter()
                 .map(|sw_rot_page_row| {
                     (
@@ -1272,18 +1274,20 @@ impl DataStore {
                 .entry(nexus_types::inventory::RotPageWhich::from(p.which))
                 .or_insert_with(BTreeMap::new);
             let Some(bb) = baseboards_by_id.get(&p.hw_baseboard_id) else {
-                bail!(
+                let msg = format!(
                     "unknown baseboard found in inv_root_of_trust_page: {}",
                     p.hw_baseboard_id
                 );
+                return Err(Error::internal_error(&msg));
             };
             let Some(sw_rot_page) =
                 rot_pages_by_id.get(&p.sw_root_of_trust_page_id)
             else {
-                bail!(
+                let msg = format!(
                     "unknown rot page found in inv_root_of_trust_page: {}",
                     p.sw_root_of_trust_page_id
                 );
+                return Err(Error::internal_error(&msg));
             };
 
             let previous = by_baseboard.insert(
@@ -1294,7 +1298,7 @@ impl DataStore {
                     page: sw_rot_page.clone(),
                 },
             );
-            anyhow::ensure!(
+            bail_unless!(
                 previous.is_none(),
                 "duplicate rot page found: {:?} baseboard {:?}",
                 p.which,
@@ -1398,7 +1402,7 @@ impl DataStoreInventoryTest for DataStore {
                         for id in dangling_collection_ids {
                             id_string.push_str(&format!(", {id}"));
                         }
-                        bail!("dangling collection IDs: {id_string}");
+                        anyhow::bail!("dangling collection IDs: {id_string}");
                     }
                 }
 
