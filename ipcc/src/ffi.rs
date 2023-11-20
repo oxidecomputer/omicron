@@ -1,0 +1,62 @@
+#![allow(non_upper_case_globals)]
+#![allow(non_camel_case_types)]
+#![allow(non_snake_case)]
+
+use std::ffi::{c_char, c_int, c_uint};
+
+/// Opaque libipcc handle
+#[repr(C)]
+pub(crate) struct libipcc_handle_t {
+    _data: [u8; 0],
+    _marker: core::marker::PhantomData<(*mut u8, core::marker::PhantomPinned)>,
+}
+
+pub(crate) const LIBIPCC_ERR_OK: libipcc_err_t = 0;
+/// Indicates that there was a memory allocation error. The system error
+/// contains the specific errno.
+pub(crate) const LIBIPCC_ERR_NO_MEM: libipcc_err_t = 1;
+/// One of the function parameters does not pass validation. There will be more
+/// detail available via libipcc_errmsg().
+pub(crate) const LIBIPCC_ERR_INVALID_PARAM: libipcc_err_t = 2;
+/// An internal error occurred. There will be more detail available via
+/// libipcc_errmsg() and libipcc_syserr().
+pub(crate) const LIBIPCC_ERR_INTERNAL: libipcc_err_t = 3;
+/// The requested lookup key was not known to the SP.
+pub(crate) const LIBIPCC_ERR_KEY_UNKNOWN: libipcc_err_t = 4;
+/// The value for the requested lookup key was too large for the
+/// supplied buffer.
+pub(crate) const LIBIPCC_ERR_KEY_BUFTOOSMALL: libipcc_err_t = 5;
+/// An attempt to write to a key failed because the key is read-only.
+pub(crate) const LIBIPCC_ERR_KEY_READONLY: libipcc_err_t = 6;
+/// An attempt to write to a key failed because the passed value is too
+/// long.
+pub(crate) const LIBIPCC_ERR_KEY_VALTOOLONG: libipcc_err_t = 7;
+/// Compression or decompression failed. If appropriate, libipcc_syserr() will
+/// return the Z_ error from zlib.
+pub(crate) const LIBIPCC_ERR_KEY_ZERR: libipcc_err_t = 8;
+pub(crate) type libipcc_err_t = c_uint;
+
+// pub const libipcc_key_flag_t_LIBIPCC_KEYF_COMPRESSED: libipcc_key_flag_t = 1;
+pub type libipcc_key_flag_t = ::std::os::raw::c_uint;
+
+#[link(name = "ipcc")]
+extern "C" {
+    pub(crate) fn libipcc_init(
+        lihp: *mut *mut libipcc_handle_t,
+        libipcc_errp: *mut libipcc_err_t,
+        syserrp: *mut c_int,
+        errmsg: *const c_char,
+        errlen: usize,
+    ) -> bool;
+    pub(crate) fn libipcc_fini(lih: *mut libipcc_handle_t);
+    pub(crate) fn libipcc_err(lih: *mut libipcc_handle_t) -> libipcc_err_t;
+    pub(crate) fn libipcc_syserr(lih: *mut libipcc_handle_t) -> c_int;
+    pub(crate) fn libipcc_errmsg(lih: *mut libipcc_handle_t) -> *const c_char;
+    pub(crate) fn libipcc_keylookup(
+        lih: *mut libipcc_handle_t,
+        key: u8,
+        bufp: *mut *mut u8,
+        lenp: *mut usize,
+        flags: libipcc_key_flag_t,
+    ) -> bool;
+}

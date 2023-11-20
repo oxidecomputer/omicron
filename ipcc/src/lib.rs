@@ -12,18 +12,15 @@ use serde::Deserialize;
 use serde::Serialize;
 use uuid::Uuid;
 
-mod ioctl_common;
-pub use ioctl_common::*;
+mod ipcc_common;
+pub use ipcc_common::*;
 
 #[cfg(target_os = "illumos")]
-mod ioctl;
+mod ffi;
 #[cfg(target_os = "illumos")]
-pub use ioctl::Ipcc;
-
-#[cfg(not(target_os = "illumos"))]
-mod ioctl_stub;
-#[cfg(not(target_os = "illumos"))]
-pub use ioctl_stub::Ipcc;
+pub mod ipcc;
+#[cfg(target_os = "illumos")]
+pub use ipcc::Ipcc;
 
 #[cfg(test)]
 use proptest::arbitrary::any;
