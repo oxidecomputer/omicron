@@ -349,6 +349,7 @@ impl Nexus {
             &background_ctx,
             Arc::clone(&db_datastore),
             &config.pkg.background_tasks,
+            &dpd_clients,
             config.deployment.id,
             resolver.clone(),
         );

@@ -1059,9 +1059,9 @@ checksum = "6245d59a3e82a7fc217c5828a6692dbc6dfb63a0c8c90495621f7b9d79704a0e"
 
 [[package]]
 name = "cookie"
-version = "0.16.2"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e859cd57d0710d9e06c381b550c06e76992472a8c6d527aecd2fc673dcc231fb"
+checksum = "3cd91cf61412820176e137621345ee43b3f4423e589e7ae4e50d601d93e35ef8"
 dependencies = [
  "time",
  "version_check",
@@ -1640,9 +1640,9 @@ dependencies = [
 
 [[package]]
 name = "diesel"
-version = "2.1.3"
+version = "2.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2268a214a6f118fce1838edba3d1561cf0e78d8de785475957a580a7f8c69d33"
+checksum = "62c6fcf842f17f8c78ecf7c81d75c5ce84436b41ee07e03f490fbb5f5a8731d8"
 dependencies = [
  "bitflags 2.4.0",
  "byteorder",
@@ -2291,9 +2291,12 @@ checksum = "6c2141d6d6c8512188a7891b4b01590a45f6dac67afb4f255c4124dbb86d4eaa"
 
 [[package]]
 name = "fs-err"
-version = "2.9.0"
+version = "2.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0845fa252299212f0389d64ba26f34fa32cfe41588355f21ed507c59a0f64541"
+checksum = "fb5fd9bcbe8b1087cbd395b51498c01bc997cef73e778a80b77a811af5e2d29f"
+dependencies = [
+ "autocfg",
+]
 
 [[package]]
 name = "fs2"
@@ -2798,9 +2801,9 @@ dependencies = [
 
 [[package]]
 name = "http"
-version = "0.2.9"
+version = "0.2.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd6effc99afb63425aff9b05836f029929e345a6148a14b7ecd5ab67af944482"
+checksum = "8947b1a6fad4393052c7ba1f4cd97bed3e953a95c79c92ad9b051a04611d9fbb"
 dependencies = [
  "bytes",
  "fnv",
@@ -3183,7 +3186,7 @@ dependencies = [
  "installinator-artifact-client",
  "installinator-common",
  "ipcc-key-value",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "libc",
  "omicron-common",
  "omicron-test-utils",
@@ -3404,6 +3407,15 @@ name = "itertools"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b1c173a5686ce8bfa551b3563d0c2170bf24ca44da99c7ca4bfdab5418c3fe57"
+dependencies = [
+ "either",
+]
+
+[[package]]
+name = "itertools"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "25db6b064527c5d482d0423354fcd07a89a2dfe07b67892e62411946db7f07b0"
 dependencies = [
  "either",
 ]
@@ -4010,7 +4022,7 @@ dependencies = [
  "hyper-rustls",
  "internal-dns",
  "ipnetwork",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "lazy_static",
  "macaddr",
  "newtype_derive",
@@ -4604,7 +4616,7 @@ dependencies = [
  "hyper-rustls",
  "internal-dns",
  "ipnetwork",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "lazy_static",
  "macaddr",
  "mg-admin-client",
@@ -4684,6 +4696,7 @@ dependencies = [
  "async-bb8-diesel",
  "chrono",
  "clap 4.4.3",
+ "crucible-agent-client",
  "diesel",
  "dropshot",
  "expectorate",
@@ -4811,7 +4824,7 @@ dependencies = [
  "illumos-utils",
  "internal-dns",
  "ipnetwork",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "key-manager",
  "libc",
  "macaddr",
@@ -5002,9 +5015,9 @@ dependencies = [
 
 [[package]]
 name = "omicron-zone-package"
-version = "0.8.3"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6dc0973625837d1c4e31d4aa60e72008f3af3aa9b0d0ebfd5b5dc67d2e721a48"
+checksum = "620c53207d39a385f298444337d575690e0d9e793561d471ba7a614dc213e372"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5012,7 +5025,9 @@ dependencies = [
  "filetime",
  "flate2",
  "futures-util",
+ "hex",
  "reqwest",
+ "ring 0.16.20",
  "semver 1.0.20",
  "serde",
  "serde_derive",
@@ -5326,7 +5341,7 @@ dependencies = [
  "dropshot",
  "expectorate",
  "highway",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "omicron-common",
  "omicron-test-utils",
  "omicron-workspace-hack",
@@ -6150,9 +6165,9 @@ dependencies = [
 
 [[package]]
 name = "proptest"
-version = "1.3.1"
+version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7c003ac8c77cb07bb74f5f198bce836a689bcd5a42574612bf14d17bfd08c20e"
+checksum = "31b476131c3c86cb68032fdc5cb6d5a1045e3e42d96b69fa599fd77701e1f5bf"
 dependencies = [
  "bit-set",
  "bit-vec",
@@ -6162,7 +6177,7 @@ dependencies = [
  "rand 0.8.5",
  "rand_chacha 0.3.1",
  "rand_xorshift",
- "regex-syntax 0.7.5",
+ "regex-syntax 0.8.2",
  "rusty-fork",
  "tempfile",
  "unarray",
@@ -6868,9 +6883,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.21.8"
+version = "0.21.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "446e14c5cda4f3f30fe71863c34ec70f5ac79d6087097ad0bb433e1be5edf04c"
+checksum = "629648aced5775d558af50b2b4c7b02983a04b312126d45eeead26e7caa498b9"
 dependencies = [
  "log",
  "ring 0.17.5",
@@ -8855,7 +8870,7 @@ dependencies = [
  "futures",
  "hex",
  "hubtools",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "omicron-common",
  "omicron-test-utils",
  "omicron-workspace-hack",
@@ -9435,7 +9450,7 @@ dependencies = [
  "humantime",
  "indexmap 2.1.0",
  "indicatif",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "omicron-common",
  "omicron-passwords",
  "omicron-workspace-hack",
@@ -9541,7 +9556,7 @@ dependencies = [
  "installinator-common",
  "internal-dns",
  "ipnetwork",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "maplit",
  "omicron-certificates",
  "omicron-common",
