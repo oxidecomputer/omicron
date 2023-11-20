@@ -73,6 +73,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.rack (
  * Sleds
  */
 
+CREATE TYPE IF NOT EXISTS omicron.public.sled_provision_state (
+    /* New resources can be provisioned onto the sled */
+    'provisionable',
+    /* Resources must not be provisioned onto the sled */
+    'not_provisionable',
+)
+
 CREATE TABLE IF NOT EXISTS omicron.public.sled (
     /* Identity metadata (asset) */
     id UUID PRIMARY KEY,
@@ -91,6 +98,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.sled (
     serial_number STRING(63) NOT NULL,
     part_number STRING(63) NOT NULL,
     revision INT8 NOT NULL,
+
+    /* The state of whether resources should be provisioned onto the sled */
+    provision_state omicron.public.sled_provision_state NOT NULL,
 
     /* CPU & RAM summary for the sled */
     usable_hardware_threads INT8 CHECK (usable_hardware_threads BETWEEN 0 AND 4294967295) NOT NULL,

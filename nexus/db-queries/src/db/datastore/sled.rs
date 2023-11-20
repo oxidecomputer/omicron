@@ -149,6 +149,11 @@ impl DataStore {
                             .and(sled_has_space_in_reservoir),
                     )
                     .filter(sled_dsl::time_deleted.is_null())
+                    // Filter out sleds that are not provisionable.
+                    .filter(
+                        sled_dsl::provision_state
+                            .eq(db::model::SledProvisionState::Provisionable),
+                    )
                     .select(sled_dsl::id)
                     .into_boxed();
 

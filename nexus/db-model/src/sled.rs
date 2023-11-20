@@ -4,8 +4,8 @@
 
 use super::{ByteCount, Generation, SqlU16, SqlU32};
 use crate::collection::DatastoreCollectionConfig;
-use crate::ipv6;
 use crate::schema::{physical_disk, service, sled, zpool};
+use crate::{ipv6, SledProvisionState};
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
 use nexus_types::{external_api::views, identity::Asset};

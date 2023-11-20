@@ -729,6 +729,7 @@ table! {
 
         rack_id -> Uuid,
         is_scrimlet -> Bool,
+        provision_state -> crate::SledProvisionStateEnum,
         serial_number -> Text,
         part_number -> Text,
         revision -> Int8,
