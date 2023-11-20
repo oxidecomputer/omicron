@@ -20,6 +20,19 @@ impl From<std::time::Duration> for types::Duration {
     }
 }
 
+impl From<omicron_common::api::internal::nexus::ProducerKind>
+    for types::ProducerKind
+{
+    fn from(kind: omicron_common::api::internal::nexus::ProducerKind) -> Self {
+        use omicron_common::api::internal::nexus;
+        match kind {
+            nexus::ProducerKind::Service => Self::Service,
+            nexus::ProducerKind::SledAgent => Self::SledAgent,
+            nexus::ProducerKind::Instance => Self::Instance,
+        }
+    }
+}
+
 impl From<&omicron_common::api::internal::nexus::ProducerEndpoint>
     for types::ProducerEndpoint
 {
@@ -30,6 +43,7 @@ impl From<&omicron_common::api::internal::nexus::ProducerEndpoint>
             address: s.address.to_string(),
             base_route: s.base_route.clone(),
             id: s.id,
+            kind: s.kind.map(Into::into),
             interval: s.interval.into(),
         }
     }

@@ -1109,12 +1109,25 @@ CREATE TABLE IF NOT EXISTS omicron.public.oximeter (
 );
 
 /*
+ * The kind of metric producer each record corresponds to.
+ */
+CREATE TYPE IF NOT EXISTS omicron.public.producer_kind AS ENUM (
+    -- A sled agent for an entry in the sled table.
+    'sled_agent',
+    -- A service in the omicron.public.service table
+    'service',
+    -- A Propolis VMM for an instance in the omicron.public.instance table
+    'instance'
+);
+
+/*
  * Information about registered metric producers.
  */
 CREATE TABLE IF NOT EXISTS omicron.public.metric_producer (
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
+    kind omicron.public.producer_kind,
     ip INET NOT NULL,
     port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL,
     interval FLOAT NOT NULL,
@@ -2906,7 +2919,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '11.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '12.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
