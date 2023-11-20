@@ -217,6 +217,8 @@ impl DataStore {
 
     // Return the rack subnet, reconfiguration epoch, and all current
     // underlay allocations for the rack.
+    //
+    // Order allocations by `subnet_octet`
     pub async fn rack_subnet_allocations(
         &self,
         opctx: &OpContext,
@@ -240,6 +242,7 @@ impl DataStore {
                 rack_dsl::reconfiguration_epoch,
                 Option::<SledUnderlaySubnetAllocation>::as_select(),
             ))
+            .order_by(subnet_dsl::subnet_octet.asc())
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))

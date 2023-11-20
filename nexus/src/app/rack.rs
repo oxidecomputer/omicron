@@ -13,6 +13,7 @@ use gateway_client::types::SpType;
 use ipnetwork::IpNetwork;
 use nexus_db_model::DnsGroup;
 use nexus_db_model::InitialDnsGroup;
+use nexus_db_model::SledUnderlaySubnetAllocation;
 use nexus_db_model::{SwitchLinkFec, SwitchLinkSpeed};
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
@@ -45,6 +46,7 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
+use omicron_common::bail_unless;
 use sled_agent_client::types::EarlyNetworkConfigBody;
 use sled_agent_client::types::{
     BgpConfig, BgpPeerConfig, EarlyNetworkConfig, PortConfigV1,
@@ -774,11 +776,52 @@ impl super::Nexus {
         opctx: &OpContext,
         sled: UninitializedSled,
     ) -> Result<(), Error> {
-        // fetch all the existing allocations via self.rack_id  - This only works for a
-        // a single rack right now
-        //let allocations = self.db_datastore.rack_subnet_allocations(opctx, rack_id)?;
+        // First, get the hw_baseboard_id for the given UninitializedSled
+        let limit = NonZeroU32::new(50).unwrap();
+        let collection = self
+            .db_datastore
+            .inventory_get_latest_collection(opctx, limit)
+            .await?;
 
-        // Then calculate the allocation for the new sled
+        let baseboard_id = sled.baseboard.into();
+        let hw_baseboard_id =
+            self.db_datastore.find_hw_baseboard_id(opctx, baseboard_id).await?;
+
+        // Fetch all the existing allocations via self.rack_id
+        // This only works for a single rack right now
+        let allocations = self
+            .db_datastore
+            .rack_subnet_allocations(opctx, sled.rack_id)
+            .await?;
+
+        // Calculate the allocation for the new sled by choosing the minimim
+        // octet. The returned allocations are ordered by octet, so we will know
+        // when we have a free one. However, if we already have an allocation
+        // for the given sled then reuse that one.
+        const MIN_SUBNET_OCTET: i16 = 33;
+        let mut new_allocation = SledUnderlaySubnetAllocation {
+            rack_id: sled.rack_id,
+            sled_id: Uuid::new_v4(),
+            subnet_octet: MIN_SUBNET_OCTET,
+            hw_baseboard_id,
+        };
+        for (subnet, epoch, allocation) in allocations {
+            if let Some(allocation) = allocation {
+                if allocation.hw_baseboard_id == new_allocation.hw_baseboard_id
+                {
+                    // We already have an allocation for this sled.
+                    new_allocation = allocation;
+                    break;
+                }
+                if allocation.subnet_octet == new_allocation.subnet_octet {
+                    bail_unless!(
+                        new_allocation.subnet_octet < 255,
+                        "Too many sled subnets allocated"
+                    );
+                    new_allocation.subnet_octet += 1;
+                }
+            }
+        }
 
         // Then write the allocation and bump the reconfiguration epoch
 

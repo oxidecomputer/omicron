@@ -20,6 +20,8 @@ use std::sync::Arc;
 use strum::EnumIter;
 use uuid::Uuid;
 
+use crate::external_api::views::Baseboard;
+
 /// Results of collecting hardware/software inventory from various Omicron
 /// components
 ///
@@ -106,6 +108,12 @@ pub struct BaseboardId {
     pub part_number: String,
     /// Serial number (unique for a given part number)
     pub serial_number: String,
+}
+
+impl From<Baseboard> for BaseboardId {
+    fn from(value: Baseboard) -> Self {
+        BaseboardId { part_number: value.part, serial_number: value.serial }
+    }
 }
 
 /// Caboose contents found during a collection
