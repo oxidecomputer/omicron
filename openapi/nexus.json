@@ -13981,11 +13981,16 @@
             "type": "integer",
             "format": "uint16",
             "minimum": 0
+          },
+          "rack_id": {
+            "type": "string",
+            "format": "uuid"
           }
         },
         "required": [
           "baseboard",
-          "cubby"
+          "cubby",
+          "rack_id"
         ]
       },
       "User": {
