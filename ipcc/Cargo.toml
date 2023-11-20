@@ -12,6 +12,7 @@ serde.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
 omicron-workspace-hack.workspace = true
+cfg-if.workspace = true
 
 [dev-dependencies]
 omicron-common = { workspace = true, features = ["testing"] }

@@ -7,20 +7,23 @@
 //! Utilities for key/value pairs passed from the control plane to the SP
 //! (through MGS) to the host (through the host/SP uart) via IPCC.
 
+use cfg_if::cfg_if;
 use omicron_common::update::ArtifactHash;
 use serde::Deserialize;
 use serde::Serialize;
+use thiserror::Error;
 use uuid::Uuid;
 
-mod ipcc_common;
-pub use ipcc_common::*;
-
-#[cfg(target_os = "illumos")]
-mod ffi;
-#[cfg(target_os = "illumos")]
-pub mod ipcc;
-#[cfg(target_os = "illumos")]
-pub use ipcc::Ipcc;
+cfg_if! {
+    if #[cfg(target_os = "illumos")] {
+        mod ffi;
+        mod handle;
+        use handle::IpccHandle;
+    } else {
+        mod handle_stub;
+        use handle_stub::IpccHandle;
+    }
+}
 
 #[cfg(test)]
 use proptest::arbitrary::any;
@@ -35,9 +38,9 @@ use proptest::strategy::Strategy;
 #[repr(u8)]
 pub enum Key {
     /// Always responds `"pong"`.
-    Ping = 0,
+    Ping = IpccKey::Ping as u8,
     /// The value should be an encoded [`InstallinatorImageId`].
-    InstallinatorImageId = 1,
+    InstallinatorImageId = IpccKey::InstallinatorImageId as u8,
 }
 
 /// Description of the images `installinator` needs to fetch from a peer on the
@@ -132,10 +135,80 @@ impl InstallinatorImageId {
     }
 }
 
-// TODO Add ioctl wrappers? `installinator` is the only client for
-// `Key::InstallinatorImageId`, but we might grow other keys for other clients,
-// at which point we probably want all the ioctl wrapping to happen in one
-// place.
+#[derive(Debug, Error)]
+pub enum InstallinatorImageIdError {
+    #[error(transparent)]
+    Ipcc(#[from] IpccError),
+    #[error("deserializing installinator image ID failed: {0}")]
+    DeserializationFailed(String),
+}
+
+#[derive(Error, Debug)]
+pub enum IpccError {
+    #[error("Memory allocation error")]
+    NoMem(#[source] IpccErrorInner),
+    #[error("Invalid parameter")]
+    InvalidParam(#[source] IpccErrorInner),
+    #[error("Internal error occurred")]
+    Internal(#[source] IpccErrorInner),
+    #[error("Requested lookup key was not known to the SP")]
+    KeyUnknown(#[source] IpccErrorInner),
+    #[error("Value for the requested lookup key was too large for the supplied buffer")]
+    KeyBufTooSmall(#[source] IpccErrorInner),
+    #[error("Attempted to write to read-only key")]
+    KeyReadonly(#[source] IpccErrorInner),
+    #[error("Attempted write to key failed because the value is too long")]
+    KeyValTooLong(#[source] IpccErrorInner),
+    #[error("Compression or decompression failed")]
+    KeyZerr(#[source] IpccErrorInner),
+    #[error("Unknown libipcc error")]
+    UnknownErr(#[source] IpccErrorInner),
+}
+
+#[derive(Error, Debug)]
+#[error("{context}: {errmsg} ({syserr})")]
+pub struct IpccErrorInner {
+    pub context: String,
+    pub errmsg: String,
+    pub syserr: String,
+}
+
+/// These are the IPCC keys we can lookup.
+/// NB: These keys match the definitions found in libipcc (RFD 316) and should
+/// match the values in `[ipcc::Key]` one-to-one.
+#[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
+#[repr(u8)]
+enum IpccKey {
+    Ping = 0,
+    InstallinatorImageId = 1,
+    Inventory = 2,
+    System = 3,
+    Dtrace = 4,
+}
+
+pub struct Ipcc {
+    handle: IpccHandle,
+}
+
+impl Ipcc {
+    pub fn new() -> Result<Self, IpccError> {
+        let handle = IpccHandle::new()?;
+        Ok(Self { handle })
+    }
+
+    pub fn installinator_image_id(
+        &self,
+    ) -> Result<InstallinatorImageId, InstallinatorImageIdError> {
+        let mut buf = [0; InstallinatorImageId::CBOR_SERIALIZED_SIZE];
+        let n = self
+            .handle
+            .key_lookup(IpccKey::InstallinatorImageId as u8, &mut buf)?;
+        let id = InstallinatorImageId::deserialize(&buf[..n])
+            .map_err(InstallinatorImageIdError::DeserializationFailed)?;
+        Ok(id)
+    }
+}
 
 #[cfg(test)]
 mod tests {

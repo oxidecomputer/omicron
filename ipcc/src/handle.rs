@@ -3,12 +3,12 @@ use std::{
     ptr,
 };
 
-use crate::ipcc_common::*;
-use crate::{ffi::*, InstallinatorImageId, InstallinatorImageIdError, IpccKey};
+use crate::IpccError;
+use crate::{ffi::*, IpccErrorInner};
 
-pub struct Ipcc(*mut libipcc_handle_t);
+pub struct IpccHandle(*mut libipcc_handle_t);
 
-impl Drop for Ipcc {
+impl Drop for IpccHandle {
     fn drop(&mut self) {
         unsafe {
             libipcc_fini(self.0);
@@ -47,7 +47,7 @@ fn ipcc_fatal_error<C: Into<String>>(
     }
 }
 
-impl Ipcc {
+impl IpccHandle {
     pub fn new() -> Result<Self, IpccError> {
         let mut ipcc_handle: *mut libipcc_handle_t = ptr::null_mut();
         let errmsg = CString::new(vec![1; 1024]).unwrap();
@@ -73,7 +73,7 @@ impl Ipcc {
             ));
         }
 
-        Ok(Ipcc(ipcc_handle))
+        Ok(IpccHandle(ipcc_handle))
     }
 
     fn fatal<C: Into<String>>(&self, context: C) -> IpccError {
@@ -84,7 +84,11 @@ impl Ipcc {
         ipcc_fatal_error(context, lerr, syserr, errmsg)
     }
 
-    fn key_lookup(&self, key: u8, buf: &mut [u8]) -> Result<usize, IpccError> {
+    pub(crate) fn key_lookup(
+        &self,
+        key: u8,
+        buf: &mut [u8],
+    ) -> Result<usize, IpccError> {
         let mut lenp = buf.len();
 
         if !unsafe {
@@ -94,16 +98,5 @@ impl Ipcc {
         }
 
         Ok(lenp)
-    }
-
-    pub fn installinator_image_id(
-        &self,
-    ) -> Result<InstallinatorImageId, InstallinatorImageIdError> {
-        let mut buf = [0; InstallinatorImageId::CBOR_SERIALIZED_SIZE];
-        let n =
-            self.key_lookup(IpccKey::InstallinatorImageId as u8, &mut buf)?;
-        let id = InstallinatorImageId::deserialize(&buf[..n])
-            .map_err(InstallinatorImageIdError::DeserializationFailed)?;
-        Ok(id)
     }
 }

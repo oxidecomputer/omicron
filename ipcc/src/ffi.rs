@@ -36,7 +36,6 @@ pub(crate) const LIBIPCC_ERR_KEY_VALTOOLONG: libipcc_err_t = 7;
 pub(crate) const LIBIPCC_ERR_KEY_ZERR: libipcc_err_t = 8;
 pub(crate) type libipcc_err_t = c_uint;
 
-// pub const libipcc_key_flag_t_LIBIPCC_KEYF_COMPRESSED: libipcc_key_flag_t = 1;
 pub type libipcc_key_flag_t = ::std::os::raw::c_uint;
 
 #[link(name = "ipcc")]
