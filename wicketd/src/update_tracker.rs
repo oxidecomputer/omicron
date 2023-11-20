@@ -105,13 +105,17 @@ struct SpUpdateData {
 enum UploadTrampolinePhase2ToMgsStatus {
     Running { hash: ArtifactHash },
     Done { hash: ArtifactHash, uploaded_image_id: HostPhase2RecoveryImageId },
+    Failed(Arc<anyhow::Error>),
 }
 
 impl UploadTrampolinePhase2ToMgsStatus {
-    fn hash(&self) -> ArtifactHash {
+    fn hash(&self) -> Option<ArtifactHash> {
         match self {
             UploadTrampolinePhase2ToMgsStatus::Running { hash }
-            | UploadTrampolinePhase2ToMgsStatus::Done { hash, .. } => *hash,
+            | UploadTrampolinePhase2ToMgsStatus::Done { hash, .. } => {
+                Some(*hash)
+            }
+            UploadTrampolinePhase2ToMgsStatus::Failed(_) => None,
         }
     }
 }
@@ -431,7 +435,7 @@ impl<'tr> SpawnUpdateDriver for RealSpawnUpdateDriver<'tr> {
                 // might still be trying to upload) and start a new one
                 // with our current image.
                 if prev.status.borrow().hash()
-                    != plan.trampoline_phase_2.data.hash()
+                    != Some(plan.trampoline_phase_2.data.hash())
                 {
                     // It does _not_ match - we have a new plan with a
                     // different trampoline image. If the old task is
@@ -1164,11 +1168,23 @@ impl UpdateDriver {
                                 uploaded_image_id.clone(),
                             ).into();
                         }
+                        UploadTrampolinePhase2ToMgsStatus::Failed(error) => {
+                            let error = Arc::clone(error);
+                            return Err(UpdateTerminalError::TrampolinePhase2UploadFailed {
+                                error,
+                            });
+                        }
                     }
 
+                    // `upload_trampoline_phase_2_to_mgs` holds onto the sending
+                    // half of this channel until all receivers are gone, so the
+                    // only way we can fail to receive here is if that task
+                    // panicked (which would abort our process) or was cancelled
+                    // (because a new TUF repo has been uploaded), in which case
+                    // we should fail the current update.
                     upload_trampoline_phase_2_to_mgs.changed().await.map_err(
                         |_recv_err| {
-                            UpdateTerminalError::TrampolinePhase2UploadFailed
+                            UpdateTerminalError::TrampolinePhase2UploadCancelled
                         }
                     )?;
                 }
@@ -2154,9 +2170,6 @@ enum ComponentUpdateStage {
     InProgress,
 }
 
-// This function is spawned as a task. On failure, no error is returned;
-// instead, `status` watchers detect our failure when we drop `status`, as they
-// will never see the `Done` state.
 async fn upload_trampoline_phase_2_to_mgs(
     mgs_client: gateway_client::Client,
     artifact: ArtifactIdData,
@@ -2169,7 +2182,7 @@ async fn upload_trampoline_phase_2_to_mgs(
     const SLEEP_BETWEEN_ATTEMPTS: Duration = Duration::from_secs(1);
 
     let mut attempt = 1;
-    loop {
+    let final_status = loop {
         let image_stream = match artifact.data.reader_stream().await {
             Ok(stream) => stream,
             Err(err) => {
@@ -2177,7 +2190,9 @@ async fn upload_trampoline_phase_2_to_mgs(
                     log, "failed to read trampoline phase 2";
                     "err" => #%err,
                 );
-                return;
+                break UploadTrampolinePhase2ToMgsStatus::Failed(Arc::new(
+                    err.context("failed to read trampoline phase 2"),
+                ));
             }
         };
 
@@ -2188,16 +2203,10 @@ async fn upload_trampoline_phase_2_to_mgs(
             .await
         {
             Ok(response) => {
-                // Notify all receivers that we've uploaded the image.
-                _ = status.send(UploadTrampolinePhase2ToMgsStatus::Done {
+                break UploadTrampolinePhase2ToMgsStatus::Done {
                     hash: artifact.data.hash(),
                     uploaded_image_id: response.into_inner(),
-                });
-
-                // Wait for all receivers to be gone before we exit, so they
-                // don't get recv errors unless we're cancelled.
-                status.closed().await;
-                return;
+                };
             }
             Err(err) => {
                 if attempt < MAX_ATTEMPTS {
@@ -2217,11 +2226,19 @@ async fn upload_trampoline_phase_2_to_mgs(
                         "attempt" => attempt,
                         "err" => %DisplayErrorChain::new(&err),
                     );
-                    return;
+                    break UploadTrampolinePhase2ToMgsStatus::Failed(Arc::new(
+                        anyhow::Error::new(err)
+                            .context("failed to upload trampoline phase 2"),
+                    ));
                 }
             }
         }
-    }
+    };
+
+    // Send our final status, then wait for all receivers to be gone before we
+    // exit, so they don't get recv errors unless we're cancelled.
+    status.send_replace(final_status);
+    status.closed().await;
 }
 
 struct SpComponentUpdateContext<'a> {
