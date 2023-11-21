@@ -515,6 +515,22 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 );
             }
         };
+    } else if name == "phantom_disks" {
+        #[derive(Deserialize)]
+        struct TaskSuccess {
+            /// how many phantom disks were found
+            ok: usize,
+        }
+
+        match serde_json::from_value::<TaskSuccess>(details.clone()) {
+            Err(error) => eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            ),
+            Ok(success) => {
+                println!("    phantom disks found: {}", success.ok);
+            }
+        };
     } else {
         println!(
             "warning: unknown background task: {:?} \

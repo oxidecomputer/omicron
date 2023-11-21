@@ -11,6 +11,7 @@ use super::dns_servers;
 use super::external_endpoints;
 use super::inventory_collection;
 use super::nat_cleanup;
+use super::phantom_disks;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
@@ -52,6 +53,9 @@ pub struct BackgroundTasks {
 
     /// task handle for the task that collects inventory
     pub task_inventory_collection: common::TaskHandle,
+
+    /// task handle for the task that detects phantom disks
+    pub task_phantom_disks: common::TaskHandle,
 }
 
 impl BackgroundTasks {
@@ -122,7 +126,7 @@ impl BackgroundTasks {
         // Background task: inventory collector
         let task_inventory_collection = {
             let collector = inventory_collection::InventoryCollector::new(
-                datastore,
+                datastore.clone(),
                 resolver,
                 &nexus_id.to_string(),
                 config.inventory.nkeep,
@@ -143,6 +147,22 @@ impl BackgroundTasks {
             task
         };
 
+        // Background task: phantom disk detection
+        let task_phantom_disks = {
+            let detector = phantom_disks::PhantomDiskDetector::new(datastore);
+
+            let task = driver.register(
+                String::from("phantom_disks"),
+                String::from("detects and un-deletes phantom disks"),
+                config.phantom_disks.period_secs,
+                Box::new(detector),
+                opctx.child(BTreeMap::new()),
+                vec![],
+            );
+
+            task
+        };
+
         BackgroundTasks {
             driver,
             task_internal_dns_config,
@@ -153,6 +173,7 @@ impl BackgroundTasks {
             external_endpoints,
             nat_cleanup,
             task_inventory_collection,
+            task_phantom_disks,
         }
     }
 
