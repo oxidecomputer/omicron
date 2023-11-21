@@ -26,12 +26,14 @@ use std::str::FromStr;
 pub const EARLIEST_SUPPORTED_VERSION: &'static str = "1.0.0";
 
 /// Describes a single file containing a schema change, as SQL.
+#[derive(Debug)]
 pub struct SchemaUpgradeStep {
     pub path: Utf8PathBuf,
     pub sql: String,
 }
 
 /// Describes a sequence of files containing schema changes.
+#[derive(Debug)]
 pub struct SchemaUpgrade {
     pub steps: Vec<SchemaUpgradeStep>,
 }
@@ -39,10 +41,17 @@ pub struct SchemaUpgrade {
 /// Reads a "version directory" and reads all SQL changes into
 /// a result Vec.
 ///
-/// Any file that starts with "up" and ends with "sql" is considered
-/// part of the migration, and fully read to a string.
+/// Files that do not begin with "up" and end with ".sql" are ignored. The
+/// collection of `up*.sql` files must fall into one of these two conventions:
 ///
-/// These are sorted lexicographically.
+/// * "up.sql" with no other files
+/// * "up1.sql", "up2.sql", ..., beginning from 1, optionally with leading
+///   zeroes (e.g., "up01.sql", "up02.sql", ...). There is no maximum value, but
+///   there may not be any gaps (e.g., if "up2.sql" and "up4.sql" exist, so must
+///   "up3.sql") and there must not be any repeats (e.g., if "up1.sql" exists,
+///
+/// Any violation of these two rules will result in an error. Collections of the
+/// second form (`up1.sql`, ...) will be sorted numerically.
 pub async fn all_sql_for_version_migration<P: AsRef<Utf8Path>>(
     path: P,
 ) -> Result<SchemaUpgrade, String> {
@@ -54,23 +63,83 @@ pub async fn all_sql_for_version_migration<P: AsRef<Utf8Path>>(
     for entry in entries {
         let entry = entry.map_err(|err| format!("Invalid entry: {err}"))?;
         let pathbuf = entry.into_path();
-        let is_up = pathbuf
-            .file_name()
-            .map(|name| name.starts_with("up"))
-            .unwrap_or(false);
-        let is_sql = matches!(pathbuf.extension(), Some("sql"));
-        if is_up && is_sql {
-            up_sqls.push(pathbuf);
+
+        // Ensure filename ends with ".sql"
+        if pathbuf.extension() != Some("sql") {
+            continue;
+        }
+
+        // Ensure filename begins with "up", and extract anything in between
+        // "up" and ".sql".
+        let Some(remaining_filename) = pathbuf
+            .file_stem()
+            .and_then(|file_stem| file_stem.strip_prefix("up"))
+        else {
+            continue;
+        };
+
+        // Ensure the remaining filename is either empty (i.e., the filename is
+        // exactly "up.sql") or parseable as an unsigned integer. We give
+        // "up.sql" the "up_number" 0 (checked in the loop below), and require
+        // any other number to be nonzero.
+        if remaining_filename.is_empty() {
+            up_sqls.push((0, pathbuf));
+        } else {
+            let Ok(up_number) = remaining_filename.parse::<u64>() else {
+                return Err(format!(
+                    "invalid filename (non-numeric `up*.sql`): {pathbuf}",
+                ));
+            };
+            if up_number == 0 {
+                return Err(format!(
+                    "invalid filename (`up*.sql` numbering must start at 1): \
+                     {pathbuf}",
+                ));
+            }
+            up_sqls.push((up_number, pathbuf));
         }
     }
     up_sqls.sort();
 
     let mut result = SchemaUpgrade { steps: vec![] };
-    for path in up_sqls.into_iter() {
+    let mut prev_up_number = None;
+    for (up_number, path) in up_sqls.into_iter() {
+        // Optimistically read the file and push it into `result` first to avoid
+        // needing to clone `path` in the error-checking `match` below.
         let sql = tokio::fs::read_to_string(&path)
             .await
             .map_err(|e| format!("Cannot read {path}: {e}"))?;
         result.steps.push(SchemaUpgradeStep { path: path.to_owned(), sql });
+
+        match (up_number, prev_up_number) {
+            // First file must be either "up.sql" (which we marked as
+            // up_number==0) or "up1.sql".
+            (0, None) | (1, None) => {
+                prev_up_number = Some((path, up_number));
+            }
+            // No other first value is allowed.
+            (_, None) => {
+                return Err(format!(
+                    "`up*.sql` numbering must start at 1: found first file \
+                     {path}"
+                ));
+            }
+            // If we previously saw 0 (i.e., "up.sql"), no other values are
+            // allowed.
+            (_, Some((_, 0))) => {
+                return Err(format!("`up.sql` cannot be used with {path}"));
+            }
+            (_, Some((previous_path, previous_up_number))) => {
+                if up_number == previous_up_number + 1 {
+                    prev_up_number = Some((path, up_number));
+                } else {
+                    return Err(format!(
+                        "invalid `up*.sql` combination: \
+                         {previous_path}, {path}"
+                    ));
+                }
+            }
+        }
     }
     Ok(result)
 }
@@ -403,10 +472,121 @@ impl DataStore {
 #[cfg(test)]
 mod test {
     use super::*;
+    use camino_tempfile::Utf8TempDir;
     use nexus_db_model::schema::SCHEMA_VERSION;
     use nexus_test_utils::db as test_db;
     use omicron_test_utils::dev;
     use std::sync::Arc;
+
+    // Confirm that `all_sql_for_version_migration` rejects `up*.sql` files
+    // where the `*` doesn't contain a positive integer.
+    #[tokio::test]
+    async fn all_sql_for_version_migration_rejects_invalid_up_sql_names() {
+        for (invalid_filename, error_prefix) in [
+            ("upA.sql", "invalid filename (non-numeric `up*.sql`)"),
+            ("up1a.sql", "invalid filename (non-numeric `up*.sql`)"),
+            ("upaaa1.sql", "invalid filename (non-numeric `up*.sql`)"),
+            ("up-3.sql", "invalid filename (non-numeric `up*.sql`)"),
+            (
+                "up0.sql",
+                "invalid filename (`up*.sql` numbering must start at 1)",
+            ),
+            (
+                "up00.sql",
+                "invalid filename (`up*.sql` numbering must start at 1)",
+            ),
+            (
+                "up000.sql",
+                "invalid filename (`up*.sql` numbering must start at 1)",
+            ),
+        ] {
+            let tempdir = Utf8TempDir::new().unwrap();
+            let filename = tempdir.path().join(invalid_filename);
+            _ = tokio::fs::File::create(&filename).await.unwrap();
+
+            match all_sql_for_version_migration(tempdir.path()).await {
+                Ok(upgrade) => {
+                    panic!(
+                        "unexpected success on {invalid_filename} \
+                         (produced {upgrade:?})"
+                    );
+                }
+                Err(message) => {
+                    assert_eq!(message, format!("{error_prefix}: {filename}"));
+                }
+            }
+        }
+    }
+
+    // Confirm that `all_sql_for_version_migration` rejects collections of
+    // `up*.sql` files with individually-valid names but that do not pass the
+    // rules of the entire collection.
+    #[tokio::test]
+    async fn all_sql_for_version_migration_rejects_invalid_up_sql_collections()
+    {
+        for (invalid_filenames, error_message_prefix) in [
+            (&["up.sql", "up1.sql"] as &[&str], "`up.sql` cannot be used with"),
+            (&["up1.sql", "up01.sql"], "invalid `up*.sql` combination: "),
+            (&["up1.sql", "up3.sql"], "invalid `up*.sql` combination: "),
+            (
+                &["up1.sql", "up2.sql", "up3.sql", "up02.sql"],
+                "invalid `up*.sql` combination: ",
+            ),
+        ] {
+            let tempdir = Utf8TempDir::new().unwrap();
+            for filename in invalid_filenames {
+                _ = tokio::fs::File::create(tempdir.path().join(filename))
+                    .await
+                    .unwrap();
+            }
+
+            match all_sql_for_version_migration(tempdir.path()).await {
+                Ok(upgrade) => {
+                    panic!(
+                        "unexpected success on {invalid_filenames:?} \
+                         (produced {upgrade:?})"
+                    );
+                }
+                Err(message) => {
+                    assert!(
+                        message.starts_with(error_message_prefix),
+                        "message did not start with expected prefix \
+                         {error_message_prefix:?}: {message:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    // Confirm that `all_sql_for_version_migration` accepts legal collections of
+    // `up*.sql` filenames.
+    #[tokio::test]
+    async fn all_sql_for_version_migration_allows_valid_up_sql_collections() {
+        for filenames in [
+            &["up.sql"] as &[&str],
+            &["up1.sql", "up2.sql"],
+            &[
+                "up01.sql", "up02.sql", "up03.sql", "up04.sql", "up05.sql",
+                "up06.sql", "up07.sql", "up08.sql", "up09.sql", "up10.sql",
+                "up11.sql",
+            ],
+            &["up00001.sql", "up00002.sql", "up00003.sql"],
+        ] {
+            let tempdir = Utf8TempDir::new().unwrap();
+            for filename in filenames {
+                _ = tokio::fs::File::create(tempdir.path().join(filename))
+                    .await
+                    .unwrap();
+            }
+
+            match all_sql_for_version_migration(tempdir.path()).await {
+                Ok(_) => (),
+                Err(message) => {
+                    panic!("unexpected failure on {filenames:?}: {message:?}");
+                }
+            }
+        }
+    }
 
     // Confirms that calling the internal "ensure_schema" function can succeed
     // when the database is already at that version.
@@ -444,7 +624,7 @@ mod test {
         let conn = pool.pool().get().await.unwrap();
 
         // Mimic the layout of "schema/crdb".
-        let config_dir = tempfile::TempDir::new().unwrap();
+        let config_dir = Utf8TempDir::new().unwrap();
 
         // Helper to create the version directory and "up.sql".
         let add_upgrade = |version: SemverVersion, sql: String| {
@@ -499,8 +679,9 @@ mod test {
             .await;
 
         // Show that the datastores can be created concurrently.
-        let config =
-            SchemaConfig { schema_dir: config_dir.path().to_path_buf() };
+        let config = SchemaConfig {
+            schema_dir: config_dir.into_path().into_std_path_buf(),
+        };
         let _ = futures::future::join_all((0..10).map(|_| {
             let log = log.clone();
             let pool = pool.clone();
