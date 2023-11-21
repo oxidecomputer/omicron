@@ -6,10 +6,11 @@
 
 use super::{
     console_api, device_auth, params,
+    shared::UninitializedSled,
     views::{
         self, Certificate, Group, IdentityProvider, Image, IpPool, IpPoolRange,
-        PhysicalDisk, Project, Rack, Role, Silo, Sled, Snapshot, SshKey,
-        UninitializedSled, User, UserBuiltin, Vpc, VpcRouter, VpcSubnet,
+        PhysicalDisk, Project, Rack, Role, Silo, Sled, Snapshot, SshKey, User,
+        UserBuiltin, Vpc, VpcRouter, VpcSubnet,
     },
 };
 use crate::external_api::shared;

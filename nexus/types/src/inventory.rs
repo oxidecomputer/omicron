@@ -20,7 +20,7 @@ use std::sync::Arc;
 use strum::EnumIter;
 use uuid::Uuid;
 
-use crate::external_api::views::Baseboard;
+use crate::external_api::shared::Baseboard;
 
 /// Results of collecting hardware/software inventory from various Omicron
 /// components

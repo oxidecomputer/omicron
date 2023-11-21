@@ -30,12 +30,12 @@ use nexus_types::external_api::params::{
     AddressLotCreate, LoopbackAddressCreate, Route, SiloCreate,
     SwitchPortSettingsCreate,
 };
+use nexus_types::external_api::shared::Baseboard;
 use nexus_types::external_api::shared::FleetRole;
 use nexus_types::external_api::shared::SiloIdentityMode;
 use nexus_types::external_api::shared::SiloRole;
+use nexus_types::external_api::shared::UninitializedSled;
 use nexus_types::external_api::views;
-use nexus_types::external_api::views::Baseboard;
-use nexus_types::external_api::views::UninitializedSled;
 use nexus_types::internal_api::params::DnsRecord;
 use omicron_common::address::{get_64_subnet, Ipv6Subnet, RACK_PREFIX};
 use omicron_common::api::external::AddressLotKind;
