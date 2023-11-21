@@ -49,6 +49,7 @@ pub struct SchemaUpgrade {
 ///   zeroes (e.g., "up01.sql", "up02.sql", ...). There is no maximum value, but
 ///   there may not be any gaps (e.g., if "up2.sql" and "up4.sql" exist, so must
 ///   "up3.sql") and there must not be any repeats (e.g., if "up1.sql" exists,
+///   "up01.sql" must not exist).
 ///
 /// Any violation of these two rules will result in an error. Collections of the
 /// second form (`up1.sql`, ...) will be sorted numerically.
@@ -680,7 +681,7 @@ mod test {
 
         // Show that the datastores can be created concurrently.
         let config = SchemaConfig {
-            schema_dir: config_dir.into_path().into_std_path_buf(),
+            schema_dir: config_dir.path().to_path_buf().into_std_path_buf(),
         };
         let _ = futures::future::join_all((0..10).map(|_| {
             let log = log.clone();
