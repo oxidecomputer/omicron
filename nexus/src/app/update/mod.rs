@@ -26,9 +26,22 @@ use std::path::Path;
 use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
+mod mgs_clients;
+mod rot_updater;
 mod sp_updater;
 
-pub use sp_updater::{SpUpdateError, SpUpdater, UpdateProgress};
+pub use mgs_clients::{MgsClients, UpdateStatusError};
+pub use rot_updater::{RotUpdateError, RotUpdater};
+pub use sp_updater::{SpUpdateError, SpUpdater};
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum UpdateProgress {
+    Started,
+    Preparing { progress: Option<f64> },
+    InProgress { progress: Option<f64> },
+    Complete,
+    Failed(String),
+}
 
 static BASE_ARTIFACT_DIR: &str = "/var/tmp/oxide_artifacts";
 

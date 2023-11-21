@@ -35,10 +35,13 @@ use nexus_db_model::InvCaboose;
 use nexus_db_model::InvCollection;
 use nexus_db_model::InvCollectionError;
 use nexus_db_model::InvRootOfTrust;
+use nexus_db_model::InvRotPage;
 use nexus_db_model::InvServiceProcessor;
+use nexus_db_model::RotPageWhichEnum;
 use nexus_db_model::SpType;
 use nexus_db_model::SpTypeEnum;
 use nexus_db_model::SwCaboose;
+use nexus_db_model::SwRotPage;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::Error;
@@ -76,6 +79,11 @@ impl DataStore {
             .cabooses
             .iter()
             .map(|s| SwCaboose::from((**s).clone()))
+            .collect::<Vec<_>>();
+        let rot_pages = collection
+            .rot_pages
+            .iter()
+            .map(|p| SwRotPage::from((**p).clone()))
             .collect::<Vec<_>>();
         let error_values = collection
             .errors
@@ -136,6 +144,19 @@ impl DataStore {
                 use db::schema::sw_caboose::dsl;
                 let _ = diesel::insert_into(dsl::sw_caboose)
                     .values(cabooses)
+                    .on_conflict_do_nothing()
+                    .execute_async(&conn)
+                    .await?;
+            }
+
+            // Insert records (and generate ids) for each distinct RoT page that
+            // we've found.  Like baseboards, these might already be present and
+            // rows in this table are not scoped to a particular collection
+            // because they only map (immutable) identifiers to UUIDs.
+            {
+                use db::schema::sw_root_of_trust_page::dsl;
+                let _ = diesel::insert_into(dsl::sw_root_of_trust_page)
+                    .values(rot_pages)
                     .on_conflict_do_nothing()
                     .execute_async(&conn)
                     .await?;
@@ -469,6 +490,85 @@ impl DataStore {
                 }
             }
 
+            // Insert rows for the root of trust pages that we found. This is
+            // almost identical to inserting cabooses above, and just like for
+            // cabooses, we do this using INSERT INTO ... SELECT. We have these
+            // three tables:
+            //
+            // - `hw_baseboard` with an "id" primary key and lookup columns
+            //   "part_number" and "serial_number"
+            // - `sw_root_of_trust_page` with an "id" primary key and lookup
+            //   column "data_base64"
+            // - `inv_root_of_trust_page` with foreign keys "hw_baseboard_id",
+            //   "sw_root_of_trust_page_id", and various other columns
+            //
+            // and generate an INSERT INTO query that is structurally the same
+            // as the caboose query described above.
+            for (which, tree) in &collection.rot_pages_found {
+                use db::schema::hw_baseboard_id::dsl as dsl_baseboard_id;
+                use db::schema::inv_root_of_trust_page::dsl as dsl_inv_rot_page;
+                use db::schema::sw_root_of_trust_page::dsl as dsl_sw_rot_page;
+                let db_which = nexus_db_model::RotPageWhich::from(*which);
+                for (baseboard_id, found_rot_page) in tree {
+                    let selection = db::schema::hw_baseboard_id::table
+                        .inner_join(
+                            db::schema::sw_root_of_trust_page::table.on(
+                                dsl_baseboard_id::part_number
+                                    .eq(baseboard_id.part_number.clone())
+                                    .and(
+                                        dsl_baseboard_id::serial_number.eq(
+                                            baseboard_id.serial_number.clone(),
+                                        ),
+                                    )
+                                    .and(dsl_sw_rot_page::data_base64.eq(
+                                        found_rot_page.page.data_base64.clone(),
+                                    )),
+                            ),
+                        )
+                        .select((
+                            dsl_baseboard_id::id,
+                            dsl_sw_rot_page::id,
+                            collection_id.into_sql::<diesel::sql_types::Uuid>(),
+                            found_rot_page
+                                .time_collected
+                                .into_sql::<diesel::sql_types::Timestamptz>(),
+                            found_rot_page
+                                .source
+                                .clone()
+                                .into_sql::<diesel::sql_types::Text>(),
+                            db_which.into_sql::<RotPageWhichEnum>(),
+                        ));
+
+                    let _ = diesel::insert_into(
+                        db::schema::inv_root_of_trust_page::table,
+                    )
+                    .values(selection)
+                    .into_columns((
+                        dsl_inv_rot_page::hw_baseboard_id,
+                        dsl_inv_rot_page::sw_root_of_trust_page_id,
+                        dsl_inv_rot_page::inv_collection_id,
+                        dsl_inv_rot_page::time_collected,
+                        dsl_inv_rot_page::source,
+                        dsl_inv_rot_page::which,
+                    ))
+                    .execute_async(&conn)
+                    .await?;
+
+                    // See the comments above.  The same applies here.  If you
+                    // update the statement below because the schema for
+                    // `inv_root_of_trust_page` has changed, be sure to update
+                    // the code above, too!
+                    let (
+                        _hw_baseboard_id,
+                        _sw_root_of_trust_page_id,
+                        _inv_collection_id,
+                        _time_collected,
+                        _source,
+                        _which,
+                    ) = dsl_inv_rot_page::inv_root_of_trust_page::all_columns();
+                }
+            }
+
             // Finally, insert the list of errors.
             {
                 use db::schema::inv_collection_error::dsl as errors_dsl;
@@ -721,7 +821,7 @@ impl DataStore {
         // start removing it and we'd also need to make sure we didn't leak a
         // collection if we crash while deleting it.
         let conn = self.pool_connection_authorized(opctx).await?;
-        let (ncollections, nsps, nrots, ncabooses, nerrors) = conn
+        let (ncollections, nsps, nrots, ncabooses, nrot_pages, nerrors) = conn
             .transaction_async(|conn| async move {
                 // Remove the record describing the collection itself.
                 let ncollections = {
@@ -730,7 +830,7 @@ impl DataStore {
                         dsl::inv_collection.filter(dsl::id.eq(collection_id)),
                     )
                     .execute_async(&conn)
-                    .await?;
+                    .await?
                 };
 
                 // Remove rows for service processors.
@@ -741,7 +841,7 @@ impl DataStore {
                             .filter(dsl::inv_collection_id.eq(collection_id)),
                     )
                     .execute_async(&conn)
-                    .await?;
+                    .await?
                 };
 
                 // Remove rows for roots of trust.
@@ -752,7 +852,7 @@ impl DataStore {
                             .filter(dsl::inv_collection_id.eq(collection_id)),
                     )
                     .execute_async(&conn)
-                    .await?;
+                    .await?
                 };
 
                 // Remove rows for cabooses found.
@@ -763,7 +863,18 @@ impl DataStore {
                             .filter(dsl::inv_collection_id.eq(collection_id)),
                     )
                     .execute_async(&conn)
-                    .await?;
+                    .await?
+                };
+
+                // Remove rows for root of trust pages found.
+                let nrot_pages = {
+                    use db::schema::inv_root_of_trust_page::dsl;
+                    diesel::delete(
+                        dsl::inv_root_of_trust_page
+                            .filter(dsl::inv_collection_id.eq(collection_id)),
+                    )
+                    .execute_async(&conn)
+                    .await?
                 };
 
                 // Remove rows for errors encountered.
@@ -774,10 +885,10 @@ impl DataStore {
                             .filter(dsl::inv_collection_id.eq(collection_id)),
                     )
                     .execute_async(&conn)
-                    .await?;
+                    .await?
                 };
 
-                Ok((ncollections, nsps, nrots, ncabooses, nerrors))
+                Ok((ncollections, nsps, nrots, ncabooses, nrot_pages, nerrors))
             })
             .await
             .map_err(|error| match error {
@@ -793,6 +904,7 @@ impl DataStore {
             "nsps" => nsps,
             "nrots" => nrots,
             "ncabooses" => ncabooses,
+            "nrot_pages" => nrot_pages,
             "nerrors" => nerrors,
         );
 
@@ -1088,6 +1200,88 @@ impl DataStore {
             );
         }
 
+        // Fetch records of RoT pages found.
+        let inv_rot_page_rows = {
+            use db::schema::inv_root_of_trust_page::dsl;
+            dsl::inv_root_of_trust_page
+                .filter(dsl::inv_collection_id.eq(id))
+                .limit(sql_limit)
+                .select(InvRotPage::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?
+        };
+        limit_reached = limit_reached || inv_rot_page_rows.len() == usize_limit;
+
+        // Collect the unique sw_rot_page_ids for those pages.
+        let sw_rot_page_ids: BTreeSet<_> = inv_rot_page_rows
+            .iter()
+            .map(|inv_rot_page| inv_rot_page.sw_root_of_trust_page_id)
+            .collect();
+        // Fetch the corresponing records.
+        let rot_pages_by_id: BTreeMap<_, _> = {
+            use db::schema::sw_root_of_trust_page::dsl;
+            dsl::sw_root_of_trust_page
+                .filter(dsl::id.eq_any(sw_rot_page_ids))
+                .limit(sql_limit)
+                .select(SwRotPage::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
+                .into_iter()
+                .map(|sw_rot_page_row| {
+                    (
+                        sw_rot_page_row.id,
+                        Arc::new(nexus_types::inventory::RotPage::from(
+                            sw_rot_page_row,
+                        )),
+                    )
+                })
+                .collect()
+        };
+        limit_reached = limit_reached || rot_pages_by_id.len() == usize_limit;
+
+        // Assemble the lists of rot pages found.
+        let mut rot_pages_found = BTreeMap::new();
+        for p in inv_rot_page_rows {
+            let by_baseboard = rot_pages_found
+                .entry(nexus_types::inventory::RotPageWhich::from(p.which))
+                .or_insert_with(BTreeMap::new);
+            let Some(bb) = baseboards_by_id.get(&p.hw_baseboard_id) else {
+                let msg = format!(
+                    "unknown baseboard found in inv_root_of_trust_page: {}",
+                    p.hw_baseboard_id
+                );
+                return Err(Error::internal_error(&msg));
+            };
+            let Some(sw_rot_page) =
+                rot_pages_by_id.get(&p.sw_root_of_trust_page_id)
+            else {
+                let msg = format!(
+                    "unknown rot page found in inv_root_of_trust_page: {}",
+                    p.sw_root_of_trust_page_id
+                );
+                return Err(Error::internal_error(&msg));
+            };
+
+            let previous = by_baseboard.insert(
+                bb.clone(),
+                nexus_types::inventory::RotPageFound {
+                    time_collected: p.time_collected,
+                    source: p.source,
+                    page: sw_rot_page.clone(),
+                },
+            );
+            bail_unless!(
+                previous.is_none(),
+                "duplicate rot page found: {:?} baseboard {:?}",
+                p.which,
+                p.hw_baseboard_id
+            );
+        }
+
         Ok((
             Collection {
                 id,
@@ -1097,9 +1291,11 @@ impl DataStore {
                 collector,
                 baseboards: baseboards_by_id.values().cloned().collect(),
                 cabooses: cabooses_by_id.values().cloned().collect(),
+                rot_pages: rot_pages_by_id.values().cloned().collect(),
                 sps,
                 rots,
                 cabooses_found,
+                rot_pages_found,
             },
             limit_reached,
         ))
@@ -1161,6 +1357,7 @@ mod test {
     use nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL;
     use nexus_types::inventory::CabooseWhich;
     use nexus_types::inventory::Collection;
+    use nexus_types::inventory::RotPageWhich;
     use omicron_test_utils::dev;
     use std::num::NonZeroU32;
     use uuid::Uuid;
@@ -1176,28 +1373,44 @@ mod test {
             .await?)
     }
 
-    async fn count_baseboards_cabooses(
-        conn: &DataStoreConnection<'_>,
-    ) -> anyhow::Result<(usize, usize)> {
-        conn.transaction_async(|conn| async move {
-            conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await.unwrap();
-            let bb_count = schema::hw_baseboard_id::dsl::hw_baseboard_id
-                .select(diesel::dsl::count_star())
-                .first_async::<i64>(&conn)
-                .await
-                .context("failed to count baseboards")?;
-            let caboose_count = schema::sw_caboose::dsl::sw_caboose
-                .select(diesel::dsl::count_star())
-                .first_async::<i64>(&conn)
-                .await
-                .context("failed to count cabooses")?;
-            let bb_count_usize = usize::try_from(bb_count)
-                .context("failed to convert baseboard count to usize")?;
-            let caboose_count_usize = usize::try_from(caboose_count)
-                .context("failed to convert caboose count to usize")?;
-            Ok((bb_count_usize, caboose_count_usize))
-        })
-        .await
+    struct CollectionCounts {
+        baseboards: usize,
+        cabooses: usize,
+        rot_pages: usize,
+    }
+
+    impl CollectionCounts {
+        async fn new(conn: &DataStoreConnection<'_>) -> anyhow::Result<Self> {
+            conn.transaction_async(|conn| async move {
+                conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL)
+                    .await
+                    .unwrap();
+                let bb_count = schema::hw_baseboard_id::dsl::hw_baseboard_id
+                    .select(diesel::dsl::count_star())
+                    .first_async::<i64>(&conn)
+                    .await
+                    .context("failed to count baseboards")?;
+                let caboose_count = schema::sw_caboose::dsl::sw_caboose
+                    .select(diesel::dsl::count_star())
+                    .first_async::<i64>(&conn)
+                    .await
+                    .context("failed to count cabooses")?;
+                let rot_page_count =
+                    schema::sw_root_of_trust_page::dsl::sw_root_of_trust_page
+                        .select(diesel::dsl::count_star())
+                        .first_async::<i64>(&conn)
+                        .await
+                        .context("failed to count rot pages")?;
+                let baseboards = usize::try_from(bb_count)
+                    .context("failed to convert baseboard count to usize")?;
+                let cabooses = usize::try_from(caboose_count)
+                    .context("failed to convert caboose count to usize")?;
+                let rot_pages = usize::try_from(rot_page_count)
+                    .context("failed to convert rot page count to usize")?;
+                Ok(Self { baseboards, cabooses, rot_pages })
+            })
+            .await
+        }
     }
 
     /// Tests inserting several collections, reading them back, and making sure
@@ -1225,14 +1438,15 @@ mod test {
                 .expect("failed to read collection back");
         assert_eq!(collection1, collection_read);
 
-        // There ought to be no baseboards or cabooses in the databases from
-        // that collection.
+        // There ought to be no baseboards, cabooses, or RoT pages in the
+        // databases from that collection.
         assert_eq!(collection1.baseboards.len(), 0);
         assert_eq!(collection1.cabooses.len(), 0);
-        let (nbaseboards, ncabooses) =
-            count_baseboards_cabooses(&conn).await.unwrap();
-        assert_eq!(collection1.baseboards.len(), nbaseboards);
-        assert_eq!(collection1.cabooses.len(), ncabooses);
+        assert_eq!(collection1.rot_pages.len(), 0);
+        let coll_counts = CollectionCounts::new(&conn).await.unwrap();
+        assert_eq!(collection1.baseboards.len(), coll_counts.baseboards);
+        assert_eq!(collection1.cabooses.len(), coll_counts.cabooses);
+        assert_eq!(collection1.rot_pages.len(), coll_counts.rot_pages);
 
         // Now insert a more complex collection, write it to the database, and
         // read it back.
@@ -1247,14 +1461,16 @@ mod test {
                 .await
                 .expect("failed to read collection back");
         assert_eq!(collection2, collection_read);
-        // Verify that we have exactly the set of cabooses and baseboards in the
-        // databases that came from this first non-empty collection.
+        // Verify that we have exactly the set of cabooses, baseboards, and RoT
+        // pages in the databases that came from this first non-empty
+        // collection.
         assert_ne!(collection2.baseboards.len(), collection1.baseboards.len());
         assert_ne!(collection2.cabooses.len(), collection1.cabooses.len());
-        let (nbaseboards, ncabooses) =
-            count_baseboards_cabooses(&conn).await.unwrap();
-        assert_eq!(collection2.baseboards.len(), nbaseboards);
-        assert_eq!(collection2.cabooses.len(), ncabooses);
+        assert_ne!(collection2.rot_pages.len(), collection1.rot_pages.len());
+        let coll_counts = CollectionCounts::new(&conn).await.unwrap();
+        assert_eq!(collection2.baseboards.len(), coll_counts.baseboards);
+        assert_eq!(collection2.cabooses.len(), coll_counts.cabooses);
+        assert_eq!(collection2.rot_pages.len(), coll_counts.rot_pages);
 
         // Check that we get an error on the limit being reached for
         // `read_all_or_nothing`
@@ -1269,9 +1485,9 @@ mod test {
             .is_err());
 
         // Now insert an equivalent collection again.  Verify the distinct
-        // baseboards and cabooses again.  This is important: the insertion
-        // process should re-use the baseboards and cabooses from the previous
-        // collection.
+        // baseboards, cabooses, and RoT pages again.  This is important: the
+        // insertion process should re-use the baseboards, cabooses, and RoT
+        // pages from the previous collection.
         let Representative { builder, .. } = representative();
         let collection3 = builder.build();
         datastore
@@ -1283,18 +1499,19 @@ mod test {
                 .await
                 .expect("failed to read collection back");
         assert_eq!(collection3, collection_read);
-        // Verify that we have the same number of cabooses and baseboards, since
-        // those didn't change.
+        // Verify that we have the same number of cabooses, baseboards, and RoT
+        // pages, since those didn't change.
         assert_eq!(collection3.baseboards.len(), collection2.baseboards.len());
         assert_eq!(collection3.cabooses.len(), collection2.cabooses.len());
-        let (nbaseboards, ncabooses) =
-            count_baseboards_cabooses(&conn).await.unwrap();
-        assert_eq!(collection3.baseboards.len(), nbaseboards);
-        assert_eq!(collection3.cabooses.len(), ncabooses);
+        assert_eq!(collection3.rot_pages.len(), collection2.rot_pages.len());
+        let coll_counts = CollectionCounts::new(&conn).await.unwrap();
+        assert_eq!(collection3.baseboards.len(), coll_counts.baseboards);
+        assert_eq!(collection3.cabooses.len(), coll_counts.cabooses);
+        assert_eq!(collection3.rot_pages.len(), coll_counts.rot_pages);
 
         // Now insert a collection that's almost equivalent, but has an extra
-        // couple of baseboards and caboose.  Verify that we re-use the existing
-        // ones, but still insert the new ones.
+        // couple of baseboards, one caboose, and one RoT page.  Verify that we
+        // re-use the existing ones, but still insert the new ones.
         let Representative { mut builder, .. } = representative();
         builder.found_sp_state(
             "test suite",
@@ -1318,6 +1535,14 @@ mod test {
                 nexus_inventory::examples::caboose("dummy"),
             )
             .unwrap();
+        builder
+            .found_rot_page(
+                &bb,
+                RotPageWhich::Cmpa,
+                "dummy",
+                nexus_inventory::examples::rot_page("dummy"),
+            )
+            .unwrap();
         let collection4 = builder.build();
         datastore
             .inventory_insert_collection(&opctx, &collection4)
@@ -1333,14 +1558,15 @@ mod test {
             collection4.baseboards.len(),
             collection3.baseboards.len() + 2
         );
+        assert_eq!(collection4.cabooses.len(), collection3.cabooses.len() + 1);
         assert_eq!(
-            collection4.cabooses.len(),
-            collection3.baseboards.len() + 1
+            collection4.rot_pages.len(),
+            collection3.rot_pages.len() + 1
         );
-        let (nbaseboards, ncabooses) =
-            count_baseboards_cabooses(&conn).await.unwrap();
-        assert_eq!(collection4.baseboards.len(), nbaseboards);
-        assert_eq!(collection4.cabooses.len(), ncabooses);
+        let coll_counts = CollectionCounts::new(&conn).await.unwrap();
+        assert_eq!(collection4.baseboards.len(), coll_counts.baseboards);
+        assert_eq!(collection4.cabooses.len(), coll_counts.cabooses);
+        assert_eq!(collection4.rot_pages.len(), coll_counts.rot_pages);
 
         // This time, go back to our earlier collection.  This logically removes
         // some baseboards.  They should still be present in the database, but
@@ -1358,12 +1584,14 @@ mod test {
         assert_eq!(collection5, collection_read);
         assert_eq!(collection5.baseboards.len(), collection3.baseboards.len());
         assert_eq!(collection5.cabooses.len(), collection3.cabooses.len());
+        assert_eq!(collection5.rot_pages.len(), collection3.rot_pages.len());
         assert_ne!(collection5.baseboards.len(), collection4.baseboards.len());
         assert_ne!(collection5.cabooses.len(), collection4.cabooses.len());
-        let (nbaseboards, ncabooses) =
-            count_baseboards_cabooses(&conn).await.unwrap();
-        assert_eq!(collection4.baseboards.len(), nbaseboards);
-        assert_eq!(collection4.cabooses.len(), ncabooses);
+        assert_ne!(collection5.rot_pages.len(), collection4.rot_pages.len());
+        let coll_counts = CollectionCounts::new(&conn).await.unwrap();
+        assert_eq!(collection4.baseboards.len(), coll_counts.baseboards);
+        assert_eq!(collection4.cabooses.len(), coll_counts.cabooses);
+        assert_eq!(collection4.rot_pages.len(), coll_counts.rot_pages);
 
         // Try to insert the same collection again and make sure it fails.
         let error = datastore
@@ -1556,10 +1784,10 @@ mod test {
         .expect("failed to check that tables were empty");
 
         // We currently keep the baseboard ids and sw_cabooses around.
-        let (nbaseboards, ncabooses) =
-            count_baseboards_cabooses(&conn).await.unwrap();
-        assert_ne!(nbaseboards, 0);
-        assert_ne!(ncabooses, 0);
+        let coll_counts = CollectionCounts::new(&conn).await.unwrap();
+        assert_ne!(coll_counts.baseboards, 0);
+        assert_ne!(coll_counts.cabooses, 0);
+        assert_ne!(coll_counts.rot_pages, 0);
 
         // Clean up.
         db.cleanup().await.unwrap();

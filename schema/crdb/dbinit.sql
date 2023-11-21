@@ -2672,12 +2672,19 @@ CREATE TABLE IF NOT EXISTS omicron.public.sw_caboose (
     board TEXT NOT NULL,
     git_commit TEXT NOT NULL,
     name TEXT NOT NULL,
-    -- The MGS response that provides this field indicates that it can be NULL.
-    -- But that's only to support old software that we no longer support.
     version TEXT NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS caboose_properties
     on omicron.public.sw_caboose (board, git_commit, name, version);
+
+/* root of trust pages: this table assigns unique ids to distinct RoT CMPA
+   and CFPA page contents, each of which is a 512-byte blob */
+CREATE TABLE IF NOT EXISTS omicron.public.sw_root_of_trust_page (
+    id UUID PRIMARY KEY,
+    data_base64 TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS root_of_trust_page_properties
+    on omicron.public.sw_root_of_trust_page (data_base64);
 
 /* Inventory Collections */
 
@@ -2782,6 +2789,32 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_caboose (
 
     which omicron.public.caboose_which NOT NULL,
     sw_caboose_id UUID NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, hw_baseboard_id, which)
+);
+
+CREATE TYPE IF NOT EXISTS omicron.public.root_of_trust_page_which AS ENUM (
+    'cmpa',
+    'cfpa_active',
+    'cfpa_inactive',
+    'cfpa_scratch'
+);
+
+-- root of trust key signing pages found
+CREATE TABLE IF NOT EXISTS omicron.public.inv_root_of_trust_page (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+    -- which system this SP reports it is part of
+    -- (foreign key into `hw_baseboard_id` table)
+    hw_baseboard_id UUID NOT NULL,
+    -- when this observation was made
+    time_collected TIMESTAMPTZ NOT NULL,
+    -- which MGS instance reported this data
+    source TEXT NOT NULL,
+
+    which omicron.public.root_of_trust_page_which NOT NULL,
+    sw_root_of_trust_page_id UUID NOT NULL,
 
     PRIMARY KEY (inv_collection_id, hw_baseboard_id, which)
 );
