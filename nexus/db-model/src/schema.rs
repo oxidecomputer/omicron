@@ -399,6 +399,7 @@ table! {
         id -> Uuid,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
+        kind -> Nullable<crate::ProducerKindEnum>,
         ip -> Inet,
         port -> Int4,
         interval -> Float8,
@@ -1279,7 +1280,7 @@ table! {
 ///
 /// This should be updated whenever the schema is changed. For more details,
 /// refer to: schema/crdb/README.adoc
-pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(11, 0, 0);
+pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(12, 0, 0);
 
 allow_tables_to_appear_in_same_query!(
     system_update,
@@ -1337,4 +1338,9 @@ allow_tables_to_appear_in_same_query!(external_ip, service);
 allow_tables_to_appear_in_same_query!(
     switch_port,
     switch_port_settings_route_config
+);
+
+allow_tables_to_appear_in_same_query!(
+    switch_port,
+    switch_port_settings_bgp_peer_config
 );
