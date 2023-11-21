@@ -91,7 +91,9 @@ default-members = [
     "dev-tools/omdb",
     "dev-tools/omicron-dev",
     "dev-tools/thing-flinger",
-    "dev-tools/xtask",
+    # Do not include xtask in the list of default members, because this causes
+    # hakari to not work as well and build times to be longer.
+    # See omicron#4392.
     "dns-server",
     "gateway-cli",
     "gateway-test-utils",
@@ -392,10 +394,19 @@ zip = { version = "0.6.6", default-features = false, features = ["deflate","bzip
 zone = { version = "0.3", default-features = false, features = ["async"] }
 
 [profile.dev]
-panic = "abort"
+# Note: This used to be panic = "abort" earlier, but that caused a lot of
+# duplicate dependency builds. Letting panic be "unwind" causes dependencies
+# across `cargo test` and `cargo run` to be unified. See omicron#4392.
+panic = "unwind"
+
 # See https://github.com/oxidecomputer/omicron/issues/4009 for some background context here.
 # By reducing the debug level (though keeping enough to have meaningful
 # backtraces), we reduce incremental build time and binary size significantly.
+debug = "line-tables-only"
+
+[profile.dev.build-override]
+# Setting this to line-tables-only results in a large improvement in build
+# times, because it allows target and host dependencies to be unified.
 debug = "line-tables-only"
 
 # `bindgen` is used by `samael`'s build script; building it with optimizations
