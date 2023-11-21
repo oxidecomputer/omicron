@@ -278,9 +278,7 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(system_quota_list)?;
 
         api.register(silo_quota_view)?;
-        api.register(silo_quota_create)?;
         api.register(silo_quota_update)?;
-        api.register(silo_quota_delete)?;
 
         api.register(silo_identity_provider_list)?;
 
@@ -606,32 +604,6 @@ async fn silo_quota_view(
 }
 
 #[endpoint {
-    method = POST,
-    path = "/v1/system/silos/{silo}/quotas",
-    tags = ["system/quotas"],
-}]
-async fn silo_quota_create(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<params::SiloPath>,
-    new_quota: TypedBody<Quota>,
-) -> Result<HttpResponseCreated<Quota>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let nexus = &apictx.nexus;
-
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let silo_lookup =
-            nexus.silo_lookup(&opctx, path_params.into_inner().silo)?;
-        let quota = nexus
-            .silo_create_quota(&opctx, &silo_lookup, new_quota.into_inner())
-            .await?
-            .try_into()?;
-        Ok(HttpResponseCreated(quota))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-#[endpoint {
     method = PUT,
     path = "/v1/system/silos/{silo}/quotas",
     tags = ["system/quotas"],
@@ -653,28 +625,6 @@ async fn silo_quota_update(
             .await?
             .try_into()?;
         Ok(HttpResponseOk(quota))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-#[endpoint {
-    method = DELETE,
-    path = "/v1/system/silos/{silo}/quotas",
-    tags = ["system/quotas"],
-}]
-async fn silo_quota_delete(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<params::SiloPath>,
-) -> Result<HttpResponseDeleted, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let nexus = &apictx.nexus;
-
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let silo_lookup =
-            nexus.silo_lookup(&opctx, path_params.into_inner().silo)?;
-        nexus.silo_delete_quota(&opctx, &silo_lookup).await?;
-        Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
