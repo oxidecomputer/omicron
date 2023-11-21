@@ -1,5 +1,7 @@
 #!/usr/sbin/dtrace -s
 
+#pragma D option switchrate=997hz
+
 BEGIN
 {
 	printf("hunting for zfs(8) errors...\n");

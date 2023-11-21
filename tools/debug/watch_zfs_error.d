@@ -1,5 +1,7 @@
 #!/usr/sbin/dtrace -s
 
+#pragma D option switchrate=997hz
+
 enum {
 	EZFS_SUCCESS = 0,	/* no error -- success */
 	EZFS_NOMEM = 2000,	/* out of memory */
@@ -191,4 +193,12 @@ pid$target::zfs_verror:entry
 	printf("pid %d: error %d %s\n", pid, arg1, enam[arg1]);
 	ustack();
 	printf("\n");
+
+	if (arg1 == EZFS_NOSPC) {
+		system("echo ZFS LIST; zfs list; echo");
+		system("echo ZPOOL LIST; zpool list; echo");
+		system("echo DF; df -h; echo");
+		system("echo SWAP; swap -sh; swap -lh; echo");
+		system("echo MDB MEMSTAT; echo mdb -ke ::memstat; echo");
+	}
 }
