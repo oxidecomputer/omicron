@@ -195,11 +195,11 @@ pid$target::zfs_verror:entry
 	printf("\n");
 
 	if (arg1 == EZFS_NOSPC) {
-		system("echo ## ZFS LIST; zfs list; echo");
-		system("echo ## ZPOOL LIST; zpool list; echo");
-		system("echo ## DF; df -h; echo");
-		system("echo ## SWAP; swap -sh; swap -lh; echo");
-		system("echo ## MDB MEMSTAT; mdb -ke ::memstat; echo");
-		system("echo ##; echo");
+		system("echo === ZFS LIST; zfs list; echo");
+		system("echo === ZPOOL LIST; zpool list; echo");
+		system("echo === DF; df -h; echo");
+		system("echo === SWAP; swap -sh; swap -lh; echo");
+		system("echo === MDB MEMSTAT; mdb -ke ::memstat; echo");
+		system("echo ===; echo");
 	}
 }
