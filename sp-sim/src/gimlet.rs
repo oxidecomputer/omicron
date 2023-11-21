@@ -22,8 +22,11 @@ use futures::Future;
 use gateway_messages::ignition::{self, LinkEvents};
 use gateway_messages::sp_impl::SpHandler;
 use gateway_messages::sp_impl::{BoundsChecked, DeviceDescription};
+use gateway_messages::CfpaPage;
 use gateway_messages::ComponentAction;
 use gateway_messages::Header;
+use gateway_messages::RotRequest;
+use gateway_messages::RotResponse;
 use gateway_messages::RotSlotId;
 use gateway_messages::SpComponent;
 use gateway_messages::SpError;
@@ -1371,10 +1374,18 @@ impl SpHandler for Handler {
 
     fn read_rot(
         &mut self,
-        _request: gateway_messages::RotRequest,
-        _buf: &mut [u8],
-    ) -> std::result::Result<gateway_messages::RotResponse, SpError> {
-        Err(SpError::RequestUnsupportedForSp)
+        request: RotRequest,
+        buf: &mut [u8],
+    ) -> std::result::Result<RotResponse, SpError> {
+        let dummy_page = match request {
+            RotRequest::ReadCmpa => "gimlet-cmpa",
+            RotRequest::ReadCfpa(CfpaPage::Active) => "gimlet-cfpa-active",
+            RotRequest::ReadCfpa(CfpaPage::Inactive) => "gimlet-cfpa-inactive",
+            RotRequest::ReadCfpa(CfpaPage::Scratch) => "gimlet-cfpa-scratch",
+        };
+        buf[..dummy_page.len()].copy_from_slice(dummy_page.as_bytes());
+        buf[dummy_page.len()..].fill(0);
+        Ok(RotResponse::Ok)
     }
 }
 

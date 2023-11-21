@@ -4084,6 +4084,7 @@ name = "nexus-inventory"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64 0.21.5",
  "chrono",
  "expectorate",
  "gateway-client",
@@ -4730,6 +4731,7 @@ dependencies = [
  "tabled",
  "textwrap 0.16.0",
  "tokio",
+ "unicode-width",
  "uuid",
 ]
 

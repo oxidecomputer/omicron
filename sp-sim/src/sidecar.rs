@@ -27,6 +27,7 @@ use gateway_messages::ignition::LinkEvents;
 use gateway_messages::sp_impl::BoundsChecked;
 use gateway_messages::sp_impl::DeviceDescription;
 use gateway_messages::sp_impl::SpHandler;
+use gateway_messages::CfpaPage;
 use gateway_messages::ComponentAction;
 use gateway_messages::ComponentDetails;
 use gateway_messages::DiscoverResponse;
@@ -34,6 +35,8 @@ use gateway_messages::IgnitionCommand;
 use gateway_messages::IgnitionState;
 use gateway_messages::MgsError;
 use gateway_messages::PowerState;
+use gateway_messages::RotRequest;
+use gateway_messages::RotResponse;
 use gateway_messages::RotSlotId;
 use gateway_messages::SpComponent;
 use gateway_messages::SpError;
@@ -1150,10 +1153,18 @@ impl SpHandler for Handler {
 
     fn read_rot(
         &mut self,
-        _request: gateway_messages::RotRequest,
-        _buf: &mut [u8],
-    ) -> std::result::Result<gateway_messages::RotResponse, SpError> {
-        Err(SpError::RequestUnsupportedForSp)
+        request: RotRequest,
+        buf: &mut [u8],
+    ) -> std::result::Result<RotResponse, SpError> {
+        let dummy_page = match request {
+            RotRequest::ReadCmpa => "sidecar-cmpa",
+            RotRequest::ReadCfpa(CfpaPage::Active) => "sidecar-cfpa-active",
+            RotRequest::ReadCfpa(CfpaPage::Inactive) => "sidecar-cfpa-inactive",
+            RotRequest::ReadCfpa(CfpaPage::Scratch) => "sidecar-cfpa-scratch",
+        };
+        buf[..dummy_page.len()].copy_from_slice(dummy_page.as_bytes());
+        buf[dummy_page.len()..].fill(0);
+        Ok(RotResponse::Ok)
     }
 }
 
