@@ -12,5 +12,5 @@ proc:::exec-success
 {
 	printf("pid %d is zfs\n", pid);
 	stop();
-	system("dtrace -p %d -Zqs watch_zfs_error.d", pid);
+	system("dtrace -p %d -Zqws watch_zfs_error.d", pid);
 }
