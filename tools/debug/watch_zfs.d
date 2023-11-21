@@ -86,22 +86,3 @@ proc:::exec-success
 	stop();
 	system("dtrace -p %d -Zqws watch_zfs_error.d", pid);
 }
-
-inline string errnos[int e] =
-	e == EDQUOT ? "EDQUOT" :
-	e == ENOSPC ? "ENOSPC" :
-	"<?>";
-
-/*
- * The EZFS_NOSPC error we are chasing is being produced by
- * zfs_standard_error() which implies it comes from a regular kernel errno.
- * The errnos that appear to translate into this error are ENOSPC and EDQUOT.
- */
-sdt:zfs::set-error
-/arg1 == ENOSPC || arg1 == EDQUOT/
-{
-	printf("pid %d zfs %s() set error %d (%s)\n", pid, probefunc, arg0,
-	    errnos[arg1]);
-	stack();
-	printf("\n");
-}
