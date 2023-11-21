@@ -393,6 +393,11 @@ zeroize = { version = "1.6.0", features = ["zeroize_derive", "std"] }
 zip = { version = "0.6.6", default-features = false, features = ["deflate","bzip2"] }
 zone = { version = "0.3", default-features = false, features = ["async"] }
 
+# NOTE: The test profile inherits from the dev profile, so settings under
+# profile.dev get inherited. AVOID setting anything under profile.test: that
+# will cause dev and test builds to diverge, which will cause more Cargo build
+# cache misses.
+
 [profile.dev]
 # Note: This used to be panic = "abort" earlier, but that caused a lot of
 # duplicate dependency builds. Letting panic be "unwind" causes dependencies
@@ -439,112 +444,108 @@ panic = "abort"
 # proptest based test generation and shrinking is expensive. Let's optimize it.
 [profile.dev.package.proptest]
 opt-level = 3
-[profile.test.package.proptest]
-opt-level = 3
 
 [profile.dev.package.bootstore]
 opt-level = 3
-[profile.test.package.bootstore]
-opt-level = 3
 
 # Crypto stuff always needs optimizations
-[profile.test.package.sha3]
+[profile.dev.package.sha3]
 opt-level = 3
-[profile.test.package.sha2]
+[profile.dev.package.sha2]
 opt-level = 3
-[profile.test.package.hkdf]
+[profile.dev.package.hkdf]
 opt-level = 3
-[profile.test.package.chacha20poly1305]
+[profile.dev.package.chacha20poly1305]
 opt-level = 3
-[profile.test.package.chacha20]
+[profile.dev.package.chacha20]
 opt-level = 3
-[profile.test.package.vsss-rs]
+[profile.dev.package.vsss-rs]
 opt-level = 3
-[profile.test.package.curve25519-dalek]
+[profile.dev.package.curve25519-dalek]
 opt-level = 3
-[profile.test.package.aead]
+[profile.dev.package.aead]
 opt-level = 3
-[profile.test.package.aes]
+[profile.dev.package.aes]
 opt-level = 3
-[profile.test.package.aes-gcm]
+[profile.dev.package.aes-gcm]
 opt-level = 3
-[profile.test.package.bcrypt-pbkdf]
+[profile.dev.package.bcrypt-pbkdf]
 opt-level = 3
-[profile.test.package.blake2]
+[profile.dev.package.blake2]
 opt-level = 3
-[profile.test.package.blake2b_simd]
+[profile.dev.package.blake2b_simd]
 opt-level = 3
-[profile.test.package.block-buffer]
+[profile.dev.package.block-buffer]
 opt-level = 3
-[profile.test.package.block-padding]
+[profile.dev.package.block-padding]
 opt-level = 3
-[profile.test.package.blowfish]
+[profile.dev.package.blowfish]
 opt-level = 3
-[profile.test.package.constant_time_eq]
+[profile.dev.package.constant_time_eq]
 opt-level = 3
-[profile.test.package.crypto-bigint]
+[profile.dev.package.crypto-bigint]
 opt-level = 3
-[profile.test.package.crypto-common]
+[profile.dev.package.crypto-common]
 opt-level = 3
-[profile.test.package.ctr]
+[profile.dev.package.ctr]
 opt-level = 3
-[profile.test.package.cbc]
+[profile.dev.package.cbc]
 opt-level = 3
-[profile.test.package.digest]
+[profile.dev.package.digest]
 opt-level = 3
-[profile.test.package.ed25519]
+[profile.dev.package.ed25519]
 opt-level = 3
-[profile.test.package.ed25519-dalek]
+[profile.dev.package.ed25519-dalek]
 opt-level = 3
-[profile.test.package.elliptic-curve]
+[profile.dev.package.elliptic-curve]
 opt-level = 3
-[profile.test.package.generic-array]
+[profile.dev.package.generic-array]
 opt-level = 3
-[profile.test.package.getrandom]
+[profile.dev.package.getrandom]
 opt-level = 3
-[profile.test.package.hmac]
+[profile.dev.package.hmac]
 opt-level = 3
-[profile.test.package.lpc55_sign]
+[profile.dev.package.lpc55_sign]
 opt-level = 3
-[profile.test.package.md5]
+[profile.dev.package.md5]
 opt-level = 3
-[profile.test.package.md-5]
+[profile.dev.package.md-5]
 opt-level = 3
-[profile.test.package.num-bigint]
+[profile.dev.package.num-bigint]
 opt-level = 3
-[profile.test.package.num-bigint-dig]
+[profile.dev.package.num-bigint-dig]
 opt-level = 3
-[profile.test.package.rand]
+[profile.dev.package.rand]
 opt-level = 3
-[profile.test.package.rand_chacha]
+[profile.dev.package.rand_chacha]
 opt-level = 3
-[profile.test.package.rand_core]
+[profile.dev.package.rand_core]
 opt-level = 3
-[profile.test.package.rand_hc]
+[profile.dev.package.rand_hc]
 opt-level = 3
-[profile.test.package.rand_xorshift]
+[profile.dev.package.rand_xorshift]
 opt-level = 3
-[profile.test.package.rsa]
+[profile.dev.package.rsa]
 opt-level = 3
-[profile.test.package.salty]
+[profile.dev.package.salty]
 opt-level = 3
-[profile.test.package.signature]
+[profile.dev.package.signature]
 opt-level = 3
-[profile.test.package.subtle]
+[profile.dev.package.subtle]
 opt-level = 3
-[profile.test.package.tiny-keccak]
+[profile.dev.package.tiny-keccak]
 opt-level = 3
-[profile.test.package.uuid]
+[profile.dev.package.uuid]
 opt-level = 3
-[profile.test.package.cipher]
+[profile.dev.package.cipher]
 opt-level = 3
-[profile.test.package.cpufeatures]
+[profile.dev.package.cpufeatures]
 opt-level = 3
-[profile.test.package.poly1305]
+[profile.dev.package.poly1305]
 opt-level = 3
-[profile.test.package.inout]
+[profile.dev.package.inout]
 opt-level = 3
-[profile.test.package.keccak]
+[profile.dev.package.keccak]
 opt-level = 3
 
 #
