@@ -110,7 +110,8 @@ source.type = "local"
 source.rust.binary_names = ["oximeter", "clickhouse-schema-updater"]
 source.rust.release = true
 source.paths = [
-    { from = "smf/oximeter", to = "/var/svc/manifest/site/oximeter" },
+    { from = "smf/oximeter/manifest.xml", to = "/var/svc/manifest/site/oximeter/manifest.xml" },
+    { from = "smf/oximeter/method_script.sh", to = "/opt/oxide/lib/svc/manifest/oximeter.sh" },
     { from = "oximeter/db/schema", to = "/opt/oxide/oximeter/schema" },
 ]
 output.type = "zone"

@@ -61,7 +61,6 @@ use illumos_utils::zone::Zones;
 use illumos_utils::{execute, PFEXEC};
 use internal_dns::resolver::Resolver;
 use itertools::Itertools;
-use omicron_common::address::AZ_PREFIX;
 use omicron_common::address::BOOTSTRAP_ARTIFACT_PORT;
 use omicron_common::address::CLICKHOUSE_KEEPER_PORT;
 use omicron_common::address::CLICKHOUSE_PORT;
@@ -75,6 +74,7 @@ use omicron_common::address::SLED_PREFIX;
 use omicron_common::address::WICKETD_NEXUS_PROXY_PORT;
 use omicron_common::address::WICKETD_PORT;
 use omicron_common::address::{Ipv6Subnet, NEXUS_TECHPORT_EXTERNAL_PORT};
+use omicron_common::address::{AZ_PREFIX, OXIMETER_PORT};
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::{
     HostPortConfig, RackNetworkConfig,
@@ -1312,6 +1312,45 @@ impl ServiceManager {
                 let running_zone = RunningZone::boot(installed_zone).await?;
                 return Ok(running_zone);
             }
+            ZoneType::Oximeter => {
+                let Some(info) = self.inner.sled_info.get() else {
+                    return Err(Error::SledAgentNotReady);
+                };
+
+                // Configure the Oximeter service.
+                let datalink = installed_zone.get_control_vnic_name();
+                let gateway = &info.underlay_address.to_string();
+                assert_eq!(request.zone.addresses.len(), 1);
+                let address = SocketAddr::new(
+                    IpAddr::V6(request.zone.addresses[0]),
+                    OXIMETER_PORT,
+                );
+                let listen_addr = &address.ip().to_string();
+                let listen_port = &address.port().to_string();
+                let id = &request.zone.id.to_string();
+
+                let oximeter_config = PropertyGroupBuilder::new("config")
+                    .add_property("datalink", "astring", datalink)
+                    .add_property("gateway", "astring", gateway)
+                    .add_property("listen_addr", "astring", listen_addr)
+                    .add_property("listen_port", "astring", listen_port)
+                    .add_property("id", "astring", id);
+                let oximeter_service = ServiceBuilder::new("oxide/oximeter")
+                    .add_instance(
+                        ServiceInstanceBuilder::new("default")
+                            .add_property_group(oximeter_config),
+                    );
+
+                let profile = ProfileBuilder::new("omicron")
+                    .add_service(oximeter_service);
+                profile
+                    .add_to_zone(&self.inner.log, &installed_zone)
+                    .await
+                    .map_err(|err| {
+                        Error::io("Failed to setup Oximeter profile", err)
+                    })?;
+                return Ok(RunningZone::boot(installed_zone).await?);
+            }
             _ => {}
         }
 
@@ -1633,12 +1672,6 @@ impl ServiceManager {
                     // Refresh the manifest with the new properties we set, so
                     // they become "effective" properties when the service is
                     // enabled.
-                    smfh.refresh()?;
-                }
-                ServiceType::Oximeter { address } => {
-                    info!(self.inner.log, "Setting up oximeter service");
-                    smfh.setprop("config/id", request.zone.id)?;
-                    smfh.setprop("config/address", address.to_string())?;
                     smfh.refresh()?;
                 }
                 ServiceType::ManagementGatewayService => {
@@ -2053,11 +2086,12 @@ impl ServiceManager {
 
                     smfh.refresh()?;
                 }
-                ServiceType::Crucible { .. }
-                | ServiceType::CruciblePantry { .. }
+                ServiceType::Clickhouse { .. }
+                | ServiceType::ClickhouseKeeper { .. }
                 | ServiceType::CockroachDb { .. }
-                | ServiceType::Clickhouse { .. }
-                | ServiceType::ClickhouseKeeper { .. } => {
+                | ServiceType::Crucible { .. }
+                | ServiceType::CruciblePantry { .. }
+                | ServiceType::Oximeter { .. } => {
                     panic!(
                         "{} is a service which exists as part of a self-assembling zone",
                         service.details,
