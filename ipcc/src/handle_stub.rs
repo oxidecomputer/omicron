@@ -4,13 +4,7 @@
 
 // Copyright 2023 Oxide Computer Company
 
-use std::{
-    ffi::{c_int, CStr, CString},
-    ptr,
-};
-
-use crate::ffi::*;
-use crate::ipcc_common::*;
+use crate::IpccError;
 
 pub struct IpccHandle;
 
@@ -21,8 +15,8 @@ impl IpccHandle {
 
     pub(crate) fn key_lookup(
         &self,
-        key: u8,
-        buf: &mut [u8],
+        _key: u8,
+        _buf: &mut [u8],
     ) -> Result<usize, IpccError> {
         panic!("ipcc unavailable on this platform")
     }
