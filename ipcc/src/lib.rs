@@ -173,7 +173,7 @@ pub struct IpccErrorInner {
     pub syserr: String,
 }
 
-/// These are the IPCC keys we can lookup.
+/// These are the IPCC keys we can look up.
 /// NB: These keys match the definitions found in libipcc (RFD 316) and should
 /// match the values in `[ipcc::Key]` one-to-one.
 #[derive(Debug, Clone, Copy)]

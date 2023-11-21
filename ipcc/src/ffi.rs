@@ -42,7 +42,10 @@ pub(crate) const LIBIPCC_ERR_KEY_VALTOOLONG: libipcc_err_t = 7;
 pub(crate) const LIBIPCC_ERR_KEY_ZERR: libipcc_err_t = 8;
 pub(crate) type libipcc_err_t = c_uint;
 
-pub type libipcc_key_flag_t = ::std::os::raw::c_uint;
+/// Maxium length of an error message retrieved by libipcc_errmsg().
+pub(crate) const LIBIPCC_ERR_LEN: usize = 1024;
+
+pub(crate) type libipcc_key_flag_t = ::std::os::raw::c_uint;
 
 #[link(name = "ipcc")]
 extern "C" {

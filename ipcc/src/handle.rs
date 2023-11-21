@@ -31,8 +31,7 @@ fn ipcc_fatal_error<C: Into<String>>(
     let syserr = if syserr == 0 {
         "no system errno".to_string()
     } else {
-        let syserr = unsafe { libc::strerror(syserr) };
-        unsafe { CStr::from_ptr(syserr) }.to_string_lossy().into_owned()
+        std::io::Error::from_raw_os_error(syserr).to_string()
     };
     let inner = IpccErrorInner {
         context,
@@ -56,7 +55,7 @@ fn ipcc_fatal_error<C: Into<String>>(
 impl IpccHandle {
     pub fn new() -> Result<Self, IpccError> {
         let mut ipcc_handle: *mut libipcc_handle_t = ptr::null_mut();
-        let errmsg = CString::new(vec![1; 1024]).unwrap();
+        let errmsg = CString::new(vec![1; LIBIPCC_ERR_LEN]).unwrap();
         let errmsg_len = errmsg.as_bytes().len();
         let errmsg_ptr = errmsg.into_raw();
         let mut lerr = LIBIPCC_ERR_OK;
