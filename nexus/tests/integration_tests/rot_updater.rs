@@ -491,7 +491,7 @@ async fn test_rot_updater_delivers_progress() {
         tokio::spawn(async move { rot_updater.update(&mut mgs_clients).await });
 
     // Allow the SP to respond to 1 message: the "prepare update" messages that
-    // trigger the start of an update, then ensure we see the "started"
+    // triggers the start of an update, then ensure we see the "started"
     // progress.
     sp_accept_sema.send(1).unwrap();
     progress.changed().await.unwrap();

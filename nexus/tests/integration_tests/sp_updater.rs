@@ -478,7 +478,7 @@ async fn test_sp_updater_delivers_progress() {
         tokio::spawn(async move { sp_updater.update(&mut mgs_clients).await });
 
     // Allow the SP to respond to 2 messages: the caboose check and the "prepare
-    // update" messages that trigger the start of an update, then ensure we see
+    // update" messages that triggers the start of an update, then ensure we see
     // the "started" progress.
     sp_accept_sema.send(2).unwrap();
     progress.changed().await.unwrap();

@@ -340,12 +340,12 @@ async fn test_host_phase1_updater_switches_mgs_instances_on_failure() {
         }
     }
 
-    // An SP update requires a minimum of 3 requests to MGS: post the update,
-    // check the status, and post an SP reset. There may be more requests if the
-    // update is not yet complete when the status is checked, but we can just
-    // check that each of our proxies received at least 2 incoming requests;
-    // based on our outline above, if we got the minimum of 3 requests, it would
-    // look like this:
+    // A host flash update requires a minimum of 3 requests to MGS: set the
+    // active flash slot, post the update, and check the status. There may be
+    // more requests if the update is not yet complete when the status is
+    // checked, but we can just check that each of our proxies received at least
+    // 2 incoming requests; based on our outline above, if we got the minimum of
+    // 3 requests, it would look like this:
     //
     // 1. POST update -> first proxy (success)
     // 2. GET status -> first proxy (fail)
@@ -432,9 +432,9 @@ async fn test_host_phase1_updater_delivers_progress() {
         host_phase1_updater.update(&mut mgs_clients).await
     });
 
-    // Allow the SP to respond to 2 messages: the caboose check and the "prepare
-    // update" messages that trigger the start of an update, then ensure we see
-    // the "started" progress.
+    // Allow the SP to respond to 2 messages: the message to activate the target
+    // flash slot and the "prepare update" messages that triggers the start of an
+    // update, then ensure we see the "started" progress.
     sp_accept_sema.send(2).unwrap();
     progress.changed().await.unwrap();
     assert_eq!(*progress.borrow_and_update(), Some(UpdateProgress::Started));

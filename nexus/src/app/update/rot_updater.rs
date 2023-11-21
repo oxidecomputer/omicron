@@ -79,7 +79,7 @@ impl RotUpdater {
         deliver_update(&mut self, mgs_clients).await?;
 
         // The async blocks below want `&self` references, but we take `self`
-        // for API clarity (to start a RoT update, the caller should construct a
+        // for API clarity (to start a new update, the caller should construct a
         // new updater). Create a `&self` ref that we use through the remainder
         // of this method.
         let me = &self;
