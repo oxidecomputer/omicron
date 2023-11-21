@@ -226,15 +226,19 @@ impl DataStore {
         use db::schema::rack::dsl;
         // It's safe to unwrap the returned `rack_subnet` because
         // we filter on `rack_subnet.is_not_null()`
-        dsl::rack
+        let subnet = dsl::rack
             .filter(dsl::id.eq(rack_id))
             .filter(dsl::rack_subnet.is_not_null())
             .select(dsl::rack_subnet)
-            .limit(1)
             .first_async::<Option<IpNetwork>>(&*conn)
             .await
-            .map(|net| net.unwrap())
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        match subnet {
+            Some(subnet) => Ok(subnet),
+            None => Err(Error::internal_error(
+                "DB Error(bug): returned a null subnet for {rack_id}",
+            )),
+        }
     }
 
     /// Return all current underlay allocations for the rack.
@@ -1575,5 +1579,12 @@ mod test {
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn rack_sled_subnet_allocations() {
+        let logctx = dev::test_setup_log("rack_sled_subnet_allocations");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
     }
 }

@@ -194,7 +194,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.sled_underlay_subnet_allocation (
     -- The octet that extends a /56 rack subnet to a /64 sled subnet
     --
     -- Always between 33 and 255 inclusive
-    subnet_octet INT2 NOT NULL UNIQUE
+    subnet_octet INT2 NOT NULL UNIQUE CHECK (subnet_octet BETWEEN 33 AND 255)
 );
 
 -- Add an index which allows pagination by {rack_id, sled_id} pairs. 
@@ -2964,7 +2964,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '12.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '14.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

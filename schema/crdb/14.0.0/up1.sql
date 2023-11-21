@@ -33,5 +33,5 @@ CREATE TABLE IF NOT EXISTS omicron.public.sled_underlay_subnet_allocation (
     -- The octet that extends a /56 rack subnet to a /64 sled subnet
     --
     -- Always between 33 and 255 inclusive
-    subnet_octet INT2 NOT NULL UNIQUE
+    subnet_octet INT2 NOT NULL UNIQUE CHECK (subnet_octet BETWEEN 33 AND 255)
 );
