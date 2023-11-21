@@ -14,6 +14,15 @@
 		}							\
 	}
 
+#define	PRINT_ARGV_ELLIPSIS(s, i)					\
+	if (this->printed) {						\
+		this->printed = 0;					\
+		if (this->argv[i] != 0) {				\
+			this->str = strjoin(s, " [...]");		\
+			this->printed = 1;				\
+		}							\
+	}
+
 BEGIN
 {
 	printf("hunting for zfs(8) errors...\n");
@@ -33,6 +42,11 @@ proc:::exec-success
 /execname == "zfs" && !progenyof(us)/
 {
 	/*
+	 * We want to print the full string of the first ~16 arguments.  We
+	 * could use "curpsinfo->pr_psargs", but that gets truncated at 80
+	 * characters.  Some of our pool names and paths under omicron are
+	 * quite a bit longer!
+	 *
 	 * NOTE: /sbin/zfs is a 64-bit program, otherwise we would have to
 	 * check pr_dmodel.
 	 */
@@ -59,8 +73,35 @@ proc:::exec-success
 	PRINT_ARGV(this->str, 13)
 	PRINT_ARGV(this->str, 14)
 	PRINT_ARGV(this->str, 15)
+	PRINT_ARGV_ELLIPSIS(this->str, 16)
 
 	printf("pid %d: %s\n", pid, this->str);
+
+	/*
+	 * Stop the zfs(8) process here, before it gets a chance to do
+	 * anything.  Then, start our second D script, pointed directly at that
+	 * child process.  The dtrace(8) process will resume the stopped child
+	 * automatically as part of grabbing the process (-p).
+	 */
 	stop();
 	system("dtrace -p %d -Zqws watch_zfs_error.d", pid);
+}
+
+inline string errnos[int e] =
+	e == EDQUOT ? "EDQUOT" :
+	e == ENOSPC ? "ENOSPC" :
+	"<?>";
+
+/*
+ * The EZFS_NOSPC error we are chasing is being produced by
+ * zfs_standard_error() which implies it comes from a regular kernel errno.
+ * The errnos that appear to translate into this error are ENOSPC and EDQUOT.
+ */
+sdt:zfs::set-error
+/arg1 == ENOSPC || arg1 == EDQUOT/
+{
+	printf("pid %d zfs %s() set error %d (%s)\n", pid, probefunc, arg0,
+	    errnos[arg1]);
+	stack();
+	printf("\n");
 }

@@ -2,6 +2,10 @@
 
 #pragma D option switchrate=997hz
 
+/*
+ * This is the zfs_error_t definition lifted from /usr/include/libzfs.h.  We do
+ * not ship /usr/include at all on Gimlets, so I am including it here.
+ */
 enum {
 	EZFS_SUCCESS = 0,	/* no error -- success */
 	EZFS_NOMEM = 2000,	/* out of memory */
@@ -95,6 +99,9 @@ enum {
 	EZFS_UNKNOWN
 };
 
+/*
+ * Translate a zfs_error_t to a string that names the constant, for display.
+ */
 inline string enam[int r] =
 	r == EZFS_SUCCESS ? "EZFS_SUCCESS" :
 	r == EZFS_NOMEM ? "EZFS_NOMEM" :
@@ -189,17 +196,22 @@ inline string enam[int r] =
 
 pid$target::zfs_error:entry,
 pid$target::zfs_verror:entry
+/arg1 == EZFS_NOSPC/
 {
 	printf("pid %d: error %d %s\n", pid, arg1, enam[arg1]);
 	ustack();
 	printf("\n");
 
+	/*
+	 * Dump out some pool utilisation information if we hit the "out of
+	 * space" condition, to try and confirm that we are in fact not out of
+	 * space:
+	 */
 	if (arg1 == EZFS_NOSPC) {
-		system("echo === ZFS LIST; zfs list; echo");
-		system("echo === ZPOOL LIST; zpool list; echo");
-		system("echo === DF; df -h; echo");
-		system("echo === SWAP; swap -sh; swap -lh; echo");
-		system("echo === MDB MEMSTAT; mdb -ke ::memstat; echo");
-		system("echo ===; echo");
+		system("echo == %d == ZFS LIST; zfs list; echo", pid);
+		system("echo == %d == ZPOOL LIST; zpool list; echo", pid);
+		system("echo == %d == DF; df -h; echo", pid);
+		system("echo == %d == SWAP; swap -sh; swap -lh; echo", pid);
+		system("echo == %d ==; echo", pid);
 	}
 }
