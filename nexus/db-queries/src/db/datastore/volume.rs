@@ -1024,7 +1024,7 @@ impl DataStore {
 /// Return the targets from a VolumeConstructionRequest.
 ///
 /// The targets of a volume construction request map to resources.
-fn read_only_resources_associated_with_volume(
+pub fn read_only_resources_associated_with_volume(
     vcr: &VolumeConstructionRequest,
     crucible_targets: &mut CrucibleTargets,
 ) {

@@ -1109,12 +1109,25 @@ CREATE TABLE IF NOT EXISTS omicron.public.oximeter (
 );
 
 /*
+ * The kind of metric producer each record corresponds to.
+ */
+CREATE TYPE IF NOT EXISTS omicron.public.producer_kind AS ENUM (
+    -- A sled agent for an entry in the sled table.
+    'sled_agent',
+    -- A service in the omicron.public.service table
+    'service',
+    -- A Propolis VMM for an instance in the omicron.public.instance table
+    'instance'
+);
+
+/*
  * Information about registered metric producers.
  */
 CREATE TABLE IF NOT EXISTS omicron.public.metric_producer (
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
+    kind omicron.public.producer_kind,
     ip INET NOT NULL,
     port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL,
     interval FLOAT NOT NULL,
@@ -2738,12 +2751,24 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_caboose (
 COMMIT;
 BEGIN;
 
-/*******************************************************************/
+CREATE TABLE IF NOT EXISTS omicron.public.db_metadata (
+    -- There should only be one row of this table for the whole DB.
+    -- It's a little goofy, but filter on "singleton = true" before querying
+    -- or applying updates, and you'll access the singleton row.
+    --
+    -- We also add a constraint on this table to ensure it's not possible to
+    -- access the version of this table with "singleton = false".
+    singleton BOOL NOT NULL PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    -- Semver representation of the DB version
+    version STRING(64) NOT NULL,
 
-/*
- * Metadata for the schema itself. This version number isn't great, as there's
- * nothing to ensure it gets bumped when it should be, but it's a start.
- */
+    -- (Optional) Semver representation of the DB version to which we're upgrading
+    target_version STRING(64),
+
+    CHECK (singleton = true)
+);
 
 -- Per-VMM state.
 CREATE TABLE IF NOT EXISTS omicron.public.vmm (
@@ -2812,6 +2837,62 @@ CREATE TYPE IF NOT EXISTS omicron.public.switch_link_speed AS ENUM (
 ALTER TABLE omicron.public.switch_port_settings_link_config ADD COLUMN IF NOT EXISTS fec omicron.public.switch_link_fec;
 ALTER TABLE omicron.public.switch_port_settings_link_config ADD COLUMN IF NOT EXISTS speed omicron.public.switch_link_speed;
 
+CREATE SEQUENCE IF NOT EXISTS omicron.public.ipv4_nat_version START 1 INCREMENT 1;
+
+CREATE TABLE IF NOT EXISTS omicron.public.ipv4_nat_entry (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    external_address INET NOT NULL,
+    first_port INT4 NOT NULL,
+    last_port INT4 NOT NULL,
+    sled_address INET NOT NULL,
+    vni INT4 NOT NULL,
+    mac INT8 NOT NULL,
+    version_added INT8 NOT NULL DEFAULT nextval('omicron.public.ipv4_nat_version'),
+    version_removed INT8,
+    time_created TIMESTAMPTZ NOT NULL DEFAULT now(),
+    time_deleted TIMESTAMPTZ
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ipv4_nat_version_added ON omicron.public.ipv4_nat_entry (
+    version_added
+)
+STORING (
+    external_address,
+    first_port,
+    last_port,
+    sled_address,
+    vni,
+    mac,
+    time_created,
+    time_deleted
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS overlapping_ipv4_nat_entry ON omicron.public.ipv4_nat_entry (
+    external_address,
+    first_port,
+    last_port
+) WHERE time_deleted IS NULL;
+
+CREATE INDEX IF NOT EXISTS ipv4_nat_lookup ON omicron.public.ipv4_nat_entry (external_address, first_port, last_port, sled_address, vni, mac);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ipv4_nat_version_removed ON omicron.public.ipv4_nat_entry (
+    version_removed
+)
+STORING (
+    external_address,
+    first_port,
+    last_port,
+    sled_address,
+    vni,
+    mac,
+    time_created,
+    time_deleted
+);
+
+/*
+ * Metadata for the schema itself. This version number isn't great, as there's
+ * nothing to ensure it gets bumped when it should be, but it's a start.
+ */
 CREATE TABLE IF NOT EXISTS omicron.public.db_metadata (
     -- There should only be one row of this table for the whole DB.
     -- It's a little goofy, but filter on "singleton = true" before querying
@@ -2838,7 +2919,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '10.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '12.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

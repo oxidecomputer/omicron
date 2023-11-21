@@ -260,6 +260,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-recursion"
+version = "1.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5fd55a5ba1179988837d24ab4c7cc8ed6efdeff578ede0416b4225a5fca35bd0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.32",
+]
+
+[[package]]
 name = "async-stream"
 version = "0.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1048,9 +1059,9 @@ checksum = "6245d59a3e82a7fc217c5828a6692dbc6dfb63a0c8c90495621f7b9d79704a0e"
 
 [[package]]
 name = "cookie"
-version = "0.16.2"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e859cd57d0710d9e06c381b550c06e76992472a8c6d527aecd2fc673dcc231fb"
+checksum = "3cd91cf61412820176e137621345ee43b3f4423e589e7ae4e50d601d93e35ef8"
 dependencies = [
  "time",
  "version_check",
@@ -1629,9 +1640,9 @@ dependencies = [
 
 [[package]]
 name = "diesel"
-version = "2.1.3"
+version = "2.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2268a214a6f118fce1838edba3d1561cf0e78d8de785475957a580a7f8c69d33"
+checksum = "62c6fcf842f17f8c78ecf7c81d75c5ce84436b41ee07e03f490fbb5f5a8731d8"
 dependencies = [
  "bitflags 2.4.0",
  "byteorder",
@@ -2280,9 +2291,12 @@ checksum = "6c2141d6d6c8512188a7891b4b01590a45f6dac67afb4f255c4124dbb86d4eaa"
 
 [[package]]
 name = "fs-err"
-version = "2.9.0"
+version = "2.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0845fa252299212f0389d64ba26f34fa32cfe41588355f21ed507c59a0f64541"
+checksum = "88a41f105fe1d5b6b34b2055e3dc59bb79b46b48b2040b9e6c7b4b5de097aa41"
+dependencies = [
+ "autocfg",
+]
 
 [[package]]
 name = "fs2"
@@ -2487,7 +2501,7 @@ dependencies = [
  "serde",
  "serde-big-array 0.5.1",
  "slog",
- "socket2 0.5.4",
+ "socket2 0.5.5",
  "string_cache",
  "thiserror",
  "tlvc 0.3.1 (git+https://github.com/oxidecomputer/tlvc.git?branch=main)",
@@ -2787,9 +2801,9 @@ dependencies = [
 
 [[package]]
 name = "http"
-version = "0.2.9"
+version = "0.2.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd6effc99afb63425aff9b05836f029929e345a6148a14b7ecd5ab67af944482"
+checksum = "8947b1a6fad4393052c7ba1f4cd97bed3e953a95c79c92ad9b051a04611d9fbb"
 dependencies = [
  "bytes",
  "fnv",
@@ -3172,7 +3186,7 @@ dependencies = [
  "installinator-artifact-client",
  "installinator-common",
  "ipcc-key-value",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "libc",
  "omicron-common",
  "omicron-test-utils",
@@ -3340,7 +3354,7 @@ version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b58db92f96b720de98181bbbe63c831e87005ab460c1bf306eb2622b4707997f"
 dependencies = [
- "socket2 0.5.4",
+ "socket2 0.5.5",
  "widestring",
  "windows-sys 0.48.0",
  "winreg",
@@ -3393,6 +3407,15 @@ name = "itertools"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b1c173a5686ce8bfa551b3563d0c2170bf24ca44da99c7ca4bfdab5418c3fe57"
+dependencies = [
+ "either",
+]
+
+[[package]]
+name = "itertools"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "25db6b064527c5d482d0423354fcd07a89a2dfe07b67892e62411946db7f07b0"
 dependencies = [
  "either",
 ]
@@ -3812,9 +3835,9 @@ dependencies = [
 
 [[package]]
 name = "mio"
-version = "0.8.8"
+version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "927a765cd3fc26206e66b296465fa9d3e5ab003e651c1b3c060e7956d96b19d2"
+checksum = "3dce281c5e46beae905d4de1870d8b1509a9142b62eedf18b443b011ca8343d0"
 dependencies = [
  "libc",
  "log",
@@ -3999,7 +4022,7 @@ dependencies = [
  "hyper-rustls",
  "internal-dns",
  "ipnetwork",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "lazy_static",
  "macaddr",
  "newtype_derive",
@@ -4565,6 +4588,7 @@ dependencies = [
  "async-bb8-diesel",
  "async-trait",
  "base64 0.21.5",
+ "buf-list",
  "camino",
  "cancel-safe-futures",
  "chrono",
@@ -4592,7 +4616,7 @@ dependencies = [
  "hyper-rustls",
  "internal-dns",
  "ipnetwork",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "lazy_static",
  "macaddr",
  "mg-admin-client",
@@ -4672,6 +4696,7 @@ dependencies = [
  "async-bb8-diesel",
  "chrono",
  "clap 4.4.3",
+ "crucible-agent-client",
  "diesel",
  "dropshot",
  "expectorate",
@@ -4799,7 +4824,7 @@ dependencies = [
  "illumos-utils",
  "internal-dns",
  "ipnetwork",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "key-manager",
  "libc",
  "macaddr",
@@ -4961,6 +4986,7 @@ dependencies = [
  "signature 2.1.0",
  "similar",
  "slog",
+ "snafu",
  "spin 0.9.8",
  "string_cache",
  "subtle",
@@ -4971,6 +4997,7 @@ dependencies = [
  "tokio",
  "tokio-postgres",
  "tokio-stream",
+ "tokio-util",
  "toml 0.7.8",
  "toml_datetime",
  "toml_edit 0.19.15",
@@ -4988,9 +5015,9 @@ dependencies = [
 
 [[package]]
 name = "omicron-zone-package"
-version = "0.8.3"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6dc0973625837d1c4e31d4aa60e72008f3af3aa9b0d0ebfd5b5dc67d2e721a48"
+checksum = "620c53207d39a385f298444337d575690e0d9e793561d471ba7a614dc213e372"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4998,7 +5025,9 @@ dependencies = [
  "filetime",
  "flate2",
  "futures-util",
+ "hex",
  "reqwest",
+ "ring 0.16.20",
  "semver 1.0.20",
  "serde",
  "serde_derive",
@@ -5312,7 +5341,7 @@ dependencies = [
  "dropshot",
  "expectorate",
  "highway",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "omicron-common",
  "omicron-test-utils",
  "omicron-workspace-hack",
@@ -5532,24 +5561,6 @@ name = "paste"
 version = "1.0.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "de3145af08024dea9fa9914f381a17b8fc6034dfb00f3a84013f7ff43f29ed4c"
-
-[[package]]
-name = "path-absolutize"
-version = "3.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43eb3595c63a214e1b37b44f44b0a84900ef7ae0b4c5efce59e123d246d7a0de"
-dependencies = [
- "path-dedot",
-]
-
-[[package]]
-name = "path-dedot"
-version = "3.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9d55e486337acb9973cdea3ec5638c1b3bcb22e573b2b7b41969e0c744d5a15e"
-dependencies = [
- "once_cell",
-]
 
 [[package]]
 name = "path-slash"
@@ -6154,9 +6165,9 @@ dependencies = [
 
 [[package]]
 name = "proptest"
-version = "1.3.1"
+version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7c003ac8c77cb07bb74f5f198bce836a689bcd5a42574612bf14d17bfd08c20e"
+checksum = "31b476131c3c86cb68032fdc5cb6d5a1045e3e42d96b69fa599fd77701e1f5bf"
 dependencies = [
  "bit-set",
  "bit-vec",
@@ -6166,7 +6177,7 @@ dependencies = [
  "rand 0.8.5",
  "rand_chacha 0.3.1",
  "rand_xorshift",
- "regex-syntax 0.7.5",
+ "regex-syntax 0.8.2",
  "rusty-fork",
  "tempfile",
  "unarray",
@@ -6421,9 +6432,9 @@ dependencies = [
 
 [[package]]
 name = "reedline"
-version = "0.25.0"
+version = "0.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e7dc1d1d369c194cf79acc204397aca1fecc4248df3e1c1eabb15e5ef2d16991"
+checksum = "d0a093a20a6c473247c2e9971aaf4cedf9041bcd3f444dc7fad667d3b6b7a5fd"
 dependencies = [
  "chrono",
  "crossterm",
@@ -6635,13 +6646,13 @@ dependencies = [
 
 [[package]]
 name = "rpassword"
-version = "7.2.0"
+version = "7.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6678cf63ab3491898c0d021b493c94c9b221d91295294a2a5746eacbe5928322"
+checksum = "80472be3c897911d0137b2d2b9055faf6eeac5b14e324073d83bc17b191d7e3f"
 dependencies = [
  "libc",
  "rtoolbox",
- "winapi",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -6872,9 +6883,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.21.8"
+version = "0.21.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "446e14c5cda4f3f30fe71863c34ec70f5ac79d6087097ad0bb433e1be5edf04c"
+checksum = "629648aced5775d558af50b2b4c7b02983a04b312126d45eeead26e7caa498b9"
 dependencies = [
  "log",
  "ring 0.17.5",
@@ -7738,6 +7749,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e4de37ad025c587a29e8f3f5605c00f70b98715ef90b9061a815b9e59e9042d6"
 dependencies = [
  "doc-comment",
+ "futures-core",
+ "pin-project",
  "snafu-derive",
 ]
 
@@ -7765,9 +7778,9 @@ dependencies = [
 
 [[package]]
 name = "socket2"
-version = "0.5.4"
+version = "0.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4031e820eb552adee9295814c0ced9e5cf38ddf1e8b7d566d6de8e2538ea989e"
+checksum = "7b5fac59a5cb5dd637972e5fca70daf0523c9067fcdc4842f053dae04a18f8e9"
 dependencies = [
  "libc",
  "windows-sys 0.48.0",
@@ -8422,9 +8435,9 @@ dependencies = [
 
 [[package]]
 name = "tokio"
-version = "1.33.0"
+version = "1.34.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f38200e3ef7995e5ef13baec2f432a6da0aa9ac495b2c0e8f3b7eec2c92d653"
+checksum = "d0c014766411e834f7af5b8f4cf46257aab4036ca95e9d2c144a10f59ad6f5b9"
 dependencies = [
  "backtrace",
  "bytes",
@@ -8434,16 +8447,16 @@ dependencies = [
  "parking_lot 0.12.1",
  "pin-project-lite",
  "signal-hook-registry",
- "socket2 0.5.4",
+ "socket2 0.5.5",
  "tokio-macros",
  "windows-sys 0.48.0",
 ]
 
 [[package]]
 name = "tokio-macros"
-version = "2.1.0"
+version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "630bdcf245f78637c13ec01ffae6187cca34625e8c63150d424b59e55af2675e"
+checksum = "5b8a1e28f2deaa14e508979454cb3a223b10b938b45af148bc0986de36f1923b"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -8480,7 +8493,7 @@ dependencies = [
  "postgres-protocol",
  "postgres-types",
  "rand 0.8.5",
- "socket2 0.5.4",
+ "socket2 0.5.5",
  "tokio",
  "tokio-util",
  "whoami",
@@ -8634,18 +8647,22 @@ checksum = "ea68304e134ecd095ac6c3574494fc62b909f416c4fca77e440530221e549d3d"
 
 [[package]]
 name = "tough"
-version = "0.14.0"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eda3efa9005cf9c1966984c3b9a44c3f37b7ed2c95ba338d6ad51bba70e989a0"
+checksum = "d16dc5f42fc7ce7cb51eebc7a6ef91f4d69a6d41bb13f34a09674ec47e454d9b"
 dependencies = [
+ "async-recursion",
+ "async-trait",
+ "bytes",
  "chrono",
  "dyn-clone",
+ "futures",
+ "futures-core",
  "globset",
  "hex",
  "log",
  "olpc-cjson",
- "path-absolutize",
- "pem 1.1.1",
+ "pem 3.0.2",
  "percent-encoding",
  "reqwest",
  "ring 0.16.20",
@@ -8654,6 +8671,9 @@ dependencies = [
  "serde_plain",
  "snafu",
  "tempfile",
+ "tokio",
+ "tokio-util",
+ "typed-path",
  "untrusted 0.7.1",
  "url",
  "walkdir",
@@ -8828,6 +8848,7 @@ dependencies = [
  "slog-envlogger",
  "slog-term",
  "tempfile",
+ "tokio",
  "tufaceous-lib",
 ]
 
@@ -8836,6 +8857,7 @@ name = "tufaceous-lib"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "buf-list",
  "bytes",
  "bytesize",
@@ -8845,9 +8867,10 @@ dependencies = [
  "debug-ignore",
  "flate2",
  "fs-err",
+ "futures",
  "hex",
  "hubtools",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "omicron-common",
  "omicron-test-utils",
  "omicron-workspace-hack",
@@ -8859,6 +8882,7 @@ dependencies = [
  "sha2",
  "slog",
  "tar",
+ "tokio",
  "toml 0.8.8",
  "tough",
  "url",
@@ -8912,6 +8936,12 @@ dependencies = [
  "url",
  "utf-8",
 ]
+
+[[package]]
+name = "typed-path"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbb9d13b8242894ff21f9990082b90a6410a43dcc6029ac4227a1467853ba781"
 
 [[package]]
 name = "typenum"
@@ -9176,9 +9206,9 @@ checksum = "711b9620af191e0cdc7468a8d14e709c3dcdb115b36f838e601583af800a370a"
 
 [[package]]
 name = "uuid"
-version = "1.5.0"
+version = "1.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "88ad59a7560b41a70d191093a945f0b87bc1deeda46fb237479708a1d6b6cdfc"
+checksum = "5e395fcf16a7a3d8127ec99782007af141946b4795001f876d54fb0d55978560"
 dependencies = [
  "getrandom 0.2.10",
  "serde",
@@ -9420,7 +9450,7 @@ dependencies = [
  "humantime",
  "indexmap 2.1.0",
  "indicatif",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "omicron-common",
  "omicron-passwords",
  "omicron-workspace-hack",
@@ -9496,6 +9526,7 @@ dependencies = [
  "async-trait",
  "base64 0.21.5",
  "bootstrap-agent-client",
+ "buf-list",
  "bytes",
  "camino",
  "camino-tempfile",
@@ -9525,7 +9556,7 @@ dependencies = [
  "installinator-common",
  "internal-dns",
  "ipnetwork",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "maplit",
  "omicron-certificates",
  "omicron-common",

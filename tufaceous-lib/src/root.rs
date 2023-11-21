@@ -8,7 +8,7 @@ use tough::editor::signed::SignedRole;
 use tough::schema::{KeyHolder, RoleKeys, RoleType, Root};
 use tough::sign::Sign;
 
-pub(crate) fn new_root(
+pub(crate) async fn new_root(
     keys: Vec<Key>,
     expires: DateTime<Utc>,
 ) -> Result<SignedRole<Root>> {
@@ -47,5 +47,6 @@ pub(crate) fn new_root(
         &KeyHolder::Root(root),
         &keys,
         &SystemRandom::new(),
-    )?)
+    )
+    .await?)
 }

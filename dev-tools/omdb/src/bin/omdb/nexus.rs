@@ -159,6 +159,7 @@ async fn cmd_nexus_background_tasks_show(
         "dns_config_external",
         "dns_servers_external",
         "dns_propagation_external",
+        "nat_v4_garbage_collector",
     ] {
         if let Some(bgtask) = tasks.remove(name) {
             print_task(&bgtask);

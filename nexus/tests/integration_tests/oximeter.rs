@@ -9,6 +9,7 @@ use http::StatusCode;
 use nexus_test_interface::NexusServer;
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
+use omicron_common::api::internal::nexus::ProducerKind;
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use oximeter_db::DbWrite;
 use std::collections::BTreeSet;
@@ -360,6 +361,7 @@ async fn test_oximeter_collector_reregistration_gets_all_assignments() {
         ids.insert(id);
         let info = ProducerEndpoint {
             id,
+            kind: Some(ProducerKind::Service),
             address: SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 12345),
             base_route: String::from("/collect"),
             interval: Duration::from_secs(1),
