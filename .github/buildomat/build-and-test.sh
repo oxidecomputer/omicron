@@ -8,7 +8,7 @@ target_os=$1
 
 if [[ $target_os == illumos ]]; then
 	bmat process start zfserr \
-	    bash -c 'cd tools/debug && exec pfexec dtrace -qws watch_zfs.d'
+	    bash -c 'cd tools/debug && exec pfexec dtrace -qCws watch_zfs.d'
 fi
 
 # NOTE: This version should be in sync with the recommended version in
