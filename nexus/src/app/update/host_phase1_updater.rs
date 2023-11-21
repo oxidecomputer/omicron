@@ -84,7 +84,7 @@ impl HostPhase1Updater {
         // TODO-correctness Should we be doing this, or should a higher level
         // executor set this up before calling us?
         mgs_clients
-            .try_all(&self.log, |client| async move {
+            .try_all_serially(&self.log, |client| async move {
                 me.mark_target_slot_active(&client).await
             })
             .await?;
