@@ -265,6 +265,8 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(networking_bgp_announce_set_list)?;
         api.register(networking_bgp_announce_set_delete)?;
 
+        api.register(quota_list)?;
+
         // Fleet-wide API operations
         api.register(silo_list)?;
         api.register(silo_create)?;
@@ -272,6 +274,13 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(silo_delete)?;
         api.register(silo_policy_view)?;
         api.register(silo_policy_update)?;
+
+        api.register(system_quota_list)?;
+
+        api.register(silo_quota_view)?;
+        api.register(silo_quota_create)?;
+        api.register(silo_quota_update)?;
+        api.register(silo_quota_delete)?;
 
         api.register(silo_identity_provider_list)?;
 
@@ -499,6 +508,173 @@ async fn policy_update(
         let policy =
             nexus.silo_update_policy(&opctx, &silo_lookup, &new_policy).await?;
         Ok(HttpResponseOk(policy))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+#[endpoint {
+    method = GET,
+    path = "/v1/quotas",
+    tags = ["quotas"],
+}]
+async fn quota_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedByNameOrId>,
+) -> Result<HttpResponseOk<ResultsPage<Quota>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+
+        let query = query_params.into_inner();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let quotas = nexus
+            .quotas_list(&opctx, &paginated_by)
+            .await?
+            .into_iter()
+            .map(|p| p.try_into())
+            .collect::<Result<Vec<_>, Error>>()?;
+
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
+            quotas,
+            &marker_for_name_or_id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+#[endpoint {
+    method = GET,
+    path = "/v1/system/quotas",
+    tags = ["system/quotas"],
+}]
+async fn system_quota_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedByNameOrId>,
+) -> Result<HttpResponseOk<ResultsPage<Quota>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+
+        let query = query_params.into_inner();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let quotas = nexus
+            .fleet_list_quotas(&opctx, &paginated_by)
+            .await?
+            .into_iter()
+            .map(|p| p.try_into())
+            .collect::<Result<Vec<_>, Error>>()?;
+
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
+            quotas,
+            &marker_for_name_or_id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+#[endpoint {
+    method = GET,
+    path = "/v1/system/silos/{silo}/quotas",
+    tags = ["system/quotas"],
+}]
+async fn silo_quota_view(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::SiloPath>,
+) -> Result<HttpResponseOk<Quota>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let silo_lookup =
+            nexus.silo_lookup(&opctx, path_params.into_inner().silo)?;
+        let quota =
+            nexus.silo_fetch_quota(&opctx, &silo_lookup).await?.try_into()?;
+        Ok(HttpResponseOk(quota))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+#[endpoint {
+    method = POST,
+    path = "/v1/system/silos/{silo}/quotas",
+    tags = ["system/quotas"],
+}]
+async fn silo_quota_create(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::SiloPath>,
+    new_quota: TypedBody<Quota>,
+) -> Result<HttpResponseCreated<Quota>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let silo_lookup =
+            nexus.silo_lookup(&opctx, path_params.into_inner().silo)?;
+        let quota = nexus
+            .silo_create_quota(&opctx, &silo_lookup, new_quota.into_inner())
+            .await?
+            .try_into()?;
+        Ok(HttpResponseCreated(quota))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+#[endpoint {
+    method = PUT,
+    path = "/v1/system/silos/{silo}/quotas",
+    tags = ["system/quotas"],
+}]
+async fn silo_quota_update(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::SiloPath>,
+    new_quota: TypedBody<Quota>,
+) -> Result<HttpResponseOk<Quota>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let silo_lookup =
+            nexus.silo_lookup(&opctx, path_params.into_inner().silo)?;
+        let quota = nexus
+            .silo_update_quota(&opctx, &silo_lookup, new_quota.into_inner())
+            .await?
+            .try_into()?;
+        Ok(HttpResponseOk(quota))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+#[endpoint {
+    method = DELETE,
+    path = "/v1/system/silos/{silo}/quotas",
+    tags = ["system/quotas"],
+}]
+async fn silo_quota_delete(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::SiloPath>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let silo_lookup =
+            nexus.silo_lookup(&opctx, path_params.into_inner().silo)?;
+        nexus.silo_delete_quota(&opctx, &silo_lookup).await?;
+        Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
