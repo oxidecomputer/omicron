@@ -193,7 +193,7 @@ filetime = "0.2.22"
 flate2 = "1.0.28"
 flume = "0.11.0"
 foreign-types = "0.3.2"
-fs-err = "2.10.0"
+fs-err = "2.11.0"
 futures = "0.3.29"
 gateway-client = { path = "clients/gateway-client" }
 gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "2739c18e80697aa6bc235c935176d14b4d757ee9", default-features = false, features = ["std"] }
@@ -304,7 +304,7 @@ regex = "1.10.2"
 regress = "0.7.1"
 reqwest = { version = "0.11", default-features = false }
 ring = "0.16"
-rpassword = "7.2.0"
+rpassword = "7.3.1"
 rstest = "0.18.2"
 rustfmt-wrapper = "0.2"
 rustls = "0.21.9"
@@ -363,15 +363,15 @@ textwrap = "0.16.0"
 test-strategy = "0.3.1"
 thiserror = "1.0"
 tofino = { git = "http://github.com/oxidecomputer/tofino", branch = "main" }
-tokio = "1.33.0"
+tokio = "1.34.0"
 tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-1" ] }
 tokio-stream = "0.1.14"
 tokio-tungstenite = "0.18"
-tokio-util = "0.7.10"
+tokio-util = { version = "0.7.10", features = ["io", "io-util"] }
 toml = "0.8.8"
 toml_edit = "0.21.0"
 topological-sort = "0.2.2"
-tough = { version = "0.14", features = [ "http" ] }
+tough = { version = "0.15", features = [ "http" ] }
 trust-dns-client = "0.22"
 trust-dns-proto = "0.22"
 trust-dns-resolver = "0.22"
@@ -382,7 +382,7 @@ tufaceous-lib = { path = "tufaceous-lib" }
 unicode-width = "0.1.11"
 update-engine = { path = "update-engine" }
 usdt = "0.3"
-uuid = { version = "1.5.0", features = ["serde", "v4"] }
+uuid = { version = "1.6.1", features = ["serde", "v4"] }
 walkdir = "2.4"
 wicket = { path = "wicket" }
 wicket-common = { path = "wicket-common" }

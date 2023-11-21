@@ -51,7 +51,7 @@ impl super::Nexus {
             SledRole::Scrimlet => true,
         };
 
-        let sled = db::model::Sled::new(
+        let sled = db::model::SledUpdate::new(
             id,
             info.sa_address,
             db::model::SledBaseboard {

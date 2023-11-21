@@ -5,9 +5,9 @@ baseboards:
     part "FAKE_SIM_SIDECAR" serial "SimSidecar1"
 
 cabooses:
-    board "SimGimletRot" name "SimGimlet" version "0.0.1" git_commit "eeeeeeee"
     board "SimGimletSp" name "SimGimlet" version "0.0.1" git_commit "ffffffff"
-    board "SimSidecarRot" name "SimSidecar" version "0.0.1" git_commit "eeeeeeee"
+    board "SimRot" name "SimGimlet" version "0.0.1" git_commit "eeeeeeee"
+    board "SimRot" name "SimSidecar" version "0.0.1" git_commit "eeeeeeee"
     board "SimSidecarSp" name "SimSidecar" version "0.0.1" git_commit "ffffffff"
 
 rot pages:
@@ -41,14 +41,14 @@ cabooses found:
     SpSlot1 baseboard part "FAKE_SIM_GIMLET" serial "SimGimlet01": board "SimGimletSp"
     SpSlot1 baseboard part "FAKE_SIM_SIDECAR" serial "SimSidecar0": board "SimSidecarSp"
     SpSlot1 baseboard part "FAKE_SIM_SIDECAR" serial "SimSidecar1": board "SimSidecarSp"
-    RotSlotA baseboard part "FAKE_SIM_GIMLET" serial "SimGimlet00": board "SimGimletRot"
-    RotSlotA baseboard part "FAKE_SIM_GIMLET" serial "SimGimlet01": board "SimGimletRot"
-    RotSlotA baseboard part "FAKE_SIM_SIDECAR" serial "SimSidecar0": board "SimSidecarRot"
-    RotSlotA baseboard part "FAKE_SIM_SIDECAR" serial "SimSidecar1": board "SimSidecarRot"
-    RotSlotB baseboard part "FAKE_SIM_GIMLET" serial "SimGimlet00": board "SimGimletRot"
-    RotSlotB baseboard part "FAKE_SIM_GIMLET" serial "SimGimlet01": board "SimGimletRot"
-    RotSlotB baseboard part "FAKE_SIM_SIDECAR" serial "SimSidecar0": board "SimSidecarRot"
-    RotSlotB baseboard part "FAKE_SIM_SIDECAR" serial "SimSidecar1": board "SimSidecarRot"
+    RotSlotA baseboard part "FAKE_SIM_GIMLET" serial "SimGimlet00": board "SimRot"
+    RotSlotA baseboard part "FAKE_SIM_GIMLET" serial "SimGimlet01": board "SimRot"
+    RotSlotA baseboard part "FAKE_SIM_SIDECAR" serial "SimSidecar0": board "SimRot"
+    RotSlotA baseboard part "FAKE_SIM_SIDECAR" serial "SimSidecar1": board "SimRot"
+    RotSlotB baseboard part "FAKE_SIM_GIMLET" serial "SimGimlet00": board "SimRot"
+    RotSlotB baseboard part "FAKE_SIM_GIMLET" serial "SimGimlet01": board "SimRot"
+    RotSlotB baseboard part "FAKE_SIM_SIDECAR" serial "SimSidecar0": board "SimRot"
+    RotSlotB baseboard part "FAKE_SIM_SIDECAR" serial "SimSidecar1": board "SimRot"
 
 rot pages found:
     Cmpa baseboard part "FAKE_SIM_GIMLET" serial "SimGimlet00": data_base64 "Z2ltbGV0LWNtcGEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
