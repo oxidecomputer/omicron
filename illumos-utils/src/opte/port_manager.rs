@@ -20,6 +20,7 @@ use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::api::internal::shared::SourceNatConfig;
 use oxide_vpc::api::AddRouterEntryReq;
 use oxide_vpc::api::DhcpCfg;
+use oxide_vpc::api::ExternalIpCfg;
 use oxide_vpc::api::IpCfg;
 use oxide_vpc::api::IpCidr;
 use oxide_vpc::api::Ipv4Cfg;
@@ -116,6 +117,8 @@ impl PortManager {
         // that OPTE supports. The array is guaranteed to be limited by Nexus.
         // See https://github.com/oxidecomputer/omicron/issues/1467
         // See https://github.com/oxidecomputer/opte/issues/196
+
+        // XXX: Need to take ephemeral vs floating as separate params.
         let external_ip = external_ips.get(0);
 
         macro_rules! ip_cfg {
@@ -152,7 +155,7 @@ impl PortManager {
                     }
                     None => None,
                 };
-                let external_ip = match external_ip {
+                let ephemeral_ip = match external_ip {
                     Some($ip_t(ip)) => Some((*ip).into()),
                     Some(_) => {
                         error!(
@@ -169,8 +172,12 @@ impl PortManager {
                     vpc_subnet,
                     private_ip: $ip.into(),
                     gateway_ip: gateway_ip.into(),
-                    snat,
-                    external_ips: external_ip,
+                    external_ips: ExternalIpCfg {
+                        ephemeral_ip,
+                        snat,
+                        // TODO: implement
+                        floating_ips: vec![],
+                    },
                 })
             }}
         }
