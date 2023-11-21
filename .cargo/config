@@ -13,7 +13,7 @@ rustdocflags = "--document-private-items"
 # things critical to correctness probably don't belong here.
 [target.x86_64-unknown-illumos]
 rustflags = [
-    "-C", "link-arg=-Wl,-znocompstrtab"
+    "-C", "link-arg=-Wl,-znocompstrtab,-R/usr/platform/oxide/lib/amd64"
 ]
 
 # Set up `cargo xtask`.
