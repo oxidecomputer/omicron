@@ -102,45 +102,49 @@ pub async fn all_sql_for_version_migration<P: AsRef<Utf8Path>>(
     }
     up_sqls.sort();
 
-    let mut result = SchemaUpgrade { steps: vec![] };
-    let mut prev_up_number = None;
-    for (up_number, path) in up_sqls.into_iter() {
-        // Optimistically read the file and push it into `result` first to avoid
-        // needing to clone `path` in the error-checking `match` below.
-        let sql = tokio::fs::read_to_string(&path)
-            .await
-            .map_err(|e| format!("Cannot read {path}: {e}"))?;
-        result.steps.push(SchemaUpgradeStep { path: path.to_owned(), sql });
-
-        match (up_number, prev_up_number) {
-            // First file must be either "up.sql" (which we marked as
-            // up_number==0) or "up1.sql".
-            (0, None) | (1, None) => {
-                prev_up_number = Some((path, up_number));
-            }
-            // No other first value is allowed.
-            (_, None) => {
+    // Validate that we have a reasonable sequence of `up*.sql` numbers.
+    match up_sqls.as_slice() {
+        [] => return Err("no `up*.sql` files found".to_string()),
+        [(up_number, path)] => {
+            // For a single file, we allow either `up.sql` (keyed as
+            // up_number=0) or `up1.sql`; reject any higher number.
+            if *up_number > 1 {
                 return Err(format!(
                     "`up*.sql` numbering must start at 1: found first file \
                      {path}"
                 ));
             }
-            // If we previously saw 0 (i.e., "up.sql"), no other values are
-            // allowed.
-            (_, Some((_, 0))) => {
-                return Err(format!("`up.sql` cannot be used with {path}"));
-            }
-            (_, Some((previous_path, previous_up_number))) => {
-                if up_number == previous_up_number + 1 {
-                    prev_up_number = Some((path, up_number));
-                } else {
+        }
+        _ => {
+            for (i, (up_number, path)) in up_sqls.iter().enumerate() {
+                // We have 2 or more `up*.sql`; they should be numbered exactly
+                // 1..=up_sqls.len().
+                if i as u64 + 1 != *up_number {
+                    // We know we have at least two elements, so report an error
+                    // referencing either the next item (if we're first) or the
+                    // previous item (if we're not first).
+                    let (path_a, path_b) = if i == 0 {
+                        let (_, next_path) = &up_sqls[1];
+                        (path, next_path)
+                    } else {
+                        let (_, prev_path) = &up_sqls[i - 1];
+                        (prev_path, path)
+                    };
                     return Err(format!(
-                        "invalid `up*.sql` combination: \
-                         {previous_path}, {path}"
+                        "invalid `up*.sql` combination: {path_a}, {path_b}"
                     ));
                 }
             }
         }
+    }
+
+    // This collection of `up*.sql` files is valid; read them all, in order.
+    let mut result = SchemaUpgrade { steps: vec![] };
+    for (_, path) in up_sqls.into_iter() {
+        let sql = tokio::fs::read_to_string(&path)
+            .await
+            .map_err(|e| format!("Cannot read {path}: {e}"))?;
+        result.steps.push(SchemaUpgradeStep { path: path.to_owned(), sql });
     }
     Ok(result)
 }
@@ -519,20 +523,48 @@ mod test {
         }
     }
 
+    // Confirm that `all_sql_for_version_migration` rejects a directory with no
+    // appriopriately-named files.
+    #[tokio::test]
+    async fn all_sql_for_version_migration_rejects_no_up_sql_files() {
+        for filenames in [
+            &[] as &[&str],
+            &["README.md"],
+            &["foo.sql", "bar.sql"],
+            &["up1sql", "up2sql"],
+        ] {
+            let tempdir = Utf8TempDir::new().unwrap();
+            for filename in filenames {
+                _ = tokio::fs::File::create(tempdir.path().join(filename))
+                    .await
+                    .unwrap();
+            }
+
+            match all_sql_for_version_migration(tempdir.path()).await {
+                Ok(upgrade) => {
+                    panic!(
+                        "unexpected success on {filenames:?} \
+                         (produced {upgrade:?})"
+                    );
+                }
+                Err(message) => {
+                    assert_eq!(message, "no `up*.sql` files found");
+                }
+            }
+        }
+    }
+
     // Confirm that `all_sql_for_version_migration` rejects collections of
     // `up*.sql` files with individually-valid names but that do not pass the
     // rules of the entire collection.
     #[tokio::test]
     async fn all_sql_for_version_migration_rejects_invalid_up_sql_collections()
     {
-        for (invalid_filenames, error_message_prefix) in [
-            (&["up.sql", "up1.sql"] as &[&str], "`up.sql` cannot be used with"),
-            (&["up1.sql", "up01.sql"], "invalid `up*.sql` combination: "),
-            (&["up1.sql", "up3.sql"], "invalid `up*.sql` combination: "),
-            (
-                &["up1.sql", "up2.sql", "up3.sql", "up02.sql"],
-                "invalid `up*.sql` combination: ",
-            ),
+        for invalid_filenames in [
+            &["up.sql", "up1.sql"] as &[&str],
+            &["up1.sql", "up01.sql"],
+            &["up1.sql", "up3.sql"],
+            &["up1.sql", "up2.sql", "up3.sql", "up02.sql"],
         ] {
             let tempdir = Utf8TempDir::new().unwrap();
             for filename in invalid_filenames {
@@ -550,9 +582,9 @@ mod test {
                 }
                 Err(message) => {
                     assert!(
-                        message.starts_with(error_message_prefix),
-                        "message did not start with expected prefix \
-                         {error_message_prefix:?}: {message:?}"
+                        message.starts_with("invalid `up*.sql` combination: "),
+                        "message did not start with expected prefix: \
+                         {message:?}"
                     );
                 }
             }
