@@ -62,38 +62,6 @@ pub struct Sled {
 }
 
 impl Sled {
-    pub fn new(
-        id: Uuid,
-        addr: SocketAddrV6,
-        baseboard: SledBaseboard,
-        hardware: SledSystemHardware,
-        rack_id: Uuid,
-    ) -> Self {
-        let last_used_address = {
-            let mut segments = addr.ip().segments();
-            segments[7] += omicron_common::address::RSS_RESERVED_ADDRESSES;
-            ipv6::Ipv6Addr::from(Ipv6Addr::from(segments))
-        };
-        Self {
-            identity: SledIdentity::new(id),
-            time_deleted: None,
-            rcgen: Generation::new(),
-            rack_id,
-            is_scrimlet: hardware.is_scrimlet,
-            serial_number: baseboard.serial_number,
-            part_number: baseboard.part_number,
-            revision: baseboard.revision,
-            usable_hardware_threads: SqlU32::new(
-                hardware.usable_hardware_threads,
-            ),
-            usable_physical_ram: hardware.usable_physical_ram,
-            reservoir_size: hardware.reservoir_size,
-            ip: ipv6::Ipv6Addr::from(addr.ip()),
-            port: addr.port().into(),
-            last_used_address,
-        }
-    }
-
     pub fn is_scrimlet(&self) -> bool {
         self.is_scrimlet
     }
@@ -151,6 +119,107 @@ impl DatastoreCollectionConfig<super::Service> for Sled {
     type GenerationNumberColumn = sled::dsl::rcgen;
     type CollectionTimeDeletedColumn = sled::dsl::time_deleted;
     type CollectionIdColumn = service::dsl::sled_id;
+}
+
+/// Form of `Sled` used for updates from sled-agent. This is missing some
+/// columns that are present in `Sled` because sled-agent doesn't control them.
+#[derive(Debug, Clone)]
+pub struct SledUpdate {
+    id: Uuid,
+
+    pub rack_id: Uuid,
+
+    is_scrimlet: bool,
+    serial_number: String,
+    part_number: String,
+    revision: i64,
+
+    pub usable_hardware_threads: SqlU32,
+    pub usable_physical_ram: ByteCount,
+    pub reservoir_size: ByteCount,
+
+    // ServiceAddress (Sled Agent).
+    pub ip: ipv6::Ipv6Addr,
+    pub port: SqlU16,
+}
+
+impl SledUpdate {
+    pub fn new(
+        id: Uuid,
+        addr: SocketAddrV6,
+        baseboard: SledBaseboard,
+        hardware: SledSystemHardware,
+        rack_id: Uuid,
+    ) -> Self {
+        Self {
+            id,
+            rack_id,
+            is_scrimlet: hardware.is_scrimlet,
+            serial_number: baseboard.serial_number,
+            part_number: baseboard.part_number,
+            revision: baseboard.revision,
+            usable_hardware_threads: SqlU32::new(
+                hardware.usable_hardware_threads,
+            ),
+            usable_physical_ram: hardware.usable_physical_ram,
+            reservoir_size: hardware.reservoir_size,
+            ip: addr.ip().into(),
+            port: addr.port().into(),
+        }
+    }
+
+    /// Converts self into a form used for inserts of new sleds into the
+    /// database.
+    ///
+    /// This form adds default values for fields that are not present in
+    /// `SledUpdate`.
+    pub fn into_insertable(self) -> Sled {
+        let last_used_address = {
+            let mut segments = self.ip().segments();
+            segments[7] += omicron_common::address::RSS_RESERVED_ADDRESSES;
+            ipv6::Ipv6Addr::from(Ipv6Addr::from(segments))
+        };
+        Sled {
+            identity: SledIdentity::new(self.id),
+            rcgen: Generation::new(),
+            time_deleted: None,
+            rack_id: self.rack_id,
+            is_scrimlet: self.is_scrimlet,
+            serial_number: self.serial_number,
+            part_number: self.part_number,
+            revision: self.revision,
+            usable_hardware_threads: self.usable_hardware_threads,
+            usable_physical_ram: self.usable_physical_ram,
+            reservoir_size: self.reservoir_size,
+            ip: self.ip,
+            port: self.port,
+            last_used_address,
+        }
+    }
+
+    pub fn id(&self) -> Uuid {
+        self.id
+    }
+
+    pub fn is_scrimlet(&self) -> bool {
+        self.is_scrimlet
+    }
+
+    pub fn ip(&self) -> Ipv6Addr {
+        self.ip.into()
+    }
+
+    pub fn address(&self) -> SocketAddrV6 {
+        self.address_with_port(self.port.into())
+    }
+
+    pub fn address_with_port(&self, port: u16) -> SocketAddrV6 {
+        SocketAddrV6::new(self.ip(), port, 0, 0)
+    }
+
+    pub fn serial_number(&self) -> &str {
+        &self.serial_number
+    }
 }
 
 /// A set of constraints that can be placed on operations that select a sled.
