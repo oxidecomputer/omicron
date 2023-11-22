@@ -21,6 +21,7 @@ use diesel::ExpressionMethods;
 use diesel::IntoSql;
 use diesel::JoinOnDsl;
 use diesel::NullableExpressionMethods;
+use diesel::OptionalExtension;
 use diesel::QueryDsl;
 use diesel::Table;
 use futures::future::BoxFuture;
@@ -932,11 +933,13 @@ impl DataStore {
 
     /// Attempt to read the latest collection while limiting queries to `limit`
     /// records
+    ///
+    /// If there aren't any collections, return `Ok(None)`.
     pub async fn inventory_get_latest_collection(
         &self,
         opctx: &OpContext,
         limit: NonZeroU32,
-    ) -> Result<Collection, Error> {
+    ) -> Result<Option<Collection>, Error> {
         opctx.authorize(authz::Action::Read, &authz::INVENTORY).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
         use db::schema::inv_collection::dsl;
@@ -946,14 +949,21 @@ impl DataStore {
             .limit(1)
             .first_async::<Uuid>(&*conn)
             .await
+            .optional()
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
-        self.inventory_collection_read_all_or_nothing(
-            opctx,
-            collection_id,
-            limit,
-        )
-        .await
+        let Some(collection_id) = collection_id else {
+            return Ok(None);
+        };
+
+        Ok(Some(
+            self.inventory_collection_read_all_or_nothing(
+                opctx,
+                collection_id,
+                limit,
+            )
+            .await?,
+        ))
     }
 
     /// Attempt to read the given collection while limiting queries to `limit`

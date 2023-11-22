@@ -1590,7 +1590,6 @@ mod test {
         let rack_id = Uuid::new_v4();
 
         // Ensure we get an empty list when there are no allocations
-        // List all 5 allocations
         let allocations =
             datastore.rack_subnet_allocations(&opctx, rack_id).await.unwrap();
         assert!(allocations.is_empty());
@@ -1666,6 +1665,10 @@ mod test {
             datastore.rack_subnet_allocations(&opctx, rack_id).await.unwrap();
 
         assert_eq!(6, allocations.len());
+        assert_eq!(
+            vec![33, 34, 35, 36, 37, 38],
+            allocations.iter().map(|a| a.subnet_octet).collect::<Vec<_>>()
+        );
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();

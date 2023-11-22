@@ -719,18 +719,28 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
     ) -> ListResultVec<UninitializedSled> {
+        debug!(self.log, "Getting latest collection");
         // Grab the SPs from the last collection
         let limit = NonZeroU32::new(50).unwrap();
         let collection = self
             .db_datastore
             .inventory_get_latest_collection(opctx, limit)
             .await?;
+
+        // There can't be any uninitialized sleds we know about
+        // if there is no inventory.
+        let Some(collection) = collection else {
+            return Ok(vec![]);
+        };
+
         let pagparams = DataPageParams {
             marker: None,
             direction: dropshot::PaginationOrder::Descending,
             // TODO: This limit is only suitable for a single sled cluster
             limit: NonZeroU32::new(32).unwrap(),
         };
+
+        debug!(self.log, "Listing sleds");
         let sleds = self.db_datastore.sled_list(opctx, &pagparams).await?;
 
         let mut uninitialized_sleds: Vec<UninitializedSled> = collection
