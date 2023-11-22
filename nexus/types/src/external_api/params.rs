@@ -751,6 +751,22 @@ pub struct IpPoolUpdate {
     pub identity: IdentityMetadataUpdateParams,
 }
 
+// Floating IPs
+/// Parameters for creating a new floating IP address for instances.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct FloatingIpCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+
+    /// The intended address
+    // TODO: make non-optional and draw from pool
+    pub address: Option<IpAddr>,
+
+    /// The parent pool that a
+    // TODO: support tie-in to pools.
+    pub pool: Option<NameOrId>,
+}
+
 // INSTANCES
 
 /// Describes an attachment of an `InstanceNetworkInterface` to an `Instance`,

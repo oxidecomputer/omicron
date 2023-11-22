@@ -1148,31 +1148,31 @@ mod test {
         assert_eq!(observed_ip_pool_ranges[0].ip_pool_id, svc_pool.id());
 
         // Verify the allocated external IPs
-        assert_eq!(dns_external_ip.ip_pool_id, svc_pool.id());
+        assert_eq!(dns_external_ip.ip_pool_id, Some(svc_pool.id()));
         assert_eq!(
             dns_external_ip.ip_pool_range_id,
-            observed_ip_pool_ranges[0].id
+            Some(observed_ip_pool_ranges[0].id)
         );
         assert_eq!(dns_external_ip.ip.ip(), external_dns_ip);
 
-        assert_eq!(nexus_external_ip.ip_pool_id, svc_pool.id());
+        assert_eq!(nexus_external_ip.ip_pool_id, Some(svc_pool.id()));
         assert_eq!(
             nexus_external_ip.ip_pool_range_id,
-            observed_ip_pool_ranges[0].id
+            Some(observed_ip_pool_ranges[0].id)
         );
         assert_eq!(nexus_external_ip.ip.ip(), nexus_ip);
 
-        assert_eq!(ntp1_external_ip.ip_pool_id, svc_pool.id());
+        assert_eq!(ntp1_external_ip.ip_pool_id, Some(svc_pool.id()));
         assert_eq!(
             ntp1_external_ip.ip_pool_range_id,
-            observed_ip_pool_ranges[0].id
+            Some(observed_ip_pool_ranges[0].id)
         );
         assert_eq!(ntp1_external_ip.ip.ip(), ntp1_ip);
 
-        assert_eq!(ntp2_external_ip.ip_pool_id, svc_pool.id());
+        assert_eq!(ntp2_external_ip.ip_pool_id, Some(svc_pool.id()));
         assert_eq!(
             ntp2_external_ip.ip_pool_range_id,
-            observed_ip_pool_ranges[0].id
+            Some(observed_ip_pool_ranges[0].id)
         );
         assert_eq!(ntp2_external_ip.ip.ip(), ntp2_ip);
 

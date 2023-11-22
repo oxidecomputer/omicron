@@ -126,6 +126,26 @@ impl DataStore {
         self.allocate_external_ip(opctx, data).await
     }
 
+    /// Allocates a floating IP address for instance usage.
+    pub async fn allocate_floating_ip(
+        &self,
+        opctx: &OpContext,
+        project_id: Uuid,
+        ip_id: Uuid,
+        name: &Name,
+        description: &str,
+        ip: IpAddr,
+    ) -> CreateResult<ExternalIp> {
+        let data = IncompleteExternalIp::for_floating_explicit(
+            ip_id,
+            name,
+            description,
+            project_id,
+            ip,
+        );
+        self.allocate_external_ip(opctx, data).await
+    }
+
     async fn allocate_external_ip(
         &self,
         opctx: &OpContext,
@@ -276,6 +296,23 @@ impl DataStore {
             .filter(dsl::is_service.eq(false))
             .filter(dsl::parent_id.eq(instance_id))
             .filter(dsl::time_deleted.is_null())
+            .select(ExternalIp::as_select())
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Fetch all floating IP addresses for the provided project.
+    pub async fn lookup_floating_ips(
+        &self,
+        opctx: &OpContext,
+        project_id: Uuid,
+    ) -> LookupResult<Vec<ExternalIp>> {
+        use db::schema::external_ip::dsl;
+        dsl::external_ip
+            .filter(dsl::project_id.eq(project_id))
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::kind.eq(IpKind::Floating))
             .select(ExternalIp::as_select())
             .get_results_async(&*self.pool_connection_authorized(opctx).await?)
             .await

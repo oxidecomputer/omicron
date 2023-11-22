@@ -622,7 +622,7 @@ impl NextExternalIp {
         out.push_sql(" WHERE ");
         out.push_identifier(dsl::ip_pool_id::NAME)?;
         out.push_sql(" = ");
-        out.push_bind_param::<sql_types::Uuid, Uuid>(self.ip.pool_id())?;
+        out.push_bind_param::<sql_types::Nullable<sql_types::Uuid>, Option<Uuid>>(self.ip.pool_id())?;
         out.push_sql(" AND ");
         out.push_identifier(dsl::time_deleted::NAME)?;
         out.push_sql(" IS NULL");

@@ -57,8 +57,9 @@ pub struct ExternalIp {
     pub time_created: DateTime<Utc>,
     pub time_modified: DateTime<Utc>,
     pub time_deleted: Option<DateTime<Utc>>,
-    pub ip_pool_id: Uuid,
-    pub ip_pool_range_id: Uuid,
+    pub project_id: Option<Uuid>,
+    pub ip_pool_id: Option<Uuid>,
+    pub ip_pool_range_id: Option<Uuid>,
     pub is_service: bool,
     // This is Some(_) for:
     //  - all instance/service SNAT IPs
@@ -92,7 +93,8 @@ pub struct IncompleteExternalIp {
     kind: IpKind,
     is_service: bool,
     parent_id: Option<Uuid>,
-    pool_id: Uuid,
+    pool_id: Option<Uuid>,
+    project_id: Option<Uuid>,
     // Optional address requesting that a specific IP address be allocated.
     explicit_ip: Option<IpNetwork>,
     // Optional range when requesting a specific SNAT range be allocated.
@@ -113,7 +115,8 @@ impl IncompleteExternalIp {
             kind: IpKind::SNat,
             is_service: false,
             parent_id: Some(instance_id),
-            pool_id,
+            pool_id: Some(pool_id),
+            project_id: None,
             explicit_ip: None,
             explicit_port_range: None,
         }
@@ -128,7 +131,8 @@ impl IncompleteExternalIp {
             kind: IpKind::Ephemeral,
             is_service: false,
             parent_id: Some(instance_id),
-            pool_id,
+            pool_id: Some(pool_id),
+            project_id: None,
             explicit_ip: None,
             explicit_port_range: None,
         }
@@ -138,6 +142,7 @@ impl IncompleteExternalIp {
         id: Uuid,
         name: &Name,
         description: &str,
+        project_id: Uuid,
         pool_id: Uuid,
     ) -> Self {
         Self {
@@ -148,8 +153,31 @@ impl IncompleteExternalIp {
             kind: IpKind::Floating,
             is_service: false,
             parent_id: None,
-            pool_id,
+            pool_id: Some(pool_id),
+            project_id: Some(project_id),
             explicit_ip: None,
+            explicit_port_range: None,
+        }
+    }
+
+    pub fn for_floating_explicit(
+        id: Uuid,
+        name: &Name,
+        description: &str,
+        project_id: Uuid,
+        explicit_ip: IpAddr,
+    ) -> Self {
+        Self {
+            id,
+            name: Some(name.clone()),
+            description: Some(description.to_string()),
+            time_created: Utc::now(),
+            kind: IpKind::Floating,
+            is_service: false,
+            parent_id: None,
+            pool_id: None,
+            project_id: Some(project_id),
+            explicit_ip: Some(explicit_ip.into()),
             explicit_port_range: None,
         }
     }
@@ -170,7 +198,8 @@ impl IncompleteExternalIp {
             kind: IpKind::Floating,
             is_service: true,
             parent_id: Some(service_id),
-            pool_id,
+            pool_id: Some(pool_id),
+            project_id: None,
             explicit_ip: Some(IpNetwork::from(address)),
             explicit_port_range: None,
         }
@@ -198,7 +227,8 @@ impl IncompleteExternalIp {
             kind: IpKind::SNat,
             is_service: true,
             parent_id: Some(service_id),
-            pool_id,
+            pool_id: Some(pool_id),
+            project_id: None,
             explicit_ip: Some(IpNetwork::from(address)),
             explicit_port_range,
         }
@@ -219,7 +249,8 @@ impl IncompleteExternalIp {
             kind: IpKind::Floating,
             is_service: true,
             parent_id: Some(service_id),
-            pool_id,
+            pool_id: Some(pool_id),
+            project_id: None,
             explicit_ip: None,
             explicit_port_range: None,
         }
@@ -234,7 +265,8 @@ impl IncompleteExternalIp {
             kind: IpKind::SNat,
             is_service: true,
             parent_id: Some(service_id),
-            pool_id,
+            pool_id: Some(pool_id),
+            project_id: None,
             explicit_ip: None,
             explicit_port_range: None,
         }
@@ -268,8 +300,12 @@ impl IncompleteExternalIp {
         &self.parent_id
     }
 
-    pub fn pool_id(&self) -> &Uuid {
+    pub fn pool_id(&self) -> &Option<Uuid> {
         &self.pool_id
+    }
+
+    pub fn project_id(&self) -> &Option<Uuid> {
+        &self.project_id
     }
 
     pub fn explicit_ip(&self) -> &Option<IpNetwork> {

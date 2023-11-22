@@ -1579,10 +1579,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.external_ip (
     time_deleted TIMESTAMPTZ,
 
     /* FK to the `ip_pool` table. */
-    ip_pool_id UUID NOT NULL,
+    project_id UUID,
+
+    /* FK to the `ip_pool` table. */
+    ip_pool_id UUID,
 
     /* FK to the `ip_pool_range` table. */
-    ip_pool_range_id UUID NOT NULL,
+    ip_pool_range_id UUID,
 
     /* True if this IP is associated with a service rather than an instance. */
     is_service BOOL NOT NULL,
@@ -1612,6 +1615,26 @@ CREATE TABLE IF NOT EXISTS omicron.public.external_ip (
     CONSTRAINT null_fip_description CHECK (
         (kind != 'floating' AND description IS NULL) OR
         (kind = 'floating' AND description IS NOT NULL)
+    ),
+
+    /* Only floating IPs can be attached to a project.
+     * Projects are nullable in such a case.
+     */
+    CONSTRAINT null_project_id CHECK (
+        kind = 'floating' OR project_id IS NULL
+    ),
+
+    /* Ephemeral/SNAT IPs must have a parent pool and range, while this
+     * is optional for floating IPs.
+     */
+    CONSTRAINT null_non_fip_pool_id CHECK (
+        kind = 'floating' OR (ip_pool_id IS NOT NULL AND ip_pool_range_id IS NOT NULL)
+    ),
+
+    /* If the IP pool is defined, the IP pool range must also be. */
+    CONSTRAINT null_pool_range_id CHECK (
+        (ip_pool_id IS NULL AND ip_pool_range_id IS NULL) OR
+        (ip_pool_id IS NOT NULL AND ip_pool_range_id IS NOT NULL)
     ),
 
     /*
