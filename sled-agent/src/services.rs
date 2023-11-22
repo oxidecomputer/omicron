@@ -1340,15 +1340,16 @@ impl ServiceManager {
 
                 let config = PropertyGroupBuilder::new("config")
                     .add_property("gateway", "astring", gateway)
-                    .add_property(
-                        "all_links",
-                        "astring",
-                        &installed_zone
-                            .links()
-                            .iter()
-                            .map(|l| l.name())
-                            .join(" "),
-                    )
+                   // TODO: Uncomment or delete after testing
+                   // .add_property(
+                   //     "all_links",
+                   //     "astring",
+                   //     &installed_zone
+                   //         .links()
+                   //         .iter()
+                   //         .map(|l| l.name())
+                   //         .join(" "),
+                   // )
                     .add_property("datalink", "astring", datalink)
                     .add_property("listen_addr", "astring", listen_addr)
                     .add_property("allow", "astring", &format!("{}", rack_net))
@@ -1983,67 +1984,6 @@ impl ServiceManager {
 
                     smfh.refresh()?;
                 }
-                //                ServiceType::BoundaryNtp {
-                //                    ntp_servers,
-                //                    dns_servers,
-                //                    domain,
-                //                    ..
-                //                }
-                //                | ServiceType::InternalNtp {
-                //                    ntp_servers,
-                //                    dns_servers,
-                //                    domain,
-                //                    ..
-                //                } => {
-                //                    let boundary = matches!(
-                //                        service.details,
-                //                        ServiceType::BoundaryNtp { .. }
-                //                    );
-                //                    info!(
-                //                        self.inner.log,
-                //                        "Set up NTP service boundary={}, Servers={:?}",
-                //                        boundary,
-                //                        ntp_servers
-                //                    );
-                //
-                //                    let sled_info =
-                //                        if let Some(info) = self.inner.sled_info.get() {
-                //                            info
-                //                        } else {
-                //                            return Err(Error::SledAgentNotReady);
-                //                        };
-                //
-                //                    let rack_net = Ipv6Subnet::<RACK_PREFIX>::new(
-                //                        sled_info.underlay_address,
-                //                    )
-                //                    .net();
-                //
-                //                    smfh.setprop("config/allow", &format!("{}", rack_net))?;
-                //                    smfh.setprop(
-                //                        "config/boundary",
-                //                        if boundary { "true" } else { "false" },
-                //                    )?;
-                //
-                //                    if boundary {
-                //                        // Configure OPTE port for boundary NTP
-                //                        running_zone
-                //                            .ensure_address_for_port("public", 0)
-                //                            .await?;
-                //                    }
-                //
-                //                    smfh.delpropvalue("config/server", "*")?;
-                //                    for server in ntp_servers {
-                //                        smfh.addpropvalue("config/server", server)?;
-                //                    }
-                //                    self.configure_dns_client(
-                //                        &running_zone,
-                //                        dns_servers,
-                //                        &domain,
-                //                    )
-                //                    .await?;
-                //
-                //                    smfh.refresh()?;
-                //                }
                 ServiceType::Uplink => {
                     // Nothing to do here - this service is special and
                     // configured in `ensure_switch_zone_uplinks_configured`

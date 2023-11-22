@@ -23,22 +23,23 @@ typeset -r action=${1:?action parameter not specified}
 typeset -r contract=$2  # For the refresh and stop methods
 
 LISTEN_ADDR="$(svcprop -c -p config/listen_addr "${SMF_FMRI}")"
-ALL_LINKS=$(svcprop -c -p config/all_links "${SMF_FMRI}")
+# ALL_LINKS=$(svcprop -c -p config/all_links "${SMF_FMRI}") # TODO: Uncomment or delete after testing
 DATALINK="$(svcprop -c -p config/datalink "${SMF_FMRI}")"
 GATEWAY="$(svcprop -c -p config/gateway "${SMF_FMRI}")"
 
-if [[ "$ALL_LINKS" == unknown ]] || \
-  [[ "$LISTEN_ADDR" == unknown ]] || \
+if [[ "$LISTEN_ADDR" == unknown ]] || \
+  # [[ "$ALL_LINKS" == unknown ]] || \ # TODO: Uncomment or delete after testing
   [[ "$DATALINK" == unknown ]] || \
   [[ "$GATEWAY" == unknown ]]; then
     config 'ERROR: missing all_links, listen_addr, datalink or gateway\n'
 fi
 
-ALL_LINKS=( $ALL_LINKS )
+# TODO: Uncomment or delete after testing
+#ALL_LINKS=( $ALL_LINKS )
 
-for LINK in "${ALL_LINKS[@]}"; do
-    ipadm show-addr "$LINK/ll" || ipadm create-addr -t -T addrconf "$LINK/ll"
-done
+#for LINK in "${ALL_LINKS[@]}"; do
+#    ipadm show-addr "$LINK/ll" || ipadm create-addr -t -T addrconf "$LINK/ll"
+#done
 ipadm show-addr "$DATALINK/ll" || ipadm create-addr -t -T addrconf "$DATALINK/ll"
 ipadm show-addr "$DATALINK/omicron6"  || \
   ipadm create-addr -t -T static -a "$LISTEN_ADDR" "$DATALINK/omicron6"
