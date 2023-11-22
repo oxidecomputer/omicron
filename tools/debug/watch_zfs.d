@@ -84,5 +84,5 @@ proc:::exec-success
 	 * automatically as part of grabbing the process (-p).
 	 */
 	stop();
-	system("dtrace -p %d -Zqws watch_zfs_error.d", pid);
+	system("dtrace -p %d -Zqws watch_zfs_error.d &", pid);
 }

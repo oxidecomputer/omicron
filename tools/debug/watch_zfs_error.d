@@ -227,10 +227,35 @@ inline string errnos[int e] =
  * The errnos that appear to translate into this error are ENOSPC and EDQUOT.
  */
 sdt:zfs::set-error
-/pid == $target && (arg1 == ENOSPC || arg1 == EDQUOT)/
+/pid == $target && (arg0 == ENOSPC || arg0 == EDQUOT)/
 {
 	printf("pid %d zfs %s() set error %d (%s)\n", pid, probefunc, arg0,
-	    errnos[arg1]);
+	    errnos[arg0]);
 	stack();
 	printf("\n");
+}
+
+pid$target::zfs_create:entry
+{
+	printf("pid %d: E %s()\n", pid, probefunc);
+	self->zfsc = 1;
+}
+
+pid$target::zfs_create:return
+/self->zfsc/
+{
+	printf("pid %d: R %s() -> %d\n", pid, probefunc, (int)arg1);
+	self->zfsc = 0;
+}
+
+pid$target:libzfs.so.1::entry
+/self->zfsc/
+{
+	printf("pid %d: E %s()\n", pid, probefunc);
+}
+
+pid$target:libzfs.so.1::return
+/self->zfsc/
+{
+	printf("pid %d: R %s() -> %d (%x)\n", pid, probefunc, (int)arg1, arg1);
 }
