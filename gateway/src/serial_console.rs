@@ -51,7 +51,7 @@ pub(crate) async fn run(
     let config = WebSocketConfig {
         // Maintain a max write buffer size of 2 MB (this is only relevant if
         // writes are failing).
-        max_write_buffer_size: 1 << 21,
+        max_write_buffer_size: 2 * 1024 * 1024,
         ..Default::default()
     };
     let ws_stream =
