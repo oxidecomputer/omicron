@@ -26,6 +26,7 @@ serde.workspace = true
 serde_json.workspace = true
 steno.workspace = true
 strum.workspace = true
+thiserror.workspace = true
 uuid.workspace = true
 
 db-macros.workspace = true

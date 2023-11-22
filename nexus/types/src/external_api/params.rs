@@ -75,6 +75,12 @@ pub struct SledSelector {
     pub sled: Uuid,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct SledProvisionStateParams {
+    /// The provision state.
+    pub provision_state: super::views::SledProvisionState,
+}
+
 pub struct SwitchSelector {
     /// ID of the switch
     pub switch: Uuid,

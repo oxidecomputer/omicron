@@ -39,7 +39,7 @@ jobs:
           . ./tools/reflector/helpers.sh
 
           PATHS=("tools")
-          merge $TARGET_BRANCH $INT_BRANCH ${{ inputs.reflector_user_id }} $PATHS
+          merge $TARGET_BRANCH $INT_BRANCH ${{ inputs.reflector_user_id }} "${PATHS[@]}"
 
       - name: Update maghemite versions
         run: |

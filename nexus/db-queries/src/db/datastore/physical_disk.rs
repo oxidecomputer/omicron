@@ -141,7 +141,7 @@ mod test {
     use crate::db::datastore::test::{
         sled_baseboard_for_test, sled_system_hardware_for_test,
     };
-    use crate::db::model::{PhysicalDiskKind, Sled};
+    use crate::db::model::{PhysicalDiskKind, Sled, SledUpdate};
     use dropshot::PaginationOrder;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::identity::Asset;
@@ -153,14 +153,14 @@ mod test {
         let sled_id = Uuid::new_v4();
         let addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0);
         let rack_id = Uuid::new_v4();
-        let sled = Sled::new(
+        let sled_update = SledUpdate::new(
             sled_id,
             addr,
             sled_baseboard_for_test(),
             sled_system_hardware_for_test(),
             rack_id,
         );
-        db.sled_upsert(sled)
+        db.sled_upsert(sled_update)
             .await
             .expect("Could not upsert sled during test prep")
     }

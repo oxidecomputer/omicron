@@ -11,14 +11,16 @@ use crate::db;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
-use crate::db::identity::Asset;
+use crate::db::lookup;
 use crate::db::model::Sled;
 use crate::db::model::SledResource;
+use crate::db::model::SledUpdate;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use nexus_types::identity::Asset;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -29,21 +31,25 @@ use uuid::Uuid;
 
 impl DataStore {
     /// Stores a new sled in the database.
-    pub async fn sled_upsert(&self, sled: Sled) -> CreateResult<Sled> {
+    pub async fn sled_upsert(
+        &self,
+        sled_update: SledUpdate,
+    ) -> CreateResult<Sled> {
         use db::schema::sled::dsl;
         diesel::insert_into(dsl::sled)
-            .values(sled.clone())
+            .values(sled_update.clone().into_insertable())
             .on_conflict(dsl::id)
             .do_update()
             .set((
                 dsl::time_modified.eq(Utc::now()),
-                dsl::ip.eq(sled.ip),
-                dsl::port.eq(sled.port),
-                dsl::rack_id.eq(sled.rack_id),
-                dsl::is_scrimlet.eq(sled.is_scrimlet()),
-                dsl::usable_hardware_threads.eq(sled.usable_hardware_threads),
-                dsl::usable_physical_ram.eq(sled.usable_physical_ram),
-                dsl::reservoir_size.eq(sled.reservoir_size),
+                dsl::ip.eq(sled_update.ip),
+                dsl::port.eq(sled_update.port),
+                dsl::rack_id.eq(sled_update.rack_id),
+                dsl::is_scrimlet.eq(sled_update.is_scrimlet()),
+                dsl::usable_hardware_threads
+                    .eq(sled_update.usable_hardware_threads),
+                dsl::usable_physical_ram.eq(sled_update.usable_physical_ram),
+                dsl::reservoir_size.eq(sled_update.reservoir_size),
             ))
             .returning(Sled::as_returning())
             .get_result_async(&*self.pool_connection_unauthorized().await?)
@@ -53,7 +59,7 @@ impl DataStore {
                     e,
                     ErrorHandler::Conflict(
                         ResourceType::Sled,
-                        &sled.id().to_string(),
+                        &sled_update.id().to_string(),
                     ),
                 )
             })
@@ -218,6 +224,33 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
         Ok(())
     }
+
+    /// Sets the provision state for this sled.
+    pub async fn sled_set_provision_state(
+        &self,
+        opctx: &OpContext,
+        sled_lookup: &lookup::Sled<'_>,
+        state: db::model::SledProvisionState,
+    ) -> Result<(), external::Error> {
+        // Ensure that opctx is authorized to modify this sled.
+        let (_, sled) = sled_lookup.fetch_for(authz::Action::Modify).await?;
+        if sled.provision_state() == state {
+            return Ok(());
+        }
+
+        use db::schema::sled::dsl;
+        // XXX: Do we need transaction semantics here? Probably not because
+        // this is idempotent?
+        diesel::update(dsl::sled.filter(dsl::id.eq(sled.id())))
+            .set((
+                dsl::provision_state.eq(state),
+                dsl::time_modified.eq(Utc::now()),
+            ))
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -246,7 +279,7 @@ mod test {
 
         let sled_id = Uuid::new_v4();
         let addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0);
-        let mut sled = Sled::new(
+        let mut sled_update = SledUpdate::new(
             sled_id,
             addr,
             sled_baseboard_for_test(),
@@ -254,44 +287,50 @@ mod test {
             rack_id(),
         );
         let observed_sled = datastore
-            .sled_upsert(sled.clone())
+            .sled_upsert(sled_update.clone())
             .await
             .expect("Could not upsert sled during test prep");
         assert_eq!(
             observed_sled.usable_hardware_threads,
-            sled.usable_hardware_threads
+            sled_update.usable_hardware_threads
         );
-        assert_eq!(observed_sled.usable_physical_ram, sled.usable_physical_ram);
-        assert_eq!(observed_sled.reservoir_size, sled.reservoir_size);
+        assert_eq!(
+            observed_sled.usable_physical_ram,
+            sled_update.usable_physical_ram
+        );
+        assert_eq!(observed_sled.reservoir_size, sled_update.reservoir_size);
 
         // Modify the sizes of hardware
-        sled.usable_hardware_threads =
-            SqlU32::new(sled.usable_hardware_threads.0 + 1);
+        sled_update.usable_hardware_threads =
+            SqlU32::new(sled_update.usable_hardware_threads.0 + 1);
         const MIB: u64 = 1024 * 1024;
-        sled.usable_physical_ram = ByteCount::from(
+        sled_update.usable_physical_ram = ByteCount::from(
             external::ByteCount::try_from(
-                sled.usable_physical_ram.0.to_bytes() + MIB,
+                sled_update.usable_physical_ram.0.to_bytes() + MIB,
             )
             .unwrap(),
         );
-        sled.reservoir_size = ByteCount::from(
+        sled_update.reservoir_size = ByteCount::from(
             external::ByteCount::try_from(
-                sled.reservoir_size.0.to_bytes() + MIB,
+                sled_update.reservoir_size.0.to_bytes() + MIB,
             )
             .unwrap(),
         );
 
         // Test that upserting the sled propagates those changes to the DB.
         let observed_sled = datastore
-            .sled_upsert(sled.clone())
+            .sled_upsert(sled_update.clone())
             .await
             .expect("Could not upsert sled during test prep");
         assert_eq!(
             observed_sled.usable_hardware_threads,
-            sled.usable_hardware_threads
+            sled_update.usable_hardware_threads
         );
-        assert_eq!(observed_sled.usable_physical_ram, sled.usable_physical_ram);
-        assert_eq!(observed_sled.reservoir_size, sled.reservoir_size);
+        assert_eq!(
+            observed_sled.usable_physical_ram,
+            sled_update.usable_physical_ram
+        );
+        assert_eq!(observed_sled.reservoir_size, sled_update.reservoir_size);
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();

@@ -3789,6 +3789,47 @@
         }
       }
     },
+    "/v1/system/hardware/sleds/{sled_id}/provision-state": {
+      "put": {
+        "tags": [
+          "system/hardware"
+        ],
+        "summary": "Set the sled's provision state.",
+        "operationId": "sled_set_provision_state",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sled_id",
+            "description": "ID of the sled",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "provision_state",
+            "description": "The provision state.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SledProvisionState"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/hardware/switch-port": {
       "get": {
         "tags": [
@@ -4051,6 +4092,37 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Switch"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/hardware/uninitialized-sleds": {
+      "get": {
+        "tags": [
+          "system/hardware"
+        ],
+        "summary": "List uninitialized sleds in a given rack",
+        "operationId": "uninitialized_sled_list",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_UninitializedSled",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/UninitializedSled"
+                  }
                 }
               }
             }
@@ -12917,6 +12989,14 @@
             "type": "string",
             "format": "uuid"
           },
+          "provision_state": {
+            "description": "The provision state of the sled.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SledProvisionState"
+              }
+            ]
+          },
           "rack_id": {
             "description": "The rack to which this Sled is currently attached",
             "type": "string",
@@ -12950,6 +13030,7 @@
         "required": [
           "baseboard",
           "id",
+          "provision_state",
           "rack_id",
           "time_created",
           "time_modified",
@@ -13038,6 +13119,32 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "SledProvisionState": {
+        "description": "The provision state of a sled.\n\nThis controls whether new resources are going to be provisioned on this sled.",
+        "oneOf": [
+          {
+            "description": "New resources will be provisioned on this sled.",
+            "type": "string",
+            "enum": [
+              "provisionable"
+            ]
+          },
+          {
+            "description": "New resources will not be provisioned on this sled. However, existing resources will continue to be on this sled unless manually migrated off.",
+            "type": "string",
+            "enum": [
+              "non_provisionable"
+            ]
+          },
+          {
+            "description": "This is a state that isn't known yet.\n\nThis is defined to avoid API breakage.",
+            "type": "string",
+            "enum": [
+              "unknown"
+            ]
+          }
         ]
       },
       "SledResultsPage": {
@@ -13937,6 +14044,29 @@
         "required": [
           "interface_config_id",
           "vlan_id"
+        ]
+      },
+      "UninitializedSled": {
+        "description": "View of a sled that has not been added to an initialized rack yet",
+        "type": "object",
+        "properties": {
+          "baseboard": {
+            "$ref": "#/components/schemas/Baseboard"
+          },
+          "cubby": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "rack_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "baseboard",
+          "cubby",
+          "rack_id"
         ]
       },
       "User": {

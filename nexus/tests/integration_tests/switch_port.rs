@@ -318,4 +318,19 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     .execute()
     .await
     .unwrap();
+
+    // clear port settings
+
+    NexusRequest::new(
+        RequestBuilder::new(
+            client,
+            Method::DELETE,
+            &format!("/v1/system/hardware/switch-port/qsfp0/settings?rack_id={rack_id}&switch_location=switch0"),
+        )
+        .expect_status(Some(StatusCode::NO_CONTENT)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
 }

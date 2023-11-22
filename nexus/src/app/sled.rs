@@ -51,7 +51,7 @@ impl super::Nexus {
             SledRole::Scrimlet => true,
         };
 
-        let sled = db::model::Sled::new(
+        let sled = db::model::SledUpdate::new(
             id,
             info.sa_address,
             db::model::SledBaseboard {
@@ -136,6 +136,17 @@ impl super::Nexus {
     ) -> Result<(), Error> {
         self.db_datastore
             .sled_reservation_delete(&self.opctx_alloc, resource_id)
+            .await
+    }
+
+    pub(crate) async fn sled_set_provision_state(
+        &self,
+        opctx: &OpContext,
+        sled_lookup: &lookup::Sled<'_>,
+        state: db::model::SledProvisionState,
+    ) -> Result<(), Error> {
+        self.db_datastore
+            .sled_set_provision_state(opctx, sled_lookup, state)
             .await
     }
 

@@ -3,11 +3,46 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::SqlU16;
+use crate::impl_enum_type;
 use crate::schema::metric_producer;
 use db_macros::Asset;
 use nexus_types::identity::Asset;
 use omicron_common::api::internal;
 use uuid::Uuid;
+
+impl_enum_type!(
+    #[derive(SqlType, Copy, Clone, Debug, QueryId)]
+    #[diesel(postgres_type(name = "producer_kind"))]
+    pub struct ProducerKindEnum;
+
+    #[derive(AsExpression, Copy, Clone, Debug, FromSqlRow, PartialEq)]
+    #[diesel(sql_type = ProducerKindEnum)]
+    pub enum ProducerKind;
+
+    SledAgent => b"sled_agent"
+    Service => b"service"
+    Instance => b"instance"
+);
+
+impl From<internal::nexus::ProducerKind> for ProducerKind {
+    fn from(kind: internal::nexus::ProducerKind) -> Self {
+        match kind {
+            internal::nexus::ProducerKind::SledAgent => ProducerKind::SledAgent,
+            internal::nexus::ProducerKind::Service => ProducerKind::Service,
+            internal::nexus::ProducerKind::Instance => ProducerKind::Instance,
+        }
+    }
+}
+
+impl From<ProducerKind> for internal::nexus::ProducerKind {
+    fn from(kind: ProducerKind) -> Self {
+        match kind {
+            ProducerKind::SledAgent => internal::nexus::ProducerKind::SledAgent,
+            ProducerKind::Service => internal::nexus::ProducerKind::Service,
+            ProducerKind::Instance => internal::nexus::ProducerKind::Instance,
+        }
+    }
+}
 
 /// Information announced by a metric server, used so that clients can contact it and collect
 /// available metric data from it.
@@ -17,6 +52,7 @@ pub struct ProducerEndpoint {
     #[diesel(embed)]
     identity: ProducerEndpointIdentity,
 
+    pub kind: Option<ProducerKind>,
     pub ip: ipnetwork::IpNetwork,
     pub port: SqlU16,
     pub interval: f64,
@@ -33,6 +69,7 @@ impl ProducerEndpoint {
     ) -> Self {
         Self {
             identity: ProducerEndpointIdentity::new(endpoint.id),
+            kind: endpoint.kind.map(Into::into),
             ip: endpoint.address.ip().into(),
             port: endpoint.address.port().into(),
             base_route: endpoint.base_route.clone(),

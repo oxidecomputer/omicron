@@ -8,8 +8,8 @@ use super::{
     console_api, device_auth, params,
     views::{
         self, Certificate, Group, IdentityProvider, Image, IpPool, IpPoolRange,
-        PhysicalDisk, Project, Rack, Role, Silo, Sled, Snapshot, SshKey, User,
-        UserBuiltin, Vpc, VpcRouter, VpcSubnet,
+        PhysicalDisk, Project, Rack, Role, Silo, Sled, Snapshot, SshKey,
+        UninitializedSled, User, UserBuiltin, Vpc, VpcRouter, VpcSubnet,
     },
 };
 use crate::external_api::shared;
@@ -217,11 +217,13 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(rack_view)?;
         api.register(sled_list)?;
         api.register(sled_view)?;
+        api.register(sled_set_provision_state)?;
         api.register(sled_instance_list)?;
         api.register(sled_physical_disk_list)?;
         api.register(physical_disk_list)?;
         api.register(switch_list)?;
         api.register(switch_view)?;
+        api.register(uninitialized_sled_list)?;
 
         api.register(user_builtin_list)?;
         api.register(user_builtin_view)?;
@@ -4382,6 +4384,25 @@ async fn rack_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// List uninitialized sleds in a given rack
+#[endpoint {
+    method = GET,
+    path = "/v1/system/hardware/uninitialized-sleds",
+    tags = ["system/hardware"]
+}]
+async fn uninitialized_sled_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+) -> Result<HttpResponseOk<Vec<UninitializedSled>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let sleds = nexus.uninitialized_sled_list(&opctx).await?;
+        Ok(HttpResponseOk(sleds))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 // Sleds
 
 /// List sleds
@@ -4432,6 +4453,48 @@ async fn sled_view(
         let (.., sled) =
             nexus.sled_lookup(&opctx, &path.sled_id)?.fetch().await?;
         Ok(HttpResponseOk(sled.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Set the sled's provision state.
+#[endpoint {
+    method = PUT,
+    path = "/v1/system/hardware/sleds/{sled_id}/provision-state",
+    tags = ["system/hardware"],
+}]
+async fn sled_set_provision_state(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::SledPath>,
+    query_params: Query<params::SledProvisionStateParams>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+
+        let path = path_params.into_inner();
+        let provision_state = query_params.into_inner().provision_state;
+
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        // Convert the external `SledProvisionState` into our internal data model.
+        let provision_state = db::model::SledProvisionState::try_from(
+            provision_state,
+        )
+        .map_err(|error| {
+            HttpError::for_bad_request(
+                None,
+                format!("invalid provision state: {}", error.to_string()),
+            )
+        })?;
+
+        let sled_lookup = nexus.sled_lookup(&opctx, &path.sled_id)?;
+
+        nexus
+            .sled_set_provision_state(&opctx, &sled_lookup, provision_state)
+            .await?;
+        // XXX: Should we return the old value as an indication of whether the
+        // state has changed?
+        Ok(HttpResponseUpdatedNoContent())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

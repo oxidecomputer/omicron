@@ -14,9 +14,11 @@ We use the following conventions:
   appear in each file.  More on this below.
 ** If there's only one statement required, we put it into `up.sql`.
 ** If more than one change is needed, any number of files starting with `up`
-   and ending with `.sql` may be used. These files will be sorted in
-   lexicographic order before being executed.  Each will be executed in a
-   separate transaction.
+   and ending with `.sql` may be used. These files  must follow a
+   numerically-increasing pattern starting with 1 (leading prefixes are allowed,
+   so `up1.sql`, `up2.sql`, ..., or `up01.sql`, `up02.sql`, etc.), and they will
+   be sorted numerically by these values.  Each will be executed in a separate
+   transaction.
 ** CockroachDB documentation recommends the following: "Execute schema
    changes ... in an explicit transaction consisting of the single schema
    change statement.".  Practically this means: If you want to change multiple
@@ -65,7 +67,8 @@ Process:
 * If only one SQL statement is necessary to get from `OLD_VERSION` to
   `NEW_VERSION`, put that statement into `schema/crdb/NEW_VERSION/up.sql`.  If
   multiple statements are required, put each one into a separate file, naming
-  these `schema/crdb/NEW_VERSION/upN.sql` for as many `N` as you need.
+  these `schema/crdb/NEW_VERSION/upN.sql` for as many `N` as you need, staring
+  with `N=1`.
 ** Each file should contain _either_ one schema-modifying statement _or_ some
    number of data-modifying statements.  You can combine multiple data-modifying
    statements.  But you should not mix schema-modifying statements and

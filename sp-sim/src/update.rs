@@ -13,12 +13,17 @@ use gateway_messages::UpdateInProgressStatus;
 
 pub(crate) struct SimSpUpdate {
     state: UpdateState,
-    last_update_data: Option<Box<[u8]>>,
+    last_sp_update_data: Option<Box<[u8]>>,
+    last_rot_update_data: Option<Box<[u8]>>,
 }
 
 impl Default for SimSpUpdate {
     fn default() -> Self {
-        Self { state: UpdateState::NotPrepared, last_update_data: None }
+        Self {
+            state: UpdateState::NotPrepared,
+            last_sp_update_data: None,
+            last_rot_update_data: None,
+        }
     }
 }
 
@@ -80,6 +85,7 @@ impl SimSpUpdate {
                     let mut stolen = Cursor::new(Box::default());
                     mem::swap(data, &mut stolen);
                     self.state = UpdateState::Completed {
+                        component: *component,
                         id: *id,
                         data: stolen.into_inner(),
                     };
@@ -112,16 +118,37 @@ impl SimSpUpdate {
     }
 
     pub(crate) fn sp_reset(&mut self) {
-        self.last_update_data = match &self.state {
-            UpdateState::Completed { data, .. } => Some(data.clone()),
+        match &self.state {
+            UpdateState::Completed { data, component, .. } => {
+                if *component == SpComponent::SP_ITSELF {
+                    self.last_sp_update_data = Some(data.clone());
+                }
+            }
             UpdateState::NotPrepared
             | UpdateState::Prepared { .. }
-            | UpdateState::Aborted(_) => None,
-        };
+            | UpdateState::Aborted(_) => (),
+        }
     }
 
-    pub(crate) fn last_update_data(&self) -> Option<Box<[u8]>> {
-        self.last_update_data.clone()
+    pub(crate) fn rot_reset(&mut self) {
+        match &self.state {
+            UpdateState::Completed { data, component, .. } => {
+                if *component == SpComponent::ROT {
+                    self.last_rot_update_data = Some(data.clone());
+                }
+            }
+            UpdateState::NotPrepared
+            | UpdateState::Prepared { .. }
+            | UpdateState::Aborted(_) => (),
+        }
+    }
+
+    pub(crate) fn last_sp_update_data(&self) -> Option<Box<[u8]>> {
+        self.last_sp_update_data.clone()
+    }
+
+    pub(crate) fn last_rot_update_data(&self) -> Option<Box<[u8]>> {
+        self.last_rot_update_data.clone()
     }
 }
 
@@ -138,6 +165,7 @@ enum UpdateState {
     },
     Aborted(UpdateId),
     Completed {
+        component: SpComponent,
         id: UpdateId,
         data: Box<[u8]>,
     },
