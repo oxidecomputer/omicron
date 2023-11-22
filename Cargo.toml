@@ -214,7 +214,7 @@ hubtools = { git = "https://github.com/oxidecomputer/hubtools.git", branch = "ma
 humantime = "2.1.0"
 hyper = "0.14"
 hyper-rustls = "0.24.2"
-hyper-staticfile = "0.9.5"
+hyper-staticfile = "0.10.0"
 illumos-utils = { path = "illumos-utils" }
 indexmap = "2.1.0"
 indicatif = { version = "0.17.7", features = ["rayon"] }
