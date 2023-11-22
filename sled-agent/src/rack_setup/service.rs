@@ -11,14 +11,24 @@
 //! - DNS records for those services
 //! - Handoff to Nexus, for control of Control Plane management
 //!
-//! # Phases and Configuration Files
+//! # Phases, state files, and restart behavior
 //!
-//! Rack setup occurs in distinct phases which are denoted by the prescence of
-//! configuration files.
+//! Rack setup occurs in distinct phases that are denoted by the presence of
+//! state files that get generated as RSS executes:
 //!
 //! - /pool/int/UUID/config/rss-sled-plan.json (Sled Plan)
-//! - /pool/int/UUID/config/rss-service-plan.json (Service Plan)
+//! - /pool/int/UUID/config/rss-service-plan-v2.json (Service Plan)
 //! - /pool/int/UUID/config/rss-plan-completed.marker (Plan Execution Complete)
+//!
+//! These phases are described below.  As each phase completes, a corresponding
+//! state file is written.  This mechanism is designed so that if RSS restarts
+//! (e.g., after a crash) then it will resume execution using the same plans.
+//!
+//! The service plan file has "-v2" in the filename because its structure
+//! changed in omicron#4466.  It is possible that on startup, RSS finds an
+//! older-form service plan.  In that case, it fails altogether.  We do not
+//! expect this condition to happen in practice.  See the implementation for
+//! details.
 //!
 //! ## Sled Plan
 //!
@@ -761,8 +771,8 @@ impl ServiceInner {
     //    time, it creates an allocation plan to provision subnets to an initial
     //    set of sleds.
     //
-    // 2. SLED ALLOCATION PLAN EXECUTION. The RSS then carries out this plan, making
-    //    requests to the sleds enumerated within the "allocation plan".
+    // 2. SLED ALLOCATION PLAN EXECUTION. The RSS then carries out this plan,
+    //    making requests to the sleds enumerated within the "allocation plan".
     //
     // 3. SERVICE ALLOCATION PLAN CREATION. Now that Sled Agents are executing
     //    on their respective subnets, they can be queried to create an
@@ -773,7 +783,8 @@ impl ServiceInner {
     //
     // 5. MARKING SETUP COMPLETE. Once the RSS has successfully initialized the
     //    rack, a marker file is created at "rss_completed_marker_path()". This
-    //    indicates that the plan executed successfully, and no work remains.
+    //    indicates that the plan executed successfully, and the only work
+    //    remaining is to handoff to Nexus.
     async fn run(
         &self,
         config: &Config,

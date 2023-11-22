@@ -13,136 +13,11 @@
     "services": {
       "type": "object",
       "additionalProperties": {
-        "$ref": "#/definitions/SledRequest"
+        "$ref": "#/definitions/SledConfig"
       }
     }
   },
   "definitions": {
-    "DatasetKind": {
-      "description": "The type of a dataset, and an auxiliary information necessary to successfully launch a zone managing the associated data.",
-      "oneOf": [
-        {
-          "type": "object",
-          "required": [
-            "type"
-          ],
-          "properties": {
-            "type": {
-              "type": "string",
-              "enum": [
-                "cockroach_db"
-              ]
-            }
-          }
-        },
-        {
-          "type": "object",
-          "required": [
-            "type"
-          ],
-          "properties": {
-            "type": {
-              "type": "string",
-              "enum": [
-                "crucible"
-              ]
-            }
-          }
-        },
-        {
-          "type": "object",
-          "required": [
-            "type"
-          ],
-          "properties": {
-            "type": {
-              "type": "string",
-              "enum": [
-                "clickhouse"
-              ]
-            }
-          }
-        },
-        {
-          "type": "object",
-          "required": [
-            "type"
-          ],
-          "properties": {
-            "type": {
-              "type": "string",
-              "enum": [
-                "clickhouse_keeper"
-              ]
-            }
-          }
-        },
-        {
-          "type": "object",
-          "required": [
-            "type"
-          ],
-          "properties": {
-            "type": {
-              "type": "string",
-              "enum": [
-                "external_dns"
-              ]
-            }
-          }
-        },
-        {
-          "type": "object",
-          "required": [
-            "type"
-          ],
-          "properties": {
-            "type": {
-              "type": "string",
-              "enum": [
-                "internal_dns"
-              ]
-            }
-          }
-        }
-      ]
-    },
-    "DatasetName": {
-      "type": "object",
-      "required": [
-        "kind",
-        "pool_name"
-      ],
-      "properties": {
-        "kind": {
-          "$ref": "#/definitions/DatasetKind"
-        },
-        "pool_name": {
-          "$ref": "#/definitions/ZpoolName"
-        }
-      }
-    },
-    "DatasetRequest": {
-      "description": "Describes a request to provision a specific dataset",
-      "type": "object",
-      "required": [
-        "id",
-        "name",
-        "service_address"
-      ],
-      "properties": {
-        "id": {
-          "type": "string",
-          "format": "uuid"
-        },
-        "name": {
-          "$ref": "#/definitions/DatasetName"
-        },
-        "service_address": {
-          "type": "string"
-        }
-      }
-    },
     "DnsConfigParams": {
       "type": "object",
       "required": [
@@ -399,161 +274,43 @@
         }
       ]
     },
-    "ServiceType": {
-      "description": "Describes service-specific parameters.",
+    "OmicronZoneConfig": {
+      "description": "Describes one Omicron-managed zone running on a sled",
+      "type": "object",
+      "required": [
+        "id",
+        "underlay_address",
+        "zone_type"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "underlay_address": {
+          "type": "string",
+          "format": "ipv6"
+        },
+        "zone_type": {
+          "$ref": "#/definitions/OmicronZoneType"
+        }
+      }
+    },
+    "OmicronZoneDataset": {
+      "description": "Describes a persistent ZFS dataset associated with an Omicron zone",
+      "type": "object",
+      "required": [
+        "pool_name"
+      ],
+      "properties": {
+        "pool_name": {
+          "$ref": "#/definitions/ZpoolName"
+        }
+      }
+    },
+    "OmicronZoneType": {
+      "description": "Describes what kind of zone this is (i.e., what component is running in it) as well as any type-specific configuration",
       "oneOf": [
-        {
-          "type": "object",
-          "required": [
-            "external_dns_servers",
-            "external_ip",
-            "external_tls",
-            "internal_address",
-            "nic",
-            "type"
-          ],
-          "properties": {
-            "external_dns_servers": {
-              "description": "External DNS servers Nexus can use to resolve external hosts.",
-              "type": "array",
-              "items": {
-                "type": "string",
-                "format": "ip"
-              }
-            },
-            "external_ip": {
-              "description": "The address at which the external nexus server is reachable.",
-              "type": "string",
-              "format": "ip"
-            },
-            "external_tls": {
-              "description": "Whether Nexus's external endpoint should use TLS",
-              "type": "boolean"
-            },
-            "internal_address": {
-              "description": "The address at which the internal nexus server is reachable.",
-              "type": "string"
-            },
-            "nic": {
-              "description": "The service vNIC providing external connectivity using OPTE.",
-              "allOf": [
-                {
-                  "$ref": "#/definitions/NetworkInterface"
-                }
-              ]
-            },
-            "type": {
-              "type": "string",
-              "enum": [
-                "nexus"
-              ]
-            }
-          }
-        },
-        {
-          "type": "object",
-          "required": [
-            "dns_address",
-            "http_address",
-            "nic",
-            "type"
-          ],
-          "properties": {
-            "dns_address": {
-              "description": "The address at which the external DNS server is reachable.",
-              "type": "string"
-            },
-            "http_address": {
-              "description": "The address at which the external DNS server API is reachable.",
-              "type": "string"
-            },
-            "nic": {
-              "description": "The service vNIC providing external connectivity using OPTE.",
-              "allOf": [
-                {
-                  "$ref": "#/definitions/NetworkInterface"
-                }
-              ]
-            },
-            "type": {
-              "type": "string",
-              "enum": [
-                "external_dns"
-              ]
-            }
-          }
-        },
-        {
-          "type": "object",
-          "required": [
-            "dns_address",
-            "gz_address",
-            "gz_address_index",
-            "http_address",
-            "type"
-          ],
-          "properties": {
-            "dns_address": {
-              "type": "string"
-            },
-            "gz_address": {
-              "description": "The addresses in the global zone which should be created\n\nFor the DNS service, which exists outside the sleds's typical subnet - adding an address in the GZ is necessary to allow inter-zone traffic routing.",
-              "type": "string",
-              "format": "ipv6"
-            },
-            "gz_address_index": {
-              "description": "The address is also identified with an auxiliary bit of information to ensure that the created global zone address can have a unique name.",
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 0.0
-            },
-            "http_address": {
-              "type": "string"
-            },
-            "type": {
-              "type": "string",
-              "enum": [
-                "internal_dns"
-              ]
-            }
-          }
-        },
-        {
-          "type": "object",
-          "required": [
-            "address",
-            "type"
-          ],
-          "properties": {
-            "address": {
-              "type": "string"
-            },
-            "type": {
-              "type": "string",
-              "enum": [
-                "oximeter"
-              ]
-            }
-          }
-        },
-        {
-          "type": "object",
-          "required": [
-            "address",
-            "type"
-          ],
-          "properties": {
-            "address": {
-              "type": "string"
-            },
-            "type": {
-              "type": "string",
-              "enum": [
-                "crucible_pantry"
-              ]
-            }
-          }
-        },
         {
           "type": "object",
           "required": [
@@ -615,6 +372,188 @@
           "type": "object",
           "required": [
             "address",
+            "dataset",
+            "type"
+          ],
+          "properties": {
+            "address": {
+              "type": "string"
+            },
+            "dataset": {
+              "$ref": "#/definitions/OmicronZoneDataset"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "clickhouse"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "address",
+            "dataset",
+            "type"
+          ],
+          "properties": {
+            "address": {
+              "type": "string"
+            },
+            "dataset": {
+              "$ref": "#/definitions/OmicronZoneDataset"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "clickhouse_keeper"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "address",
+            "dataset",
+            "type"
+          ],
+          "properties": {
+            "address": {
+              "type": "string"
+            },
+            "dataset": {
+              "$ref": "#/definitions/OmicronZoneDataset"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "cockroach_db"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "address",
+            "dataset",
+            "type"
+          ],
+          "properties": {
+            "address": {
+              "type": "string"
+            },
+            "dataset": {
+              "$ref": "#/definitions/OmicronZoneDataset"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "crucible"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "address",
+            "type"
+          ],
+          "properties": {
+            "address": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "crucible_pantry"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "dataset",
+            "dns_address",
+            "http_address",
+            "nic",
+            "type"
+          ],
+          "properties": {
+            "dataset": {
+              "$ref": "#/definitions/OmicronZoneDataset"
+            },
+            "dns_address": {
+              "description": "The address at which the external DNS server is reachable.",
+              "type": "string"
+            },
+            "http_address": {
+              "description": "The address at which the external DNS server API is reachable.",
+              "type": "string"
+            },
+            "nic": {
+              "description": "The service vNIC providing external connectivity using OPTE.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/NetworkInterface"
+                }
+              ]
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "external_dns"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "dataset",
+            "dns_address",
+            "gz_address",
+            "gz_address_index",
+            "http_address",
+            "type"
+          ],
+          "properties": {
+            "dataset": {
+              "$ref": "#/definitions/OmicronZoneDataset"
+            },
+            "dns_address": {
+              "type": "string"
+            },
+            "gz_address": {
+              "description": "The addresses in the global zone which should be created\n\nFor the DNS service, which exists outside the sleds's typical subnet - adding an address in the GZ is necessary to allow inter-zone traffic routing.",
+              "type": "string",
+              "format": "ipv6"
+            },
+            "gz_address_index": {
+              "description": "The address is also identified with an auxiliary bit of information to ensure that the created global zone address can have a unique name.",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "http_address": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "internal_dns"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "address",
             "dns_servers",
             "ntp_servers",
             "type"
@@ -653,17 +592,47 @@
         {
           "type": "object",
           "required": [
-            "address",
+            "external_dns_servers",
+            "external_ip",
+            "external_tls",
+            "internal_address",
+            "nic",
             "type"
           ],
           "properties": {
-            "address": {
+            "external_dns_servers": {
+              "description": "External DNS servers Nexus can use to resolve external hosts.",
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "ip"
+              }
+            },
+            "external_ip": {
+              "description": "The address at which the external nexus server is reachable.",
+              "type": "string",
+              "format": "ip"
+            },
+            "external_tls": {
+              "description": "Whether Nexus's external endpoint should use TLS",
+              "type": "boolean"
+            },
+            "internal_address": {
+              "description": "The address at which the internal nexus server is reachable.",
               "type": "string"
+            },
+            "nic": {
+              "description": "The service vNIC providing external connectivity using OPTE.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/NetworkInterface"
+                }
+              ]
             },
             "type": {
               "type": "string",
               "enum": [
-                "clickhouse"
+                "nexus"
               ]
             }
           }
@@ -681,118 +650,24 @@
             "type": {
               "type": "string",
               "enum": [
-                "clickhouse_keeper"
-              ]
-            }
-          }
-        },
-        {
-          "type": "object",
-          "required": [
-            "address",
-            "type"
-          ],
-          "properties": {
-            "address": {
-              "type": "string"
-            },
-            "type": {
-              "type": "string",
-              "enum": [
-                "cockroach_db"
-              ]
-            }
-          }
-        },
-        {
-          "type": "object",
-          "required": [
-            "address",
-            "type"
-          ],
-          "properties": {
-            "address": {
-              "type": "string"
-            },
-            "type": {
-              "type": "string",
-              "enum": [
-                "crucible"
+                "oximeter"
               ]
             }
           }
         }
       ]
     },
-    "ServiceZoneRequest": {
-      "description": "Describes a request to create a zone running one or more services.",
+    "SledConfig": {
       "type": "object",
       "required": [
-        "addresses",
-        "id",
-        "services",
-        "zone_type"
+        "zones"
       ],
       "properties": {
-        "addresses": {
+        "zones": {
+          "description": "zones configured for this sled",
           "type": "array",
           "items": {
-            "type": "string",
-            "format": "ipv6"
-          }
-        },
-        "dataset": {
-          "default": null,
-          "anyOf": [
-            {
-              "$ref": "#/definitions/DatasetRequest"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "id": {
-          "type": "string",
-          "format": "uuid"
-        },
-        "services": {
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/ServiceZoneService"
-          }
-        },
-        "zone_type": {
-          "$ref": "#/definitions/ZoneType"
-        }
-      }
-    },
-    "ServiceZoneService": {
-      "description": "Used to request that the Sled initialize a single service.",
-      "type": "object",
-      "required": [
-        "details",
-        "id"
-      ],
-      "properties": {
-        "details": {
-          "$ref": "#/definitions/ServiceType"
-        },
-        "id": {
-          "type": "string",
-          "format": "uuid"
-        }
-      }
-    },
-    "SledRequest": {
-      "type": "object",
-      "properties": {
-        "service": {
-          "description": "Services to be instantiated.",
-          "default": [],
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/ServiceZoneRequest"
+            "$ref": "#/definitions/OmicronZoneConfig"
           }
         }
       }
@@ -859,23 +734,6 @@
       "type": "integer",
       "format": "uint32",
       "minimum": 0.0
-    },
-    "ZoneType": {
-      "description": "The type of zone which may be requested from Sled Agent",
-      "type": "string",
-      "enum": [
-        "clickhouse",
-        "clickhouse_keeper",
-        "cockroach_db",
-        "crucible_pantry",
-        "crucible",
-        "external_dns",
-        "internal_dns",
-        "nexus",
-        "ntp",
-        "oximeter",
-        "switch"
-      ]
     },
     "ZpoolName": {
       "title": "The name of a Zpool",

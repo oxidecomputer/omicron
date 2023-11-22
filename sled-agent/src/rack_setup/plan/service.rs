@@ -94,6 +94,9 @@ pub enum PlanError {
 
     #[error("Ran out of sleds / U2 storage pools")]
     NotEnoughSleds,
+
+    #[error("Found only v1 service plan")]
+    FoundV1,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
@@ -114,7 +117,8 @@ impl Ledgerable for Plan {
     }
     fn generation_bump(&mut self) {}
 }
-const RSS_SERVICE_PLAN_FILENAME: &str = "rss-service-plan.json";
+const RSS_SERVICE_PLAN_V1_FILENAME: &str = "rss-service-plan.json";
+const RSS_SERVICE_PLAN_FILENAME: &str = "rss-service-plan-v2.json";
 
 impl Plan {
     pub async fn load(
@@ -136,9 +140,59 @@ impl Plan {
         if let Some(ledger) = ledger {
             info!(log, "RSS plan already created, loading from file");
             Ok(Some(ledger.data().clone()))
+        } else if Self::has_v1(storage_manager).await.map_err(|err| {
+            PlanError::Io {
+                message: String::from("looking for v1 RSS plan"),
+                err,
+            }
+        })? {
+            // If we found no current-version service plan, but we _do_ find
+            // a v1 plan present, bail out.  We do not expect to ever see this
+            // in practice because that would indicate that:
+            //
+            // - We ran RSS previously on this same system using an older
+            //   version of the software that generates v1 service plans and it
+            //   got far enough through RSS to have written the v1 service plan.
+            // - That means it must have finished initializing all sled agents,
+            //   including itself, causing it to record a
+            //   `StartSledAgentRequest`s in its ledger -- while still running
+            //   the older RSS.
+            // - But we're currently running software that knows about v2
+            //   service plans.  Thus, this process started some time after that
+            //   ledger was written.
+            // - But the bootstrap agent refuses to execute RSS if it has a
+            //   local `StartSledAgentRequest` ledgered.  So we shouldn't get
+            //   here if all of the above happened.
+            //
+            // This sounds like a complicated set of assumptions.  If we got
+            // this wrong, we'll fail spuriously here and we'll have to figure
+            // out what happened.  But the alternative is doing extra work to
+            // support a condition that we do not believe can ever happen in any
+            // system.
+            Err(PlanError::FoundV1)
         } else {
             Ok(None)
         }
+    }
+
+    async fn has_v1(
+        storage_manager: &StorageHandle,
+    ) -> Result<bool, std::io::Error> {
+        let paths: Vec<Utf8PathBuf> = storage_manager
+            .get_latest_resources()
+            .await
+            .all_m2_mountpoints(CONFIG_DATASET)
+            .into_iter()
+            .map(|p| p.join(RSS_SERVICE_PLAN_V1_FILENAME))
+            .collect();
+
+        for p in paths {
+            if p.try_exists()? {
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
     }
 
     async fn is_sled_scrimlet(
@@ -1154,13 +1208,11 @@ mod tests {
         assert_eq!(internal_service_ips, expected_internal_service_ips);
     }
 
-    // XXX-dap I think we should remove this test?  Do we really consider the
-    // RSS service plan stable?
     #[test]
-    fn test_rss_service_plan_schema() {
+    fn test_rss_service_plan_v2_schema() {
         let schema = schemars::schema_for!(Plan);
         expectorate::assert_contents(
-            "../schema/rss-service-plan.json",
+            "../schema/rss-service-plan-v2.json",
             &serde_json::to_string_pretty(&schema).unwrap(),
         );
     }
