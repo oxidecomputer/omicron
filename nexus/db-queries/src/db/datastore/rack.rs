@@ -1586,5 +1586,88 @@ mod test {
         let logctx = dev::test_setup_log("rack_sled_subnet_allocations");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        let rack_id = Uuid::new_v4();
+
+        // Ensure we get an empty list when there are no allocations
+        // List all 5 allocations
+        let allocations =
+            datastore.rack_subnet_allocations(&opctx, rack_id).await.unwrap();
+        assert!(allocations.is_empty());
+
+        // Add 5 allocations
+        for i in 0..5i16 {
+            let allocation = SledUnderlaySubnetAllocation {
+                rack_id,
+                sled_id: Uuid::new_v4(),
+                subnet_octet: 33 + i,
+                hw_baseboard_id: Uuid::new_v4(),
+            };
+            datastore
+                .sled_subnet_allocation_insert(&opctx, &allocation)
+                .await
+                .unwrap();
+        }
+
+        // List all 5 allocations
+        let allocations =
+            datastore.rack_subnet_allocations(&opctx, rack_id).await.unwrap();
+
+        assert_eq!(5, allocations.len());
+
+        // Try to add another allocation for the same octet, but with a distinct
+        // sled_id. Ensure we get an error due to a unique constraint.
+        let mut should_fail_allocation = SledUnderlaySubnetAllocation {
+            rack_id,
+            sled_id: Uuid::new_v4(),
+            subnet_octet: 37,
+            hw_baseboard_id: Uuid::new_v4(),
+        };
+        let _err = datastore
+            .sled_subnet_allocation_insert(&opctx, &should_fail_allocation)
+            .await
+            .unwrap_err();
+
+        // Adding an allocation for the same {rack_id, sled_id} pair fails
+        // the second time, even with a distinct subnet_epoch
+        let mut allocation = should_fail_allocation.clone();
+        allocation.subnet_octet = 38;
+        datastore
+            .sled_subnet_allocation_insert(&opctx, &allocation)
+            .await
+            .unwrap();
+
+        should_fail_allocation.subnet_octet = 39;
+        should_fail_allocation.hw_baseboard_id = Uuid::new_v4();
+        let _err = datastore
+            .sled_subnet_allocation_insert(&opctx, &should_fail_allocation)
+            .await
+            .unwrap_err();
+
+        // Allocations outside our expected range fail
+        let mut should_fail_allocation = SledUnderlaySubnetAllocation {
+            rack_id,
+            sled_id: Uuid::new_v4(),
+            subnet_octet: 32,
+            hw_baseboard_id: Uuid::new_v4(),
+        };
+        let _err = datastore
+            .sled_subnet_allocation_insert(&opctx, &should_fail_allocation)
+            .await
+            .unwrap_err();
+        should_fail_allocation.subnet_octet = 256;
+        let _err = datastore
+            .sled_subnet_allocation_insert(&opctx, &should_fail_allocation)
+            .await
+            .unwrap_err();
+
+        // We should have 6 allocations
+        let allocations =
+            datastore.rack_subnet_allocations(&opctx, rack_id).await.unwrap();
+
+        assert_eq!(6, allocations.len());
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
     }
 }

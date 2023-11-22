@@ -777,7 +777,7 @@ impl super::Nexus {
             .rack_subnet_allocations(opctx, sled.rack_id)
             .await?;
 
-        // Calculate the allocation for the new sled by choosing the minimim
+        // Calculate the allocation for the new sled by choosing the minimum
         // octet. The returned allocations are ordered by octet, so we will know
         // when we have a free one. However, if we already have an allocation
         // for the given sled then reuse that one.
@@ -872,7 +872,7 @@ impl super::Nexus {
             .await?
             .get(0)
             .ok_or(Error::InternalError {
-                internal_message: "no sleds at time of bootstore sync".into(),
+                internal_message: "no sled agents available".into(),
             })?
             .address();
 

@@ -4403,6 +4403,7 @@ async fn uninitialized_sled_list(
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
+
 /// Add a sled to an initialized rack
 //
 // TODO: In the future this should really be a PUT request, once we resolve
