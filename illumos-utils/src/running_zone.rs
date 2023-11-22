@@ -400,7 +400,7 @@ impl RunningZone {
 
     /// Returns the filesystem path to the zone's root in the GZ.
     pub fn root(&self) -> Utf8PathBuf {
-        self.inner.zonepath.join(Self::ROOT_FS_PATH)
+        self.inner.root()
     }
 
     pub fn control_interface(&self) -> AddrObject {
@@ -1087,6 +1087,9 @@ pub struct InstalledZone {
 }
 
 impl InstalledZone {
+    /// The path to the zone's root filesystem (i.e., `/`), within zonepath.
+    pub const ROOT_FS_PATH: &'static str = "root";
+
     /// Returns the name of a zone, based on the base zone name plus any unique
     /// identifying info.
     ///
@@ -1105,17 +1108,21 @@ impl InstalledZone {
         zone_name
     }
 
-    /// Returns the filesystem path to the zone's root
-    pub fn root(&self) -> String {
-        format!("{}/{}/root", ZONE_ZFS_DATASET_MOUNTPOINT, self.name)
-    }
-
     pub fn get_control_vnic_name(&self) -> &str {
         self.control_vnic.name()
     }
 
+    pub fn links(&self) -> &Vec<Link> {
+        &self.links
+    }
+
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    /// Returns the filesystem path to the zone's root in the GZ.
+    pub fn root(&self) -> Utf8PathBuf {
+        self.zonepath.join(Self::ROOT_FS_PATH)
     }
 
     /// Returns the filesystem path to the zonepath
