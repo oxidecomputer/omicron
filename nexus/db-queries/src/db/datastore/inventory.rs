@@ -7,6 +7,7 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::error::public_error_from_diesel;
+use crate::db::error::public_error_from_diesel_lookup;
 use crate::db::error::ErrorHandler;
 use crate::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
 use crate::db::TransactionError;
@@ -47,6 +48,8 @@ use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
+use omicron_common::api::external::LookupType;
+use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -922,13 +925,18 @@ impl DataStore {
         let conn = self.pool_connection_authorized(opctx).await?;
         use db::schema::hw_baseboard_id::dsl;
         dsl::hw_baseboard_id
-            .filter(dsl::serial_number.eq(baseboard_id.serial_number))
-            .filter(dsl::part_number.eq(baseboard_id.part_number))
+            .filter(dsl::serial_number.eq(baseboard_id.serial_number.clone()))
+            .filter(dsl::part_number.eq(baseboard_id.part_number.clone()))
             .select(dsl::id)
-            .limit(1)
             .first_async::<Uuid>(&*conn)
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .map_err(|e| {
+                public_error_from_diesel_lookup(
+                    e,
+                    ResourceType::Sled,
+                    &LookupType::ByCompositeId(format!("{baseboard_id:?}")),
+                )
+            })
     }
 
     /// Attempt to read the latest collection while limiting queries to `limit`
@@ -946,7 +954,6 @@ impl DataStore {
         let collection_id = dsl::inv_collection
             .select(dsl::id)
             .order_by(dsl::time_started.desc())
-            .limit(1)
             .first_async::<Uuid>(&*conn)
             .await
             .optional()
@@ -1365,9 +1372,11 @@ mod test {
     use nexus_inventory::examples::Representative;
     use nexus_test_utils::db::test_setup_database;
     use nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL;
+    use nexus_types::inventory::BaseboardId;
     use nexus_types::inventory::CabooseWhich;
     use nexus_types::inventory::Collection;
     use nexus_types::inventory::RotPageWhich;
+    use omicron_common::api::external::Error;
     use omicron_test_utils::dev;
     use std::num::NonZeroU32;
     use uuid::Uuid;
@@ -1421,6 +1430,24 @@ mod test {
             })
             .await
         }
+    }
+
+    #[tokio::test]
+    async fn test_find_hw_baseboard_id_missing_returns_not_found() {
+        let logctx = dev::test_setup_log("inventory_insert");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let baseboard_id = BaseboardId {
+            serial_number: "some-serial".into(),
+            part_number: "some-part".into(),
+        };
+        let err = datastore
+            .find_hw_baseboard_id(&opctx, baseboard_id)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, Error::ObjectNotFound { .. }));
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
     }
 
     /// Tests inserting several collections, reading them back, and making sure
