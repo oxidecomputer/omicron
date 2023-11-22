@@ -109,6 +109,9 @@ impl TryFrom<AllZoneRequests> for OmicronZonesConfigLocal {
         // pick the version from the ledger that we loaded.
         let ledger_version = input.generation;
 
+        let ndatasets_input =
+            input.requests.iter().filter(|r| r.zone.dataset.is_some()).count();
+
         let zones = input
             .requests
             .into_iter()
@@ -117,6 +120,15 @@ impl TryFrom<AllZoneRequests> for OmicronZonesConfigLocal {
             .context(
                 "mapping `AllZoneRequests` to `OmicronZonesConfigLocal`",
             )?;
+
+        // As a quick check, the number of datasets in the old and new versions
+        // ought to be the same.
+        let ndatasets_output =
+            zones.iter().filter(|r| r.zone.dataset_name().is_some()).count();
+        ensure!(
+            ndatasets_input == ndatasets_output,
+            "conversion produced a different number of datasets"
+        );
 
         Ok(OmicronZonesConfigLocal { omicron_version, ledger_version, zones })
     }
@@ -515,7 +527,13 @@ impl DatasetRequest {
 #[cfg(test)]
 mod test {
     use super::AllZoneRequests;
+    use crate::services::OmicronZonesConfigLocal;
+    use camino::Utf8PathBuf;
 
+    /// Verifies that our understanding of this old-format ledger has not
+    /// changed.  (If you need to change this for some reason, you must figure
+    /// out how that affects systems with old-format ledgers and update this
+    /// test accordingly.)
     #[test]
     fn test_all_services_requests_schema() {
         let schema = schemars::schema_for!(AllZoneRequests);
@@ -523,5 +541,80 @@ mod test {
             "../schema/all-zone-requests.json",
             &serde_json::to_string_pretty(&schema).unwrap(),
         );
+    }
+
+    /// Verifies that we can successfully convert a corpus of known old-format
+    /// ledgers.  These came from two racks operated by Oxide.  In practice
+    /// there probably aren't many different configurations represented here but
+    /// it's easy enough to just check them all.
+    ///
+    /// In terms of verifying the output: all we have done by hand in
+    /// constructing this test is verify that the code successfully converts
+    /// them.  The conversion code does some basic sanity checks as well, like
+    /// that we produced the same number of zones and datasets.
+    #[test]
+    fn test_convert_known_ledgers() {
+        let known_ledgers = &[
+            /* rack2 */
+            "rack2-sled8.json",
+            "rack2-sled9.json",
+            "rack2-sled10.json",
+            "rack2-sled11.json",
+            "rack2-sled12.json",
+            "rack2-sled14.json",
+            "rack2-sled16.json",
+            "rack2-sled17.json",
+            "rack2-sled21.json",
+            "rack2-sled23.json",
+            "rack2-sled25.json",
+            /* rack3 (no sled 10) */
+            "rack3-sled0.json",
+            "rack3-sled1.json",
+            "rack3-sled2.json",
+            "rack3-sled3.json",
+            "rack3-sled4.json",
+            "rack3-sled5.json",
+            "rack3-sled6.json",
+            "rack3-sled7.json",
+            "rack3-sled8.json",
+            "rack3-sled9.json",
+            "rack3-sled11.json",
+            "rack3-sled12.json",
+            "rack3-sled13.json",
+            "rack3-sled14.json",
+            "rack3-sled15.json",
+            "rack3-sled16.json",
+            "rack3-sled17.json",
+            "rack3-sled18.json",
+            "rack3-sled19.json",
+            "rack3-sled20.json",
+            "rack3-sled21.json",
+            "rack3-sled22.json",
+            "rack3-sled23.json",
+            "rack3-sled24.json",
+            "rack3-sled25.json",
+            "rack3-sled26.json",
+            "rack3-sled27.json",
+            "rack3-sled28.json",
+            "rack3-sled29.json",
+            "rack3-sled30.json",
+            "rack3-sled31.json",
+        ];
+
+        let path = Utf8PathBuf::from("tests/old-service-ledgers");
+        let out_path = Utf8PathBuf::from("tests/output/new-zones-ledgers");
+        for ledger_basename in known_ledgers {
+            println!("checking {:?}", ledger_basename);
+            let contents = std::fs::read_to_string(path.join(ledger_basename))
+                .expect("failed to read file");
+            let parsed: AllZoneRequests =
+                serde_json::from_str(&contents).expect("failed to parse file");
+            let converted = OmicronZonesConfigLocal::try_from(parsed)
+                .expect("failed to convert file");
+            expectorate::assert_contents(
+                out_path.join(ledger_basename),
+                &serde_json::to_string_pretty(&converted).unwrap(),
+            );
+        }
     }
 }
