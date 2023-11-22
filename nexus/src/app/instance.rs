@@ -895,8 +895,6 @@ impl super::Nexus {
             .partition(|ip| ip.kind == IpKind::SNat);
 
         // Sanity checks on the number and kind of each IP address.
-        // TODO-correctness: Handle multiple IP addresses, see
-        //  https://github.com/oxidecomputer/omicron/issues/1467
         if external_ips.len() > MAX_EXTERNAL_IPS_PER_INSTANCE {
             return Err(Error::internal_error(
                 format!(

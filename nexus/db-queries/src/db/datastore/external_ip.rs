@@ -27,6 +27,8 @@ use nexus_types::identity::Resource;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::NameOrId;
+use omicron_common::api::external::UpdateResult;
 use std::net::IpAddr;
 use uuid::Uuid;
 
@@ -144,6 +146,51 @@ impl DataStore {
             ip,
         );
         self.allocate_external_ip(opctx, data).await
+    }
+
+    /// Allocates a floating IP address for instance usage.
+    pub async fn attach_floating_ip_to_instance(
+        &self,
+        opctx: &OpContext,
+        instance_id: Uuid,
+        ip_id: &NameOrId,
+        project: &authz::Project,
+    ) -> UpdateResult<ExternalIp> {
+        use db::schema::external_ip::dsl;
+        // TODO: scope by project
+        // opctx.authorize(authz::Action::CreateChild, authz_project).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        // let ip_id = match ip_id {
+        //     NameOrId::Id(id) => *id,
+        //     NameOrId::Name(name) => {
+        //         diesel::select(dsl::external_ip)
+        //             .filter(dsl::time_deleted.is_null())
+        //             .filter(dsl::name.eq(&name))
+        //             .execute_and_check(&conn)
+        //             .await
+        //             .map(|m| m.)
+        //     }
+        // };
+
+        // opctx.authn.
+        // todo!()
+
+        // diesel::update(dsl::external_ip)
+        //     .filter(dsl::time_deleted.is_null())
+        //     .filter(dsl::id.eq(Some(ip_id)))
+        //     .filter(dsl::parent_id.is_null())
+        //     .set(dsl::parent_id.eq(instance_id))
+        //     .check_if_exists::<ExternalIp>(ip_id)
+        //     .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
+        //     .await
+        //     .map(|r| match r.status {
+        //         UpdateStatus::Updated => true,
+        //         UpdateStatus::NotUpdatedButExists => false,
+        //     })
+        //     .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+
+        todo!()
     }
 
     async fn allocate_external_ip(

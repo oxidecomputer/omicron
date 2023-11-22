@@ -50,9 +50,7 @@ impl super::Nexus {
             .lookup_floating_ips(opctx, authz_project.id())
             .await?
             .into_iter()
-            .map(|ip| {
-                ip.try_into().unwrap()
-            })
+            .map(|ip| ip.try_into().unwrap())
             .collect::<Vec<_>>())
     }
 
@@ -66,9 +64,15 @@ impl super::Nexus {
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
 
         let chosen_addr = match (&params.pool, params.address) {
-            (Some(_), _) => todo!("Drawing floating IP from pools not yet supported."),
+            (Some(_), _) => {
+                todo!("Drawing floating IP from pools not yet supported.")
+            }
             (None, Some(ip)) => ip,
-            _ => return Err(Error::invalid_request("floating IP needs a pool or ")),
+            _ => {
+                return Err(Error::invalid_request(
+                    "floating IP needs a pool or ",
+                ))
+            }
         };
 
         Ok(self
@@ -79,9 +83,10 @@ impl super::Nexus {
                 Uuid::new_v4(),
                 &params.identity.name.clone().into(),
                 &params.identity.description,
-                chosen_addr)
+                chosen_addr,
+            )
             .await?
-            .try_into().unwrap()
-        )
+            .try_into()
+            .unwrap())
     }
 }

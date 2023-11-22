@@ -598,6 +598,8 @@ async fn sic_allocate_instance_snat_ip_undo(
 async fn sic_allocate_instance_external_ip(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
+    // XXX: may wish to restructure partially: we have at most one ephemeral
+    //      and then at most $n$ floating.
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
     let repeat_saga_params = sagactx.saga_params::<NetParams>()?;
@@ -621,6 +623,14 @@ async fn sic_allocate_instance_external_ip(
     let pool_name = match ip_params {
         params::ExternalIpCreate::Ephemeral { ref pool_name } => {
             pool_name.as_ref().map(|name| db::model::Name(name.clone()))
+        }
+        params::ExternalIpCreate::Floating { ref floating_ip } => {
+            // In floating case, need:
+            //  floating IP does not belong to another instance
+            //  floating IP belongs to the parent project.
+            return Err(ActionError::action_failed(format!(
+                "can't yet bind floating ip {floating_ip:?} to instance"
+            )));
         }
     };
     datastore

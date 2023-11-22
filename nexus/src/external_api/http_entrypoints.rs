@@ -1532,15 +1532,14 @@ async fn ip_pool_service_range_remove(
 async fn floating_ip_list(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<params::ProjectSelector>,
-)-> Result<HttpResponseOk<ResultsPage<views::ExternalIp>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<views::ExternalIp>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let project_lookup =
             nexus.project_lookup(&opctx, query_params.into_inner())?;
-        let ips =
-            nexus.list_floating_ips(&opctx, &project_lookup).await?;
+        let ips = nexus.list_floating_ips(&opctx, &project_lookup).await?;
         Ok(HttpResponseOk(ResultsPage { items: ips, next_page: None }))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -1562,8 +1561,11 @@ async fn floating_ip_create(
     let floating_params = floating_params.into_inner();
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let project_lookup = nexus.project_lookup(&opctx, query_params.into_inner())?;
-        let pool = nexus.create_floating_ip(&opctx, &project_lookup, &floating_params).await?;
+        let project_lookup =
+            nexus.project_lookup(&opctx, query_params.into_inner())?;
+        let pool = nexus
+            .create_floating_ip(&opctx, &project_lookup, &floating_params)
+            .await?;
         Ok(HttpResponseCreated(views::ExternalIp::from(pool)))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await

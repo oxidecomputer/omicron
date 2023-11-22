@@ -758,11 +758,15 @@ pub struct FloatingIpCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
 
-    /// The intended address
-    // TODO: make non-optional and draw from pool
+    /// An IP address to reserve for use as a floating IP.  This field is
+    /// optional if a pool is provided, in which case an address will
+    /// be automatically chosen from there.
+    // TODO: draw from pool if needed.
     pub address: Option<IpAddr>,
 
-    /// The parent pool that a
+    /// The parent IP pool that a floating IP is pulled from. If combined
+    /// with an explicit address, then that address must be available in
+    /// the pool.
     // TODO: support tie-in to pools.
     pub pool: Option<NameOrId>,
 }
@@ -834,7 +838,11 @@ pub enum ExternalIpCreate {
     /// automatically-assigned from the provided IP Pool, or all available pools
     /// if not specified.
     Ephemeral { pool_name: Option<Name> },
-    // TODO: Add floating IPs: https://github.com/oxidecomputer/omicron/issues/1334
+    /// An IP address providing both inbound and outbound access. The address is
+    /// an existing Floating IP object assigned to the current project.
+    ///
+    /// The floating IP must not be in use by another instance or service.
+    Floating { floating_ip: NameOrId },
 }
 
 /// Create-time parameters for an `Instance`
