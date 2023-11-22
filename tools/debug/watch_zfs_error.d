@@ -194,6 +194,7 @@ inline string enam[int r] =
 	r == EZFS_IOC_NOTSUPPORTED ? "EZFS_IOC_NOTSUPPORTED" :
 	"EZFS_UNKNOWN";
 
+#if 0
 pid$target::zfs_error:entry,
 pid$target::zfs_verror:entry
 /arg1 == EZFS_NOSPC/
@@ -215,6 +216,7 @@ pid$target::zfs_verror:entry
 		system("echo == %d ==; echo", pid);
 	}
 }
+#endif
 
 inline string errnos[int e] =
 	e == EDQUOT ? "EDQUOT" :
@@ -235,27 +237,77 @@ sdt:zfs::set-error
 	printf("\n");
 }
 
-pid$target::zfs_create:entry
+/*
+ * The error appears to be coming from inside dsl_dir_set_quota_check()!
+ */
+fbt::dsl_dir_set_quota_check:entry
+/pid == $target/
 {
-	printf("pid %d: E %s()\n", pid, probefunc);
-	self->zfsc = 1;
+	self->qc = 1;
+	self->tx = args[1];
+	printf("pid %d: quota check ---------------\n", pid);
 }
 
-pid$target::zfs_create:return
-/self->zfsc/
+fbt::dsl_prop_predict:entry
+/self->qc/
 {
-	printf("pid %d: R %s() -> %d\n", pid, probefunc, (int)arg1);
-	self->zfsc = 0;
+	self->newvalp = (uint64_t *)arg4;
 }
 
-pid$target:libzfs.so.1::entry
-/self->zfsc/
+fbt::dsl_prop_predict:return
+/self->newvalp/
 {
-	printf("pid %d: E %s()\n", pid, probefunc);
+	self->newval = *self->newvalp;
+	printf("pid %d: quota check: newval -> %u\n", pid, self->newval);
+	self->newvalp = 0;
 }
 
-pid$target:libzfs.so.1::return
-/self->zfsc/
+fbt::dsl_dataset_hold:entry
+/self->qc/
 {
-	printf("pid %d: R %s() -> %d (%x)\n", pid, probefunc, (int)arg1, arg1);
+	self->dsp = args[3]; /* dsl_dataset_t** */
+}
+
+fbt::dsl_dataset_hold:return
+/self->dsp/
+{
+	self->ds = *self->dsp;
+	self->dsp = 0;
+}
+
+fbt::dsl_dataset_hold:return,
+fbt::dsl_prop_predict:return
+/self->qc/
+{
+	printf("pid %d: quota check: %s() -> %d\n", pid, probefunc, arg1);
+}
+
+fbt::dsl_dir_space_towrite:return
+/self->qc/
+{
+	this->towrite = arg1;
+	this->dd = self->ds->ds_dir;
+	this->ddphys = (dsl_dir_phys_t *)this->dd->dd_dbuf->db_data;
+	this->dd_reserved = this->ddphys->dd_reserved;
+	this->dd_used_bytes = this->ddphys->dd_used_bytes;
+	this->is_syncing = self->tx->tx_anyobj;
+
+	printf("pid %d: quota check: %s(): towrite -> %u ",
+	    pid, probefunc,this->towrite);
+	printf("[is_syncing %u ", this->is_syncing);
+	printf("dd_reserved %u dd_used_bytes %u ub+write %u]\n",
+	    this->dd_reserved, this->dd_used_bytes,
+	    this->dd_used_bytes + this->towrite);
+
+	self->dd = 0;
+}
+
+fbt::dsl_dir_set_quota_check:return
+/self->qc/
+{
+	printf("pid %d: quota check: %s() -> %d\n", pid, probefunc, arg0);
+	self->qc = 0;
+	self->ds = 0;
+	self->tx = 0;
+	self->newval = 0;
 }
