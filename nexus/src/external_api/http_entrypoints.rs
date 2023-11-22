@@ -1563,10 +1563,10 @@ async fn floating_ip_create(
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let project_lookup =
             nexus.project_lookup(&opctx, query_params.into_inner())?;
-        let pool = nexus
+        let ip = nexus
             .create_floating_ip(&opctx, &project_lookup, &floating_params)
             .await?;
-        Ok(HttpResponseCreated(views::ExternalIp::from(pool)))
+        Ok(HttpResponseCreated(views::ExternalIp::from(ip)))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

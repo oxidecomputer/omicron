@@ -1579,9 +1579,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.external_ip (
     time_deleted TIMESTAMPTZ,
 
     /* FK to the `ip_pool` table. */
-    project_id UUID,
-
-    /* FK to the `ip_pool` table. */
     ip_pool_id UUID,
 
     /* FK to the `ip_pool_range` table. */
@@ -1604,6 +1601,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.external_ip (
 
     /* The last port in the allowed range, also inclusive. */
     last_port INT4 NOT NULL,
+
+    /* FK to the `ip_pool` table. */
+    project_id UUID,
 
     /* The name must be non-NULL iff this is a floating IP. */
     CONSTRAINT null_fip_name CHECK (

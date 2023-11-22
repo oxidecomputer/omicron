@@ -57,7 +57,6 @@ pub struct ExternalIp {
     pub time_created: DateTime<Utc>,
     pub time_modified: DateTime<Utc>,
     pub time_deleted: Option<DateTime<Utc>>,
-    pub project_id: Option<Uuid>,
     pub ip_pool_id: Option<Uuid>,
     pub ip_pool_range_id: Option<Uuid>,
     pub is_service: bool,
@@ -70,6 +69,7 @@ pub struct ExternalIp {
     pub ip: IpNetwork,
     pub first_port: SqlU16,
     pub last_port: SqlU16,
+    pub project_id: Option<Uuid>,
 }
 
 impl From<ExternalIp> for sled_agent_client::types::SourceNatConfig {

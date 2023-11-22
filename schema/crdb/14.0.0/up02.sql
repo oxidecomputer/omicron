@@ -1,3 +1,3 @@
-ALTER TABLE omicron.public.external_ip ADD CONSTRAINT null_project_id IF NOT EXISTS CHECK (
+ALTER TABLE omicron.public.external_ip ADD CONSTRAINT IF NOT EXISTS null_project_id CHECK (
 	kind = 'floating' OR project_id IS NULL
 );

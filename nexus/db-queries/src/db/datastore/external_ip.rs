@@ -152,14 +152,14 @@ impl DataStore {
     pub async fn attach_floating_ip_to_instance(
         &self,
         opctx: &OpContext,
-        instance_id: Uuid,
-        ip_id: &NameOrId,
-        project: &authz::Project,
+        _instance_id: Uuid,
+        _ip_id: &NameOrId,
+        _project: &authz::Project,
     ) -> UpdateResult<ExternalIp> {
-        use db::schema::external_ip::dsl;
+        // use db::schema::external_ip::dsl;
         // TODO: scope by project
         // opctx.authorize(authz::Action::CreateChild, authz_project).await?;
-        let conn = self.pool_connection_authorized(opctx).await?;
+        let _conn = self.pool_connection_authorized(opctx).await?;
 
         // let ip_id = match ip_id {
         //     NameOrId::Id(id) => *id,

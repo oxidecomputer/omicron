@@ -524,7 +524,6 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
-        project_id -> Nullable<Uuid>,
         ip_pool_id -> Nullable<Uuid>,
         ip_pool_range_id -> Nullable<Uuid>,
         is_service -> Bool,
@@ -533,6 +532,7 @@ table! {
         ip -> Inet,
         first_port -> Int4,
         last_port -> Int4,
+        project_id -> Nullable<Uuid>,
     }
 }
 
