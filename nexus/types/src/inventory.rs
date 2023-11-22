@@ -56,6 +56,11 @@ pub struct Collection {
     ///
     /// In practice, these will be inserted into the `sw_caboose` table.
     pub cabooses: BTreeSet<Arc<Caboose>>,
+    /// unique root of trust page contents that were found in this collection
+    ///
+    /// In practice, these will be inserted into the `sw_root_of_trust_page`
+    /// table.
+    pub rot_pages: BTreeSet<Arc<RotPage>>,
 
     /// all service processors, keyed by baseboard id
     ///
@@ -73,6 +78,14 @@ pub struct Collection {
     /// In practice, these will be inserted into the `inv_caboose` table.
     pub cabooses_found:
         BTreeMap<CabooseWhich, BTreeMap<Arc<BaseboardId>, CabooseFound>>,
+    /// all root of trust page contents found, keyed first by the kind of page
+    /// (`RotPageWhich`), then the baseboard id of the sled where they were
+    /// found
+    ///
+    /// In practice, these will be inserted into the `inv_root_of_trust_page`
+    /// table.
+    pub rot_pages_found:
+        BTreeMap<RotPageWhich, BTreeMap<Arc<BaseboardId>, RotPageFound>>,
 }
 
 impl Collection {
@@ -82,6 +95,16 @@ impl Collection {
         baseboard_id: &BaseboardId,
     ) -> Option<&CabooseFound> {
         self.cabooses_found
+            .get(&which)
+            .and_then(|by_bb| by_bb.get(baseboard_id))
+    }
+
+    pub fn rot_page_for(
+        &self,
+        which: RotPageWhich,
+        baseboard_id: &BaseboardId,
+    ) -> Option<&RotPageFound> {
+        self.rot_pages_found
             .get(&which)
             .and_then(|by_bb| by_bb.get(baseboard_id))
     }
@@ -176,4 +199,58 @@ pub enum CabooseWhich {
     SpSlot1,
     RotSlotA,
     RotSlotB,
+}
+
+/// Root of trust page contents found during a collection
+///
+/// These are normalized in the database.  Each distinct `RotPage` is assigned a
+/// uuid and shared across many possible collections that reference it.
+#[derive(Clone, Debug, Ord, Eq, PartialOrd, PartialEq)]
+pub struct RotPage {
+    pub data_base64: String,
+}
+
+/// Indicates that a particular `RotPage` was found (at a particular time from a
+/// particular source, but these are only for debugging)
+#[derive(Clone, Debug, Ord, Eq, PartialOrd, PartialEq)]
+pub struct RotPageFound {
+    pub time_collected: DateTime<Utc>,
+    pub source: String,
+    pub page: Arc<RotPage>,
+}
+
+/// Describes which root of trust page this is
+#[derive(Clone, Copy, Debug, EnumIter, PartialEq, Eq, PartialOrd, Ord)]
+pub enum RotPageWhich {
+    Cmpa,
+    CfpaActive,
+    CfpaInactive,
+    CfpaScratch,
+}
+
+/// Trait to convert between the two MGS root of trust page types and a tuple of
+/// `([RotPageWhich], [RotPage])`.
+///
+/// This cannot use the standard `From` trait due to orphan rules: we do not own
+/// the `gateway_client` type, and tuples are always considered foreign.
+pub trait IntoRotPage {
+    fn into_rot_page(self) -> (RotPageWhich, RotPage);
+}
+
+impl IntoRotPage for gateway_client::types::RotCmpa {
+    fn into_rot_page(self) -> (RotPageWhich, RotPage) {
+        (RotPageWhich::Cmpa, RotPage { data_base64: self.base64_data })
+    }
+}
+
+impl IntoRotPage for gateway_client::types::RotCfpa {
+    fn into_rot_page(self) -> (RotPageWhich, RotPage) {
+        use gateway_client::types::RotCfpaSlot;
+        let which = match self.slot {
+            RotCfpaSlot::Active => RotPageWhich::CfpaActive,
+            RotCfpaSlot::Inactive => RotPageWhich::CfpaInactive,
+            RotCfpaSlot::Scratch => RotPageWhich::CfpaScratch,
+        };
+        (which, RotPage { data_base64: self.base64_data })
+    }
 }

@@ -96,6 +96,7 @@ impl DataStore {
             .do_update()
             .set((
                 dsl::time_modified.eq(Utc::now()),
+                dsl::kind.eq(producer.kind),
                 dsl::ip.eq(producer.ip),
                 dsl::port.eq(producer.port),
                 dsl::interval.eq(producer.interval),

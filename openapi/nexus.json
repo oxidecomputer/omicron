@@ -4064,6 +4064,37 @@
         }
       }
     },
+    "/v1/system/hardware/uninitialized-sleds": {
+      "get": {
+        "tags": [
+          "system/hardware"
+        ],
+        "summary": "List uninitialized sleds in a given rack",
+        "operationId": "uninitialized_sled_list",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_UninitializedSled",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/UninitializedSled"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/identity-providers": {
       "get": {
         "tags": [
@@ -13937,6 +13968,29 @@
         "required": [
           "interface_config_id",
           "vlan_id"
+        ]
+      },
+      "UninitializedSled": {
+        "description": "View of a sled that has not been added to an initialized rack yet",
+        "type": "object",
+        "properties": {
+          "baseboard": {
+            "$ref": "#/components/schemas/Baseboard"
+          },
+          "cubby": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "rack_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "baseboard",
+          "cubby",
+          "rack_id"
         ]
       },
       "User": {

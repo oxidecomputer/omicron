@@ -5,7 +5,7 @@
 use super::switch_port_settings_apply::select_dendrite_client;
 use super::{NexusActionContext, NEXUS_DPD_TAG};
 use crate::app::sagas::retry_until_known_result;
-use crate::app::sagas::switch_port_settings_apply::{
+use crate::app::sagas::switch_port_settings_common::{
     api_to_dpd_port_settings, apply_bootstore_update, bootstore_update,
     ensure_switch_port_bgp_settings, ensure_switch_port_uplink,
     read_bootstore_config, select_mg_client, switch_sled_agent,
@@ -214,7 +214,20 @@ async fn spa_undo_clear_switch_port_settings(
 async fn spa_clear_switch_port_uplink(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
-    ensure_switch_port_uplink(sagactx, true, None).await
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+    ensure_switch_port_uplink(
+        sagactx,
+        &opctx,
+        true,
+        None,
+        params.switch_port_id,
+        params.port_name.clone(),
+    )
+    .await
 }
 
 async fn spa_undo_clear_switch_port_uplink(
@@ -223,8 +236,21 @@ async fn spa_undo_clear_switch_port_uplink(
     let id = sagactx
         .lookup::<Option<Uuid>>("original_switch_port_settings_id")
         .map_err(|e| external::Error::internal_error(&e.to_string()))?;
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
-    Ok(ensure_switch_port_uplink(sagactx, false, id).await?)
+    Ok(ensure_switch_port_uplink(
+        sagactx,
+        &opctx,
+        false,
+        id,
+        params.switch_port_id,
+        params.port_name.clone(),
+    )
+    .await?)
 }
 
 async fn spa_clear_switch_port_bgp_settings(
@@ -257,9 +283,13 @@ async fn spa_clear_switch_port_bgp_settings(
         .map_err(ActionError::action_failed)?;
 
     let mg_client: Arc<mg_admin_client::Client> =
-        select_mg_client(&sagactx).await.map_err(|e| {
-            ActionError::action_failed(format!("select mg client (undo): {e}"))
-        })?;
+        select_mg_client(&sagactx, &opctx, params.switch_port_id)
+            .await
+            .map_err(|e| {
+                ActionError::action_failed(format!(
+                    "select mg client (undo): {e}"
+                ))
+            })?;
 
     for peer in settings.bgp_peers {
         let config = nexus
@@ -306,7 +336,14 @@ async fn spa_undo_clear_switch_port_bgp_settings(
     let settings =
         nexus.switch_port_settings_get(&opctx, &NameOrId::Id(id)).await?;
 
-    Ok(ensure_switch_port_bgp_settings(sagactx, settings).await?)
+    Ok(ensure_switch_port_bgp_settings(
+        sagactx,
+        &opctx,
+        settings,
+        params.port_name.clone(),
+        params.switch_port_id,
+    )
+    .await?)
 }
 
 async fn spa_clear_switch_port_bootstore_network_settings(

@@ -42,12 +42,9 @@ impl WicketdArtifactStore {
         slog::debug!(self.log, "adding repository");
 
         let log = self.log.clone();
-        let new_artifacts = tokio::task::spawn_blocking(move || {
-            ArtifactsWithPlan::from_zip(data, &log)
-                .map_err(|error| error.to_http_error())
-        })
-        .await
-        .unwrap()?;
+        let new_artifacts = ArtifactsWithPlan::from_zip(data, &log)
+            .await
+            .map_err(|error| error.to_http_error())?;
         self.replace(new_artifacts);
 
         Ok(())

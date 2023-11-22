@@ -680,7 +680,7 @@ mod test {
     use crate::db::model::Sled;
     use async_bb8_diesel::AsyncSimpleConnection;
     use internal_params::DnsRecord;
-    use nexus_db_model::{DnsGroup, InitialDnsGroup};
+    use nexus_db_model::{DnsGroup, InitialDnsGroup, SledUpdate};
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::external_api::shared::SiloIdentityMode;
     use nexus_types::identity::Asset;
@@ -870,14 +870,14 @@ mod test {
     async fn create_test_sled(db: &DataStore) -> Sled {
         let sled_id = Uuid::new_v4();
         let addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0);
-        let sled = Sled::new(
+        let sled_update = SledUpdate::new(
             sled_id,
             addr,
             sled_baseboard_for_test(),
             sled_system_hardware_for_test(),
             rack_id(),
         );
-        db.sled_upsert(sled)
+        db.sled_upsert(sled_update)
             .await
             .expect("Could not upsert sled during test prep")
     }

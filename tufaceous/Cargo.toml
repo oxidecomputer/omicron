@@ -17,6 +17,7 @@ slog.workspace = true
 slog-async.workspace = true
 slog-envlogger.workspace = true
 slog-term.workspace = true
+tokio.workspace = true
 tufaceous-lib.workspace = true
 omicron-workspace-hack.workspace = true
 
@@ -27,6 +28,7 @@ fs-err.workspace = true
 omicron-test-utils.workspace = true
 predicates.workspace = true
 tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
 
 [[test]]
 name = "manifest-tests"
