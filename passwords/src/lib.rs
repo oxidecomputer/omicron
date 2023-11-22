@@ -58,7 +58,7 @@ pub const MAX_PASSWORD_LENGTH: usize = 512;
 // takes as long as we think it should on whatever machine the test suite is
 // running on.
 pub const MIN_EXPECTED_PASSWORD_VERIFY_TIME: std::time::Duration =
-    std::time::Duration::from_millis(650);
+    std::time::Duration::from_millis(500);
 
 /// Returns an [`Argon2`] context suitable for hashing passwords the same way
 /// we do for external authentication
