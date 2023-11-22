@@ -4,8 +4,10 @@
 
 // Copyright 2023 Oxide Computer Company
 
-//! Utilities for key/value pairs passed from the control plane to the SP
-//! (through MGS) to the host (through the host/SP uart) via IPCC.
+//! An interface to libipcc (inter-processor communications channel) which
+//! currently supports looking up values stored in the SP by key. These
+//! values are passed from the control plane to the SP (through MGS) or
+//! are maniuplated through the `ipcc` command found on Helios.
 
 use cfg_if::cfg_if;
 use omicron_common::update::ArtifactHash;
@@ -187,16 +189,20 @@ enum IpccKey {
     Dtrace = 4,
 }
 
+/// Interface to the inter-processor communications channel.
+/// For more information see rfd 316.
 pub struct Ipcc {
     handle: IpccHandle,
 }
 
 impl Ipcc {
+    /// Creates a new `Ipcc` instance.
     pub fn new() -> Result<Self, IpccError> {
         let handle = IpccHandle::new()?;
         Ok(Self { handle })
     }
 
+    /// Returns the current `InstallinatorImageId`.
     pub fn installinator_image_id(
         &self,
     ) -> Result<InstallinatorImageId, InstallinatorImageIdError> {
