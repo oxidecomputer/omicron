@@ -214,14 +214,12 @@ mod test {
     async fn populate_users(pool: &db::Pool, values: &Vec<(i64, i64)>) {
         use schema::test_users::dsl;
 
+        let conn = pool.pool().get().await.unwrap();
+
         // The indexes here work around the check that prevents full table
         // scans.
-        pool.pool()
-            .get()
-            .await
-            .unwrap()
-            .batch_execute_async(
-                "CREATE TABLE test_users (
+        conn.batch_execute_async(
+            "CREATE TABLE test_users (
                     id UUID PRIMARY KEY,
                     age INT NOT NULL,
                     height INT NOT NULL
@@ -229,9 +227,9 @@ mod test {
 
                 CREATE INDEX ON test_users (age, height);
                 CREATE INDEX ON test_users (height, age);",
-            )
-            .await
-            .unwrap();
+        )
+        .await
+        .unwrap();
 
         let users: Vec<User> = values
             .iter()
@@ -244,7 +242,7 @@ mod test {
 
         diesel::insert_into(dsl::test_users)
             .values(users)
-            .execute_async(pool.pool())
+            .execute_async(&*conn)
             .await
             .unwrap();
     }
@@ -254,7 +252,8 @@ mod test {
         pool: &db::Pool,
         query: BoxedQuery<schema::test_users::dsl::test_users>,
     ) -> Vec<User> {
-        query.select(User::as_select()).load_async(pool.pool()).await.unwrap()
+        let conn = pool.pool().get().await.unwrap();
+        query.select(User::as_select()).load_async(&*conn).await.unwrap()
     }
 
     #[tokio::test]
@@ -263,7 +262,7 @@ mod test {
             dev::test_setup_log("test_paginated_single_column_ascending");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&cfg);
+        let pool = db::Pool::new(&logctx.log, &cfg);
 
         use schema::test_users::dsl;
 
@@ -298,7 +297,7 @@ mod test {
             dev::test_setup_log("test_paginated_single_column_descending");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&cfg);
+        let pool = db::Pool::new(&logctx.log, &cfg);
 
         use schema::test_users::dsl;
 
@@ -333,7 +332,7 @@ mod test {
             dev::test_setup_log("test_paginated_multicolumn_ascending");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&cfg);
+        let pool = db::Pool::new(&logctx.log, &cfg);
 
         use schema::test_users::dsl;
 
@@ -387,7 +386,7 @@ mod test {
             dev::test_setup_log("test_paginated_multicolumn_descending");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&cfg);
+        let pool = db::Pool::new(&logctx.log, &cfg);
 
         use schema::test_users::dsl;
 

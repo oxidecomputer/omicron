@@ -6,16 +6,29 @@
 
 // Copyright 2021 Oxide Computer Company
 
-use dropshot::{
-    endpoint, ApiDescription, ConfigDropshot, ConfigLogging, HttpError,
-    HttpResponseOk, HttpServer, HttpServerStarter, Path, RequestContext,
-};
+use dropshot::endpoint;
+use dropshot::ApiDescription;
+use dropshot::ConfigDropshot;
+use dropshot::ConfigLogging;
+use dropshot::HttpError;
+use dropshot::HttpResponseOk;
+use dropshot::HttpServer;
+use dropshot::HttpServerStarter;
+use dropshot::Path;
+use dropshot::RequestContext;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
-use oximeter::types::{ProducerRegistry, ProducerResults};
+use omicron_common::FileKv;
+use oximeter::types::ProducerRegistry;
+use oximeter::types::ProducerResults;
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
+use slog::debug;
+use slog::error;
+use slog::info;
+use slog::o;
 use slog::Drain;
-use slog::{debug, error, info, o};
+use slog::Logger;
 use std::net::SocketAddr;
 use thiserror::Error;
 use uuid::Uuid;
@@ -27,15 +40,35 @@ pub enum Error {
 
     #[error("Error registering as metric producer: {0}")]
     RegistrationError(String),
+
+    #[error("Producer registry and config UUIDs do not match")]
+    UuidMismatch,
+}
+
+/// Either configuration for building a logger, or an actual logger already
+/// instantiated.
+///
+/// This can be used to start a [`Server`] with a new logger or a child of a
+/// parent logger if desired.
+#[derive(Debug, Clone)]
+pub enum LogConfig {
+    /// Configuration for building a new logger.
+    Config(ConfigLogging),
+    /// An explicit logger to use.
+    Logger(Logger),
 }
 
 /// Information used to configure a [`Server`]
 #[derive(Debug, Clone)]
 pub struct Config {
+    /// The information for contacting this server, and collecting its metrics.
     pub server_info: ProducerEndpoint,
+    /// The address at which we attempt to register as a producer.
     pub registration_address: SocketAddr,
-    pub dropshot_config: ConfigDropshot,
-    pub logging_config: ConfigLogging,
+    /// Configuration for starting the Dropshot server used to produce metrics.
+    pub dropshot: ConfigDropshot,
+    /// The logging configuration or actual logger used to emit logs.
+    pub log: LogConfig,
 }
 
 /// A Dropshot server used to expose metrics to be collected over the network.
@@ -52,63 +85,26 @@ impl Server {
     /// Start a new metric server, registering it with the chosen endpoint, and listening for
     /// requests on the associated address and route.
     pub async fn start(config: &Config) -> Result<Self, Error> {
-        // Clone mutably, as we may update the address after the server starts, see below.
-        let mut config = config.clone();
-
-        let (drain, registration) = slog_dtrace::with_drain(
-            config
-                .logging_config
-                .to_logger("metric-server")
-                .map_err(|msg| Error::Server(msg.to_string()))?,
-        );
-        let log = slog::Logger::root(drain.fuse(), slog::o!());
-        if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
-            let msg = format!("failed to register DTrace probes: {}", e);
-            error!(log, "failed to register DTrace probes: {}", e);
-            return Err(Error::Server(msg));
-        } else {
-            debug!(log, "registered DTrace probes");
-        }
-        let registry = ProducerRegistry::with_id(config.server_info.id);
-        let dropshot_log = log.new(o!("component" => "dropshot"));
-        let server = HttpServerStarter::new(
-            &config.dropshot_config,
-            metric_server_api(),
-            registry.clone(),
-            &dropshot_log,
+        Self::with_registry(
+            ProducerRegistry::with_id(config.server_info.id),
+            &config,
         )
-        .map_err(|e| Error::Server(e.to_string()))?
-        .start();
+        .await
+    }
 
-        // Client code may decide to assign a specific address and/or port, or to listen on any
-        // available address and port, assigned by the OS. For example, `[::1]:0` would assign any
-        // port on localhost. If needed, update the address in the `ProducerEndpoint` with the
-        // actual address the server has bound.
-        //
-        // TODO-robustness: Is there a better way to do this? We'd like to support users picking an
-        // exact address or using whatever's available. The latter is useful during tests or other
-        // situations in which we don't know which ports are available.
-        if config.server_info.address != server.local_addr() {
-            assert_eq!(config.server_info.address.port(), 0);
-            debug!(
-                log,
-                "Requested any available port, Dropshot server has been bound to {}",
-                server.local_addr(),
-            );
-            config.server_info.address = server.local_addr();
-        }
-
-        debug!(log, "registering metric server as a producer");
-        register(config.registration_address, &log, &config.server_info)
-            .await?;
-        info!(
-            log,
-            "starting oximeter metric server";
-            "route" => config.server_info.collection_route(),
-            "producer_id" => ?registry.producer_id(),
-            "address" => config.server_info.address,
-        );
-        Ok(Self { registry, server })
+    /// Create a new metric producer server, with an existing registry.
+    pub async fn with_registry(
+        registry: ProducerRegistry,
+        config: &Config,
+    ) -> Result<Self, Error> {
+        Self::new_impl(
+            registry,
+            config.server_info.clone(),
+            &config.registration_address,
+            &config.dropshot,
+            &config.log,
+        )
+        .await
     }
 
     /// Serve requests for metrics.
@@ -134,6 +130,85 @@ impl Server {
     /// Return the server's local listening address
     pub fn address(&self) -> std::net::SocketAddr {
         self.server.local_addr()
+    }
+
+    fn build_logger(log: &LogConfig) -> Result<Logger, Error> {
+        // Build a logger, either using the configuration or actual logger
+        // provided. First build the base logger from the configuration or a
+        // clone of the provided logger, and then add the DTrace and Dropshot
+        // loggers on top of it.
+        let base_logger = match log {
+            LogConfig::Config(conf) => conf
+                .to_logger("metric-server")
+                .map_err(|msg| Error::Server(msg.to_string()))?,
+            LogConfig::Logger(log) => log.clone(),
+        };
+        let (drain, registration) = slog_dtrace::with_drain(base_logger);
+        let log = Logger::root(drain.fuse(), slog::o!(FileKv));
+        if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
+            let msg = format!("failed to register DTrace probes: {}", e);
+            error!(log, "failed to register DTrace probes: {}", e);
+            return Err(Error::Server(msg));
+        } else {
+            debug!(log, "registered DTrace probes");
+        }
+        Ok(log)
+    }
+
+    fn build_dropshot_server(
+        log: &Logger,
+        registry: &ProducerRegistry,
+        dropshot: &ConfigDropshot,
+    ) -> Result<HttpServer<ProducerRegistry>, Error> {
+        let dropshot_log = log.new(o!("component" => "dropshot"));
+        HttpServerStarter::new(
+            dropshot,
+            metric_server_api(),
+            registry.clone(),
+            &dropshot_log,
+        )
+        .map_err(|e| Error::Server(e.to_string()))
+        .map(HttpServerStarter::start)
+    }
+
+    // Create a new server registering with Nexus.
+    async fn new_impl(
+        registry: ProducerRegistry,
+        mut server_info: ProducerEndpoint,
+        registration_address: &SocketAddr,
+        dropshot: &ConfigDropshot,
+        log: &LogConfig,
+    ) -> Result<Self, Error> {
+        if registry.producer_id() != server_info.id {
+            return Err(Error::UuidMismatch);
+        }
+        let log = Self::build_logger(log)?;
+        let server = Self::build_dropshot_server(&log, &registry, dropshot)?;
+
+        // Update the producer endpoint address with the actual server's
+        // address, to handle cases where client listens on any available
+        // address.
+        if server_info.address != server.local_addr() {
+            assert_eq!(server_info.address.port(), 0);
+            debug!(
+                log,
+                "Requested any available port, Dropshot server has been bound to {}",
+                server.local_addr(),
+            );
+            server_info.address = server.local_addr();
+        }
+
+        debug!(log, "registering metric server as a producer");
+        register(*registration_address, &log, &server_info).await?;
+        info!(
+            log,
+            "starting oximeter metric producer server";
+            "route" => server_info.collection_route(),
+            "producer_id" => ?registry.producer_id(),
+            "address" => server.local_addr(),
+            "interval" => ?server_info.interval,
+        );
+        Ok(Self { registry, server })
     }
 }
 

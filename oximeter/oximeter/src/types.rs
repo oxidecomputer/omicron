@@ -3,21 +3,30 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Types used to describe targets, metrics, and measurements.
-// Copyright 2021 Oxide Computer Company
+
+// Copyright 2023 Oxide Computer Company
 
 use crate::histogram;
 use crate::traits;
 use crate::Producer;
 use bytes::Bytes;
-use chrono::{DateTime, Utc};
-use num_traits::{One, Zero};
+use chrono::DateTime;
+use chrono::Utc;
+use num::traits::One;
+use num::traits::Zero;
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use std::boxed::Box;
+use std::collections::BTreeMap;
 use std::fmt;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use std::ops::{Add, AddAssign};
-use std::sync::{Arc, Mutex};
+use std::net::IpAddr;
+use std::net::Ipv4Addr;
+use std::net::Ipv6Addr;
+use std::ops::Add;
+use std::ops::AddAssign;
+use std::sync::Arc;
+use std::sync::Mutex;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -33,11 +42,19 @@ use uuid::Uuid;
     JsonSchema,
     Serialize,
     Deserialize,
+    strum::EnumIter,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum FieldType {
     String,
+    I8,
+    U8,
+    I16,
+    U16,
+    I32,
+    U32,
     I64,
+    U64,
     IpAddr,
     Uuid,
     Bool,
@@ -60,19 +77,41 @@ macro_rules! impl_field_type_from {
 }
 
 impl_field_type_from! { String, FieldType::String }
+impl_field_type_from! { i8, FieldType::I8 }
+impl_field_type_from! { u8, FieldType::U8 }
+impl_field_type_from! { i16, FieldType::I16 }
+impl_field_type_from! { u16, FieldType::U16 }
+impl_field_type_from! { i32, FieldType::I32 }
+impl_field_type_from! { u32, FieldType::U32 }
 impl_field_type_from! { i64, FieldType::I64 }
+impl_field_type_from! { u64, FieldType::U64 }
 impl_field_type_from! { IpAddr, FieldType::IpAddr }
 impl_field_type_from! { Uuid, FieldType::Uuid }
 impl_field_type_from! { bool, FieldType::Bool }
 
 /// The `FieldValue` contains the value of a target or metric field.
 #[derive(
-    Clone, Debug, Hash, PartialEq, Eq, JsonSchema, Serialize, Deserialize,
+    Clone,
+    Debug,
+    Hash,
+    PartialEq,
+    Eq,
+    JsonSchema,
+    Serialize,
+    Deserialize,
+    strum::EnumCount,
 )]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum FieldValue {
     String(String),
+    I8(i8),
+    U8(u8),
+    I16(i16),
+    U16(u16),
+    I32(i32),
+    U32(u32),
     I64(i64),
+    U64(u64),
     IpAddr(IpAddr),
     Uuid(Uuid),
     Bool(bool),
@@ -83,7 +122,14 @@ impl FieldValue {
     pub fn field_type(&self) -> FieldType {
         match self {
             FieldValue::String(_) => FieldType::String,
+            FieldValue::I8(_) => FieldType::I8,
+            FieldValue::U8(_) => FieldType::U8,
+            FieldValue::I16(_) => FieldType::I16,
+            FieldValue::U16(_) => FieldType::U16,
+            FieldValue::I32(_) => FieldType::I32,
+            FieldValue::U32(_) => FieldType::U32,
             FieldValue::I64(_) => FieldType::I64,
+            FieldValue::U64(_) => FieldType::U64,
             FieldValue::IpAddr(_) => FieldType::IpAddr,
             FieldValue::Uuid(_) => FieldType::Uuid,
             FieldValue::Bool(_) => FieldType::Bool,
@@ -102,8 +148,29 @@ impl FieldValue {
         };
         match field_type {
             FieldType::String => Ok(FieldValue::String(s.to_string())),
+            FieldType::I8 => {
+                Ok(FieldValue::I8(s.parse().map_err(|_| make_err())?))
+            }
+            FieldType::U8 => {
+                Ok(FieldValue::U8(s.parse().map_err(|_| make_err())?))
+            }
+            FieldType::I16 => {
+                Ok(FieldValue::I16(s.parse().map_err(|_| make_err())?))
+            }
+            FieldType::U16 => {
+                Ok(FieldValue::U16(s.parse().map_err(|_| make_err())?))
+            }
+            FieldType::I32 => {
+                Ok(FieldValue::I32(s.parse().map_err(|_| make_err())?))
+            }
+            FieldType::U32 => {
+                Ok(FieldValue::U32(s.parse().map_err(|_| make_err())?))
+            }
             FieldType::I64 => {
                 Ok(FieldValue::I64(s.parse().map_err(|_| make_err())?))
+            }
+            FieldType::U64 => {
+                Ok(FieldValue::U64(s.parse().map_err(|_| make_err())?))
             }
             FieldType::IpAddr => {
                 Ok(FieldValue::IpAddr(s.parse().map_err(|_| make_err())?))
@@ -122,7 +189,14 @@ impl fmt::Display for FieldValue {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             FieldValue::String(ref inner) => write!(f, "{}", inner),
+            FieldValue::I8(ref inner) => write!(f, "{}", inner),
+            FieldValue::U8(ref inner) => write!(f, "{}", inner),
+            FieldValue::I16(ref inner) => write!(f, "{}", inner),
+            FieldValue::U16(ref inner) => write!(f, "{}", inner),
+            FieldValue::I32(ref inner) => write!(f, "{}", inner),
+            FieldValue::U32(ref inner) => write!(f, "{}", inner),
             FieldValue::I64(ref inner) => write!(f, "{}", inner),
+            FieldValue::U64(ref inner) => write!(f, "{}", inner),
             FieldValue::IpAddr(ref inner) => write!(f, "{}", inner),
             FieldValue::Uuid(ref inner) => write!(f, "{}", inner),
             FieldValue::Bool(ref inner) => write!(f, "{}", inner),
@@ -130,27 +204,32 @@ impl fmt::Display for FieldValue {
     }
 }
 
-impl From<i64> for FieldValue {
-    fn from(value: i64) -> Self {
-        FieldValue::I64(value)
-    }
+macro_rules! impl_field_value_from {
+    ($int:ty, $variant:path) => {
+        impl From<$int> for FieldValue {
+            fn from(value: $int) -> Self {
+                $variant(value)
+            }
+        }
+    };
 }
 
-impl From<String> for FieldValue {
-    fn from(value: String) -> Self {
-        FieldValue::String(value)
-    }
-}
+impl_field_value_from! { i8, FieldValue::I8 }
+impl_field_value_from! { u8, FieldValue::U8 }
+impl_field_value_from! { i16, FieldValue::I16 }
+impl_field_value_from! { u16, FieldValue::U16 }
+impl_field_value_from! { i32, FieldValue::I32 }
+impl_field_value_from! { u32, FieldValue::U32 }
+impl_field_value_from! { i64, FieldValue::I64 }
+impl_field_value_from! { u64, FieldValue::U64 }
+impl_field_value_from! { String, FieldValue::String }
+impl_field_value_from! { IpAddr, FieldValue::IpAddr }
+impl_field_value_from! { Uuid, FieldValue::Uuid }
+impl_field_value_from! { bool, FieldValue::Bool }
 
 impl From<&str> for FieldValue {
     fn from(value: &str) -> Self {
         FieldValue::String(String::from(value))
-    }
-}
-
-impl From<IpAddr> for FieldValue {
-    fn from(value: IpAddr) -> Self {
-        FieldValue::IpAddr(value)
     }
 }
 
@@ -163,18 +242,6 @@ impl From<Ipv4Addr> for FieldValue {
 impl From<Ipv6Addr> for FieldValue {
     fn from(value: Ipv6Addr) -> Self {
         FieldValue::IpAddr(IpAddr::V6(value))
-    }
-}
-
-impl From<Uuid> for FieldValue {
-    fn from(value: Uuid) -> Self {
-        FieldValue::Uuid(value)
-    }
-}
-
-impl From<bool> for FieldValue {
-    fn from(value: bool) -> Self {
-        FieldValue::Bool(value)
     }
 }
 
@@ -196,17 +263,6 @@ pub struct Field {
     pub value: FieldValue,
 }
 
-impl Field {
-    /// Construct a field from its name and value.
-    pub fn new<S, T>(name: S, value: T) -> Self
-    where
-        S: AsRef<str>,
-        T: Into<FieldValue>,
-    {
-        Field { name: name.as_ref().to_string(), value: value.into() }
-    }
-}
-
 /// The type of an individual datum of a metric.
 #[derive(
     Clone,
@@ -220,17 +276,36 @@ impl Field {
     JsonSchema,
     Serialize,
     Deserialize,
+    strum::EnumIter,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum DatumType {
     Bool,
+    I8,
+    U8,
+    I16,
+    U16,
+    I32,
+    U32,
     I64,
+    U64,
+    F32,
     F64,
     String,
     Bytes,
     CumulativeI64,
+    CumulativeU64,
+    CumulativeF32,
     CumulativeF64,
+    HistogramI8,
+    HistogramU8,
+    HistogramI16,
+    HistogramU16,
+    HistogramI32,
+    HistogramU32,
     HistogramI64,
+    HistogramU64,
+    HistogramF32,
     HistogramF64,
 }
 
@@ -240,8 +315,18 @@ impl DatumType {
         matches!(
             self,
             DatumType::CumulativeI64
+                | DatumType::CumulativeU64
+                | DatumType::CumulativeF32
                 | DatumType::CumulativeF64
+                | DatumType::HistogramI8
+                | DatumType::HistogramU8
+                | DatumType::HistogramI16
+                | DatumType::HistogramU16
+                | DatumType::HistogramI32
+                | DatumType::HistogramU32
                 | DatumType::HistogramI64
+                | DatumType::HistogramU64
+                | DatumType::HistogramF32
                 | DatumType::HistogramF64
         )
     }
@@ -258,13 +343,31 @@ impl std::fmt::Display for DatumType {
 #[serde(tag = "type", content = "datum", rename_all = "snake_case")]
 pub enum Datum {
     Bool(bool),
+    I8(i8),
+    U8(u8),
+    I16(i16),
+    U16(u16),
+    I32(i32),
+    U32(u32),
     I64(i64),
+    U64(u64),
+    F32(f32),
     F64(f64),
     String(String),
     Bytes(Bytes),
     CumulativeI64(Cumulative<i64>),
+    CumulativeU64(Cumulative<u64>),
+    CumulativeF32(Cumulative<f32>),
     CumulativeF64(Cumulative<f64>),
+    HistogramI8(histogram::Histogram<i8>),
+    HistogramU8(histogram::Histogram<u8>),
+    HistogramI16(histogram::Histogram<i16>),
+    HistogramU16(histogram::Histogram<u16>),
+    HistogramI32(histogram::Histogram<i32>),
+    HistogramU32(histogram::Histogram<u32>),
     HistogramI64(histogram::Histogram<i64>),
+    HistogramU64(histogram::Histogram<u64>),
+    HistogramF32(histogram::Histogram<f32>),
     HistogramF64(histogram::Histogram<f64>),
 }
 
@@ -273,13 +376,31 @@ impl Datum {
     pub fn datum_type(&self) -> DatumType {
         match self {
             Datum::Bool(_) => DatumType::Bool,
+            Datum::I8(_) => DatumType::I8,
+            Datum::U8(_) => DatumType::U8,
+            Datum::I16(_) => DatumType::I16,
+            Datum::U16(_) => DatumType::U16,
+            Datum::I32(_) => DatumType::I32,
+            Datum::U32(_) => DatumType::U32,
             Datum::I64(_) => DatumType::I64,
+            Datum::U64(_) => DatumType::U64,
+            Datum::F32(_) => DatumType::F32,
             Datum::F64(_) => DatumType::F64,
             Datum::String(_) => DatumType::String,
             Datum::Bytes(_) => DatumType::Bytes,
             Datum::CumulativeI64(_) => DatumType::CumulativeI64,
+            Datum::CumulativeU64(_) => DatumType::CumulativeU64,
+            Datum::CumulativeF32(_) => DatumType::CumulativeF32,
             Datum::CumulativeF64(_) => DatumType::CumulativeF64,
+            Datum::HistogramI8(_) => DatumType::HistogramI8,
+            Datum::HistogramU8(_) => DatumType::HistogramU8,
+            Datum::HistogramI16(_) => DatumType::HistogramI16,
+            Datum::HistogramU16(_) => DatumType::HistogramU16,
+            Datum::HistogramI32(_) => DatumType::HistogramI32,
+            Datum::HistogramU32(_) => DatumType::HistogramU32,
             Datum::HistogramI64(_) => DatumType::HistogramI64,
+            Datum::HistogramU64(_) => DatumType::HistogramU64,
+            Datum::HistogramF32(_) => DatumType::HistogramF32,
             Datum::HistogramF64(_) => DatumType::HistogramF64,
         }
     }
@@ -292,14 +413,32 @@ impl Datum {
     /// Return the start time of the underlying data, if this is cumulative, or `None`
     pub fn start_time(&self) -> Option<DateTime<Utc>> {
         match self {
-            Datum::Bool(_) => None,
-            Datum::I64(_) => None,
-            Datum::F64(_) => None,
-            Datum::String(_) => None,
-            Datum::Bytes(_) => None,
+            Datum::Bool(_)
+            | Datum::I8(_)
+            | Datum::U8(_)
+            | Datum::I16(_)
+            | Datum::U16(_)
+            | Datum::I32(_)
+            | Datum::U32(_)
+            | Datum::I64(_)
+            | Datum::U64(_)
+            | Datum::F32(_)
+            | Datum::F64(_)
+            | Datum::String(_)
+            | Datum::Bytes(_) => None,
             Datum::CumulativeI64(ref inner) => Some(inner.start_time()),
+            Datum::CumulativeU64(ref inner) => Some(inner.start_time()),
+            Datum::CumulativeF32(ref inner) => Some(inner.start_time()),
             Datum::CumulativeF64(ref inner) => Some(inner.start_time()),
+            Datum::HistogramI8(ref inner) => Some(inner.start_time()),
+            Datum::HistogramU8(ref inner) => Some(inner.start_time()),
+            Datum::HistogramI16(ref inner) => Some(inner.start_time()),
+            Datum::HistogramU16(ref inner) => Some(inner.start_time()),
+            Datum::HistogramI32(ref inner) => Some(inner.start_time()),
+            Datum::HistogramU32(ref inner) => Some(inner.start_time()),
             Datum::HistogramI64(ref inner) => Some(inner.start_time()),
+            Datum::HistogramU64(ref inner) => Some(inner.start_time()),
+            Datum::HistogramF32(ref inner) => Some(inner.start_time()),
             Datum::HistogramF64(ref inner) => Some(inner.start_time()),
         }
     }
@@ -323,13 +462,31 @@ macro_rules! impl_from {
 }
 
 impl_from! { bool, Bool }
+impl_from! { i8, I8 }
+impl_from! { u8, U8 }
+impl_from! { i16, I16 }
+impl_from! { u16, U16 }
+impl_from! { i32, I32 }
+impl_from! { u32, U32 }
 impl_from! { i64, I64 }
+impl_from! { u64, U64 }
+impl_from! { f32, F32 }
 impl_from! { f64, F64 }
 impl_from! { String, String }
 impl_from! { Bytes, Bytes }
 impl_from! { Cumulative<i64>, CumulativeI64 }
+impl_from! { Cumulative<u64>, CumulativeU64 }
+impl_from! { Cumulative<f32>, CumulativeF32 }
 impl_from! { Cumulative<f64>, CumulativeF64 }
+impl_from! { histogram::Histogram<i8>, HistogramI8 }
+impl_from! { histogram::Histogram<u8>, HistogramU8 }
+impl_from! { histogram::Histogram<i16>, HistogramI16 }
+impl_from! { histogram::Histogram<u16>, HistogramU16 }
+impl_from! { histogram::Histogram<i32>, HistogramI32 }
+impl_from! { histogram::Histogram<u32>, HistogramU32 }
 impl_from! { histogram::Histogram<i64>, HistogramI64 }
+impl_from! { histogram::Histogram<u64>, HistogramU64 }
+impl_from! { histogram::Histogram<f32>, HistogramF32 }
 impl_from! { histogram::Histogram<f64>, HistogramF64 }
 
 impl From<&str> for Datum {
@@ -400,6 +557,16 @@ pub enum MetricsError {
     /// An error parsing a field or measurement from a string.
     #[error("String '{src}' could not be parsed as type '{typ}'")]
     ParseError { src: String, typ: String },
+
+    /// A field name is duplicated between the target and metric.
+    #[error("Field '{name}' is duplicated between the target and metric")]
+    DuplicateFieldName { name: String },
+}
+
+impl From<MetricsError> for omicron_common::api::external::Error {
+    fn from(e: MetricsError) -> Self {
+        omicron_common::api::external::Error::internal_error(&e.to_string())
+    }
 }
 
 /// A cumulative or counter data type.
@@ -488,16 +655,28 @@ where
 #[derive(Clone, Debug, PartialEq, JsonSchema, Deserialize, Serialize)]
 pub(crate) struct FieldSet {
     pub name: String,
-    pub fields: Vec<Field>,
+    pub fields: BTreeMap<String, Field>,
 }
 
 impl FieldSet {
     fn from_target(target: &impl traits::Target) -> Self {
-        Self { name: target.name().to_string(), fields: target.fields() }
+        let fields = target
+            .fields()
+            .iter()
+            .cloned()
+            .map(|f| (f.name.clone(), f))
+            .collect();
+        Self { name: target.name().to_string(), fields }
     }
 
     fn from_metric(metric: &impl traits::Metric) -> Self {
-        Self { name: metric.name().to_string(), fields: metric.fields() }
+        let fields = metric
+            .fields()
+            .iter()
+            .cloned()
+            .map(|f| (f.name.clone(), f))
+            .collect();
+        Self { name: metric.name().to_string(), fields }
     }
 }
 
@@ -539,24 +718,27 @@ impl Sample {
         timestamp: DateTime<Utc>,
         target: &T,
         metric: &M,
-    ) -> Self
+    ) -> Result<Self, MetricsError>
     where
         T: traits::Target,
         M: traits::Metric<Datum = D>,
     {
-        Self {
-            timeseries_name: format!("{}:{}", target.name(), metric.name()),
-            target: FieldSet::from_target(target),
-            metric: FieldSet::from_metric(metric),
+        let target_fields = FieldSet::from_target(target);
+        let metric_fields = FieldSet::from_metric(metric);
+        Self::verify_field_names(&target_fields, &metric_fields)?;
+        Ok(Self {
+            timeseries_name: crate::timeseries_name(target, metric),
+            target: target_fields,
+            metric: metric_fields,
             measurement: metric.measure(timestamp),
-        }
+        })
     }
 
     /// Construct a new sample, created at the time the function is called.
     ///
     /// This materializes the data from the target and metric, and stores that information along
     /// with the measurement data itself.
-    pub fn new<T, M, D>(target: &T, metric: &M) -> Self
+    pub fn new<T, M, D>(target: &T, metric: &M) -> Result<Self, MetricsError>
     where
         T: traits::Target,
         M: traits::Metric<Datum = D>,
@@ -569,7 +751,14 @@ impl Sample {
     /// This returns the target fields and metric fields, chained, although there is no distinction
     /// between them in this method.
     pub fn fields(&self) -> Vec<Field> {
-        [self.target.fields.clone(), self.metric.fields.clone()].concat()
+        let mut out = Vec::with_capacity(
+            self.target.fields.len() + self.metric.fields.len(),
+        );
+        for f in self.target.fields.values().chain(self.metric.fields.values())
+        {
+            out.push(f.clone())
+        }
+        out
     }
 
     /// Return the name of this sample's target.
@@ -578,7 +767,12 @@ impl Sample {
     }
 
     /// Return the fields of this sample's target.
-    pub fn target_fields(&self) -> &Vec<Field> {
+    pub fn target_fields(&self) -> impl Iterator<Item = &Field> {
+        self.target.fields.values()
+    }
+
+    /// Return the sorted fields of this sample's target.
+    pub fn sorted_target_fields(&self) -> &BTreeMap<String, Field> {
         &self.target.fields
     }
 
@@ -588,8 +782,29 @@ impl Sample {
     }
 
     /// Return the fields of this sample's metric.
-    pub fn metric_fields(&self) -> &Vec<Field> {
+    pub fn metric_fields(&self) -> impl Iterator<Item = &Field> {
+        self.metric.fields.values()
+    }
+
+    /// Return the sorted fields of this sample's metric
+    pub fn sorted_metric_fields(&self) -> &BTreeMap<String, Field> {
         &self.metric.fields
+    }
+
+    // Check validity of field names for the target and metric. Currently this
+    // just verifies there are no duplicate names between them.
+    fn verify_field_names(
+        target: &FieldSet,
+        metric: &FieldSet,
+    ) -> Result<(), MetricsError> {
+        for name in target.fields.keys() {
+            if metric.fields.contains_key(name) {
+                return Err(MetricsError::DuplicateFieldName {
+                    name: name.to_string(),
+                });
+            }
+        }
+        Ok(())
     }
 }
 
@@ -662,17 +877,26 @@ impl ProducerRegistry {
 
 #[cfg(test)]
 mod tests {
-    use bytes::Bytes;
-    use std::net::IpAddr;
-    use uuid::Uuid;
-
     use super::histogram::Histogram;
-    use super::{
-        Cumulative, Datum, DatumType, FieldType, FieldValue, Measurement,
-    };
+    use super::Cumulative;
+    use super::Datum;
+    use super::DatumType;
+    use super::Field;
+    use super::FieldSet;
+    use super::FieldType;
+    use super::FieldValue;
+    use super::Measurement;
+    use super::MetricsError;
+    use super::Sample;
     use crate::test_util;
     use crate::types;
-    use crate::{Metric, Target};
+    use crate::Metric;
+    use crate::Target;
+    use bytes::Bytes;
+    use std::collections::BTreeMap;
+    use std::net::Ipv4Addr;
+    use std::net::Ipv6Addr;
+    use uuid::Uuid;
 
     #[test]
     fn test_cumulative_i64() {
@@ -744,7 +968,7 @@ mod tests {
             good: true,
             datum: 1i64,
         };
-        let sample = types::Sample::new(&t, &m);
+        let sample = types::Sample::new(&t, &m).unwrap();
         assert_eq!(
             sample.timeseries_name,
             format!("{}:{}", t.name(), m.name())
@@ -757,39 +981,55 @@ mod tests {
             good: true,
             datum: 1i64.into(),
         };
-        let sample = types::Sample::new(&t, &m);
+        let sample = types::Sample::new(&t, &m).unwrap();
         assert!(sample.measurement.start_time().is_some());
     }
 
+    #[rstest::rstest]
+    #[case::as_string("some string", FieldValue::String("some string".into()))]
+    #[case::as_i8("2", FieldValue::I8(2))]
+    #[case::as_u8("2", FieldValue::U8(2))]
+    #[case::as_i16("2", FieldValue::I16(2))]
+    #[case::as_u16("2", FieldValue::U16(2))]
+    #[case::as_i32("2", FieldValue::I32(2))]
+    #[case::as_u32("2", FieldValue::U32(2))]
+    #[case::as_i64("2", FieldValue::I64(2))]
+    #[case::as_u64("2", FieldValue::U64(2))]
+    #[case::as_uuid(
+        "684f42af-0500-4fc9-be93-fdf1a7ac36ad",
+        FieldValue::Uuid(uuid::uuid!("684f42af-0500-4fc9-be93-fdf1a7ac36ad"))
+    )]
+    #[case::as_ipv4addr("127.0.0.1", FieldValue::from(Ipv4Addr::LOCALHOST))]
+    #[case::as_ipv6addr("::1", FieldValue::from(Ipv6Addr::LOCALHOST))]
+    fn test_field_value_parse_as_type(
+        #[case] unparsed: &str,
+        #[case] expected: FieldValue,
+    ) {
+        let parsed =
+            FieldValue::parse_as_type(unparsed, expected.field_type()).unwrap();
+        assert_eq!(parsed, expected);
+    }
+
+    #[rstest::rstest]
+    #[case::as_u64(FieldType::U64)]
+    #[case::as_uuid(FieldType::Uuid)]
+    #[case::as_bool(FieldType::Bool)]
+    #[case::as_ipaddr(FieldType::IpAddr)]
+    #[case::as_uuid(FieldType::Uuid)]
+    fn test_field_value_parse_as_wrong_type(#[case] ty: FieldType) {
+        assert!(FieldValue::parse_as_type("baddcafe", ty).is_err());
+    }
+
     #[test]
-    fn test_field_value_parse_as_type() {
-        let as_string = "some string";
-        let as_i64 = "2";
-        let as_ipaddr = "::1";
-        let as_uuid = "3c937cd9-348f-42c2-bd44-d0a4dfffabd9";
-        let as_bool = "false";
-
-        assert_eq!(
-            FieldValue::parse_as_type(&as_string, FieldType::String).unwrap(),
-            FieldValue::from(&as_string),
-        );
-        assert_eq!(
-            FieldValue::parse_as_type(&as_i64, FieldType::I64).unwrap(),
-            FieldValue::from(2_i64),
-        );
-        assert_eq!(
-            FieldValue::parse_as_type(&as_ipaddr, FieldType::IpAddr).unwrap(),
-            FieldValue::from(as_ipaddr.parse::<IpAddr>().unwrap()),
-        );
-        assert_eq!(
-            FieldValue::parse_as_type(&as_uuid, FieldType::Uuid).unwrap(),
-            FieldValue::from(as_uuid.parse::<Uuid>().unwrap()),
-        );
-        assert_eq!(
-            FieldValue::parse_as_type(&as_bool, FieldType::Bool).unwrap(),
-            FieldValue::from(false),
-        );
-
-        assert!(FieldValue::parse_as_type(&as_string, FieldType::Uuid).is_err());
+    fn test_verify_field_names() {
+        let mut fields = BTreeMap::new();
+        let field =
+            Field { name: "n".to_string(), value: FieldValue::from(0i64) };
+        fields.insert(field.name.clone(), field);
+        let fields = FieldSet { name: "t".to_string(), fields };
+        assert!(matches!(
+            Sample::verify_field_names(&fields, &fields),
+            Err(MetricsError::DuplicateFieldName { .. })
+        ));
     }
 }

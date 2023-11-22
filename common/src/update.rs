@@ -35,6 +35,17 @@ impl ArtifactsDocument {
 /// internally in Nexus and Sled Agent.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Artifact {
+    /// Used to differentiate between different series of artifacts of the same
+    /// kind. This is used by the control plane to select the correct artifact.
+    ///
+    /// For SP and ROT images ([`KnownArtifactKind::GimletSp`],
+    /// [`KnownArtifactKind::GimletRot`], [`KnownArtifactKind::PscSp`],
+    /// [`KnownArtifactKind::PscRot`], [`KnownArtifactKind::SwitchSp`],
+    /// [`KnownArtifactKind::SwitchRot`]), `name` is the value of the board
+    /// (`BORD`) tag in the image caboose.
+    ///
+    /// In the future when [`KnownArtifactKind::ControlPlane`] is split up into
+    /// separate zones, `name` will be the zone name.
     pub name: String,
     pub version: SemverVersion,
     pub kind: ArtifactKind,
@@ -49,6 +60,11 @@ impl Artifact {
             version: self.version.clone(),
             kind: self.kind.clone(),
         }
+    }
+
+    /// Returns the artifact ID for this artifact without clones.
+    pub fn into_id(self) -> ArtifactId {
+        ArtifactId { name: self.name, version: self.version, kind: self.kind }
     }
 }
 
@@ -154,6 +170,40 @@ impl ArtifactKind {
 /// These artifact kinds are not stored anywhere, but are derived from stored
 /// kinds and used as internal identifiers.
 impl ArtifactKind {
+    /// Gimlet root of trust A slot image identifier.
+    ///
+    /// Derived from [`KnownArtifactKind::GimletRot`].
+    pub const GIMLET_ROT_IMAGE_A: Self =
+        Self::from_static("gimlet_rot_image_a");
+
+    /// Gimlet root of trust B slot image identifier.
+    ///
+    /// Derived from [`KnownArtifactKind::GimletRot`].
+    pub const GIMLET_ROT_IMAGE_B: Self =
+        Self::from_static("gimlet_rot_image_b");
+
+    /// PSC root of trust A slot image identifier.
+    ///
+    /// Derived from [`KnownArtifactKind::PscRot`].
+    pub const PSC_ROT_IMAGE_A: Self = Self::from_static("psc_rot_image_a");
+
+    /// PSC root of trust B slot image identifier.
+    ///
+    /// Derived from [`KnownArtifactKind::PscRot`].
+    pub const PSC_ROT_IMAGE_B: Self = Self::from_static("psc_rot_image_b");
+
+    /// Switch root of trust A slot image identifier.
+    ///
+    /// Derived from [`KnownArtifactKind::SwitchRot`].
+    pub const SWITCH_ROT_IMAGE_A: Self =
+        Self::from_static("switch_rot_image_a");
+
+    /// Switch root of trust B slot image identifier.
+    ///
+    /// Derived from [`KnownArtifactKind::SwitchRot`].
+    pub const SWITCH_ROT_IMAGE_B: Self =
+        Self::from_static("switch_rot_image_b");
+
     /// Host phase 1 identifier.
     ///
     /// Derived from [`KnownArtifactKind::Host`].
@@ -217,6 +267,12 @@ pub struct ArtifactHash(
     #[schemars(schema_with = "hex_schema::<32>")]
     pub [u8; 32],
 );
+
+impl AsRef<[u8]> for ArtifactHash {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
 
 impl fmt::Debug for ArtifactHash {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

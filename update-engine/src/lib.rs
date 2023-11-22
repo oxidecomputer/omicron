@@ -55,15 +55,18 @@
 //! 2. Receive an event stream from a source and turn it into nested events in
 //!    another source.
 
+mod buffer;
 mod context;
+pub mod display;
 mod engine;
-mod errors;
+pub mod errors;
 pub mod events;
 mod macros;
 mod spec;
 #[cfg(test)]
 mod test_utils;
 
+pub use buffer::*;
 pub use context::*;
 pub use engine::*;
 pub use spec::*;

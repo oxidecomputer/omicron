@@ -4,62 +4,16 @@
 
 use omicron_common::api::external;
 use omicron_common::api::internal::nexus::HostIdentifier;
+use omicron_common::api::internal::shared::NetworkInterface;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
-use uuid::Uuid;
-
-/// The type of network interface
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Eq,
-    PartialEq,
-    Ord,
-    PartialOrd,
-    Deserialize,
-    Serialize,
-    JsonSchema,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum NetworkInterfaceKind {
-    /// A vNIC attached to a guest instance
-    Instance { id: Uuid },
-    /// A vNIC associated with an internal service
-    Service { id: Uuid },
-}
-
-/// Information required to construct a virtual network interface
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct NetworkInterface {
-    pub id: Uuid,
-    pub kind: NetworkInterfaceKind,
-    pub name: external::Name,
-    pub ip: IpAddr,
-    pub mac: external::MacAddr,
-    pub subnet: external::IpNet,
-    pub vni: external::Vni,
-    pub primary: bool,
-    pub slot: u8,
-}
-
-/// An IP address and port range used for instance source NAT, i.e., making
-/// outbound network connections from guests or services.
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, JsonSchema)]
-pub struct SourceNatConfig {
-    /// The external address provided to the instance
-    pub ip: IpAddr,
-    /// The first port used for instance NAT, inclusive.
-    pub first_port: u16,
-    /// The last port used for instance NAT, also inclusive.
-    pub last_port: u16,
-}
 
 /// Update firewall rules for a VPC
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct VpcFirewallRulesEnsureBody {
+    pub vni: external::Vni,
     pub rules: Vec<VpcFirewallRule>,
 }
 
@@ -83,4 +37,39 @@ pub struct SetVirtualNetworkInterfaceHost {
     pub virtual_mac: external::MacAddr,
     pub physical_host_ip: Ipv6Addr,
     pub vni: external::Vni,
+}
+
+/// The data needed to identify a virtual IP for which a sled maintains an OPTE
+/// virtual-to-physical mapping such that that mapping can be deleted.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct DeleteVirtualNetworkInterfaceHost {
+    /// The virtual IP whose mapping should be deleted.
+    pub virtual_ip: IpAddr,
+
+    /// The VNI for the network containing the virtual IP whose mapping should
+    /// be deleted.
+    pub vni: external::Vni,
+}
+
+/// DHCP configuration for a port
+///
+/// Not present here: Hostname (DHCPv4 option 12; used in DHCPv6 option 39); we
+/// use `InstanceRuntimeState::hostname` for this value.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct DhcpConfig {
+    /// DNS servers to send to the instance
+    ///
+    /// (DHCPv4 option 6; DHCPv6 option 23)
+    pub dns_servers: Vec<IpAddr>,
+
+    /// DNS zone this instance's hostname belongs to (e.g. the `project.example`
+    /// part of `instance1.project.example`)
+    ///
+    /// (DHCPv4 option 15; used in DHCPv6 option 39)
+    pub host_domain: Option<String>,
+
+    /// DNS search domains
+    ///
+    /// (DHCPv4 option 119; DHCPv6 option 24)
+    pub search_domains: Vec<String>,
 }

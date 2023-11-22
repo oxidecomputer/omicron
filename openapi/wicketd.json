@@ -10,18 +10,149 @@
     "version": "0.0.1"
   },
   "paths": {
-    "/artifacts": {
+    "/abort-update/{type}/{slot}": {
+      "post": {
+        "summary": "Forcibly cancels a running update.",
+        "description": "This is a potentially dangerous operation, but one that is sometimes required. A machine reset might be required after this operation completes.",
+        "operationId": "post_abort_update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AbortUpdateOptions"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/artifacts-and-event-reports": {
       "get": {
-        "summary": "An endpoint used to report all available artifacts.",
+        "summary": "An endpoint used to report all available artifacts and event reports.",
         "description": "The order of the returned artifacts is unspecified, and may change between calls even if the total set of artifacts has not.",
-        "operationId": "get_artifacts",
+        "operationId": "get_artifacts_and_event_reports",
         "responses": {
           "200": {
             "description": "successful operation",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/GetArtifactsResponse"
+                  "$ref": "#/components/schemas/GetArtifactsAndEventReportsResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/baseboard": {
+      "get": {
+        "summary": "Report the configured baseboard details",
+        "operationId": "get_baseboard",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetBaseboardResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/bootstrap-sleds": {
+      "get": {
+        "summary": "Get wicketd's current view of all sleds visible on the bootstrap network.",
+        "operationId": "get_bootstrap_sleds",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BootstrapSledIps"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/clear-update-state": {
+      "post": {
+        "summary": "Resets update state for a sled.",
+        "description": "Use this to clear update state after a failed update.",
+        "operationId": "post_clear_update_state",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClearUpdateStateParams"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClearUpdateStateResponse"
                 }
               }
             }
@@ -116,6 +247,333 @@
         }
       }
     },
+    "/location": {
+      "get": {
+        "summary": "Report the identity of the sled and switch we're currently running on /",
+        "description": "connected to.",
+        "operationId": "get_location",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetLocationResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/preflight/uplink": {
+      "get": {
+        "summary": "An endpoint to get the report for the most recent (or still running)",
+        "description": "preflight uplink check.",
+        "operationId": "get_preflight_uplink_report",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventReportForGenericSpec"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "summary": "An endpoint to start a preflight check for uplink configuration.",
+        "operationId": "post_start_preflight_uplink_check",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreflightUplinkCheckOptions"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/rack-setup": {
+      "get": {
+        "summary": "Query current state of rack setup.",
+        "operationId": "get_rack_setup_state",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RackOperationStatus"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Run rack setup.",
+        "description": "Will return an error if not all of the rack setup configuration has been populated.",
+        "operationId": "post_run_rack_setup",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RackInitId"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Run rack reset.",
+        "operationId": "post_run_rack_reset",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RackResetId"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/rack-setup/config": {
+      "get": {
+        "summary": "Get the current status of the user-provided (or system-default-provided, in",
+        "description": "some cases) RSS configuration.",
+        "operationId": "get_rss_config",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentRssUserConfig"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "summary": "Update (a subset of) the current RSS configuration.",
+        "description": "Sensitive values (certificates and password hash) are not set through this endpoint.",
+        "operationId": "put_rss_config",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutRssUserConfigInsensitive"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Reset all RSS configuration to their default values.",
+        "operationId": "delete_rss_config",
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/rack-setup/config/cert": {
+      "post": {
+        "summary": "Add an external certificate.",
+        "description": "This must be paired with its private key. They may be posted in either order, but one cannot post two certs in a row (or two keys in a row).",
+        "operationId": "post_rss_config_cert",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "title": "String",
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CertificateUploadResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/rack-setup/config/key": {
+      "post": {
+        "summary": "Add the private key of an external certificate.",
+        "description": "This must be paired with its certificate. They may be posted in either order, but one cannot post two keys in a row (or two certs in a row).",
+        "operationId": "post_rss_config_key",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "title": "String",
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CertificateUploadResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/rack-setup/config/recovery-user-password-hash": {
+      "put": {
+        "summary": "Update the RSS config recovery silo user password hash.",
+        "operationId": "put_rss_config_recovery_user_password_hash",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutRssRecoveryUserPasswordHash"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/reload-config": {
+      "post": {
+        "summary": "An endpoint instructing wicketd to reload its SMF config properties.",
+        "description": "The only expected client of this endpoint is `curl` from wicketd's SMF `refresh` method, but other clients hitting it is harmless.",
+        "operationId": "post_reload_config",
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/repository": {
       "put": {
         "summary": "Upload a TUF repository to the server.",
@@ -146,20 +604,22 @@
       }
     },
     "/update": {
-      "get": {
-        "summary": "An endpoint to get the status of all updates being performed or recently",
-        "description": "completed on all SPs.",
-        "operationId": "get_update_all",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UpdateLogAll"
-                }
+      "post": {
+        "summary": "An endpoint to start updating one or more sleds, switches and PSCs.",
+        "operationId": "post_start_update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartUpdateParams"
               }
             }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -201,45 +661,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UpdateLog"
+                  "$ref": "#/components/schemas/EventReportForWicketdEngineSpec"
                 }
               }
             }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
-      "post": {
-        "summary": "An endpoint to start updating a sled.",
-        "operationId": "post_start_update",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "slot",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 0
-            }
-          },
-          {
-            "in": "path",
-            "name": "type",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/SpType"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -252,19 +677,47 @@
     }
   },
   "components": {
-    "responses": {
-      "Error": {
-        "description": "Error",
-        "content": {
-          "application/json": {
-            "schema": {
-              "$ref": "#/components/schemas/Error"
-            }
-          }
-        }
-      }
-    },
     "schemas": {
+      "AbortUpdateOptions": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "description": "The message to abort the update with.",
+            "type": "string"
+          },
+          "test_error": {
+            "nullable": true,
+            "description": "If passed in, fails the force cancel update operation with a simulated error.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UpdateTestError"
+              }
+            ]
+          }
+        },
+        "required": [
+          "message"
+        ]
+      },
+      "ArtifactHashId": {
+        "description": "A hash-based identifier for an artifact.\n\nSome places, e.g. the installinator, request artifacts by hash rather than by name and version. This type indicates that.",
+        "type": "object",
+        "properties": {
+          "hash": {
+            "description": "The hash of the artifact.",
+            "type": "string",
+            "format": "hex string (32 bytes)"
+          },
+          "kind": {
+            "description": "The kind of artifact this is.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "hash",
+          "kind"
+        ]
+      },
       "ArtifactId": {
         "description": "An identifier for an artifact.\n\nThe kind is [`ArtifactKind`], indicating that it might represent an artifact whose kind is unknown.",
         "type": "object",
@@ -292,60 +745,422 @@
           "version"
         ]
       },
-      "CurrentProgress": {
+      "Baseboard": {
+        "description": "Describes properties that should uniquely identify a Gimlet.",
         "oneOf": [
           {
             "type": "object",
             "properties": {
-              "data": {
-                "description": "The kind of event this is.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/ProgressEventKindForWicketdEngineSpec"
-                  }
-                ]
+              "identifier": {
+                "type": "string"
               },
-              "execution_id": {
-                "description": "The execution ID.",
-                "type": "string",
-                "format": "uuid"
+              "model": {
+                "type": "string"
               },
-              "kind": {
+              "revision": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "type": {
                 "type": "string",
                 "enum": [
-                  "progress_event"
-                ]
-              },
-              "total_elapsed": {
-                "description": "Total time elapsed since the start of execution.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/Duration"
-                  }
+                  "gimlet"
                 ]
               }
             },
             "required": [
-              "data",
-              "execution_id",
-              "kind",
-              "total_elapsed"
+              "identifier",
+              "model",
+              "revision",
+              "type"
             ]
           },
           {
             "type": "object",
             "properties": {
-              "kind": {
+              "type": {
                 "type": "string",
                 "enum": [
-                  "waiting_for_progress_event"
+                  "unknown"
                 ]
               }
             },
             "required": [
-              "kind"
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "identifier": {
+                "type": "string"
+              },
+              "model": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "pc"
+                ]
+              }
+            },
+            "required": [
+              "identifier",
+              "model",
+              "type"
             ]
           }
+        ]
+      },
+      "BgpConfig": {
+        "type": "object",
+        "properties": {
+          "asn": {
+            "description": "The autonomous system number for the BGP configuration.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "originate": {
+            "description": "The set of prefixes for the BGP router to originate.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Ipv4Network"
+            }
+          }
+        },
+        "required": [
+          "asn",
+          "originate"
+        ]
+      },
+      "BgpPeerConfig": {
+        "type": "object",
+        "properties": {
+          "addr": {
+            "description": "Address of the peer.",
+            "type": "string",
+            "format": "ipv4"
+          },
+          "asn": {
+            "description": "The autonomous sysetm number of the router the peer belongs to.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "connect_retry": {
+            "nullable": true,
+            "description": "The interval in seconds between peer connection retry attempts.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "delay_open": {
+            "nullable": true,
+            "description": "How long to delay sending open messages to a peer. In seconds.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "hold_time": {
+            "nullable": true,
+            "description": "How long to keep a session alive without a keepalive in seconds. Defaults to 6.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "idle_hold_time": {
+            "nullable": true,
+            "description": "How long to keep a peer in idle after a state machine reset in seconds.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "keepalive": {
+            "nullable": true,
+            "description": "The interval to send keepalive messages at.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "port": {
+            "description": "Switch port the peer is reachable on.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "addr",
+          "asn",
+          "port"
+        ]
+      },
+      "BootstrapSledDescription": {
+        "type": "object",
+        "properties": {
+          "baseboard": {
+            "$ref": "#/components/schemas/Baseboard"
+          },
+          "bootstrap_ip": {
+            "nullable": true,
+            "description": "The sled's bootstrap address, if the host is on and we've discovered it on the bootstrap network.",
+            "type": "string",
+            "format": "ipv6"
+          },
+          "id": {
+            "$ref": "#/components/schemas/SpIdentifier"
+          }
+        },
+        "required": [
+          "baseboard",
+          "id"
+        ]
+      },
+      "BootstrapSledIp": {
+        "type": "object",
+        "properties": {
+          "baseboard": {
+            "$ref": "#/components/schemas/Baseboard"
+          },
+          "ip": {
+            "type": "string",
+            "format": "ipv6"
+          }
+        },
+        "required": [
+          "baseboard",
+          "ip"
+        ]
+      },
+      "BootstrapSledIps": {
+        "type": "object",
+        "properties": {
+          "sleds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BootstrapSledIp"
+            }
+          }
+        },
+        "required": [
+          "sleds"
+        ]
+      },
+      "CertificateUploadResponse": {
+        "oneOf": [
+          {
+            "description": "The key has been uploaded, but we're waiting on its corresponding certificate chain.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "waiting_on_cert"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "description": "The cert chain has been uploaded, but we're waiting on its corresponding private key.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "waiting_on_key"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "description": "A cert chain and its key have been accepted.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "cert_key_accepted"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "description": "A cert chain and its key are valid, but have already been uploaded.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "cert_key_duplicate_ignored"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          }
+        ]
+      },
+      "ClearUpdateStateOptions": {
+        "type": "object",
+        "properties": {
+          "test_error": {
+            "nullable": true,
+            "description": "If passed in, fails the clear update state operation with a simulated error.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UpdateTestError"
+              }
+            ]
+          }
+        }
+      },
+      "ClearUpdateStateParams": {
+        "type": "object",
+        "properties": {
+          "options": {
+            "description": "Options for clearing update state",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ClearUpdateStateOptions"
+              }
+            ]
+          },
+          "targets": {
+            "description": "The SP identifiers to clear the update state for. Must be non-empty.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpIdentifier"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "options",
+          "targets"
+        ]
+      },
+      "ClearUpdateStateResponse": {
+        "type": "object",
+        "properties": {
+          "cleared": {
+            "description": "The SPs for which update data was cleared.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpIdentifier"
+            },
+            "uniqueItems": true
+          },
+          "no_update_data": {
+            "description": "The SPs that had no update state to clear.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpIdentifier"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "cleared",
+          "no_update_data"
+        ]
+      },
+      "CurrentRssUserConfig": {
+        "type": "object",
+        "properties": {
+          "insensitive": {
+            "$ref": "#/components/schemas/CurrentRssUserConfigInsensitive"
+          },
+          "sensitive": {
+            "$ref": "#/components/schemas/CurrentRssUserConfigSensitive"
+          }
+        },
+        "required": [
+          "insensitive",
+          "sensitive"
+        ]
+      },
+      "CurrentRssUserConfigInsensitive": {
+        "type": "object",
+        "properties": {
+          "bootstrap_sleds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BootstrapSledDescription"
+            },
+            "uniqueItems": true
+          },
+          "dns_servers": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "ip"
+            }
+          },
+          "external_dns_ips": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "ip"
+            }
+          },
+          "external_dns_zone_name": {
+            "type": "string"
+          },
+          "internal_services_ip_pool_ranges": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpRange"
+            }
+          },
+          "ntp_servers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "rack_network_config": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RackNetworkConfigV1"
+              }
+            ]
+          }
+        },
+        "required": [
+          "bootstrap_sleds",
+          "dns_servers",
+          "external_dns_ips",
+          "external_dns_zone_name",
+          "internal_services_ip_pool_ranges",
+          "ntp_servers"
+        ]
+      },
+      "CurrentRssUserConfigSensitive": {
+        "type": "object",
+        "properties": {
+          "num_external_certificates": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "recovery_silo_password_set": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "num_external_certificates",
+          "recovery_silo_password_set"
         ]
       },
       "Duration": {
@@ -386,14 +1201,98 @@
           "request_id"
         ]
       },
-      "GetArtifactsResponse": {
+      "EventReportForGenericSpec": {
+        "description": "A report produced from an [`EventBuffer`](crate::EventBuffer).\n\nRemote reports can be passed into a [`StepContext`](crate::StepContext), in which case they show up as nested events.",
+        "type": "object",
+        "properties": {
+          "last_seen": {
+            "nullable": true,
+            "description": "The last event seen.\n\n`last_seen` can be used to retrieve deltas of events.",
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "progress_events": {
+            "description": "A list of progress events, or whether we're currently waiting for a progress event.\n\nCurrently, this produces one progress event for each top-level and nested event in progress.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProgressEventForGenericSpec"
+            }
+          },
+          "root_execution_id": {
+            "nullable": true,
+            "description": "The root execution ID for this report.\n\nEach report has a root execution ID, which ties together all step and progress events. This is always filled out if the list of step events is non-empty.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "step_events": {
+            "description": "A list of step events.\n\nStep events include success and failure events.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StepEventForGenericSpec"
+            }
+          }
+        },
+        "required": [
+          "progress_events",
+          "step_events"
+        ]
+      },
+      "EventReportForWicketdEngineSpec": {
+        "description": "A report produced from an [`EventBuffer`](crate::EventBuffer).\n\nRemote reports can be passed into a [`StepContext`](crate::StepContext), in which case they show up as nested events.",
+        "type": "object",
+        "properties": {
+          "last_seen": {
+            "nullable": true,
+            "description": "The last event seen.\n\n`last_seen` can be used to retrieve deltas of events.",
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "progress_events": {
+            "description": "A list of progress events, or whether we're currently waiting for a progress event.\n\nCurrently, this produces one progress event for each top-level and nested event in progress.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProgressEventForWicketdEngineSpec"
+            }
+          },
+          "root_execution_id": {
+            "nullable": true,
+            "description": "The root execution ID for this report.\n\nEach report has a root execution ID, which ties together all step and progress events. This is always filled out if the list of step events is non-empty.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "step_events": {
+            "description": "A list of step events.\n\nStep events include success and failure events.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StepEventForWicketdEngineSpec"
+            }
+          }
+        },
+        "required": [
+          "progress_events",
+          "step_events"
+        ]
+      },
+      "GetArtifactsAndEventReportsResponse": {
         "description": "The response to a `get_artifacts` call: the system version, and the list of all artifacts currently held by wicketd.",
         "type": "object",
         "properties": {
           "artifacts": {
+            "description": "Map of artifacts we ingested from the most-recently-uploaded TUF repository to a list of artifacts we're serving over the bootstrap network. In some cases the list of artifacts being served will have length 1 (when we're serving the artifact directly); in other cases the artifact in the TUF repo contains multiple nested artifacts inside it (e.g., RoT artifacts contain both A and B images), and we serve the list of extracted artifacts but not the original combination.\n\nConceptually, this is a `BTreeMap<ArtifactId, Vec<ArtifactHashId>>`, but JSON requires string keys for maps, so we give back a vec of pairs instead.",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/ArtifactId"
+              "$ref": "#/components/schemas/InstallableArtifacts"
+            }
+          },
+          "event_reports": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/components/schemas/EventReportForWicketdEngineSpec"
+              }
             }
           },
           "system_version": {
@@ -406,8 +1305,22 @@
           }
         },
         "required": [
-          "artifacts"
+          "artifacts",
+          "event_reports"
         ]
+      },
+      "GetBaseboardResponse": {
+        "type": "object",
+        "properties": {
+          "baseboard": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Baseboard"
+              }
+            ]
+          }
+        }
       },
       "GetInventoryParams": {
         "type": "object",
@@ -473,23 +1386,240 @@
           }
         ]
       },
-      "ImageVersion": {
+      "GetLocationResponse": {
+        "description": "All the fields of this response are optional, because it's possible we don't know any of them (yet) if MGS has not yet finished discovering its location or (ever) if we're running in a dev environment that doesn't support MGS-location / baseboard mapping.",
         "type": "object",
         "properties": {
-          "epoch": {
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
+          "sled_baseboard": {
+            "nullable": true,
+            "description": "The baseboard of our sled (where wicketd is running).",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Baseboard"
+              }
+            ]
           },
-          "version": {
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
+          "sled_id": {
+            "nullable": true,
+            "description": "The identity of our sled (where wicketd is running).",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpIdentifier"
+              }
+            ]
+          },
+          "switch_baseboard": {
+            "nullable": true,
+            "description": "The baseboard of the switch our sled is physically connected to.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Baseboard"
+              }
+            ]
+          },
+          "switch_id": {
+            "nullable": true,
+            "description": "The identity of the switch our sled is physically connected to.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpIdentifier"
+              }
+            ]
+          }
+        }
+      },
+      "InstallableArtifacts": {
+        "type": "object",
+        "properties": {
+          "artifact_id": {
+            "$ref": "#/components/schemas/ArtifactId"
+          },
+          "installable": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ArtifactHashId"
+            }
           }
         },
         "required": [
-          "epoch",
-          "version"
+          "artifact_id",
+          "installable"
+        ]
+      },
+      "IpNetwork": {
+        "oneOf": [
+          {
+            "title": "v4",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv4Network"
+              }
+            ]
+          },
+          {
+            "title": "v6",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv6Network"
+              }
+            ]
+          }
+        ]
+      },
+      "IpRange": {
+        "oneOf": [
+          {
+            "title": "v4",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv4Range"
+              }
+            ]
+          },
+          {
+            "title": "v6",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv6Range"
+              }
+            ]
+          }
+        ]
+      },
+      "Ipv4Network": {
+        "type": "string",
+        "pattern": "^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\/(3[0-2]|[0-2]?[0-9])$"
+      },
+      "Ipv4Range": {
+        "description": "A non-decreasing IPv4 address range, inclusive of both ends.\n\nThe first address must be less than or equal to the last address.",
+        "type": "object",
+        "properties": {
+          "first": {
+            "type": "string",
+            "format": "ipv4"
+          },
+          "last": {
+            "type": "string",
+            "format": "ipv4"
+          }
+        },
+        "required": [
+          "first",
+          "last"
+        ]
+      },
+      "Ipv6Network": {
+        "type": "string",
+        "pattern": "^(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\")[/](12[0-8]|1[0-1][0-9]|[0-9]?[0-9])$"
+      },
+      "Ipv6Range": {
+        "description": "A non-decreasing IPv6 address range, inclusive of both ends.\n\nThe first address must be less than or equal to the last address.",
+        "type": "object",
+        "properties": {
+          "first": {
+            "type": "string",
+            "format": "ipv6"
+          },
+          "last": {
+            "type": "string",
+            "format": "ipv6"
+          }
+        },
+        "required": [
+          "first",
+          "last"
+        ]
+      },
+      "NewPasswordHash": {
+        "title": "A password hash in PHC string format",
+        "description": "Password hashes must be in PHC (Password Hashing Competition) string format.  Passwords must be hashed with Argon2id.  Password hashes may be rejected if the parameters appear not to be secure enough.",
+        "type": "string"
+      },
+      "PortConfigV1": {
+        "type": "object",
+        "properties": {
+          "addresses": {
+            "description": "This port's addresses.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpNetwork"
+            }
+          },
+          "bgp_peers": {
+            "description": "BGP peers on this port",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BgpPeerConfig"
+            }
+          },
+          "port": {
+            "description": "Nmae of the port this config applies to.",
+            "type": "string"
+          },
+          "routes": {
+            "description": "The set of routes associated with this port.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouteConfig"
+            }
+          },
+          "switch": {
+            "description": "Switch the port belongs to.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SwitchLocation"
+              }
+            ]
+          },
+          "uplink_port_fec": {
+            "description": "Port forward error correction type.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PortFec"
+              }
+            ]
+          },
+          "uplink_port_speed": {
+            "description": "Port speed.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PortSpeed"
+              }
+            ]
+          }
+        },
+        "required": [
+          "addresses",
+          "bgp_peers",
+          "port",
+          "routes",
+          "switch",
+          "uplink_port_fec",
+          "uplink_port_speed"
+        ]
+      },
+      "PortFec": {
+        "description": "Switchport FEC options",
+        "type": "string",
+        "enum": [
+          "firecode",
+          "none",
+          "rs"
+        ]
+      },
+      "PortSpeed": {
+        "description": "Switchport Speed options",
+        "type": "string",
+        "enum": [
+          "speed0_g",
+          "speed1_g",
+          "speed10_g",
+          "speed25_g",
+          "speed40_g",
+          "speed50_g",
+          "speed100_g",
+          "speed200_g",
+          "speed400_g"
         ]
       },
       "PowerState": {
@@ -501,24 +1631,42 @@
           "A2"
         ]
       },
+      "PreflightUplinkCheckOptions": {
+        "description": "Options provided to the preflight uplink check.",
+        "type": "object",
+        "properties": {
+          "dns_name_to_query": {
+            "nullable": true,
+            "description": "DNS name to query.",
+            "type": "string"
+          }
+        }
+      },
       "ProgressCounter": {
         "description": "Current progress.\n\nBoth `current` and `total` are abstract counters. These counters are often a number of bytes. There is no guarantee that the counter won't go back in subsequent events; that can happen e.g. if a fetch happens from multiple peers within a single attempt.",
         "type": "object",
         "properties": {
           "current": {
+            "description": "The current progress.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
           },
           "total": {
             "nullable": true,
+            "description": "The total progress.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
+          },
+          "units": {
+            "description": "Progress units.",
+            "type": "string"
           }
         },
         "required": [
-          "current"
+          "current",
+          "units"
         ]
       },
       "ProgressEventForGenericSpec": {
@@ -537,6 +1685,10 @@
             "type": "string",
             "format": "uuid"
           },
+          "spec": {
+            "description": "The specification that this event belongs to.\n\nThis is typically the name of the type `S` for which `StepSpec` is implemented.\n\nThis can be used with `Self::from_generic` to deserialize generic metadata.",
+            "type": "string"
+          },
           "total_elapsed": {
             "description": "Total time elapsed since the start of execution.",
             "allOf": [
@@ -549,11 +1701,97 @@
         "required": [
           "data",
           "execution_id",
+          "spec",
+          "total_elapsed"
+        ]
+      },
+      "ProgressEventForWicketdEngineSpec": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "description": "The kind of event this is.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProgressEventKindForWicketdEngineSpec"
+              }
+            ]
+          },
+          "execution_id": {
+            "description": "The execution ID.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "spec": {
+            "description": "The specification that this event belongs to.\n\nThis is typically the name of the type `S` for which `StepSpec` is implemented.\n\nThis can be used with `Self::from_generic` to deserialize generic metadata.",
+            "type": "string"
+          },
+          "total_elapsed": {
+            "description": "Total time elapsed since the start of execution.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          }
+        },
+        "required": [
+          "data",
+          "execution_id",
+          "spec",
           "total_elapsed"
         ]
       },
       "ProgressEventKindForGenericSpec": {
         "oneOf": [
+          {
+            "description": "The update engine is waiting for a progress message.\n\nThe update engine sends this message immediately after a [`StepEvent`] corresponding to a new step.",
+            "type": "object",
+            "properties": {
+              "attempt": {
+                "description": "The attempt number currently being executed.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "attempt_elapsed": {
+                "description": "Total time elapsed since the start of the attempt.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "waiting_for_progress"
+                ]
+              },
+              "step": {
+                "description": "Information about the step.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForGenericSpec"
+                  }
+                ]
+              },
+              "step_elapsed": {
+                "description": "Total time elapsed since the start of the step. Includes prior attempts.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "attempt",
+              "attempt_elapsed",
+              "kind",
+              "step",
+              "step_elapsed"
+            ]
+          },
           {
             "type": "object",
             "properties": {
@@ -692,6 +1930,55 @@
       "ProgressEventKindForWicketdEngineSpec": {
         "oneOf": [
           {
+            "description": "The update engine is waiting for a progress message.\n\nThe update engine sends this message immediately after a [`StepEvent`] corresponding to a new step.",
+            "type": "object",
+            "properties": {
+              "attempt": {
+                "description": "The attempt number currently being executed.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "attempt_elapsed": {
+                "description": "Total time elapsed since the start of the attempt.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "waiting_for_progress"
+                ]
+              },
+              "step": {
+                "description": "Information about the step.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForWicketdEngineSpec"
+                  }
+                ]
+              },
+              "step_elapsed": {
+                "description": "Total time elapsed since the start of the step. Includes prior attempts.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "attempt",
+              "attempt_elapsed",
+              "kind",
+              "step",
+              "step_elapsed"
+            ]
+          },
+          {
             "type": "object",
             "properties": {
               "attempt": {
@@ -826,6 +2113,288 @@
           }
         ]
       },
+      "PutRssRecoveryUserPasswordHash": {
+        "type": "object",
+        "properties": {
+          "hash": {
+            "$ref": "#/components/schemas/NewPasswordHash"
+          }
+        },
+        "required": [
+          "hash"
+        ]
+      },
+      "PutRssUserConfigInsensitive": {
+        "type": "object",
+        "properties": {
+          "bootstrap_sleds": {
+            "description": "List of slot numbers only.\n\n`wicketd` will map this back to sleds with the correct `SpIdentifier` based on the `bootstrap_sleds` it provides in `CurrentRssUserConfigInsensitive`.",
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "uniqueItems": true
+          },
+          "dns_servers": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "ip"
+            }
+          },
+          "external_dns_ips": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "ip"
+            }
+          },
+          "external_dns_zone_name": {
+            "type": "string"
+          },
+          "internal_services_ip_pool_ranges": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpRange"
+            }
+          },
+          "ntp_servers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "rack_network_config": {
+            "$ref": "#/components/schemas/RackNetworkConfigV1"
+          }
+        },
+        "required": [
+          "bootstrap_sleds",
+          "dns_servers",
+          "external_dns_ips",
+          "external_dns_zone_name",
+          "internal_services_ip_pool_ranges",
+          "ntp_servers",
+          "rack_network_config"
+        ]
+      },
+      "RackInitId": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "RackNetworkConfigV1": {
+        "description": "Initial network configuration",
+        "type": "object",
+        "properties": {
+          "bgp": {
+            "description": "BGP configurations for connecting the rack to external networks",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BgpConfig"
+            }
+          },
+          "infra_ip_first": {
+            "description": "First ip address to be used for configuring network infrastructure",
+            "type": "string",
+            "format": "ipv4"
+          },
+          "infra_ip_last": {
+            "description": "Last ip address to be used for configuring network infrastructure",
+            "type": "string",
+            "format": "ipv4"
+          },
+          "ports": {
+            "description": "Uplinks for connecting the rack to external networks",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PortConfigV1"
+            }
+          },
+          "rack_subnet": {
+            "$ref": "#/components/schemas/Ipv6Network"
+          }
+        },
+        "required": [
+          "bgp",
+          "infra_ip_first",
+          "infra_ip_last",
+          "ports",
+          "rack_subnet"
+        ]
+      },
+      "RackOperationStatus": {
+        "description": "Current status of any rack-level operation being performed by this bootstrap agent.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/RackInitId"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "initializing"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "status"
+            ]
+          },
+          {
+            "description": "`id` will be none if the rack was already initialized on startup.",
+            "type": "object",
+            "properties": {
+              "id": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RackInitId"
+                  }
+                ]
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "initialized"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/RackInitId"
+              },
+              "message": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "initialization_failed"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "message",
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/RackInitId"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "initialization_panicked"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/RackResetId"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "resetting"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "status"
+            ]
+          },
+          {
+            "description": "`reset_id` will be None if the rack is in an uninitialized-on-startup, or Some if it is in an uninitialized state due to a reset operation completing.",
+            "type": "object",
+            "properties": {
+              "reset_id": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RackResetId"
+                  }
+                ]
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "uninitialized"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/RackResetId"
+              },
+              "message": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "reset_failed"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "message",
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/RackResetId"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "reset_panicked"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "status"
+            ]
+          }
+        ]
+      },
+      "RackResetId": {
+        "type": "string",
+        "format": "uuid"
+      },
       "RackV1Inventory": {
         "description": "The current state of the v1 Rack as known to wicketd",
         "type": "object",
@@ -841,26 +2410,22 @@
           "sps"
         ]
       },
-      "RotImageDetails": {
-        "type": "object",
-        "properties": {
-          "digest": {
-            "type": "string"
-          },
-          "version": {
-            "$ref": "#/components/schemas/ImageVersion"
-          }
-        },
-        "required": [
-          "digest",
-          "version"
-        ]
-      },
       "RotInventory": {
         "description": "RoT-related data that isn't already supplied in [`SpState`].",
         "type": "object",
         "properties": {
-          "caboose": {
+          "active": {
+            "$ref": "#/components/schemas/RotSlot"
+          },
+          "caboose_a": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpComponentCaboose"
+              }
+            ]
+          },
+          "caboose_b": {
             "nullable": true,
             "allOf": [
               {
@@ -868,7 +2433,10 @@
               }
             ]
           }
-        }
+        },
+        "required": [
+          "active"
+        ]
       },
       "RotSlot": {
         "oneOf": [
@@ -910,31 +2478,43 @@
               "active": {
                 "$ref": "#/components/schemas/RotSlot"
               },
-              "slot_a": {
+              "pending_persistent_boot_preference": {
                 "nullable": true,
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/RotImageDetails"
+                    "$ref": "#/components/schemas/RotSlot"
                   }
                 ]
               },
-              "slot_b": {
+              "persistent_boot_preference": {
+                "$ref": "#/components/schemas/RotSlot"
+              },
+              "slot_a_sha3_256_digest": {
                 "nullable": true,
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/RotImageDetails"
-                  }
-                ]
+                "type": "string"
+              },
+              "slot_b_sha3_256_digest": {
+                "nullable": true,
+                "type": "string"
               },
               "state": {
                 "type": "string",
                 "enum": [
                   "enabled"
                 ]
+              },
+              "transient_boot_preference": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotSlot"
+                  }
+                ]
               }
             },
             "required": [
               "active",
+              "persistent_boot_preference",
               "state"
             ]
           },
@@ -958,6 +2538,28 @@
           }
         ]
       },
+      "RouteConfig": {
+        "type": "object",
+        "properties": {
+          "destination": {
+            "description": "The destination of the route.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpNetwork"
+              }
+            ]
+          },
+          "nexthop": {
+            "description": "The nexthop/gateway address.",
+            "type": "string",
+            "format": "ip"
+          }
+        },
+        "required": [
+          "destination",
+          "nexthop"
+        ]
+      },
       "SemverVersion": {
         "type": "string",
         "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
@@ -975,14 +2577,14 @@
             "type": "string"
           },
           "version": {
-            "nullable": true,
             "type": "string"
           }
         },
         "required": [
           "board",
           "git_commit",
-          "name"
+          "name",
+          "version"
         ]
       },
       "SpComponentInfo": {
@@ -1074,14 +2676,6 @@
               "error"
             ]
           }
-        ]
-      },
-      "SpComponentUpdateStage": {
-        "type": "string",
-        "enum": [
-          "sending",
-          "preparing",
-          "writing"
         ]
       },
       "SpIdentifier": {
@@ -1237,7 +2831,15 @@
         "description": "SP-related data",
         "type": "object",
         "properties": {
-          "caboose": {
+          "caboose_active": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpComponentCaboose"
+              }
+            ]
+          },
+          "caboose_inactive": {
             "nullable": true,
             "allOf": [
               {
@@ -1264,7 +2866,12 @@
             ]
           },
           "rot": {
-            "$ref": "#/components/schemas/RotInventory"
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RotInventory"
+              }
+            ]
           },
           "state": {
             "nullable": true,
@@ -1276,8 +2883,7 @@
           }
         },
         "required": [
-          "id",
-          "rot"
+          "id"
         ]
       },
       "SpState": {
@@ -1289,7 +2895,9 @@
               "type": "integer",
               "format": "uint8",
               "minimum": 0
-            }
+            },
+            "minItems": 6,
+            "maxItems": 6
           },
           "hubris_archive_id": {
             "type": "string"
@@ -1310,9 +2918,6 @@
           },
           "serial_number": {
             "type": "string"
-          },
-          "version": {
-            "$ref": "#/components/schemas/ImageVersion"
           }
         },
         "required": [
@@ -1322,8 +2927,7 @@
           "power_state",
           "revision",
           "rot",
-          "serial_number",
-          "version"
+          "serial_number"
         ]
       },
       "SpType": {
@@ -1332,6 +2936,82 @@
           "sled",
           "power",
           "switch"
+        ]
+      },
+      "StartUpdateOptions": {
+        "type": "object",
+        "properties": {
+          "skip_rot_version_check": {
+            "description": "If true, skip the check on the current RoT version and always update it regardless of whether the update appears to be neeeded.",
+            "type": "boolean"
+          },
+          "skip_sp_version_check": {
+            "description": "If true, skip the check on the current SP version and always update it regardless of whether the update appears to be neeeded.",
+            "type": "boolean"
+          },
+          "test_error": {
+            "nullable": true,
+            "description": "If passed in, fails the update with a simulated error.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UpdateTestError"
+              }
+            ]
+          },
+          "test_simulate_rot_result": {
+            "nullable": true,
+            "description": "If passed in, simulates a result for the RoT update.\n\nThis is used for testing.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UpdateSimulatedResult"
+              }
+            ]
+          },
+          "test_simulate_sp_result": {
+            "nullable": true,
+            "description": "If passed in, simulates a result for the SP update.\n\nThis is used for testing.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UpdateSimulatedResult"
+              }
+            ]
+          },
+          "test_step_seconds": {
+            "nullable": true,
+            "description": "If passed in, creates a test step that lasts these many seconds long.\n\nThis is used for testing.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "skip_rot_version_check",
+          "skip_sp_version_check"
+        ]
+      },
+      "StartUpdateParams": {
+        "type": "object",
+        "properties": {
+          "options": {
+            "description": "Options for the update.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/StartUpdateOptions"
+              }
+            ]
+          },
+          "targets": {
+            "description": "The SP identifiers to start the update with. Must be non-empty.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpIdentifier"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "options",
+          "targets"
         ]
       },
       "StepComponentSummaryForGenericSpec": {
@@ -1386,10 +3066,20 @@
               }
             ]
           },
+          "event_index": {
+            "description": "A monotonically increasing index for this `StepEvent`.",
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
           "execution_id": {
             "description": "The execution ID.",
             "type": "string",
             "format": "uuid"
+          },
+          "spec": {
+            "description": "The specification that this event belongs to.\n\nThis is typically the name of the type `S` for which `StepSpec` is implemented.\n\nThis can be used along with `Self::from_generic` to identify which specification to deserialize generic metadata against. For example:\n\n```rust,ignore if event.spec == \"MySpec\" { // event is likely generated from a MySpec engine. let event = Event::<MySpec>::from_generic(event)?; // ... } ```",
+            "type": "string"
           },
           "total_elapsed": {
             "description": "Total time elapsed since the start of execution.",
@@ -1402,7 +3092,9 @@
         },
         "required": [
           "data",
+          "event_index",
           "execution_id",
+          "spec",
           "total_elapsed"
         ]
       },
@@ -1417,10 +3109,20 @@
               }
             ]
           },
+          "event_index": {
+            "description": "A monotonically increasing index for this `StepEvent`.",
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
           "execution_id": {
             "description": "The execution ID.",
             "type": "string",
             "format": "uuid"
+          },
+          "spec": {
+            "description": "The specification that this event belongs to.\n\nThis is typically the name of the type `S` for which `StepSpec` is implemented.\n\nThis can be used along with `Self::from_generic` to identify which specification to deserialize generic metadata against. For example:\n\n```rust,ignore if event.spec == \"MySpec\" { // event is likely generated from a MySpec engine. let event = Event::<MySpec>::from_generic(event)?; // ... } ```",
+            "type": "string"
           },
           "total_elapsed": {
             "description": "Total time elapsed since the start of execution.",
@@ -1433,7 +3135,9 @@
         },
         "required": [
           "data",
+          "event_index",
           "execution_id",
+          "spec",
           "total_elapsed"
         ]
       },
@@ -1791,6 +3495,60 @@
               "message",
               "step_elapsed",
               "total_attempts"
+            ]
+          },
+          {
+            "description": "Execution aborted by an external user.\n\nThis is a terminal event: it is guaranteed that no more events will be seen after this one.",
+            "type": "object",
+            "properties": {
+              "aborted_step": {
+                "description": "Information about the step that was running at the time execution was aborted.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForGenericSpec"
+                  }
+                ]
+              },
+              "attempt": {
+                "description": "The attempt that was running at the time the step was aborted.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "attempt_elapsed": {
+                "description": "The time it took for this attempt to complete.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "execution_aborted"
+                ]
+              },
+              "message": {
+                "description": "A message associated with the abort.",
+                "type": "string"
+              },
+              "step_elapsed": {
+                "description": "Total time elapsed since the start of the step. Includes prior attempts.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "aborted_step",
+              "attempt",
+              "attempt_elapsed",
+              "kind",
+              "message",
+              "step_elapsed"
             ]
           },
           {
@@ -2225,6 +3983,60 @@
             ]
           },
           {
+            "description": "Execution aborted by an external user.\n\nThis is a terminal event: it is guaranteed that no more events will be seen after this one.",
+            "type": "object",
+            "properties": {
+              "aborted_step": {
+                "description": "Information about the step that was running at the time execution was aborted.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForWicketdEngineSpec"
+                  }
+                ]
+              },
+              "attempt": {
+                "description": "The attempt that was running at the time the step was aborted.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "attempt_elapsed": {
+                "description": "The time it took for this attempt to complete.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "execution_aborted"
+                ]
+              },
+              "message": {
+                "description": "A message associated with the abort.",
+                "type": "string"
+              },
+              "step_elapsed": {
+                "description": "Total time elapsed since the start of the step. Includes prior attempts.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "aborted_step",
+              "attempt",
+              "attempt_elapsed",
+              "kind",
+              "message",
+              "step_elapsed"
+            ]
+          },
+          {
             "description": "A nested step event occurred.",
             "type": "object",
             "properties": {
@@ -2447,13 +4259,18 @@
                   "success"
                 ]
               },
+              "message": {
+                "nullable": true,
+                "description": "An optional message associated with this step.",
+                "type": "string"
+              },
               "metadata": {
-                "description": "Completion metadata associated with the step."
+                "nullable": true,
+                "description": "Optional completion metadata associated with the step."
               }
             },
             "required": [
-              "kind",
-              "metadata"
+              "kind"
             ]
           },
           {
@@ -2471,13 +4288,13 @@
                 "type": "string"
               },
               "metadata": {
-                "description": "Completion metadata associated with the step."
+                "nullable": true,
+                "description": "Optional completion metadata associated with the step."
               }
             },
             "required": [
               "kind",
-              "message",
-              "metadata"
+              "message"
             ]
           },
           {
@@ -2491,17 +4308,17 @@
                 ]
               },
               "message": {
-                "description": "Metadata associated with the step.",
+                "description": "Message associated with the skip.",
                 "type": "string"
               },
               "metadata": {
-                "description": "Skipped metadata associated with the step."
+                "nullable": true,
+                "description": "Optional metadata associated with the skip."
               }
             },
             "required": [
               "kind",
-              "message",
-              "metadata"
+              "message"
             ]
           }
         ]
@@ -2518,13 +4335,18 @@
                   "success"
                 ]
               },
+              "message": {
+                "nullable": true,
+                "description": "An optional message associated with this step.",
+                "type": "string"
+              },
               "metadata": {
-                "description": "Completion metadata associated with the step."
+                "nullable": true,
+                "description": "Optional completion metadata associated with the step."
               }
             },
             "required": [
-              "kind",
-              "metadata"
+              "kind"
             ]
           },
           {
@@ -2542,13 +4364,13 @@
                 "type": "string"
               },
               "metadata": {
-                "description": "Completion metadata associated with the step."
+                "nullable": true,
+                "description": "Optional completion metadata associated with the step."
               }
             },
             "required": [
               "kind",
-              "message",
-              "metadata"
+              "message"
             ]
           },
           {
@@ -2562,17 +4384,36 @@
                 ]
               },
               "message": {
-                "description": "Metadata associated with the step.",
+                "description": "Message associated with the skip.",
                 "type": "string"
               },
               "metadata": {
-                "description": "Skipped metadata associated with the step."
+                "nullable": true,
+                "description": "Optional metadata associated with the skip."
               }
             },
             "required": [
               "kind",
-              "message",
-              "metadata"
+              "message"
+            ]
+          }
+        ]
+      },
+      "SwitchLocation": {
+        "description": "Identifies switch physical location",
+        "oneOf": [
+          {
+            "description": "Switch in upper slot",
+            "type": "string",
+            "enum": [
+              "switch0"
+            ]
+          },
+          {
+            "description": "Switch in lower slot",
+            "type": "string",
+            "enum": [
+              "switch1"
             ]
           }
         ]
@@ -2623,48 +4464,32 @@
           }
         ]
       },
-      "UpdateLog": {
-        "type": "object",
-        "properties": {
-          "current": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/CurrentProgress"
-              }
-            ]
-          },
-          "events": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/StepEventForWicketdEngineSpec"
-            }
-          }
-        },
-        "required": [
-          "events"
-        ]
-      },
-      "UpdateLogAll": {
-        "description": "The response to a `get_update_all` call: the list of all updates (in-flight or completed) known by wicketd.",
-        "type": "object",
-        "properties": {
-          "sps": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "object",
-              "additionalProperties": {
-                "$ref": "#/components/schemas/UpdateLog"
-              }
-            }
-          }
-        },
-        "required": [
-          "sps"
+      "UpdateSimulatedResult": {
+        "description": "A simulated result for a component update.\n\nUsed by [`StartUpdateOptions`].",
+        "type": "string",
+        "enum": [
+          "success",
+          "warning",
+          "skipped",
+          "failure"
         ]
       },
       "UpdateStepId": {
         "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "enum": [
+                  "test_step"
+                ]
+              }
+            },
+            "required": [
+              "id"
+            ]
+          },
           {
             "type": "object",
             "properties": {
@@ -2689,7 +4514,21 @@
               "id": {
                 "type": "string",
                 "enum": [
-                  "resetting_sp"
+                  "interrogate_rot"
+                ]
+              }
+            },
+            "required": [
+              "id"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "enum": [
+                  "interrogate_sp"
                 ]
               }
             },
@@ -2705,14 +4544,10 @@
                 "enum": [
                   "sp_component_update"
                 ]
-              },
-              "stage": {
-                "$ref": "#/components/schemas/SpComponentUpdateStage"
               }
             },
             "required": [
-              "id",
-              "stage"
+              "id"
             ]
           },
           {
@@ -2801,6 +4636,55 @@
           }
         ]
       },
+      "UpdateTestError": {
+        "oneOf": [
+          {
+            "description": "Simulate an error where the operation fails to complete.",
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "fail"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "description": "Simulate an issue where the operation times out.",
+            "type": "object",
+            "properties": {
+              "content": {
+                "type": "object",
+                "properties": {
+                  "secs": {
+                    "description": "The number of seconds to time out after.",
+                    "type": "integer",
+                    "format": "uint64",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "secs"
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "timeout"
+                ]
+              }
+            },
+            "required": [
+              "content",
+              "kind"
+            ]
+          }
+        ]
+      },
       "IgnitionCommand": {
         "description": "Ignition command.",
         "type": "string",
@@ -2809,6 +4693,18 @@
           "power_off",
           "power_reset"
         ]
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "Error",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
       }
     }
   }

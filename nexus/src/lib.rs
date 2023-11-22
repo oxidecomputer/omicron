@@ -14,30 +14,32 @@
 
 pub mod app; // Public for documentation examples
 mod cidata;
-pub mod config; // Public for testing
-pub mod context; // Public for documentation examples
+mod config;
+mod context; // Public for documentation examples
 pub mod external_api; // Public for testing
-pub mod internal_api; // Public for testing
+mod internal_api;
 mod populate;
 mod saga_interface;
-pub mod updates; // public for testing
+mod updates; // public for testing
 
 pub use app::test_interfaces::TestInterfaces;
 pub use app::Nexus;
 pub use config::Config;
-pub use context::ServerContext;
-pub use crucible_agent_client;
+use context::ServerContext;
+use dropshot::ConfigDropshot;
 use external_api::http_entrypoints::external_api;
 use internal_api::http_entrypoints::internal_api;
-use internal_dns::DnsConfigBuilder;
+use nexus_types::internal_api::params::ServiceKind;
+use omicron_common::address::IpRange;
+use omicron_common::api::internal::shared::{
+    ExternalPortDiscovery, RackNetworkConfig, SwitchLocation,
+};
+use omicron_common::FileKv;
 use slog::Logger;
-use std::net::{SocketAddr, SocketAddrV6};
+use std::collections::HashMap;
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;
-
-// These modules used to be within nexus, but have been moved to
-// nexus-db-queries. Keeping these around temporarily for migration reasons.
-pub use nexus_db_queries::{authn, authz, db};
 
 #[macro_use]
 extern crate slog;
@@ -68,9 +70,9 @@ pub fn run_openapi_internal() -> Result<(), String> {
 /// but is not ready to receive external requests.
 pub struct InternalServer {
     /// shared state used by API request handlers
-    pub apictx: Arc<ServerContext>,
+    apictx: Arc<ServerContext>,
     /// dropshot server for internal API
-    pub http_server_internal: dropshot::HttpServer<Arc<ServerContext>>,
+    http_server_internal: dropshot::HttpServer<Arc<ServerContext>>,
 
     config: Config,
     log: Logger,
@@ -105,7 +107,7 @@ impl InternalServer {
     }
 }
 
-pub type DropshotServer = dropshot::HttpServer<Arc<ServerContext>>;
+type DropshotServer = dropshot::HttpServer<Arc<ServerContext>>;
 
 /// Packages up a [`Nexus`], running both external and internal HTTP API servers
 /// wired up to Nexus
@@ -126,37 +128,64 @@ impl Server {
         apictx.nexus.await_rack_initialization(&opctx).await;
 
         // Launch the external server.
-        let http_server_external = {
-            let server_starter_external = dropshot::HttpServerStarter::new(
-                &config.deployment.dropshot_external,
-                external_api(),
-                Arc::clone(&apictx),
-                &log.new(o!("component" => "dropshot_external")),
-            )
-            .map_err(|error| {
-                format!("initializing external server: {}", error)
-            })?;
-            server_starter_external.start()
-        };
-
-        // Transfer control of the external server to Nexus
-        let mut http_servers_external = crate::app::ExternalServers::new(
-            config.deployment.dropshot_external.clone(),
-            config.pkg.nexus_https_port,
-        );
-        http_servers_external.set_http(http_server_external);
-        apictx
+        let tls_config = apictx
             .nexus
-            .set_servers(http_servers_external, http_server_internal)
+            .external_tls_config(config.deployment.dropshot_external.tls)
             .await;
 
-        // If Nexus has TLS certificates, launch the HTTPS server.
+        // We launch two dropshot servers providing the external API: one as
+        // configured (which is accessible from the customer network), and one
+        // that matches the configuration except listens on the same address
+        // (but a different port) as the `internal` server. The latter is
+        // available for proxied connections via the tech port in the event the
+        // rack has lost connectivity (see RFD 431).
+        let techport_server_bind_addr = {
+            let mut addr = http_server_internal.local_addr();
+            addr.set_port(config.deployment.techport_external_server_port);
+            addr
+        };
+        let techport_server_config = ConfigDropshot {
+            bind_address: techport_server_bind_addr,
+            ..config.deployment.dropshot_external.dropshot.clone()
+        };
+
+        let http_server_external = {
+            let server_starter_external =
+                dropshot::HttpServerStarter::new_with_tls(
+                    &config.deployment.dropshot_external.dropshot,
+                    external_api(),
+                    Arc::clone(&apictx),
+                    &log.new(o!("component" => "dropshot_external")),
+                    tls_config.clone().map(dropshot::ConfigTls::Dynamic),
+                )
+                .map_err(|error| {
+                    format!("initializing external server: {}", error)
+                })?;
+            server_starter_external.start()
+        };
+        let http_server_techport_external = {
+            let server_starter_external_techport =
+                dropshot::HttpServerStarter::new_with_tls(
+                    &techport_server_config,
+                    external_api(),
+                    Arc::clone(&apictx),
+                    &log.new(o!("component" => "dropshot_external_techport")),
+                    tls_config.map(dropshot::ConfigTls::Dynamic),
+                )
+                .map_err(|error| {
+                    format!("initializing external techport server: {}", error)
+                })?;
+            server_starter_external_techport.start()
+        };
+
         apictx
             .nexus
-            .refresh_tls_config(&opctx)
-            .await
-            .map_err(|e| e.to_string())?;
-
+            .set_servers(
+                http_server_external,
+                http_server_techport_external,
+                http_server_internal,
+            )
+            .await;
         let server = Server { apictx: apictx.clone() };
         Ok(server)
     }
@@ -170,7 +199,7 @@ impl Server {
     /// Note that this doesn't initiate a graceful shutdown, so if you call this
     /// immediately after calling `start()`, the program will block indefinitely
     /// or until something else initiates a graceful shutdown.
-    pub async fn wait_for_finish(self) -> Result<(), String> {
+    pub(crate) async fn wait_for_finish(self) -> Result<(), String> {
         self.apictx.nexus.wait_for_shutdown().await
     }
 
@@ -205,11 +234,41 @@ impl nexus_test_interface::NexusServer for Server {
         internal_server: InternalServer,
         config: &Config,
         services: Vec<nexus_types::internal_api::params::ServicePutRequest>,
+        datasets: Vec<nexus_types::internal_api::params::DatasetCreateRequest>,
+        internal_dns_zone_config: nexus_types::internal_api::params::DnsConfigParams,
+        external_dns_zone_name: &str,
+        recovery_silo: nexus_types::internal_api::params::RecoverySiloConfig,
+        certs: Vec<nexus_types::internal_api::params::Certificate>,
     ) -> Self {
         // Perform the "handoff from RSS".
         //
         // However, RSS isn't running, so we'll do the handoff ourselves.
-        let opctx = internal_server.apictx.nexus.opctx_for_service_balancer();
+        let opctx = internal_server.apictx.nexus.opctx_for_internal_api();
+
+        // Allocation of the initial Nexus's external IP is a little funny.  In
+        // a real system, it'd be allocated by RSS and provided with the rack
+        // initialization request (which we're about to simulate).  RSS also
+        // provides information about the external IP pool ranges available for
+        // system services.  The Nexus external IP that it picks comes from this
+        // range.  During rack initialization, Nexus "allocates" the IP (which
+        // was really already allocated) -- recording that allocation like any
+        // other one.
+        //
+        // In this context, the IP was "allocated" by the user.  Most likely,
+        // it's 127.0.0.1, having come straight from the stock testing config
+        // file.  Whatever it is, we fake up an IP pool range for use by system
+        // services that includes solely this IP.
+        let internal_services_ip_pool_ranges = services
+            .iter()
+            .filter_map(|s| match s.kind {
+                ServiceKind::ExternalDns { external_address, .. }
+                | ServiceKind::Nexus { external_address, .. } => {
+                    Some(IpRange::from(external_address))
+                }
+                _ => None,
+            })
+            .collect();
+
         internal_server
             .apictx
             .nexus
@@ -218,10 +277,25 @@ impl nexus_test_interface::NexusServer for Server {
                 config.deployment.rack_id,
                 internal_api::params::RackInitializationRequest {
                     services,
-                    datasets: vec![],
-                    internal_services_ip_pool_ranges: vec![],
-                    certs: vec![],
-                    internal_dns_zone_config: DnsConfigBuilder::new().build(),
+                    datasets,
+                    internal_services_ip_pool_ranges,
+                    certs,
+                    internal_dns_zone_config,
+                    external_dns_zone_name: external_dns_zone_name.to_owned(),
+                    recovery_silo,
+                    external_port_count: ExternalPortDiscovery::Static(
+                        HashMap::from([(
+                            SwitchLocation::Switch0,
+                            vec!["qsfp0".parse().unwrap()],
+                        )]),
+                    ),
+                    rack_network_config: Some(RackNetworkConfig {
+                        rack_subnet: "fd00:1122:3344:01::/56".parse().unwrap(),
+                        infra_ip_first: Ipv4Addr::UNSPECIFIED,
+                        infra_ip_last: Ipv4Addr::UNSPECIFIED,
+                        ports: Vec::new(),
+                        bgp: Vec::new(),
+                    }),
                 },
             )
             .await
@@ -231,20 +305,12 @@ impl nexus_test_interface::NexusServer for Server {
         Server::start(internal_server).await.unwrap()
     }
 
-    async fn get_http_server_external_address(&self) -> Option<SocketAddr> {
-        self.apictx.nexus.get_http_external_server_address().await
-    }
-
-    async fn get_https_server_external_address(&self) -> Option<SocketAddr> {
-        self.apictx.nexus.get_https_external_server_address().await
+    async fn get_http_server_external_address(&self) -> SocketAddr {
+        self.apictx.nexus.get_external_server_address().await.unwrap()
     }
 
     async fn get_http_server_internal_address(&self) -> SocketAddr {
         self.apictx.nexus.get_internal_server_address().await.unwrap()
-    }
-
-    async fn set_resolver(&self, resolver: internal_dns::resolver::Resolver) {
-        self.apictx.nexus.set_resolver(resolver).await
     }
 
     async fn upsert_crucible_dataset(
@@ -259,7 +325,7 @@ impl nexus_test_interface::NexusServer for Server {
                 id,
                 zpool_id,
                 address,
-                crate::db::model::DatasetKind::Crucible,
+                nexus_db_queries::db::model::DatasetKind::Crucible,
             )
             .await
             .unwrap();
@@ -275,7 +341,7 @@ impl nexus_test_interface::NexusServer for Server {
     }
 }
 
-/// Run an instance of the [Server].
+/// Run an instance of the Nexus server.
 pub async fn run_server(config: &Config) -> Result<(), String> {
     use slog::Drain;
     let (drain, registration) =
@@ -284,7 +350,7 @@ pub async fn run_server(config: &Config) -> Result<(), String> {
                 format!("initializing logger: {}", message)
             })?,
         );
-    let log = slog::Logger::root(drain.fuse(), slog::o!());
+    let log = slog::Logger::root(drain.fuse(), slog::o!(FileKv));
     if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
         let msg = format!("failed to register DTrace probes: {}", e);
         error!(log, "{}", msg);

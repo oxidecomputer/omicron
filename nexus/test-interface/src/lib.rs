@@ -46,17 +46,20 @@ pub trait NexusServer {
         log: &Logger,
     ) -> (Self::InternalServer, SocketAddr);
 
+    #[allow(clippy::too_many_arguments)]
     async fn start(
         internal_server: Self::InternalServer,
         config: &Config,
         services: Vec<nexus_types::internal_api::params::ServicePutRequest>,
+        datasets: Vec<nexus_types::internal_api::params::DatasetCreateRequest>,
+        internal_dns_config: nexus_types::internal_api::params::DnsConfigParams,
+        external_dns_zone_name: &str,
+        recovery_silo: nexus_types::internal_api::params::RecoverySiloConfig,
+        tls_certificates: Vec<nexus_types::internal_api::params::Certificate>,
     ) -> Self;
 
-    async fn get_http_server_external_address(&self) -> Option<SocketAddr>;
-    async fn get_https_server_external_address(&self) -> Option<SocketAddr>;
+    async fn get_http_server_external_address(&self) -> SocketAddr;
     async fn get_http_server_internal_address(&self) -> SocketAddr;
-
-    async fn set_resolver(&self, resolver: internal_dns::resolver::Resolver);
 
     // Previously, as a dataset was created (within the sled agent),
     // we'd use an internal API from Nexus to record that the dataset

@@ -1,0 +1,720 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Plan",
+  "type": "object",
+  "required": [
+    "config",
+    "rack_id",
+    "sleds"
+  ],
+  "properties": {
+    "config": {
+      "$ref": "#/definitions/RackInitializeRequest"
+    },
+    "rack_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "sleds": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/definitions/StartSledAgentRequest"
+      }
+    }
+  },
+  "definitions": {
+    "Baseboard": {
+      "description": "Describes properties that should uniquely identify a Gimlet.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "identifier",
+            "model",
+            "revision",
+            "type"
+          ],
+          "properties": {
+            "identifier": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
+            "revision": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "gimlet"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "unknown"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "identifier",
+            "model",
+            "type"
+          ],
+          "properties": {
+            "identifier": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "pc"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "BgpConfig": {
+      "type": "object",
+      "required": [
+        "asn",
+        "originate"
+      ],
+      "properties": {
+        "asn": {
+          "description": "The autonomous system number for the BGP configuration.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "originate": {
+          "description": "The set of prefixes for the BGP router to originate.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Ipv4Network"
+          }
+        }
+      }
+    },
+    "BgpPeerConfig": {
+      "type": "object",
+      "required": [
+        "addr",
+        "asn",
+        "port"
+      ],
+      "properties": {
+        "addr": {
+          "description": "Address of the peer.",
+          "type": "string",
+          "format": "ipv4"
+        },
+        "asn": {
+          "description": "The autonomous sysetm number of the router the peer belongs to.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "connect_retry": {
+          "description": "The interval in seconds between peer connection retry attempts.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "delay_open": {
+          "description": "How long to delay sending open messages to a peer. In seconds.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "hold_time": {
+          "description": "How long to keep a session alive without a keepalive in seconds. Defaults to 6.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "idle_hold_time": {
+          "description": "How long to keep a peer in idle after a state machine reset in seconds.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "keepalive": {
+          "description": "The interval to send keepalive messages at.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "port": {
+          "description": "Switch port the peer is reachable on.",
+          "type": "string"
+        }
+      }
+    },
+    "BootstrapAddressDiscovery": {
+      "oneOf": [
+        {
+          "description": "Ignore all bootstrap addresses except our own.",
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "only_ours"
+              ]
+            }
+          }
+        },
+        {
+          "description": "Ignore all bootstrap addresses except the following.",
+          "type": "object",
+          "required": [
+            "addrs",
+            "type"
+          ],
+          "properties": {
+            "addrs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "ipv6"
+              },
+              "uniqueItems": true
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "only_these"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "Certificate": {
+      "type": "object",
+      "required": [
+        "cert",
+        "key"
+      ],
+      "properties": {
+        "cert": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        }
+      }
+    },
+    "IpNetwork": {
+      "oneOf": [
+        {
+          "title": "v4",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Ipv4Network"
+            }
+          ]
+        },
+        {
+          "title": "v6",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Ipv6Network"
+            }
+          ]
+        }
+      ],
+      "x-rust-type": "ipnetwork::IpNetwork"
+    },
+    "IpRange": {
+      "oneOf": [
+        {
+          "title": "v4",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Ipv4Range"
+            }
+          ]
+        },
+        {
+          "title": "v6",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Ipv6Range"
+            }
+          ]
+        }
+      ]
+    },
+    "Ipv4Network": {
+      "type": "string",
+      "pattern": "^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\/(3[0-2]|[0-2]?[0-9])$",
+      "x-rust-type": "ipnetwork::Ipv4Network"
+    },
+    "Ipv4Range": {
+      "description": "A non-decreasing IPv4 address range, inclusive of both ends.\n\nThe first address must be less than or equal to the last address.",
+      "type": "object",
+      "required": [
+        "first",
+        "last"
+      ],
+      "properties": {
+        "first": {
+          "type": "string",
+          "format": "ipv4"
+        },
+        "last": {
+          "type": "string",
+          "format": "ipv4"
+        }
+      }
+    },
+    "Ipv6Net": {
+      "title": "An IPv6 subnet",
+      "description": "An IPv6 subnet, including prefix and subnet mask",
+      "examples": [
+        "fd12:3456::/64"
+      ],
+      "type": "string",
+      "pattern": "^([fF][dD])[0-9a-fA-F]{2}:(([0-9a-fA-F]{1,4}:){6}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,6}:)([0-9a-fA-F]{1,4})?\\/([0-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])$"
+    },
+    "Ipv6Network": {
+      "type": "string",
+      "pattern": "^(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\")[/](12[0-8]|1[0-1][0-9]|[0-9]?[0-9])$",
+      "x-rust-type": "ipnetwork::Ipv6Network"
+    },
+    "Ipv6Range": {
+      "description": "A non-decreasing IPv6 address range, inclusive of both ends.\n\nThe first address must be less than or equal to the last address.",
+      "type": "object",
+      "required": [
+        "first",
+        "last"
+      ],
+      "properties": {
+        "first": {
+          "type": "string",
+          "format": "ipv6"
+        },
+        "last": {
+          "type": "string",
+          "format": "ipv6"
+        }
+      }
+    },
+    "Ipv6Subnet": {
+      "description": "Wraps an [`Ipv6Network`] with a compile-time prefix length.",
+      "type": "object",
+      "required": [
+        "net"
+      ],
+      "properties": {
+        "net": {
+          "$ref": "#/definitions/Ipv6Net"
+        }
+      }
+    },
+    "Name": {
+      "title": "A name unique within the parent collection",
+      "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID though they may contain a UUID.",
+      "type": "string",
+      "maxLength": 63,
+      "minLength": 1,
+      "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z][a-z0-9-]*[a-zA-Z0-9]*$"
+    },
+    "NewPasswordHash": {
+      "title": "A password hash in PHC string format",
+      "description": "Password hashes must be in PHC (Password Hashing Competition) string format.  Passwords must be hashed with Argon2id.  Password hashes may be rejected if the parameters appear not to be secure enough.",
+      "type": "string"
+    },
+    "PortConfigV1": {
+      "type": "object",
+      "required": [
+        "addresses",
+        "bgp_peers",
+        "port",
+        "routes",
+        "switch",
+        "uplink_port_fec",
+        "uplink_port_speed"
+      ],
+      "properties": {
+        "addresses": {
+          "description": "This port's addresses.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IpNetwork"
+          }
+        },
+        "bgp_peers": {
+          "description": "BGP peers on this port",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/BgpPeerConfig"
+          }
+        },
+        "port": {
+          "description": "Nmae of the port this config applies to.",
+          "type": "string"
+        },
+        "routes": {
+          "description": "The set of routes associated with this port.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/RouteConfig"
+          }
+        },
+        "switch": {
+          "description": "Switch the port belongs to.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/SwitchLocation"
+            }
+          ]
+        },
+        "uplink_port_fec": {
+          "description": "Port forward error correction type.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/PortFec"
+            }
+          ]
+        },
+        "uplink_port_speed": {
+          "description": "Port speed.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/PortSpeed"
+            }
+          ]
+        }
+      }
+    },
+    "PortFec": {
+      "description": "Switchport FEC options",
+      "type": "string",
+      "enum": [
+        "firecode",
+        "none",
+        "rs"
+      ]
+    },
+    "PortSpeed": {
+      "description": "Switchport Speed options",
+      "type": "string",
+      "enum": [
+        "speed0_g",
+        "speed1_g",
+        "speed10_g",
+        "speed25_g",
+        "speed40_g",
+        "speed50_g",
+        "speed100_g",
+        "speed200_g",
+        "speed400_g"
+      ]
+    },
+    "RackInitializeRequest": {
+      "description": "Configuration for the \"rack setup service\".\n\nThe Rack Setup Service should be responsible for one-time setup actions, such as CockroachDB placement and initialization.  Without operator intervention, however, these actions need a way to be automated in our deployment.",
+      "type": "object",
+      "required": [
+        "bootstrap_discovery",
+        "dns_servers",
+        "external_certificates",
+        "external_dns_ips",
+        "external_dns_zone_name",
+        "internal_services_ip_pool_ranges",
+        "ntp_servers",
+        "rack_subnet",
+        "recovery_silo"
+      ],
+      "properties": {
+        "bootstrap_discovery": {
+          "description": "Describes how bootstrap addresses should be collected during RSS.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/BootstrapAddressDiscovery"
+            }
+          ]
+        },
+        "dns_servers": {
+          "description": "The external DNS server addresses.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "ip"
+          }
+        },
+        "external_certificates": {
+          "description": "initial TLS certificates for the external API",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Certificate"
+          }
+        },
+        "external_dns_ips": {
+          "description": "Service IP addresses on which we run external DNS servers.\n\nEach address must be present in `internal_services_ip_pool_ranges`.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "ip"
+          }
+        },
+        "external_dns_zone_name": {
+          "description": "DNS name for the DNS zone delegated to the rack for external DNS",
+          "type": "string"
+        },
+        "internal_services_ip_pool_ranges": {
+          "description": "Ranges of the service IP pool which may be used for internal services.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IpRange"
+          }
+        },
+        "ntp_servers": {
+          "description": "The external NTP server addresses.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "rack_network_config": {
+          "description": "Initial rack network configuration",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RackNetworkConfigV1"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rack_subnet": {
+          "type": "string",
+          "format": "ipv6"
+        },
+        "recovery_silo": {
+          "description": "Configuration of the Recovery Silo (the initial Silo)",
+          "allOf": [
+            {
+              "$ref": "#/definitions/RecoverySiloConfig"
+            }
+          ]
+        },
+        "trust_quorum_peers": {
+          "description": "The set of peer_ids required to initialize trust quorum\n\nThe value is `None` if we are not using trust quorum",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/Baseboard"
+          }
+        }
+      }
+    },
+    "RackNetworkConfigV1": {
+      "description": "Initial network configuration",
+      "type": "object",
+      "required": [
+        "bgp",
+        "infra_ip_first",
+        "infra_ip_last",
+        "ports",
+        "rack_subnet"
+      ],
+      "properties": {
+        "bgp": {
+          "description": "BGP configurations for connecting the rack to external networks",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/BgpConfig"
+          }
+        },
+        "infra_ip_first": {
+          "description": "First ip address to be used for configuring network infrastructure",
+          "type": "string",
+          "format": "ipv4"
+        },
+        "infra_ip_last": {
+          "description": "Last ip address to be used for configuring network infrastructure",
+          "type": "string",
+          "format": "ipv4"
+        },
+        "ports": {
+          "description": "Uplinks for connecting the rack to external networks",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PortConfigV1"
+          }
+        },
+        "rack_subnet": {
+          "$ref": "#/definitions/Ipv6Network"
+        }
+      }
+    },
+    "RecoverySiloConfig": {
+      "type": "object",
+      "required": [
+        "silo_name",
+        "user_name",
+        "user_password_hash"
+      ],
+      "properties": {
+        "silo_name": {
+          "$ref": "#/definitions/Name"
+        },
+        "user_name": {
+          "$ref": "#/definitions/UserId"
+        },
+        "user_password_hash": {
+          "$ref": "#/definitions/NewPasswordHash"
+        }
+      }
+    },
+    "RouteConfig": {
+      "type": "object",
+      "required": [
+        "destination",
+        "nexthop"
+      ],
+      "properties": {
+        "destination": {
+          "description": "The destination of the route.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/IpNetwork"
+            }
+          ]
+        },
+        "nexthop": {
+          "description": "The nexthop/gateway address.",
+          "type": "string",
+          "format": "ip"
+        }
+      }
+    },
+    "StartSledAgentRequest": {
+      "description": "Configuration information for launching a Sled Agent.",
+      "type": "object",
+      "required": [
+        "body",
+        "generation",
+        "schema_version"
+      ],
+      "properties": {
+        "body": {
+          "$ref": "#/definitions/StartSledAgentRequestBody"
+        },
+        "generation": {
+          "description": "The current generation number of data as stored in CRDB.\n\nThe initial generation is set during RSS time and then only mutated by Nexus. For now, we don't actually anticipate mutating this data, but we leave open the possiblity.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "schema_version": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        }
+      }
+    },
+    "StartSledAgentRequestBody": {
+      "description": "This is the actual app level data of `StartSledAgentRequest`\n\nWe nest it below the \"header\" of `generation` and `schema_version` so that we can perform partial deserialization of `EarlyNetworkConfig` to only read the header and defer deserialization of the body once we know the schema version. This is possible via the use of [`serde_json::value::RawValue`] in future (post-v1) deserialization paths.",
+      "type": "object",
+      "required": [
+        "id",
+        "is_lrtq_learner",
+        "rack_id",
+        "subnet",
+        "use_trust_quorum"
+      ],
+      "properties": {
+        "id": {
+          "description": "Uuid of the Sled Agent to be created.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "is_lrtq_learner": {
+          "description": "Is this node an LRTQ learner node?\n\nWe only put the node into learner mode if `use_trust_quorum` is also true.",
+          "type": "boolean"
+        },
+        "rack_id": {
+          "description": "Uuid of the rack to which this sled agent belongs.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "subnet": {
+          "description": "Portion of the IP space to be managed by the Sled Agent.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Ipv6Subnet"
+            }
+          ]
+        },
+        "use_trust_quorum": {
+          "description": "Use trust quorum for key generation",
+          "type": "boolean"
+        }
+      }
+    },
+    "SwitchLocation": {
+      "description": "Identifies switch physical location",
+      "oneOf": [
+        {
+          "description": "Switch in upper slot",
+          "type": "string",
+          "enum": [
+            "switch0"
+          ]
+        },
+        {
+          "description": "Switch in lower slot",
+          "type": "string",
+          "enum": [
+            "switch1"
+          ]
+        }
+      ]
+    },
+    "UserId": {
+      "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID though they may contain a UUID.",
+      "type": "string"
+    }
+  }
+}

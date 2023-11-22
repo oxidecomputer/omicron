@@ -6,15 +6,20 @@
 
 // TODO see the TODO for nexus.
 
+use anyhow::{anyhow, Context};
+use camino::Utf8PathBuf;
 use clap::Parser;
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
+use dropshot::HandlerTaskMode;
+use nexus_client::types as NexusTypes;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
+use omicron_sled_agent::sim::RssArgs;
 use omicron_sled_agent::sim::{
-    run_server, Config, ConfigHardware, ConfigStorage, ConfigUpdates,
-    ConfigZpool, SimMode,
+    run_standalone_server, Config, ConfigHardware, ConfigStorage,
+    ConfigUpdates, ConfigZpool, SimMode,
 };
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
@@ -47,6 +52,37 @@ struct Args {
 
     #[clap(name = "NEXUS_IP:PORT", action)]
     nexus_addr: SocketAddr,
+
+    #[clap(long, name = "NEXUS_EXTERNAL_IP:PORT", action)]
+    /// If specified, when the simulated sled agent initializes the rack, it
+    /// will record the Nexus service running with the specified external IP
+    /// address.  When combined with `EXTERNAL_DNS_INTERNAL_IP:PORT`, this will
+    /// cause Nexus to publish DNS names to external DNS.
+    rss_nexus_external_addr: Option<SocketAddr>,
+
+    #[clap(long, name = "EXTERNAL_DNS_INTERNAL_IP:PORT", action)]
+    /// If specified, when the simulated sled agent initializes the rack, it
+    /// will record the external DNS service running with the specified internal
+    /// IP address.  When combined with `NEXUS_EXTERNAL_IP:PORT`, this will cause
+    /// Nexus to publish DNS names to external DNS.
+    rss_external_dns_internal_addr: Option<SocketAddrV6>,
+
+    #[clap(long, name = "INTERNAL_DNS_INTERNAL_IP:PORT", action)]
+    /// If specified, the sled agent will create a DNS server exposing the
+    /// following socket address for the DNS interface.
+    rss_internal_dns_dns_addr: Option<SocketAddrV6>,
+
+    #[clap(long, name = "TLS_CERT_PEM_FILE", action)]
+    /// If this flag and TLS_KEY_PEM_FILE are specified, when the simulated sled
+    /// agent initializes the rack, the specified certificate and private keys
+    /// will be provided for the initial TLS certificates for the recovery silo.
+    rss_tls_cert: Option<Utf8PathBuf>,
+
+    #[clap(long, name = "TLS_KEY_PEM_FILE", action)]
+    /// If this flag and TLS_CERT_PEM_FILE are specified, when the simulated sled
+    /// agent initializes the rack, the specified certificate and private keys
+    /// will be provided for the initial TLS certificates for the recovery silo.
+    rss_tls_key: Option<Utf8PathBuf>,
 }
 
 #[tokio::main]
@@ -59,8 +95,8 @@ async fn main() {
 async fn do_run() -> Result<(), CmdError> {
     let args = Args::parse();
 
-    let tmp =
-        tempfile::tempdir().map_err(|e| CmdError::Failure(e.to_string()))?;
+    let tmp = camino_tempfile::tempdir()
+        .map_err(|e| CmdError::Failure(anyhow!(e)))?;
     let config = Config {
         id: args.uuid,
         sim_mode: args.sim_mode,
@@ -68,7 +104,7 @@ async fn do_run() -> Result<(), CmdError> {
         dropshot: ConfigDropshot {
             bind_address: args.sled_agent_addr.into(),
             request_body_max_bytes: 1024 * 1024,
-            ..Default::default()
+            default_handler_task_mode: HandlerTaskMode::Detached,
         },
         log: ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Info },
         storage: ConfigStorage {
@@ -80,8 +116,34 @@ async fn do_run() -> Result<(), CmdError> {
         hardware: ConfigHardware {
             hardware_threads: 32,
             physical_ram: 64 * (1 << 30),
+            reservoir_ram: 32 * (1 << 30),
         },
     };
 
-    run_server(&config).await.map_err(CmdError::Failure)
+    let tls_certificate = match (args.rss_tls_cert, args.rss_tls_key) {
+        (None, None) => None,
+        (Some(cert_path), Some(key_path)) => {
+            let cert_bytes = std::fs::read_to_string(&cert_path)
+                .with_context(|| format!("read {:?}", &cert_path))
+                .map_err(CmdError::Failure)?;
+            let key_bytes = std::fs::read_to_string(&key_path)
+                .with_context(|| format!("read {:?}", &key_path))
+                .map_err(CmdError::Failure)?;
+            Some(NexusTypes::Certificate { cert: cert_bytes, key: key_bytes })
+        }
+        _ => {
+            return Err(CmdError::Usage(String::from(
+                "--rss-tls-key and --rss-tls-cert must be specified together",
+            )))
+        }
+    };
+
+    let rss_args = RssArgs {
+        nexus_external_addr: args.rss_nexus_external_addr,
+        external_dns_internal_addr: args.rss_external_dns_internal_addr,
+        internal_dns_dns_addr: args.rss_internal_dns_dns_addr,
+        tls_certificate,
+    };
+
+    run_standalone_server(&config, &rss_args).await.map_err(CmdError::Failure)
 }

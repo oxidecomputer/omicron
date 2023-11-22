@@ -28,7 +28,6 @@
     <propval name='listen_addr' type='astring' value='unknown' />
     <propval name='listen_port' type='astring' value='unknown' />
     <propval name='store' type='astring' value='unknown' />
-    <propval name='join_addrs' type='astring' value='unknown' />
   </property_group>
 
   <property_group name='startd' type='framework'>

@@ -14,8 +14,8 @@ mod coverage;
 mod resource_builder;
 mod resources;
 
-use super::SiloRole;
 use crate::authn;
+use crate::authn::SiloAuthnPolicy;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
@@ -24,6 +24,8 @@ use coverage::Coverage;
 use futures::StreamExt;
 use nexus_test_utils::db::test_setup_database;
 use nexus_types::external_api::shared;
+use nexus_types::external_api::shared::FleetRole;
+use nexus_types::external_api::shared::SiloRole;
 use nexus_types::identity::Asset;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
@@ -31,6 +33,8 @@ use omicron_test_utils::dev;
 use resource_builder::DynAuthorizedResource;
 use resource_builder::ResourceBuilder;
 use resource_builder::ResourceSet;
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::io::Cursor;
 use std::io::Write;
 use std::sync::Arc;
@@ -107,7 +111,11 @@ async fn test_iam_roles_behavior() {
             let opctx = OpContext::for_background(
                 user_log,
                 Arc::clone(&authz),
-                authn::Context::for_test_user(user_id, main_silo_id),
+                authn::Context::for_test_user(
+                    user_id,
+                    main_silo_id,
+                    SiloAuthnPolicy::default(),
+                ),
                 Arc::clone(&datastore),
             );
 
@@ -152,6 +160,7 @@ async fn test_iam_roles_behavior() {
             &logctx.log,
             &user_contexts,
             &test_resources,
+            true,
         )
         .await
         .unwrap();
@@ -177,6 +186,7 @@ async fn authorize_everything<W: Write>(
     log: &slog::Logger,
     user_contexts: &[Arc<(String, OpContext)>],
     test_resources: &ResourceSet,
+    print_actions: bool,
 ) -> std::io::Result<()> {
     // Run the per-resource tests in parallel.  Since the caller will be
     // checking the overall output against some expected output, it's important
@@ -196,11 +206,18 @@ async fn authorize_everything<W: Write>(
         write!(out, "{}", o)?;
     }
 
-    write!(out, "ACTIONS:\n\n")?;
-    for action in authz::Action::iter() {
-        write!(out, "  {:>2} = {:?}\n", action_abbreviation(action), action)?;
+    if print_actions {
+        write!(out, "ACTIONS:\n\n")?;
+        for action in authz::Action::iter() {
+            write!(
+                out,
+                "  {:>2} = {:?}\n",
+                action_abbreviation(action),
+                action
+            )?;
+        }
+        write!(out, "\n")?;
     }
-    write!(out, "\n")?;
 
     Ok(())
 }
@@ -298,4 +315,151 @@ impl<W: Write> Write for StdoutTee<W> {
     fn flush(&mut self) -> std::io::Result<()> {
         self.sink.flush()
     }
+}
+
+/// Verifies that Fleet-level roles are correctly conferred by Silo-level roles
+///
+/// The way to think about what's happening here is some chunk of the
+/// authorization policy lives with each Silo (in the Silo's database record,
+/// more precisely).  This test exercises various combinations of that policy,
+/// plus that it's honored correctly by the authz subsystem.
+#[tokio::test]
+async fn test_conferred_roles() {
+    // To start, this test looks a lot like the test above.
+    let logctx = dev::test_setup_log("test_conferred_roles");
+    let mut db = test_setup_database(&logctx.log).await;
+    let (opctx, datastore) = db::datastore::datastore_test(&logctx, &db).await;
+
+    // Before we can create the resources, users, and role assignments that we
+    // need, we must grant the "test-privileged" user privileges to fetch and
+    // modify policies inside the "main" Silo (the one we create users in).
+    let main_silo_id = Uuid::new_v4();
+    let main_silo = authz::Silo::new(
+        authz::FLEET,
+        main_silo_id,
+        LookupType::ById(main_silo_id),
+    );
+    datastore
+        .role_assignment_replace_visible(
+            &opctx,
+            &main_silo,
+            &[shared::RoleAssignment {
+                identity_type: shared::IdentityType::SiloUser,
+                identity_id: USER_TEST_PRIVILEGED.id(),
+                role_name: SiloRole::Admin,
+            }],
+        )
+        .await
+        .unwrap();
+
+    let exemptions = resources::exempted_authz_classes();
+    let mut coverage = Coverage::new(&logctx.log, exemptions);
+
+    // Assemble the list of resources that we'll use for testing.  This is much
+    // more limited than the main policy test because we only care about the
+    // behavior on the Fleet itself, as well as some top-level resources that
+    // exist outside of a silo.
+    let mut builder =
+        ResourceBuilder::new(&opctx, &datastore, &mut coverage, main_silo_id);
+    builder.new_resource(authz::FLEET);
+    builder.new_resource(authz::IP_POOL_LIST);
+    let test_resources = builder.build();
+
+    // We also create a Silo because the ResourceBuilder will create for us
+    // users that we can use to test the behavior of each role.
+    let mut silo_builder =
+        ResourceBuilder::new(&opctx, &datastore, &mut coverage, main_silo_id);
+    silo_builder.new_resource(authz::FLEET);
+    silo_builder.new_resource_with_users(main_silo).await;
+    let silo_resources = silo_builder.build();
+
+    // Up to this point, this looks similar to the main policy test.  Here's
+    // where things get different.
+    //
+    // Our goal is to run a battery of authz checks against a bunch of different
+    // configurations.  These configurations vary only in the part of the policy
+    // that normally comes from the Silo.  As far as the authz subsystem is
+    // concerned, though, that policy comes from the authn::Context.  So we
+    // don't actually need to create a bunch of different Silos with different
+    // policies.  Instead, we can use different authn:::Contexts.
+    let authz = Arc::new(authz::Authz::new(&logctx.log));
+    let policies = vec![
+        // empty policy
+        BTreeMap::new(),
+        // silo admin confers fleet admin
+        BTreeMap::from([(SiloRole::Admin, BTreeSet::from([FleetRole::Admin]))]),
+        // silo viewer confers fleet viewer
+        BTreeMap::from([(
+            SiloRole::Viewer,
+            BTreeSet::from([FleetRole::Viewer]),
+        )]),
+        // silo admin confers fleet viewer (i.e., it's not hardcoded to confer
+        // the same-named role)
+        BTreeMap::from([(
+            SiloRole::Admin,
+            BTreeSet::from([FleetRole::Viewer]),
+        )]),
+        // It's not possible to effectively test conferring multiple roles
+        // because the roles we have are hierarchical, so conferring any number
+        // of roles is equivalent to conferring just the most privileged of
+        // them.  Still, at least make sure it doesn't panic or something.
+        BTreeMap::from([(
+            SiloRole::Viewer,
+            BTreeSet::from([FleetRole::Viewer, FleetRole::Admin]),
+        )]),
+        // Different roles can be conferred different roles.
+        BTreeMap::from([
+            (SiloRole::Admin, BTreeSet::from([FleetRole::Admin])),
+            (SiloRole::Viewer, BTreeSet::from([FleetRole::Viewer])),
+        ]),
+    ];
+
+    let mut buffer = Vec::new();
+    {
+        let mut out = StdoutTee::new(&mut buffer);
+        for policy in policies {
+            write!(out, "policy: {:?}\n", policy).unwrap();
+            let policy = SiloAuthnPolicy::new(policy);
+
+            let user_contexts: Vec<Arc<(String, OpContext)>> = silo_resources
+                .users()
+                .map(|(username, user_id)| {
+                    let user_id = *user_id;
+                    let user_log = logctx.log.new(o!(
+                        "user_id" => user_id.to_string(),
+                        "username" => username.clone(),
+                    ));
+                    let opctx = OpContext::for_background(
+                        user_log,
+                        Arc::clone(&authz),
+                        authn::Context::for_test_user(
+                            user_id,
+                            main_silo_id,
+                            policy.clone(),
+                        ),
+                        Arc::clone(&datastore),
+                    );
+                    Arc::new((username.clone(), opctx))
+                })
+                .collect();
+
+            authorize_everything(
+                &mut out,
+                &logctx.log,
+                &user_contexts,
+                &test_resources,
+                false,
+            )
+            .await
+            .unwrap();
+        }
+    }
+
+    expectorate::assert_contents(
+        "tests/output/authz-conferred-roles.out",
+        &std::str::from_utf8(buffer.as_ref()).expect("non-UTF8 output"),
+    );
+
+    db.cleanup().await.unwrap();
+    logctx.cleanup_successful();
 }

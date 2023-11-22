@@ -4,6 +4,7 @@
 
 //! Implementation details for polling MGS for rack inventory details.
 
+use gateway_client::types::RotState;
 use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpComponentInfo;
 use gateway_client::types::SpIdentifier;
@@ -155,8 +156,9 @@ pub(super) struct FetchedSpData {
     pub(super) id: SpIdentifier,
     pub(super) state: SpState,
     pub(super) components: Option<Vec<SpComponentInfo>>,
-    pub(super) caboose: Option<SpComponentCaboose>,
-    pub(super) rot: RotInventory,
+    pub(super) caboose_active: Option<SpComponentCaboose>,
+    pub(super) caboose_inactive: Option<SpComponentCaboose>,
+    pub(super) rot: Option<RotInventory>,
     pub(super) mgs_received: Instant,
 }
 
@@ -266,8 +268,9 @@ async fn sp_fetching_task(
 
     let mut prev_state = None;
     let mut components = None;
-    let mut caboose = None;
-    let mut rot = RotInventory { caboose: None };
+    let mut caboose_active = None;
+    let mut caboose_inactive = None;
+    let mut rot = None;
 
     loop {
         tokio::select! {
@@ -280,8 +283,9 @@ async fn sp_fetching_task(
                 // and recreate `ticker`.
                 prev_state = None;
                 components = None;
-                caboose = None;
-                rot = RotInventory { caboose: None };
+                caboose_active = None;
+                caboose_inactive = None;
+                rot = None;
 
                 ticker = interval(
                     ignition_presence
@@ -310,6 +314,25 @@ async fn sp_fetching_task(
         };
         let mut mgs_received = Instant::now();
 
+        if rot.is_none() || prev_state.as_ref() != Some(&state) {
+            match &state.rot {
+                RotState::Enabled { active, .. } => {
+                    rot = Some(RotInventory {
+                        active: *active,
+                        caboose_a: None,
+                        caboose_b: None,
+                    });
+                }
+                RotState::CommunicationFailed { message } => {
+                    warn!(
+                        log, "Failed to get RoT state from SP";
+                        "message" => message,
+                    );
+                    rot = None;
+                }
+            }
+        }
+
         // For each of our cached items that require additional MGS requests (SP
         // components, SP caboose, RoT caboose), only fetch them if either our
         // state has changed or we previously failed to fetch them after such a
@@ -333,12 +356,13 @@ async fn sp_fetching_task(
                 };
         }
 
-        if prev_state.as_ref() != Some(&state) || caboose.is_none() {
-            caboose = match mgs_client
+        if prev_state.as_ref() != Some(&state) || caboose_active.is_none() {
+            caboose_active = match mgs_client
                 .sp_component_caboose_get(
                     id.type_,
                     id.slot,
                     SpComponent::SP_ITSELF.const_as_str(),
+                    0,
                 )
                 .await
             {
@@ -348,7 +372,7 @@ async fn sp_fetching_task(
                 }
                 Err(err) => {
                     warn!(
-                        log, "Failed to get caboose for sp";
+                        log, "Failed to get caboose for sp (active slot)";
                         "sp" => ?id,
                         "err" => %err,
                     );
@@ -357,12 +381,13 @@ async fn sp_fetching_task(
             };
         }
 
-        if prev_state.as_ref() != Some(&state) || rot.caboose.is_none() {
-            rot.caboose = match mgs_client
+        if prev_state.as_ref() != Some(&state) || caboose_inactive.is_none() {
+            caboose_inactive = match mgs_client
                 .sp_component_caboose_get(
                     id.type_,
                     id.slot,
-                    SpComponent::ROT.const_as_str(),
+                    SpComponent::SP_ITSELF.const_as_str(),
+                    1,
                 )
                 .await
             {
@@ -372,20 +397,73 @@ async fn sp_fetching_task(
                 }
                 Err(err) => {
                     warn!(
-                        log, "Failed to get RoT caboose for sp";
+                        log, "Failed to get caboose for sp (inactive slot)";
                         "sp" => ?id,
                         "err" => %err,
                     );
                     None
                 }
             };
+        }
+
+        if let Some(rot) = rot.as_mut() {
+            if prev_state.as_ref() != Some(&state) || rot.caboose_a.is_none() {
+                rot.caboose_a = match mgs_client
+                    .sp_component_caboose_get(
+                        id.type_,
+                        id.slot,
+                        SpComponent::ROT.const_as_str(),
+                        0,
+                    )
+                    .await
+                {
+                    Ok(response) => {
+                        mgs_received = Instant::now();
+                        Some(response.into_inner())
+                    }
+                    Err(err) => {
+                        warn!(
+                            log, "Failed to get RoT caboose (slot A) for sp";
+                            "sp" => ?id,
+                            "err" => %err,
+                        );
+                        None
+                    }
+                };
+            }
+
+            if prev_state.as_ref() != Some(&state) || rot.caboose_b.is_none() {
+                rot.caboose_b = match mgs_client
+                    .sp_component_caboose_get(
+                        id.type_,
+                        id.slot,
+                        SpComponent::ROT.const_as_str(),
+                        1,
+                    )
+                    .await
+                {
+                    Ok(response) => {
+                        mgs_received = Instant::now();
+                        Some(response.into_inner())
+                    }
+                    Err(err) => {
+                        warn!(
+                            log, "Failed to get RoT caboose (slot B) for sp";
+                            "sp" => ?id,
+                            "err" => %err,
+                        );
+                        None
+                    }
+                };
+            }
         }
 
         let emit = FetchedSpData {
             id,
             state,
             components: components.clone(),
-            caboose: caboose.clone(),
+            caboose_active: caboose_active.clone(),
+            caboose_inactive: caboose_inactive.clone(),
             rot: rot.clone(),
             mgs_received,
         };

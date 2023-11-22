@@ -2,329 +2,355 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::{net::SocketAddrV6, time::Duration};
+use std::{collections::BTreeSet, fmt, net::SocketAddr};
 
+use anyhow::bail;
 use camino::Utf8PathBuf;
-use omicron_common::update::ArtifactKind;
+use illumos_utils::zpool;
 use schemars::{
     gen::SchemaGenerator,
     schema::{Schema, SchemaObject},
     JsonSchema,
 };
 use serde::{Deserialize, Serialize};
+use serde_with::rust::deserialize_ignore_any;
+use thiserror::Error;
+use update_engine::{errors::NestedEngineError, AsError, StepSpec};
 
-/// A report, consisting of a list of events and some more metadata.
+// ---
+// Type definitions for use by installinator code.
+// ---
+
+update_engine::define_update_engine!(pub InstallinatorSpec);
+
+/// The specification for installinator events.
+#[derive(JsonSchema)]
+pub enum InstallinatorSpec {}
+
+impl StepSpec for InstallinatorSpec {
+    type Component = InstallinatorComponent;
+    type StepId = InstallinatorStepId;
+    type StepMetadata = InstallinatorStepMetadata;
+    type ProgressMetadata = InstallinatorProgressMetadata;
+    type CompletionMetadata = InstallinatorCompletionMetadata;
+    type SkippedMetadata = serde_json::Value;
+    type Error = anyhow::Error;
+}
+
+/// Installinator components.
 #[derive(
-    Clone, Debug, Default, Eq, PartialEq, Deserialize, Serialize, JsonSchema,
+    Copy, Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema,
 )]
-#[serde(rename_all = "snake_case", tag = "reason")]
-pub struct ProgressReport {
-    /// How long it's been since the installinator started running.
-    pub total_elapsed: Duration,
+#[serde(rename_all = "snake_case")]
+pub enum InstallinatorComponent {
+    /// The host phase 2 component.
+    HostPhase2,
 
-    /// A list of completion events.
-    ///
-    /// Completion events include success and failure events.
-    pub completion_events: Vec<CompletionEvent>,
+    /// The control plane component.
+    ControlPlane,
 
-    /// A list of progress events.
-    ///
-    /// For now, this is zero or one events since the installinator performs its
-    /// actions serially.
-    pub progress_events: Vec<ProgressEvent>,
+    /// A component that means "both the host and the control plane", used for
+    /// writes for now. It is possible that this component will go away in the
+    /// future.
+    Both,
+
+    /// Future variants that might be unknown.
+    #[serde(other, deserialize_with = "deserialize_ignore_any")]
+    Unknown,
 }
 
-/// An individual completion event.
-///
-/// Forms part of [`ProgressReport`].
+/// Installinator step identifier.
+#[derive(
+    Copy, Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum InstallinatorStepId {
+    Download,
+    Format,
+    Scan,
+    // There are multiple "composite" artifacts in the tuf repository the user
+    // gives to wicketd: the RoT (A/B images), the host (phase1/phase2), and the
+    // control plane (the collection of zones). wicketd handles unpacking the
+    // RoT and host composite artifacts, because it needs to give pieces from
+    // inside them to MGS. However, it does not unpack the control plane
+    // artifact: only installinator needs access to the zone images inside, so
+    // we have an explicit step here for that unpacking. If the user uploads a
+    // tuf repository with a malformed control plane composite artifact, this
+    // step is the point at which we'd discover that and fail.
+    UnpackControlPlaneArtifact,
+    Write,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case", tag = "reason")]
-pub struct CompletionEvent {
-    /// When this event was generated, in duration since the start of the program.
-    ///
-    /// This can be compared against [`ProgressReport::total_elapsed`] to figure
-    /// out how old the event was.
-    pub total_elapsed: Duration,
+pub enum InstallinatorStepMetadata {
+    Write {
+        /// The destination being formatted or written to.
+        ///
+        /// Available with format and destination events.
+        #[schemars(schema_with = "path_schema_opt")]
+        destination: Option<Utf8PathBuf>,
+    },
 
-    /// The kind of event this is.
-    pub kind: CompletionEventKind,
+    /// Future variants that might be unknown.
+    #[serde(other, deserialize_with = "deserialize_ignore_any")]
+    Unknown,
 }
 
-/// An individual kind of completion event.
-///
-/// Forms part of [`CompletionEvent`].
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case", tag = "reason")]
-pub enum CompletionEventKind {
-    /// The download of an artifact failed.
-    DownloadFailed {
-        /// The download attempt that failed.
-        attempt: usize,
-
-        /// The kind of artifact being downloaded.
-        kind: ArtifactKind,
-
-        /// The peer the artifact was being downloaded from, if any.
-        peer: SocketAddrV6,
-
-        /// The number of bytes downloaded before failure.
-        downloaded_bytes: u64,
-
-        /// How long the download took before failing.
-        elapsed: Duration,
-
-        /// A message indicating the reason for failure.
-        message: String,
+pub enum InstallinatorProgressMetadata {
+    Download {
+        /// The peer being downloaded from.
+        ///
+        /// Available with downlad events.
+        peer: SocketAddr,
     },
 
-    /// An artifact download was completed.
-    DownloadCompleted {
-        /// The download attempt that completed.
-        attempt: usize,
+    /// Future variants that might be unknown.
+    #[serde(other, deserialize_with = "deserialize_ignore_any")]
+    Unknown,
+}
 
-        /// The artifact downloaded.
-        kind: ArtifactKind,
-
-        /// The peer the artifact was downloaded from.
-        peer: SocketAddrV6,
-
-        /// The number of bytes downloaded.
-        artifact_size: u64,
-
-        /// How long the download took.
-        elapsed: Duration,
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case", tag = "reason")]
+pub enum InstallinatorCompletionMetadata {
+    HardwareScan {
+        /// Number of disks found.
+        disks_found: usize,
     },
 
-    /// Failed to format a disk.
-    FormatFailed {
-        /// The format attempt that failed.
-        attempt: usize,
-
-        /// The path to the disk.
-        #[schemars(schema_with = "path_schema")]
-        path: Utf8PathBuf,
-
-        /// How long the format attempt took.
-        elapsed: Duration,
-
-        /// A message indicating the reason for failure.
-        message: String,
+    ControlPlaneZones {
+        /// Number of zone images that will be installed.
+        zones_to_install: usize,
     },
 
-    /// Completed formatting a disk.
-    FormatCompleted {
-        /// The format attempt.
-        attempt: usize,
-
-        /// The path to the disk.
-        #[schemars(schema_with = "path_schema")]
-        path: Utf8PathBuf,
-
-        /// How long the format attempt took.
-        elapsed: Duration,
+    Download {
+        /// The address the artifact was downloaded from.
+        address: SocketAddr,
+    },
+    Write {
+        /// The output of the write operation.
+        output: WriteOutput,
     },
 
-    /// Failed to write an artifact.
-    WriteFailed {
-        /// The write attempt that failed.
-        attempt: usize,
+    /// Future variants that might be unknown.
+    #[serde(other, deserialize_with = "deserialize_ignore_any")]
+    Unknown,
+}
 
-        /// The kind of artifact being written out.
-        kind: ArtifactKind,
+/// The output of a write operation.
+///
+/// Forms part of [`InstallinatorCompletionMetadata::Write`].
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
+pub struct WriteOutput {
+    /// The slots that were requested to be written.
+    pub slots_attempted: BTreeSet<M2Slot>,
 
-        /// The destination the artifact is being written out to.
-        #[schemars(schema_with = "path_schema")]
-        destination: Utf8PathBuf,
+    /// The slots that were actually written.
+    pub slots_written: BTreeSet<M2Slot>,
+}
 
-        /// The number of bytes written out before failure.
+impl WriteOutput {
+    /// Returns a list of the slots not written.
+    pub fn slots_not_written(&self) -> Vec<M2Slot> {
+        let mut not_written = Vec::new();
+        for slot in &self.slots_attempted {
+            if !self.slots_written.contains(slot) {
+                not_written.push(*slot);
+            }
+        }
+
+        not_written
+    }
+}
+
+/// An M.2 slot that was written.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+pub enum M2Slot {
+    A,
+    B,
+}
+
+impl fmt::Display for M2Slot {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::A => f.write_str("A"),
+            Self::B => f.write_str("B"),
+        }
+    }
+}
+
+impl TryFrom<i64> for M2Slot {
+    type Error = anyhow::Error;
+
+    fn try_from(value: i64) -> Result<Self, Self::Error> {
+        match value {
+            // Gimlet should have 2 M.2 drives: drive A is assigned slot 17, and
+            // drive B is assigned slot 18.
+            17 => Ok(Self::A),
+            18 => Ok(Self::B),
+            _ => bail!("unexpected M.2 slot {value}"),
+        }
+    }
+}
+
+/// The specification for write events.
+#[derive(JsonSchema)]
+pub enum WriteSpec {}
+
+impl StepSpec for WriteSpec {
+    type Component = WriteComponent;
+    type StepId = WriteStepId;
+    type StepMetadata = ();
+    type ProgressMetadata = ();
+    type CompletionMetadata = ();
+    type SkippedMetadata = ();
+    type Error = WriteError;
+}
+
+/// The write component.
+#[derive(
+    Copy, Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum WriteComponent {
+    /// The host phase 2 component.
+    HostPhase2,
+
+    /// The control plane component.
+    ControlPlane,
+
+    /// Future variants that might be unknown.
+    #[serde(other, deserialize_with = "deserialize_ignore_any")]
+    Unknown,
+}
+
+impl fmt::Display for WriteComponent {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::HostPhase2 => f.write_str("host phase 2"),
+            Self::ControlPlane => f.write_str("control plane"),
+            Self::Unknown => f.write_str("unknown"),
+        }
+    }
+}
+
+/// A step identifier for the write operation.
+#[derive(
+    Copy, Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum WriteStepId {
+    /// Writing the component.
+    Writing { slot: M2Slot },
+
+    /// Future variants that might be unknown.
+    #[serde(other, deserialize_with = "deserialize_ignore_any")]
+    Unknown,
+}
+
+/// The error that occurred.
+#[derive(Debug, Error)]
+pub enum WriteError {
+    #[error(
+        "writing {component} to slot {slot} failed \
+         after {written_bytes}/{total_bytes} bytes"
+    )]
+    WriteError {
+        component: WriteComponent,
+        slot: M2Slot,
         written_bytes: u64,
-
-        /// The total number of bytes that should have been written out.
         total_bytes: u64,
-
-        /// How long the write took before it failed.
-        elapsed: Duration,
-
-        /// A message indicating why the write failed.
-        message: String,
+        #[source]
+        error: std::io::Error,
     },
-
-    /// Completed writing an artifact.
-    WriteCompleted {
-        /// The write attempt that completed.
-        attempt: usize,
-
-        /// The kind of artifact that was written out.
-        kind: ArtifactKind,
-
-        /// The destination for the artifact.
-        #[schemars(schema_with = "path_schema")]
-        destination: Utf8PathBuf,
-
-        /// The number of bytes written out.
-        artifact_size: u64,
-
-        /// How long the write took to complete.
-        elapsed: Duration,
+    #[error("error validating checksum of written file")]
+    ChecksumValidationError(#[source] anyhow::Error),
+    #[error("error removing files from {path}: {error}")]
+    RemoveFilesError { path: Utf8PathBuf, error: std::io::Error },
+    #[error("error fsyncing output directory: {error}")]
+    SyncOutputDirError { error: std::io::Error },
+    #[error("error interacting with zpool: {error}")]
+    ZpoolError {
+        #[from]
+        error: zpool::Error,
     },
-
-    /// A miscellaneous error occurred.
-    ///
-    /// This is a catch-all for errors that aren't described by any of the variants.
-    MiscError {
-        /// The name of the operation that failed.
-        operation: String,
-
-        /// The attempt that failed.
-        attempt: usize,
-
-        /// Data about the operation, serialized as JSON.
-        data: serde_json::Value,
-
-        /// How long the operation took before it failed.
-        elapsed: Duration,
-
-        /// A message indicating why the operation failed.
-        message: String,
-
-        /// Whether this operation is fatal, i.e. will not be retried.
-        is_fatal: bool,
+    #[error("error writing control plane")]
+    ControlPlaneWriteError {
+        #[source]
+        error: Box<NestedEngineError<ControlPlaneZonesSpec>>,
     },
-
-    /// Completed the entire operation.
-    Completed,
 }
 
-impl CompletionEventKind {
-    /// Returns the attempt number for this event.
-    pub fn attempt(&self) -> Option<usize> {
-        match self {
-            Self::DownloadCompleted { attempt, .. }
-            | Self::DownloadFailed { attempt, .. }
-            | Self::FormatFailed { attempt, .. }
-            | Self::FormatCompleted { attempt, .. }
-            | Self::WriteCompleted { attempt, .. }
-            | Self::WriteFailed { attempt, .. }
-            | Self::MiscError { attempt, .. } => Some(*attempt),
-            Self::Completed => None,
-        }
-    }
-
-    /// Returns true if the event is a success.
-    pub fn is_success(&self) -> bool {
-        match self {
-            Self::DownloadCompleted { .. }
-            | Self::FormatCompleted { .. }
-            | Self::WriteCompleted { .. }
-            | Self::Completed => true,
-            Self::DownloadFailed { .. }
-            | Self::FormatFailed { .. }
-            | Self::WriteFailed { .. }
-            | Self::MiscError { .. } => false,
-        }
-    }
-
-    /// Returns the peer corresponding to this event.
-    ///
-    /// Returns None if this is not a download event.
-    pub fn peer(&self) -> Option<SocketAddrV6> {
-        match self {
-            Self::DownloadCompleted { peer, .. }
-            | Self::DownloadFailed { peer, .. } => Some(*peer),
-            Self::FormatCompleted { .. }
-            | Self::FormatFailed { .. }
-            | Self::WriteCompleted { .. }
-            | Self::WriteFailed { .. }
-            | Self::MiscError { .. }
-            | Self::Completed => None,
-        }
+impl From<NestedEngineError<ControlPlaneZonesSpec>> for WriteError {
+    fn from(error: NestedEngineError<ControlPlaneZonesSpec>) -> Self {
+        Self::ControlPlaneWriteError { error: Box::new(error) }
     }
 }
 
-/// An individual progress event.
-///
-/// Forms part of [`ProgressReport`].
+impl AsError for WriteError {
+    fn as_error(&self) -> &(dyn std::error::Error + 'static) {
+        self
+    }
+}
+
+/// The specification for writing control plane zones.
+#[derive(JsonSchema)]
+pub enum ControlPlaneZonesSpec {}
+
+// This is a nested spec used within a `WriteSpec` engine, and we reuse a couple
+// of `WriteSpec`'s types for simplicity.
+impl StepSpec for ControlPlaneZonesSpec {
+    type Component = WriteComponent;
+    type StepId = ControlPlaneZonesStepId;
+    type StepMetadata = ();
+    type ProgressMetadata = ();
+    type CompletionMetadata = ();
+    type SkippedMetadata = ();
+    type Error = WriteError;
+}
+
+/// A step identifier for the control plane zones operation.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case", tag = "reason")]
-pub struct ProgressEvent {
-    /// When this event was generated, in duration since the start of the program.
-    ///
-    /// This can be compared against [`ProgressReport::total_elapsed`] to figure
-    /// out how old the event was.
-    pub total_elapsed: Duration,
-
-    /// The kind of event this is.
-    pub kind: ProgressEventKind,
-}
-
-/// An individual kind of progress event.
-///
-/// Forms part of [`ProgressEvent`].
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case", tag = "reason")]
-pub enum ProgressEventKind {
-    /// An artifact is being downloaded.
-    DownloadProgress {
-        /// The download attempt currently occurring.
-        attempt: usize,
-
-        /// The kind of artifact being downloaded.
-        kind: ArtifactKind,
-
-        /// The peer from which the artifact is being downloaded.
-        peer: SocketAddrV6,
-
-        /// The number of bytes downloaded so far.
-        downloaded_bytes: u64,
-
-        /// The size of the artifact, as provided in the Content-Length header.
-        total_bytes: u64,
-
-        /// How long it's been since the download started.
-        elapsed: Duration,
-    },
-
-    /// A disk is being formatted.
-    FormatProgress {
-        /// The format attempt.
-        attempt: usize,
-
-        /// The path to the disk.
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum ControlPlaneZonesStepId {
+    /// Removing any files from the target directory.
+    CleanTargetDirectory {
         #[schemars(schema_with = "path_schema")]
         path: Utf8PathBuf,
-
-        /// Percentage progress.
-        percentage: usize,
-
-        /// How long it's been since the format started.
-        elapsed: Duration,
     },
 
-    /// An artifact is being written out.
-    WriteProgress {
-        /// The write attempt currently occurring.
-        attempt: usize,
+    /// Writing a zone.
+    Zone { name: String },
 
-        /// The kind of artifact being written out.
-        kind: ArtifactKind,
+    /// Syncing writes to disk.
+    Fsync,
 
-        /// The destination the artifact is being written out to.
-        #[schemars(schema_with = "path_schema")]
-        destination: Utf8PathBuf,
-
-        /// The number of bytes written out.
-        written_bytes: u64,
-
-        /// The total number of bytes to write out.
-        total_bytes: u64,
-
-        /// How long it's been since the write started.
-        elapsed: Duration,
-    },
+    /// Future variants that might be unknown.
+    #[serde(other, deserialize_with = "deserialize_ignore_any")]
+    Unknown,
 }
 
 fn path_schema(gen: &mut SchemaGenerator) -> Schema {
     let mut schema: SchemaObject = <String>::json_schema(gen).into();
+    schema.format = Some("Utf8PathBuf".to_owned());
+    schema.into()
+}
+
+fn path_schema_opt(gen: &mut SchemaGenerator) -> Schema {
+    let mut schema: SchemaObject = <Option<String>>::json_schema(gen).into();
     schema.format = Some("Utf8PathBuf".to_owned());
     schema.into()
 }

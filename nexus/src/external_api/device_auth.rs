@@ -11,7 +11,7 @@
 
 use super::console_api::console_index_or_login_redirect;
 use super::views::DeviceAccessTokenGrant;
-use crate::db::model::DeviceAccessToken;
+use crate::app::external_endpoints::authority_for_request;
 use crate::ServerContext;
 use dropshot::{
     endpoint, HttpError, HttpResponseUpdatedNoContent, RequestContext,
@@ -19,6 +19,7 @@ use dropshot::{
 };
 use http::{header, Response, StatusCode};
 use hyper::Body;
+use nexus_db_queries::db::model::DeviceAccessToken;
 use omicron_common::api::external::InternalContext;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -62,7 +63,7 @@ pub struct DeviceAuthRequest {
     content_type = "application/x-www-form-urlencoded",
     tags = ["hidden"], // "token"
 }]
-pub async fn device_auth_request(
+pub(crate) async fn device_auth_request(
     rqctx: RequestContext<Arc<ServerContext>>,
     params: TypedBody<DeviceAuthRequest>,
 ) -> Result<Response<Body>, HttpError> {
@@ -71,37 +72,15 @@ pub async fn device_auth_request(
     let params = params.into_inner();
     let handler = async {
         let opctx = nexus.opctx_external_authn();
-        let request = &rqctx.request;
-
-        let host = if request.version() > hyper::Version::HTTP_11 {
-            request.uri().authority().map(|a| a.as_str())
-        } else {
-            let host = request
-                .headers()
-                .get(header::HOST)
-                .map(|h| h.to_str())
-                .transpose();
-            match host {
-                Ok(host) => host,
-                Err(e) => {
-                    return build_oauth_response(
-                        StatusCode::BAD_REQUEST,
-                        &serde_json::json!({
-                            "error": "invalid_request",
-                            "error_description": format!("could not decode Host header: {}", e)
-                        }),
-                    )
-                }
-            }
-        };
-        let host = match host {
-            Some(host) => host,
-            None => {
+        let authority = authority_for_request(&rqctx.request);
+        let host = match &authority {
+            Ok(host) => host.as_str(),
+            Err(error) => {
                 return build_oauth_response(
                     StatusCode::BAD_REQUEST,
                     &serde_json::json!({
                         "error": "invalid_request",
-                        "error_description": "missing Host header",
+                        "error_description": error,
                     }),
                 )
             }
@@ -136,7 +115,7 @@ pub struct DeviceAuthVerify {
     path = "/device/verify",
     unpublished = true,
 }]
-pub async fn device_auth_verify(
+pub(crate) async fn device_auth_verify(
     rqctx: RequestContext<Arc<ServerContext>>,
 ) -> Result<Response<Body>, HttpError> {
     console_index_or_login_redirect(rqctx).await
@@ -147,7 +126,7 @@ pub async fn device_auth_verify(
     path = "/device/success",
     unpublished = true,
 }]
-pub async fn device_auth_success(
+pub(crate) async fn device_auth_success(
     rqctx: RequestContext<Arc<ServerContext>>,
 ) -> Result<Response<Body>, HttpError> {
     console_index_or_login_redirect(rqctx).await
@@ -163,7 +142,7 @@ pub async fn device_auth_success(
     path = "/device/confirm",
     tags = ["hidden"], // "token"
 }]
-pub async fn device_auth_confirm(
+pub(crate) async fn device_auth_confirm(
     rqctx: RequestContext<Arc<ServerContext>>,
     params: TypedBody<DeviceAuthVerify>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
@@ -198,6 +177,7 @@ pub struct DeviceAccessTokenRequest {
 pub enum DeviceAccessTokenResponse {
     Granted(DeviceAccessToken),
     Pending,
+    #[allow(dead_code)]
     Denied,
 }
 
@@ -211,7 +191,7 @@ pub enum DeviceAccessTokenResponse {
     content_type = "application/x-www-form-urlencoded",
     tags = ["hidden"], // "token"
 }]
-pub async fn device_access_token(
+pub(crate) async fn device_access_token(
     rqctx: RequestContext<Arc<ServerContext>>,
     params: TypedBody<DeviceAccessTokenRequest>,
 ) -> Result<Response<Body>, HttpError> {

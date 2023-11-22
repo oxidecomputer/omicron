@@ -4,13 +4,13 @@
 
 //! Console session management.
 
-use crate::authn;
-use crate::authn::Reason;
-use crate::authz;
-use crate::db;
-use crate::db::lookup::LookupPath;
 use hex;
+use nexus_db_queries::authn;
+use nexus_db_queries::authn::Reason;
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
+use nexus_db_queries::db::lookup::LookupPath;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
@@ -68,7 +68,7 @@ impl super::Nexus {
         Ok(true)
     }
 
-    pub async fn session_create(
+    pub(crate) async fn session_create(
         &self,
         opctx: &OpContext,
         user_id: Uuid,
@@ -85,7 +85,7 @@ impl super::Nexus {
         self.db_datastore.session_create(opctx, session).await
     }
 
-    pub async fn session_fetch(
+    pub(crate) async fn session_fetch(
         &self,
         opctx: &OpContext,
         token: String,
@@ -108,7 +108,7 @@ impl super::Nexus {
     }
 
     /// Updates last_used to now.
-    pub async fn session_update_last_used(
+    pub(crate) async fn session_update_last_used(
         &self,
         opctx: &OpContext,
         token: &str,
@@ -121,7 +121,7 @@ impl super::Nexus {
         self.db_datastore.session_update_last_used(opctx, &authz_session).await
     }
 
-    pub async fn session_hard_delete(
+    pub(crate) async fn session_hard_delete(
         &self,
         opctx: &OpContext,
         token: &str,
@@ -134,7 +134,7 @@ impl super::Nexus {
         self.db_datastore.session_hard_delete(opctx, &authz_session).await
     }
 
-    pub async fn lookup_silo_for_authn(
+    pub(crate) async fn lookup_silo_for_authn(
         &self,
         opctx: &OpContext,
         silo_user_id: Uuid,
@@ -155,7 +155,8 @@ impl super::Nexus {
                 | Error::InternalError { .. }
                 | Error::ServiceUnavailable { .. }
                 | Error::MethodNotAllowed { .. }
-                | Error::TypeVersionMismatch { .. } => {
+                | Error::TypeVersionMismatch { .. }
+                | Error::Conflict { .. } => {
                     Reason::UnknownError { source: error }
                 }
             })?;

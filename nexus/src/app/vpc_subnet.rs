@@ -4,15 +4,15 @@
 
 //! VPC Subnets and their network interfaces
 
-use crate::authz;
-use crate::db;
-use crate::db::identity::Resource;
-use crate::db::lookup;
-use crate::db::lookup::LookupPath;
-use crate::db::model::VpcSubnet;
-use crate::db::queries::vpc_subnet::SubnetError;
 use crate::external_api::params;
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
+use nexus_db_queries::db::identity::Resource;
+use nexus_db_queries::db::lookup;
+use nexus_db_queries::db::lookup::LookupPath;
+use nexus_db_queries::db::model::VpcSubnet;
+use nexus_db_queries::db::queries::vpc_subnet::SubnetError;
 use omicron_common::api::external;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
@@ -65,7 +65,7 @@ impl super::Nexus {
     }
     // TODO: When a subnet is created it should add a route entry into the VPC's
     // system router
-    pub async fn vpc_create_subnet(
+    pub(crate) async fn vpc_create_subnet(
         &self,
         opctx: &OpContext,
         vpc_lookup: &lookup::Vpc<'_>,
@@ -215,7 +215,7 @@ impl super::Nexus {
         }
     }
 
-    pub async fn vpc_subnet_list(
+    pub(crate) async fn vpc_subnet_list(
         &self,
         opctx: &OpContext,
         vpc_lookup: &lookup::Vpc<'_>,
@@ -226,7 +226,7 @@ impl super::Nexus {
         self.db_datastore.vpc_subnet_list(opctx, &authz_vpc, pagparams).await
     }
 
-    pub async fn vpc_update_subnet(
+    pub(crate) async fn vpc_update_subnet(
         &self,
         opctx: &OpContext,
         vpc_subnet_lookup: &lookup::VpcSubnet<'_>,
@@ -241,7 +241,7 @@ impl super::Nexus {
 
     // TODO: When a subnet is deleted it should remove its entry from the VPC's
     // system router.
-    pub async fn vpc_delete_subnet(
+    pub(crate) async fn vpc_delete_subnet(
         &self,
         opctx: &OpContext,
         vpc_subnet_lookup: &lookup::VpcSubnet<'_>,
@@ -253,7 +253,7 @@ impl super::Nexus {
             .await
     }
 
-    pub async fn subnet_list_instance_network_interfaces(
+    pub(crate) async fn subnet_list_instance_network_interfaces(
         &self,
         opctx: &OpContext,
         subnet_lookup: &lookup::VpcSubnet<'_>,

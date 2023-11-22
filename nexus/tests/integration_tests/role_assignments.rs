@@ -10,19 +10,18 @@ use futures::Future;
 use futures::FutureExt;
 use http::Method;
 use http::StatusCode;
+use nexus_db_queries::authn::USER_TEST_UNPRIVILEGED;
+use nexus_db_queries::db::fixed_data;
+use nexus_db_queries::db::identity::Asset;
+use nexus_db_queries::db::identity::Resource;
+use nexus_db_queries::db::model::DatabaseString;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::shared;
+use nexus_types::external_api::views;
 use omicron_common::api::external::ObjectIdentity;
-use omicron_nexus::authn::USER_TEST_UNPRIVILEGED;
-use omicron_nexus::authz;
-use omicron_nexus::db::fixed_data;
-use omicron_nexus::db::identity::Asset;
-use omicron_nexus::db::identity::Resource;
-use omicron_nexus::db::model::DatabaseString;
-use omicron_nexus::external_api::shared;
-use omicron_nexus::external_api::views;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -105,8 +104,8 @@ async fn test_role_assignments_fleet(cptestctx: &ControlPlaneTestContext) {
 
     struct FleetRoleAssignmentTest;
     impl RoleAssignmentTest for FleetRoleAssignmentTest {
-        type RoleType = authz::FleetRole;
-        const ROLE: Self::RoleType = authz::FleetRole::Admin;
+        type RoleType = shared::FleetRole;
+        const ROLE: Self::RoleType = shared::FleetRole::Admin;
         const VISIBLE_TO_UNPRIVILEGED: bool = true;
         fn policy_url(&self) -> String {
             String::from("/v1/system/policy")
@@ -170,8 +169,8 @@ async fn test_role_assignments_fleet(cptestctx: &ControlPlaneTestContext) {
 async fn test_role_assignments_silo(cptestctx: &ControlPlaneTestContext) {
     struct SiloRoleAssignmentTest;
     impl RoleAssignmentTest for SiloRoleAssignmentTest {
-        type RoleType = authz::SiloRole;
-        const ROLE: Self::RoleType = authz::SiloRole::Admin;
+        type RoleType = shared::SiloRole;
+        const ROLE: Self::RoleType = shared::SiloRole::Admin;
         const VISIBLE_TO_UNPRIVILEGED: bool = true;
         fn policy_url(&self) -> String {
             format!(
@@ -226,8 +225,8 @@ async fn test_role_assignments_silo_implicit(
 ) {
     struct SiloRoleAssignmentTest;
     impl RoleAssignmentTest for SiloRoleAssignmentTest {
-        type RoleType = authz::SiloRole;
-        const ROLE: Self::RoleType = authz::SiloRole::Admin;
+        type RoleType = shared::SiloRole;
+        const ROLE: Self::RoleType = shared::SiloRole::Admin;
         const VISIBLE_TO_UNPRIVILEGED: bool = true;
         fn policy_url(&self) -> String {
             "/v1/policy".to_string()
@@ -290,8 +289,8 @@ async fn test_role_assignments_project(cptestctx: &ControlPlaneTestContext) {
         policy_url: format!("/v1/projects/{}/policy", project_name),
     };
     impl RoleAssignmentTest for ProjectRoleAssignmentTest {
-        type RoleType = authz::ProjectRole;
-        const ROLE: Self::RoleType = authz::ProjectRole::Admin;
+        type RoleType = shared::ProjectRole;
+        const ROLE: Self::RoleType = shared::ProjectRole::Admin;
         const VISIBLE_TO_UNPRIVILEGED: bool = false;
         fn policy_url(&self) -> String {
             self.policy_url.clone()

@@ -452,6 +452,15 @@
             "schema": {
               "$ref": "#/components/schemas/SpType"
             }
+          },
+          {
+            "in": "query",
+            "name": "persist",
+            "description": "Persist this choice of active slot.",
+            "required": true,
+            "schema": {
+              "type": "boolean"
+            }
           }
         ],
         "requestBody": {
@@ -509,6 +518,17 @@
             "schema": {
               "$ref": "#/components/schemas/SpType"
             }
+          },
+          {
+            "in": "query",
+            "name": "firmware_slot",
+            "description": "The firmware slot to for which we want to request caboose information.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
           }
         ],
         "responses": {
@@ -531,11 +551,175 @@
         }
       }
     },
+    "/sp/{type}/{slot}/component/{component}/cfpa": {
+      "get": {
+        "summary": "Read the requested CFPA slot from a root of trust.",
+        "description": "This endpoint is only valid for the `rot` component.",
+        "operationId": "sp_rot_cfpa_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "component",
+            "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GetCfpaParams"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RotCfpa"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/sp/{type}/{slot}/component/{component}/clear-status": {
       "post": {
         "summary": "Clear status of a component",
         "description": "For components that maintain event counters (e.g., the sidecar `monorail`), this will reset the event counters to zero.",
         "operationId": "sp_component_clear_status",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "component",
+            "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/sp/{type}/{slot}/component/{component}/cmpa": {
+      "get": {
+        "summary": "Read the CMPA from a root of trust.",
+        "description": "This endpoint is only valid for the `rot` component.",
+        "operationId": "sp_rot_cmpa_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "component",
+            "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RotCmpa"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/sp/{type}/{slot}/component/{component}/reset": {
+      "post": {
+        "summary": "Reset an SP component (possibly the SP itself).",
+        "operationId": "sp_component_reset",
         "parameters": [
           {
             "in": "path",
@@ -1116,43 +1300,6 @@
         }
       }
     },
-    "/sp/{type}/{slot}/reset": {
-      "post": {
-        "summary": "Reset an SP",
-        "operationId": "sp_reset",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "slot",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 0
-            }
-          },
-          {
-            "in": "path",
-            "name": "type",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/SpType"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/sp/{type}/{slot}/startup-options": {
       "get": {
         "summary": "Get host startup options for a sled",
@@ -1246,18 +1393,6 @@
     }
   },
   "components": {
-    "responses": {
-      "Error": {
-        "description": "Error",
-        "content": {
-          "application/json": {
-            "schema": {
-              "$ref": "#/components/schemas/Error"
-            }
-          }
-        }
-      }
-    },
     "schemas": {
       "Duration": {
         "type": "object",
@@ -1295,6 +1430,17 @@
         "required": [
           "message",
           "request_id"
+        ]
+      },
+      "GetCfpaParams": {
+        "type": "object",
+        "properties": {
+          "slot": {
+            "$ref": "#/components/schemas/RotCfpaSlot"
+          }
+        },
+        "required": [
+          "slot"
         ]
       },
       "HostPhase2Progress": {
@@ -1403,25 +1549,6 @@
           "phase2_recovery_mode",
           "prom",
           "verbose"
-        ]
-      },
-      "ImageVersion": {
-        "type": "object",
-        "properties": {
-          "epoch": {
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          },
-          "version": {
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "epoch",
-          "version"
         ]
       },
       "InstallinatorImageId": {
@@ -2061,19 +2188,76 @@
           "A2"
         ]
       },
-      "RotImageDetails": {
+      "RotCfpa": {
         "type": "object",
         "properties": {
-          "digest": {
+          "base64_data": {
             "type": "string"
           },
-          "version": {
-            "$ref": "#/components/schemas/ImageVersion"
+          "slot": {
+            "$ref": "#/components/schemas/RotCfpaSlot"
           }
         },
         "required": [
-          "digest",
-          "version"
+          "base64_data",
+          "slot"
+        ]
+      },
+      "RotCfpaSlot": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "slot": {
+                "type": "string",
+                "enum": [
+                  "active"
+                ]
+              }
+            },
+            "required": [
+              "slot"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "slot": {
+                "type": "string",
+                "enum": [
+                  "inactive"
+                ]
+              }
+            },
+            "required": [
+              "slot"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "slot": {
+                "type": "string",
+                "enum": [
+                  "scratch"
+                ]
+              }
+            },
+            "required": [
+              "slot"
+            ]
+          }
+        ]
+      },
+      "RotCmpa": {
+        "type": "object",
+        "properties": {
+          "base64_data": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "base64_data"
         ]
       },
       "RotSlot": {
@@ -2116,31 +2300,43 @@
               "active": {
                 "$ref": "#/components/schemas/RotSlot"
               },
-              "slot_a": {
+              "pending_persistent_boot_preference": {
                 "nullable": true,
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/RotImageDetails"
+                    "$ref": "#/components/schemas/RotSlot"
                   }
                 ]
               },
-              "slot_b": {
+              "persistent_boot_preference": {
+                "$ref": "#/components/schemas/RotSlot"
+              },
+              "slot_a_sha3_256_digest": {
                 "nullable": true,
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/RotImageDetails"
-                  }
-                ]
+                "type": "string"
+              },
+              "slot_b_sha3_256_digest": {
+                "nullable": true,
+                "type": "string"
               },
               "state": {
                 "type": "string",
                 "enum": [
                   "enabled"
                 ]
+              },
+              "transient_boot_preference": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotSlot"
+                  }
+                ]
               }
             },
             "required": [
               "active",
+              "persistent_boot_preference",
               "state"
             ]
           },
@@ -2177,14 +2373,14 @@
             "type": "string"
           },
           "version": {
-            "nullable": true,
             "type": "string"
           }
         },
         "required": [
           "board",
           "git_commit",
-          "name"
+          "name",
+          "version"
         ]
       },
       "SpComponentDetails": {
@@ -2624,9 +2820,6 @@
           },
           "serial_number": {
             "type": "string"
-          },
-          "version": {
-            "$ref": "#/components/schemas/ImageVersion"
           }
         },
         "required": [
@@ -2636,8 +2829,7 @@
           "power_state",
           "revision",
           "rot",
-          "serial_number",
-          "version"
+          "serial_number"
         ]
       },
       "SpType": {
@@ -2790,6 +2982,30 @@
               "id",
               "state"
             ]
+          },
+          {
+            "description": "The update process failed with an RoT-specific error.",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "message": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "rot_error"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "message",
+              "state"
+            ]
           }
         ]
       },
@@ -2880,6 +3096,18 @@
           "power_off",
           "power_reset"
         ]
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "Error",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
       }
     }
   }

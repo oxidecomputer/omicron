@@ -22,30 +22,41 @@ use uuid::Uuid;
 pub mod disk_create;
 pub mod disk_delete;
 pub mod finalize_disk;
+pub mod image_delete;
 pub mod import_blocks_from_url;
+mod instance_common;
 pub mod instance_create;
 pub mod instance_delete;
 pub mod instance_migrate;
+pub mod instance_start;
+pub mod loopback_address_create;
+pub mod loopback_address_delete;
 pub mod project_create;
 pub mod snapshot_create;
 pub mod snapshot_delete;
+pub mod switch_port_settings_apply;
+pub mod switch_port_settings_clear;
+pub mod test_saga;
 pub mod volume_delete;
 pub mod volume_remove_rop;
 pub mod vpc_create;
 
 pub mod common_storage;
 
+#[cfg(test)]
+mod test_helpers;
+
 #[derive(Debug)]
-pub struct NexusSagaType;
+pub(crate) struct NexusSagaType;
 impl steno::SagaType for NexusSagaType {
     type ExecContextType = Arc<SagaContext>;
 }
 
-pub type ActionRegistry = steno::ActionRegistry<NexusSagaType>;
-pub type NexusAction = Arc<dyn steno::Action<NexusSagaType>>;
-pub type NexusActionContext = steno::ActionContext<NexusSagaType>;
+pub(crate) type ActionRegistry = steno::ActionRegistry<NexusSagaType>;
+pub(crate) type NexusAction = Arc<dyn steno::Action<NexusSagaType>>;
+pub(crate) type NexusActionContext = steno::ActionContext<NexusSagaType>;
 
-pub trait NexusSaga {
+pub(crate) trait NexusSaga {
     const NAME: &'static str;
 
     type Params: serde::Serialize
@@ -101,7 +112,7 @@ impl From<SagaInitError> for omicron_common::api::external::Error {
 pub(super) static ACTION_GENERATE_ID: Lazy<NexusAction> = Lazy::new(|| {
     new_action_noop_undo("common.uuid_generate", saga_generate_uuid)
 });
-pub static ACTION_REGISTRY: Lazy<Arc<ActionRegistry>> =
+pub(crate) static ACTION_REGISTRY: Lazy<Arc<ActionRegistry>> =
     Lazy::new(|| Arc::new(make_action_registry()));
 
 fn make_action_registry() -> ActionRegistry {
@@ -123,6 +134,23 @@ fn make_action_registry() -> ActionRegistry {
     <instance_migrate::SagaInstanceMigrate as NexusSaga>::register_actions(
         &mut registry,
     );
+    <instance_start::SagaInstanceStart as NexusSaga>::register_actions(
+        &mut registry,
+    );
+    <loopback_address_create::SagaLoopbackAddressCreate
+        as NexusSaga>::register_actions(
+        &mut registry,
+    );
+    <loopback_address_delete::SagaLoopbackAddressDelete
+        as NexusSaga>::register_actions(
+        &mut registry,
+    );
+    <switch_port_settings_apply::SagaSwitchPortSettingsApply as NexusSaga>::register_actions(
+        &mut registry,
+    );
+    <switch_port_settings_clear::SagaSwitchPortSettingsClear as NexusSaga>::register_actions(
+        &mut registry,
+    );
     <project_create::SagaProjectCreate as NexusSaga>::register_actions(
         &mut registry,
     );
@@ -139,6 +167,12 @@ fn make_action_registry() -> ActionRegistry {
         &mut registry,
     );
     <vpc_create::SagaVpcCreate as NexusSaga>::register_actions(&mut registry);
+    <image_delete::SagaImageDelete as NexusSaga>::register_actions(
+        &mut registry,
+    );
+
+    #[cfg(test)]
+    <test_saga::SagaTest as NexusSaga>::register_actions(&mut registry);
 
     registry
 }
@@ -279,7 +313,91 @@ macro_rules! declare_saga_actions {
     };
 }
 
+use omicron_common::OMICRON_DPD_TAG as NEXUS_DPD_TAG;
+
 pub(crate) use __action_name;
 pub(crate) use __emit_action;
 pub(crate) use __stringify_ident;
 pub(crate) use declare_saga_actions;
+
+use futures::Future;
+
+/// Retry a progenitor client operation until a known result is returned.
+///
+/// Saga execution relies on the outcome of an external call being known: since
+/// they are idempotent, reissue the external call until a known result comes
+/// back. Retry if a communication error is seen, or if another retryable error
+/// is seen.
+///
+/// Note that retrying is only valid if the call itself is idempotent.
+pub(crate) async fn retry_until_known_result<F, T, E, Fut>(
+    log: &slog::Logger,
+    mut f: F,
+) -> Result<T, progenitor_client::Error<E>>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<T, progenitor_client::Error<E>>>,
+    E: std::fmt::Debug,
+{
+    use omicron_common::backoff;
+
+    backoff::retry_notify(
+        backoff::retry_policy_internal_service(),
+        move || {
+            let fut = f();
+            async move {
+                match fut.await {
+                    Err(progenitor_client::Error::CommunicationError(e)) => {
+                        warn!(
+                            log,
+                            "saw transient communication error {}, retrying...",
+                            e,
+                        );
+
+                        Err(backoff::BackoffError::transient(
+                            progenitor_client::Error::CommunicationError(e),
+                        ))
+                    }
+
+                    Err(progenitor_client::Error::ErrorResponse(
+                        response_value,
+                    )) => {
+                        match response_value.status() {
+                            // Retry on 503 or 429
+                            http::StatusCode::SERVICE_UNAVAILABLE
+                            | http::StatusCode::TOO_MANY_REQUESTS => {
+                                Err(backoff::BackoffError::transient(
+                                    progenitor_client::Error::ErrorResponse(
+                                        response_value,
+                                    ),
+                                ))
+                            }
+
+                            // Anything else is a permanent error
+                            _ => Err(backoff::BackoffError::Permanent(
+                                progenitor_client::Error::ErrorResponse(
+                                    response_value,
+                                ),
+                            )),
+                        }
+                    }
+
+                    Err(e) => {
+                        warn!(log, "saw permanent error {}, aborting", e,);
+
+                        Err(backoff::BackoffError::Permanent(e))
+                    }
+
+                    Ok(v) => Ok(v),
+                }
+            }
+        },
+        |error: progenitor_client::Error<_>, delay| {
+            warn!(
+                log,
+                "failed external call ({:?}), will retry in {:?}", error, delay,
+            );
+        },
+    )
+    .await
+}

@@ -10,6 +10,23 @@
     "version": "0.0.1"
   },
   "paths": {
+    "/cockroachdb": {
+      "post": {
+        "summary": "Initializes a CockroachDB cluster",
+        "operationId": "cockroachdb_init",
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/disks/{disk_id}": {
       "put": {
         "operationId": "disk_put",
@@ -54,32 +71,6 @@
         }
       }
     },
-    "/filesystem": {
-      "put": {
-        "operationId": "filesystem_put",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DatasetEnsureBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/instances/{instance_id}": {
       "put": {
         "operationId": "instance_register",
@@ -110,7 +101,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InstanceRuntimeState"
+                  "$ref": "#/components/schemas/SledInstanceState"
                 }
               }
             }
@@ -240,7 +231,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InstanceRuntimeState"
+                  "$ref": "#/components/schemas/SledInstanceState"
                 }
               }
             }
@@ -298,6 +289,94 @@
         }
       }
     },
+    "/metrics/collect/{producer_id}": {
+      "get": {
+        "summary": "Collect oximeter samples from the sled agent.",
+        "operationId": "metrics_collect",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "producer_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_ProducerResultsItem",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ProducerResultsItem"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/network-bootstore-config": {
+      "get": {
+        "summary": "This API endpoint is only reading the local sled agent's view of the",
+        "description": "bootstore. The boostore is a distributed data store that is eventually consistent. Reads from individual nodes may not represent the latest state.",
+        "operationId": "read_network_bootstore_config_cache",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EarlyNetworkConfig"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "operationId": "write_network_bootstore_config",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EarlyNetworkConfig"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/services": {
       "put": {
         "operationId": "services_put",
@@ -337,6 +416,59 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/sleds": {
+      "put": {
+        "summary": "Add a sled to a rack that was already initialized via RSS",
+        "operationId": "add_sled_to_initialized_rack",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddSledRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/switch-ports": {
+      "post": {
+        "operationId": "uplink_ensure",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SwitchPorts"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -451,7 +583,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/SetVirtualNetworkInterfaceHost"
+                "$ref": "#/components/schemas/DeleteVirtualNetworkInterfaceHost"
               }
             }
           },
@@ -507,6 +639,329 @@
         }
       }
     },
+    "/zones": {
+      "get": {
+        "summary": "List the zones that are currently managed by the sled agent.",
+        "operationId": "zones_list",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_String",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/zones/bundle-cleanup": {
+      "post": {
+        "summary": "Trigger a zone bundle cleanup.",
+        "operationId": "zone_bundle_cleanup",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Map_of_CleanupCount",
+                  "type": "object",
+                  "additionalProperties": {
+                    "$ref": "#/components/schemas/CleanupCount"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/zones/bundle-cleanup/context": {
+      "get": {
+        "summary": "Return context used by the zone-bundle cleanup task.",
+        "operationId": "zone_bundle_cleanup_context",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CleanupContext"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "summary": "Update context used by the zone-bundle cleanup task.",
+        "operationId": "zone_bundle_cleanup_context_update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CleanupContextUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/zones/bundle-cleanup/utilization": {
+      "get": {
+        "summary": "Return utilization information about all zone bundles.",
+        "operationId": "zone_bundle_utilization",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Map_of_BundleUtilization",
+                  "type": "object",
+                  "additionalProperties": {
+                    "$ref": "#/components/schemas/BundleUtilization"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/zones/bundles": {
+      "get": {
+        "summary": "List all zone bundles that exist, even for now-deleted zones.",
+        "operationId": "zone_bundle_list_all",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "filter",
+            "description": "An optional substring used to filter zone bundles.",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_ZoneBundleMetadata",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ZoneBundleMetadata"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/zones/bundles/{zone_name}": {
+      "get": {
+        "summary": "List the zone bundles that are available for a running zone.",
+        "operationId": "zone_bundle_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "zone_name",
+            "description": "The name of the zone.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_ZoneBundleMetadata",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ZoneBundleMetadata"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Ask the sled agent to create a zone bundle.",
+        "operationId": "zone_bundle_create",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "zone_name",
+            "description": "The name of the zone.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ZoneBundleMetadata"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/zones/bundles/{zone_name}/{bundle_id}": {
+      "get": {
+        "summary": "Fetch the binary content of a single zone bundle.",
+        "operationId": "zone_bundle_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bundle_id",
+            "description": "The ID for this bundle itself.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "zone_name",
+            "description": "The name of the zone this bundle is derived from.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a zone bundle.",
+        "operationId": "zone_bundle_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bundle_id",
+            "description": "The ID for this bundle itself.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "zone_name",
+            "description": "The name of the zone this bundle is derived from.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/zpools": {
       "get": {
         "operationId": "zpools_get",
@@ -536,24 +991,1259 @@
     }
   },
   "components": {
-    "responses": {
-      "Error": {
-        "description": "Error",
-        "content": {
-          "application/json": {
-            "schema": {
-              "$ref": "#/components/schemas/Error"
+    "schemas": {
+      "AddSledRequest": {
+        "description": "A request to Add a given sled after rack initialization has occurred",
+        "type": "object",
+        "properties": {
+          "sled_id": {
+            "$ref": "#/components/schemas/Baseboard"
+          },
+          "start_request": {
+            "$ref": "#/components/schemas/StartSledAgentRequest"
+          }
+        },
+        "required": [
+          "sled_id",
+          "start_request"
+        ]
+      },
+      "Baseboard": {
+        "description": "Describes properties that should uniquely identify a Gimlet.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "identifier": {
+                "type": "string"
+              },
+              "model": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "gimlet"
+                ]
+              }
+            },
+            "required": [
+              "identifier",
+              "model",
+              "revision",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "unknown"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "identifier": {
+                "type": "string"
+              },
+              "model": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "pc"
+                ]
+              }
+            },
+            "required": [
+              "identifier",
+              "model",
+              "type"
+            ]
+          }
+        ]
+      },
+      "BgpConfig": {
+        "type": "object",
+        "properties": {
+          "asn": {
+            "description": "The autonomous system number for the BGP configuration.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "originate": {
+            "description": "The set of prefixes for the BGP router to originate.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Ipv4Network"
             }
           }
-        }
-      }
-    },
-    "schemas": {
+        },
+        "required": [
+          "asn",
+          "originate"
+        ]
+      },
+      "BgpPeerConfig": {
+        "type": "object",
+        "properties": {
+          "addr": {
+            "description": "Address of the peer.",
+            "type": "string",
+            "format": "ipv4"
+          },
+          "asn": {
+            "description": "The autonomous sysetm number of the router the peer belongs to.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "connect_retry": {
+            "nullable": true,
+            "description": "The interval in seconds between peer connection retry attempts.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "delay_open": {
+            "nullable": true,
+            "description": "How long to delay sending open messages to a peer. In seconds.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "hold_time": {
+            "nullable": true,
+            "description": "How long to keep a session alive without a keepalive in seconds. Defaults to 6.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "idle_hold_time": {
+            "nullable": true,
+            "description": "How long to keep a peer in idle after a state machine reset in seconds.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "keepalive": {
+            "nullable": true,
+            "description": "The interval to send keepalive messages at.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "port": {
+            "description": "Switch port the peer is reachable on.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "addr",
+          "asn",
+          "port"
+        ]
+      },
+      "BinRangedouble": {
+        "description": "A type storing a range over `T`.\n\nThis type supports ranges similar to the `RangeTo`, `Range` and `RangeFrom` types in the standard library. Those cover `(..end)`, `(start..end)`, and `(start..)` respectively.",
+        "oneOf": [
+          {
+            "description": "A range unbounded below and exclusively above, `..end`.",
+            "type": "object",
+            "properties": {
+              "end": {
+                "type": "number",
+                "format": "double"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "range_to"
+                ]
+              }
+            },
+            "required": [
+              "end",
+              "type"
+            ]
+          },
+          {
+            "description": "A range bounded inclusively below and exclusively above, `start..end`.",
+            "type": "object",
+            "properties": {
+              "end": {
+                "type": "number",
+                "format": "double"
+              },
+              "start": {
+                "type": "number",
+                "format": "double"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "range"
+                ]
+              }
+            },
+            "required": [
+              "end",
+              "start",
+              "type"
+            ]
+          },
+          {
+            "description": "A range bounded inclusively below and unbounded above, `start..`.",
+            "type": "object",
+            "properties": {
+              "start": {
+                "type": "number",
+                "format": "double"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "range_from"
+                ]
+              }
+            },
+            "required": [
+              "start",
+              "type"
+            ]
+          }
+        ]
+      },
+      "BinRangefloat": {
+        "description": "A type storing a range over `T`.\n\nThis type supports ranges similar to the `RangeTo`, `Range` and `RangeFrom` types in the standard library. Those cover `(..end)`, `(start..end)`, and `(start..)` respectively.",
+        "oneOf": [
+          {
+            "description": "A range unbounded below and exclusively above, `..end`.",
+            "type": "object",
+            "properties": {
+              "end": {
+                "type": "number",
+                "format": "float"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "range_to"
+                ]
+              }
+            },
+            "required": [
+              "end",
+              "type"
+            ]
+          },
+          {
+            "description": "A range bounded inclusively below and exclusively above, `start..end`.",
+            "type": "object",
+            "properties": {
+              "end": {
+                "type": "number",
+                "format": "float"
+              },
+              "start": {
+                "type": "number",
+                "format": "float"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "range"
+                ]
+              }
+            },
+            "required": [
+              "end",
+              "start",
+              "type"
+            ]
+          },
+          {
+            "description": "A range bounded inclusively below and unbounded above, `start..`.",
+            "type": "object",
+            "properties": {
+              "start": {
+                "type": "number",
+                "format": "float"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "range_from"
+                ]
+              }
+            },
+            "required": [
+              "start",
+              "type"
+            ]
+          }
+        ]
+      },
+      "BinRangeint16": {
+        "description": "A type storing a range over `T`.\n\nThis type supports ranges similar to the `RangeTo`, `Range` and `RangeFrom` types in the standard library. Those cover `(..end)`, `(start..end)`, and `(start..)` respectively.",
+        "oneOf": [
+          {
+            "description": "A range unbounded below and exclusively above, `..end`.",
+            "type": "object",
+            "properties": {
+              "end": {
+                "type": "integer",
+                "format": "int16"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "range_to"
+                ]
+              }
+            },
+            "required": [
+              "end",
+              "type"
+            ]
+          },
+          {
+            "description": "A range bounded inclusively below and exclusively above, `start..end`.",
+            "type": "object",
+            "properties": {
+              "end": {
+                "type": "integer",
+                "format": "int16"
+              },
+              "start": {
+                "type": "integer",
+                "format": "int16"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "range"
+                ]
+              }
+            },
+            "required": [
+              "end",
+              "start",
+              "type"
+            ]
+          },
+          {
+            "description": "A range bounded inclusively below and unbounded above, `start..`.",
+            "type": "object",
+            "properties": {
+              "start": {
+                "type": "integer",
+                "format": "int16"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "range_from"
+                ]
+              }
+            },
+            "required": [
+              "start",
+              "type"
+            ]
+          }
+        ]
+      },
+      "BinRangeint32": {
+        "description": "A type storing a range over `T`.\n\nThis type supports ranges similar to the `RangeTo`, `Range` and `RangeFrom` types in the standard library. Those cover `(..end)`, `(start..end)`, and `(start..)` respectively.",
+        "oneOf": [
+          {
+            "description": "A range unbounded below and exclusively above, `..end`.",
+            "type": "object",
+            "properties": {
+              "end": {
+                "type": "integer",
+                "format": "int32"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "range_to"
+                ]
+              }
+            },
+            "required": [
+              "end",
+              "type"
+            ]
+          },
+          {
+            "description": "A range bounded inclusively below and exclusively above, `start..end`.",
+            "type": "object",
+            "properties": {
+              "end": {
+                "type": "integer",
+                "format": "int32"
+              },
+              "start": {
+                "type": "integer",
+                "format": "int32"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "range"
+                ]
+              }
+            },
+            "required": [
+              "end",
+              "start",
+              "type"
+            ]
+          },
+          {
+            "description": "A range bounded inclusively below and unbounded above, `start..`.",
+            "type": "object",
+            "properties": {
+              "start": {
+                "type": "integer",
+                "format": "int32"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "range_from"
+                ]
+              }
+            },
+            "required": [
+              "start",
+              "type"
+            ]
+          }
+        ]
+      },
+      "BinRangeint64": {
+        "description": "A type storing a range over `T`.\n\nThis type supports ranges similar to the `RangeTo`, `Range` and `RangeFrom` types in the standard library. Those cover `(..end)`, `(start..end)`, and `(start..)` respectively.",
+        "oneOf": [
+          {
+            "description": "A range unbounded below and exclusively above, `..end`.",
+            "type": "object",
+            "properties": {
+              "end": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "range_to"
+                ]
+              }
+            },
+            "required": [
+              "end",
+              "type"
+            ]
+          },
+          {
+            "description": "A range bounded inclusively below and exclusively above, `start..end`.",
+            "type": "object",
+            "properties": {
+              "end": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "start": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "range"
+                ]
+              }
+            },
+            "required": [
+              "end",
+              "start",
+              "type"
+            ]
+          },
+          {
+            "description": "A range bounded inclusively below and unbounded above, `start..`.",
+            "type": "object",
+            "properties": {
+              "start": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "range_from"
+                ]
+              }
+            },
+            "required": [
+              "start",
+              "type"
+            ]
+          }
+        ]
+      },
+      "BinRangeint8": {
+        "description": "A type storing a range over `T`.\n\nThis type supports ranges similar to the `RangeTo`, `Range` and `RangeFrom` types in the standard library. Those cover `(..end)`, `(start..end)`, and `(start..)` respectively.",
+        "oneOf": [
+          {
+            "description": "A range unbounded below and exclusively above, `..end`.",
+            "type": "object",
+            "properties": {
+              "end": {
+                "type": "integer",
+                "format": "int8"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "range_to"
+                ]
+              }
+            },
+            "required": [
+              "end",
+              "type"
+            ]
+          },
+          {
+            "description": "A range bounded inclusively below and exclusively above, `start..end`.",
+            "type": "object",
+            "properties": {
+              "end": {
+                "type": "integer",
+                "format": "int8"
+              },
+              "start": {
+                "type": "integer",
+                "format": "int8"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "range"
+                ]
+              }
+            },
+            "required": [
+              "end",
+              "start",
+              "type"
+            ]
+          },
+          {
+            "description": "A range bounded inclusively below and unbounded above, `start..`.",
+            "type": "object",
+            "properties": {
+              "start": {
+                "type": "integer",
+                "format": "int8"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "range_from"
+                ]
+              }
+            },
+            "required": [
+              "start",
+              "type"
+            ]
+          }
+        ]
+      },
+      "BinRangeuint16": {
+        "description": "A type storing a range over `T`.\n\nThis type supports ranges similar to the `RangeTo`, `Range` and `RangeFrom` types in the standard library. Those cover `(..end)`, `(start..end)`, and `(start..)` respectively.",
+        "oneOf": [
+          {
+            "description": "A range unbounded below and exclusively above, `..end`.",
+            "type": "object",
+            "properties": {
+              "end": {
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "range_to"
+                ]
+              }
+            },
+            "required": [
+              "end",
+              "type"
+            ]
+          },
+          {
+            "description": "A range bounded inclusively below and exclusively above, `start..end`.",
+            "type": "object",
+            "properties": {
+              "end": {
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0
+              },
+              "start": {
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "range"
+                ]
+              }
+            },
+            "required": [
+              "end",
+              "start",
+              "type"
+            ]
+          },
+          {
+            "description": "A range bounded inclusively below and unbounded above, `start..`.",
+            "type": "object",
+            "properties": {
+              "start": {
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "range_from"
+                ]
+              }
+            },
+            "required": [
+              "start",
+              "type"
+            ]
+          }
+        ]
+      },
+      "BinRangeuint32": {
+        "description": "A type storing a range over `T`.\n\nThis type supports ranges similar to the `RangeTo`, `Range` and `RangeFrom` types in the standard library. Those cover `(..end)`, `(start..end)`, and `(start..)` respectively.",
+        "oneOf": [
+          {
+            "description": "A range unbounded below and exclusively above, `..end`.",
+            "type": "object",
+            "properties": {
+              "end": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "range_to"
+                ]
+              }
+            },
+            "required": [
+              "end",
+              "type"
+            ]
+          },
+          {
+            "description": "A range bounded inclusively below and exclusively above, `start..end`.",
+            "type": "object",
+            "properties": {
+              "end": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
+              "start": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "range"
+                ]
+              }
+            },
+            "required": [
+              "end",
+              "start",
+              "type"
+            ]
+          },
+          {
+            "description": "A range bounded inclusively below and unbounded above, `start..`.",
+            "type": "object",
+            "properties": {
+              "start": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "range_from"
+                ]
+              }
+            },
+            "required": [
+              "start",
+              "type"
+            ]
+          }
+        ]
+      },
+      "BinRangeuint64": {
+        "description": "A type storing a range over `T`.\n\nThis type supports ranges similar to the `RangeTo`, `Range` and `RangeFrom` types in the standard library. Those cover `(..end)`, `(start..end)`, and `(start..)` respectively.",
+        "oneOf": [
+          {
+            "description": "A range unbounded below and exclusively above, `..end`.",
+            "type": "object",
+            "properties": {
+              "end": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "range_to"
+                ]
+              }
+            },
+            "required": [
+              "end",
+              "type"
+            ]
+          },
+          {
+            "description": "A range bounded inclusively below and exclusively above, `start..end`.",
+            "type": "object",
+            "properties": {
+              "end": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              },
+              "start": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "range"
+                ]
+              }
+            },
+            "required": [
+              "end",
+              "start",
+              "type"
+            ]
+          },
+          {
+            "description": "A range bounded inclusively below and unbounded above, `start..`.",
+            "type": "object",
+            "properties": {
+              "start": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "range_from"
+                ]
+              }
+            },
+            "required": [
+              "start",
+              "type"
+            ]
+          }
+        ]
+      },
+      "BinRangeuint8": {
+        "description": "A type storing a range over `T`.\n\nThis type supports ranges similar to the `RangeTo`, `Range` and `RangeFrom` types in the standard library. Those cover `(..end)`, `(start..end)`, and `(start..)` respectively.",
+        "oneOf": [
+          {
+            "description": "A range unbounded below and exclusively above, `..end`.",
+            "type": "object",
+            "properties": {
+              "end": {
+                "type": "integer",
+                "format": "uint8",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "range_to"
+                ]
+              }
+            },
+            "required": [
+              "end",
+              "type"
+            ]
+          },
+          {
+            "description": "A range bounded inclusively below and exclusively above, `start..end`.",
+            "type": "object",
+            "properties": {
+              "end": {
+                "type": "integer",
+                "format": "uint8",
+                "minimum": 0
+              },
+              "start": {
+                "type": "integer",
+                "format": "uint8",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "range"
+                ]
+              }
+            },
+            "required": [
+              "end",
+              "start",
+              "type"
+            ]
+          },
+          {
+            "description": "A range bounded inclusively below and unbounded above, `start..`.",
+            "type": "object",
+            "properties": {
+              "start": {
+                "type": "integer",
+                "format": "uint8",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "range_from"
+                ]
+              }
+            },
+            "required": [
+              "start",
+              "type"
+            ]
+          }
+        ]
+      },
+      "Bindouble": {
+        "description": "Type storing bin edges and a count of samples within it.",
+        "type": "object",
+        "properties": {
+          "count": {
+            "description": "The total count of samples in this bin.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "range": {
+            "description": "The range of the support covered by this bin.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BinRangedouble"
+              }
+            ]
+          }
+        },
+        "required": [
+          "count",
+          "range"
+        ]
+      },
+      "Binfloat": {
+        "description": "Type storing bin edges and a count of samples within it.",
+        "type": "object",
+        "properties": {
+          "count": {
+            "description": "The total count of samples in this bin.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "range": {
+            "description": "The range of the support covered by this bin.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BinRangefloat"
+              }
+            ]
+          }
+        },
+        "required": [
+          "count",
+          "range"
+        ]
+      },
+      "Binint16": {
+        "description": "Type storing bin edges and a count of samples within it.",
+        "type": "object",
+        "properties": {
+          "count": {
+            "description": "The total count of samples in this bin.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "range": {
+            "description": "The range of the support covered by this bin.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BinRangeint16"
+              }
+            ]
+          }
+        },
+        "required": [
+          "count",
+          "range"
+        ]
+      },
+      "Binint32": {
+        "description": "Type storing bin edges and a count of samples within it.",
+        "type": "object",
+        "properties": {
+          "count": {
+            "description": "The total count of samples in this bin.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "range": {
+            "description": "The range of the support covered by this bin.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BinRangeint32"
+              }
+            ]
+          }
+        },
+        "required": [
+          "count",
+          "range"
+        ]
+      },
+      "Binint64": {
+        "description": "Type storing bin edges and a count of samples within it.",
+        "type": "object",
+        "properties": {
+          "count": {
+            "description": "The total count of samples in this bin.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "range": {
+            "description": "The range of the support covered by this bin.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BinRangeint64"
+              }
+            ]
+          }
+        },
+        "required": [
+          "count",
+          "range"
+        ]
+      },
+      "Binint8": {
+        "description": "Type storing bin edges and a count of samples within it.",
+        "type": "object",
+        "properties": {
+          "count": {
+            "description": "The total count of samples in this bin.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "range": {
+            "description": "The range of the support covered by this bin.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BinRangeint8"
+              }
+            ]
+          }
+        },
+        "required": [
+          "count",
+          "range"
+        ]
+      },
+      "Binuint16": {
+        "description": "Type storing bin edges and a count of samples within it.",
+        "type": "object",
+        "properties": {
+          "count": {
+            "description": "The total count of samples in this bin.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "range": {
+            "description": "The range of the support covered by this bin.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BinRangeuint16"
+              }
+            ]
+          }
+        },
+        "required": [
+          "count",
+          "range"
+        ]
+      },
+      "Binuint32": {
+        "description": "Type storing bin edges and a count of samples within it.",
+        "type": "object",
+        "properties": {
+          "count": {
+            "description": "The total count of samples in this bin.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "range": {
+            "description": "The range of the support covered by this bin.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BinRangeuint32"
+              }
+            ]
+          }
+        },
+        "required": [
+          "count",
+          "range"
+        ]
+      },
+      "Binuint64": {
+        "description": "Type storing bin edges and a count of samples within it.",
+        "type": "object",
+        "properties": {
+          "count": {
+            "description": "The total count of samples in this bin.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "range": {
+            "description": "The range of the support covered by this bin.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BinRangeuint64"
+              }
+            ]
+          }
+        },
+        "required": [
+          "count",
+          "range"
+        ]
+      },
+      "Binuint8": {
+        "description": "Type storing bin edges and a count of samples within it.",
+        "type": "object",
+        "properties": {
+          "count": {
+            "description": "The total count of samples in this bin.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "range": {
+            "description": "The range of the support covered by this bin.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BinRangeuint8"
+              }
+            ]
+          }
+        },
+        "required": [
+          "count",
+          "range"
+        ]
+      },
+      "BundleUtilization": {
+        "description": "The portion of a debug dataset used for zone bundles.",
+        "type": "object",
+        "properties": {
+          "bytes_available": {
+            "description": "The total number of bytes available for zone bundles.\n\nThis is `dataset_quota` multiplied by the context's storage limit.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "bytes_used": {
+            "description": "Total bundle usage, in bytes.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "dataset_quota": {
+            "description": "The total dataset quota, in bytes.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "bytes_available",
+          "bytes_used",
+          "dataset_quota"
+        ]
+      },
       "ByteCount": {
-        "description": "A count of bytes, typically used either for memory or storage capacity\n\nThe maximum supported byte count is [`i64::MAX`].  This makes it somewhat inconvenient to define constructors: a u32 constructor can be infallible, but an i64 constructor can fail (if the value is negative) and a u64 constructor can fail (if the value is larger than i64::MAX).  We provide all of these for consumers' convenience.",
+        "description": "Byte count to express memory or storage capacity.",
         "type": "integer",
         "format": "uint64",
         "minimum": 0
+      },
+      "CleanupContext": {
+        "description": "Context provided for the zone bundle cleanup task.",
+        "type": "object",
+        "properties": {
+          "period": {
+            "description": "The period on which automatic checks and cleanup is performed.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CleanupPeriod"
+              }
+            ]
+          },
+          "priority": {
+            "description": "The priority ordering for keeping old bundles.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PriorityOrder"
+              }
+            ]
+          },
+          "storage_limit": {
+            "description": "The limit on the dataset quota available for zone bundles.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/StorageLimit"
+              }
+            ]
+          }
+        },
+        "required": [
+          "period",
+          "priority",
+          "storage_limit"
+        ]
+      },
+      "CleanupContextUpdate": {
+        "description": "Parameters used to update the zone bundle cleanup context.",
+        "type": "object",
+        "properties": {
+          "period": {
+            "nullable": true,
+            "description": "The new period on which automatic cleanups are run.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          },
+          "priority": {
+            "nullable": true,
+            "description": "The priority ordering for preserving old zone bundles.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PriorityOrder"
+              }
+            ]
+          },
+          "storage_limit": {
+            "nullable": true,
+            "description": "The new limit on the underlying dataset quota allowed for bundles.",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          }
+        }
+      },
+      "CleanupCount": {
+        "description": "The count of bundles / bytes removed during a cleanup operation.",
+        "type": "object",
+        "properties": {
+          "bundles": {
+            "description": "The number of bundles removed.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "bytes": {
+            "description": "The number of bytes removed.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "bundles",
+          "bytes"
+        ]
+      },
+      "CleanupPeriod": {
+        "description": "A period on which bundles are automatically cleaned up.",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Duration"
+          }
+        ]
       },
       "CrucibleOpts": {
         "type": "object",
@@ -568,9 +2258,8 @@
           },
           "flush_timeout": {
             "nullable": true,
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
+            "type": "number",
+            "format": "float"
           },
           "id": {
             "type": "string",
@@ -608,30 +2297,77 @@
           "target"
         ]
       },
-      "DatasetEnsureBody": {
-        "description": "Used to request a new dataset kind exists within a zpool.\n\nMany dataset types are associated with services that will be instantiated when the dataset is detected.",
+      "Cumulativedouble": {
+        "description": "A cumulative or counter data type.",
         "type": "object",
         "properties": {
-          "address": {
-            "type": "string"
-          },
-          "dataset_kind": {
-            "$ref": "#/components/schemas/DatasetKind"
-          },
-          "id": {
+          "start_time": {
             "type": "string",
-            "format": "uuid"
+            "format": "date-time"
           },
-          "zpool_id": {
-            "type": "string",
-            "format": "uuid"
+          "value": {
+            "type": "number",
+            "format": "double"
           }
         },
         "required": [
-          "address",
-          "dataset_kind",
-          "id",
-          "zpool_id"
+          "start_time",
+          "value"
+        ]
+      },
+      "Cumulativefloat": {
+        "description": "A cumulative or counter data type.",
+        "type": "object",
+        "properties": {
+          "start_time": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "value": {
+            "type": "number",
+            "format": "float"
+          }
+        },
+        "required": [
+          "start_time",
+          "value"
+        ]
+      },
+      "Cumulativeint64": {
+        "description": "A cumulative or counter data type.",
+        "type": "object",
+        "properties": {
+          "start_time": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "value": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "start_time",
+          "value"
+        ]
+      },
+      "Cumulativeuint64": {
+        "description": "A cumulative or counter data type.",
+        "type": "object",
+        "properties": {
+          "start_time": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "value": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "start_time",
+          "value"
         ]
       },
       "DatasetKind": {
@@ -640,13 +2376,6 @@
           {
             "type": "object",
             "properties": {
-              "all_addresses": {
-                "description": "The addresses of all nodes within the cluster.",
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -655,7 +2384,6 @@
               }
             },
             "required": [
-              "all_addresses",
               "type"
             ]
           },
@@ -686,15 +2414,648 @@
             "required": [
               "type"
             ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "clickhouse_keeper"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "external_dns"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "internal_dns"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
           }
         ]
       },
-      "DendriteAsic": {
-        "type": "string",
-        "enum": [
-          "tofino_asic",
-          "tofino_stub",
-          "soft_npu"
+      "DatasetName": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/DatasetKind"
+          },
+          "pool_name": {
+            "$ref": "#/components/schemas/ZpoolName"
+          }
+        },
+        "required": [
+          "kind",
+          "pool_name"
+        ]
+      },
+      "DatasetRequest": {
+        "description": "Describes a request to provision a specific dataset",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "$ref": "#/components/schemas/DatasetName"
+          },
+          "service_address": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "service_address"
+        ]
+      },
+      "Datum": {
+        "description": "A `Datum` is a single sampled data point from a metric.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "datum": {
+                "type": "boolean"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "bool"
+                ]
+              }
+            },
+            "required": [
+              "datum",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "datum": {
+                "type": "integer",
+                "format": "int8"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "i8"
+                ]
+              }
+            },
+            "required": [
+              "datum",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "datum": {
+                "type": "integer",
+                "format": "uint8",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "u8"
+                ]
+              }
+            },
+            "required": [
+              "datum",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "datum": {
+                "type": "integer",
+                "format": "int16"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "i16"
+                ]
+              }
+            },
+            "required": [
+              "datum",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "datum": {
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "u16"
+                ]
+              }
+            },
+            "required": [
+              "datum",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "datum": {
+                "type": "integer",
+                "format": "int32"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "i32"
+                ]
+              }
+            },
+            "required": [
+              "datum",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "datum": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "u32"
+                ]
+              }
+            },
+            "required": [
+              "datum",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "datum": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "i64"
+                ]
+              }
+            },
+            "required": [
+              "datum",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "datum": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "u64"
+                ]
+              }
+            },
+            "required": [
+              "datum",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "datum": {
+                "type": "number",
+                "format": "float"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "f32"
+                ]
+              }
+            },
+            "required": [
+              "datum",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "datum": {
+                "type": "number",
+                "format": "double"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "f64"
+                ]
+              }
+            },
+            "required": [
+              "datum",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "datum": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "string"
+                ]
+              }
+            },
+            "required": [
+              "datum",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "datum": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "uint8",
+                  "minimum": 0
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "bytes"
+                ]
+              }
+            },
+            "required": [
+              "datum",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "datum": {
+                "$ref": "#/components/schemas/Cumulativeint64"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "cumulative_i64"
+                ]
+              }
+            },
+            "required": [
+              "datum",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "datum": {
+                "$ref": "#/components/schemas/Cumulativeuint64"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "cumulative_u64"
+                ]
+              }
+            },
+            "required": [
+              "datum",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "datum": {
+                "$ref": "#/components/schemas/Cumulativefloat"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "cumulative_f32"
+                ]
+              }
+            },
+            "required": [
+              "datum",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "datum": {
+                "$ref": "#/components/schemas/Cumulativedouble"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "cumulative_f64"
+                ]
+              }
+            },
+            "required": [
+              "datum",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "datum": {
+                "$ref": "#/components/schemas/Histogramint8"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "histogram_i8"
+                ]
+              }
+            },
+            "required": [
+              "datum",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "datum": {
+                "$ref": "#/components/schemas/Histogramuint8"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "histogram_u8"
+                ]
+              }
+            },
+            "required": [
+              "datum",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "datum": {
+                "$ref": "#/components/schemas/Histogramint16"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "histogram_i16"
+                ]
+              }
+            },
+            "required": [
+              "datum",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "datum": {
+                "$ref": "#/components/schemas/Histogramuint16"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "histogram_u16"
+                ]
+              }
+            },
+            "required": [
+              "datum",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "datum": {
+                "$ref": "#/components/schemas/Histogramint32"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "histogram_i32"
+                ]
+              }
+            },
+            "required": [
+              "datum",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "datum": {
+                "$ref": "#/components/schemas/Histogramuint32"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "histogram_u32"
+                ]
+              }
+            },
+            "required": [
+              "datum",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "datum": {
+                "$ref": "#/components/schemas/Histogramint64"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "histogram_i64"
+                ]
+              }
+            },
+            "required": [
+              "datum",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "datum": {
+                "$ref": "#/components/schemas/Histogramuint64"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "histogram_u64"
+                ]
+              }
+            },
+            "required": [
+              "datum",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "datum": {
+                "$ref": "#/components/schemas/Histogramfloat"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "histogram_f32"
+                ]
+              }
+            },
+            "required": [
+              "datum",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "datum": {
+                "$ref": "#/components/schemas/Histogramdouble"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "histogram_f64"
+                ]
+              }
+            },
+            "required": [
+              "datum",
+              "type"
+            ]
+          }
+        ]
+      },
+      "DeleteVirtualNetworkInterfaceHost": {
+        "description": "The data needed to identify a virtual IP for which a sled maintains an OPTE virtual-to-physical mapping such that that mapping can be deleted.",
+        "type": "object",
+        "properties": {
+          "virtual_ip": {
+            "description": "The virtual IP whose mapping should be deleted.",
+            "type": "string",
+            "format": "ip"
+          },
+          "vni": {
+            "description": "The VNI for the network containing the virtual IP whose mapping should be deleted.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Vni"
+              }
+            ]
+          }
+        },
+        "required": [
+          "virtual_ip",
+          "vni"
+        ]
+      },
+      "DhcpConfig": {
+        "description": "DHCP configuration for a port\n\nNot present here: Hostname (DHCPv4 option 12; used in DHCPv6 option 39); we use `InstanceRuntimeState::hostname` for this value.",
+        "type": "object",
+        "properties": {
+          "dns_servers": {
+            "description": "DNS servers to send to the instance\n\n(DHCPv4 option 6; DHCPv6 option 23)",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "ip"
+            }
+          },
+          "host_domain": {
+            "nullable": true,
+            "description": "DNS zone this instance's hostname belongs to (e.g. the `project.example` part of `instance1.project.example`)\n\n(DHCPv4 option 15; used in DHCPv6 option 39)",
+            "type": "string"
+          },
+          "search_domains": {
+            "description": "DNS search domains\n\n(DHCPv4 option 119; DHCPv6 option 24)",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "dns_servers",
+          "search_domains"
         ]
       },
       "DiskEnsureBody": {
@@ -783,7 +3144,7 @@
         ]
       },
       "DiskState": {
-        "description": "State of a Disk (primarily: attached or not)",
+        "description": "State of a Disk",
         "oneOf": [
           {
             "description": "Disk is being initialized",
@@ -1055,6 +3416,73 @@
           "M2"
         ]
       },
+      "Duration": {
+        "type": "object",
+        "properties": {
+          "nanos": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "secs": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "nanos",
+          "secs"
+        ]
+      },
+      "EarlyNetworkConfig": {
+        "description": "Network configuration required to bring up the control plane\n\nThe fields in this structure are those from [`super::params::RackInitializeRequest`] necessary for use beyond RSS. This is just for the initial rack configuration and cold boot purposes. Updates come from Nexus.",
+        "type": "object",
+        "properties": {
+          "body": {
+            "$ref": "#/components/schemas/EarlyNetworkConfigBody"
+          },
+          "generation": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "schema_version": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "body",
+          "generation",
+          "schema_version"
+        ]
+      },
+      "EarlyNetworkConfigBody": {
+        "description": "This is the actual configuration of EarlyNetworking.\n\nWe nest it below the \"header\" of `generation` and `schema_version` so that we can perform partial deserialization of `EarlyNetworkConfig` to only read the header and defer deserialization of the body once we know the schema version. This is possible via the use of [`serde_json::value::RawValue`] in future (post-v1) deserialization paths.",
+        "type": "object",
+        "properties": {
+          "ntp_servers": {
+            "description": "The external NTP server addresses.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "rack_network_config": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RackNetworkConfigV1"
+              }
+            ]
+          }
+        },
+        "required": [
+          "ntp_servers"
+        ]
+      },
       "Error": {
         "description": "Error information from a response.",
         "type": "object",
@@ -1074,11 +3502,678 @@
           "request_id"
         ]
       },
+      "Field": {
+        "description": "A `Field` is a named aspect of a target or metric.",
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "value": {
+            "$ref": "#/components/schemas/FieldValue"
+          }
+        },
+        "required": [
+          "name",
+          "value"
+        ]
+      },
+      "FieldSet": {
+        "type": "object",
+        "properties": {
+          "fields": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Field"
+            }
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "fields",
+          "name"
+        ]
+      },
+      "FieldValue": {
+        "description": "The `FieldValue` contains the value of a target or metric field.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "string"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "i8"
+                ]
+              },
+              "value": {
+                "type": "integer",
+                "format": "int8"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "u8"
+                ]
+              },
+              "value": {
+                "type": "integer",
+                "format": "uint8",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "i16"
+                ]
+              },
+              "value": {
+                "type": "integer",
+                "format": "int16"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "u16"
+                ]
+              },
+              "value": {
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "i32"
+                ]
+              },
+              "value": {
+                "type": "integer",
+                "format": "int32"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "u32"
+                ]
+              },
+              "value": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "i64"
+                ]
+              },
+              "value": {
+                "type": "integer",
+                "format": "int64"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "u64"
+                ]
+              },
+              "value": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ip_addr"
+                ]
+              },
+              "value": {
+                "type": "string",
+                "format": "ip"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "uuid"
+                ]
+              },
+              "value": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "bool"
+                ]
+              },
+              "value": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
+        ]
+      },
       "Generation": {
         "description": "Generation numbers stored in the database, used for optimistic concurrency control",
         "type": "integer",
         "format": "uint64",
         "minimum": 0
+      },
+      "HistogramError": {
+        "description": "Errors related to constructing histograms or adding samples into them.",
+        "oneOf": [
+          {
+            "description": "An attempt to construct a histogram with an empty set of bins.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "empty_bins"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "An attempt to construct a histogram with non-monotonic bins.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "nonmonotonic_bins"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "A non-finite was encountered, either as a bin edge or a sample.",
+            "type": "object",
+            "properties": {
+              "content": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "non_finite_value"
+                ]
+              }
+            },
+            "required": [
+              "content",
+              "type"
+            ]
+          },
+          {
+            "description": "Error returned when two neighboring bins are not adjoining (there's space between them)",
+            "type": "object",
+            "properties": {
+              "content": {
+                "type": "object",
+                "properties": {
+                  "left": {
+                    "type": "string"
+                  },
+                  "right": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "left",
+                  "right"
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "non_adjoining_bins"
+                ]
+              }
+            },
+            "required": [
+              "content",
+              "type"
+            ]
+          },
+          {
+            "description": "Bin and count arrays are of different sizes.",
+            "type": "object",
+            "properties": {
+              "content": {
+                "type": "object",
+                "properties": {
+                  "n_bins": {
+                    "type": "integer",
+                    "format": "uint",
+                    "minimum": 0
+                  },
+                  "n_counts": {
+                    "type": "integer",
+                    "format": "uint",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "n_bins",
+                  "n_counts"
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "array_size_mismatch"
+                ]
+              }
+            },
+            "required": [
+              "content",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "content": {
+                "$ref": "#/components/schemas/QuantizationError"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "quantization"
+                ]
+              }
+            },
+            "required": [
+              "content",
+              "type"
+            ]
+          }
+        ]
+      },
+      "Histogramdouble": {
+        "description": "Histogram metric\n\nA histogram maintains the count of any number of samples, over a set of bins. Bins are specified on construction via their _left_ edges, inclusive. There can't be any \"gaps\" in the bins, and an additional bin may be added to the left, right, or both so that the bins extend to the entire range of the support.\n\nNote that any gaps, unsorted bins, or non-finite values will result in an error.",
+        "type": "object",
+        "properties": {
+          "bins": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Bindouble"
+            }
+          },
+          "n_samples": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "start_time": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "bins",
+          "n_samples",
+          "start_time"
+        ]
+      },
+      "Histogramfloat": {
+        "description": "Histogram metric\n\nA histogram maintains the count of any number of samples, over a set of bins. Bins are specified on construction via their _left_ edges, inclusive. There can't be any \"gaps\" in the bins, and an additional bin may be added to the left, right, or both so that the bins extend to the entire range of the support.\n\nNote that any gaps, unsorted bins, or non-finite values will result in an error.",
+        "type": "object",
+        "properties": {
+          "bins": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Binfloat"
+            }
+          },
+          "n_samples": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "start_time": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "bins",
+          "n_samples",
+          "start_time"
+        ]
+      },
+      "Histogramint16": {
+        "description": "Histogram metric\n\nA histogram maintains the count of any number of samples, over a set of bins. Bins are specified on construction via their _left_ edges, inclusive. There can't be any \"gaps\" in the bins, and an additional bin may be added to the left, right, or both so that the bins extend to the entire range of the support.\n\nNote that any gaps, unsorted bins, or non-finite values will result in an error.",
+        "type": "object",
+        "properties": {
+          "bins": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Binint16"
+            }
+          },
+          "n_samples": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "start_time": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "bins",
+          "n_samples",
+          "start_time"
+        ]
+      },
+      "Histogramint32": {
+        "description": "Histogram metric\n\nA histogram maintains the count of any number of samples, over a set of bins. Bins are specified on construction via their _left_ edges, inclusive. There can't be any \"gaps\" in the bins, and an additional bin may be added to the left, right, or both so that the bins extend to the entire range of the support.\n\nNote that any gaps, unsorted bins, or non-finite values will result in an error.",
+        "type": "object",
+        "properties": {
+          "bins": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Binint32"
+            }
+          },
+          "n_samples": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "start_time": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "bins",
+          "n_samples",
+          "start_time"
+        ]
+      },
+      "Histogramint64": {
+        "description": "Histogram metric\n\nA histogram maintains the count of any number of samples, over a set of bins. Bins are specified on construction via their _left_ edges, inclusive. There can't be any \"gaps\" in the bins, and an additional bin may be added to the left, right, or both so that the bins extend to the entire range of the support.\n\nNote that any gaps, unsorted bins, or non-finite values will result in an error.",
+        "type": "object",
+        "properties": {
+          "bins": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Binint64"
+            }
+          },
+          "n_samples": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "start_time": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "bins",
+          "n_samples",
+          "start_time"
+        ]
+      },
+      "Histogramint8": {
+        "description": "Histogram metric\n\nA histogram maintains the count of any number of samples, over a set of bins. Bins are specified on construction via their _left_ edges, inclusive. There can't be any \"gaps\" in the bins, and an additional bin may be added to the left, right, or both so that the bins extend to the entire range of the support.\n\nNote that any gaps, unsorted bins, or non-finite values will result in an error.",
+        "type": "object",
+        "properties": {
+          "bins": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Binint8"
+            }
+          },
+          "n_samples": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "start_time": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "bins",
+          "n_samples",
+          "start_time"
+        ]
+      },
+      "Histogramuint16": {
+        "description": "Histogram metric\n\nA histogram maintains the count of any number of samples, over a set of bins. Bins are specified on construction via their _left_ edges, inclusive. There can't be any \"gaps\" in the bins, and an additional bin may be added to the left, right, or both so that the bins extend to the entire range of the support.\n\nNote that any gaps, unsorted bins, or non-finite values will result in an error.",
+        "type": "object",
+        "properties": {
+          "bins": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Binuint16"
+            }
+          },
+          "n_samples": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "start_time": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "bins",
+          "n_samples",
+          "start_time"
+        ]
+      },
+      "Histogramuint32": {
+        "description": "Histogram metric\n\nA histogram maintains the count of any number of samples, over a set of bins. Bins are specified on construction via their _left_ edges, inclusive. There can't be any \"gaps\" in the bins, and an additional bin may be added to the left, right, or both so that the bins extend to the entire range of the support.\n\nNote that any gaps, unsorted bins, or non-finite values will result in an error.",
+        "type": "object",
+        "properties": {
+          "bins": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Binuint32"
+            }
+          },
+          "n_samples": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "start_time": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "bins",
+          "n_samples",
+          "start_time"
+        ]
+      },
+      "Histogramuint64": {
+        "description": "Histogram metric\n\nA histogram maintains the count of any number of samples, over a set of bins. Bins are specified on construction via their _left_ edges, inclusive. There can't be any \"gaps\" in the bins, and an additional bin may be added to the left, right, or both so that the bins extend to the entire range of the support.\n\nNote that any gaps, unsorted bins, or non-finite values will result in an error.",
+        "type": "object",
+        "properties": {
+          "bins": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Binuint64"
+            }
+          },
+          "n_samples": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "start_time": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "bins",
+          "n_samples",
+          "start_time"
+        ]
+      },
+      "Histogramuint8": {
+        "description": "Histogram metric\n\nA histogram maintains the count of any number of samples, over a set of bins. Bins are specified on construction via their _left_ edges, inclusive. There can't be any \"gaps\" in the bins, and an additional bin may be added to the left, right, or both so that the bins extend to the entire range of the support.\n\nNote that any gaps, unsorted bins, or non-finite values will result in an error.",
+        "type": "object",
+        "properties": {
+          "bins": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Binuint8"
+            }
+          },
+          "n_samples": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "start_time": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "bins",
+          "n_samples",
+          "start_time"
+        ]
       },
       "HostIdentifier": {
         "description": "A `HostIdentifier` represents either an IP host or network (v4 or v6), or an entire VPC (identified by its VNI). It is used in firewall rule host filters.",
@@ -1121,6 +4216,26 @@
           }
         ]
       },
+      "HostPortConfig": {
+        "type": "object",
+        "properties": {
+          "addrs": {
+            "description": "IP Address and prefix (e.g., `192.168.0.1/16`) to apply to switchport (must be in infra_ip pool)",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpNetwork"
+            }
+          },
+          "port": {
+            "description": "Switchport to use for external connectivity",
+            "type": "string"
+          }
+        },
+        "required": [
+          "addrs",
+          "port"
+        ]
+      },
       "InstanceCpuCount": {
         "description": "The number of CPUs in an Instance",
         "type": "integer",
@@ -1128,20 +4243,49 @@
         "minimum": 0
       },
       "InstanceEnsureBody": {
-        "description": "The body of a request to ensure that an instance is known to a sled agent.",
+        "description": "The body of a request to ensure that a instance and VMM are known to a sled agent.",
         "type": "object",
         "properties": {
-          "initial": {
+          "hardware": {
             "description": "A description of the instance's virtual hardware and the initial runtime state this sled agent should store for this incarnation of the instance.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/InstanceHardware"
               }
             ]
+          },
+          "instance_runtime": {
+            "description": "The instance runtime state for the instance being registered.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceRuntimeState"
+              }
+            ]
+          },
+          "propolis_addr": {
+            "description": "The address at which this VMM should serve a Propolis server API.",
+            "type": "string"
+          },
+          "propolis_id": {
+            "description": "The ID of the VMM being registered. This may not be the active VMM ID in the instance runtime state (e.g. if the new VMM is going to be a migration target).",
+            "type": "string",
+            "format": "uuid"
+          },
+          "vmm_runtime": {
+            "description": "The initial VMM runtime state for the VMM being registered.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VmmRuntimeState"
+              }
+            ]
           }
         },
         "required": [
-          "initial"
+          "hardware",
+          "instance_runtime",
+          "propolis_addr",
+          "propolis_id",
+          "vmm_runtime"
         ]
       },
       "InstanceHardware": {
@@ -1151,6 +4295,9 @@
           "cloud_init_bytes": {
             "nullable": true,
             "type": "string"
+          },
+          "dhcp_config": {
+            "$ref": "#/components/schemas/DhcpConfig"
           },
           "disks": {
             "type": "array",
@@ -1178,19 +4325,20 @@
               "$ref": "#/components/schemas/NetworkInterface"
             }
           },
-          "runtime": {
-            "$ref": "#/components/schemas/InstanceRuntimeState"
+          "properties": {
+            "$ref": "#/components/schemas/InstanceProperties"
           },
           "source_nat": {
             "$ref": "#/components/schemas/SourceNatConfig"
           }
         },
         "required": [
+          "dhcp_config",
           "disks",
           "external_ips",
           "firewall_rules",
           "nics",
-          "runtime",
+          "properties",
           "source_nat"
         ]
       },
@@ -1255,6 +4403,27 @@
           "src_propolis_id"
         ]
       },
+      "InstanceProperties": {
+        "description": "The \"static\" properties of an instance: information about the instance that doesn't change while the instance is running.",
+        "type": "object",
+        "properties": {
+          "hostname": {
+            "description": "RFC1035-compliant hostname for the instance.",
+            "type": "string"
+          },
+          "memory": {
+            "$ref": "#/components/schemas/ByteCount"
+          },
+          "ncpus": {
+            "$ref": "#/components/schemas/InstanceCpuCount"
+          }
+        },
+        "required": [
+          "hostname",
+          "memory",
+          "ncpus"
+        ]
+      },
       "InstancePutMigrationIdsBody": {
         "description": "The body of a request to set or clear the migration identifiers from a sled agent's instance state records.",
         "type": "object",
@@ -1269,7 +4438,7 @@
             ]
           },
           "old_runtime": {
-            "description": "The last runtime state known to this requestor. This request will succeed if either (a) the Propolis generation in the sled agent's runtime state matches the generation in this record, or (b) the sled agent's runtime state matches what would result from applying this request to the caller's runtime state. This latter condition provides idempotency.",
+            "description": "The last instance runtime state known to this requestor. This request will succeed if either (a) the state generation in the sled agent's runtime state matches the generation in this record, or (b) the sled agent's runtime state matches what would result from applying this request to the caller's runtime state. This latter condition provides idempotency.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/InstanceRuntimeState"
@@ -1307,102 +4476,50 @@
             "description": "The current runtime state of the instance after handling the request to change its state. If the instance's state did not change, this field is `None`.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/InstanceRuntimeState"
+                "$ref": "#/components/schemas/SledInstanceState"
               }
             ]
           }
         }
       },
       "InstanceRuntimeState": {
-        "description": "Runtime state of the Instance, including the actual running state and minimal metadata\n\nThis state is owned by the sled agent running that Instance.",
+        "description": "The dynamic runtime properties of an instance: its current VMM ID (if any), migration information (if any), and the instance state to report if there is no active VMM.",
         "type": "object",
         "properties": {
           "dst_propolis_id": {
             "nullable": true,
-            "description": "the target propolis-server during a migration of this Instance",
+            "description": "If a migration is active, the ID of the target VMM.",
             "type": "string",
             "format": "uuid"
           },
           "gen": {
-            "description": "generation number for this state",
+            "description": "Generation number for this state.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Generation"
-              }
-            ]
-          },
-          "hostname": {
-            "description": "RFC1035-compliant hostname for the Instance.",
-            "type": "string"
-          },
-          "memory": {
-            "description": "memory allocated for this Instance",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ByteCount"
               }
             ]
           },
           "migration_id": {
             "nullable": true,
-            "description": "migration id (if one in process)",
+            "description": "If a migration is active, the ID of that migration.",
             "type": "string",
             "format": "uuid"
-          },
-          "ncpus": {
-            "description": "number of CPUs allocated for this Instance",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/InstanceCpuCount"
-              }
-            ]
-          },
-          "propolis_addr": {
-            "nullable": true,
-            "description": "address of propolis-server running this Instance",
-            "type": "string"
-          },
-          "propolis_gen": {
-            "description": "The generation number for the Propolis and sled identifiers for this instance.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Generation"
-              }
-            ]
           },
           "propolis_id": {
-            "description": "which propolis-server is running this Instance",
-            "type": "string",
-            "format": "uuid"
-          },
-          "run_state": {
-            "description": "runtime state of the Instance",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/InstanceState"
-              }
-            ]
-          },
-          "sled_id": {
-            "description": "which sled is running this Instance",
+            "nullable": true,
+            "description": "The instance's currently active VMM ID.",
             "type": "string",
             "format": "uuid"
           },
           "time_updated": {
-            "description": "timestamp for this information",
+            "description": "Timestamp for this information.",
             "type": "string",
             "format": "date-time"
           }
         },
         "required": [
           "gen",
-          "hostname",
-          "memory",
-          "ncpus",
-          "propolis_gen",
-          "propolis_id",
-          "run_state",
-          "sled_id",
           "time_updated"
         ]
       },
@@ -1559,7 +4676,7 @@
             "description": "The current state of the instance after handling the request to unregister it. If the instance's state did not change, this field is `None`.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/InstanceRuntimeState"
+                "$ref": "#/components/schemas/SledInstanceState"
               }
             ]
           }
@@ -1585,19 +4702,59 @@
           }
         ]
       },
+      "IpNetwork": {
+        "oneOf": [
+          {
+            "title": "v4",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv4Network"
+              }
+            ]
+          },
+          {
+            "title": "v6",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv6Network"
+              }
+            ]
+          }
+        ]
+      },
       "Ipv4Net": {
         "example": "192.168.1.0/24",
         "title": "An IPv4 subnet",
         "description": "An IPv4 subnet, including prefix and subnet mask",
         "type": "string",
-        "pattern": "^(([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])/([8-9]|1[0-9]|2[0-9]|3[0-2])$"
+        "pattern": "^(([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])/([0-9]|1[0-9]|2[0-9]|3[0-2])$"
+      },
+      "Ipv4Network": {
+        "type": "string",
+        "pattern": "^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\/(3[0-2]|[0-2]?[0-9])$"
       },
       "Ipv6Net": {
         "example": "fd12:3456::/64",
         "title": "An IPv6 subnet",
         "description": "An IPv6 subnet, including prefix and subnet mask",
         "type": "string",
-        "pattern": "^([fF][dD])[0-9a-fA-F]{2}:(([0-9a-fA-F]{1,4}:){6}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,6}:)\\/([1-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])$"
+        "pattern": "^([fF][dD])[0-9a-fA-F]{2}:(([0-9a-fA-F]{1,4}:){6}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,6}:)([0-9a-fA-F]{1,4})?\\/([0-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])$"
+      },
+      "Ipv6Network": {
+        "type": "string",
+        "pattern": "^(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\")[/](12[0-8]|1[0-1][0-9]|[0-9]?[0-9])$"
+      },
+      "Ipv6Subnet": {
+        "description": "Wraps an [`Ipv6Network`] with a compile-time prefix length.",
+        "type": "object",
+        "properties": {
+          "net": {
+            "$ref": "#/components/schemas/Ipv6Net"
+          }
+        },
+        "required": [
+          "net"
+        ]
       },
       "KnownArtifactKind": {
         "description": "Kinds of update artifacts, as used by Nexus to determine what updates are available and by sled-agent to determine how to apply an update when asked.",
@@ -1631,6 +4788,143 @@
         "pattern": "^([0-9a-fA-F]{0,2}:){5}[0-9a-fA-F]{0,2}$",
         "minLength": 5,
         "maxLength": 17
+      },
+      "Measurement": {
+        "description": "A `Measurement` is a timestamped datum from a single metric",
+        "type": "object",
+        "properties": {
+          "datum": {
+            "$ref": "#/components/schemas/Datum"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "datum",
+          "timestamp"
+        ]
+      },
+      "MetricsError": {
+        "description": "Errors related to the generation or collection of metrics.",
+        "oneOf": [
+          {
+            "description": "An error related to generating metric data points",
+            "type": "object",
+            "properties": {
+              "content": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "datum_error"
+                ]
+              }
+            },
+            "required": [
+              "content",
+              "type"
+            ]
+          },
+          {
+            "description": "An error running an `Oximeter` server",
+            "type": "object",
+            "properties": {
+              "content": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "oximeter_server"
+                ]
+              }
+            },
+            "required": [
+              "content",
+              "type"
+            ]
+          },
+          {
+            "description": "An error related to creating or sampling a [`histogram::Histogram`] metric.",
+            "type": "object",
+            "properties": {
+              "content": {
+                "$ref": "#/components/schemas/HistogramError"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "histogram_error"
+                ]
+              }
+            },
+            "required": [
+              "content",
+              "type"
+            ]
+          },
+          {
+            "description": "An error parsing a field or measurement from a string.",
+            "type": "object",
+            "properties": {
+              "content": {
+                "type": "object",
+                "properties": {
+                  "src": {
+                    "type": "string"
+                  },
+                  "typ": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "src",
+                  "typ"
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "parse_error"
+                ]
+              }
+            },
+            "required": [
+              "content",
+              "type"
+            ]
+          },
+          {
+            "description": "A field name is duplicated between the target and metric.",
+            "type": "object",
+            "properties": {
+              "content": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "duplicate_field_name"
+                ]
+              }
+            },
+            "required": [
+              "content",
+              "type"
+            ]
+          }
+        ]
       },
       "Name": {
         "title": "A name unique within the parent collection",
@@ -1695,46 +4989,381 @@
             "description": "A vNIC attached to a guest instance",
             "type": "object",
             "properties": {
-              "instance": {
-                "type": "object",
-                "properties": {
-                  "id": {
-                    "type": "string",
-                    "format": "uuid"
-                  }
-                },
-                "required": [
-                  "id"
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "instance"
                 ]
               }
             },
             "required": [
-              "instance"
-            ],
-            "additionalProperties": false
+              "id",
+              "type"
+            ]
           },
           {
             "description": "A vNIC associated with an internal service",
             "type": "object",
             "properties": {
-              "service": {
-                "type": "object",
-                "properties": {
-                  "id": {
-                    "type": "string",
-                    "format": "uuid"
-                  }
-                },
-                "required": [
-                  "id"
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "service"
                 ]
               }
             },
             "required": [
-              "service"
-            ],
-            "additionalProperties": false
+              "id",
+              "type"
+            ]
           }
+        ]
+      },
+      "PortConfigV1": {
+        "type": "object",
+        "properties": {
+          "addresses": {
+            "description": "This port's addresses.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpNetwork"
+            }
+          },
+          "bgp_peers": {
+            "description": "BGP peers on this port",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BgpPeerConfig"
+            }
+          },
+          "port": {
+            "description": "Nmae of the port this config applies to.",
+            "type": "string"
+          },
+          "routes": {
+            "description": "The set of routes associated with this port.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouteConfig"
+            }
+          },
+          "switch": {
+            "description": "Switch the port belongs to.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SwitchLocation"
+              }
+            ]
+          },
+          "uplink_port_fec": {
+            "description": "Port forward error correction type.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PortFec"
+              }
+            ]
+          },
+          "uplink_port_speed": {
+            "description": "Port speed.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PortSpeed"
+              }
+            ]
+          }
+        },
+        "required": [
+          "addresses",
+          "bgp_peers",
+          "port",
+          "routes",
+          "switch",
+          "uplink_port_fec",
+          "uplink_port_speed"
+        ]
+      },
+      "PortFec": {
+        "description": "Switchport FEC options",
+        "type": "string",
+        "enum": [
+          "firecode",
+          "none",
+          "rs"
+        ]
+      },
+      "PortSpeed": {
+        "description": "Switchport Speed options",
+        "type": "string",
+        "enum": [
+          "speed0_g",
+          "speed1_g",
+          "speed10_g",
+          "speed25_g",
+          "speed40_g",
+          "speed50_g",
+          "speed100_g",
+          "speed200_g",
+          "speed400_g"
+        ]
+      },
+      "PriorityDimension": {
+        "description": "A dimension along with bundles can be sorted, to determine priority.",
+        "oneOf": [
+          {
+            "description": "Sorting by time, with older bundles with lower priority.",
+            "type": "string",
+            "enum": [
+              "time"
+            ]
+          },
+          {
+            "description": "Sorting by the cause for creating the bundle.",
+            "type": "string",
+            "enum": [
+              "cause"
+            ]
+          }
+        ]
+      },
+      "PriorityOrder": {
+        "description": "The priority order for bundles during cleanup.\n\nBundles are sorted along the dimensions in [`PriorityDimension`], with each dimension appearing exactly once. During cleanup, lesser-priority bundles are pruned first, to maintain the dataset quota. Note that bundles are sorted by each dimension in the order in which they appear, with each dimension having higher priority than the next.",
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/PriorityDimension"
+        },
+        "minItems": 2,
+        "maxItems": 2
+      },
+      "ProducerResultsItem": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "info": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Sample"
+                }
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "ok"
+                ]
+              }
+            },
+            "required": [
+              "info",
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "info": {
+                "$ref": "#/components/schemas/MetricsError"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "err"
+                ]
+              }
+            },
+            "required": [
+              "info",
+              "status"
+            ]
+          }
+        ]
+      },
+      "QuantizationError": {
+        "description": "Errors occurring during quantizated bin generation.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "overflow"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "precision"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "invalid_base"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "invalid_steps"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "uneven_steps_for_base"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "powers_out_of_order"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
+      "RackNetworkConfigV1": {
+        "description": "Initial network configuration",
+        "type": "object",
+        "properties": {
+          "bgp": {
+            "description": "BGP configurations for connecting the rack to external networks",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BgpConfig"
+            }
+          },
+          "infra_ip_first": {
+            "description": "First ip address to be used for configuring network infrastructure",
+            "type": "string",
+            "format": "ipv4"
+          },
+          "infra_ip_last": {
+            "description": "Last ip address to be used for configuring network infrastructure",
+            "type": "string",
+            "format": "ipv4"
+          },
+          "ports": {
+            "description": "Uplinks for connecting the rack to external networks",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PortConfigV1"
+            }
+          },
+          "rack_subnet": {
+            "$ref": "#/components/schemas/Ipv6Network"
+          }
+        },
+        "required": [
+          "bgp",
+          "infra_ip_first",
+          "infra_ip_last",
+          "ports",
+          "rack_subnet"
+        ]
+      },
+      "RouteConfig": {
+        "type": "object",
+        "properties": {
+          "destination": {
+            "description": "The destination of the route.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpNetwork"
+              }
+            ]
+          },
+          "nexthop": {
+            "description": "The nexthop/gateway address.",
+            "type": "string",
+            "format": "ip"
+          }
+        },
+        "required": [
+          "destination",
+          "nexthop"
+        ]
+      },
+      "Sample": {
+        "description": "A concrete type representing a single, timestamped measurement from a timeseries.",
+        "type": "object",
+        "properties": {
+          "measurement": {
+            "description": "The measured value of the metric at this sample",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Measurement"
+              }
+            ]
+          },
+          "metric": {
+            "$ref": "#/components/schemas/FieldSet"
+          },
+          "target": {
+            "$ref": "#/components/schemas/FieldSet"
+          },
+          "timeseries_name": {
+            "description": "The name of the timeseries this sample belongs to",
+            "type": "string"
+          }
+        },
+        "required": [
+          "measurement",
+          "metric",
+          "target",
+          "timeseries_name"
         ]
       },
       "SemverVersion": {
@@ -1742,7 +5371,7 @@
         "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
       },
       "ServiceEnsureBody": {
-        "description": "Used to request that the Sled initialize certain services on initialization.\n\nThis may be used to record that certain sleds are responsible for launching services which may not be associated with a dataset, such as Nexus.",
+        "description": "Used to request that the Sled initialize multiple services.",
         "type": "object",
         "properties": {
           "services": {
@@ -1762,13 +5391,34 @@
           {
             "type": "object",
             "properties": {
+              "external_dns_servers": {
+                "description": "External DNS servers Nexus can use to resolve external hosts.",
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "ip"
+                }
+              },
               "external_ip": {
+                "description": "The address at which the external nexus server is reachable.",
                 "type": "string",
                 "format": "ip"
               },
-              "internal_ip": {
-                "type": "string",
-                "format": "ipv6"
+              "external_tls": {
+                "description": "Whether Nexus's external endpoint should use TLS",
+                "type": "boolean"
+              },
+              "internal_address": {
+                "description": "The address at which the internal nexus server is reachable.",
+                "type": "string"
+              },
+              "nic": {
+                "description": "The service vNIC providing external connectivity using OPTE.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/NetworkInterface"
+                  }
+                ]
               },
               "type": {
                 "type": "string",
@@ -1778,8 +5428,11 @@
               }
             },
             "required": [
+              "external_dns_servers",
               "external_ip",
-              "internal_ip",
+              "external_tls",
+              "internal_address",
+              "nic",
               "type"
             ]
           },
@@ -1787,10 +5440,20 @@
             "type": "object",
             "properties": {
               "dns_address": {
+                "description": "The address at which the external DNS server is reachable.",
                 "type": "string"
               },
               "http_address": {
+                "description": "The address at which the external DNS server API is reachable.",
                 "type": "string"
+              },
+              "nic": {
+                "description": "The service vNIC providing external connectivity using OPTE.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/NetworkInterface"
+                  }
+                ]
               },
               "type": {
                 "type": "string",
@@ -1802,6 +5465,7 @@
             "required": [
               "dns_address",
               "http_address",
+              "nic",
               "type"
             ]
           },
@@ -1810,6 +5474,17 @@
             "properties": {
               "dns_address": {
                 "type": "string"
+              },
+              "gz_address": {
+                "description": "The addresses in the global zone which should be created\n\nFor the DNS service, which exists outside the sleds's typical subnet - adding an address in the GZ is necessary to allow inter-zone traffic routing.",
+                "type": "string",
+                "format": "ipv6"
+              },
+              "gz_address_index": {
+                "description": "The address is also identified with an auxiliary bit of information to ensure that the created global zone address can have a unique name.",
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
               },
               "http_address": {
                 "type": "string"
@@ -1823,6 +5498,8 @@
             },
             "required": [
               "dns_address",
+              "gz_address",
+              "gz_address_index",
               "http_address",
               "type"
             ]
@@ -1830,6 +5507,9 @@
           {
             "type": "object",
             "properties": {
+              "address": {
+                "type": "string"
+              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -1838,76 +5518,16 @@
               }
             },
             "required": [
+              "address",
               "type"
             ]
           },
           {
             "type": "object",
             "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "management_gateway_service"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "wicketd"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "asic": {
-                "$ref": "#/components/schemas/DendriteAsic"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "dendrite"
-                ]
-              }
-            },
-            "required": [
-              "asic",
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "pkt_source": {
+              "address": {
                 "type": "string"
               },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "tfport"
-                ]
-              }
-            },
-            "required": [
-              "pkt_source",
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
               "type": {
                 "type": "string",
                 "enum": [
@@ -1916,19 +5536,76 @@
               }
             },
             "required": [
+              "address",
               "type"
             ]
           },
           {
             "type": "object",
             "properties": {
-              "boundary": {
-                "type": "boolean"
+              "address": {
+                "type": "string"
               },
               "dns_servers": {
                 "type": "array",
                 "items": {
+                  "type": "string",
+                  "format": "ip"
+                }
+              },
+              "domain": {
+                "nullable": true,
+                "type": "string"
+              },
+              "nic": {
+                "description": "The service vNIC providing outbound connectivity using OPTE.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/NetworkInterface"
+                  }
+                ]
+              },
+              "ntp_servers": {
+                "type": "array",
+                "items": {
                   "type": "string"
+                }
+              },
+              "snat_cfg": {
+                "description": "The SNAT configuration for outbound connections.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/SourceNatConfig"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "boundary_ntp"
+                ]
+              }
+            },
+            "required": [
+              "address",
+              "dns_servers",
+              "nic",
+              "ntp_servers",
+              "snat_cfg",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "string"
+              },
+              "dns_servers": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "ip"
                 }
               },
               "domain": {
@@ -1944,12 +5621,12 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "ntp"
+                  "internal_ntp"
                 ]
               }
             },
             "required": [
-              "boundary",
+              "address",
               "dns_servers",
               "ntp_servers",
               "type"
@@ -1958,18 +5635,72 @@
           {
             "type": "object",
             "properties": {
-              "mode": {
+              "address": {
                 "type": "string"
               },
               "type": {
                 "type": "string",
                 "enum": [
-                  "maghemite"
+                  "clickhouse"
                 ]
               }
             },
             "required": [
-              "mode",
+              "address",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "clickhouse_keeper"
+                ]
+              }
+            },
+            "required": [
+              "address",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "cockroach_db"
+                ]
+              }
+            },
+            "required": [
+              "address",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "crucible"
+                ]
+              }
+            },
+            "required": [
+              "address",
               "type"
             ]
           }
@@ -1986,13 +5717,14 @@
               "format": "ipv6"
             }
           },
-          "gz_addresses": {
-            "default": [],
-            "type": "array",
-            "items": {
-              "type": "string",
-              "format": "ipv6"
-            }
+          "dataset": {
+            "nullable": true,
+            "default": null,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DatasetRequest"
+              }
+            ]
           },
           "id": {
             "type": "string",
@@ -2001,7 +5733,7 @@
           "services": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/ServiceType"
+              "$ref": "#/components/schemas/ServiceZoneService"
             }
           },
           "zone_type": {
@@ -2013,6 +5745,23 @@
           "id",
           "services",
           "zone_type"
+        ]
+      },
+      "ServiceZoneService": {
+        "description": "Used to request that the Sled initialize a single service.",
+        "type": "object",
+        "properties": {
+          "details": {
+            "$ref": "#/components/schemas/ServiceType"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "details",
+          "id"
         ]
       },
       "SetVirtualNetworkInterfaceHost": {
@@ -2041,6 +5790,38 @@
           "vni"
         ]
       },
+      "SledInstanceState": {
+        "description": "A wrapper type containing a sled's total knowledge of the state of a specific VMM and the instance it incarnates.",
+        "type": "object",
+        "properties": {
+          "instance_state": {
+            "description": "The sled's conception of the state of the instance.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceRuntimeState"
+              }
+            ]
+          },
+          "propolis_id": {
+            "description": "The ID of the VMM whose state is being reported.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "vmm_state": {
+            "description": "The most recent state of the sled's VMM process.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VmmRuntimeState"
+              }
+            ]
+          }
+        },
+        "required": [
+          "instance_state",
+          "propolis_id",
+          "vmm_state"
+        ]
+      },
       "SledRole": {
         "oneOf": [
           {
@@ -2066,22 +5847,22 @@
         "minimum": 0
       },
       "SourceNatConfig": {
-        "description": "An IP address and port range used for instance source NAT, i.e., making outbound network connections from guests or services.",
+        "description": "An IP address and port range used for source NAT, i.e., making outbound network connections from guests or services.",
         "type": "object",
         "properties": {
           "first_port": {
-            "description": "The first port used for instance NAT, inclusive.",
+            "description": "The first port used for source NAT, inclusive.",
             "type": "integer",
             "format": "uint16",
             "minimum": 0
           },
           "ip": {
-            "description": "The external address provided to the instance",
+            "description": "The external address provided to the instance or service.",
             "type": "string",
             "format": "ip"
           },
           "last_port": {
-            "description": "The last port used for instance NAT, also inclusive.",
+            "description": "The last port used for source NAT, also inclusive.",
             "type": "integer",
             "format": "uint16",
             "minimum": 0
@@ -2093,6 +5874,110 @@
           "last_port"
         ]
       },
+      "StartSledAgentRequest": {
+        "description": "Configuration information for launching a Sled Agent.",
+        "type": "object",
+        "properties": {
+          "body": {
+            "$ref": "#/components/schemas/StartSledAgentRequestBody"
+          },
+          "generation": {
+            "description": "The current generation number of data as stored in CRDB.\n\nThe initial generation is set during RSS time and then only mutated by Nexus. For now, we don't actually anticipate mutating this data, but we leave open the possiblity.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "schema_version": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "body",
+          "generation",
+          "schema_version"
+        ]
+      },
+      "StartSledAgentRequestBody": {
+        "description": "This is the actual app level data of `StartSledAgentRequest`\n\nWe nest it below the \"header\" of `generation` and `schema_version` so that we can perform partial deserialization of `EarlyNetworkConfig` to only read the header and defer deserialization of the body once we know the schema version. This is possible via the use of [`serde_json::value::RawValue`] in future (post-v1) deserialization paths.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "Uuid of the Sled Agent to be created.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "is_lrtq_learner": {
+            "description": "Is this node an LRTQ learner node?\n\nWe only put the node into learner mode if `use_trust_quorum` is also true.",
+            "type": "boolean"
+          },
+          "rack_id": {
+            "description": "Uuid of the rack to which this sled agent belongs.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "subnet": {
+            "description": "Portion of the IP space to be managed by the Sled Agent.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv6Subnet"
+              }
+            ]
+          },
+          "use_trust_quorum": {
+            "description": "Use trust quorum for key generation",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "is_lrtq_learner",
+          "rack_id",
+          "subnet",
+          "use_trust_quorum"
+        ]
+      },
+      "StorageLimit": {
+        "description": "The limit on space allowed for zone bundles, as a percentage of the overall dataset's quota.",
+        "type": "integer",
+        "format": "uint8",
+        "minimum": 0
+      },
+      "SwitchLocation": {
+        "description": "Identifies switch physical location",
+        "oneOf": [
+          {
+            "description": "Switch in upper slot",
+            "type": "string",
+            "enum": [
+              "switch0"
+            ]
+          },
+          {
+            "description": "Switch in lower slot",
+            "type": "string",
+            "enum": [
+              "switch1"
+            ]
+          }
+        ]
+      },
+      "SwitchPorts": {
+        "description": "A set of switch uplinks.",
+        "type": "object",
+        "properties": {
+          "uplinks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HostPortConfig"
+            }
+          }
+        },
+        "required": [
+          "uplinks"
+        ]
+      },
       "TimeSync": {
         "type": "object",
         "properties": {
@@ -2101,10 +5986,27 @@
             "type": "number",
             "format": "double"
           },
-          "skew": {
-            "description": "The estimated error bound on the frequency.",
+          "ip_addr": {
+            "description": "The NTP reference IP address.",
+            "type": "string",
+            "format": "ip"
+          },
+          "ref_id": {
+            "description": "The NTP reference ID.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "ref_time": {
+            "description": "The NTP reference time (i.e. what chrony thinks the current time is, not necessarily the current system time).",
             "type": "number",
             "format": "double"
+          },
+          "stratum": {
+            "description": "The NTP stratum (our upstream's stratum plus one).",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
           },
           "sync": {
             "description": "The synchronization state of the sled, true when the system clock and the NTP clock are in sync (to within a small window).",
@@ -2113,7 +6015,10 @@
         },
         "required": [
           "correction",
-          "skew",
+          "ip_addr",
+          "ref_id",
+          "ref_time",
+          "stratum",
           "sync"
         ]
       },
@@ -2146,6 +6051,38 @@
           "kind",
           "name",
           "version"
+        ]
+      },
+      "VmmRuntimeState": {
+        "description": "The dynamic runtime properties of an individual VMM process.",
+        "type": "object",
+        "properties": {
+          "gen": {
+            "description": "The generation number for this VMM's state.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          },
+          "state": {
+            "description": "The last state reported by this VMM.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceState"
+              }
+            ]
+          },
+          "time_updated": {
+            "description": "Timestamp for the VMM's state.",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "gen",
+          "state",
+          "time_updated"
         ]
       },
       "Vni": {
@@ -2391,23 +6328,122 @@
             "items": {
               "$ref": "#/components/schemas/VpcFirewallRule"
             }
+          },
+          "vni": {
+            "$ref": "#/components/schemas/Vni"
           }
         },
         "required": [
-          "rules"
+          "rules",
+          "vni"
+        ]
+      },
+      "ZoneBundleCause": {
+        "description": "The reason or cause for a zone bundle, i.e., why it was created.",
+        "oneOf": [
+          {
+            "description": "Some other, unspecified reason.",
+            "type": "string",
+            "enum": [
+              "other"
+            ]
+          },
+          {
+            "description": "A zone bundle taken when a sled agent finds a zone that it does not expect to be running.",
+            "type": "string",
+            "enum": [
+              "unexpected_zone"
+            ]
+          },
+          {
+            "description": "An instance zone was terminated.",
+            "type": "string",
+            "enum": [
+              "terminated_instance"
+            ]
+          },
+          {
+            "description": "Generated in response to an explicit request to the sled agent.",
+            "type": "string",
+            "enum": [
+              "explicit_request"
+            ]
+          }
+        ]
+      },
+      "ZoneBundleId": {
+        "description": "An identifier for a zone bundle.",
+        "type": "object",
+        "properties": {
+          "bundle_id": {
+            "description": "The ID for this bundle itself.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "zone_name": {
+            "description": "The name of the zone this bundle is derived from.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bundle_id",
+          "zone_name"
+        ]
+      },
+      "ZoneBundleMetadata": {
+        "description": "Metadata about a zone bundle.",
+        "type": "object",
+        "properties": {
+          "cause": {
+            "description": "The reason or cause a bundle was created.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ZoneBundleCause"
+              }
+            ]
+          },
+          "id": {
+            "description": "Identifier for this zone bundle",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ZoneBundleId"
+              }
+            ]
+          },
+          "time_created": {
+            "description": "The time at which this zone bundle was created.",
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "description": "A version number for this zone bundle.",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "cause",
+          "id",
+          "time_created",
+          "version"
         ]
       },
       "ZoneType": {
         "description": "The type of zone which may be requested from Sled Agent",
         "type": "string",
         "enum": [
+          "clickhouse",
+          "clickhouse_keeper",
+          "cockroach_db",
+          "crucible_pantry",
+          "crucible",
           "external_dns",
           "internal_dns",
           "nexus",
+          "ntp",
           "oximeter",
-          "switch",
-          "crucible_pantry",
-          "ntp"
+          "switch"
         ]
       },
       "Zpool": {
@@ -2425,6 +6461,24 @@
           "disk_type",
           "id"
         ]
+      },
+      "ZpoolName": {
+        "title": "The name of a Zpool",
+        "description": "Zpool names are of the format ox{i,p}_<UUID>. They are either Internal or External, and should be unique",
+        "type": "string",
+        "pattern": "^ox[ip]_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "Error",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
       }
     }
   }

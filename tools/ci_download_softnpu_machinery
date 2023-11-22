@@ -7,33 +7,22 @@
 #   - the sidecar-lite precompiled P4 program
 #
 
+set -euo pipefail
 
-# This is the softnpu ASIC emulator
-if [[ ! -f out/softnpu/softnpu ]]; then
-    echo "fetching softnpu"
-    # This comes from a separate repo from the below artifacts,
-    # and lacks public Buildomat URLs based on the commit.
-    curl -OL https://buildomat.eng.oxide.computer/wg/0/artefact/01GTD3CPEENJZ9K1VA0J3GYD5D/WZ2Rw4MGOeSr06SEfmyuMfsp7i5rgwzvENWnAUjShI8FGryp/01GTD3D91TCD903Z0BAYSA31JR/01GTD3T8VFSZTE59Y0SVAR4CWC/softnpu
-    chmod +x softnpu
-    mkdir -p out/softnpu
-    mv softnpu out/softnpu/
-fi
+TOOLS_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 
-# Commit and base URL that's pinned for softnpu tools
-SOFTNPU_COMMIT="9fcec13bd4a4e25035003413f085f448b250884a"
-COMMIT_URL="https://buildomat.eng.oxide.computer/public/file/oxidecomputer/sidecar-lite/release/$SOFTNPU_COMMIT"
+OUT_DIR="out/npuzone"
 
-# This is an ASIC administration program.
-if [[ ! -f out/softnpu/scadm ]]; then
-    echo "fetching scadm"
-    curl -OL "$COMMIT_URL/scadm"
-    chmod +x scadm
-    mv scadm out/softnpu/
-fi
+# Pinned commit for softnpu ASIC simulator
+SOFTNPU_REPO="softnpu"
+SOFTNPU_COMMIT="dec63e67156fe6e958991bbfa090629868115ab5"
 
-# Fetch the pre-compiled sidecar_lite p4 program
-if [[ ! -f out/softnpu/libsidecar_lite.so ]]; then
-    echo "fetching libsidecar_lite.so"
-    curl -OL "$COMMIT_URL/libsidecar_lite.so"
-    mv libsidecar_lite.so out/softnpu/
-fi
+# This is the softnpu ASIC simulator
+echo "fetching npuzone"
+mkdir -p $OUT_DIR
+"$TOOLS_DIR"/ensure_buildomat_artifact.sh \
+    -O $OUT_DIR \
+    "npuzone" \
+    "$SOFTNPU_REPO" \
+    "$SOFTNPU_COMMIT"
+chmod +x $OUT_DIR/npuzone

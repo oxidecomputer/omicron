@@ -80,8 +80,8 @@ impl BackgroundTask for DnsServersWatcher {
 
             // Read the latest service configuration for this DNS group.
             let service_kind = match self.dns_group {
-                DnsGroup::Internal => ServiceKind::InternalDnsConfig,
-                DnsGroup::External => ServiceKind::ExternalDnsConfig,
+                DnsGroup::Internal => ServiceKind::InternalDns,
+                DnsGroup::External => ServiceKind::ExternalDns,
             };
 
             let pagparams = DataPageParams {
@@ -188,14 +188,14 @@ mod test {
     use crate::app::background::dns_servers::DnsServersList;
     use crate::app::background::dns_servers::DnsServersWatcher;
     use crate::app::background::dns_servers::MAX_DNS_SERVERS;
-    use crate::db::model::Service;
-    use crate::db::model::ServiceKind;
     use assert_matches::assert_matches;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use diesel::ExpressionMethods;
     use diesel::QueryDsl;
     use nexus_db_model::DnsGroup;
     use nexus_db_queries::context::OpContext;
+    use nexus_db_queries::db::model::Service;
+    use nexus_db_queries::db::model::ServiceKind;
     use nexus_test_utils_macros::nexus_test;
     use std::net::Ipv6Addr;
     use std::net::SocketAddrV6;
@@ -228,15 +228,18 @@ mod test {
 
         // If we add another server, we should see it.
         {
-            use crate::db::schema::service::dsl;
+            use nexus_db_queries::db::schema::service::dsl;
             diesel::insert_into(dsl::service)
                 .values(Service::new(
                     Uuid::new_v4(),
                     Uuid::new_v4(),
+                    Some(Uuid::new_v4()),
                     SocketAddrV6::new(Ipv6Addr::LOCALHOST, 1, 0, 0),
-                    ServiceKind::InternalDnsConfig,
+                    ServiceKind::InternalDns,
                 ))
-                .execute_async(datastore.pool_for_tests().await.unwrap())
+                .execute_async(
+                    &*datastore.pool_connection_for_tests().await.unwrap(),
+                )
                 .await
                 .unwrap();
         }
@@ -249,21 +252,24 @@ mod test {
         // If we add MAX_DNS_SERVERS more servers, we should see
         // MAX_DNS_SERVERS.
         {
-            use crate::db::schema::service::dsl;
+            use nexus_db_queries::db::schema::service::dsl;
             let new_services = (0..u16::try_from(MAX_DNS_SERVERS).unwrap())
                 .map(|i| {
                     Service::new(
                         Uuid::new_v4(),
                         Uuid::new_v4(),
+                        Some(Uuid::new_v4()),
                         SocketAddrV6::new(Ipv6Addr::LOCALHOST, i + 2, 0, 0),
-                        ServiceKind::InternalDnsConfig,
+                        ServiceKind::InternalDns,
                     )
                 })
                 .collect::<Vec<_>>();
 
             diesel::insert_into(dsl::service)
                 .values(new_services)
-                .execute_async(datastore.pool_for_tests().await.unwrap())
+                .execute_async(
+                    &*datastore.pool_connection_for_tests().await.unwrap(),
+                )
                 .await
                 .unwrap();
         }
@@ -275,12 +281,13 @@ mod test {
 
         // Now delete all the servers and try again.
         {
-            use crate::db::schema::service::dsl;
+            use nexus_db_queries::db::schema::service::dsl;
             diesel::delete(
-                dsl::service
-                    .filter(dsl::kind.eq(ServiceKind::InternalDnsConfig)),
+                dsl::service.filter(dsl::kind.eq(ServiceKind::InternalDns)),
             )
-            .execute_async(datastore.pool_for_tests().await.unwrap())
+            .execute_async(
+                &*datastore.pool_connection_for_tests().await.unwrap(),
+            )
             .await
             .unwrap();
         }

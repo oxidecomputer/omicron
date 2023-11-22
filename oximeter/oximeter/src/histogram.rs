@@ -3,14 +3,29 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Types for managing metrics that are histograms.
-// Copyright 2021 Oxide Computer Company
 
-use chrono::{DateTime, Utc};
-use num_traits::Bounded;
+// Copyright 2023 Oxide Computer Company
+
+use chrono::DateTime;
+use chrono::Utc;
+use num::traits::Bounded;
+use num::traits::FromPrimitive;
+use num::traits::Num;
+use num::traits::ToPrimitive;
+use num::Float;
+use num::Integer;
+use num::NumCast;
 use schemars::JsonSchema;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::de::DeserializeOwned;
+use serde::Deserialize;
+use serde::Serialize;
 use std::cmp::Ordering;
-use std::ops::{Bound, Range, RangeBounds, RangeFrom, RangeTo};
+use std::num::NonZeroUsize;
+use std::ops::Bound;
+use std::ops::Range;
+use std::ops::RangeBounds;
+use std::ops::RangeFrom;
+use std::ops::RangeTo;
 use thiserror::Error;
 
 /// A trait used to identify the data types that can be used as the support of a histogram.
@@ -24,24 +39,46 @@ pub trait HistogramSupport:
     + Serialize
     + DeserializeOwned
     + Clone
-    + num_traits::Zero
-    + num_traits::One
+    + Num
+    + FromPrimitive
+    + ToPrimitive
+    + NumCast
     + 'static
 {
+    type Power;
+    /// Return true if `self` is a finite number, not NAN or infinite.
     fn is_finite(&self) -> bool;
 }
 
-impl HistogramSupport for i64 {
-    fn is_finite(&self) -> bool {
-        true
+macro_rules! impl_int_histogram_support {
+    ($($type:ty),+) => {
+        $(
+            impl HistogramSupport for $type {
+                type Power = u16;
+                fn is_finite(&self) -> bool {
+                    true
+                }
+            }
+        )+
     }
 }
 
-impl HistogramSupport for f64 {
-    fn is_finite(&self) -> bool {
-        f64::is_finite(*self)
+impl_int_histogram_support! { i8, u8, i16, u16, i32, u32, i64, u64 }
+
+macro_rules! impl_float_histogram_support {
+    ($($type:ty),+) => {
+        $(
+            impl HistogramSupport for $type {
+                type Power = i16;
+                fn is_finite(&self) -> bool {
+                    <$type>::is_finite(*self)
+                }
+            }
+        )+
     }
 }
+
+impl_float_histogram_support! { f32, f64 }
 
 /// Errors related to constructing histograms or adding samples into them.
 #[derive(Debug, Clone, Error, JsonSchema, Serialize, Deserialize)]
@@ -66,6 +103,37 @@ pub enum HistogramError {
     /// Bin and count arrays are of different sizes.
     #[error("Bin and count arrays must have the same size, found {n_bins} and {n_counts}")]
     ArraySizeMismatch { n_bins: usize, n_counts: usize },
+
+    #[error("Quantization error")]
+    Quantization(#[from] QuantizationError),
+}
+
+/// Errors occurring during quantizated bin generation.
+#[derive(
+    Clone, Debug, Deserialize, JsonSchema, Serialize, thiserror::Error,
+)]
+#[serde(tag = "type", content = "content", rename_all = "snake_case")]
+pub enum QuantizationError {
+    #[error("Overflow during bin generation")]
+    Overflow,
+
+    #[error("Precision error during bin generation")]
+    Precision,
+
+    #[error("Base must in the range [1, 32]")]
+    InvalidBase,
+
+    #[error("Number of steps must be > 1 and fit in the output type")]
+    InvalidSteps,
+
+    #[error(
+        "Number of steps must be multiple of base and \
+        evenly divide a power of the base"
+    )]
+    UnevenStepsForBase,
+
+    #[error("Low power must be strictly less than high power")]
+    PowersOutOfOrder,
 }
 
 /// A type storing a range over `T`.
@@ -84,6 +152,19 @@ pub enum BinRange<T> {
 
     /// A range bounded inclusively below and unbounded above, `start..`.
     RangeFrom { start: T },
+}
+
+impl<T> std::fmt::Display for BinRange<T>
+where
+    T: std::fmt::Display,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            BinRange::RangeTo { end } => write!(f, "< {end}"),
+            BinRange::Range { start, end } => write!(f, "[{start}, {end})"),
+            BinRange::RangeFrom { start } => write!(f, ">= {start}"),
+        }
+    }
 }
 
 impl<T> BinRange<T>
@@ -191,7 +272,7 @@ pub struct Bin<T> {
     pub count: u64,
 }
 
-/// A simple type for managing a histogram metric.
+/// Histogram metric
 ///
 /// A histogram maintains the count of any number of samples, over a set of bins. Bins are
 /// specified on construction via their _left_ edges, inclusive. There can't be any "gaps" in the
@@ -199,43 +280,57 @@ pub struct Bin<T> {
 /// the entire range of the support.
 ///
 /// Note that any gaps, unsorted bins, or non-finite values will result in an error.
-///
-/// Example
-/// -------
-/// ```rust
-/// use oximeter::histogram::{BinRange, Histogram};
-///
-/// let edges = [0i64, 10, 20];
-/// let mut hist = Histogram::new(&edges).unwrap();
-/// assert_eq!(hist.n_bins(), 4); // One additional bin for the range (20..)
-/// assert_eq!(hist.n_samples(), 0);
-/// hist.sample(4);
-/// hist.sample(100);
-/// assert_eq!(hist.n_samples(), 2);
-///
-/// let data = hist.iter().collect::<Vec<_>>();
-/// assert_eq!(data[0].range, BinRange::range(i64::MIN, 0)); // An additional bin for `..0`
-/// assert_eq!(data[0].count, 0); // Nothing is in this bin
-///
-/// assert_eq!(data[1].range, BinRange::range(0, 10)); // The range `0..10`
-/// assert_eq!(data[1].count, 1); // 4 is sampled into this bin
-/// ```
-///
-/// Notes
-/// -----
-///
-/// Histograms may be constructed either from their left bin edges, or from a sequence of ranges.
-/// In either case, the left-most bin may be converted upon construction. In particular, if the
-/// left-most value is not equal to the minimum of the support, a new bin will be added from the
-/// minimum to that provided value. If the left-most value _is_ the support's minimum, because the
-/// provided bin was unbounded below, such as `(..0)`, then that bin will be converted into one
-/// bounded below, `(MIN..0)` in this case.
-///
-/// The short of this is that, most of the time, it shouldn't matter. If one specifies the extremes
-/// of the support as their bins, be aware that the left-most may be converted from a
-/// `BinRange::RangeTo` into a `BinRange::Range`. In other words, the first bin of a histogram is
-/// _always_ a `Bin::Range` or a `Bin::RangeFrom` after construction. In fact, every bin is one of
-/// those variants, the `BinRange::RangeTo` is only provided as a convenience during construction.
+//
+// Example
+// -------
+// ```rust
+// use oximeter::histogram::{BinRange, Histogram};
+//
+// let edges = [0i64, 10, 20];
+// let mut hist = Histogram::new(&edges).unwrap();
+// assert_eq!(hist.n_bins(), 4); // One additional bin for the range (20..)
+// assert_eq!(hist.n_samples(), 0);
+// hist.sample(4);
+// hist.sample(100);
+// assert_eq!(hist.n_samples(), 2);
+//
+// let data = hist.iter().collect::<Vec<_>>();
+// assert_eq!(data[0].range, BinRange::range(i64::MIN, 0)); // An additional bin for `..0`
+// assert_eq!(data[0].count, 0); // Nothing is in this bin
+//
+// assert_eq!(data[1].range, BinRange::range(0, 10)); // The range `0..10`
+// assert_eq!(data[1].count, 1); // 4 is sampled into this bin
+// ```
+//
+// Notes
+// -----
+//
+// Histograms may be constructed either from their left bin edges, or from a sequence of ranges.
+// In either case, the left-most bin may be converted upon construction. In particular, if the
+// left-most value is not equal to the minimum of the support, a new bin will be added from the
+// minimum to that provided value. If the left-most value _is_ the support's minimum, because the
+// provided bin was unbounded below, such as `(..0)`, then that bin will be converted into one
+// bounded below, `(MIN..0)` in this case.
+//
+// The short of this is that, most of the time, it shouldn't matter. If one specifies the extremes
+// of the support as their bins, be aware that the left-most may be converted from a
+// `BinRange::RangeTo` into a `BinRange::Range`. In other words, the first bin of a histogram is
+// _always_ a `Bin::Range` or a `Bin::RangeFrom` after construction. In fact, every bin is one of
+// those variants, the `BinRange::RangeTo` is only provided as a convenience during construction.
+//
+// Floating point support
+// ----------------------
+//
+// This type allows both integer and floating-point types as the support of the
+// distribution. However, developers should be very aware of the difficulties
+// around floating point comparisons. It's notoriously hard to understand,
+// predict, and control floating point comparisons. Resolution changes with the
+// magnitude of the values; cancellation can creep in in unexpected ways; and
+// arithmetic operations often lead to rounding errors. In general, one should
+// strongly prefer using an integer type for the histogram support, along with a
+// well-understood unit / resolution. Developers are also encouraged to
+// carefully check that the bins generated from methods like
+// `Histogram::with_log_linear_bins()` are exactly the ones expected.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[schemars(rename = "Histogram{T}")]
 pub struct Histogram<T> {
@@ -468,96 +563,298 @@ where
     pub fn start_time(&self) -> DateTime<Utc> {
         self.start_time
     }
+}
 
-    /// Generate a histogram with bins linearly spaced within each decade in the range
-    /// `[start_decade, stop_decade)`.
+impl<T> Histogram<T>
+where
+    T: HistogramSupport,
+    u16: LogLinearBins<T, T::Power>,
+{
+    /// Generate a histogram with 9 linearly-spaced bins, per power of 10.
     ///
-    /// This generates a "log-linear" histogram. Within each power of 10, the bins of the histogram
-    /// are linearly spaced. Note that any additional bins on the left will be added, as described
-    /// in `[Histogram::new]`. Also, an extra bin will be added from `[0, x)`, where `x == 10 **
-    /// start_decade` -- in other words, this will add the first bin from zero to the start of the
-    /// decades specified.
+    /// This generates a "log-linear" histogram. Within each power of 10, the
+    /// bins of the histogram are linearly spaced. Note that additional bins on
+    /// the left will be added, as described in [`Histogram::new()`].
+    ///
+    /// Notes
+    /// -----
+    ///
+    /// Why 9 bins? Most users intuitively want the bins in each power of ten to
+    /// have a specific width: the power of 10 itself. For example, consider the
+    /// bins between 10 and 100. It is often desirable to have bins placed at 10,
+    /// 20, 30, ..., 90, 100. Since 100 itself does _not_ fall within the 1st
+    /// decade of 10, i.e., the range `[10, 100)`, this means there are exactly
+    /// 9 bins within the range.
+    ///
+    /// This is much more easily understood compared to the actual edges we get
+    /// with 10 bins, which is the sequence `10, 19, 28, ...`. If one wants
+    /// exactly the requested number of bins (assuming it's possible), use
+    /// [`Histogram::with_log_linear_bins()`].
     ///
     /// Example
     /// -------
+    ///
     /// ```rust
     /// use oximeter::histogram::{Histogram, BinRange};
     /// use std::ops::{RangeBounds, Bound};
     ///
-    /// let hist = Histogram::span_decades(-1, 1).unwrap();
+    /// let hist: Histogram<f64> = Histogram::span_decades(-1, 1).unwrap();
     /// let bins = hist.iter().collect::<Vec<_>>();
     ///
-    /// // First bin is from the left support edge to zero
-    /// assert_eq!(bins[0].range.end_bound(), Bound::Excluded(&0.0));
+    /// // There are 9 bins per power of 10, plus 1 additional for everything
+    /// // below and above the power of 10.
+    /// assert_eq!(bins.len(), 2 * 9 + 2);
     ///
-    /// // First decade of bins is `[0.0, 0.1, 0.2, ...)`.
-    /// assert_eq!(bins[1].range, BinRange::range(0.0, 0.1));
-    /// assert_eq!(bins[2].range, BinRange::range(0.1, 0.2));
+    /// // First bin is from the left support edge to the first bin
+    /// assert_eq!(bins[0].range.end_bound(), Bound::Excluded(&0.1));
+    ///
+    /// // First decade of bins is `[0.1, 0.2, ...)`.
+    /// assert_eq!(bins[1].range, BinRange::range(0.1, 0.2));
+    ///
+    /// // Note that these are floats, which are notoriously difficult to
+    /// // compare. The bin edges are not _exact_, but quite close.
+    /// let BinRange::Range { start, end } = bins[2].range else { unreachable!() };
+    /// let BinRange::Range {
+    ///     start: expected_start,
+    ///     end: expected_end,
+    /// } = BinRange::range(0.2, 0.3) else { unreachable!() };
+    /// assert_eq!(start, expected_start);
+    /// approx::assert_ulps_eq!(end, expected_end);
     ///
     /// // Second decade is `[1.0, 2.0, 3.0, ...]`
-    /// assert_eq!(bins[10].range, BinRange::range(0.9, 1.0));
-    /// assert_eq!(bins[11].range, BinRange::range(1.0, 2.0));
+    /// assert_eq!(bins[9].range, BinRange::range(0.9, 1.0));
+    /// assert_eq!(bins[10].range, BinRange::range(1.0, 2.0));
+    /// assert_eq!(bins[11].range, BinRange::range(2.0, 3.0));
     ///
     /// // Ends at the third decade, so the last bin is the remainder of the support
-    /// assert_eq!(bins[19].range, BinRange::from(9.0));
+    /// assert_eq!(bins[19].range, BinRange::from(10.0));
     /// ```
-    pub fn span_decades<D>(
-        start_decade: D,
-        end_decade: D,
-    ) -> Result<Self, HistogramError>
-    where
-        D: SpanDecade<D, T>,
-        std::ops::Range<D>: Iterator<Item = D>,
-    {
-        let edges = [
-            vec![<T as num_traits::Zero>::zero()],
-            (start_decade..end_decade).flat_map(|x| x.span_decade()).collect(),
-        ]
-        .concat();
-        Histogram::new(&edges)
+    pub fn span_decades(
+        start_decade: T::Power,
+        stop_decade: T::Power,
+    ) -> Result<Self, HistogramError> {
+        Self::with_log_linear_bins(
+            10,
+            start_decade,
+            stop_decade,
+            9.try_into().unwrap(),
+        )
+    }
+
+    /// Generate a histogram with evenly-spaced bin in each power of a base.
+    ///
+    /// This results in a histogram with `n_bins` bins in each decade over the
+    /// range `[base ** start_decade, base ** stop_decade)`. There are two
+    /// additional bins, for the values entirely below `base ** start_decade`
+    /// and >= `base ** stop_decade`.
+    pub fn with_log_linear_bins(
+        base: u16,
+        start_decade: T::Power,
+        stop_decade: T::Power,
+        n_bins: NonZeroUsize,
+    ) -> Result<Self, HistogramError> {
+        let bins = base.bins(start_decade, stop_decade, n_bins)?;
+        Histogram::new(&bins)
     }
 }
 
-/// A trait to support generating linearly-spaced bin edges that span the given decade.
-///
-/// This trait is used to generate what's sometimes called a "log-linear" histogram support. This
-/// support has linearly spaced bins over a range, and many ranges, each of which is
-/// logarithmically-spaced. Trait accepts a decade, a power of 10, and linearly spaces bins over
-/// that decade, from `10 ** decade` to `10 ** (decade + 1)`, not inclusive of the right edges.
-/// Note that the left bin is `1.0`, `10.0`, etc, not zero.
-///
-/// Example
-/// -------
-/// ```rust
-/// use oximeter::histogram::SpanDecade;
-/// let x = 0i8.span_decade();
-/// assert_eq!(x, &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]);
-/// ```
-///
-/// Note that the `SpanDecade` trait is parametrized by _two_ types, `D` is the input type, and `T`
-/// is the output type, the type of elements generated in the return vector. This crate only
-/// defines this trait for type pairs `(i8, f64)` and `(u8, i64)`. That is, calling
-/// `i8::span_decade()` generates a `Vec<f64>` and `u8::span_decade()` generates a `Vec<i64>`.
-pub trait SpanDecade<D, T>
-where
-    T: HistogramSupport,
+/// A trait for generating linearly-spaced bins over a set of powers.
+pub trait LogLinearBins<T: HistogramSupport, Base>:
+    ToPrimitive + FromPrimitive + Num
 {
-    /// Return a set of bin edges linearly-spaced across the decade defined by `self`, i.e, `10 **
-    /// self`.
-    fn span_decade(&self) -> Vec<T>;
+    /// Compute the left bin edges for a histogram with `count` bins over each
+    /// power of the base.
+    fn bins(
+        &self,
+        lo: Base,
+        hi: Base,
+        count: NonZeroUsize,
+    ) -> Result<Vec<T>, QuantizationError>;
 }
 
-impl SpanDecade<i8, f64> for i8 {
-    fn span_decade(&self) -> Vec<f64> {
-        let mul = 10.0f64.powi((*self).into());
-        (1..10).map(|x| (x as f64) * mul).collect()
+impl<T> LogLinearBins<T, u16> for u16
+where
+    T: HistogramSupport + Integer,
+{
+    fn bins(
+        &self,
+        lo: u16,
+        hi: u16,
+        count: NonZeroUsize,
+    ) -> Result<Vec<T>, QuantizationError> {
+        // Basic sanity checks
+        if *self == 0 || *self > 32 {
+            return Err(QuantizationError::InvalidBase);
+        }
+        if count.get() < 2 {
+            return Err(QuantizationError::InvalidSteps);
+        }
+        if lo >= hi {
+            return Err(QuantizationError::PowersOutOfOrder);
+        }
+
+        // The base must be <= the number of steps + 1. The one is because we're
+        // computing left bin edges.
+        if <Self as Into<usize>>::into(*self) > count.get() + 1 {
+            return Err(QuantizationError::InvalidSteps);
+        }
+
+        // The highest power must be representable in the target type.
+        if self.checked_pow(hi.into()).is_none() {
+            return Err(QuantizationError::Overflow);
+        }
+
+        // Convert everything into wide integers for easy computations that
+        // won't overflow during interim processing.
+        //
+        // Note that we unwrap in a few places below, where we're sure the
+        // narrowing conversion cannot fail, such as to a u32.
+        let base = <u64 as From<Self>>::from(*self);
+        let lo = <u64 as From<Self>>::from(lo);
+        let hi = <u64 as From<Self>>::from(hi);
+        let count = <u64 as NumCast>::from(count.get())
+            .ok_or(QuantizationError::Overflow)?;
+
+        fn bin_count_divides_spacing(
+            base: u64,
+            lo: u64,
+            hi: u64,
+            count: u64,
+        ) -> bool {
+            let powers = lo..hi;
+            let next_powers = lo + 1..hi + 1;
+            powers.zip(next_powers).all(|(lo, hi)| {
+                let lo = base.pow(lo as _);
+                let hi = base.pow(hi as _);
+                let distance = hi - lo;
+                dbg!(distance, count);
+                distance.is_multiple_of(&count)
+            })
+        }
+
+        if !bin_count_divides_spacing(base, lo, hi, count) {
+            return Err(QuantizationError::UnevenStepsForBase);
+        }
+
+        // Compute the next step size.
+        fn next_step(next: u64, count: u64) -> Result<u64, QuantizationError> {
+            if next > count {
+                next.checked_div(count).ok_or(QuantizationError::Precision)
+            } else {
+                Ok(1)
+            }
+        }
+
+        let mut out = Vec::with_capacity(
+            count
+                .checked_mul(hi - lo)
+                .ok_or(QuantizationError::Overflow)?
+                .try_into()
+                .unwrap(),
+        );
+        let powers = lo..hi;
+        let mut power = lo;
+        let mut value = base
+            .checked_pow(lo.try_into().unwrap())
+            .ok_or(QuantizationError::Overflow)?;
+        let mut next_start = base
+            .checked_pow((lo + 1).try_into().unwrap())
+            .ok_or(QuantizationError::Overflow)?;
+        let mut step = next_step(next_start - value, count)?;
+        while powers.contains(&power) {
+            out.push(
+                <T as NumCast>::from(value)
+                    .ok_or(QuantizationError::Overflow)?,
+            );
+            if value < next_start {
+                value = value
+                    .checked_add(step)
+                    .ok_or(QuantizationError::Overflow)?;
+                continue;
+            }
+            next_start = next_start
+                .checked_mul(base)
+                .ok_or(QuantizationError::Overflow)?;
+            power = power.checked_add(1).ok_or(QuantizationError::Overflow)?;
+            step = next_step(next_start - value, count)?;
+            value =
+                value.checked_add(step).ok_or(QuantizationError::Overflow)?;
+        }
+        Ok(out)
     }
 }
 
-impl SpanDecade<u8, i64> for u8 {
-    fn span_decade(&self) -> Vec<i64> {
-        let mul = 10i64.pow((*self).into());
-        (1..10).map(|x| x * mul).collect()
+impl<T> LogLinearBins<T, i16> for u16
+where
+    T: HistogramSupport + Float,
+{
+    fn bins(
+        &self,
+        lo: i16,
+        hi: i16,
+        count: NonZeroUsize,
+    ) -> Result<Vec<T>, QuantizationError> {
+        // Basic sanity checks.
+        //
+        // Note that for floating point, we are significantly less constrained
+        // in terms of the relationship between the base and the count. For
+        // integers, we ensure that they're relatively co-divisible, so that we
+        // are not losing precision by computing the steps. Floats are more
+        // permissive.
+        if *self == 0 || *self > 32 {
+            return Err(QuantizationError::InvalidBase);
+        }
+        if count.get() < 2 {
+            return Err(QuantizationError::InvalidSteps);
+        }
+        if lo >= hi {
+            return Err(QuantizationError::PowersOutOfOrder);
+        }
+
+        // Compute the next step size.
+        fn next_step(next: f64, count: u64) -> Result<f64, QuantizationError> {
+            let count_ = <f64 as NumCast>::from(count)
+                .ok_or(QuantizationError::Precision)?;
+            Ok(next / count_)
+        }
+
+        let count = <u64 as NumCast>::from(count.get())
+            .ok_or(QuantizationError::Overflow)?;
+        let base = <f64 as NumCast>::from(*self).unwrap();
+        let n_elems = count
+            .checked_mul(
+                <u64 as NumCast>::from(hi - lo)
+                    .ok_or(QuantizationError::Overflow)?,
+            )
+            .ok_or(QuantizationError::Overflow)?
+            .try_into()
+            .unwrap();
+        let mut out = Vec::with_capacity(n_elems);
+        let powers = lo..hi;
+
+        let mut power = lo;
+        let mut start = base.powi(lo.into());
+        let mut stop = base.powi((lo + 1).into());
+        let mut step = next_step(stop - start, count)?;
+        while powers.contains(&power) {
+            for i in 0..count {
+                let value = start + step * <f64 as NumCast>::from(i).unwrap();
+                out.push(
+                    <T as NumCast>::from(value)
+                        .ok_or(QuantizationError::Precision)?,
+                );
+            }
+
+            // Move to next power of the base.
+            start = stop;
+            stop *= base;
+            step = next_step(stop - start, count)?;
+            power += 1;
+        }
+        out.push(
+            <T as NumCast>::from(start).ok_or(QuantizationError::Overflow)?,
+        );
+        Ok(out)
     }
 }
 
@@ -576,44 +873,22 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn assert_approx_eq(x: f64, y: f64) {
-        assert!((x - y).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn test_span_decade_f64() {
-        fn run_test(decade: i8) {
-            let diff = 10.0f64.powi(decade.into());
-            let x = decade.span_decade();
-            for (x, y) in x.iter().zip(x.iter().skip(1)) {
-                assert_approx_eq(y - x, diff);
-            }
-        }
-        run_test(0);
-        run_test(-1);
-        run_test(1);
-    }
-
-    #[test]
-    fn test_span_decade_i64() {
-        fn run_test(decade: u8) {
-            let diff = 10i64.pow(decade.into());
-            let x = decade.span_decade();
-            for (x, y) in x.iter().zip(x.iter().skip(1)) {
-                assert_eq!(y - x, diff);
-            }
-        }
-        run_test(0);
-        run_test(1);
-        run_test(2);
-    }
+    use std::convert::TryInto;
 
     #[test]
     fn test_ensure_finite() {
         assert!(ensure_finite(0i64).is_ok());
         assert!(ensure_finite(i64::MIN).is_ok());
         assert!(ensure_finite(i64::MAX).is_ok());
+
+        assert!(ensure_finite(0u64).is_ok());
+        assert!(ensure_finite(u64::MIN).is_ok());
+        assert!(ensure_finite(u64::MAX).is_ok());
+
+        assert!(ensure_finite(0.0).is_ok());
+        assert!(ensure_finite(f32::NEG_INFINITY).is_err());
+        assert!(ensure_finite(f32::INFINITY).is_err());
+        assert!(ensure_finite(f32::NAN).is_err());
 
         assert!(ensure_finite(0.0).is_ok());
         assert!(ensure_finite(f64::NEG_INFINITY).is_err());
@@ -623,7 +898,7 @@ mod tests {
 
     #[test]
     fn test_bin_range_to() {
-        let range = BinRange::to(10);
+        let range = BinRange::to(10_u64);
         assert!(!range.contains(&100));
         assert!(range.contains(&0));
         assert_eq!(range.cmp(&0), Ordering::Equal);
@@ -632,7 +907,7 @@ mod tests {
 
     #[test]
     fn test_bin_range_from() {
-        let range = BinRange::from(10);
+        let range = BinRange::from(10_u64);
         assert!(range.contains(&100));
         assert!(!range.contains(&0));
         assert_eq!(range.cmp(&0), Ordering::Less);
@@ -641,7 +916,7 @@ mod tests {
 
     #[test]
     fn test_bin_range() {
-        let range = BinRange::range(0, 10);
+        let range = BinRange::range(0_u64, 10);
         assert!(!range.contains(&100));
         assert!(range.contains(&0));
         assert!(!range.contains(&10));
@@ -694,7 +969,7 @@ mod tests {
 
     #[test]
     fn test_histogram_with_overlapping_bins() {
-        let bins = &[(..1).into(), (0..10).into()];
+        let bins = &[(..1_u64).into(), (0..10).into()];
         assert!(Histogram::with_bins(bins).is_err());
     }
 
@@ -831,8 +1106,260 @@ mod tests {
 
     #[test]
     fn test_span_decades() {
-        let hist = Histogram::span_decades(0i8, 3i8).unwrap();
+        let hist = Histogram::<f64>::span_decades(0, 3).unwrap();
         println!("{:#?}", hist.bins);
-        assert_eq!(hist.n_bins(), 9 * 3 + 2); // 1 for bin from (-infty, 1), 1 for (0, 0.1)
+        // Total number of bins is:
+        //
+        // 1        -- for bin from (MIN, 1)
+        // 9 * 3   -- for each power of 10 in [10 ** 0, 10 ** 3)
+        // 1        -- for [10 ** 3, MAX)
+        //
+        // = 29;
+        assert_eq!(hist.n_bins(), 29);
+    }
+
+    #[test]
+    fn test_span_decades_other_counts_f64() {
+        const N_BINS: usize = 20;
+        let hist = Histogram::<f64>::with_log_linear_bins(
+            10,
+            0,
+            1,
+            N_BINS.try_into().unwrap(),
+        )
+        .unwrap();
+        // Total number of bins is:
+        //
+        // 1        -- for [MIN, 0)
+        // N_BINS   -- for [10 ** 0, 10 ** 1)
+        // 1        -- for [10**1, MAX)
+        println!("{:#?}", hist.bins);
+        assert_eq!(hist.n_bins(), N_BINS + 2);
+    }
+
+    #[test]
+    fn test_span_decades_other_counts_u64_resolution_too_low() {
+        let err = Histogram::<u64>::with_log_linear_bins(
+            10,
+            0,
+            1,
+            20.try_into().unwrap(),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            HistogramError::Quantization(QuantizationError::UnevenStepsForBase)
+        ));
+    }
+
+    #[test]
+    fn test_span_decades_other_counts_u64_resolution_ok() {
+        const N_BINS: usize = 30;
+        let hist = Histogram::<u64>::with_log_linear_bins(
+            10,
+            1,
+            2,
+            N_BINS.try_into().unwrap(),
+        )
+        .unwrap();
+        // Total number of bins is:
+        // 1        -- for [0, 1)
+        // N_BINS   -- for each power of ten in [1, 2)
+        // 1        -- for the last left edge
+        println!("{:#?}", hist.bins);
+        assert_eq!(hist.n_bins(), N_BINS + 2);
+    }
+
+    // Sanity check that we compute exactly the expected bins for an easy case,
+    // where any output type can represent the exact set of bins.
+    #[test]
+    fn test_log_linear_bins_all_representable() {
+        const EXPECTED: &[u8] = &[
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100,
+        ];
+        let base = 10_u16;
+        let lo = 0;
+        let hi = 2;
+        let n_bins = NonZeroUsize::new(9).unwrap();
+
+        let bins: Vec<u8> = base.bins(lo, hi, n_bins).unwrap();
+        assert_eq!(bins, EXPECTED);
+
+        fn cmp<T>(bins: Vec<T>, expected: &[u8])
+        where
+            T: TryFrom<u8> + std::fmt::Debug + std::cmp::PartialEq,
+            <T as TryFrom<u8>>::Error: std::fmt::Debug,
+        {
+            assert_eq!(
+                bins,
+                expected
+                    .iter()
+                    .copied()
+                    .map(|x| T::try_from(x).unwrap())
+                    .collect::<Vec<_>>()
+            );
+        }
+
+        let bins: Vec<i8> = base.bins(lo, hi, n_bins).unwrap();
+        cmp(bins, EXPECTED);
+        let bins: Vec<u16> = base.bins(lo, hi, n_bins).unwrap();
+        cmp(bins, EXPECTED);
+        let bins: Vec<i16> = base.bins(lo, hi, n_bins).unwrap();
+        cmp(bins, EXPECTED);
+        let bins: Vec<u32> = base.bins(lo, hi, n_bins).unwrap();
+        cmp(bins, EXPECTED);
+        let bins: Vec<i32> = base.bins(lo, hi, n_bins).unwrap();
+        cmp(bins, EXPECTED);
+        let bins: Vec<u64> = base.bins(lo, hi, n_bins).unwrap();
+        cmp(bins, EXPECTED);
+        let bins: Vec<i64> = base.bins(lo, hi, n_bins).unwrap();
+        cmp(bins, EXPECTED);
+
+        let base = 10_u16;
+        let lo = 0_i16;
+        let hi = 2;
+        let n_bins = NonZeroUsize::new(9).unwrap();
+        let bins: Vec<f32> = base.bins(lo, hi, n_bins).unwrap();
+        cmp(bins, EXPECTED);
+        let bins: Vec<f64> = base.bins(lo, hi, n_bins).unwrap();
+        cmp(bins, EXPECTED);
+    }
+
+    #[test]
+    fn test_log_linear_bins_integer_size_checks() {
+        // Number of steps must be >= 2.
+        let base = 10_u16;
+        let res: Result<Vec<u64>, _> =
+            base.bins(0_u16, 2, 1.try_into().unwrap());
+        assert!(matches!(res.unwrap_err(), QuantizationError::InvalidSteps));
+
+        // 10 ** 100 overflows a u64.
+        let res: Result<Vec<u64>, _> =
+            base.bins(2_u16, 100, 10.try_into().unwrap());
+        assert!(matches!(res.unwrap_err(), QuantizationError::Overflow));
+
+        // 100 bins can't evenly divide the provided base.
+        let res: Result<Vec<u64>, _> = base.bins(0, 1, 100.try_into().unwrap());
+        assert!(matches!(
+            res.unwrap_err(),
+            QuantizationError::UnevenStepsForBase
+        ));
+
+        // Base is larger than the number of steps
+        let res: Result<Vec<u64>, _> = base.bins(0, 1, 5.try_into().unwrap());
+        assert!(matches!(res.unwrap_err(), QuantizationError::InvalidSteps));
+    }
+
+    #[test]
+    fn test_log_linear_bins_small_bin_count() {
+        let base = 10_u16;
+        let _: Vec<u64> = base
+            .bins(3, 4, 20.try_into().unwrap())
+            .expect("Should be able to compute widely spaced bins");
+    }
+
+    // These are explicit tests against NumPy's linspace implementation, which
+    // we're trying to emulate. Specifically, assuming NumPy is installed, the
+    // following code will generate these values:
+    //
+    // ```python
+    // def space(base: int, lo: int, hi: int, count: int) -> np.ndarray:
+    //      parts = np.concatenate([
+    //          np.linspace(base ** b, base ** (b + 1), count, endpoint=False)
+    //          for b in range(lo, hi)
+    //      ], axis=0)
+    //      return np.append(parts, np.atleast_1d(base ** hi))
+    // ```
+    #[rstest::rstest]
+    #[case(
+        2,
+        -3,
+        0,
+        7,
+        &[
+            0.125     , 0.14285714, 0.16071429, 0.17857143, 0.19642857,
+            0.21428571, 0.23214286, 0.25      , 0.28571429, 0.32142857,
+            0.35714286, 0.39285714, 0.42857143, 0.46428571, 0.5       ,
+            0.57142857, 0.64285714, 0.71428571, 0.78571429, 0.85714286,
+            0.92857143, 1.
+        ]
+    )]
+    #[case(
+        10,
+        -1,
+        3,
+        15,
+        &[
+            1.0e-01, 1.6e-01, 2.2e-01, 2.8e-01, 3.4e-01, 4.0e-01, 4.6e-01,
+            5.2e-01, 5.8e-01, 6.4e-01, 7.0e-01, 7.6e-01, 8.2e-01, 8.8e-01,
+            9.4e-01, 1.0e+00, 1.6e+00, 2.2e+00, 2.8e+00, 3.4e+00, 4.0e+00,
+            4.6e+00, 5.2e+00, 5.8e+00, 6.4e+00, 7.0e+00, 7.6e+00, 8.2e+00,
+            8.8e+00, 9.4e+00, 1.0e+01, 1.6e+01, 2.2e+01, 2.8e+01, 3.4e+01,
+            4.0e+01, 4.6e+01, 5.2e+01, 5.8e+01, 6.4e+01, 7.0e+01, 7.6e+01,
+            8.2e+01, 8.8e+01, 9.4e+01, 1.0e+02, 1.6e+02, 2.2e+02, 2.8e+02,
+            3.4e+02, 4.0e+02, 4.6e+02, 5.2e+02, 5.8e+02, 6.4e+02, 7.0e+02,
+            7.6e+02, 8.2e+02, 8.8e+02, 9.4e+02, 1.0e+03
+        ]
+    )]
+    #[case(
+        10,
+        -12,
+        -10,
+        10,
+        &[
+            1.0e-12, 1.9e-12, 2.8e-12, 3.7e-12, 4.6e-12, 5.5e-12, 6.4e-12,
+            7.3e-12, 8.2e-12, 9.1e-12, 1.0e-11, 1.9e-11, 2.8e-11, 3.7e-11,
+            4.6e-11, 5.5e-11, 6.4e-11, 7.3e-11, 8.2e-11, 9.1e-11, 1.0e-10
+        ],
+    )]
+    #[case(
+        10,
+        10,
+        12,
+        10,
+        &[
+            1.0e+10, 1.9e+10, 2.8e+10, 3.7e+10, 4.6e+10, 5.5e+10, 6.4e+10,
+            7.3e+10, 8.2e+10, 9.1e+10, 1.0e+11, 1.9e+11, 2.8e+11, 3.7e+11,
+            4.6e+11, 5.5e+11, 6.4e+11, 7.3e+11, 8.2e+11, 9.1e+11, 1.0e+12
+        ]
+    )]
+    fn test_log_linear_bins_f64_matches_reference_implementation(
+        #[case] base: u16,
+        #[case] lo: i16,
+        #[case] hi: i16,
+        #[case] count: usize,
+        #[case] expected: &[f64],
+    ) {
+        let bins: Vec<f64> =
+            base.bins(lo, hi, count.try_into().unwrap()).unwrap();
+        println!("{bins:#?}");
+        println!("{expected:#?}");
+        assert!(
+            all_close(&bins, expected, 1e-8, 1e-5),
+            "Linspaced bins don't match reference implementation"
+        );
+    }
+
+    fn all_close<T>(a: &[T], b: &[T], atol: T, rtol: T) -> bool
+    where
+        T: Float,
+    {
+        if a.len() != b.len() {
+            return false;
+        }
+        a.iter()
+            .zip(b.iter())
+            .all(|(a, b)| (*a - *b).abs() <= (atol + rtol * b.abs()))
+    }
+
+    #[test]
+    fn test_foo() {
+        let bins: Vec<f64> = 10u16.bins(1, 3, 30.try_into().unwrap()).unwrap();
+        println!("{bins:?}");
+        dbg!(bins.len());
+        let hist = Histogram::new(&bins).unwrap();
+        for bin in hist.iter() {
+            println!("{}", bin.range);
+        }
     }
 }

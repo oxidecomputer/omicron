@@ -11,16 +11,18 @@ use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::{
     create_disk, create_project, create_vpc, object_create, populate_ip_pool,
-    project_get, DiskTest,
+    project_get, projects_list, DiskTest,
 };
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::params;
+use nexus_types::external_api::views;
+use nexus_types::external_api::views::Project;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
-use omicron_nexus::external_api::params;
-use omicron_nexus::external_api::views;
-use omicron_nexus::external_api::views::Project;
+use omicron_common::api::external::Name;
+use std::str::FromStr;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -44,15 +46,7 @@ async fn test_projects(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(project.identity.name, p2_name);
 
     // Verify the list of Projects.
-    let projects = NexusRequest::iter_collection_authn::<Project>(
-        &client,
-        "/v1/projects",
-        "",
-        None,
-    )
-    .await
-    .expect("failed to list projects")
-    .all_items;
+    let projects = projects_list(&client, "/v1/projects", "", None).await;
     assert_eq!(projects.len(), 2);
     // alphabetical order for now
     assert_eq!(projects[0].identity.name, p2_name);
@@ -236,7 +230,6 @@ async fn test_project_deletion_with_image(cptestctx: &ControlPlaneTestContext) {
         },
         os: "alpine".to_string(),
         version: "edge".to_string(),
-        block_size: params::BlockSize::try_from(512).unwrap(),
         source: params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
     };
 
@@ -252,32 +245,24 @@ async fn test_project_deletion_with_image(cptestctx: &ControlPlaneTestContext) {
         delete_project_expect_fail(&url, &client).await,
     );
 
-    // TODO: finish test once image delete is implemented. Image create works
-    // and project delete with image fails as expected, but image delete is not
-    // implemented yet, so we can't show that project delete works after image
-    // delete.
     let image_url = format!("/v1/images/{}", image.identity.id);
-    NexusRequest::expect_failure_with_body(
-        client,
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Method::DELETE,
-        &image_url,
-        &image_create_params,
+    NexusRequest::object_delete(&client, &image_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to delete image");
+
+    // Expect that trying to GET the image results in a 404
+    NexusRequest::new(
+        RequestBuilder::new(&client, http::Method::GET, &image_url)
+            .expect_status(Some(http::StatusCode::NOT_FOUND)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
-    .unwrap();
+    .expect("GET of a deleted image did not return 404");
 
-    // TODO: delete the image
-    // NexusRequest::object_delete(&client, &image_url)
-    //     .authn_as(AuthnMode::PrivilegedUser)
-    //     .execute()
-    //     .await
-    //     .expect("failed to delete image");
-
-    // TODO: now delete project works
-    // delete_project(&url, &client).await;
+    delete_project(&url, &client).await;
 }
 
 #[nexus_test]
@@ -305,7 +290,7 @@ async fn test_project_deletion_with_snapshot(
                 name: "my-snapshot".parse().unwrap(),
                 description: "not attached to instance".into(),
             },
-            disk: "my-disk".parse().unwrap(),
+            disk: Name::from_str("my-disk").unwrap().into(),
         },
     )
     .await;

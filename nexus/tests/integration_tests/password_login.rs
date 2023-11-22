@@ -4,16 +4,15 @@
 
 use dropshot::test_util::ClientTestContext;
 use http::{header, method::Method, StatusCode};
-use nexus_passwords::MIN_EXPECTED_PASSWORD_VERIFY_TIME;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::grant_iam;
 use nexus_test_utils::resource_helpers::{create_local_user, create_silo};
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::params;
+use nexus_types::external_api::shared::{self, SiloRole};
+use nexus_types::external_api::views;
 use omicron_common::api::external::Name;
-use omicron_nexus::authz::SiloRole;
-use omicron_nexus::external_api::params;
-use omicron_nexus::external_api::shared;
-use omicron_nexus::external_api::views;
+use omicron_passwords::MIN_EXPECTED_PASSWORD_VERIFY_TIME;
 use std::str::FromStr;
 
 type ControlPlaneTestContext =
@@ -144,7 +143,7 @@ async fn test_local_user_basic(client: &ClientTestContext, silo: &views::Silo) {
 
     // Log out of the first session.
     NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, "/logout")
+        RequestBuilder::new(client, Method::POST, "/v1/logout")
             .expect_status(Some(StatusCode::NO_CONTENT)),
     )
     .authn_as(AuthnMode::Session(session_token.to_string()))
@@ -242,7 +241,7 @@ async fn test_local_user_basic(client: &ClientTestContext, silo: &views::Silo) {
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &user_password_url)
             .expect_status(Some(StatusCode::NO_CONTENT))
-            .body(Some(&params::UserPassword::InvalidPassword)),
+            .body(Some(&params::UserPassword::LoginDisallowed)),
     )
     .authn_as(AuthnMode::Session(admin_session.to_string()))
     .execute()
@@ -292,7 +291,7 @@ async fn test_local_user_basic(client: &ClientTestContext, silo: &views::Silo) {
         StatusCode::FORBIDDEN,
         Method::POST,
         &admin_password_url,
-        &params::UserPassword::InvalidPassword,
+        &params::UserPassword::LoginDisallowed,
     )
     .authn_as(AuthnMode::Session(session_token2.clone()))
     .execute()
@@ -312,7 +311,7 @@ async fn test_local_user_with_no_initial_password(
         client,
         silo,
         &test_user,
-        params::UserPassword::InvalidPassword,
+        params::UserPassword::LoginDisallowed,
     )
     .await;
 
@@ -390,7 +389,7 @@ async fn expect_login_failure(
     password: params::Password,
 ) {
     let start = std::time::Instant::now();
-    let login_url = format!("/login/{}/local", silo_name);
+    let login_url = format!("/v1/login/{}/local", silo_name);
     let error: dropshot::HttpErrorResponseBody =
         NexusRequest::expect_failure_with_body(
             client,
@@ -430,10 +429,10 @@ async fn expect_login_success(
     password: params::Password,
 ) -> String {
     let start = std::time::Instant::now();
-    let login_url = format!("/login/{}/local", silo_name);
+    let login_url = format!("/v1/login/{}/local", silo_name);
     let response = RequestBuilder::new(client, Method::POST, &login_url)
         .body(Some(&params::UsernamePasswordCredentials { username, password }))
-        .expect_status(Some(StatusCode::SEE_OTHER))
+        .expect_status(Some(StatusCode::NO_CONTENT))
         .execute()
         .await
         .expect("expected successful login, but it failed");
@@ -448,7 +447,7 @@ async fn expect_login_success(
         .split_once("; ")
         .expect("session cookie: bad cookie header value (missing semicolon)");
     assert!(token_cookie.starts_with("session="));
-    assert_eq!(rest, "Path=/; HttpOnly; SameSite=Lax; Max-Age=3600");
+    assert_eq!(rest, "Path=/; HttpOnly; SameSite=Lax; Max-Age=28800");
     let (_, session_token) = token_cookie
         .split_once('=')
         .expect("session cookie: bad cookie header value (missing 'session=')");
@@ -456,7 +455,7 @@ async fn expect_login_success(
     // It's not clear how a successful login could ever take less than the
     // minimum verification time, but we verify it here anyway.  (If we fail
     // here, it's possible that our hash parameters have gotten too weak for the
-    // current hardware.  See the similar test in the nexus_passwords module.)
+    // current hardware.  See the similar test in the omicron_passwords module.)
     if elapsed < MIN_EXPECTED_PASSWORD_VERIFY_TIME {
         panic!(
             "successful login unexpectedly took less time ({:?}) than \

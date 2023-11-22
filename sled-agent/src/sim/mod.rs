@@ -18,5 +18,5 @@ mod storage;
 
 pub use crate::updates::ConfigUpdates;
 pub use config::{Config, ConfigHardware, ConfigStorage, ConfigZpool, SimMode};
-pub use server::{run_server, Server};
+pub use server::{run_standalone_server, RssArgs, Server};
 pub use sled_agent::SledAgent;

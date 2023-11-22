@@ -17,11 +17,11 @@ use nexus_test_utils::resource_helpers::{
     create_instance, create_project, create_vpc, populate_ip_pool,
 };
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::{params, views::VpcSubnet};
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Ipv4Net;
 use omicron_common::api::external::Ipv6Net;
-use omicron_nexus::external_api::{params, views::VpcSubnet};
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -164,8 +164,7 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
     let other_ipv4_block = Ipv4Net("172.31.0.0/16".parse().unwrap());
     // Create the first two available IPv6 address ranges. */
     let prefix = vpc.ipv6_prefix.network();
-    let ipv6_block =
-        Some(Ipv6Net(ipnetwork::Ipv6Network::new(prefix, 64).unwrap()));
+    let ipv6_block = Ipv6Net(ipnetwork::Ipv6Network::new(prefix, 64).unwrap());
     let mut segments = prefix.segments();
     segments[3] = 1;
     let addr = std::net::Ipv6Addr::from(segments);
@@ -177,7 +176,7 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
             description: "it's below the net".to_string(),
         },
         ipv4_block,
-        ipv6_block,
+        ipv6_block: Some(ipv6_block),
     };
     let subnet: VpcSubnet =
         NexusRequest::objects_post(client, &subnets_url, &new_subnet)
@@ -191,7 +190,7 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(subnet.identity.description, "it's below the net");
     assert_eq!(subnet.vpc_id, vpc.identity.id);
     assert_eq!(subnet.ipv4_block, ipv4_block);
-    assert_eq!(subnet.ipv6_block, ipv6_block.unwrap());
+    assert_eq!(subnet.ipv6_block, ipv6_block);
     assert!(subnet.ipv6_block.is_vpc_subnet(&vpc.ipv6_prefix));
 
     // get subnet, should be the same
@@ -228,7 +227,7 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
             description: "it's below the net".to_string(),
         },
         ipv4_block,
-        ipv6_block,
+        ipv6_block: Some(ipv6_block),
     };
     let expected_error = format!(
         "IP address range '{}' conflicts with an existing subnet",

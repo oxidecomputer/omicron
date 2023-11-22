@@ -5,12 +5,12 @@
 //! A popup dialog box widget for ignition control
 
 use super::ButtonText;
-use super::Popup;
+use super::PopupBuilder;
 use crate::state::ComponentId;
 use crate::ui::defaults::style;
-use tui::text::Span;
-use tui::text::Spans;
-use tui::text::Text;
+use ratatui::text::Line;
+use ratatui::text::Span;
+use ratatui::text::Text;
 use wicketd_client::types::IgnitionCommand;
 
 pub struct IgnitionPopup {
@@ -48,27 +48,34 @@ impl IgnitionPopup {
         };
     }
 
-    pub fn popup(&self, component: ComponentId) -> Popup<'static> {
-        Popup {
-            header: Text::from(vec![Spans::from(vec![Span::styled(
-                format!(" IGNITION: {}", component),
+    /// Return the `PopupBuilder` for this popup -- the header, body and button
+    /// text.
+    ///
+    /// Can't return a `Popup` here due to lifetime issues.
+    pub fn to_popup_builder(
+        &self,
+        component: ComponentId,
+    ) -> PopupBuilder<'static> {
+        PopupBuilder {
+            header: Line::from(vec![Span::styled(
+                format!("IGNITION: {}", component.to_string_uppercase()),
                 style::header(true),
-            )])]),
+            )]),
             body: Text {
                 lines: vec![
-                    Spans::from(vec![Span::styled(
+                    Line::from(vec![Span::styled(
                         "Power On",
                         style::line(
                             self.selected_command == IgnitionCommand::PowerOn,
                         ),
                     )]),
-                    Spans::from(vec![Span::styled(
+                    Line::from(vec![Span::styled(
                         "Power Off",
                         style::line(
                             self.selected_command == IgnitionCommand::PowerOff,
                         ),
                     )]),
-                    Spans::from(vec![Span::styled(
+                    Line::from(vec![Span::styled(
                         "Power Reset",
                         style::line(
                             self.selected_command
@@ -77,7 +84,7 @@ impl IgnitionPopup {
                     )]),
                 ],
             },
-            buttons: vec![ButtonText { instruction: "CLOSE", key: "ESC" }],
+            buttons: vec![ButtonText::new("Close", "Esc")],
         }
     }
 }

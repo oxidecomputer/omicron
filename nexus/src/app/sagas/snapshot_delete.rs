@@ -5,14 +5,14 @@
 use super::{ActionRegistry, NexusActionContext, NexusSaga};
 use crate::app::sagas;
 use crate::app::sagas::declare_saga_actions;
-use crate::{authn, authz, db};
+use nexus_db_queries::{authn, authz, db};
 use serde::Deserialize;
 use serde::Serialize;
 use steno::ActionError;
 use steno::Node;
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Params {
+pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub authz_snapshot: authz::Snapshot,
     pub snapshot: db::model::Snapshot,
@@ -29,7 +29,7 @@ declare_saga_actions! {
 }
 
 #[derive(Debug)]
-pub struct SagaSnapshotDelete;
+pub(crate) struct SagaSnapshotDelete;
 impl NexusSaga for SagaSnapshotDelete {
     const NAME: &'static str = "snapshot-delete";
     type Params = Params;
@@ -116,6 +116,11 @@ async fn ssd_delete_snapshot_record(
             &opctx,
             &params.authz_snapshot,
             &params.snapshot,
+            vec![
+                db::model::SnapshotState::Ready,
+                db::model::SnapshotState::Faulted,
+                db::model::SnapshotState::Destroyed,
+            ],
         )
         .await
         .map_err(ActionError::action_failed)?;

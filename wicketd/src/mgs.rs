@@ -24,7 +24,10 @@ use self::inventory::{
 
 mod inventory;
 
-const MGS_TIMEOUT: Duration = Duration::from_secs(10);
+// This timeout feels long, but needs to be long for the case where we update
+// our sidecar's SP: we won't get a respose until the SP brings back the
+// management network, which often takes 15+ seconds.
+const MGS_TIMEOUT: Duration = Duration::from_secs(30);
 
 // We support:
 //   * One outstanding query request from wicket
@@ -58,6 +61,10 @@ pub enum GetInventoryResponse {
     Unavailable,
 }
 
+/// Channel errors result only from system shutdown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShutdownInProgress;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GetInventoryError {
     /// Channel errors result only from system shutdown.
@@ -69,7 +76,23 @@ pub enum GetInventoryError {
 }
 
 impl MgsHandle {
-    pub async fn get_inventory(
+    pub async fn get_cached_inventory(
+        &self,
+    ) -> Result<GetInventoryResponse, ShutdownInProgress> {
+        match self.get_inventory_refreshing_sps(Vec::new()).await {
+            Ok(response) => Ok(response),
+            Err(GetInventoryError::ShutdownInProgress) => {
+                Err(ShutdownInProgress)
+            }
+            Err(GetInventoryError::InvalidSpIdentifier) => {
+                // We pass no SP identifiers to refresh, so it's not possible
+                // for one of them to be invalid.
+                unreachable!("empty SP list cannot contain an invalid ID");
+            }
+        }
+    }
+
+    pub async fn get_inventory_refreshing_sps(
         &self,
         force_refresh: Vec<SpIdentifier>,
     ) -> Result<GetInventoryResponse, GetInventoryError> {
@@ -365,7 +388,8 @@ impl MgsManager {
             .or_insert_with(|| SpInventory::new(sp.id));
         entry.state = Some(sp.state);
         entry.components = sp.components;
-        entry.caboose = sp.caboose;
+        entry.caboose_active = sp.caboose_active;
+        entry.caboose_inactive = sp.caboose_inactive;
         entry.rot = sp.rot;
 
         // Scan any pending waiters and remove this SP from their list; if that

@@ -65,8 +65,9 @@ pub async fn make_resources(
     builder.new_resource(authz::DATABASE);
     builder.new_resource_with_users(authz::FLEET).await;
     builder.new_resource(authz::CONSOLE_SESSION_LIST);
+    builder.new_resource(authz::DNS_CONFIG);
     builder.new_resource(authz::DEVICE_AUTH_REQUEST_LIST);
-    builder.new_resource(authz::GLOBAL_IMAGE_LIST);
+    builder.new_resource(authz::INVENTORY);
     builder.new_resource(authz::IP_POOL_LIST);
 
     // Silo/organization/project hierarchy
@@ -88,26 +89,19 @@ pub async fn make_resources(
         LookupType::ById(sled_id),
     ));
 
+    let zpool_id = "aaaaaaaa-1233-af7d-9220-afe1d8090900".parse().unwrap();
+    builder.new_resource(authz::Zpool::new(
+        authz::FLEET,
+        zpool_id,
+        LookupType::ById(zpool_id),
+    ));
+
+    make_services(&mut builder).await;
+
     builder.new_resource(authz::PhysicalDisk::new(
         authz::FLEET,
         ("vendor".to_string(), "serial".to_string(), "model".to_string()),
         LookupType::ByCompositeId("vendor-serial-model".to_string()),
-    ));
-
-    let global_image_id =
-        "b46bf5b5-e6e4-49e6-fe78-8e25d698dabc".parse().unwrap();
-    builder.new_resource(authz::GlobalImage::new(
-        authz::FLEET,
-        global_image_id,
-        LookupType::ById(global_image_id),
-    ));
-
-    let certificate_id =
-        "c56bf5b5-e6e4-49e6-fe78-8e25d698dabc".parse().unwrap();
-    builder.new_resource(authz::Certificate::new(
-        authz::FLEET,
-        certificate_id,
-        LookupType::ById(certificate_id),
     ));
 
     let device_user_code = String::from("a-device-user-code");
@@ -140,7 +134,42 @@ pub async fn make_resources(
         LookupType::ById(update_deployment_id),
     ));
 
+    let address_lot_id =
+        "43259fdc-c5c0-4a21-8b1d-2f673ad00d93".parse().unwrap();
+    builder.new_resource(authz::AddressLot::new(
+        authz::FLEET,
+        address_lot_id,
+        LookupType::ById(address_lot_id),
+    ));
+
+    let loopback_address_id =
+        "9efbf1b1-16f9-45ab-864a-f7ebe501ae5b".parse().unwrap();
+    builder.new_resource(authz::LoopbackAddress::new(
+        authz::FLEET,
+        loopback_address_id,
+        LookupType::ById(loopback_address_id),
+    ));
+
     builder.build()
+}
+
+/// Helper for `make_resources()` that constructs some Services
+async fn make_services(builder: &mut ResourceBuilder<'_>) {
+    let nexus_service_id =
+        "6b1f15ee-d6b3-424c-8436-94413a0b682d".parse().unwrap();
+    builder.new_resource(authz::Service::new(
+        authz::FLEET,
+        nexus_service_id,
+        LookupType::ById(nexus_service_id),
+    ));
+
+    let oximeter_service_id =
+        "7f7bb301-5dc9-41f1-ab29-d369f4835079".parse().unwrap();
+    builder.new_resource(authz::Service::new(
+        authz::FLEET,
+        oximeter_service_id,
+        LookupType::ById(oximeter_service_id),
+    ));
 }
 
 /// Helper for `make_resources()` that constructs a small Silo hierarchy
@@ -160,6 +189,14 @@ async fn make_silo(
     } else {
         builder.new_resource(silo.clone());
     }
+
+    builder.new_resource(authz::SiloCertificateList::new(silo.clone()));
+    let certificate_id = Uuid::new_v4();
+    builder.new_resource(authz::Certificate::new(
+        silo.clone(),
+        certificate_id,
+        LookupType::ByName(format!("{}-certificate", silo_name)),
+    ));
 
     builder.new_resource(authz::SiloIdentityProviderList::new(silo.clone()));
     let idp_id = Uuid::new_v4();
@@ -201,8 +238,8 @@ async fn make_silo(
         LookupType::ByName(format!("{}-silo-image", silo_name)),
     ));
 
-    // Image is a special case in that this resource is technically just a pass-through for
-    // `SiloImage` and `ProjectImage` resources.
+    // Image is a special case in that this resource is technically just a
+    // pass-through for `SiloImage` and `ProjectImage` resources.
     let image_id = Uuid::new_v4();
     builder.new_resource(authz::Image::new(
         silo.clone(),

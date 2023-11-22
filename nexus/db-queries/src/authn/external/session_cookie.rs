@@ -11,6 +11,8 @@ use crate::authn::{Actor, Details};
 use anyhow::anyhow;
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
+use dropshot::HttpError;
+use http::HeaderValue;
 use uuid::Uuid;
 
 // many parts of the implementation will reference this OWASP guide
@@ -55,20 +57,32 @@ pub const SESSION_COOKIE_SCHEME_NAME: authn::SchemeName =
     authn::SchemeName("session_cookie");
 
 /// Generate session cookie header
-pub fn session_cookie_header_value(token: &str, max_age: Duration) -> String {
-    // TODO-security:(https://github.com/oxidecomputer/omicron/issues/249): We
-    // should insert "Secure;" back into this string.
-    format!(
-        "{}={}; Path=/; HttpOnly; SameSite=Lax; Max-Age={}",
+pub fn session_cookie_header_value(
+    token: &str,
+    max_age: Duration,
+    secure: bool,
+) -> Result<HeaderValue, HttpError> {
+    let value = format!(
+        "{}={}; Path=/; HttpOnly; SameSite=Lax;{} Max-Age={}",
         SESSION_COOKIE_COOKIE_NAME,
         token,
+        if secure { " Secure;" } else { "" },
         max_age.num_seconds()
-    )
+    );
+    // this will only fail if we accidentally stick a \n in there or something
+    http::HeaderValue::from_str(&value).map_err(|_e| {
+        HttpError::for_internal_error(format!(
+            "unsupported cookie value: {:#}",
+            value
+        ))
+    })
 }
 
 /// Generate session cookie with empty token and max-age=0 so browser deletes it
-pub fn clear_session_cookie_header_value() -> String {
-    session_cookie_header_value("", Duration::zero())
+pub fn clear_session_cookie_header_value(
+    secure: bool,
+) -> Result<HeaderValue, HttpError> {
+    session_cookie_header_value("", Duration::zero(), secure)
 }
 
 /// Implements an authentication scheme where we check the DB to see if we have
@@ -267,7 +281,16 @@ mod test {
             let headers = request.headers_mut();
             headers.insert(http::header::COOKIE, cookie.parse().unwrap());
         }
-        scheme.authn(context, &log, &request.into()).await
+        scheme
+            .authn(
+                context,
+                &log,
+                &dropshot::RequestInfo::new(
+                    &request,
+                    "0.0.0.0:0".parse().unwrap(),
+                ),
+            )
+            .await
     }
 
     #[tokio::test]
@@ -369,8 +392,7 @@ mod test {
         let context =
             TestServerContext { sessions: Mutex::new(HashMap::new()) };
         let result =
-            authn_with_cookie(&context, Some("unparseable garbage!!!!!1"))
-                .await;
+            authn_with_cookie(&context, Some("unparsable garbage!!!!!1")).await;
         assert!(matches!(result, SchemeResult::NotRequested));
     }
 
@@ -403,18 +425,37 @@ mod test {
     #[test]
     fn test_session_cookie_value() {
         assert_eq!(
-            session_cookie_header_value("abc", Duration::seconds(5)),
+            session_cookie_header_value("abc", Duration::seconds(5), true)
+                .unwrap(),
+            "session=abc; Path=/; HttpOnly; SameSite=Lax; Secure; Max-Age=5"
+        );
+
+        assert_eq!(
+            session_cookie_header_value("abc", Duration::seconds(-5), true)
+                .unwrap(),
+            "session=abc; Path=/; HttpOnly; SameSite=Lax; Secure; Max-Age=-5"
+        );
+
+        assert_eq!(
+            session_cookie_header_value("", Duration::zero(), true).unwrap(),
+            "session=; Path=/; HttpOnly; SameSite=Lax; Secure; Max-Age=0"
+        );
+
+        // secure=false leaves out "Secure;"
+        assert_eq!(
+            session_cookie_header_value("abc", Duration::seconds(5), false)
+                .unwrap(),
             "session=abc; Path=/; HttpOnly; SameSite=Lax; Max-Age=5"
         );
+    }
 
+    #[test]
+    fn test_session_cookie_value_error() {
         assert_eq!(
-            session_cookie_header_value("abc", Duration::seconds(-5)),
-            "session=abc; Path=/; HttpOnly; SameSite=Lax; Max-Age=-5"
-        );
-
-        assert_eq!(
-            session_cookie_header_value("", Duration::zero()),
-            "session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"
+            session_cookie_header_value("abc\ndef", Duration::seconds(5), true)
+                .unwrap_err()
+                .internal_message,
+            "unsupported cookie value: session=abc\ndef; Path=/; HttpOnly; SameSite=Lax; Secure; Max-Age=5".to_string(),
         );
     }
 }

@@ -1,0 +1,19 @@
+[package]
+name = "sled-agent-client"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[dependencies]
+async-trait.workspace = true
+chrono.workspace = true
+omicron-common.workspace = true
+progenitor.workspace = true
+ipnetwork.workspace = true
+regress.workspace = true
+reqwest = { workspace = true, features = [ "json", "rustls-tls", "stream" ] }
+serde.workspace = true
+slog.workspace = true
+sled-storage.workspace = true
+uuid.workspace = true
+omicron-workspace-hack.workspace = true

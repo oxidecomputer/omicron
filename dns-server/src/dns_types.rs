@@ -7,6 +7,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -34,6 +35,7 @@ pub struct DnsConfigZone {
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(tag = "type", content = "data")]
 pub enum DnsRecord {
+    A(Ipv4Addr),
     AAAA(Ipv6Addr),
     SRV(SRV),
 }

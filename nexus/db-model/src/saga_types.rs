@@ -13,7 +13,7 @@
 //! conversions.
 
 use super::schema::{saga, saga_node_event};
-use diesel::backend::{Backend, RawValue};
+use diesel::backend::Backend;
 use diesel::deserialize::{self, FromSql};
 use diesel::pg::Pg;
 use diesel::serialize::{self, ToSql};
@@ -53,7 +53,7 @@ where
     DB: Backend,
     Uuid: FromSql<sql_types::Uuid, DB>,
 {
-    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+    fn from_sql(bytes: DB::RawValue<'_>) -> deserialize::Result<Self> {
         let id = Uuid::from_sql(bytes)?;
         Ok(SecId(id))
     }
@@ -98,7 +98,7 @@ where
     DB: Backend,
     Uuid: FromSql<sql_types::Uuid, DB>,
 {
-    fn from_sql(bytes: RawValue<'_, DB>) -> deserialize::Result<Self> {
+    fn from_sql(bytes: DB::RawValue<'_>) -> deserialize::Result<Self> {
         let id = Uuid::from_sql(bytes)?;
         Ok(SagaId(steno::SagaId::from(id)))
     }
@@ -133,7 +133,7 @@ where
     DB: Backend,
     i64: FromSql<sql_types::BigInt, DB>,
 {
-    fn from_sql(bytes: RawValue<'_, DB>) -> deserialize::Result<Self> {
+    fn from_sql(bytes: DB::RawValue<'_>) -> deserialize::Result<Self> {
         let id = u32::try_from(i64::from_sql(bytes)?)?;
         Ok(SagaNodeId(id.into()))
     }
@@ -170,8 +170,10 @@ impl ToSql<SagaCachedStateEnum, Pg> for SagaCachedState {
 }
 
 impl FromSql<SagaCachedStateEnum, Pg> for SagaCachedState {
-    fn from_sql(bytes: RawValue<Pg>) -> deserialize::Result<Self> {
-        let bytes = RawValue::<Pg>::as_bytes(&bytes);
+    fn from_sql(
+        bytes: <Pg as Backend>::RawValue<'_>,
+    ) -> deserialize::Result<Self> {
+        let bytes = <Pg as Backend>::RawValue::as_bytes(&bytes);
         let s = std::str::from_utf8(bytes)?;
         let state = steno::SagaCachedState::try_from(s)?;
         Ok(Self(state))
@@ -220,7 +222,7 @@ impl Saga {
 }
 
 /// Represents a row in the "SagaNodeEvent" table
-#[derive(Queryable, Insertable, Clone, Debug)]
+#[derive(Queryable, Insertable, Clone, Debug, Selectable)]
 #[diesel(table_name = saga_node_event)]
 pub struct SagaNodeEvent {
     pub saga_id: SagaId,

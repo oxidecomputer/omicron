@@ -6,10 +6,11 @@ use anyhow::anyhow;
 use anyhow::ensure;
 use anyhow::Context;
 use anyhow::Result;
-use sled_hardware::Disk;
 use sled_hardware::DiskVariant;
 use sled_hardware::HardwareManager;
 use sled_hardware::SledMode;
+use sled_storage::disk::Disk;
+use sled_storage::disk::RawDisk;
 use slog::info;
 use slog::Logger;
 
@@ -18,7 +19,7 @@ pub struct Hardware {
 }
 
 impl Hardware {
-    pub fn scan(log: &Logger) -> Result<Self> {
+    pub async fn scan(log: &Logger) -> Result<Self> {
         let is_gimlet = sled_hardware::is_gimlet()
             .context("failed to detect whether host is a gimlet")?;
         ensure!(is_gimlet, "hardware scan only supported on gimlets");
@@ -28,7 +29,8 @@ impl Hardware {
                 anyhow!("failed to create HardwareManager: {err}")
             })?;
 
-        let disks = hardware.disks();
+        let disks: Vec<RawDisk> =
+            hardware.disks().into_iter().map(|disk| disk.into()).collect();
 
         info!(
             log, "found gimlet hardware";
@@ -37,27 +39,23 @@ impl Hardware {
             "num_disks" => disks.len(),
         );
 
-        let m2_disks = disks
-            .into_iter()
-            .filter_map(|disk| {
-                // Skip U.2 disks
-                match disk.variant() {
-                    DiskVariant::U2 => {
-                        info!(
-                            log, "ignoring U.2 disk";
-                            "path" => disk.devfs_path().display(),
-                        );
-                        return None;
-                    }
-                    DiskVariant::M2 => (),
+        let mut m2_disks = vec![];
+        for disk in disks {
+            match disk.variant() {
+                DiskVariant::U2 => {
+                    info!(
+                        log, "ignoring U.2 disk";
+                        "path" => disk.devfs_path().as_str(),
+                    );
                 }
-
-                Some(
-                    Disk::new(log, disk)
-                        .context("failed to instantiate Disk handle for M.2"),
-                )
-            })
-            .collect::<Result<Vec<_>>>()?;
+                DiskVariant::M2 => {
+                    let disk = Disk::new(log, disk, None)
+                        .await
+                        .context("failed to instantiate Disk handle for M.2")?;
+                    m2_disks.push(disk);
+                }
+            }
+        }
 
         Ok(Self { m2_disks })
     }

@@ -5,3 +5,4 @@
 //! Internally facing APIs.
 
 pub mod nexus;
+pub mod shared;

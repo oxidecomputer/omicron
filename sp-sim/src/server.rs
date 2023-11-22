@@ -17,6 +17,8 @@ use slog::Logger;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tokio::net::UdpSocket;
 
@@ -122,7 +124,7 @@ pub fn logger(config: &Config) -> Result<Logger> {
 }
 
 // TODO: This doesn't need to return Result anymore
-pub(crate) async fn handle_request<'a, H: SpHandler>(
+pub(crate) async fn handle_request<'a, H: SimSpHandler>(
     handler: &mut H,
     recv: Result<(&[u8], SocketAddrV6)>,
     out: &'a mut [u8; gateway_messages::MAX_SERIALIZED_SIZE],
@@ -140,8 +142,28 @@ pub(crate) async fn handle_request<'a, H: SpHandler>(
     let (data, addr) =
         recv.with_context(|| format!("recv on {:?}", port_num))?;
 
+    let should_respond = Arc::new(AtomicBool::new(true));
+
+    {
+        let should_respond = Arc::clone(&should_respond);
+        handler.set_sp_should_fail_to_respond_signal(Box::new(move || {
+            should_respond.store(false, Ordering::SeqCst);
+        }));
+    }
+
     let response = sp_impl::handle_message(addr, port_num, data, handler, out)
         .map(|n| (&out[..n], addr));
 
-    Ok(response)
+    if should_respond.load(Ordering::SeqCst) {
+        Ok(response)
+    } else {
+        Ok(None)
+    }
+}
+
+pub(crate) trait SimSpHandler: SpHandler {
+    fn set_sp_should_fail_to_respond_signal(
+        &mut self,
+        signal: Box<dyn FnOnce() + Send>,
+    );
 }

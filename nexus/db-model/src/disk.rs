@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{BlockSize, ByteCount, DiskState, Generation};
-use crate::schema::disk;
+use crate::{schema::disk, unsigned::SqlU8};
 use chrono::{DateTime, Utc};
 use db_macros::Resource;
 use nexus_types::external_api::params;
@@ -43,6 +43,16 @@ pub struct Disk {
     /// runtime state of the Disk
     #[diesel(embed)]
     pub runtime_state: DiskRuntimeState,
+
+    /// The PCI slot (within the bank of slots reserved to disks) to which this
+    /// disk should be attached if its attached instance is started, or None
+    /// if there is no such assignment.
+    ///
+    /// Slot assignments are managed entirely in Nexus and aren't modified by
+    /// runtime state changes in the sled agent, so this field is part of the
+    /// "main" disk struct and not the runtime state (even though the attachment
+    /// state and slot assignment will often change together).
+    pub slot: Option<SqlU8>,
 
     /// size of the Disk
     #[diesel(column_name = size_bytes)]
@@ -86,7 +96,6 @@ impl Disk {
         // XXX further enum here for different image types?
         let create_image_id = match params.disk_source {
             params::DiskSource::Image { image_id } => Some(image_id),
-            params::DiskSource::GlobalImage { image_id } => Some(image_id),
             _ => None,
         };
 
@@ -96,6 +105,7 @@ impl Disk {
             project_id,
             volume_id,
             runtime_state: runtime_initial,
+            slot: None,
             size: params.size.into(),
             block_size,
             create_snapshot_id,

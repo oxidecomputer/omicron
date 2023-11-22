@@ -40,6 +40,9 @@ impl WicketdTestContext {
             address: localhost_port_0,
             artifact_address: localhost_port_0,
             mgs_address,
+            nexus_proxy_address: localhost_port_0,
+            baseboard: None,
+            rack_subnet: None,
         };
 
         let server = wicketd::Server::start(log.clone(), args)

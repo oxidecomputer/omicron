@@ -8,12 +8,16 @@ license = "MPL-2.0"
 anyhow = { workspace = true, features = ["backtrace"] }
 async-trait.workspace = true
 base64.workspace = true
+chrono.workspace = true
+http.workspace = true
 omicron-sled-agent.workspace = true
 omicron-test-utils.workspace = true
 oxide-client.workspace = true
 rand.workspace = true
 reqwest.workspace = true
-russh = "0.37.1"
-russh-keys = "0.37.1"
+russh = "0.39.0"
+russh-keys = "0.38.0"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+toml.workspace = true
 trust-dns-resolver.workspace = true
+omicron-workspace-hack.workspace = true

@@ -1,0 +1,84 @@
+#
+# Oxide API: example configuration file
+#
+
+# Maximum number of host phase2 trampoline images we're willing to cache. Note
+# that this value is specified in terms of _number of images_, not bytes, and
+# our cache is in-memory. We expect this value to be small in production,
+# potentially even 1 (i.e., only keep the most-recently-uploaded image).
+host_phase2_recovery_image_cache_max_images = 1
+
+[dropshot]
+# We want to allow uploads of host phase 2 recovery images, which may be
+# measured in the (small) hundreds of MiB. Set this to 512 MiB.
+request_body_max_bytes = 536870912
+
+[switch]
+# Which interface is connected to our local sidecar SP (i.e., the SP that acts
+# as our contact to the ignition controller)?
+local_ignition_controller_interface = "fake-switch0"
+
+# when sending UDP RPC packets to an SP, how many total attempts do we make
+# before giving up?
+rpc_max_attempts = 5
+
+# sleep time between UDP RPC resends (up to `rpc_max_attempts`)
+rpc_per_attempt_timeout_millis = 2000
+
+[switch.location]
+# possible locations where MGS could be running; these names appear in logs and
+# are used in the remainder of the `[switch.*]` configuration to define port
+# mappings
+names = ["switch0", "switch1"]
+
+# `[[switch.location.determination]]` is a list of switch ports we should
+# contact in order to determine our location; each port defines a subset of
+# `[switch.location.names]` which are the possible location(s) of this MGS
+# instance if the message was received on the given SP port. When MGS starts, it
+# will send a discovery message on each port listed in this section, collect the
+# responses, and determine its location via the intersection of the names listed
+# below (for all ports which returned a successful response). This process can
+# fail if too few SPs respond (leaving us with 2 or more possible locations) or
+# if there is a miscabling that results in an unsolvable system (e.g.,
+# determination 0 reports "switch0" and determination 1 reports "switch1").
+[[switch.location.determination]]
+interfaces = ["fake-sled0", "fake-sled1"]
+sp_port_1 = ["switch0"]
+sp_port_2 = ["switch1"]
+
+# `[[switch.port.*]]` defines the local data link address (in RFD 250 terms, the
+# interface configured to use VLAN tag  assigned to the given port) and the
+# logical ID of the remote SP ("sled 7", "switch 1", etc.), which must have an
+# entry for each member of `[switch.location]` above.
+[[switch.port]]
+kind = "simulated"
+fake-interface = "fake-switch0"
+addr = "[::1]:33300"
+ignition-target = 1
+location = { switch0 = ["switch", 0], switch1 = ["switch", 1] }
+
+[[switch.port]]
+kind = "simulated"
+fake-interface = "fake-sled0"
+addr = "[::1]:33310"
+ignition-target = 2
+location = { switch0 = ["sled", 0], switch1 = ["sled", 0] }
+
+[[switch.port]]
+kind = "simulated"
+fake-interface = "fake-sled1"
+addr = "[::1]:33320"
+ignition-target = 3
+location = { switch0 = ["sled", 1], switch1 = ["sled", 1] }
+
+[log]
+# Show log messages of this level and more severe
+level = "debug"
+
+# Example output to a terminal (with colors)
+mode = "stderr-terminal"
+
+# Example output to a file, appending if it already exists.
+#mode = "file"
+#path = "logs/server.log"
+#if_exists = "append"

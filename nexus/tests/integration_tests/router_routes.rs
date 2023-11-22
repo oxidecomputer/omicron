@@ -9,11 +9,11 @@ use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::identity_eq;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::params;
 use omicron_common::api::external::{
     IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
     RouteDestination, RouteTarget, RouterRoute, RouterRouteKind,
 };
-use omicron_nexus::external_api::params;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 

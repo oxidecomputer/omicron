@@ -34,11 +34,11 @@ const COCKROACHDB_START_TIMEOUT_DEFAULT: Duration = Duration::from_secs(30);
 const COCKROACHDB_DEFAULT_LISTEN_PORT: u16 = 0;
 
 /// CockroachDB database name
-// This MUST be kept in sync with src/sql/dbinit.sql and src/sql/dbwipe.sql.
+// This MUST be kept in sync with dbinit.sql and dbwipe.sql.
 const COCKROACHDB_DATABASE: &'static str = "omicron";
 /// CockroachDB user name
 // TODO-security This should really use "omicron", which is created in
-// src/sql/dbinit.sql.  Doing that requires either hardcoding a password or
+// dbinit.sql.  Doing that requires either hardcoding a password or
 // (better) using `cockroach cert` to set up a CA and certificates for this
 // user.  We should modify the infrastructure here to do that rather than use
 // "root" here.
@@ -55,7 +55,7 @@ const COCKROACHDB_VERSION: &str =
 /// arguments for the `cockroach start-single-node` command
 ///
 /// Without customizations, this will run `cockroach start-single-node --insecure
-/// --listen-addr=127.0.0.1:0 --http-addr=:0`.
+/// --listen-addr=[::1]:0 --http-addr=:0`.
 ///
 /// It's useful to support running this concurrently (as in the test suite).  To
 /// support this, we allow CockroachDB to choose its listening ports.  To figure
@@ -138,8 +138,8 @@ impl CockroachStarterBuilder {
 
     /// Redirect stdout and stderr for the "cockroach" process to files within
     /// the temporary directory.  This is used by the test suite so that people
-    /// don't get reams of irrelevant output when running `cargo test`.  This
-    /// will be cleaned up as usual on success.
+    /// don't get reams of irrelevant output when running `cargo nextest run`.
+    /// This will be cleaned up as usual on success.
     pub fn redirect_stdio_to_files(&mut self) -> &mut Self {
         self.redirect_stdio = true;
         self
@@ -163,7 +163,7 @@ impl CockroachStarterBuilder {
 
     /// Sets the listening port for the PostgreSQL and CockroachDB protocols
     ///
-    /// We always listen only on 127.0.0.1.
+    /// We always listen only on `[::1]`.
     pub fn listen_port(mut self, listen_port: u16) -> Self {
         self.listen_port = listen_port;
         self
@@ -221,7 +221,7 @@ impl CockroachStarterBuilder {
 
         let listen_url_file =
             CockroachStarterBuilder::temp_path(&temp_dir, "listen-url");
-        let listen_arg = format!("127.0.0.1:{}", self.listen_port);
+        let listen_arg = format!("[::1]:{}", self.listen_port);
         self.arg(&store_arg)
             .arg("--listen-addr")
             .arg(&listen_arg)
@@ -747,7 +747,7 @@ fn interpret_exit(
 pub async fn populate(
     client: &tokio_postgres::Client,
 ) -> Result<(), anyhow::Error> {
-    let sql = include_str!("../../../common/src/sql/dbinit.sql");
+    let sql = include_str!("../../../schema/crdb/dbinit.sql");
     client.batch_execute(sql).await.context("populating Omicron database")
 
     // It's tempting to put hardcoded data in here (like builtin users).  That
@@ -762,7 +762,7 @@ pub async fn populate(
 pub async fn wipe(
     client: &tokio_postgres::Client,
 ) -> Result<(), anyhow::Error> {
-    let sql = include_str!("../../../common/src/sql/dbwipe.sql");
+    let sql = include_str!("../../../schema/crdb/dbwipe.sql");
     client.batch_execute(sql).await.context("wiping Omicron database")
 }
 
@@ -880,7 +880,7 @@ fn make_pg_config(
 
     if let Host::Tcp(ip_host) = &hosts[0] {
         let url = format!(
-            "postgresql://{}@{}:{}/{}?sslmode=disable",
+            "postgresql://{}@[{}]:{}/{}?sslmode=disable",
             COCKROACHDB_USER, ip_host, ports[0], COCKROACHDB_DATABASE
         );
         url.parse::<PostgresConfigWithUrl>().with_context(|| {
@@ -947,7 +947,7 @@ where
     T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
     fn from((client, connection): ClientConnPair<S, T>) -> Self {
-        let join_handle = tokio::spawn(async move { connection.await });
+        let join_handle = tokio::spawn(connection);
         Client { client, conn_task: join_handle }
     }
 }
@@ -1353,14 +1353,13 @@ mod test {
             eprintln!("populating database (1)");
             database.populate().await.expect("populating database (1)");
             assert!(has_omicron_schema(&client).await);
-            // populate() fails if the database is already populated.  We don't
-            // want to accidentally destroy data by wiping it first
-            // automatically.
-            database.populate().await.expect_err("populated database twice");
+            // The populate step is idempotent, and should not cause
+            // changes if executed twice.
+            database.populate().await.expect("populated database twice");
             eprintln!("wiping database (1)");
             database.wipe().await.expect("wiping database (1)");
             assert!(!has_omicron_schema(&client).await);
-            // On the other hand, wipe() is idempotent.
+            // wipe() is idempotent.
             database.wipe().await.expect("wiping database (2)");
             assert!(!has_omicron_schema(&client).await);
             // populate() should work again after a wipe().
@@ -1512,12 +1511,12 @@ mod test {
     // Success case for make_pg_config()
     #[test]
     fn test_make_pg_config_ok() {
-        let url = "postgresql://root@127.0.0.1:45913?sslmode=disable";
+        let url = "postgresql://root@[::1]:45913?sslmode=disable";
         let config = make_pg_config(url).expect("failed to parse basic case");
         assert_eq!(
             config.to_string().as_str(),
             // TODO-security This user should become "omicron"
-            "postgresql://root@127.0.0.1:45913/omicron?sslmode=disable",
+            "postgresql://root@[::1]:45913/omicron?sslmode=disable",
         );
     }
 
@@ -1530,7 +1529,7 @@ mod test {
 
         // unexpected contents in initial listen URL (wrong db name)
         let error = make_pg_config(
-            "postgresql://root@127.0.0.1:45913/foobar?sslmode=disable",
+            "postgresql://root@[::1]:45913/foobar?sslmode=disable",
         )
         .unwrap_err()
         .to_string();
@@ -1542,7 +1541,7 @@ mod test {
 
         // unexpected contents in initial listen URL (extra param)
         let error = make_pg_config(
-            "postgresql://root@127.0.0.1:45913/foobar?application_name=foo",
+            "postgresql://root@[::1]:45913/foobar?application_name=foo",
         )
         .unwrap_err()
         .to_string();

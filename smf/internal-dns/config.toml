@@ -11,5 +11,5 @@ path = "/dev/stdout"
 if_exists = "append"
 
 [storage]
-storage_path = "/var/oxide/dns"
+storage_path = "/data/dns"
 keep_old_generations = 3

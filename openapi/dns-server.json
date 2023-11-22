@@ -54,18 +54,6 @@
     }
   },
   "components": {
-    "responses": {
-      "Error": {
-        "description": "Error",
-        "content": {
-          "application/json": {
-            "schema": {
-              "$ref": "#/components/schemas/Error"
-            }
-          }
-        }
-      }
-    },
     "schemas": {
       "DnsConfig": {
         "type": "object",
@@ -145,6 +133,25 @@
       },
       "DnsRecord": {
         "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "type": "string",
+                "format": "ipv4"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "A"
+                ]
+              }
+            },
+            "required": [
+              "data",
+              "type"
+            ]
+          },
           {
             "type": "object",
             "properties": {
@@ -231,6 +238,18 @@
           "target",
           "weight"
         ]
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "Error",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
       }
     }
   }

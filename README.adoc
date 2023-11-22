@@ -8,7 +8,7 @@ This repo houses the work-in-progress Oxide Rack control plane.
 
 image::https://github.com/oxidecomputer/omicron/workflows/Rust/badge.svg[]
 
-Omicron is open-source.  But we're pretty focused on our own goals for the foreseeable future and not able to help external contributors.  Please see xref:CONTRIBUTING.md[] for more information.
+Omicron is open-source. But we're pretty focused on our own goals for the foreseeable future and not able to help external contributors.  Please see xref:CONTRIBUTING.md[] for more information.
 
 == Documentation
 
@@ -43,119 +43,132 @@ This mode of operation will be used in production.
 
 To build and run the non-simulated version of Omicron, see: xref:docs/how-to-run.adoc[].
 
+=== Run tests with nextest
+
+The supported way to run tests is via https://nexte.st/[cargo-nextest].
+
+NOTE: `cargo test` may work, but that can't be guaranteed as `cargo test` isn't run in CI.
+
+If you don't already have nextest installed, get started by https://nexte.st/book/pre-built-binaries[downloading a pre-built binary] or installing nextest via your package manager. Nextest has pre-built binaries for Linux, macOS and illumos.
+
+Then, run tests with:
+
+[source,text]
+----
+$ cargo nextest run
+----
+
+Nextest https://github.com/nextest-rs/nextest/issues/16[does not support doctests]. Run doctests separately with `cargo test --doc`.
+
 === rustfmt and clippy
 
 You can **format the code** using `cargo fmt`.  Make sure to run this before pushing changes.  The CI checks that the code is correctly formatted.
 
-You can **run the https://github.com/rust-lang/rust-clippy[Clippy linter]** using `cargo clippy --all-targets \-- --deny warnings --allow clippy::style`.  Make sure to run this before pushing changes.  The CI checks that the code is clippy-clean.
+You can **run the https://github.com/rust-lang/rust-clippy[Clippy linter]** using `cargo xtask clippy`.  CI checks that code is clippy-clean.
 
-== Configuration reference
+== Working in Omicron
 
-`nexus` requires a TOML configuration file.  There's an example in
-xref:nexus/examples/config.toml[].
+Omicron is a pretty large repo containing a bunch of related components.  (Why?  See xref:docs/repo.adoc[].)  If you just build the whole thing with `cargo build` or `cargo nextest run`, it can take a while, even for incremental builds.  Since most people are only working on a few of these components at a time, it's helpful to be know about Cargo's tools for working with individual packages in a workspace.
 
-Supported config properties include:
+NOTE: This section assumes you're already familiar with the prerequisites and environment setup needed to do _any_ work on Omicron.  See xref:docs/how-to-run-simulated.adoc[] or xref:docs/how-to-run.adoc[] for more on that.
 
-[cols="1,1,1,3",options="header"]
+=== Key tips
+
+* Use `cargo check` when you just want to know if your code compiles.  It's _much_ faster than `cargo build` or `cargo nextest run`.
+* When using Cargo's check/build/test/clippy commands, you can use the `-p PACKAGE` flag to only operate on a specific package.  This often saves a lot of time for incremental builds.
+* When using Cargo's check/build/clippy commands, use `--all-targets` to make sure you're checking or building the test code, too.
+
+These are explained a bit more below, along with some common pitfalls.
+
+Here's an example workflow.  Suppose you're working on some changes to the Nexus database model (`nexus-db-model` package, located at `nexus/db-model` from the root).  While you're actively writing and checking code, you might run:
+
+```
+cargo check --all-targets
+```
+
+_without_ any `-p` flag.  Running this incrementally is pretty fast even on the whole workspace.  This also uncovers places where your changes have broken code that uses this package.  (If you're making big changes, you might not want that right away.  In that case, you might choose to use `-p nexus-db-model` here.)
+
+When you're ready to test the changes you've made, start with building and running tests for the most specific package you've changed:
+
+```
+cargo nextest run -p nexus-db-model
+```
+
+Once that works, check the tests for the next package up:
+
+```
+cargo nextest run -p omicron-nexus
+```
+
+When you're happy with things and want to make sure you haven't missed something, test everything:
+
+```
+cargo nextest run
+```
+
+=== Rust packages in Omicron
+
+NOTE: The term "package" is overloaded: most programming languages and operating systems have their own definitions of a package.  On top of that, Omicron bundles up components into our own kind of "package" that gets delivered via the install and update systems.  These are described in the `package-manifest.toml` file in the root of the repo.  In this section, we're just concerned with Rust packages.
+
+NOTE: There's also confusion in the Rust world about the terms https://doc.rust-lang.org/book/ch07-01-packages-and-crates.html["packages" and "crates"].  _Packages_ are the things that have a Cargo.toml file.  (Workspaces like Omicron itself have Cargo.toml files, too.)  Packages are also the things that you publish to crates.io (confusingly).  One package might have a library, a standalone executable binary, several examples, integration tests, etc. that are all compiled individually and produce separate artifacts.  These are what Rust calls _crates_.  We're generally just concerned with packages here, not crates.
+
+Here are some of the big components in the control plane that live in this repo:
+
+[cols="1,1,4",options="header"]
 |===
-|Name
-|Example
-|Required?
+|Main rust package
+|Component
 |Description
 
-|`database.url`
-|`"postgresql://root@127.0.0.1:32221/omicron?sslmode=disable"`
-|Yes
-|URL identifying the CockroachDB instance(s) to connect to.  CockroachDB is used for all persistent data.
+|omicron-nexus
+|Nexus
+|Service responsible for handling external API requests and orchestrating the rest of the control plane.
 
-|`dropshot_external`
-|
-|Yes
-|Dropshot configuration for the external server (i.e., the one that operators and developers using the Oxide rack will use).  Specific properties are documented below, but see the Dropshot README for details. Note that this is an array of external address configurations; multiple may be supplied.
+|omicron-sled-agent
+|Sled Agent
+|Service that runs on each compute sled (server) to manage resources on that Sled
 
-|`dropshot_external.bind_address`
-|`"127.0.0.1:12220"`
-|Yes
-|Specifies that the server should bind to the given IP address and TCP port for the **external** API (i.e., the one that operators and developers using the Oxide rack will use).  In general, servers can bind to more than one IP address and port, but this is not (yet?) supported.
+|dns-server
+|Internal DNS server, External DNS server
+|DNS server component used for both internal service discovery and external DNS
 
-|`dropshot_external.request_body_max_bytes`
-|`1000`
-|Yes
-|Specifies the maximum request body size for the **external** API.
+|omicron-gateway
+|Management Gateway Service
+|Connects Nexus (and other control plane services) to services on the rack management network (e.g., service processors)
 
-|`dropshot_internal`
-|
-|Yes
-|Dropshot configuration for the internal server (i.e., the one used by the sled agent).  Specific properties are documented below, but see the Dropshot README for details.
+|oximeter/oximeter
+|Oximeter
+|Collects telemetry from other services and stores it into Clickhouse
 
-|`dropshot_internal.bind_address`
-|`"127.0.0.1:12220"`
-|Yes
-|Specifies that the server should bind to the given IP address and TCP port for the **internal** API (i.e., the one used by the sled agent).  In general, servers can bind to more than one IP address and port, but this is not (yet?) supported.
-
-|`dropshot_internal.request_body_max_bytes`
-|`1000`
-|Yes
-|Specifies the maximum request body size for the **internal** API.
-
-|`id`
-|`"e6bff1ff-24fb-49dc-a54e-c6a350cd4d6c"`
-|Yes
-|Unique identifier for this Nexus instance
-
-|`log`
-|
-|Yes
-|Logging configuration.  Specific properties are documented below, but see the Dropshot README for details.
-
-|`log.mode`
-|`"file"`
-|Yes
-|Controls where server logging will go.  Valid modes are `"stderr-terminal"` and `"file".  If the mode is `"stderr-terminal"`, human-readable output, with colors and other terminal formatting if possible, will be sent to stderr.  If the mode is `"file"`, Bunyan-format output will be sent to the filesystem path given by `log.path`.  See also `log.if_exists`, which controls the behavior if the destination path already exists.
-
-|`log.level`
-|`"info"`
-|Yes
-|Specifies what severity of log messages should be included in the log.  Valid values include `"trace"`, `"debug"`, `"info"`, `"warn"`, `"error"`, and `"critical"`, which are increasing order of severity.  Log messages at the specified level and more severe levels will be included in the log.
-
-|`log.path`
-|`"logs/server.log"`
-|Only if `log.mode = "file"`
-|If `log.mode` is `"file"`, this property determines the path to the log file.
-See also `log.if_exists`.
-
-|`log.if_exists`
-|`"append"`
-|Only if `log.mode = "file"`
-|If `log.mode` is `"file"`, this property specifies what to do if the destination log file already exists.  Valid values include `"append"` (which appends to the existing file), `"truncate"` (which truncates the existing file and then uses it as though it had just been created), and `"fail"` (which causes the server to exit immediately with an error).
+|wicket/wicketd
+|Wicket
+|CLI interface made available to operators on the rack technician port for rack setup and recovery
 
 |===
 
-=== Configuring ClickHouse
+For those with access to Oxide RFDs, RFD 61 discusses the organization principles and key components in more detail.
 
-The ClickHouse binary uses several sources for its configuration. The binary expects an XML
-config file, usually named `config.xml` to be available, or one may be specified with the
-`-C` command-line flag. The binary also includes a minimal configuration _embedded_ within
-it, which will be used if no configuration file is given or present in the current directory.
-The server also accepts command-line flags for overriding the values of the configuration
-parameters.
+Many of these components themselves are made up of other packages (e.g., `nexus-db-model` is under `omicron-nexus`).  There are also many more top-level packages than what's mentioned above.  These are used for common code, clients, tools, etc.  For more, see the Rustdoc for each module.  (Where docs are missing or incomplete, please contribute!)
 
-The packages downloaded by `ci_download_clickhouse` include a `config.xml` file with them.
-You should probably run ClickHouse via the `omicron-dev` tool, but if you decide to run it
-manually, you can start the server with:
+Use Cargo's `-p PACKAGE` to check/build/test only the package you're working on.  Since people are usually only working on one or two components at a time, you can usually iterate faster this way.
 
-[source,text]
-$ /path/to/clickhouse server --config-file /path/to/config.xml
+=== Workspace management
 
-The configuration file contains a large number of parameters, but most of them are described
-with comments in the included `config.xml`, or you may learn more about them
-https://clickhouse.tech/docs/en/operations/server-configuration-parameters/settings/[here]
-and https://clickhouse.tech/docs/en/operations/settings/[here]. Parameters may be updated
-in the `config.xml`, and the server will automatically reload them. You may also specify
-many of them on the command-line with:
+Omicron uses `cargo-hakari` to ensure that all workspace dependencies enable the same set of features. This dramatically improves compilation time when switching between different subsets of packages (e.g. `-p wicket` or `-p nexus-db-model`), because the sets of enabled features remain consistent.
 
-[source,text]
-$ /path/to/clickhouse server --config-file /path/to/config.xml -- --param_name param_value ...
+`cargo hakari` status is checked in CI; if the CI check fails, then update the configuration locally with
+
+```
+cargo install cargo-hakari --locked # only needed on the first run
+cargo hakari generate
+cargo hakari manage-deps
+```
+
+=== Why am I getting compile errors after I thought I'd already built everything?
+
+Say you're iterating on code, running `cargo build -p nexus-db-model` to build just that package.  You work through lots of compiler errors until finally it works.  Now you run tests: `cargo nextest run -p nexus-db-model`.  Now you see a bunch of compiler errors again!  What gives?
+
+By default, Cargo does not operate on the tests.  Cargo's check/build/clippy commands ignore them.  This is another reason we suggest using `--all-targets` most of the time.
 
 === Generated Service Clients and Updating
 
@@ -184,20 +197,75 @@ documents being checked in.
 
 In general, changes any service API **require the following set of build steps**:
 
-* Make changes to the service API
-* Build the package for the modified service alone. This can be done by changing
-  directories there, or `cargo build -p <package>`. This is step is important,
-  to avoid the circular dependency at this point. One needs to update this one
-  OpenAPI document, without rebuilding the other components that depend on a
-  now-outdated spec.
-* Update the OpenAPI document by running the relevant test with overwrite set:
-  `EXPECTORATE=overwrite cargo test test_nexus_openapi_internal` (changing the
-  test name as necessary)
-* This will cause the generated client to be updated which may break the build
-  for dependent consumers
-* Modify any dependent services to fix calls to the generated client
+. Make changes to the service API.
+. Update the OpenAPI document by running the relevant test with overwrite set:
+  `EXPECTORATE=overwrite cargo nextest run -p <package> -- test_nexus_openapi_internal`
+  (changing the package name and test name as necessary).  It's important to do
+  this _before_ the next step.
+. This will cause the generated client to be updated which may break the build
+  for dependent consumers.
+. Modify any dependent services to fix calls to the generated client.
 
 Note that if you make changes to both Nexus and Sled Agent simultaneously, you
 may end up in a spot where neither can build and therefore neither OpenAPI
 document can be generated. In this case, revert or comment out changes in one
 so that the OpenAPI document can be generated.
+
+This is a particular problem if you find yourself resolving merge conflicts in the generated files.  You have basically two options for this:
+
+* Resolve the merge conflicts by hand.  This is usually not too bad in practice.
+* Take the upstream copy of the file, back out your client side changes (`git stash` and its `-p` option can be helpful for this), follow the steps above to regenerate the file using the automated test, and finally re-apply your changes to the client side.  This is essentially getting yourself back to step 1 above and then following the procedure above.
+
+=== Resolving merge conflicts in Cargo.lock
+
+When pulling in new changes from upstream "main", you may find conflicts in Cargo.lock.  The easiest way to deal with these is usually to take the upstream changes as-is, then trigger any Cargo operation that updates the lockfile.  `cargo metadata` is a quick one.  Here's an example:
+
+```
+# Pull in changes from upstream "main"
+$ git fetch
+$ git merge origin/main
+
+# Oh no!  We've got conflicts in Cargo.lock.  First, let's just take what's upstream:
+$ git show origin/main:Cargo.lock > Cargo.lock
+
+# Now, run any command that causes Cargo to update the lock file as needed.
+$ cargo metadata > /dev/null
+```
+
+When you do this, Cargo makes only changes to Cargo.lock that are necessary based on the various Cargo.toml files in the workspace and dependencies.
+
+Here are things you _don't_ want to do to resolve this conflict:
+
+* Run `cargo generate-lockfile` to generate a new lock file from scratch.
+* Remove `Cargo.lock` and let Cargo regenerate it from scratch.
+
+Both of these will cause Cargo to make many more changes (relative to "main") than necessary because it's choosing the latest version of all dependencies in the whole tree.  You'll be inadvertently updating all of Omicron's transitive dependencies.  (You might conceivably want that.  But usually we update dependencies either as-needed for a particular change or via individual PRs via dependabot, not all at once because someone had to merge Cargo.lock.)
+
+You can also resolve conflicts by hand.  It's tedious and error-prone.
+
+
+=== Configuring ClickHouse
+
+The ClickHouse binary uses several sources for its configuration. The binary expects an XML
+config file, usually named `config.xml` to be available, or one may be specified with the
+`-C` command-line flag. The binary also includes a minimal configuration _embedded_ within
+it, which will be used if no configuration file is given or present in the current directory.
+The server also accepts command-line flags for overriding the values of the configuration
+parameters.
+
+The packages downloaded by `ci_download_clickhouse` include a `config.xml` file with them.
+You should probably run ClickHouse via the `omicron-dev` tool, but if you decide to run it
+manually, you can start the server with:
+
+[source,text]
+$ /path/to/clickhouse server --config-file /path/to/config.xml
+
+The configuration file contains a large number of parameters, but most of them are described
+with comments in the included `config.xml`, or you may learn more about them
+https://clickhouse.tech/docs/en/operations/server-configuration-parameters/settings/[here]
+and https://clickhouse.tech/docs/en/operations/settings/[here]. Parameters may be updated
+in the `config.xml`, and the server will automatically reload them. You may also specify
+many of them on the command-line with:
+
+[source,text]
+$ /path/to/clickhouse server --config-file /path/to/config.xml -- --param_name param_value ...

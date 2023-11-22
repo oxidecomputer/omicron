@@ -76,7 +76,13 @@ async fn region_create(
     let params = body.into_inner();
     let crucible = rc.context();
 
-    Ok(HttpResponseOk(crucible.create(params).await))
+    let region = crucible.create(params).await.map_err(|e| {
+        HttpError::for_internal_error(
+            format!("region create failure: {:?}", e,),
+        )
+    })?;
+
+    Ok(HttpResponseOk(region))
 }
 
 #[endpoint {
@@ -109,16 +115,12 @@ async fn region_delete(
     let id = path.into_inner().id;
     let crucible = rc.context();
 
-    match crucible
+    crucible
         .delete(id)
         .await
-        .map_err(|e| HttpError::for_bad_request(None, e.to_string()))?
-    {
-        Some(_) => Ok(HttpResponseDeleted()),
-        None => {
-            Err(HttpError::for_not_found(None, "Region not found".to_string()))
-        }
-    }
+        .map_err(|e| HttpError::for_bad_request(None, e.to_string()))?;
+
+    Ok(HttpResponseDeleted())
 }
 
 #[endpoint {
@@ -279,9 +281,7 @@ async fn region_delete_running_snapshot(
         ));
     }
 
-    let snapshots = crucible.snapshots_for_region(&p.id).await;
-
-    if !snapshots.iter().any(|x| x.name == p.name) {
+    if crucible.get_snapshot_for_region(&p.id, &p.name).await.is_none() {
         return Err(HttpError::for_not_found(
             None,
             format!("snapshot {:?} not found", p.name),

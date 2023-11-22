@@ -8,42 +8,157 @@ use super::common;
 use super::dns_config;
 use super::dns_propagation;
 use super::dns_servers;
+use super::external_endpoints;
+use super::inventory_collection;
+use super::nat_cleanup;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_common::nexus_config::BackgroundTaskConfig;
 use omicron_common::nexus_config::DnsTasksConfig;
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::sync::Arc;
+use uuid::Uuid;
 
-/// Kick off all background tasks
+/// Describes ongoing background tasks and provides interfaces for working with
+/// them
 ///
-/// Returns a `Driver` that can be used for inspecting background tasks and
-/// their state, along with some well-known tasks
-pub fn init(
-    opctx: &OpContext,
-    datastore: Arc<DataStore>,
-    config: &BackgroundTaskConfig,
-) -> (common::Driver, common::TaskHandle, common::TaskHandle, common::TaskHandle)
-{
-    let mut driver = common::Driver::new();
+/// Most interaction happens through the `driver` field.  The rest of the fields
+/// are specific background tasks.
+pub struct BackgroundTasks {
+    /// interface for working with background tasks (activation, checking
+    /// status, etc.)
+    pub driver: common::Driver,
 
-    let (task_config, task_servers) = init_dns(
-        &mut driver,
-        opctx,
-        datastore.clone(),
-        DnsGroup::Internal,
-        &config.dns_internal,
-    );
-    let (_, external_task_servers) = init_dns(
-        &mut driver,
-        opctx,
-        datastore,
-        DnsGroup::External,
-        &config.dns_external,
-    );
+    /// task handle for the internal DNS config background task
+    pub task_internal_dns_config: common::TaskHandle,
+    /// task handle for the internal DNS servers background task
+    pub task_internal_dns_servers: common::TaskHandle,
+    /// task handle for the external DNS config background task
+    pub task_external_dns_config: common::TaskHandle,
+    /// task handle for the external DNS servers background task
+    pub task_external_dns_servers: common::TaskHandle,
 
-    (driver, task_config, task_servers, external_task_servers)
+    /// task handle for the task that keeps track of external endpoints
+    pub task_external_endpoints: common::TaskHandle,
+    /// external endpoints read by the background task
+    pub external_endpoints: tokio::sync::watch::Receiver<
+        Option<external_endpoints::ExternalEndpoints>,
+    >,
+    /// task handle for the ipv4 nat entry garbage collector
+    pub nat_cleanup: common::TaskHandle,
+
+    /// task handle for the task that collects inventory
+    pub task_inventory_collection: common::TaskHandle,
+}
+
+impl BackgroundTasks {
+    /// Kick off all background tasks
+    pub fn start(
+        opctx: &OpContext,
+        datastore: Arc<DataStore>,
+        config: &BackgroundTaskConfig,
+        dpd_clients: &HashMap<SwitchLocation, Arc<dpd_client::Client>>,
+        nexus_id: Uuid,
+        resolver: internal_dns::resolver::Resolver,
+    ) -> BackgroundTasks {
+        let mut driver = common::Driver::new();
+
+        let (task_internal_dns_config, task_internal_dns_servers) = init_dns(
+            &mut driver,
+            opctx,
+            datastore.clone(),
+            DnsGroup::Internal,
+            &config.dns_internal,
+        );
+        let (task_external_dns_config, task_external_dns_servers) = init_dns(
+            &mut driver,
+            opctx,
+            datastore.clone(),
+            DnsGroup::External,
+            &config.dns_external,
+        );
+
+        // Background task: External endpoints list watcher
+        let (task_external_endpoints, external_endpoints) = {
+            let watcher = external_endpoints::ExternalEndpointsWatcher::new(
+                datastore.clone(),
+            );
+            let watcher_channel = watcher.watcher();
+            let task = driver.register(
+                String::from("external_endpoints"),
+                String::from(
+                    "reads config for silos and TLS certificates to determine \
+                    the right set of HTTP endpoints, their HTTP server names, \
+                    and which TLS certificates to use on each one",
+                ),
+                config.external_endpoints.period_secs,
+                Box::new(watcher),
+                opctx.child(BTreeMap::new()),
+                vec![],
+            );
+            (task, watcher_channel)
+        };
+
+        let nat_cleanup = {
+            driver.register(
+                "nat_v4_garbage_collector".to_string(),
+                String::from(
+                    "prunes soft-deleted IPV4 NAT entries from ipv4_nat_entry table \
+                     based on a predetermined retention policy",
+                ),
+                config.nat_cleanup.period_secs,
+                Box::new(nat_cleanup::Ipv4NatGarbageCollector::new(
+                    datastore.clone(),
+                    dpd_clients.values().map(|client| client.clone()).collect(),
+                )),
+                opctx.child(BTreeMap::new()),
+                vec![],
+            )
+        };
+
+        // Background task: inventory collector
+        let task_inventory_collection = {
+            let collector = inventory_collection::InventoryCollector::new(
+                datastore,
+                resolver,
+                &nexus_id.to_string(),
+                config.inventory.nkeep,
+                config.inventory.disable,
+            );
+            let task = driver.register(
+                String::from("inventory_collection"),
+                String::from(
+                    "collects hardware and software inventory data from the \
+                    whole system",
+                ),
+                config.inventory.period_secs,
+                Box::new(collector),
+                opctx.child(BTreeMap::new()),
+                vec![],
+            );
+
+            task
+        };
+
+        BackgroundTasks {
+            driver,
+            task_internal_dns_config,
+            task_internal_dns_servers,
+            task_external_dns_config,
+            task_external_dns_servers,
+            task_external_endpoints,
+            external_endpoints,
+            nat_cleanup,
+            task_inventory_collection,
+        }
+    }
+
+    pub fn activate(&self, task: &common::TaskHandle) {
+        self.driver.activate(task);
+    }
 }
 
 fn init_dns(
@@ -60,8 +175,10 @@ fn init_dns(
     let dns_config =
         dns_config::DnsConfigWatcher::new(Arc::clone(&datastore), dns_group);
     let dns_config_watcher = dns_config.watcher();
+    let task_name_config = format!("dns_config_{}", dns_group);
     let task_config = driver.register(
-        format!("dns_config_{}", dns_group),
+        task_name_config.clone(),
+        format!("watches {} DNS data stored in CockroachDB", dns_group),
         config.period_secs_config,
         Box::new(dns_config),
         opctx.child(metadata.clone()),
@@ -71,8 +188,13 @@ fn init_dns(
     // Background task: DNS server list watcher
     let dns_servers = dns_servers::DnsServersWatcher::new(datastore, dns_group);
     let dns_servers_watcher = dns_servers.watcher();
+    let task_name_servers = format!("dns_servers_{}", dns_group);
     let task_servers = driver.register(
-        format!("dns_servers_{}", dns_group),
+        task_name_servers.clone(),
+        format!(
+            "watches list of {} DNS servers stored in CockroachDB",
+            dns_group,
+        ),
         config.period_secs_servers,
         Box::new(dns_servers),
         opctx.child(metadata.clone()),
@@ -87,6 +209,12 @@ fn init_dns(
     );
     driver.register(
         format!("dns_propagation_{}", dns_group),
+        format!(
+            "propagates latest {} DNS configuration (from {:?} background \
+            task) to the latest list of DNS servers (from {:?} background \
+            task)",
+            dns_group, task_name_config, task_name_servers,
+        ),
         config.period_secs_propagation,
         Box::new(dns_propagate),
         opctx.child(metadata),
@@ -98,13 +226,14 @@ fn init_dns(
 
 #[cfg(test)]
 pub mod test {
-    use crate::db::TransactionError;
     use async_bb8_diesel::AsyncConnection;
     use async_bb8_diesel::AsyncRunQueryDsl;
+    use dropshot::HandlerTaskMode;
     use nexus_db_model::DnsGroup;
     use nexus_db_model::Generation;
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db::DataStore;
+    use nexus_db_queries::db::TransactionError;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::internal_api::params as nexus_params;
     use nexus_types::internal_api::params::ServiceKind;
@@ -150,7 +279,7 @@ pub mod test {
         // the case because it was configured with version 1 when the simulated
         // sled agent started up.
         let initial_dns_dropshot_server =
-            &cptestctx.sled_agent.dns_dropshot_server;
+            &cptestctx.internal_dns.dropshot_server;
         let dns_config_client = dns_service_client::Client::new(
             &format!("http://{}", initial_dns_dropshot_server.local_addr()),
             cptestctx.logctx.log.clone(),
@@ -195,7 +324,7 @@ pub mod test {
             &dropshot::ConfigDropshot {
                 bind_address: "[::1]:0".parse().unwrap(),
                 request_body_max_bytes: 8 * 1024,
-                ..Default::default()
+                default_handler_task_mode: HandlerTaskMode::Detached,
             },
         )
         .await
@@ -210,8 +339,9 @@ pub mod test {
                 &opctx,
                 Uuid::new_v4(),
                 cptestctx.sled_agent.sled_agent.id,
+                Some(Uuid::new_v4()),
                 new_dns_addr,
-                ServiceKind::InternalDnsConfig.into(),
+                ServiceKind::InternalDns.into(),
             )
             .await
             .unwrap();
@@ -229,7 +359,9 @@ pub mod test {
         write_test_dns_generation(datastore, internal_dns_zone_id).await;
 
         // Activate the internal DNS propagation pipeline.
-        nexus.background_tasks.activate(&nexus.task_internal_dns_config);
+        nexus
+            .background_tasks
+            .activate(&nexus.background_tasks.task_internal_dns_config);
 
         // Wait for the new generation to get propagated to both servers.
         wait_propagate_dns(
@@ -289,23 +421,23 @@ pub mod test {
         .expect("DNS config not propagated in expected time");
     }
 
-    pub async fn write_test_dns_generation(
+    pub(crate) async fn write_test_dns_generation(
         datastore: &DataStore,
         internal_dns_zone_id: Uuid,
     ) {
         type TxnError = TransactionError<()>;
         {
-            let conn = datastore.pool_for_tests().await.unwrap();
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
             let _: Result<(), TxnError> = conn
                 .transaction_async(|conn| async move {
                     {
-                        use crate::db::model::DnsVersion;
-                        use crate::db::schema::dns_version::dsl;
+                        use nexus_db_queries::db::model::DnsVersion;
+                        use nexus_db_queries::db::schema::dns_version::dsl;
 
                         diesel::insert_into(dsl::dns_version)
                             .values(DnsVersion {
                                 dns_group: DnsGroup::Internal,
-                                version: Generation(2.try_into().unwrap()),
+                                version: Generation(2u32.try_into().unwrap()),
                                 time_created: chrono::Utc::now(),
                                 creator: String::from("test suite"),
                                 comment: String::from("test suite"),
@@ -316,15 +448,15 @@ pub mod test {
                     }
 
                     {
-                        use crate::db::model::DnsName;
-                        use crate::db::schema::dns_name::dsl;
+                        use nexus_db_queries::db::model::DnsName;
+                        use nexus_db_queries::db::schema::dns_name::dsl;
 
                         diesel::insert_into(dsl::dns_name)
                             .values(
                                 DnsName::new(
                                     internal_dns_zone_id,
                                     String::from("we-got-beets"),
-                                    Generation(2.try_into().unwrap()),
+                                    Generation(2u32.try_into().unwrap()),
                                     None,
                                     vec![nexus_params::DnsRecord::Aaaa(
                                         "fe80::3".parse().unwrap(),
@@ -343,7 +475,7 @@ pub mod test {
         }
     }
 
-    pub async fn read_internal_dns_zone_id(
+    pub(crate) async fn read_internal_dns_zone_id(
         opctx: &OpContext,
         datastore: &DataStore,
     ) -> Uuid {

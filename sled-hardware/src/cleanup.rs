@@ -6,11 +6,11 @@
 
 use anyhow::Error;
 use futures::stream::{self, StreamExt, TryStreamExt};
+use illumos_utils::dladm::Dladm;
 use illumos_utils::dladm::BOOTSTRAP_ETHERSTUB_NAME;
 use illumos_utils::dladm::BOOTSTRAP_ETHERSTUB_VNIC_NAME;
 use illumos_utils::dladm::UNDERLAY_ETHERSTUB_NAME;
 use illumos_utils::dladm::UNDERLAY_ETHERSTUB_VNIC_NAME;
-use illumos_utils::dladm::{Dladm, VnicSource};
 use illumos_utils::link::LinkKind;
 use illumos_utils::opte;
 use illumos_utils::zone::IPADM;
@@ -28,14 +28,6 @@ pub fn delete_underlay_addresses(log: &Logger) -> Result<(), Error> {
 pub fn delete_bootstrap_addresses(log: &Logger) -> Result<(), Error> {
     let bootstrap_prefix = format!("{}/", BOOTSTRAP_ETHERSTUB_VNIC_NAME);
     delete_addresses_matching_prefixes(log, &[bootstrap_prefix])
-}
-
-fn delete_chelsio_addresses(log: &Logger) -> Result<(), Error> {
-    let prefixes = crate::underlay::find_chelsio_links()?
-        .into_iter()
-        .map(|link| format!("{}/", link.name()))
-        .collect::<Vec<_>>();
-    delete_addresses_matching_prefixes(log, &prefixes)
 }
 
 fn delete_addresses_matching_prefixes(
@@ -112,7 +104,6 @@ pub async fn delete_omicron_vnics(log: &Logger) -> Result<(), Error> {
 pub async fn cleanup_networking_resources(log: &Logger) -> Result<(), Error> {
     delete_underlay_addresses(log)?;
     delete_bootstrap_addresses(log)?;
-    delete_chelsio_addresses(log)?;
     delete_omicron_vnics(log).await?;
     delete_etherstub(log)?;
     opte::delete_all_xde_devices(log)?;

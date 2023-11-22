@@ -4,17 +4,20 @@
 
 //! Error type for trust quorum code
 
+use derive_more::From;
 use thiserror::Error;
 
-#[derive(Debug, Error)]
+#[derive(From, Debug, Error, PartialEq, Eq, Clone)]
 pub enum TrustQuorumError {
     // Temporary until the using code is written
-    #[allow(dead_code)]
-    #[error("Not enough peers to unlock storage")]
-    NotEnoughPeers,
-
-    // Temporary until the using code is written
-    #[allow(dead_code)]
     #[error("Rack secret construction failed: {0:?}")]
-    RackSecretConstructionFailed(vsss_rs::Error),
+    Vsssrs(vsss_rs::Error),
+
+    // Failed to encrypt something
+    #[error("Failed to encrypt")]
+    FailedToEncrypt,
+
+    // Failed to decrypt something
+    #[error("Failed to decrypt")]
+    FailedToDecrypt,
 }

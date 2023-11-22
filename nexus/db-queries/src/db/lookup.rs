@@ -11,11 +11,12 @@ use crate::{
     authz,
     context::OpContext,
     db,
-    db::error::{public_error_from_diesel_pool, ErrorHandler},
+    db::error::{public_error_from_diesel, ErrorHandler},
 };
 use async_bb8_diesel::AsyncRunQueryDsl;
 use db_macros::lookup_resource;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
+use ipnetwork::IpNetwork;
 use nexus_db_model::KnownArtifactKind;
 use nexus_db_model::Name;
 use omicron_common::api::external::Error;
@@ -85,7 +86,7 @@ use uuid::Uuid;
 //                                                  returns Instance
 //             .fetch().await?;
 //
-// As you can see, at each step, a selection function (like "organization_name")
+// As you can see, at each step, a selection function (like "project_name")
 // consumes the current tail of the list and returns a new tail.  We don't want
 // the caller to have to keep track of multiple objects, so that implies that
 // the tail must own all the state that we're building up as we go.
@@ -122,7 +123,7 @@ impl<'a> LookupPath<'a> {
             .opctx
             .authn
             .silo_required()
-            .internal_context("looking up Organization by name")
+            .internal_context("looking up Project by name")
         {
             Ok(authz_silo) => {
                 let root = Root { lookup_root: self };
@@ -346,6 +347,21 @@ impl<'a> LookupPath<'a> {
         Sled::PrimaryKey(Root { lookup_root: self }, id)
     }
 
+    /// Select a resource of type Zpool, identified by its id
+    pub fn zpool_id(self, id: Uuid) -> Zpool<'a> {
+        Zpool::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
+    /// Select a resource of type Service, identified by its id
+    pub fn service_id(self, id: Uuid) -> Service<'a> {
+        Service::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
+    /// Select a resource of type Switch, identified by its id
+    pub fn switch_id(self, id: Uuid) -> Switch<'a> {
+        Switch::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
     /// Select a resource of type PhysicalDisk, identified by its id
     pub fn physical_disk(
         self,
@@ -388,6 +404,28 @@ impl<'a> LookupPath<'a> {
         }
     }
 
+    pub fn address_lot_id(self, id: Uuid) -> AddressLot<'a> {
+        AddressLot::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
+    pub fn address_lot_name_owned(self, name: Name) -> AddressLot<'a> {
+        AddressLot::OwnedName(Root { lookup_root: self }, name)
+    }
+
+    pub fn loopback_address(
+        self,
+        rack_id: Uuid,
+        switch_location: Name,
+        address: IpNetwork,
+    ) -> LoopbackAddress<'a> {
+        LoopbackAddress::PrimaryKey(
+            Root { lookup_root: self },
+            address,
+            rack_id,
+            switch_location.to_string(),
+        )
+    }
+
     /// Select a resource of type UpdateArtifact, identified by its
     /// `(name, version, kind)` tuple
     pub fn update_artifact_tuple(
@@ -426,21 +464,12 @@ impl<'a> LookupPath<'a> {
         UserBuiltin::Name(Root { lookup_root: self }, name)
     }
 
-    /// Select a resource of type GlobalImage, identified by its name
-    pub fn global_image_name<'b, 'c>(self, name: &'b Name) -> GlobalImage<'c>
-    where
-        'a: 'c,
-        'b: 'c,
-    {
-        GlobalImage::Name(Root { lookup_root: self }, name)
-    }
-
-    /// Select a resource of type GlobalImage, identified by its id
-    pub fn global_image_id<'b>(self, id: Uuid) -> GlobalImage<'b>
+    /// Select a resource of type Certificate, identified by its id
+    pub fn certificate_id<'b>(self, id: Uuid) -> Certificate<'b>
     where
         'a: 'b,
     {
-        GlobalImage::PrimaryKey(Root { lookup_root: self }, id)
+        Certificate::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     /// Select a resource of type Certificate, identified by its name
@@ -449,15 +478,46 @@ impl<'a> LookupPath<'a> {
         'a: 'c,
         'b: 'c,
     {
-        Certificate::Name(Root { lookup_root: self }, name)
+        match self
+            .opctx
+            .authn
+            .silo_required()
+            .internal_context("looking up Certificate by name")
+        {
+            Ok(authz_silo) => {
+                let root = Root { lookup_root: self };
+                let silo_key = Silo::PrimaryKey(root, authz_silo.id());
+                Certificate::Name(silo_key, name)
+            }
+            Err(error) => {
+                let root = Root { lookup_root: self };
+                Certificate::Error(root, error)
+            }
+        }
     }
 
-    /// Select a resource of type Certificate, identified by its id
-    pub fn certificate_id<'b>(self, id: Uuid) -> Certificate<'b>
+    /// Select a resource of type Certificate, identified by its owned name
+    pub fn certificate_name_owned<'b, 'c>(self, name: Name) -> Certificate<'c>
     where
-        'a: 'b,
+        'a: 'c,
+        'b: 'c,
     {
-        Certificate::PrimaryKey(Root { lookup_root: self }, id)
+        match self
+            .opctx
+            .authn
+            .silo_required()
+            .internal_context("looking up Certificate by name")
+        {
+            Ok(authz_silo) => {
+                let root = Root { lookup_root: self };
+                let silo_key = Silo::PrimaryKey(root, authz_silo.id());
+                Certificate::OwnedName(silo_key, name)
+            }
+            Err(error) => {
+                let root = Root { lookup_root: self };
+                Certificate::Error(root, error)
+            }
+        }
     }
 
     /// Select a resource of type SamlIdentityProvider, identified by its id
@@ -493,7 +553,7 @@ impl<'a> Root<'a> {
 lookup_resource! {
     name = "Silo",
     ancestors = [],
-    children = [ "IdentityProvider", "SamlIdentityProvider", "Project", "SiloImage" ],
+    children = [ "IdentityProvider", "SamlIdentityProvider", "Project", "SiloImage", "Certificate" ],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -734,6 +794,42 @@ lookup_resource! {
 }
 
 lookup_resource! {
+    name = "Zpool",
+    ancestors = [],
+    children = [],
+    lookup_by_name = false,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "SledInstance",
+    ancestors = [],
+    children = [],
+    lookup_by_name = false,
+    soft_deletes = false,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ],
+}
+
+lookup_resource! {
+    name = "Service",
+    ancestors = [],
+    children = [],
+    lookup_by_name = false,
+    soft_deletes = false,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "Switch",
+    ancestors = [],
+    children = [],
+    lookup_by_name = false,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
     name = "PhysicalDisk",
     ancestors = [],
     children = [],
@@ -787,8 +883,8 @@ lookup_resource! {
 }
 
 lookup_resource! {
-    name = "GlobalImage",
-    ancestors = [],
+    name = "Certificate",
+    ancestors = [ "Silo" ],
     children = [],
     lookup_by_name = true,
     soft_deletes = true,
@@ -796,12 +892,25 @@ lookup_resource! {
 }
 
 lookup_resource! {
-    name = "Certificate",
+    name = "AddressLot",
     ancestors = [],
-    children = [],
+    children = [], // TODO: Should this include AddressLotBlock?
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "LoopbackAddress",
+    ancestors = [],
+    children = [],
+    lookup_by_name = false,
+    soft_deletes = false,
+    primary_key_columns = [
+        { column_name = "address", rust_type = IpNetwork },
+        { column_name = "rack_id", rust_type = Uuid },
+        { column_name = "switch_location", rust_type = String }
+    ]
 }
 
 // Helpers for unifying the interfaces around images

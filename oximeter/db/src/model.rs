@@ -3,25 +3,47 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Models for timeseries data in ClickHouse
-// Copyright 2022 Oxide Computer Company
 
-use crate::{
-    DbFieldSource, FieldSchema, FieldSource, Metric, Target, TimeseriesKey,
-    TimeseriesName, TimeseriesSchema,
-};
+// Copyright 2023 Oxide Computer Company
+
+use crate::DbFieldSource;
+use crate::FieldSchema;
+use crate::FieldSource;
+use crate::Metric;
+use crate::Target;
+use crate::TimeseriesKey;
+use crate::TimeseriesName;
+use crate::TimeseriesSchema;
 use bytes::Bytes;
-use chrono::{DateTime, Utc};
+use chrono::DateTime;
+use chrono::Utc;
 use oximeter::histogram::Histogram;
 use oximeter::traits;
-use oximeter::types::{
-    Cumulative, Datum, DatumType, Field, FieldType, FieldValue, Measurement,
-    Sample,
-};
-use serde::{Deserialize, Serialize};
+use oximeter::types::Cumulative;
+use oximeter::types::Datum;
+use oximeter::types::DatumType;
+use oximeter::types::Field;
+use oximeter::types::FieldType;
+use oximeter::types::FieldValue;
+use oximeter::types::Measurement;
+use oximeter::types::Sample;
+use serde::Deserialize;
+use serde::Serialize;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::convert::TryFrom;
-use std::net::{IpAddr, Ipv6Addr};
+use std::net::IpAddr;
+use std::net::Ipv6Addr;
 use uuid::Uuid;
+
+/// Describes the version of the Oximeter database.
+///
+/// For usage and details see:
+///
+/// - [`crate::Client::initialize_db_with_version`]
+/// - [`crate::Client::ensure_schema`]
+/// - The `clickhouse-schema-updater` binary in this crate
+pub const OXIMETER_VERSION: u64 = 3;
 
 // Wrapper type to represent a boolean in the database.
 //
@@ -87,12 +109,12 @@ pub(crate) struct DbFieldList {
     pub sources: Vec<DbFieldSource>,
 }
 
-impl From<DbFieldList> for Vec<FieldSchema> {
+impl From<DbFieldList> for BTreeSet<FieldSchema> {
     fn from(list: DbFieldList) -> Self {
         list.names
             .into_iter()
-            .zip(list.types.into_iter())
-            .zip(list.sources.into_iter())
+            .zip(list.types)
+            .zip(list.sources)
             .map(|((name, ty), source)| FieldSchema {
                 name,
                 ty: ty.into(),
@@ -102,8 +124,8 @@ impl From<DbFieldList> for Vec<FieldSchema> {
     }
 }
 
-impl From<Vec<FieldSchema>> for DbFieldList {
-    fn from(list: Vec<FieldSchema>) -> Self {
+impl From<BTreeSet<FieldSchema>> for DbFieldList {
+    fn from(list: BTreeSet<FieldSchema>) -> Self {
         let mut names = Vec::with_capacity(list.len());
         let mut types = Vec::with_capacity(list.len());
         let mut sources = Vec::with_capacity(list.len());
@@ -141,7 +163,14 @@ impl From<TimeseriesSchema> for DbTimeseriesSchema {
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
 pub enum DbFieldType {
     String,
+    I8,
+    U8,
+    I16,
+    U16,
+    I32,
+    U32,
     I64,
+    U64,
     IpAddr,
     Uuid,
     Bool,
@@ -151,7 +180,14 @@ impl From<DbFieldType> for FieldType {
     fn from(src: DbFieldType) -> Self {
         match src {
             DbFieldType::String => FieldType::String,
+            DbFieldType::I8 => FieldType::I8,
+            DbFieldType::U8 => FieldType::U8,
+            DbFieldType::I16 => FieldType::I16,
+            DbFieldType::U16 => FieldType::U16,
+            DbFieldType::I32 => FieldType::I32,
+            DbFieldType::U32 => FieldType::U32,
             DbFieldType::I64 => FieldType::I64,
+            DbFieldType::U64 => FieldType::U64,
             DbFieldType::IpAddr => FieldType::IpAddr,
             DbFieldType::Uuid => FieldType::Uuid,
             DbFieldType::Bool => FieldType::Bool,
@@ -162,7 +198,14 @@ impl From<FieldType> for DbFieldType {
     fn from(src: FieldType) -> Self {
         match src {
             FieldType::String => DbFieldType::String,
+            FieldType::I8 => DbFieldType::I8,
+            FieldType::U8 => DbFieldType::U8,
+            FieldType::I16 => DbFieldType::I16,
+            FieldType::U16 => DbFieldType::U16,
+            FieldType::I32 => DbFieldType::I32,
+            FieldType::U32 => DbFieldType::U32,
             FieldType::I64 => DbFieldType::I64,
+            FieldType::U64 => DbFieldType::U64,
             FieldType::IpAddr => DbFieldType::IpAddr,
             FieldType::Uuid => DbFieldType::Uuid,
             FieldType::Bool => DbFieldType::Bool,
@@ -172,13 +215,31 @@ impl From<FieldType> for DbFieldType {
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
 pub enum DbDatumType {
     Bool,
+    I8,
+    U8,
+    I16,
+    U16,
+    I32,
+    U32,
     I64,
+    U64,
+    F32,
     F64,
     String,
     Bytes,
     CumulativeI64,
+    CumulativeU64,
+    CumulativeF32,
     CumulativeF64,
+    HistogramI8,
+    HistogramU8,
+    HistogramI16,
+    HistogramU16,
+    HistogramI32,
+    HistogramU32,
     HistogramI64,
+    HistogramU64,
+    HistogramF32,
     HistogramF64,
 }
 
@@ -186,13 +247,31 @@ impl From<DatumType> for DbDatumType {
     fn from(src: DatumType) -> Self {
         match src {
             DatumType::Bool => DbDatumType::Bool,
+            DatumType::I8 => DbDatumType::I8,
+            DatumType::U8 => DbDatumType::U8,
+            DatumType::I16 => DbDatumType::I16,
+            DatumType::U16 => DbDatumType::U16,
+            DatumType::I32 => DbDatumType::I32,
+            DatumType::U32 => DbDatumType::U32,
             DatumType::I64 => DbDatumType::I64,
+            DatumType::U64 => DbDatumType::U64,
+            DatumType::F32 => DbDatumType::F32,
             DatumType::F64 => DbDatumType::F64,
             DatumType::String => DbDatumType::String,
             DatumType::Bytes => DbDatumType::Bytes,
             DatumType::CumulativeI64 => DbDatumType::CumulativeI64,
+            DatumType::CumulativeU64 => DbDatumType::CumulativeU64,
+            DatumType::CumulativeF32 => DbDatumType::CumulativeF32,
             DatumType::CumulativeF64 => DbDatumType::CumulativeF64,
+            DatumType::HistogramI8 => DbDatumType::HistogramI8,
+            DatumType::HistogramU8 => DbDatumType::HistogramU8,
+            DatumType::HistogramI16 => DbDatumType::HistogramI16,
+            DatumType::HistogramU16 => DbDatumType::HistogramU16,
+            DatumType::HistogramI32 => DbDatumType::HistogramI32,
+            DatumType::HistogramU32 => DbDatumType::HistogramU32,
             DatumType::HistogramI64 => DbDatumType::HistogramI64,
+            DatumType::HistogramU64 => DbDatumType::HistogramU64,
+            DatumType::HistogramF32 => DbDatumType::HistogramF32,
             DatumType::HistogramF64 => DbDatumType::HistogramF64,
         }
     }
@@ -202,13 +281,31 @@ impl From<DbDatumType> for DatumType {
     fn from(src: DbDatumType) -> Self {
         match src {
             DbDatumType::Bool => DatumType::Bool,
+            DbDatumType::I8 => DatumType::I8,
+            DbDatumType::U8 => DatumType::U8,
+            DbDatumType::I16 => DatumType::I16,
+            DbDatumType::U16 => DatumType::U16,
+            DbDatumType::I32 => DatumType::I32,
+            DbDatumType::U32 => DatumType::U32,
             DbDatumType::I64 => DatumType::I64,
+            DbDatumType::U64 => DatumType::U64,
+            DbDatumType::F32 => DatumType::F32,
             DbDatumType::F64 => DatumType::F64,
             DbDatumType::String => DatumType::String,
             DbDatumType::Bytes => DatumType::Bytes,
             DbDatumType::CumulativeI64 => DatumType::CumulativeI64,
+            DbDatumType::CumulativeU64 => DatumType::CumulativeU64,
+            DbDatumType::CumulativeF32 => DatumType::CumulativeF32,
             DbDatumType::CumulativeF64 => DatumType::CumulativeF64,
+            DbDatumType::HistogramI8 => DatumType::HistogramI8,
+            DbDatumType::HistogramU8 => DatumType::HistogramU8,
+            DbDatumType::HistogramI16 => DatumType::HistogramI16,
+            DbDatumType::HistogramU16 => DatumType::HistogramU16,
+            DbDatumType::HistogramI32 => DatumType::HistogramI32,
+            DbDatumType::HistogramU32 => DatumType::HistogramU32,
             DbDatumType::HistogramI64 => DatumType::HistogramI64,
+            DbDatumType::HistogramU64 => DatumType::HistogramU64,
+            DbDatumType::HistogramF32 => DatumType::HistogramF32,
             DbDatumType::HistogramF64 => DatumType::HistogramF64,
         }
     }
@@ -224,7 +321,7 @@ impl From<DbDatumType> for DatumType {
 // nanoseconds in our case. We opt for strings here, since we're using that anyway in the
 // input/output format for ClickHouse.
 mod serde_timestamp {
-    use chrono::{DateTime, TimeZone, Utc};
+    use chrono::{naive::NaiveDateTime, DateTime, Utc};
     use serde::{self, Deserialize, Deserializer, Serializer};
 
     pub fn serialize<S>(
@@ -245,7 +342,8 @@ mod serde_timestamp {
         D: Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        Utc.datetime_from_str(&s, crate::DATABASE_TIMESTAMP_FORMAT)
+        NaiveDateTime::parse_from_str(&s, crate::DATABASE_TIMESTAMP_FORMAT)
+            .map(|naive_date| naive_date.and_utc())
             .map_err(serde::de::Error::custom)
     }
 }
@@ -284,7 +382,14 @@ macro_rules! declare_field_row {
 }
 
 declare_field_row! {BoolFieldRow, DbBool, "bool"}
+declare_field_row! {I8FieldRow, i8, "i8"}
+declare_field_row! {U8FieldRow, u8, "u8"}
+declare_field_row! {I16FieldRow, i16, "i16"}
+declare_field_row! {U16FieldRow, u16, "u16"}
+declare_field_row! {I32FieldRow, i32, "i32"}
+declare_field_row! {U32FieldRow, u32, "u32"}
 declare_field_row! {I64FieldRow, i64, "i64"}
+declare_field_row! {U64FieldRow, u64, "u64"}
 declare_field_row! {StringFieldRow, String, "string"}
 declare_field_row! {IpAddrFieldRow, Ipv6Addr, "ipaddr"}
 declare_field_row! {UuidFieldRow, Uuid, "uuid"}
@@ -305,7 +410,15 @@ macro_rules! declare_measurement_row {
 }
 
 declare_measurement_row! { BoolMeasurementRow, DbBool, "bool" }
+declare_measurement_row! { I8MeasurementRow, i8, "i8" }
+declare_measurement_row! { U8MeasurementRow, u8, "u8" }
+declare_measurement_row! { I16MeasurementRow, i16, "i16" }
+declare_measurement_row! { U16MeasurementRow, u16, "u16" }
+declare_measurement_row! { I32MeasurementRow, i32, "i32" }
+declare_measurement_row! { U32MeasurementRow, u32, "u32" }
 declare_measurement_row! { I64MeasurementRow, i64, "i64" }
+declare_measurement_row! { U64MeasurementRow, u64, "u64" }
+declare_measurement_row! { F32MeasurementRow, f32, "f32" }
 declare_measurement_row! { F64MeasurementRow, f64, "f64" }
 declare_measurement_row! { StringMeasurementRow, String, "string" }
 declare_measurement_row! { BytesMeasurementRow, Bytes, "bytes" }
@@ -328,6 +441,8 @@ macro_rules! declare_cumulative_measurement_row {
 }
 
 declare_cumulative_measurement_row! { CumulativeI64MeasurementRow, i64, "cumulativei64" }
+declare_cumulative_measurement_row! { CumulativeU64MeasurementRow, u64, "cumulativeu64" }
+declare_cumulative_measurement_row! { CumulativeF32MeasurementRow, f32, "cumulativef32" }
 declare_cumulative_measurement_row! { CumulativeF64MeasurementRow, f64, "cumulativef64" }
 
 // Representation of a histogram in ClickHouse.
@@ -369,7 +484,15 @@ macro_rules! declare_histogram_measurement_row {
     };
 }
 
+declare_histogram_measurement_row! { HistogramI8MeasurementRow, DbHistogram<i8>, "histogrami8" }
+declare_histogram_measurement_row! { HistogramU8MeasurementRow, DbHistogram<u8>, "histogramu8" }
+declare_histogram_measurement_row! { HistogramI16MeasurementRow, DbHistogram<i16>, "histogrami16" }
+declare_histogram_measurement_row! { HistogramU16MeasurementRow, DbHistogram<u16>, "histogramu16" }
+declare_histogram_measurement_row! { HistogramI32MeasurementRow, DbHistogram<i32>, "histogrami32" }
+declare_histogram_measurement_row! { HistogramU32MeasurementRow, DbHistogram<u32>, "histogramu32" }
 declare_histogram_measurement_row! { HistogramI64MeasurementRow, DbHistogram<i64>, "histogrami64" }
+declare_histogram_measurement_row! { HistogramU64MeasurementRow, DbHistogram<u64>, "histogramu64" }
+declare_histogram_measurement_row! { HistogramF32MeasurementRow, DbHistogram<f32>, "histogramf32" }
 declare_histogram_measurement_row! { HistogramF64MeasurementRow, DbHistogram<f64>, "histogramf64" }
 
 // Helper to collect the field rows from a sample
@@ -389,8 +512,71 @@ fn unroll_from_source(sample: &Sample) -> BTreeMap<String, Vec<String>> {
                 };
                 (row.table_name(), serde_json::to_string(&row).unwrap())
             }
+            FieldValue::I8(inner) => {
+                let row = I8FieldRow {
+                    timeseries_name,
+                    timeseries_key,
+                    field_name,
+                    field_value: *inner,
+                };
+                (row.table_name(), serde_json::to_string(&row).unwrap())
+            }
+            FieldValue::U8(inner) => {
+                let row = U8FieldRow {
+                    timeseries_name,
+                    timeseries_key,
+                    field_name,
+                    field_value: *inner,
+                };
+                (row.table_name(), serde_json::to_string(&row).unwrap())
+            }
+            FieldValue::I16(inner) => {
+                let row = I16FieldRow {
+                    timeseries_name,
+                    timeseries_key,
+                    field_name,
+                    field_value: *inner,
+                };
+                (row.table_name(), serde_json::to_string(&row).unwrap())
+            }
+            FieldValue::U16(inner) => {
+                let row = U16FieldRow {
+                    timeseries_name,
+                    timeseries_key,
+                    field_name,
+                    field_value: *inner,
+                };
+                (row.table_name(), serde_json::to_string(&row).unwrap())
+            }
+            FieldValue::I32(inner) => {
+                let row = I32FieldRow {
+                    timeseries_name,
+                    timeseries_key,
+                    field_name,
+                    field_value: *inner,
+                };
+                (row.table_name(), serde_json::to_string(&row).unwrap())
+            }
+            FieldValue::U32(inner) => {
+                let row = U32FieldRow {
+                    timeseries_name,
+                    timeseries_key,
+                    field_name,
+                    field_value: *inner,
+                };
+                (row.table_name(), serde_json::to_string(&row).unwrap())
+            }
             FieldValue::I64(inner) => {
                 let row = I64FieldRow {
+                    timeseries_name,
+                    timeseries_key,
+                    field_name,
+                    field_value: *inner,
+                };
+                (row.table_name(), serde_json::to_string(&row).unwrap())
+            }
+            FieldValue::U64(inner) => {
+                let row = U64FieldRow {
                     timeseries_name,
                     timeseries_key,
                     field_name,
@@ -408,14 +594,10 @@ fn unroll_from_source(sample: &Sample) -> BTreeMap<String, Vec<String>> {
                 (row.table_name(), serde_json::to_string(&row).unwrap())
             }
             FieldValue::IpAddr(inner) => {
-                // TODO-completeness Be sure to map IPV6 back to IPV4 if possible when reading.
-                //
-                // We're using the IPV6 type in ClickHouse to store all addresses. This code maps
-                // IPV4 into IPV6 in with an invertible mapping. The inversion method
-                // `to_ipv4_mapped` is currently unstable, so when we get to implementing _reading_
-                // of these types from the database, we can just copy that implementation. See
-                // https://github.com/rust-lang/rust/issues/27709 for the tracking issue for
-                // stabilizing that function, which looks like it'll happen in the near future.
+                // We're using the IPv6 type in ClickHouse to store all
+                // addresses. This code maps any IPv4 address to IPv6 using an
+                // invertible mapping. We map things back, if possible, on the
+                // way out of the database.
                 let field_value = match inner {
                     IpAddr::V4(addr) => addr.to_ipv6_mapped(),
                     IpAddr::V6(addr) => *addr,
@@ -481,8 +663,80 @@ pub(crate) fn unroll_measurement_row(sample: &Sample) -> (String, String) {
             };
             (row.table_name(), serde_json::to_string(&row).unwrap())
         }
+        Datum::I8(inner) => {
+            let row = I8MeasurementRow {
+                timeseries_name,
+                timeseries_key,
+                timestamp,
+                datum: *inner,
+            };
+            (row.table_name(), serde_json::to_string(&row).unwrap())
+        }
+        Datum::U8(inner) => {
+            let row = U8MeasurementRow {
+                timeseries_name,
+                timeseries_key,
+                timestamp,
+                datum: *inner,
+            };
+            (row.table_name(), serde_json::to_string(&row).unwrap())
+        }
+        Datum::I16(inner) => {
+            let row = I16MeasurementRow {
+                timeseries_name,
+                timeseries_key,
+                timestamp,
+                datum: *inner,
+            };
+            (row.table_name(), serde_json::to_string(&row).unwrap())
+        }
+        Datum::U16(inner) => {
+            let row = U16MeasurementRow {
+                timeseries_name,
+                timeseries_key,
+                timestamp,
+                datum: *inner,
+            };
+            (row.table_name(), serde_json::to_string(&row).unwrap())
+        }
+        Datum::I32(inner) => {
+            let row = I32MeasurementRow {
+                timeseries_name,
+                timeseries_key,
+                timestamp,
+                datum: *inner,
+            };
+            (row.table_name(), serde_json::to_string(&row).unwrap())
+        }
+        Datum::U32(inner) => {
+            let row = U32MeasurementRow {
+                timeseries_name,
+                timeseries_key,
+                timestamp,
+                datum: *inner,
+            };
+            (row.table_name(), serde_json::to_string(&row).unwrap())
+        }
         Datum::I64(inner) => {
             let row = I64MeasurementRow {
+                timeseries_name,
+                timeseries_key,
+                timestamp,
+                datum: *inner,
+            };
+            (row.table_name(), serde_json::to_string(&row).unwrap())
+        }
+        Datum::U64(inner) => {
+            let row = U64MeasurementRow {
+                timeseries_name,
+                timeseries_key,
+                timestamp,
+                datum: *inner,
+            };
+            (row.table_name(), serde_json::to_string(&row).unwrap())
+        }
+        Datum::F32(inner) => {
+            let row = F32MeasurementRow {
                 timeseries_name,
                 timeseries_key,
                 timestamp,
@@ -527,6 +781,26 @@ pub(crate) fn unroll_measurement_row(sample: &Sample) -> (String, String) {
             };
             (row.table_name(), serde_json::to_string(&row).unwrap())
         }
+        Datum::CumulativeU64(inner) => {
+            let row = CumulativeU64MeasurementRow {
+                timeseries_name,
+                timeseries_key,
+                start_time: extract_start_time(measurement),
+                timestamp,
+                datum: inner.value(),
+            };
+            (row.table_name(), serde_json::to_string(&row).unwrap())
+        }
+        Datum::CumulativeF32(inner) => {
+            let row = CumulativeF32MeasurementRow {
+                timeseries_name,
+                timeseries_key,
+                start_time: extract_start_time(measurement),
+                timestamp,
+                datum: inner.value(),
+            };
+            (row.table_name(), serde_json::to_string(&row).unwrap())
+        }
         Datum::CumulativeF64(inner) => {
             let row = CumulativeF64MeasurementRow {
                 timeseries_name,
@@ -537,8 +811,88 @@ pub(crate) fn unroll_measurement_row(sample: &Sample) -> (String, String) {
             };
             (row.table_name(), serde_json::to_string(&row).unwrap())
         }
+        Datum::HistogramI8(ref inner) => {
+            let row = HistogramI8MeasurementRow {
+                timeseries_name,
+                timeseries_key,
+                start_time: extract_start_time(measurement),
+                timestamp,
+                datum: DbHistogram::from(inner),
+            };
+            (row.table_name(), serde_json::to_string(&row).unwrap())
+        }
+        Datum::HistogramU8(ref inner) => {
+            let row = HistogramU8MeasurementRow {
+                timeseries_name,
+                timeseries_key,
+                start_time: extract_start_time(measurement),
+                timestamp,
+                datum: DbHistogram::from(inner),
+            };
+            (row.table_name(), serde_json::to_string(&row).unwrap())
+        }
+        Datum::HistogramI16(ref inner) => {
+            let row = HistogramI16MeasurementRow {
+                timeseries_name,
+                timeseries_key,
+                start_time: extract_start_time(measurement),
+                timestamp,
+                datum: DbHistogram::from(inner),
+            };
+            (row.table_name(), serde_json::to_string(&row).unwrap())
+        }
+        Datum::HistogramU16(ref inner) => {
+            let row = HistogramU16MeasurementRow {
+                timeseries_name,
+                timeseries_key,
+                start_time: extract_start_time(measurement),
+                timestamp,
+                datum: DbHistogram::from(inner),
+            };
+            (row.table_name(), serde_json::to_string(&row).unwrap())
+        }
+        Datum::HistogramI32(ref inner) => {
+            let row = HistogramI32MeasurementRow {
+                timeseries_name,
+                timeseries_key,
+                start_time: extract_start_time(measurement),
+                timestamp,
+                datum: DbHistogram::from(inner),
+            };
+            (row.table_name(), serde_json::to_string(&row).unwrap())
+        }
+        Datum::HistogramU32(ref inner) => {
+            let row = HistogramU32MeasurementRow {
+                timeseries_name,
+                timeseries_key,
+                start_time: extract_start_time(measurement),
+                timestamp,
+                datum: DbHistogram::from(inner),
+            };
+            (row.table_name(), serde_json::to_string(&row).unwrap())
+        }
         Datum::HistogramI64(ref inner) => {
             let row = HistogramI64MeasurementRow {
+                timeseries_name,
+                timeseries_key,
+                start_time: extract_start_time(measurement),
+                timestamp,
+                datum: DbHistogram::from(inner),
+            };
+            (row.table_name(), serde_json::to_string(&row).unwrap())
+        }
+        Datum::HistogramU64(ref inner) => {
+            let row = HistogramU64MeasurementRow {
+                timeseries_name,
+                timeseries_key,
+                start_time: extract_start_time(measurement),
+                timestamp,
+                datum: DbHistogram::from(inner),
+            };
+            (row.table_name(), serde_json::to_string(&row).unwrap())
+        }
+        Datum::HistogramF32(ref inner) => {
+            let row = HistogramF32MeasurementRow {
                 timeseries_name,
                 timeseries_key,
                 start_time: extract_start_time(measurement),
@@ -562,16 +916,18 @@ pub(crate) fn unroll_measurement_row(sample: &Sample) -> (String, String) {
 
 /// Return the schema for a `Sample`.
 pub(crate) fn schema_for(sample: &Sample) -> TimeseriesSchema {
+    // The fields are iterated through whatever order the `Target` or `Metric`
+    // impl chooses. We'll store in a set ordered by field name, to ignore the
+    // declaration order.
     let created = Utc::now();
     let field_schema = sample
         .target_fields()
-        .iter()
         .map(|field| FieldSchema {
             name: field.name.clone(),
             ty: field.value.field_type(),
             source: FieldSource::Target,
         })
-        .chain(sample.metric_fields().iter().map(|field| FieldSchema {
+        .chain(sample.metric_fields().map(|field| FieldSchema {
             name: field.name.clone(),
             ty: field.value.field_type(),
             source: FieldSource::Metric,
@@ -600,9 +956,9 @@ where
         FieldSchema { name: name.to_string(), ty: value.field_type(), source }
     };
     let target_field_schema =
-        target.field_names().iter().zip(target.field_values().into_iter());
+        target.field_names().iter().zip(target.field_values());
     let metric_field_schema =
-        metric.field_names().iter().zip(metric.field_values().into_iter());
+        metric.field_names().iter().zip(metric.field_values());
     let field_schema = target_field_schema
         .map(|(name, value)| {
             make_field_schema(name, value, FieldSource::Target)
@@ -743,8 +1099,28 @@ pub(crate) fn parse_measurement_from_row(
         DatumType::Bool => {
             parse_timeseries_scalar_gauge_measurement::<DbBool>(line)
         }
+        DatumType::I8 => parse_timeseries_scalar_gauge_measurement::<i8>(line),
+        DatumType::U8 => parse_timeseries_scalar_gauge_measurement::<u8>(line),
+        DatumType::I16 => {
+            parse_timeseries_scalar_gauge_measurement::<i16>(line)
+        }
+        DatumType::U16 => {
+            parse_timeseries_scalar_gauge_measurement::<u16>(line)
+        }
+        DatumType::I32 => {
+            parse_timeseries_scalar_gauge_measurement::<i32>(line)
+        }
+        DatumType::U32 => {
+            parse_timeseries_scalar_gauge_measurement::<u32>(line)
+        }
         DatumType::I64 => {
             parse_timeseries_scalar_gauge_measurement::<i64>(line)
+        }
+        DatumType::U64 => {
+            parse_timeseries_scalar_gauge_measurement::<u64>(line)
+        }
+        DatumType::F32 => {
+            parse_timeseries_scalar_gauge_measurement::<f32>(line)
         }
         DatumType::F64 => {
             parse_timeseries_scalar_gauge_measurement::<f64>(line)
@@ -758,11 +1134,41 @@ pub(crate) fn parse_measurement_from_row(
         DatumType::CumulativeI64 => {
             parse_timeseries_scalar_cumulative_measurement::<i64>(line)
         }
+        DatumType::CumulativeU64 => {
+            parse_timeseries_scalar_cumulative_measurement::<u64>(line)
+        }
+        DatumType::CumulativeF32 => {
+            parse_timeseries_scalar_cumulative_measurement::<f32>(line)
+        }
         DatumType::CumulativeF64 => {
             parse_timeseries_scalar_cumulative_measurement::<f64>(line)
         }
+        DatumType::HistogramI8 => {
+            parse_timeseries_histogram_measurement::<i8>(line)
+        }
+        DatumType::HistogramU8 => {
+            parse_timeseries_histogram_measurement::<u8>(line)
+        }
+        DatumType::HistogramI16 => {
+            parse_timeseries_histogram_measurement::<i16>(line)
+        }
+        DatumType::HistogramU16 => {
+            parse_timeseries_histogram_measurement::<u16>(line)
+        }
+        DatumType::HistogramI32 => {
+            parse_timeseries_histogram_measurement::<i32>(line)
+        }
+        DatumType::HistogramU32 => {
+            parse_timeseries_histogram_measurement::<u32>(line)
+        }
         DatumType::HistogramI64 => {
             parse_timeseries_histogram_measurement::<i64>(line)
+        }
+        DatumType::HistogramU64 => {
+            parse_timeseries_histogram_measurement::<u64>(line)
+        }
+        DatumType::HistogramF32 => {
+            parse_timeseries_histogram_measurement::<f32>(line)
         }
         DatumType::HistogramF64 => {
             parse_timeseries_histogram_measurement::<f64>(line)
@@ -823,19 +1229,87 @@ pub(crate) fn parse_field_select_row(
             .expect("Missing a field value from a field select query");
         let value = match expected_field.ty {
             FieldType::Bool => {
-                FieldValue::Bool(bool::from(DbBool::from(actual_field_value.as_u64().expect("Expected a u64 for a boolean field from the database"))))
+                FieldValue::Bool(bool::from(DbBool::from(
+                    actual_field_value
+                        .as_u64()
+                        .expect("Expected a u64 for a boolean field from the database")
+                )))
+            }
+            FieldType::I8 => {
+                let wide = actual_field_value
+                    .as_i64()
+                    .expect("Expected an i64 from the database for an I8 field");
+                let narrow = i8::try_from(wide)
+                    .expect("Expected a valid i8 for an I8 field from the database");
+                FieldValue::from(narrow)
+            }
+            FieldType::U8 => {
+                let wide = actual_field_value
+                    .as_u64()
+                    .expect("Expected a u64 from the database for a U8 field");
+                let narrow = u8::try_from(wide)
+                    .expect("Expected a valid u8 for a U8 field from the database");
+                FieldValue::from(narrow)
+            }
+            FieldType::I16 => {
+                let wide = actual_field_value
+                    .as_i64()
+                    .expect("Expected an i64 from the database for an I16 field");
+                let narrow = i16::try_from(wide)
+                    .expect("Expected a valid i16 for an I16 field from the database");
+                FieldValue::from(narrow)
+            }
+            FieldType::U16 => {
+                let wide = actual_field_value
+                    .as_u64()
+                    .expect("Expected a u64 from the database for a U16 field");
+                let narrow = u16::try_from(wide)
+                    .expect("Expected a valid u16 for a U16 field from the database");
+                FieldValue::from(narrow)
+            }
+            FieldType::I32 => {
+                let wide = actual_field_value
+                    .as_i64()
+                    .expect("Expected an i64 from the database for an I32 field");
+                let narrow = i32::try_from(wide)
+                    .expect("Expected a valid i32 for an I32 field from the database");
+                FieldValue::from(narrow)
+            }
+            FieldType::U32 => {
+                let wide = actual_field_value
+                    .as_u64()
+                    .expect("Expected a u64 from the database for a U16 field");
+                let narrow = u32::try_from(wide)
+                    .expect("Expected a valid u32 for a U32 field from the database");
+                FieldValue::from(narrow)
             }
             FieldType::I64 => {
-                FieldValue::from(actual_field_value.as_i64().expect("Expected an i64 for an I64 field from the database"))
+                FieldValue::from(
+                    actual_field_value
+                        .as_i64()
+                        .expect("Expected an i64 for an I64 field from the database")
+                )
+            }
+            FieldType::U64 => {
+                FieldValue::from(
+                    actual_field_value
+                        .as_u64()
+                        .expect("Expected a u64 for a U64 field from the database")
+                )
             }
             FieldType::IpAddr => {
-                FieldValue::IpAddr(
-                    actual_field_value
-                        .as_str()
-                        .expect("Expected an IP address string for an IpAddr field from the database")
-                        .parse()
-                        .expect("Invalid IP address from the database")
-                    )
+                // We store values in the database as IPv6, by mapping IPv4 into
+                // that space. This tries to invert the mapping. If that
+                // succeeds, we know we stored an IPv4 address in the table.
+                let always_v6: Ipv6Addr = actual_field_value
+                    .as_str()
+                    .expect("Expected an IP address string for an IpAddr field from the database")
+                    .parse()
+                    .expect("Invalid IP address from the database");
+                match always_v6.to_ipv4_mapped() {
+                    Some(v4) => FieldValue::IpAddr(IpAddr::V4(v4)),
+                    None => FieldValue::IpAddr(IpAddr::V6(always_v6)),
+                }
             }
             FieldType::Uuid => {
                 FieldValue::Uuid(
@@ -934,7 +1408,7 @@ mod tests {
             sources: vec![DbFieldSource::Target, DbFieldSource::Metric],
         };
 
-        let list = vec![
+        let list: BTreeSet<_> = [
             FieldSchema {
                 name: String::from("field0"),
                 ty: FieldType::I64,
@@ -945,11 +1419,13 @@ mod tests {
                 ty: FieldType::IpAddr,
                 source: FieldSource::Metric,
             },
-        ];
+        ]
+        .into_iter()
+        .collect();
 
         assert_eq!(DbFieldList::from(list.clone()), db_list);
         assert_eq!(db_list, list.clone().into());
-        let round_trip: Vec<FieldSchema> =
+        let round_trip: BTreeSet<FieldSchema> =
             DbFieldList::from(list.clone()).into();
         assert_eq!(round_trip, list);
     }
@@ -974,7 +1450,7 @@ mod tests {
         let unpacked: StringFieldRow =
             serde_json::from_str(&out["oximeter.fields_string"][0]).unwrap();
         assert_eq!(unpacked.timeseries_name, sample.timeseries_name);
-        let field = &sample.target_fields()[0];
+        let field = sample.target_fields().next().unwrap();
         assert_eq!(unpacked.field_name, field.name);
         if let FieldValue::String(v) = &field.value {
             assert_eq!(v, &unpacked.field_value);
@@ -1068,7 +1544,7 @@ mod tests {
         }
 
         let line = r#"{"timeseries_key": 12, "start_time": "2021-01-01 00:00:00.123456789", "timestamp": "2021-01-01 01:00:00.123456789", "datum": 2 }"#;
-        let cumulative = Cumulative::with_start_time(start_time, 2);
+        let cumulative = Cumulative::with_start_time(start_time, 2u64);
         let datum = Datum::from(cumulative);
         run_test(line, &datum, start_time, timestamp);
 

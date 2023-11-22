@@ -16,13 +16,14 @@ use diesel::Selectable;
 use ipnetwork::IpNetwork;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::views;
+use omicron_common::address::NUM_SOURCE_NAT_PORTS;
 use omicron_common::api::external::Error;
 use std::convert::TryFrom;
 use std::net::IpAddr;
 use uuid::Uuid;
 
 impl_enum_type!(
-    #[derive(SqlType, Debug, Clone, Copy)]
+    #[derive(SqlType, Debug, Clone, Copy, QueryId)]
     #[diesel(postgres_type(name = "ip_kind"))]
      pub struct IpKindEnum;
 
@@ -33,7 +34,6 @@ impl_enum_type!(
      SNat => b"snat"
      Ephemeral => b"ephemeral"
      Floating => b"floating"
-     Service => b"service"
 );
 
 /// The main model type for external IP addresses for instances
@@ -59,11 +59,12 @@ pub struct ExternalIp {
     pub time_deleted: Option<DateTime<Utc>>,
     pub ip_pool_id: Uuid,
     pub ip_pool_range_id: Uuid,
+    pub is_service: bool,
     // This is Some(_) for:
-    //  - all instance SNAT IPs
+    //  - all instance/service SNAT IPs
     //  - all ephemeral IPs
-    //  - a floating IP attached to an instance.
-    pub instance_id: Option<Uuid>,
+    //  - a floating IP attached to an instance or service.
+    pub parent_id: Option<Uuid>,
     pub kind: IpKind,
     pub ip: IpNetwork,
     pub first_port: SqlU16,
@@ -89,10 +90,13 @@ pub struct IncompleteExternalIp {
     description: Option<String>,
     time_created: DateTime<Utc>,
     kind: IpKind,
-    instance_id: Option<Uuid>,
+    is_service: bool,
+    parent_id: Option<Uuid>,
     pool_id: Uuid,
     // Optional address requesting that a specific IP address be allocated.
     explicit_ip: Option<IpNetwork>,
+    // Optional range when requesting a specific SNAT range be allocated.
+    explicit_port_range: Option<(i32, i32)>,
 }
 
 impl IncompleteExternalIp {
@@ -107,9 +111,11 @@ impl IncompleteExternalIp {
             description: None,
             time_created: Utc::now(),
             kind: IpKind::SNat,
-            instance_id: Some(instance_id),
+            is_service: false,
+            parent_id: Some(instance_id),
             pool_id,
             explicit_ip: None,
+            explicit_port_range: None,
         }
     }
 
@@ -120,9 +126,11 @@ impl IncompleteExternalIp {
             description: None,
             time_created: Utc::now(),
             kind: IpKind::Ephemeral,
-            instance_id: Some(instance_id),
+            is_service: false,
+            parent_id: Some(instance_id),
             pool_id,
             explicit_ip: None,
+            explicit_port_range: None,
         }
     }
 
@@ -138,39 +146,97 @@ impl IncompleteExternalIp {
             description: Some(description.to_string()),
             time_created: Utc::now(),
             kind: IpKind::Floating,
-            instance_id: None,
+            is_service: false,
+            parent_id: None,
             pool_id,
             explicit_ip: None,
+            explicit_port_range: None,
         }
     }
 
     pub fn for_service_explicit(
         id: Uuid,
+        name: &Name,
+        description: &str,
+        service_id: Uuid,
         pool_id: Uuid,
         address: IpAddr,
     ) -> Self {
         Self {
             id,
-            name: None,
-            description: None,
+            name: Some(name.clone()),
+            description: Some(description.to_string()),
             time_created: Utc::now(),
-            kind: IpKind::Service,
-            instance_id: None,
+            kind: IpKind::Floating,
+            is_service: true,
+            parent_id: Some(service_id),
             pool_id,
             explicit_ip: Some(IpNetwork::from(address)),
+            explicit_port_range: None,
         }
     }
 
-    pub fn for_service(id: Uuid, pool_id: Uuid) -> Self {
+    pub fn for_service_explicit_snat(
+        id: Uuid,
+        service_id: Uuid,
+        pool_id: Uuid,
+        address: IpAddr,
+        (first_port, last_port): (u16, u16),
+    ) -> Self {
+        assert!(
+            (first_port % NUM_SOURCE_NAT_PORTS == 0)
+                && (last_port - first_port + 1) == NUM_SOURCE_NAT_PORTS,
+            "explicit port range must be aligned to {}",
+            NUM_SOURCE_NAT_PORTS,
+        );
+        let explicit_port_range = Some((first_port.into(), last_port.into()));
         Self {
             id,
             name: None,
             description: None,
             time_created: Utc::now(),
-            kind: IpKind::Service,
-            instance_id: None,
+            kind: IpKind::SNat,
+            is_service: true,
+            parent_id: Some(service_id),
+            pool_id,
+            explicit_ip: Some(IpNetwork::from(address)),
+            explicit_port_range,
+        }
+    }
+
+    pub fn for_service(
+        id: Uuid,
+        name: &Name,
+        description: &str,
+        service_id: Uuid,
+        pool_id: Uuid,
+    ) -> Self {
+        Self {
+            id,
+            name: Some(name.clone()),
+            description: Some(description.to_string()),
+            time_created: Utc::now(),
+            kind: IpKind::Floating,
+            is_service: true,
+            parent_id: Some(service_id),
             pool_id,
             explicit_ip: None,
+            explicit_port_range: None,
+        }
+    }
+
+    pub fn for_service_snat(id: Uuid, service_id: Uuid, pool_id: Uuid) -> Self {
+        Self {
+            id,
+            name: None,
+            description: None,
+            time_created: Utc::now(),
+            kind: IpKind::SNat,
+            is_service: true,
+            parent_id: Some(service_id),
+            pool_id,
+            explicit_ip: None,
+            explicit_port_range: None,
         }
     }
 
@@ -194,8 +260,12 @@ impl IncompleteExternalIp {
         &self.kind
     }
 
-    pub fn instance_id(&self) -> &Option<Uuid> {
-        &self.instance_id
+    pub fn is_service(&self) -> &bool {
+        &self.is_service
+    }
+
+    pub fn parent_id(&self) -> &Option<Uuid> {
+        &self.parent_id
     }
 
     pub fn pool_id(&self) -> &Uuid {
@@ -204,6 +274,10 @@ impl IncompleteExternalIp {
 
     pub fn explicit_ip(&self) -> &Option<IpNetwork> {
         &self.explicit_ip
+    }
+
+    pub fn explicit_port_range(&self) -> &Option<(i32, i32)> {
+        &self.explicit_port_range
     }
 }
 
@@ -225,6 +299,11 @@ impl TryFrom<ExternalIp> for views::ExternalIp {
     type Error = Error;
 
     fn try_from(ip: ExternalIp) -> Result<Self, Self::Error> {
+        if ip.is_service {
+            return Err(Error::internal_error(
+                "Service IPs should not be exposed in the API",
+            ));
+        }
         let kind = ip.kind.try_into()?;
         Ok(views::ExternalIp { kind, ip: ip.ip.ip() })
     }

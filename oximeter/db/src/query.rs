@@ -10,6 +10,7 @@ use crate::{
     DATABASE_NAME, DATABASE_SELECT_FORMAT,
 };
 use chrono::{DateTime, Utc};
+use dropshot::PaginationOrder;
 use oximeter::types::{DatumType, FieldType, FieldValue};
 use oximeter::{Metric, Target};
 use regex::Regex;
@@ -37,6 +38,7 @@ pub struct SelectQueryBuilder {
     time_range: TimeRange,
     limit: Option<NonZeroU32>,
     offset: Option<u32>,
+    order: Option<PaginationOrder>,
 }
 
 impl SelectQueryBuilder {
@@ -48,6 +50,7 @@ impl SelectQueryBuilder {
             time_range: TimeRange { start: None, end: None },
             limit: None,
             offset: None,
+            order: None,
         }
     }
 
@@ -72,6 +75,12 @@ impl SelectQueryBuilder {
     /// Set the number of rows to skip in the result set.
     pub fn offset(mut self, offset: u32) -> Self {
         self.offset.replace(offset);
+        self
+    }
+
+    /// Set the order direction for the query
+    pub fn order(mut self, order: PaginationOrder) -> Self {
+        self.order.replace(order);
         self
     }
 
@@ -157,7 +166,35 @@ impl SelectQueryBuilder {
         }
         let field_value = match field_schema.ty {
             FieldType::String => FieldValue::from(&selector.value),
+            FieldType::I8 => parse_selector_field_value::<i8>(
+                &field_schema,
+                &selector.value,
+            )?,
+            FieldType::U8 => parse_selector_field_value::<u8>(
+                &field_schema,
+                &selector.value,
+            )?,
+            FieldType::I16 => parse_selector_field_value::<i16>(
+                &field_schema,
+                &selector.value,
+            )?,
+            FieldType::U16 => parse_selector_field_value::<u16>(
+                &field_schema,
+                &selector.value,
+            )?,
+            FieldType::I32 => parse_selector_field_value::<i32>(
+                &field_schema,
+                &selector.value,
+            )?,
+            FieldType::U32 => parse_selector_field_value::<u32>(
+                &field_schema,
+                &selector.value,
+            )?,
             FieldType::I64 => parse_selector_field_value::<i64>(
+                &field_schema,
+                &selector.value,
+            )?,
+            FieldType::U64 => parse_selector_field_value::<u64>(
                 &field_schema,
                 &selector.value,
             )?,
@@ -214,9 +251,9 @@ impl SelectQueryBuilder {
         let schema = crate::model::schema_for_parts(target, metric);
         let mut builder = Self::new(&schema);
         let target_fields =
-            target.field_names().iter().zip(target.field_values().into_iter());
+            target.field_names().iter().zip(target.field_values());
         let metric_fields =
-            metric.field_names().iter().zip(metric.field_values().into_iter());
+            metric.field_names().iter().zip(metric.field_values());
         for (name, value) in target_fields.chain(metric_fields) {
             builder = builder.filter(name, FieldCmp::Eq, value)?;
         }
@@ -253,11 +290,12 @@ impl SelectQueryBuilder {
             time_range: self.time_range,
             limit: self.limit,
             offset: self.offset,
+            order: self.order.unwrap_or(PaginationOrder::Ascending),
         }
     }
 }
 
-fn measurement_table_name(ty: DatumType) -> String {
+pub(crate) fn measurement_table_name(ty: DatumType) -> String {
     format!("measurements_{}", ty.to_string().to_lowercase())
 }
 
@@ -296,7 +334,7 @@ pub struct FieldSelector {
     comparison: Option<FieldComparison>,
 }
 
-fn field_table_name(ty: FieldType) -> String {
+pub(crate) fn field_table_name(ty: FieldType) -> String {
     format!("fields_{}", ty.to_string().to_lowercase())
 }
 
@@ -479,6 +517,7 @@ pub struct SelectQuery {
     time_range: TimeRange,
     limit: Option<NonZeroU32>,
     offset: Option<u32>,
+    order: PaginationOrder,
 }
 
 fn create_join_on_condition(columns: &[&str], current: usize) -> String {
@@ -620,6 +659,10 @@ impl SelectQuery {
             };
             clause
         };
+        let order_dir = match self.order {
+            PaginationOrder::Descending => "DESC ",
+            PaginationOrder::Ascending => "",
+        };
         format!(
             concat!(
                 "SELECT * ",
@@ -628,7 +671,7 @@ impl SelectQuery {
                 "timeseries_name = '{timeseries_name}'",
                 "{key_clause}",
                 "{timestamp_clause}",
-                "ORDER BY (timeseries_name, timeseries_key, timestamp) ",
+                "ORDER BY (timeseries_name, timeseries_key, timestamp) {order_dir}",
                 "{pagination_clause}",
                 "FORMAT {fmt};",
             ),
@@ -639,6 +682,7 @@ impl SelectQuery {
             key_clause = key_clause,
             timestamp_clause = self.time_range.as_query(),
             pagination_clause = pagination_clause,
+            order_dir = order_dir,
             fmt = DATABASE_SELECT_FORMAT,
         )
     }
@@ -650,7 +694,14 @@ fn field_as_db_str(value: &FieldValue) -> String {
         FieldValue::Bool(ref inner) => {
             format!("{}", if *inner { 1 } else { 0 })
         }
+        FieldValue::I8(ref inner) => format!("{}", inner),
+        FieldValue::U8(ref inner) => format!("{}", inner),
+        FieldValue::I16(ref inner) => format!("{}", inner),
+        FieldValue::U16(ref inner) => format!("{}", inner),
+        FieldValue::I32(ref inner) => format!("{}", inner),
+        FieldValue::U32(ref inner) => format!("{}", inner),
         FieldValue::I64(ref inner) => format!("{}", inner),
+        FieldValue::U64(ref inner) => format!("{}", inner),
         FieldValue::IpAddr(ref inner) => {
             let addr = match inner {
                 IpAddr::V4(ref v4) => v4.to_ipv6_mapped(),
@@ -669,7 +720,8 @@ mod tests {
     use crate::FieldSchema;
     use crate::FieldSource;
     use crate::TimeseriesName;
-    use chrono::TimeZone;
+    use chrono::NaiveDateTime;
+    use std::collections::BTreeSet;
     use std::convert::TryFrom;
 
     #[test]
@@ -723,7 +775,7 @@ mod tests {
     fn test_select_query_builder_filter_raw() {
         let schema = TimeseriesSchema {
             timeseries_name: TimeseriesName::try_from("foo:bar").unwrap(),
-            field_schema: vec![
+            field_schema: [
                 FieldSchema {
                     name: "f0".to_string(),
                     ty: FieldType::I64,
@@ -734,7 +786,9 @@ mod tests {
                     ty: FieldType::Bool,
                     source: FieldSource::Target,
                 },
-            ],
+            ]
+            .into_iter()
+            .collect(),
             datum_type: DatumType::I64,
             created: Utc::now(),
         };
@@ -828,10 +882,14 @@ mod tests {
     fn test_time_range() {
         let s = "2021-01-01 01:01:01.123456789";
         let start_time =
-            Utc.datetime_from_str(s, crate::DATABASE_TIMESTAMP_FORMAT).unwrap();
+            NaiveDateTime::parse_from_str(s, crate::DATABASE_TIMESTAMP_FORMAT)
+                .unwrap()
+                .and_utc();
         let e = "2021-01-01 01:01:02.123456789";
         let end_time =
-            Utc.datetime_from_str(e, crate::DATABASE_TIMESTAMP_FORMAT).unwrap();
+            NaiveDateTime::parse_from_str(e, crate::DATABASE_TIMESTAMP_FORMAT)
+                .unwrap()
+                .and_utc();
         let range = TimeRange {
             start: Some(Timestamp::Inclusive(start_time)),
             end: Some(Timestamp::Exclusive(end_time)),
@@ -850,7 +908,7 @@ mod tests {
     fn test_select_query_builder_no_fields() {
         let schema = TimeseriesSchema {
             timeseries_name: TimeseriesName::try_from("foo:bar").unwrap(),
-            field_schema: vec![],
+            field_schema: BTreeSet::new(),
             datum_type: DatumType::I64,
             created: Utc::now(),
         };
@@ -872,7 +930,7 @@ mod tests {
     fn test_select_query_builder_limit_offset() {
         let schema = TimeseriesSchema {
             timeseries_name: TimeseriesName::try_from("foo:bar").unwrap(),
-            field_schema: vec![],
+            field_schema: BTreeSet::new(),
             datum_type: DatumType::I64,
             created: Utc::now(),
         };
@@ -930,7 +988,7 @@ mod tests {
                 ty: FieldType::I64,
                 comparison: Some(FieldComparison {
                     op: FieldCmp::Eq,
-                    value: FieldValue::from(0),
+                    value: FieldValue::from(0i64),
                 }),
             },
             "Expected an exact comparison when building a query from parts",
@@ -941,7 +999,7 @@ mod tests {
     fn test_select_query_builder_no_selectors() {
         let schema = TimeseriesSchema {
             timeseries_name: TimeseriesName::try_from("foo:bar").unwrap(),
-            field_schema: vec![
+            field_schema: [
                 FieldSchema {
                     name: "f0".to_string(),
                     ty: FieldType::I64,
@@ -952,7 +1010,9 @@ mod tests {
                     ty: FieldType::Bool,
                     source: FieldSource::Target,
                 },
-            ],
+            ]
+            .into_iter()
+            .collect(),
             datum_type: DatumType::I64,
             created: Utc::now(),
         };
@@ -1002,7 +1062,7 @@ mod tests {
     fn test_select_query_builder_field_selectors() {
         let schema = TimeseriesSchema {
             timeseries_name: TimeseriesName::try_from("foo:bar").unwrap(),
-            field_schema: vec![
+            field_schema: [
                 FieldSchema {
                     name: "f0".to_string(),
                     ty: FieldType::I64,
@@ -1013,7 +1073,9 @@ mod tests {
                     ty: FieldType::Bool,
                     source: FieldSource::Target,
                 },
-            ],
+            ]
+            .into_iter()
+            .collect(),
             datum_type: DatumType::I64,
             created: Utc::now(),
         };
@@ -1051,7 +1113,7 @@ mod tests {
     fn test_select_query_builder_full() {
         let schema = TimeseriesSchema {
             timeseries_name: TimeseriesName::try_from("foo:bar").unwrap(),
-            field_schema: vec![
+            field_schema: [
                 FieldSchema {
                     name: "f0".to_string(),
                     ty: FieldType::I64,
@@ -1062,7 +1124,9 @@ mod tests {
                     ty: FieldType::Bool,
                     source: FieldSource::Target,
                 },
-            ],
+            ]
+            .into_iter()
+            .collect(),
             datum_type: DatumType::I64,
             created: Utc::now(),
         };

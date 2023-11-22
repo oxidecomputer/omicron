@@ -5,6 +5,7 @@
 //! Interfaces for working with sled agent configuration
 
 use crate::updates::ConfigUpdates;
+use camino::{Utf8Path, Utf8PathBuf};
 use dropshot::ConfigLogging;
 use illumos_utils::dladm::Dladm;
 use illumos_utils::dladm::FindPhysicalLinkError;
@@ -14,7 +15,6 @@ use illumos_utils::zpool::ZpoolName;
 use omicron_common::vlan::VlanID;
 use serde::Deserialize;
 use sled_hardware::is_gimlet;
-use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -24,15 +24,39 @@ pub enum SledMode {
     Scrimlet,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SidecarRevision {
+    Physical(String),
+    SoftZone(SoftPortConfig),
+    SoftPropolis(SoftPortConfig),
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SoftPortConfig {
+    /// Number of front ports
+    pub front_port_count: u8,
+    /// Number of rear ports
+    pub rear_port_count: u8,
+}
+
 /// Configuration for a sled agent
 #[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     /// Configuration for the sled agent debug log
     pub log: ConfigLogging,
     /// The sled's mode of operation (auto detect or force gimlet/scrimlet).
     pub sled_mode: SledMode,
     // TODO: Remove once this can be auto-detected.
-    pub sidecar_revision: String,
+    pub sidecar_revision: SidecarRevision,
+    /// Optional percentage of DRAM to reserve for guest memory
+    pub vmm_reservoir_percentage: Option<u8>,
+    /// Optional DRAM to reserve for guest memory in MiB (mutually exclusive
+    /// option with vmm_reservoir_percentage).
+    pub vmm_reservoir_size_mb: Option<u32>,
+    /// Optional swap device size in GiB
+    pub swap_device_size_gb: Option<u32>,
     /// Optional VLAN ID to be used for tagging guest VNICs.
     pub vlan: Option<VlanID>,
     /// Optional list of zpools to be used as "discovered disks".
@@ -50,6 +74,10 @@ pub struct Config {
     /// This allows continued support for development and testing on emulated
     /// systems.
     pub data_link: Option<PhysicalLink>,
+
+    /// The data links that sled-agent will treat as a real gimlet cxgbe0/cxgbe1
+    /// links.
+    pub data_links: [String; 2],
 
     #[serde(default)]
     pub updates: ConfigUpdates,
@@ -69,16 +97,18 @@ pub struct Config {
 pub enum ConfigError {
     #[error("Failed to read config from {path}: {err}")]
     Io {
-        path: PathBuf,
+        path: Utf8PathBuf,
         #[source]
         err: std::io::Error,
     },
     #[error("Failed to parse config from {path}: {err}")]
     Parse {
-        path: PathBuf,
+        path: Utf8PathBuf,
         #[source]
         err: toml::de::Error,
     },
+    #[error("Loading certificate: {0}")]
+    Certificate(#[source] anyhow::Error),
     #[error("Could not determine if host is a Gimlet: {0}")]
     SystemDetection(#[source] anyhow::Error),
     #[error("Could not enumerate physical links")]
@@ -86,7 +116,7 @@ pub enum ConfigError {
 }
 
 impl Config {
-    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, ConfigError> {
+    pub fn from_file<P: AsRef<Utf8Path>>(path: P) -> Result<Self, ConfigError> {
         let path = path.as_ref();
         let contents = std::fs::read_to_string(&path)
             .map_err(|err| ConfigError::Io { path: path.into(), err })?;
@@ -124,20 +154,18 @@ mod test {
     fn test_smf_configs() {
         let manifest = std::env::var("CARGO_MANIFEST_DIR")
             .expect("Cannot access manifest directory");
-        let smf = PathBuf::from(manifest).join("../smf/sled-agent");
+        let smf = Utf8PathBuf::from(manifest).join("../smf/sled-agent");
 
         let mut configs_seen = 0;
-        for variant in std::fs::read_dir(smf).unwrap() {
+        for variant in smf.read_dir_utf8().unwrap() {
             let variant = variant.unwrap();
             if variant.file_type().unwrap().is_dir() {
-                for entry in std::fs::read_dir(variant.path()).unwrap() {
+                for entry in variant.path().read_dir_utf8().unwrap() {
                     let entry = entry.unwrap();
                     if entry.file_name() == "config.toml" {
-                        Config::from_file(entry.path()).unwrap_or_else(|_| {
-                            panic!(
-                                "Failed to parse config {}",
-                                entry.path().display()
-                            )
+                        let path = entry.path();
+                        Config::from_file(&path).unwrap_or_else(|_| {
+                            panic!("Failed to parse config {path}")
                         });
                         configs_seen += 1;
                     }

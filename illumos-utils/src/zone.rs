@@ -5,14 +5,15 @@
 //! API for interacting with Zones running Propolis.
 
 use anyhow::anyhow;
+use camino::Utf8Path;
 use ipnetwork::IpNetwork;
+use ipnetwork::IpNetworkError;
 use slog::info;
 use slog::Logger;
 use std::net::{IpAddr, Ipv6Addr};
 
 use crate::addrobj::AddrObject;
 use crate::dladm::{EtherstubVnic, VNIC_PREFIX_BOOTSTRAP, VNIC_PREFIX_CONTROL};
-use crate::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use crate::{execute, PFEXEC};
 use omicron_common::address::SLED_PREFIX;
 
@@ -105,6 +106,16 @@ pub enum GetBootstrapInterfaceError {
     Unexpected { zone: String },
 }
 
+/// Errors which may be encountered getting addresses.
+#[derive(thiserror::Error, Debug)]
+#[error("Failed to get address for name {name} in {zone}: {err}")]
+pub struct GetAddressError {
+    zone: String,
+    name: AddrObject,
+    #[source]
+    err: anyhow::Error,
+}
+
 /// Errors which may be encountered ensuring addresses.
 #[derive(thiserror::Error, Debug)]
 #[error(
@@ -128,6 +139,16 @@ pub struct EnsureGzAddressError {
     #[source]
     err: anyhow::Error,
     extra_note: String,
+}
+
+/// Errors which may be encountered getting addresses.
+#[derive(thiserror::Error, Debug)]
+#[error("Failed to get addresses with name {name} in {zone}: {err}")]
+pub struct GetAddressesError {
+    zone: String,
+    name: AddrObject,
+    #[source]
+    err: anyhow::Error,
 }
 
 /// Describes the type of addresses which may be requested from a zone.
@@ -154,6 +175,33 @@ impl AddressRequest {
 
 /// Wraps commands for interacting with Zones.
 pub struct Zones {}
+
+// Helper function to parse the output of `ipadm show-addr -o ADDR`, which might
+// or might not contain an interface scope (which `ipnetwork` doesn't know how
+// to parse).
+fn parse_ip_network(s: &str) -> Result<IpNetwork, IpNetworkError> {
+    // Does `s` appear to contain a scope identifier? If so, we want to trim it
+    // out.
+    if let Some(scope_start) = s.find('%') {
+        let (ip, rest) = s.split_at(scope_start);
+
+        // Is there a `/prefix` _after_ the scope? If so, we want to reconstruct
+        // a string consisting of the leading `ip` and the trailing `/prefix`,
+        // removing the `%scope` in the middle.
+        if let Some(prefix_start) = rest.find('/') {
+            let (_scope, prefix) = rest.split_at(prefix_start);
+            let without_scope = format!("{ip}{prefix}");
+            without_scope.parse()
+        } else {
+            // We found a `%` indicating a scope but no `/` after it; parse just
+            // the IP address.
+            ip.parse()
+        }
+    } else {
+        // No `%` found; just try parsing `s` directly.
+        s.parse()
+    }
+}
 
 #[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
 impl Zones {
@@ -233,8 +281,9 @@ impl Zones {
     #[allow(clippy::too_many_arguments)]
     pub async fn install_omicron_zone(
         log: &Logger,
+        zone_root_path: &Utf8Path,
         zone_name: &str,
-        zone_image: &std::path::Path,
+        zone_image: &Utf8Path,
         datasets: &[zone::Dataset],
         filesystems: &[zone::Fs],
         devices: &[zone::Device],
@@ -269,7 +318,7 @@ impl Zones {
             true,
             zone::CreationOptions::Blank,
         );
-        let path = format!("{}/{}", ZONE_ZFS_DATASET_MOUNTPOINT, zone_name);
+        let path = zone_root_path.join(zone_name);
         cfg.get_global()
             .set_brand("omicron1")
             .set_path(&path)
@@ -281,10 +330,10 @@ impl Zones {
         }
 
         for dataset in datasets {
-            cfg.add_dataset(&dataset);
+            cfg.add_dataset(dataset);
         }
         for filesystem in filesystems {
-            cfg.add_fs(&filesystem);
+            cfg.add_fs(filesystem);
         }
         for device in devices {
             cfg.add_device(device);
@@ -304,7 +353,10 @@ impl Zones {
         info!(log, "Installing Omicron zone: {}", zone_name);
 
         zone::Adm::new(zone_name)
-            .install(&[zone_image.as_ref()])
+            .install(&[
+                zone_image.as_ref(),
+                "/opt/oxide/overlay.tar.gz".as_ref(),
+            ])
             .await
             .map_err(|err| AdmError {
                 op: Operation::Install,
@@ -346,6 +398,22 @@ impl Zones {
     /// are managed by the Sled Agent.
     pub async fn find(name: &str) -> Result<Option<zone::Zone>, AdmError> {
         Ok(Self::get().await?.into_iter().find(|zone| zone.name() == name))
+    }
+
+    /// Return the ID for a _running_ zone with the specified name.
+    //
+    // NOTE: This mostly exists for testing purposes. It's simple enough to call
+    // `Zones::find()` and then use the `zone::Zone::id()` method on that
+    // object. But that can't easily be done, because we need to supply
+    // `mockall` with a value to return, and `zone::Zone` objects can't be
+    // constructed since they have private fields.
+    pub async fn id(name: &str) -> Result<Option<i32>, AdmError> {
+        // Safety: illumos defines `zoneid_t` as a typedef for an integer, i.e.,
+        // an `i32`, so this unwrap should always be safe.
+        match Self::find(name).await?.map(|zn| zn.id()) {
+            Some(Some(id)) => Ok(Some(id.try_into().unwrap())),
+            Some(None) | None => Ok(None),
+        }
     }
 
     /// Returns the name of the VNIC used to communicate with the control plane.
@@ -433,7 +501,7 @@ impl Zones {
         addrtype: AddressRequest,
     ) -> Result<IpNetwork, EnsureAddressError> {
         |zone, addrobj, addrtype| -> Result<IpNetwork, anyhow::Error> {
-            match Self::get_address(zone, addrobj) {
+            match Self::get_address_impl(zone, addrobj) {
                 Ok(addr) => {
                     if let AddressRequest::Static(expected_addr) = addrtype {
                         // If the address is static, we need to validate that it
@@ -465,10 +533,26 @@ impl Zones {
 
     /// Gets the IP address of an interface.
     ///
+    /// This `addrobj` may optionally be within a zone named `zone`.
+    /// If `None` is supplied, the address is queried from the Global Zone.
+    #[allow(clippy::needless_lifetimes)]
+    pub fn get_address<'a>(
+        zone: Option<&'a str>,
+        addrobj: &AddrObject,
+    ) -> Result<IpNetwork, GetAddressError> {
+        Self::get_address_impl(zone, addrobj).map_err(|err| GetAddressError {
+            zone: zone.unwrap_or("global").to_string(),
+            name: addrobj.clone(),
+            err: anyhow!(err),
+        })
+    }
+
+    /// Gets the IP address of an interface.
+    ///
     /// This address may optionally be within a zone named `zone`.
     /// If `None` is supplied, the address is queried from the Global Zone.
     #[allow(clippy::needless_lifetimes)]
-    fn get_address<'a>(
+    fn get_address_impl<'a>(
         zone: Option<&'a str>,
         addrobj: &AddrObject,
     ) -> Result<IpNetwork, Error> {
@@ -486,8 +570,39 @@ impl Zones {
         let output = execute(cmd)?;
         String::from_utf8_lossy(&output.stdout)
             .lines()
-            .find_map(|s| s.parse().ok())
+            .find_map(|s| parse_ip_network(s).ok())
             .ok_or(Error::AddressNotFound { addrobj: addrobj.clone() })
+    }
+
+    /// Gets all IP address of an interface.
+    ///
+    /// This `addrobj` may optionally be within a zone named `zone`.
+    /// If `None` is supplied, the address is queried from the Global Zone.
+    #[allow(clippy::needless_lifetimes)]
+    pub fn get_all_addresses<'a>(
+        zone: Option<&'a str>,
+        addrobj: &AddrObject,
+    ) -> Result<Vec<IpNetwork>, GetAddressesError> {
+        let mut command = std::process::Command::new(PFEXEC);
+
+        let mut args = vec![];
+        if let Some(zone) = zone {
+            args.push(ZLOGIN);
+            args.push(zone);
+        };
+        let addrobj_str = addrobj.to_string();
+        args.extend(&[IPADM, "show-addr", "-p", "-o", "ADDR", &addrobj_str]);
+
+        let cmd = command.args(args);
+        let output = execute(cmd).map_err(|err| GetAddressesError {
+            zone: zone.unwrap_or("global").to_string(),
+            name: addrobj.clone(),
+            err: err.into(),
+        })?;
+        Ok(String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter_map(|s| s.parse().ok())
+            .collect::<Vec<_>>())
     }
 
     /// Returns Ok(()) if `addrobj` has a corresponding link-local IPv6 address.
@@ -556,6 +671,7 @@ impl Zones {
 
         let cmd = command.args(args);
         execute(cmd)?;
+
         Ok(())
     }
 
@@ -623,7 +739,9 @@ impl Zones {
 
     // TODO(https://github.com/oxidecomputer/omicron/issues/821): We
     // should remove this function when Sled Agents are provided IPv6 addresses
-    // from RSS.
+    // from RSS. Edit to this TODO: we still need this for the bootstrap network
+    // (which exists pre-RSS), but we should remove all uses of it other than
+    // the bootstrap agent.
     pub fn ensure_has_global_zone_v6_address(
         link: EtherstubVnic,
         address: Ipv6Addr,
@@ -717,6 +835,36 @@ impl Zones {
         // Actually perform address allocation.
         Self::create_address_internal(zone, addrobj, addrtype)?;
 
-        Self::get_address(zone, addrobj)
+        Self::get_address_impl(zone, addrobj)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_ip_network() {
+        for (s, ip, prefix) in [
+            (
+                "fdb0:a840:2504:355::1/64",
+                "fdb0:a840:2504:355::1".parse::<IpAddr>().unwrap(),
+                64,
+            ),
+            (
+                "fe80::aa40:25ff:fe04:355%cxgbe0/10",
+                "fe80::aa40:25ff:fe04:355".parse::<IpAddr>().unwrap(),
+                10,
+            ),
+            (
+                "fe80::aa40:25ff:fe04:355%cxgbe0",
+                "fe80::aa40:25ff:fe04:355".parse::<IpAddr>().unwrap(),
+                128,
+            ),
+        ] {
+            let parsed = parse_ip_network(s).unwrap();
+            assert_eq!(parsed.ip(), ip);
+            assert_eq!(parsed.prefix(), prefix);
+        }
     }
 }

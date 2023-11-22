@@ -9,7 +9,11 @@ use chrono::Utc;
 use dropshot::test_util::ClientTestContext;
 use http::method::Method;
 use http::StatusCode;
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
+use nexus_db_queries::db::identity::Resource;
+use nexus_db_queries::db::lookup::LookupPath;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
@@ -18,6 +22,8 @@ use nexus_test_utils::resource_helpers::object_create;
 use nexus_test_utils::resource_helpers::populate_ip_pool;
 use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::params;
+use nexus_types::external_api::views;
 use omicron_common::api::external;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
@@ -26,12 +32,7 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::Name;
-use omicron_nexus::authz;
-use omicron_nexus::db;
-use omicron_nexus::db::identity::Resource;
-use omicron_nexus::db::lookup::LookupPath;
-use omicron_nexus::external_api::params;
-use omicron_nexus::external_api::views;
+use omicron_nexus::app::MIN_DISK_SIZE_BYTES;
 use uuid::Uuid;
 
 use httptest::{matchers::*, responders::*, Expectation, ServerBuilder};
@@ -43,6 +44,10 @@ const PROJECT_NAME: &str = "springfield-squidport-disks";
 
 fn get_disks_url() -> String {
     format!("/v1/disks?project={}", PROJECT_NAME)
+}
+
+fn get_disk_url(name: &str) -> String {
+    format!("/v1/disks/{}?project={}", name, PROJECT_NAME)
 }
 
 async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
@@ -80,10 +85,10 @@ async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
         },
         source: params::ImageSource::Url {
             url: server.url("/image.raw").to_string(),
+            block_size: params::BlockSize::try_from(512).unwrap(),
         },
         os: "alpine".to_string(),
         version: "edge".to_string(),
-        block_size: params::BlockSize::try_from(512).unwrap(),
     };
 
     let images_url = format!("/v1/images?project={}", PROJECT_NAME);
@@ -161,7 +166,7 @@ async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
                 name: instance_name.parse().unwrap(),
                 description: format!("instance {:?}", instance_name),
             },
-            disk: base_disk_name,
+            disk: base_disk_name.into(),
         },
     )
     .await;
@@ -200,10 +205,10 @@ async fn test_snapshot_without_instance(cptestctx: &ControlPlaneTestContext) {
         },
         source: params::ImageSource::Url {
             url: server.url("/image.raw").to_string(),
+            block_size: params::BlockSize::try_from(512).unwrap(),
         },
         os: "alpine".to_string(),
         version: "edge".to_string(),
-        block_size: params::BlockSize::try_from(512).unwrap(),
     };
 
     let images_url = format!("/v1/images?project={}", PROJECT_NAME);
@@ -261,7 +266,7 @@ async fn test_snapshot_without_instance(cptestctx: &ControlPlaneTestContext) {
                 name: "not-attached".parse().unwrap(),
                 description: "not attached to instance".into(),
             },
-            disk: base_disk_name.clone(),
+            disk: base_disk_name.clone().into(),
         },
     )
     .await;
@@ -338,7 +343,7 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
                 name: "not-attached".parse().unwrap(),
                 description: "not attached to instance".into(),
             },
-            disk: base_disk_name.clone(),
+            disk: base_disk_name.clone().into(),
         },
     )
     .await;
@@ -486,11 +491,9 @@ async fn test_reject_creating_disk_from_snapshot(
                 state: db::model::SnapshotState::Creating,
                 block_size: db::model::BlockSize::AdvancedFormat,
 
-                size: external::ByteCount::try_from(
-                    2 * params::MIN_DISK_SIZE_BYTES,
-                )
-                .unwrap()
-                .into(),
+                size: external::ByteCount::try_from(2 * MIN_DISK_SIZE_BYTES)
+                    .unwrap()
+                    .into(),
             },
         )
         .await
@@ -512,7 +515,7 @@ async fn test_reject_creating_disk_from_snapshot(
                 },
 
                 size: ByteCount::try_from(
-                    2 * params::MIN_DISK_SIZE_BYTES
+                    2 * MIN_DISK_SIZE_BYTES
                         + db::model::BlockSize::Traditional.to_bytes(),
                 )
                 .unwrap(),
@@ -543,7 +546,7 @@ async fn test_reject_creating_disk_from_snapshot(
                     snapshot_id: snapshot.id(),
                 },
 
-                size: ByteCount::try_from(params::MIN_DISK_SIZE_BYTES).unwrap(),
+                size: ByteCount::try_from(MIN_DISK_SIZE_BYTES).unwrap(),
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -557,8 +560,8 @@ async fn test_reject_creating_disk_from_snapshot(
         error.message,
         format!(
             "disk size {} must be greater than or equal to snapshot size {}",
-            params::MIN_DISK_SIZE_BYTES,
-            2 * params::MIN_DISK_SIZE_BYTES,
+            MIN_DISK_SIZE_BYTES,
+            2 * MIN_DISK_SIZE_BYTES,
         )
     );
 
@@ -577,7 +580,7 @@ async fn test_reject_creating_disk_from_snapshot(
                 },
 
                 size: ByteCount::try_from(
-                    2 * params::MIN_DISK_SIZE_BYTES
+                    2 * MIN_DISK_SIZE_BYTES
                         + db::model::BlockSize::AdvancedFormat.to_bytes(),
                 )
                 .unwrap(),
@@ -693,6 +696,89 @@ async fn test_reject_creating_disk_from_illegal_snapshot(
 }
 
 #[nexus_test]
+async fn test_reject_creating_disk_from_other_project_snapshot(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.apictx().nexus;
+    let datastore = nexus.datastore();
+
+    let project_id = create_org_and_project(&client).await;
+
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    let (.., authz_project) = LookupPath::new(&opctx, &datastore)
+        .project_id(project_id)
+        .lookup_for(authz::Action::CreateChild)
+        .await
+        .unwrap();
+
+    let snapshot = datastore
+        .project_ensure_snapshot(
+            &opctx,
+            &authz_project,
+            db::model::Snapshot {
+                identity: db::model::SnapshotIdentity {
+                    id: Uuid::new_v4(),
+                    name: external::Name::try_from("snapshot".to_string())
+                        .unwrap()
+                        .into(),
+                    description: "snapshot".into(),
+
+                    time_created: Utc::now(),
+                    time_modified: Utc::now(),
+                    time_deleted: None,
+                },
+
+                project_id,
+                disk_id: Uuid::new_v4(),
+                volume_id: Uuid::new_v4(),
+                destination_volume_id: Uuid::new_v4(),
+
+                gen: db::model::Generation::new(),
+                state: db::model::SnapshotState::Creating,
+                block_size: db::model::BlockSize::AdvancedFormat,
+
+                size: external::ByteCount::try_from(
+                    db::model::BlockSize::AdvancedFormat.to_bytes(),
+                )
+                .unwrap()
+                .into(),
+            },
+        )
+        .await
+        .unwrap();
+
+    let second_project = create_project(client, "moes-tavern").await;
+    let second_disks_url =
+        format!("/v1/disks?project={}", second_project.identity.name);
+    let error = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &second_disks_url)
+            .body(Some(&params::DiskCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "stolen-disk".parse().unwrap(),
+                    description: String::from("stolen disk"),
+                },
+
+                disk_source: params::DiskSource::Snapshot {
+                    snapshot_id: snapshot.id(),
+                },
+
+                size: ByteCount::try_from(MIN_DISK_SIZE_BYTES).unwrap(),
+            }))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<dropshot::HttpErrorResponseBody>()
+    .unwrap();
+    assert_eq!(error.message, "snapshot does not belong to this project");
+}
+
+#[nexus_test]
 async fn test_cannot_snapshot_if_no_space(cptestctx: &ControlPlaneTestContext) {
     // Test that snapshots cannot be created if there is no space for the blocks
     let client = &cptestctx.external_client;
@@ -737,7 +823,7 @@ async fn test_cannot_snapshot_if_no_space(cptestctx: &ControlPlaneTestContext) {
                     name: "not-attached".parse().unwrap(),
                     description: "not attached to instance".into(),
                 },
-                disk: base_disk_name,
+                disk: base_disk_name.into(),
             }))
             .expect_status(Some(StatusCode::SERVICE_UNAVAILABLE)),
     )
@@ -745,6 +831,115 @@ async fn test_cannot_snapshot_if_no_space(cptestctx: &ControlPlaneTestContext) {
     .execute()
     .await
     .expect("unexpected success creating snapshot");
+}
+
+#[nexus_test]
+async fn test_snapshot_unwind(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let disk_test = DiskTest::new(&cptestctx).await;
+    populate_ip_pool(&client, "default", None).await;
+    create_org_and_project(client).await;
+    let disks_url = get_disks_url();
+
+    // Define a global image
+    let server = ServerBuilder::new().run().unwrap();
+    server.expect(
+        Expectation::matching(request::method_path("HEAD", "/image.raw"))
+            .times(1..)
+            .respond_with(
+                status_code(200).append_header(
+                    "Content-Length",
+                    format!("{}", 4096 * 1000),
+                ),
+            ),
+    );
+
+    let image_create_params = params::ImageCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "alpine-edge".parse().unwrap(),
+            description: String::from(
+                "you can boot any image, as long as it's alpine",
+            ),
+        },
+        source: params::ImageSource::Url {
+            url: server.url("/image.raw").to_string(),
+            block_size: params::BlockSize::try_from(512).unwrap(),
+        },
+        os: "alpine".to_string(),
+        version: "edge".to_string(),
+    };
+
+    let images_url = format!("/v1/images?project={}", PROJECT_NAME);
+    let image =
+        NexusRequest::objects_post(client, &images_url, &image_create_params)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute_and_parse_unwrap::<views::Image>()
+            .await;
+
+    // Create a disk from this image
+    let disk_size = ByteCount::from_gibibytes_u32(2);
+    let base_disk_name: Name = "base-disk".parse().unwrap();
+    let base_disk = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: base_disk_name.clone(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_source: params::DiskSource::Image { image_id: image.identity.id },
+        size: disk_size,
+    };
+
+    let _base_disk: Disk = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&base_disk))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
+
+    // Set the third region's running snapshot callback so it fails
+    let zpool = &disk_test.zpools[2];
+    let dataset = &zpool.datasets[0];
+    disk_test
+        .sled_agent
+        .get_crucible_dataset(zpool.id, dataset.id)
+        .await
+        .set_creating_a_running_snapshot_should_fail()
+        .await;
+
+    // Issue snapshot request, expecting it to fail
+    let snapshots_url = format!("/v1/snapshots?project={}", PROJECT_NAME);
+
+    NexusRequest::expect_failure_with_body(
+        client,
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Method::POST,
+        &snapshots_url,
+        &params::SnapshotCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "snapshot".parse().unwrap(),
+                description: String::from("a snapshot"),
+            },
+            disk: base_disk_name.clone().into(),
+        },
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("snapshot request succeeded");
+
+    // Delete the disk
+    NexusRequest::object_delete(client, &get_disk_url(base_disk_name.as_str()))
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to delete disk");
+
+    // Assert everything was cleaned up
+    assert!(disk_test.crucible_resources_deleted().await);
 }
 
 // Test that the code that Saga nodes call is idempotent
@@ -758,6 +953,7 @@ async fn test_create_snapshot_record_idempotent(
     let datastore = nexus.datastore();
 
     let project_id = create_org_and_project(&client).await;
+    let disk_id = Uuid::new_v4();
 
     let snapshot = db::model::Snapshot {
         identity: db::model::SnapshotIdentity {
@@ -773,7 +969,7 @@ async fn test_create_snapshot_record_idempotent(
         },
 
         project_id,
-        disk_id: Uuid::new_v4(),
+        disk_id,
         volume_id: Uuid::new_v4(),
         destination_volume_id: Uuid::new_v4(),
 
@@ -800,13 +996,70 @@ async fn test_create_snapshot_record_idempotent(
         .unwrap();
 
     let snapshot_created_2 = datastore
-        .project_ensure_snapshot(&opctx, &authz_project, snapshot)
+        .project_ensure_snapshot(&opctx, &authz_project, snapshot.clone())
         .await
         .unwrap();
 
     assert_eq!(snapshot_created_1.id(), snapshot_created_2.id());
 
-    // Test project_delete_snapshot is idempotent
+    // Test that attempting to ensure a snapshot with the same project + name
+    // but a different ID will not work: if a user tries to fire off multiple
+    // snapshot creations for the same project + name, they will get different
+    // IDs, so this should be rejected, ensuring only one snapshot create saga
+    // would apply for the user's multiple requests.
+
+    let dupe_snapshot = db::model::Snapshot {
+        identity: db::model::SnapshotIdentity {
+            id: Uuid::new_v4(),
+            name: external::Name::try_from("snapshot".to_string())
+                .unwrap()
+                .into(),
+            description: "snapshot".into(),
+
+            time_created: Utc::now(),
+            time_modified: Utc::now(),
+            time_deleted: None,
+        },
+
+        project_id,
+        disk_id,
+        volume_id: Uuid::new_v4(),
+        destination_volume_id: Uuid::new_v4(),
+
+        gen: db::model::Generation::new(),
+        state: db::model::SnapshotState::Creating,
+        block_size: db::model::BlockSize::Traditional,
+        size: external::ByteCount::try_from(1024u32).unwrap().into(),
+    };
+
+    let dupe_snapshot_created_err = datastore
+        .project_ensure_snapshot(&opctx, &authz_project, dupe_snapshot)
+        .await;
+
+    assert!(matches!(
+        dupe_snapshot_created_err.unwrap_err(),
+        external::Error::ObjectAlreadyExists { .. },
+    ));
+
+    // Move snapshot from Creating to Ready
+
+    let (.., authz_snapshot, db_snapshot) = LookupPath::new(&opctx, &datastore)
+        .snapshot_id(snapshot_created_1.id())
+        .fetch_for(authz::Action::Modify)
+        .await
+        .unwrap();
+
+    datastore
+        .project_snapshot_update_state(
+            &opctx,
+            &authz_snapshot,
+            db_snapshot.gen,
+            db::model::SnapshotState::Ready,
+        )
+        .await
+        .unwrap();
+
+    // Grab the new snapshot (so generation number is updated)
 
     let (.., authz_snapshot, db_snapshot) = LookupPath::new(&opctx, &datastore)
         .snapshot_id(snapshot_created_1.id())
@@ -814,13 +1067,44 @@ async fn test_create_snapshot_record_idempotent(
         .await
         .unwrap();
 
+    // Test project_delete_snapshot is idempotent for the same input
+
     datastore
-        .project_delete_snapshot(&opctx, &authz_snapshot, &db_snapshot)
+        .project_delete_snapshot(
+            &opctx,
+            &authz_snapshot,
+            &db_snapshot,
+            vec![
+                // This must match what is in the snapshot_delete saga!
+                db::model::SnapshotState::Ready,
+                db::model::SnapshotState::Faulted,
+                db::model::SnapshotState::Destroyed,
+            ],
+        )
         .await
         .unwrap();
 
+    {
+        // Ensure the snapshot is gone
+        let r = LookupPath::new(&opctx, &datastore)
+            .snapshot_id(snapshot_created_1.id())
+            .fetch_for(authz::Action::Read)
+            .await;
+
+        assert!(r.is_err());
+    }
+
     datastore
-        .project_delete_snapshot(&opctx, &authz_snapshot, &db_snapshot)
+        .project_delete_snapshot(
+            &opctx,
+            &authz_snapshot,
+            &db_snapshot,
+            vec![
+                db::model::SnapshotState::Ready,
+                db::model::SnapshotState::Faulted,
+                db::model::SnapshotState::Destroyed,
+            ],
+        )
         .await
         .unwrap();
 }
@@ -840,9 +1124,240 @@ async fn test_region_snapshot_create_idempotent(
         snapshot_addr: "[::]:12345".to_string(),
 
         volume_references: 1,
+        deleting: false,
     };
 
     datastore.region_snapshot_create(region_snapshot.clone()).await.unwrap();
 
     datastore.region_snapshot_create(region_snapshot).await.unwrap();
+}
+
+/// Test that multiple DELETE calls won't be sent to a Crucible agent for the
+/// same read-only downstairs
+#[nexus_test]
+async fn test_multiple_deletes_not_sent(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.apictx().nexus;
+    let datastore = nexus.datastore();
+    DiskTest::new(&cptestctx).await;
+    populate_ip_pool(&client, "default", None).await;
+    let _project_id = create_org_and_project(client).await;
+    let disks_url = get_disks_url();
+
+    // Create a blank disk
+    let disk_size = ByteCount::from_gibibytes_u32(2);
+    let base_disk_name: Name = "base-disk".parse().unwrap();
+    let base_disk = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: base_disk_name.clone(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_source: params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(512).unwrap(),
+        },
+        size: disk_size,
+    };
+
+    let base_disk: Disk = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&base_disk))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
+
+    // Create three snapshots of this disk
+    let snapshots_url = format!("/v1/snapshots?project={}", PROJECT_NAME);
+
+    let snapshot_1: views::Snapshot = object_create(
+        client,
+        &snapshots_url,
+        &params::SnapshotCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "snapshot1".parse().unwrap(),
+                description: "not attached to instance".into(),
+            },
+            disk: base_disk_name.clone().into(),
+        },
+    )
+    .await;
+
+    let snapshot_2: views::Snapshot = object_create(
+        client,
+        &snapshots_url,
+        &params::SnapshotCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "snapshot2".parse().unwrap(),
+                description: "not attached to instance".into(),
+            },
+            disk: base_disk_name.clone().into(),
+        },
+    )
+    .await;
+
+    let snapshot_3: views::Snapshot = object_create(
+        client,
+        &snapshots_url,
+        &params::SnapshotCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "snapshot3".parse().unwrap(),
+                description: "not attached to instance".into(),
+            },
+            disk: base_disk_name.clone().into(),
+        },
+    )
+    .await;
+
+    assert_eq!(snapshot_1.disk_id, base_disk.identity.id);
+    assert_eq!(snapshot_2.disk_id, base_disk.identity.id);
+    assert_eq!(snapshot_3.disk_id, base_disk.identity.id);
+
+    // Simulate all three of these have snapshot delete sagas executing
+    // concurrently. First, delete the snapshot record:
+
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    let (.., authz_snapshot_1, db_snapshot_1) =
+        LookupPath::new(&opctx, &datastore)
+            .snapshot_id(snapshot_1.identity.id)
+            .fetch_for(authz::Action::Delete)
+            .await
+            .unwrap();
+
+    datastore
+        .project_delete_snapshot(
+            &opctx,
+            &authz_snapshot_1,
+            &db_snapshot_1,
+            vec![
+                // This must match what is in the snapshot_delete saga!
+                db::model::SnapshotState::Ready,
+                db::model::SnapshotState::Faulted,
+                db::model::SnapshotState::Destroyed,
+            ],
+        )
+        .await
+        .unwrap();
+
+    let (.., authz_snapshot_2, db_snapshot_2) =
+        LookupPath::new(&opctx, &datastore)
+            .snapshot_id(snapshot_2.identity.id)
+            .fetch_for(authz::Action::Delete)
+            .await
+            .unwrap();
+
+    datastore
+        .project_delete_snapshot(
+            &opctx,
+            &authz_snapshot_2,
+            &db_snapshot_2,
+            vec![
+                // This must match what is in the snapshot_delete saga!
+                db::model::SnapshotState::Ready,
+                db::model::SnapshotState::Faulted,
+                db::model::SnapshotState::Destroyed,
+            ],
+        )
+        .await
+        .unwrap();
+
+    let (.., authz_snapshot_3, db_snapshot_3) =
+        LookupPath::new(&opctx, &datastore)
+            .snapshot_id(snapshot_3.identity.id)
+            .fetch_for(authz::Action::Delete)
+            .await
+            .unwrap();
+
+    datastore
+        .project_delete_snapshot(
+            &opctx,
+            &authz_snapshot_3,
+            &db_snapshot_3,
+            vec![
+                // This must match what is in the snapshot_delete saga!
+                db::model::SnapshotState::Ready,
+                db::model::SnapshotState::Faulted,
+                db::model::SnapshotState::Destroyed,
+            ],
+        )
+        .await
+        .unwrap();
+
+    // Continue pretending that each saga is executing concurrently: call
+    // `decrease_crucible_resource_count_and_soft_delete_volume` back to back.
+    // Make sure that each saga is deleting a unique set of resources, else they
+    // will be sending identical DELETE calls to Crucible agents. This is ok
+    // because the agents are idempotent, but if someone issues a DELETE for a
+    // read-only downstairs (called a "running snapshot") when the snapshot was
+    // deleted, they'll see a 404, which will cause the saga to fail.
+
+    let resources_1 = datastore
+        .decrease_crucible_resource_count_and_soft_delete_volume(
+            db_snapshot_1.volume_id,
+        )
+        .await
+        .unwrap();
+
+    let resources_2 = datastore
+        .decrease_crucible_resource_count_and_soft_delete_volume(
+            db_snapshot_2.volume_id,
+        )
+        .await
+        .unwrap();
+
+    let resources_3 = datastore
+        .decrease_crucible_resource_count_and_soft_delete_volume(
+            db_snapshot_3.volume_id,
+        )
+        .await
+        .unwrap();
+
+    let resources_1_datasets_and_regions =
+        datastore.regions_to_delete(&resources_1).await.unwrap();
+    let resources_1_datasets_and_snapshots =
+        datastore.snapshots_to_delete(&resources_1).await.unwrap();
+
+    let resources_2_datasets_and_regions =
+        datastore.regions_to_delete(&resources_2).await.unwrap();
+    let resources_2_datasets_and_snapshots =
+        datastore.snapshots_to_delete(&resources_2).await.unwrap();
+
+    let resources_3_datasets_and_regions =
+        datastore.regions_to_delete(&resources_3).await.unwrap();
+    let resources_3_datasets_and_snapshots =
+        datastore.snapshots_to_delete(&resources_3).await.unwrap();
+
+    // No region deletions yet, these are just snapshot deletes
+
+    assert!(resources_1_datasets_and_regions.is_empty());
+    assert!(resources_2_datasets_and_regions.is_empty());
+    assert!(resources_3_datasets_and_regions.is_empty());
+
+    // But there are snapshots to delete
+
+    assert!(!resources_1_datasets_and_snapshots.is_empty());
+    assert!(!resources_2_datasets_and_snapshots.is_empty());
+    assert!(!resources_3_datasets_and_snapshots.is_empty());
+
+    // Assert there are no overlaps in the snapshots_to_delete to delete.
+
+    for tuple in &resources_1_datasets_and_snapshots {
+        assert!(!resources_2_datasets_and_snapshots.contains(tuple));
+        assert!(!resources_3_datasets_and_snapshots.contains(tuple));
+    }
+
+    for tuple in &resources_2_datasets_and_snapshots {
+        assert!(!resources_1_datasets_and_snapshots.contains(tuple));
+        assert!(!resources_3_datasets_and_snapshots.contains(tuple));
+    }
+
+    for tuple in &resources_3_datasets_and_snapshots {
+        assert!(!resources_1_datasets_and_snapshots.contains(tuple));
+        assert!(!resources_2_datasets_and_snapshots.contains(tuple));
+    }
 }

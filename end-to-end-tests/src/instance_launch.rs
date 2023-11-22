@@ -5,12 +5,12 @@ use anyhow::{ensure, Context as _, Result};
 use async_trait::async_trait;
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use oxide_client::types::{
-    ByteCount, DiskCreate, DiskSource, Distribution, ExternalIpCreate,
-    GlobalImageCreate, ImageSource, InstanceCpuCount, InstanceCreate,
-    InstanceDiskAttachment, InstanceNetworkInterfaceAttachment, SshKeyCreate,
+    ByteCount, DiskCreate, DiskSource, ExternalIpCreate, ImageCreate,
+    ImageSource, InstanceCpuCount, InstanceCreate, InstanceDiskAttachment,
+    InstanceNetworkInterfaceAttachment, SshKeyCreate,
 };
 use oxide_client::{
-    ClientDisksExt, ClientInstancesExt, ClientSessionExt, ClientSystemExt,
+    ClientDisksExt, ClientImagesExt, ClientInstancesExt, ClientSessionExt,
 };
 use russh::{ChannelMsg, Disconnect};
 use russh_keys::key::{KeyPair, PublicKey};
@@ -41,19 +41,17 @@ async fn instance_launch() -> Result<()> {
     eprintln!("create system image");
     let image_id = ctx
         .client
-        .system_image_create()
-        .body(GlobalImageCreate {
+        .image_create()
+        .body(ImageCreate {
             name: generate_name("debian")?,
             description: String::new(),
-            block_size: 512.try_into().map_err(anyhow::Error::msg)?,
-            distribution: Distribution {
-                name: "debian".try_into().map_err(anyhow::Error::msg)?,
-                version: "propolis-blob".into(),
-            },
+            os: "debian".try_into().map_err(anyhow::Error::msg)?,
+            version: "propolis-blob".into(),
             source: ImageSource::Url {
                 url:
                     "http://[fd00:1122:3344:101::1]:54321/debian-11-genericcloud-amd64.raw"
                         .into(),
+                block_size: 512.try_into().map_err(anyhow::Error::msg)?,
             },
         })
         .send()
@@ -69,7 +67,7 @@ async fn instance_launch() -> Result<()> {
         .body(DiskCreate {
             name: disk_name.clone(),
             description: String::new(),
-            disk_source: DiskSource::GlobalImage { image_id },
+            disk_source: DiskSource::Image { image_id },
             size: ByteCount(2048 * 1024 * 1024),
         })
         .send()

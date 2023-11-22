@@ -70,8 +70,8 @@ function retry
   attempts="${RETRY_ATTEMPTS}"
   # Always try at least once
   attempts=$((attempts < 1 ? 1 : attempts))
-  retry_rc=0
   for i in $(seq 1 $attempts); do
+    retry_rc=0
     "$@" || retry_rc=$?;
     if [[ "$retry_rc" -eq 0 ]]; then
       return
@@ -121,14 +121,16 @@ function install_packages {
         confirm "Install (or update) [${packages[*]}]?" && sudo apt-get install "${packages[@]}"
     fi
   elif [[ "${HOST_OS}" == "SunOS" ]]; then
+    CLANGVER=15
+    PGVER=13
     packages=(
-      'pkg:/package/pkg'
-      'build-essential'
-      'library/postgresql-13'
-      'pkg-config'
-      'library/libxmlsec1'
+      "pkg:/package/pkg"
+      "build-essential"
+      "library/postgresql-$PGVER"
+      "pkg-config"
+      "library/libxmlsec1"
       # "bindgen leverages libclang to preprocess, parse, and type check C and C++ header files."
-      'pkg:/ooce/developer/clang-120'
+      "pkg:/ooce/developer/clang-$CLANGVER"
     )
 
     # Install/update the set of packages.
@@ -139,13 +141,20 @@ function install_packages {
     # Return codes:
     #  0: Normal Success
     #  4: Failure because we're already up-to-date. Also acceptable.
-    if [[ "$rc" -ne 4 ]] && [[ "$rc" -ne 0 ]]; then
+    if ((rc != 4 && rc != 0)); then
       exit "$rc"
     fi
 
+    confirm "Set mediators?" && {
+      pfexec pkg set-mediator -V $CLANGVER clang llvm
+      pfexec pkg set-mediator -V $PGVER postgresql
+    }
+
+    pkg mediator -a
     pkg list -v "${packages[@]}"
   elif [[ "${HOST_OS}" == "Darwin" ]]; then
     packages=(
+      'coreutils'
       'postgresql'
       'pkg-config'
       'libxmlsec1'
@@ -188,6 +197,13 @@ retry ./tools/ci_download_dendrite_openapi
 # asic and running dendrite instance
 retry ./tools/ci_download_dendrite_stub
 
+# Download mgd. This is required to run tests that invovle dynamic external
+# routing
+retry ./tools/ci_download_maghemite_mgd
+
+# Download transceiver-control. This is used as the source for the
+# xcvradm binary which is bundled with the switch zone.
+retry ./tools/ci_download_transceiver_control
 
 # Validate the PATH:
 expected_in_path=(

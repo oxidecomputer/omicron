@@ -3,7 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use diesel::backend::Backend;
-use diesel::backend::RawValue;
 use diesel::deserialize;
 use diesel::deserialize::FromSql;
 use diesel::query_builder::bind_collector::RawBytesBindCollector;
@@ -22,7 +21,7 @@ pub struct Vni(pub external::Vni);
 
 impl<DB> ToSql<sql_types::Int4, DB> for Vni
 where
-    DB: Backend<BindCollector = RawBytesBindCollector<DB>>,
+    for<'c> DB: Backend<BindCollector<'c> = RawBytesBindCollector<DB>>,
     i32: ToSql<sql_types::Int4, DB>,
 {
     fn to_sql<'b>(
@@ -40,7 +39,7 @@ where
     DB: Backend,
     i32: FromSql<sql_types::Int4, DB>,
 {
-    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+    fn from_sql(bytes: DB::RawValue<'_>) -> deserialize::Result<Self> {
         Ok(Vni(external::Vni::try_from(i32::from_sql(bytes)?)?))
     }
 }

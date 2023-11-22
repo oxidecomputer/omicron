@@ -4,15 +4,21 @@
 
 //! Well-known DNS names and related types for internal DNS (see RFD 248)
 
+use omicron_common::api::internal::shared::SwitchLocation;
 use uuid::Uuid;
 
 /// Name for the control plane DNS zone
 pub const DNS_ZONE: &str = "control-plane.oxide.internal";
 
+/// Name for the delegated external DNS zone that's used in testing and
+/// development
+pub const DNS_ZONE_EXTERNAL_TESTING: &str = "oxide-dev.test";
+
 /// Names of services within the control plane
-#[derive(Clone, Debug, Hash, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Hash, Eq, Ord, PartialEq, PartialOrd)]
 pub enum ServiceName {
     Clickhouse,
+    ClickhouseKeeper,
     Cockroach,
     InternalDns,
     ExternalDns,
@@ -25,15 +31,18 @@ pub enum ServiceName {
     CruciblePantry,
     SledAgent(Uuid),
     Crucible(Uuid),
-    BoundaryNTP,
-    InternalNTP,
-    Maghemite,
+    BoundaryNtp,
+    InternalNtp,
+    Maghemite, //TODO change to Dpd - maghemite has several services.
+    Mgd,
+    Scrimlet(SwitchLocation),
 }
 
 impl ServiceName {
     fn service_kind(&self) -> &'static str {
         match self {
             ServiceName::Clickhouse => "clickhouse",
+            ServiceName::ClickhouseKeeper => "clickhouse-keeper",
             ServiceName::Cockroach => "cockroach",
             ServiceName::ExternalDns => "external-dns",
             ServiceName::InternalDns => "nameservice",
@@ -46,9 +55,11 @@ impl ServiceName {
             ServiceName::CruciblePantry => "crucible-pantry",
             ServiceName::SledAgent(_) => "sledagent",
             ServiceName::Crucible(_) => "crucible",
-            ServiceName::BoundaryNTP => "boundary-ntp",
-            ServiceName::InternalNTP => "internal-ntp",
+            ServiceName::BoundaryNtp => "boundary-ntp",
+            ServiceName::InternalNtp => "internal-ntp",
             ServiceName::Maghemite => "maghemite",
+            ServiceName::Mgd => "mgd",
+            ServiceName::Scrimlet(_) => "scrimlet",
         }
     }
 
@@ -57,6 +68,7 @@ impl ServiceName {
     pub(crate) fn dns_name(&self) -> String {
         match self {
             ServiceName::Clickhouse
+            | ServiceName::ClickhouseKeeper
             | ServiceName::Cockroach
             | ServiceName::InternalDns
             | ServiceName::ExternalDns
@@ -67,9 +79,10 @@ impl ServiceName {
             | ServiceName::Dendrite
             | ServiceName::Tfport
             | ServiceName::CruciblePantry
-            | ServiceName::BoundaryNTP
-            | ServiceName::InternalNTP
-            | ServiceName::Maghemite => {
+            | ServiceName::BoundaryNtp
+            | ServiceName::InternalNtp
+            | ServiceName::Maghemite
+            | ServiceName::Mgd => {
                 format!("_{}._tcp", self.service_kind())
             }
             ServiceName::SledAgent(id) => {
@@ -78,6 +91,14 @@ impl ServiceName {
             ServiceName::Crucible(id) => {
                 format!("_{}._tcp.{}", self.service_kind(), id)
             }
+            ServiceName::Scrimlet(location) => {
+                format!("_{location}._scrimlet._tcp")
+            }
         }
+    }
+
+    /// Returns the full DNS name of this service
+    pub fn srv_name(&self) -> String {
+        format!("{}.{DNS_ZONE}", self.dns_name())
     }
 }

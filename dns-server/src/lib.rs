@@ -49,6 +49,12 @@ pub mod storage;
 
 use anyhow::{anyhow, Context};
 use slog::o;
+use std::net::SocketAddr;
+use trust_dns_resolver::config::NameServerConfig;
+use trust_dns_resolver::config::Protocol;
+use trust_dns_resolver::config::ResolverConfig;
+use trust_dns_resolver::config::ResolverOpts;
+use trust_dns_resolver::TokioAsyncResolver;
 
 /// Starts both the HTTP and DNS servers over a given store.
 pub async fn start_servers(
@@ -85,4 +91,88 @@ pub async fn start_servers(
     };
 
     Ok((dns_server, dropshot_server))
+}
+
+/// An DNS server running on localhost, using a temporary directory for storage.
+///
+/// Intended to be used for testing only.
+pub struct TransientServer {
+    /// Server storage dir
+    pub storage_dir: tempfile::TempDir,
+    /// DNS server
+    pub dns_server: dns_server::ServerHandle,
+    /// Dropshot server
+    pub dropshot_server: dropshot::HttpServer<http_server::Context>,
+}
+
+impl TransientServer {
+    pub async fn new(log: &slog::Logger) -> Result<Self, anyhow::Error> {
+        Self::new_with_address(log, "[::1]:0".parse().unwrap()).await
+    }
+
+    pub async fn new_with_address(
+        log: &slog::Logger,
+        dns_bind_address: SocketAddr,
+    ) -> Result<Self, anyhow::Error> {
+        let storage_dir = tempfile::tempdir()?;
+
+        let dns_log = log.new(o!("kind" => "dns"));
+
+        let store = storage::Store::new(
+            log.new(o!("component" => "store")),
+            &storage::Config {
+                keep_old_generations: 3,
+                storage_path: storage_dir
+                    .path()
+                    .to_string_lossy()
+                    .to_string()
+                    .into(),
+            },
+        )
+        .context("initializing DNS storage")?;
+
+        let (dns_server, dropshot_server) = start_servers(
+            dns_log,
+            store,
+            &dns_server::Config { bind_address: dns_bind_address },
+            &dropshot::ConfigDropshot {
+                bind_address: "[::1]:0".parse().unwrap(),
+                request_body_max_bytes: 4 * 1024 * 1024,
+                default_handler_task_mode: dropshot::HandlerTaskMode::Detached,
+            },
+        )
+        .await?;
+        Ok(Self { storage_dir, dns_server, dropshot_server })
+    }
+
+    pub async fn initialize_with_config(
+        &self,
+        log: &slog::Logger,
+        dns_config: &dns_service_client::types::DnsConfigParams,
+    ) -> Result<(), anyhow::Error> {
+        let dns_config_client = dns_service_client::Client::new(
+            &format!("http://{}", self.dropshot_server.local_addr()),
+            log.clone(),
+        );
+        dns_config_client
+            .dns_config_put(&dns_config)
+            .await
+            .context("initializing DNS")?;
+        Ok(())
+    }
+
+    pub async fn resolver(&self) -> Result<TokioAsyncResolver, anyhow::Error> {
+        let mut resolver_config = ResolverConfig::new();
+        resolver_config.add_name_server(NameServerConfig {
+            socket_addr: self.dns_server.local_address(),
+            protocol: Protocol::Udp,
+            tls_dns_name: None,
+            trust_nx_responses: false,
+            bind_addr: None,
+        });
+        let resolver =
+            TokioAsyncResolver::tokio(resolver_config, ResolverOpts::default())
+                .context("creating DNS resolver")?;
+        Ok(resolver)
+    }
 }

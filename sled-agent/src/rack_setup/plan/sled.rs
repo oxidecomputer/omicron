@@ -4,65 +4,22 @@
 
 //! Plan generation for "how should sleds be initialized".
 
+use crate::bootstrap::params::StartSledAgentRequestBody;
 use crate::bootstrap::{
-    config::BOOTSTRAP_AGENT_SPROCKETS_PORT,
-    params::SledAgentRequest,
-    trust_quorum::{RackSecret, ShareDistribution},
+    config::BOOTSTRAP_AGENT_RACK_INIT_PORT, params::StartSledAgentRequest,
 };
 use crate::rack_setup::config::SetupServiceConfig as Config;
+use camino::Utf8PathBuf;
+use omicron_common::ledger::{self, Ledger, Ledgerable};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sled_storage::dataset::CONFIG_DATASET;
+use sled_storage::manager::StorageHandle;
 use slog::Logger;
-use sprockets_host::Ed25519Certificate;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::{Ipv6Addr, SocketAddrV6};
-use std::path::{Path, PathBuf};
 use thiserror::Error;
 use uuid::Uuid;
-
-fn rss_sled_plan_path() -> PathBuf {
-    Path::new(omicron_common::OMICRON_CONFIG_PATH).join("rss-sled-plan.toml")
-}
-
-pub fn generate_rack_secret<'a>(
-    rack_secret_threshold: usize,
-    member_device_id_certs: &'a [Ed25519Certificate],
-    log: &Logger,
-) -> Result<
-    Option<impl ExactSizeIterator<Item = ShareDistribution> + 'a>,
-    PlanError,
-> {
-    // We do not generate a rack secret if we only have a single sled or if our
-    // config specifies that the threshold for unlock is only a single sled.
-    let total_shares = member_device_id_certs.len();
-    if total_shares <= 1 {
-        info!(log, "Skipping rack secret creation (only one sled present)");
-        return Ok(None);
-    }
-
-    if rack_secret_threshold <= 1 {
-        warn!(
-            log,
-            concat!(
-                "Skipping rack secret creation due to config",
-                " (despite discovery of {} bootstrap agents)"
-            ),
-            total_shares,
-        );
-        return Ok(None);
-    }
-
-    let secret = RackSecret::new();
-    let (shares, verifier) = secret
-        .split(rack_secret_threshold, total_shares)
-        .map_err(PlanError::SplitRackSecret)?;
-
-    Ok(Some(shares.into_iter().map(move |share| ShareDistribution {
-        threshold: rack_secret_threshold,
-        verifier: verifier.clone(),
-        share,
-        member_device_id_certs: member_device_id_certs.to_vec(),
-    })))
-}
 
 /// Describes errors which may occur while generating a plan for sleds.
 #[derive(Error, Debug)]
@@ -74,17 +31,22 @@ pub enum PlanError {
         err: std::io::Error,
     },
 
-    #[error("Cannot deserialize TOML file at {path}: {err}")]
-    Toml { path: PathBuf, err: toml::de::Error },
-
-    #[error("Failed to split rack secret: {0:?}")]
-    SplitRackSecret(vsss_rs::Error),
+    #[error("Failed to access ledger: {0}")]
+    Ledger(#[from] ledger::Error),
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+impl Ledgerable for Plan {
+    fn is_newer_than(&self, _other: &Self) -> bool {
+        true
+    }
+    fn generation_bump(&mut self) {}
+}
+const RSS_SLED_PLAN_FILENAME: &str = "rss-sled-plan.json";
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct Plan {
     pub rack_id: Uuid,
-    pub sleds: HashMap<SocketAddrV6, SledAgentRequest>,
+    pub sleds: HashMap<SocketAddrV6, StartSledAgentRequest>,
 
     // Store the provided RSS configuration as part of the sled plan; if it
     // changes after reboot, we need to know.
@@ -92,25 +54,24 @@ pub struct Plan {
 }
 
 impl Plan {
-    pub async fn load(log: &Logger) -> Result<Option<Self>, PlanError> {
+    pub async fn load(
+        log: &Logger,
+        storage: &StorageHandle,
+    ) -> Result<Option<Self>, PlanError> {
+        let paths: Vec<Utf8PathBuf> = storage
+            .get_latest_resources()
+            .await
+            .all_m2_mountpoints(CONFIG_DATASET)
+            .into_iter()
+            .map(|p| p.join(RSS_SLED_PLAN_FILENAME))
+            .collect();
+
         // If we already created a plan for this RSS to allocate
         // subnets/requests to sleds, re-use that existing plan.
-        let rss_sled_plan_path = rss_sled_plan_path();
-        if rss_sled_plan_path.exists() {
+        let ledger = Ledger::<Self>::new(log, paths.clone()).await;
+        if let Some(ledger) = ledger {
             info!(log, "RSS plan already created, loading from file");
-
-            let plan: Self = toml::from_str(
-                &tokio::fs::read_to_string(&rss_sled_plan_path).await.map_err(
-                    |err| PlanError::Io {
-                        message: format!(
-                            "Loading RSS plan {rss_sled_plan_path:?}"
-                        ),
-                        err,
-                    },
-                )?,
-            )
-            .map_err(|err| PlanError::Toml { path: rss_sled_plan_path, err })?;
-            Ok(Some(plan))
+            Ok(Some(ledger.data().clone()))
         } else {
             Ok(None)
         }
@@ -119,7 +80,9 @@ impl Plan {
     pub async fn create(
         log: &Logger,
         config: &Config,
-        bootstrap_addrs: Vec<Ipv6Addr>,
+        storage_manager: &StorageHandle,
+        bootstrap_addrs: HashSet<Ipv6Addr>,
+        use_trust_quorum: bool,
     ) -> Result<Self, PlanError> {
         let rack_id = Uuid::new_v4();
 
@@ -128,7 +91,7 @@ impl Plan {
             info!(log, "Creating plan for the sled at {:?}", bootstrap_addr);
             let bootstrap_addr = SocketAddrV6::new(
                 bootstrap_addr,
-                BOOTSTRAP_AGENT_SPROCKETS_PORT,
+                BOOTSTRAP_AGENT_RACK_INIT_PORT,
                 0,
                 0,
             );
@@ -138,13 +101,16 @@ impl Plan {
 
             (
                 bootstrap_addr,
-                SledAgentRequest {
-                    id: Uuid::new_v4(),
-                    subnet,
-                    gateway: config.gateway.clone(),
-                    ntp_servers: config.ntp_servers.clone(),
-                    dns_servers: config.dns_servers.clone(),
-                    rack_id,
+                StartSledAgentRequest {
+                    generation: 0,
+                    schema_version: 1,
+                    body: StartSledAgentRequestBody {
+                        id: Uuid::new_v4(),
+                        subnet,
+                        use_trust_quorum,
+                        is_lrtq_learner: false,
+                        rack_id,
+                    },
                 },
             )
         });
@@ -159,23 +125,17 @@ impl Plan {
         let plan = Self { rack_id, sleds, config: config.clone() };
 
         // Once we've constructed a plan, write it down to durable storage.
-        let serialized_plan =
-            toml::Value::try_from(&plan).unwrap_or_else(|e| {
-                panic!("Cannot serialize configuration: {:#?}: {}", plan, e)
-            });
-        let plan_str = toml::to_string(&serialized_plan)
-            .expect("Cannot turn config to string");
+        let paths: Vec<Utf8PathBuf> = storage_manager
+            .get_latest_resources()
+            .await
+            .all_m2_mountpoints(CONFIG_DATASET)
+            .into_iter()
+            .map(|p| p.join(RSS_SLED_PLAN_FILENAME))
+            .collect();
 
-        info!(log, "Plan serialized as: {}", plan_str);
-        let path = rss_sled_plan_path();
-        tokio::fs::write(&path, plan_str).await.map_err(|err| {
-            PlanError::Io {
-                message: format!("Storing RSS sled plan to {path:?}"),
-                err,
-            }
-        })?;
+        let mut ledger = Ledger::<Self>::new_with(log, paths, plan.clone());
+        ledger.commit().await?;
         info!(log, "Sled plan written to storage");
-
         Ok(plan)
     }
 }
@@ -183,68 +143,13 @@ impl Plan {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use omicron_test_utils::dev::test_setup_log;
-    use sprockets_common::certificates::Ed25519Signature;
-    use sprockets_common::certificates::KeyType;
-    use std::collections::HashSet;
-
-    fn dummy_certs(n: usize) -> Vec<Ed25519Certificate> {
-        vec![
-            Ed25519Certificate {
-                subject_key_type: KeyType::DeviceId,
-                subject_public_key: sprockets_host::Ed25519PublicKey([0; 32]),
-                signer_key_type: KeyType::Manufacturing,
-                signature: Ed25519Signature([0; 64]),
-            };
-            n
-        ]
-    }
 
     #[test]
-    fn test_generate_rack_secret() {
-        let logctx = test_setup_log("test_generate_rack_secret");
-
-        // No secret generated if we have <= 1 sled
-        assert!(generate_rack_secret(10, &dummy_certs(1), &logctx.log)
-            .unwrap()
-            .is_none());
-
-        // No secret generated if threshold <= 1
-        assert!(generate_rack_secret(1, &dummy_certs(10), &logctx.log)
-            .unwrap()
-            .is_none());
-
-        // Secret generation fails if threshold > total sleds
-        assert!(matches!(
-            generate_rack_secret(10, &dummy_certs(5), &logctx.log),
-            Err(PlanError::SplitRackSecret(_))
-        ));
-
-        // Secret generation succeeds if threshold <= total shares and both are
-        // > 1, and the returned iterator satifies:
-        //
-        // * total length == total shares
-        // * each share is distinct
-        for total_shares in 2..=32 {
-            for threshold in 2..=total_shares {
-                let certs = dummy_certs(total_shares);
-                let shares =
-                    generate_rack_secret(threshold, &certs, &logctx.log)
-                        .unwrap()
-                        .unwrap();
-
-                assert_eq!(shares.len(), total_shares);
-
-                // `Share` doesn't implement `Hash`, but it's a newtype around
-                // `Vec<u8>` (which does). Unwrap the newtype to check that all
-                // shares are distinct.
-                let shares_set = shares
-                    .map(|share_dist| share_dist.share.0)
-                    .collect::<HashSet<_>>();
-                assert_eq!(shares_set.len(), total_shares);
-            }
-        }
-
-        logctx.cleanup_successful();
+    fn test_rss_sled_plan_schema() {
+        let schema = schemars::schema_for!(Plan);
+        expectorate::assert_contents(
+            "../schema/rss-sled-plan.json",
+            &serde_json::to_string_pretty(&schema).unwrap(),
+        );
     }
 }

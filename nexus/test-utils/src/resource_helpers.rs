@@ -14,6 +14,7 @@ use dropshot::Method;
 use http::StatusCode;
 use nexus_test_interface::NexusServer;
 use nexus_types::external_api::params;
+use nexus_types::external_api::params::PhysicalDiskKind;
 use nexus_types::external_api::params::UserId;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::IdentityType;
@@ -25,6 +26,7 @@ use nexus_types::external_api::views::IpPoolRange;
 use nexus_types::external_api::views::User;
 use nexus_types::external_api::views::{Project, Silo, Vpc, VpcRouter};
 use nexus_types::internal_api::params as internal_params;
+use nexus_types::internal_api::params::Baseboard;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -138,6 +140,8 @@ pub async fn create_ip_pool(
                 name: pool_name.parse().unwrap(),
                 description: String::from("an ip pool"),
             },
+            silo: None,
+            is_default: false,
         },
     )
     .await;
@@ -148,10 +152,10 @@ pub async fn create_ip_pool(
 pub async fn create_certificate(
     client: &ClientTestContext,
     cert_name: &str,
-    cert: Vec<u8>,
-    key: Vec<u8>,
+    cert: String,
+    key: String,
 ) -> Certificate {
-    let url = "/v1/system/certificates".to_string();
+    let url = "/v1/certificates".to_string();
     object_create(
         client,
         &url,
@@ -169,8 +173,30 @@ pub async fn create_certificate(
 }
 
 pub async fn delete_certificate(client: &ClientTestContext, cert_name: &str) {
-    let url = format!("/v1/system/certificates/{}", cert_name);
+    let url = format!("/v1/certificates/{}", cert_name);
     object_delete(client, &url).await
+}
+
+pub async fn create_switch(
+    client: &ClientTestContext,
+    serial: &str,
+    part: &str,
+    revision: i64,
+    rack_id: Uuid,
+) -> views::Switch {
+    object_put(
+        client,
+        "/switches",
+        &internal_params::SwitchPutRequest {
+            baseboard: Baseboard {
+                serial_number: serial.to_string(),
+                part_number: part.to_string(),
+                revision,
+            },
+            rack_id,
+        },
+    )
+    .await
 }
 
 pub async fn create_physical_disk(
@@ -178,7 +204,7 @@ pub async fn create_physical_disk(
     vendor: &str,
     serial: &str,
     model: &str,
-    variant: internal_params::PhysicalDiskKind,
+    variant: PhysicalDiskKind,
     sled_id: Uuid,
 ) -> internal_params::PhysicalDiskPutResponse {
     object_put(
@@ -239,6 +265,8 @@ pub async fn create_silo(
             discoverable,
             identity_mode,
             admin_group_name: None,
+            tls_certificates: vec![],
+            mapped_fleet_roles: Default::default(),
         },
     )
     .await
@@ -324,7 +352,9 @@ pub async fn create_instance(
         instance_name,
         &params::InstanceNetworkInterfaceAttachment::Default,
         // Disks=
-        vec![],
+        Vec::<params::InstanceDiskAttachment>::new(),
+        // External IPs=
+        Vec::<params::ExternalIpCreate>::new(),
     )
     .await
 }
@@ -336,6 +366,7 @@ pub async fn create_instance_with(
     instance_name: &str,
     nics: &params::InstanceNetworkInterfaceAttachment,
     disks: Vec<params::InstanceDiskAttachment>,
+    external_ips: Vec<params::ExternalIpCreate>,
 ) -> Instance {
     let url = format!("/v1/instances?project={}", project_name);
     object_create(
@@ -353,7 +384,7 @@ pub async fn create_instance_with(
                 b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
                     .to_vec(),
             network_interfaces: nics.clone(),
-            external_ips: vec![],
+            external_ips,
             disks,
             start: true,
         },
@@ -494,6 +525,25 @@ pub async fn project_get(
         .expect("failed to get project")
         .parsed_body()
         .expect("failed to parse Project")
+}
+
+pub async fn projects_list(
+    client: &ClientTestContext,
+    projects_url: &str,
+    initial_params: &str,
+    limit: Option<usize>,
+) -> Vec<Project> {
+    NexusRequest::iter_collection_authn(
+        client,
+        projects_url,
+        initial_params,
+        limit,
+    )
+    .await
+    .expect("failed to list projects")
+    .all_items
+    .into_iter()
+    .collect()
 }
 
 pub struct TestDataset {

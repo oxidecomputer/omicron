@@ -18,6 +18,7 @@ pub struct Service {
     identity: ServiceIdentity,
 
     pub sled_id: Uuid,
+    pub zone_id: Option<Uuid>,
     pub ip: ipv6::Ipv6Addr,
     pub port: SqlU16,
     pub kind: ServiceKind,
@@ -27,12 +28,14 @@ impl Service {
     pub fn new(
         id: Uuid,
         sled_id: Uuid,
+        zone_id: Option<Uuid>,
         addr: SocketAddrV6,
         kind: ServiceKind,
     ) -> Self {
         Self {
             identity: ServiceIdentity::new(id),
             sled_id,
+            zone_id,
             ip: addr.ip().into(),
             port: addr.port().into(),
             kind,

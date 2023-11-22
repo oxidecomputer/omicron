@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::schema::silo_user_password_hash;
-use diesel::backend::{Backend, RawValue};
+use diesel::backend::Backend;
 use diesel::deserialize::{self, FromSql};
 use diesel::serialize::{self, ToSql};
 use diesel::sql_types;
@@ -11,20 +11,20 @@ use parse_display::Display;
 use ref_cast::RefCast;
 use uuid::Uuid;
 
-/// Newtype wrapper around [`nexus_passwords::PasswordHashString`].
+/// Newtype wrapper around [`omicron_passwords::PasswordHashString`].
 #[derive(
     Clone, Debug, Display, AsExpression, FromSqlRow, Eq, PartialEq, RefCast,
 )]
 #[diesel(sql_type = sql_types::Text)]
 #[repr(transparent)]
 #[display("{0}")]
-pub struct PasswordHashString(pub nexus_passwords::PasswordHashString);
+pub struct PasswordHashString(pub omicron_passwords::PasswordHashString);
 
 NewtypeFrom! {
-    () pub struct PasswordHashString(pub nexus_passwords::PasswordHashString);
+    () pub struct PasswordHashString(pub omicron_passwords::PasswordHashString);
 }
 NewtypeDeref! {
-    () pub struct PasswordHashString(pub nexus_passwords::PasswordHashString);
+    () pub struct PasswordHashString(pub omicron_passwords::PasswordHashString);
 }
 
 impl<DB> ToSql<sql_types::Text, DB> for PasswordHashString
@@ -46,7 +46,7 @@ where
     DB: Backend,
     String: FromSql<sql_types::Text, DB>,
 {
-    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+    fn from_sql(bytes: DB::RawValue<'_>) -> deserialize::Result<Self> {
         String::from_sql(bytes)?
             .parse()
             .map(PasswordHashString)

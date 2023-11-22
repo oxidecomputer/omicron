@@ -51,7 +51,7 @@ pub struct TestHistogram {
 pub fn make_sample() -> Sample {
     let target = TestTarget::default();
     let metric = TestMetric { id: Uuid::new_v4(), good: true, datum: 1 };
-    Sample::new(&target, &metric)
+    Sample::new(&target, &metric).unwrap()
 }
 
 pub fn make_hist_sample() -> Sample {
@@ -61,7 +61,7 @@ pub fn make_hist_sample() -> Sample {
     hist.sample(2.0).unwrap();
     hist.sample(6.0).unwrap();
     let metric = TestHistogram { id: Uuid::new_v4(), good: true, datum: hist };
-    Sample::new(&target, &metric)
+    Sample::new(&target, &metric).unwrap()
 }
 
 /// A target identifying a single virtual machine instance
@@ -96,11 +96,27 @@ pub fn generate_test_samples(
                         cpu_id: cpu as _,
                         datum: Cumulative::new(sample as f64),
                     };
-                    let sample = Sample::new(&vm, &cpu_busy);
+                    let sample = Sample::new(&vm, &cpu_busy).unwrap();
                     samples.push(sample);
                 }
             }
         }
     }
     samples
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_gen_test_samples() {
+        let (n_projects, n_instances, n_cpus, n_samples) = (2, 2, 2, 2);
+        let samples =
+            generate_test_samples(n_projects, n_instances, n_cpus, n_samples);
+        assert_eq!(
+            samples.len(),
+            n_projects * n_instances * n_cpus * n_samples
+        );
+    }
 }

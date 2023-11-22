@@ -8,12 +8,17 @@ license = "MPL-2.0"
 [dependencies]
 bytes = { workspace = true, features = [ "serde" ] }
 chrono.workspace = true
-num-traits.workspace = true
+num.workspace = true
+omicron-common.workspace = true
 oximeter-macro-impl.workspace = true
 schemars = { workspace = true, features = [ "uuid1", "bytes", "chrono" ] }
 serde.workspace = true
+strum.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
+omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
+approx.workspace = true
+rstest.workspace = true
 trybuild.workspace = true

@@ -40,10 +40,15 @@ use crate::db::model::ConsoleSession;
 
 use crate::authz;
 use crate::db;
+use crate::db::fixed_data::silo::DEFAULT_SILO;
 use crate::db::identity::Asset;
+use nexus_types::external_api::shared::FleetRole;
+use nexus_types::external_api::shared::SiloRole;
 use omicron_common::api::external::LookupType;
 use serde::Deserialize;
 use serde::Serialize;
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use uuid::Uuid;
 
 /// Describes how the actor performing the current operation is authenticated
@@ -77,7 +82,7 @@ impl Context {
         &self,
     ) -> Result<&Actor, omicron_common::api::external::Error> {
         match &self.kind {
-            Kind::Authenticated(Details { actor }) => Ok(actor),
+            Kind::Authenticated(Details { actor }, ..) => Ok(actor),
             Kind::Unauthenticated => {
                 Err(omicron_common::api::external::Error::Unauthenticated {
                     internal_message: "Actor required".to_string(),
@@ -132,6 +137,14 @@ impl Context {
         })
     }
 
+    /// Returns the `SiloAuthnPolicy` for the authenticated actor's Silo, if any
+    pub fn silo_authn_policy(&self) -> Option<&SiloAuthnPolicy> {
+        match &self.kind {
+            Kind::Unauthenticated => None,
+            Kind::Authenticated(_, policy) => policy.as_ref(),
+        }
+    }
+
     /// Returns the list of schemes tried, in order
     ///
     /// This should generally *not* be exposed to clients.
@@ -178,9 +191,10 @@ impl Context {
 
     fn context_for_builtin_user(user_builtin_id: Uuid) -> Context {
         Context {
-            kind: Kind::Authenticated(Details {
-                actor: Actor::UserBuiltin { user_builtin_id },
-            }),
+            kind: Kind::Authenticated(
+                Details { actor: Actor::UserBuiltin { user_builtin_id } },
+                None,
+            ),
             schemes_tried: Vec::new(),
         }
     }
@@ -190,12 +204,15 @@ impl Context {
     // `OpContext::for_tests()`.
     pub fn privileged_test_user() -> Context {
         Context {
-            kind: Kind::Authenticated(Details {
-                actor: Actor::SiloUser {
-                    silo_user_id: USER_TEST_PRIVILEGED.id(),
-                    silo_id: USER_TEST_PRIVILEGED.silo_id,
+            kind: Kind::Authenticated(
+                Details {
+                    actor: Actor::SiloUser {
+                        silo_user_id: USER_TEST_PRIVILEGED.id(),
+                        silo_id: USER_TEST_PRIVILEGED.silo_id,
+                    },
                 },
-            }),
+                Some(SiloAuthnPolicy::try_from(&*DEFAULT_SILO).unwrap()),
+            ),
             schemes_tried: Vec::new(),
         }
     }
@@ -207,18 +224,59 @@ impl Context {
         Context::for_test_user(
             USER_TEST_UNPRIVILEGED.id(),
             USER_TEST_UNPRIVILEGED.silo_id,
+            SiloAuthnPolicy::try_from(&*DEFAULT_SILO).unwrap(),
         )
     }
 
-    /// Returns an authenticated context for the specific Silo user.
-    #[cfg(test)]
-    pub fn for_test_user(silo_user_id: Uuid, silo_id: Uuid) -> Context {
+    /// Returns an authenticated context for the specific Silo user. Not marked
+    /// as #[cfg(test)] so that this is available in integration tests.
+    pub fn for_test_user(
+        silo_user_id: Uuid,
+        silo_id: Uuid,
+        silo_authn_policy: SiloAuthnPolicy,
+    ) -> Context {
         Context {
-            kind: Kind::Authenticated(Details {
-                actor: Actor::SiloUser { silo_user_id, silo_id },
-            }),
+            kind: Kind::Authenticated(
+                Details { actor: Actor::SiloUser { silo_user_id, silo_id } },
+                Some(silo_authn_policy),
+            ),
             schemes_tried: Vec::new(),
         }
+    }
+}
+
+/// Authentication-related policy derived from a user's Silo
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct SiloAuthnPolicy {
+    /// Describes which fleet-level roles are automatically conferred by which
+    /// silo-level roles.
+    mapped_fleet_roles: BTreeMap<SiloRole, BTreeSet<FleetRole>>,
+}
+
+impl SiloAuthnPolicy {
+    #[cfg(test)]
+    pub fn new(
+        mapped_fleet_roles: BTreeMap<SiloRole, BTreeSet<FleetRole>>,
+    ) -> SiloAuthnPolicy {
+        SiloAuthnPolicy { mapped_fleet_roles }
+    }
+
+    pub fn mapped_fleet_roles(
+        &self,
+    ) -> &BTreeMap<SiloRole, BTreeSet<FleetRole>> {
+        &self.mapped_fleet_roles
+    }
+}
+
+impl TryFrom<&nexus_db_model::Silo> for SiloAuthnPolicy {
+    type Error = omicron_common::api::external::Error;
+
+    fn try_from(
+        value: &nexus_db_model::Silo,
+    ) -> Result<Self, omicron_common::api::external::Error> {
+        value
+            .mapped_fleet_roles()
+            .map(|mapped_fleet_roles| SiloAuthnPolicy { mapped_fleet_roles })
     }
 }
 
@@ -285,7 +343,7 @@ enum Kind {
     /// Client did not attempt to authenticate
     Unauthenticated,
     /// Client successfully authenticated
-    Authenticated(Details),
+    Authenticated(Details, Option<SiloAuthnPolicy>),
 }
 
 /// Describes the actor that was authenticated
@@ -419,6 +477,14 @@ pub enum Reason {
         source: anyhow::Error,
     },
 
+    /// A user was authenticated, but we failed to load their Silo's
+    /// authentication policy
+    #[error("actor authenticated, but failed to load Silo authn policy")]
+    LoadSiloAuthnPolicy {
+        #[source]
+        source: omicron_common::api::external::Error,
+    },
+
     /// Operational error while attempting to authenticate
     #[error("unexpected error during authentication: {source:#}")]
     UnknownError {
@@ -453,7 +519,8 @@ impl From<Error> for dropshot::HttpError {
                     internal_message: format!("{:#}", e),
                 },
             ),
-            Reason::UnknownError { source } => source.into(),
+            Reason::UnknownError { source }
+            | Reason::LoadSiloAuthnPolicy { source } => source.into(),
         }
     }
 }

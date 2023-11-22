@@ -5,10 +5,10 @@
 use dropshot::test_util::ClientTestContext;
 use http::method::Method;
 use http::StatusCode;
+use nexus_types::external_api::params::PhysicalDiskKind;
+use nexus_types::internal_api::params::PhysicalDiskPutRequest;
+use nexus_types::internal_api::params::ZpoolPutRequest;
 use omicron_common::api::external::ByteCount;
-use omicron_nexus::internal_api::params::PhysicalDiskKind;
-use omicron_nexus::internal_api::params::PhysicalDiskPutRequest;
-use omicron_nexus::internal_api::params::ZpoolPutRequest;
 use uuid::Uuid;
 
 use nexus_test_utils::SLED_AGENT_UUID;

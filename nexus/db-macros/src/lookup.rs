@@ -15,7 +15,7 @@ use std::ops::Deref;
 // INPUT (arguments to the macro)
 //
 
-/// Arguments for [`lookup_resource!`]
+/// Arguments for [`super::lookup_resource!`]
 // NOTE: this is only "pub" for the `cargo doc` link on [`lookup_resource!`].
 #[derive(serde::Deserialize)]
 pub struct Input {
@@ -123,7 +123,7 @@ impl Config {
         path_authz_names.push(resource.authz_name.clone());
 
         let child_resources = input.children;
-        let parent = input.ancestors.last().map(|s| Resource::for_name(&s));
+        let parent = input.ancestors.last().map(|s| Resource::for_name(s));
         let silo_restricted = !input.visible_outside_silo
             && input.ancestors.iter().any(|s| s == "Silo");
 
@@ -167,7 +167,7 @@ impl Resource {
 // MACRO IMPLEMENTATION
 //
 
-/// Implementation of [`lookup_resource!`]
+/// Implementation of [`super::lookup_resource!`]
 pub fn lookup_resource(
     raw_input: TokenStream,
 ) -> Result<TokenStream, syn::Error> {
@@ -806,11 +806,11 @@ fn generate_database_functions(config: &Config) -> TokenStream {
                     #lookup_filter
                     .select(nexus_db_model::#resource_name::as_select())
                     .get_result_async(
-                        datastore.pool_authorized(opctx).await?
+                        &*datastore.pool_connection_authorized(opctx).await?
                     )
                     .await
                     .map_err(|e| {
-                        public_error_from_diesel_pool(
+                        public_error_from_diesel(
                             e,
                             ErrorHandler::NotFoundByLookup(
                                 ResourceType::#resource_name,
@@ -891,10 +891,10 @@ fn generate_database_functions(config: &Config) -> TokenStream {
                 #soft_delete_filter
                 #(.filter(dsl::#pkey_column_names.eq(#pkey_names.clone())))*
                 .select(nexus_db_model::#resource_name::as_select())
-                .get_result_async(datastore.pool_authorized(opctx).await?)
+                .get_result_async(&*datastore.pool_connection_authorized(opctx).await?)
                 .await
                 .map_err(|e| {
-                    public_error_from_diesel_pool(
+                    public_error_from_diesel(
                         e,
                         ErrorHandler::NotFoundByLookup(
                             ResourceType::#resource_name,

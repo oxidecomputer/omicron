@@ -6,18 +6,20 @@
 
 use crate::opte::default_boundary_services;
 use crate::opte::opte_firewall_rules;
-use crate::opte::params::NetworkInterface;
-use crate::opte::params::NetworkInterfaceKind;
+use crate::opte::params::DeleteVirtualNetworkInterfaceHost;
 use crate::opte::params::SetVirtualNetworkInterfaceHost;
-use crate::opte::params::SourceNatConfig;
 use crate::opte::params::VpcFirewallRule;
 use crate::opte::Error;
 use crate::opte::Gateway;
 use crate::opte::Port;
 use crate::opte::Vni;
 use ipnetwork::IpNetwork;
-use macaddr::MacAddr6;
+use omicron_common::api::external;
+use omicron_common::api::internal::shared::NetworkInterface;
+use omicron_common::api::internal::shared::NetworkInterfaceKind;
+use omicron_common::api::internal::shared::SourceNatConfig;
 use oxide_vpc::api::AddRouterEntryReq;
+use oxide_vpc::api::DhcpCfg;
 use oxide_vpc::api::IpCfg;
 use oxide_vpc::api::IpCidr;
 use oxide_vpc::api::Ipv4Cfg;
@@ -50,14 +52,6 @@ struct PortManagerInner {
     // Sequential identifier for each port on the system.
     next_port_id: AtomicU64,
 
-    // TODO-remove: This is part of the external IP address workaround.
-    //
-    // See https://github.com/oxidecomputer/omicron/issues/1335
-    //
-    // We only need this while OPTE needs to forward traffic to the local
-    // gateway. This will be replaced by boundary services.
-    gateway_mac: MacAddr6,
-
     // IP address of the hosting sled on the underlay.
     underlay_ip: Ipv6Addr,
 
@@ -84,15 +78,10 @@ pub struct PortManager {
 
 impl PortManager {
     /// Create a new manager, for creating OPTE ports
-    pub fn new(
-        log: Logger,
-        underlay_ip: Ipv6Addr,
-        gateway_mac: MacAddr6,
-    ) -> Self {
+    pub fn new(log: Logger, underlay_ip: Ipv6Addr) -> Self {
         let inner = Arc::new(PortManagerInner {
             log,
             next_port_id: AtomicU64::new(0),
-            gateway_mac,
             underlay_ip,
             ports: Mutex::new(BTreeMap::new()),
         });
@@ -112,6 +101,7 @@ impl PortManager {
         source_nat: Option<SourceNatConfig>,
         external_ips: &[IpAddr],
         firewall_rules: &[VpcFirewallRule],
+        dhcp_config: DhcpCfg,
     ) -> Result<(Port, PortTicket), Error> {
         let mac = *nic.mac;
         let vni = Vni::new(nic.vni).unwrap();
@@ -217,18 +207,6 @@ impl PortManager {
             vni,
             phys_ip: self.inner.underlay_ip.into(),
             boundary_services,
-            // TODO-remove: Part of the external IP hack.
-            //
-            // NOTE: This value of this flag is irrelevant, since the driver
-            // always overwrites it. The field itself is used in the `oxide-vpc`
-            // code though, to determine how to set up the ARP layer, which is
-            // why it's still here.
-            proxy_arp_enable: true,
-            phys_gw_mac: Some(MacAddr::from(
-                self.inner.gateway_mac.into_array(),
-            )),
-            // TODO-completeness (#2153): Plumb domain search list
-            domain_list: vec![],
         };
 
         // Create the xde device.
@@ -249,25 +227,22 @@ impl PortManager {
             "Creating xde device";
             "port_name" => &port_name,
             "vpc_cfg" => ?&vpc_cfg,
+            "dhcp_config" => ?&dhcp_config,
         );
         #[cfg(target_os = "illumos")]
         let hdl = {
             let hdl = opte_ioctl::OpteHdl::open(opte_ioctl::OpteHdl::XDE_CTL)?;
-            hdl.create_xde(&port_name, vpc_cfg, /* passthru = */ false)?;
+            hdl.create_xde(
+                &port_name,
+                vpc_cfg,
+                dhcp_config,
+                /* passthru = */ false,
+            )?;
             hdl
         };
 
         // Initialize firewall rules for the new port.
-        let mut rules = opte_firewall_rules(firewall_rules, &vni, &mac);
-
-        // TODO-remove: This is part of the external IP hack.
-        //
-        // We need to allow incoming ARP packets past the firewall layer so
-        // that they may be handled properly at the gateway layer.
-        rules.push(
-            "dir=in priority=65534 protocol=arp action=allow".parse().unwrap(),
-        );
-
+        let rules = opte_firewall_rules(firewall_rules, &vni, &mac);
         debug!(
             self.inner.log,
             "Setting firewall rules";
@@ -280,7 +255,7 @@ impl PortManager {
             rules,
         })?;
 
-        // Create a VNIC on top of this device, to hook Viona into.
+        // TODO-remove(#2932): Create a VNIC on top of this device, to hook Viona into.
         //
         // Viona is the illumos MAC provider that implements the VIRTIO
         // specification. It sits on top of a MAC provider, which is responsible
@@ -302,6 +277,7 @@ impl PortManager {
                 &vnic_name,
                 Some(nic.mac),
                 None,
+                1500,
             ) {
                 slog::warn!(
                     self.inner.log,
@@ -415,11 +391,28 @@ impl PortManager {
     #[cfg(target_os = "illumos")]
     pub fn firewall_rules_ensure(
         &self,
+        vni: external::Vni,
         rules: &[VpcFirewallRule],
     ) -> Result<(), Error> {
         use opte_ioctl::OpteHdl;
+
+        info!(
+            self.inner.log,
+            "Ensuring VPC firewall rules";
+            "vni" => ?vni,
+            "rules" => ?&rules,
+        );
+
         let hdl = OpteHdl::open(OpteHdl::XDE_CTL)?;
-        for ((_, _), port) in self.inner.ports.lock().unwrap().iter() {
+
+        let ports = self.inner.ports.lock().unwrap();
+
+        // We update VPC rules as a set so grab only
+        // the relevant ports using the VPC's VNI.
+        let vpc_ports = ports
+            .iter()
+            .filter(|((_, _), port)| u32::from(vni) == u32::from(*port.vni()));
+        for ((_, _), port) in vpc_ports {
             let rules = opte_firewall_rules(rules, port.vni(), port.mac());
             let port_name = port.name().to_string();
             info!(
@@ -439,9 +432,15 @@ impl PortManager {
     #[cfg(not(target_os = "illumos"))]
     pub fn firewall_rules_ensure(
         &self,
+        vni: external::Vni,
         rules: &[VpcFirewallRule],
     ) -> Result<(), Error> {
-        info!(self.inner.log, "Ignoring {} firewall rules", rules.len());
+        info!(
+            self.inner.log,
+            "Ensuring VPC firewall rules (ignored)";
+            "vni" => ?vni,
+            "rules" => ?&rules,
+        );
         Ok(())
     }
 
@@ -452,6 +451,11 @@ impl PortManager {
     ) -> Result<(), Error> {
         use opte_ioctl::OpteHdl;
 
+        info!(
+            self.inner.log,
+            "Mapping virtual NIC to physical host";
+            "mapping" => ?&mapping,
+        );
         let hdl = OpteHdl::open(OpteHdl::XDE_CTL)?;
         hdl.set_v2p(&oxide_vpc::api::SetVirt2PhysReq {
             vip: mapping.virtual_ip.into(),
@@ -470,18 +474,23 @@ impl PortManager {
     #[cfg(not(target_os = "illumos"))]
     pub fn set_virtual_nic_host(
         &self,
-        _mapping: &SetVirtualNetworkInterfaceHost,
+        mapping: &SetVirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
-        info!(self.inner.log, "Ignoring virtual NIC mapping");
+        info!(
+            self.inner.log,
+            "Mapping virtual NIC to physical host (ignored)";
+            "mapping" => ?&mapping,
+        );
         Ok(())
     }
 
     #[cfg(target_os = "illumos")]
     pub fn unset_virtual_nic_host(
         &self,
-        _mapping: &SetVirtualNetworkInterfaceHost,
+        _mapping: &DeleteVirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
         // TODO requires https://github.com/oxidecomputer/opte/issues/332
+
         slog::warn!(self.inner.log, "unset_virtual_nic_host unimplmented");
         Ok(())
     }
@@ -489,7 +498,7 @@ impl PortManager {
     #[cfg(not(target_os = "illumos"))]
     pub fn unset_virtual_nic_host(
         &self,
-        _mapping: &SetVirtualNetworkInterfaceHost,
+        _mapping: &DeleteVirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
         info!(self.inner.log, "Ignoring unset of virtual NIC mapping");
         Ok(())

@@ -9,7 +9,7 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::error::{
-    public_error_from_diesel_pool, ErrorHandler, TransactionError,
+    public_error_from_diesel, ErrorHandler, TransactionError,
 };
 use crate::db::model::{
     ComponentUpdate, SemverVersion, SystemUpdate, UpdateArtifact,
@@ -42,9 +42,9 @@ impl DataStore {
             .do_update()
             .set(artifact.clone())
             .returning(UpdateArtifact::as_returning())
-            .get_result_async(self.pool_authorized(opctx).await?)
+            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     pub async fn update_artifact_hard_delete_outdated(
@@ -60,10 +60,10 @@ impl DataStore {
         use db::schema::update_artifact::dsl;
         diesel::delete(dsl::update_artifact)
             .filter(dsl::targets_role_version.lt(current_targets_role_version))
-            .execute_async(self.pool_authorized(opctx).await?)
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map(|_rows_deleted| ())
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
             .internal_context("deleting outdated available artifacts")
     }
 
@@ -84,10 +84,10 @@ impl DataStore {
             // to add more metadata to this model
             .set(time_modified.eq(Utc::now()))
             .returning(SystemUpdate::as_returning())
-            .get_result_async(self.pool_authorized(opctx).await?)
+            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::Conflict(
                         ResourceType::SystemUpdate,
@@ -112,10 +112,10 @@ impl DataStore {
         system_update
             .filter(version.eq(target))
             .select(SystemUpdate::as_select())
-            .first_async(self.pool_authorized(opctx).await?)
+            .first_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::NotFoundByLookup(
                         ResourceType::SystemUpdate,
@@ -141,7 +141,7 @@ impl DataStore {
 
         let version_string = update.version.to_string();
 
-        self.pool_authorized(opctx)
+        self.pool_connection_authorized(opctx)
             .await?
             .transaction_async(|conn| async move {
                 let db_update = diesel::insert_into(component_update::table)
@@ -164,7 +164,7 @@ impl DataStore {
             .await
             .map_err(|e| match e {
                 TransactionError::CustomError(e) => e,
-                TransactionError::Pool(e) => public_error_from_diesel_pool(
+                TransactionError::Database(e) => public_error_from_diesel(
                     e,
                     ErrorHandler::Conflict(
                         ResourceType::ComponentUpdate,
@@ -186,9 +186,9 @@ impl DataStore {
         paginated(system_update, id, pagparams)
             .select(SystemUpdate::as_select())
             .order(version.desc())
-            .load_async(self.pool_authorized(opctx).await?)
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     pub async fn system_update_components_list(
@@ -205,9 +205,9 @@ impl DataStore {
             .inner_join(join_table::table)
             .filter(join_table::columns::system_update_id.eq(system_update_id))
             .select(ComponentUpdate::as_select())
-            .get_results_async(self.pool_authorized(opctx).await?)
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     pub async fn create_updateable_component(
@@ -226,10 +226,10 @@ impl DataStore {
         diesel::insert_into(updateable_component)
             .values(component.clone())
             .returning(UpdateableComponent::as_returning())
-            .get_result_async(self.pool_authorized(opctx).await?)
+            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::Conflict(
                         ResourceType::UpdateableComponent,
@@ -250,9 +250,9 @@ impl DataStore {
 
         paginated(updateable_component, id, pagparams)
             .select(UpdateableComponent::as_select())
-            .load_async(self.pool_authorized(opctx).await?)
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     pub async fn lowest_component_system_version(
@@ -266,9 +266,9 @@ impl DataStore {
         updateable_component
             .select(system_version)
             .order(system_version.asc())
-            .first_async(self.pool_authorized(opctx).await?)
+            .first_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     pub async fn highest_component_system_version(
@@ -282,9 +282,9 @@ impl DataStore {
         updateable_component
             .select(system_version)
             .order(system_version.desc())
-            .first_async(self.pool_authorized(opctx).await?)
+            .first_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     pub async fn create_update_deployment(
@@ -299,10 +299,10 @@ impl DataStore {
         diesel::insert_into(update_deployment)
             .values(deployment.clone())
             .returning(UpdateDeployment::as_returning())
-            .get_result_async(self.pool_authorized(opctx).await?)
+            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::Conflict(
                         ResourceType::UpdateDeployment,
@@ -330,10 +330,10 @@ impl DataStore {
                 time_modified.eq(diesel::dsl::now),
             ))
             .returning(UpdateDeployment::as_returning())
-            .get_result_async(self.pool_authorized(opctx).await?)
+            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::NotFoundByLookup(
                         ResourceType::UpdateDeployment,
@@ -354,9 +354,9 @@ impl DataStore {
 
         paginated(update_deployment, id, pagparams)
             .select(UpdateDeployment::as_select())
-            .load_async(self.pool_authorized(opctx).await?)
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     pub async fn latest_update_deployment(
@@ -370,8 +370,8 @@ impl DataStore {
         update_deployment
             .select(UpdateDeployment::as_returning())
             .order(time_created.desc())
-            .first_async(self.pool_authorized(opctx).await?)
+            .first_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 }

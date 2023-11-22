@@ -7,11 +7,16 @@
 use super::config::Config;
 use super::http_entrypoints::api as http_api;
 use super::sled_agent::SledAgent;
-use crate::bootstrap::params::SledAgentRequest;
-use crate::nexus::LazyNexusClient;
+use crate::bootstrap::params::StartSledAgentRequest;
+use crate::long_running_tasks::LongRunningTaskHandles;
+use crate::nexus::NexusClientWithResolver;
 use crate::services::ServiceManager;
+use crate::storage_monitor::UnderlayAccess;
+use internal_dns::resolver::Resolver;
 use slog::Logger;
 use std::net::SocketAddr;
+use std::sync::Arc;
+use tokio::sync::oneshot;
 use uuid::Uuid;
 
 /// Packages up a [`SledAgent`], running the sled agent API under a Dropshot
@@ -34,30 +39,40 @@ impl Server {
     pub async fn start(
         config: &Config,
         log: Logger,
-        request: SledAgentRequest,
+        request: StartSledAgentRequest,
+        long_running_tasks_handles: LongRunningTaskHandles,
         services: ServiceManager,
+        underlay_available_tx: oneshot::Sender<UnderlayAccess>,
     ) -> Result<Server, String> {
         info!(log, "setting up sled agent server");
 
-        let client_log = log.new(o!("component" => "NexusClient"));
+        let sled_address = request.sled_address();
+        let resolver = Arc::new(
+            Resolver::new_from_ip(
+                log.new(o!("component" => "DnsResolver")),
+                *sled_address.ip(),
+            )
+            .map_err(|e| e.to_string())?,
+        );
 
-        let addr = request.sled_address();
-        let lazy_nexus_client = LazyNexusClient::new(client_log, *addr.ip())
+        let nexus_client = NexusClientWithResolver::new(&log, resolver)
             .map_err(|e| e.to_string())?;
 
         let sled_agent = SledAgent::new(
             &config,
             log.clone(),
-            lazy_nexus_client.clone(),
+            nexus_client,
             request,
             services,
+            long_running_tasks_handles,
+            underlay_available_tx,
         )
         .await
         .map_err(|e| e.to_string())?;
 
         let mut dropshot_config = dropshot::ConfigDropshot::default();
         dropshot_config.request_body_max_bytes = 1024 * 1024;
-        dropshot_config.bind_address = SocketAddr::V6(addr);
+        dropshot_config.bind_address = SocketAddr::V6(sled_address);
         let dropshot_log = log.new(o!("component" => "dropshot (SledAgent)"));
         let http_server = dropshot::HttpServerStarter::new(
             &dropshot_config,
@@ -69,6 +84,10 @@ impl Server {
         .start();
 
         Ok(Server { http_server })
+    }
+
+    pub(crate) fn sled_agent(&self) -> &SledAgent {
+        self.http_server.app_private()
     }
 
     /// Wait for the given server to shut down

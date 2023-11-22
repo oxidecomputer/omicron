@@ -14,30 +14,38 @@ ciborium.workspace = true
 clap.workspace = true
 crossterm.workspace = true
 futures.workspace = true
-hex = { workspace = true, features = ["serde"] }
 humantime.workspace = true
-lazy_static.workspace = true
+indexmap.workspace = true
+indicatif.workspace = true
+itertools.workspace = true
 omicron-common.workspace = true
+once_cell.workspace = true
+owo-colors.workspace = true
+ratatui.workspace = true
 reqwest.workspace = true
-semver.workspace = true
+rpassword.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-sha3.workspace = true
 shell-words.workspace = true
 slog.workspace = true
 slog-async.workspace = true
 slog-envlogger.workspace = true
 slog-term.workspace = true
-snafu.workspace = true
-libsw.workspace = true
-tar.workspace = true
+supports-color.workspace = true
+textwrap.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tokio-util.workspace = true
 toml.workspace = true
-tui.workspace = true
-tui-tree-widget = "0.11.0"
+toml_edit.workspace = true
+tui-tree-widget = "0.13.0"
+unicode-width.workspace = true
+zeroize.workspace = true
 
+omicron-passwords.workspace = true
+update-engine.workspace = true
+wicket-common.workspace = true
 wicketd-client.workspace = true
+omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 assert_cmd.workspace = true

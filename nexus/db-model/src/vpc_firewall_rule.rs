@@ -5,7 +5,7 @@
 use super::{impl_enum_wrapper, L4PortRange, SqlU16};
 use crate::schema::vpc_firewall_rule;
 use db_macros::Resource;
-use diesel::backend::{Backend, RawValue};
+use diesel::backend::Backend;
 use diesel::deserialize::{self, FromSql};
 use diesel::pg::Pg;
 use diesel::serialize::{self, ToSql};
@@ -105,7 +105,7 @@ where
     DB: Backend,
     String: FromSql<sql_types::Text, DB>,
 {
-    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+    fn from_sql(bytes: DB::RawValue<'_>) -> deserialize::Result<Self> {
         Ok(VpcFirewallRuleTarget(
             String::from_sql(bytes)?
                 .parse::<external::VpcFirewallRuleTarget>()?,
@@ -140,7 +140,7 @@ where
     DB: Backend,
     String: FromSql<sql_types::Text, DB>,
 {
-    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+    fn from_sql(bytes: DB::RawValue<'_>) -> deserialize::Result<Self> {
         Ok(VpcFirewallRuleHostFilter(
             String::from_sql(bytes)?
                 .parse::<external::VpcFirewallRuleHostFilter>()?,
@@ -177,7 +177,7 @@ where
     DB: Backend,
     SqlU16: FromSql<sql_types::Int4, DB>,
 {
-    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+    fn from_sql(bytes: DB::RawValue<'_>) -> deserialize::Result<Self> {
         Ok(VpcFirewallRulePriority(external::VpcFirewallRulePriority(
             *SqlU16::from_sql(bytes)?,
         )))

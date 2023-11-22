@@ -8,6 +8,7 @@
 
 // TODO-coverage: test success cases of sled-agent
 
+use camino::Utf8PathBuf;
 use expectorate::assert_contents;
 use omicron_test_utils::dev::test_cmds::assert_exit_code;
 use omicron_test_utils::dev::test_cmds::path_to_executable;
@@ -15,14 +16,15 @@ use omicron_test_utils::dev::test_cmds::run_command;
 use omicron_test_utils::dev::test_cmds::EXIT_SUCCESS;
 use omicron_test_utils::dev::test_cmds::EXIT_USAGE;
 use openapiv3::OpenAPI;
-use std::path::PathBuf;
 use subprocess::Exec;
 
 /// name of the "sled-agent-sim" executable
 const CMD_SLED_AGENT_SIM: &str = env!("CARGO_BIN_EXE_sled-agent-sim");
 
-fn path_to_sled_agent_sim() -> PathBuf {
+fn path_to_sled_agent_sim() -> Utf8PathBuf {
     path_to_executable(CMD_SLED_AGENT_SIM)
+        .try_into()
+        .expect("Invalid Utf8 binary?")
 }
 
 #[test]
@@ -42,8 +44,8 @@ fn test_sled_agent_sim_no_args() {
 /// name of the "sled-agent" executable
 const CMD_SLED_AGENT: &str = env!("CARGO_BIN_EXE_sled-agent");
 
-fn path_to_sled_agent() -> PathBuf {
-    path_to_executable(CMD_SLED_AGENT)
+fn path_to_sled_agent() -> Utf8PathBuf {
+    path_to_executable(CMD_SLED_AGENT).try_into().expect("Invalid Utf8 binary?")
 }
 
 #[test]

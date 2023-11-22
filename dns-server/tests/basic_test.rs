@@ -7,10 +7,14 @@ use dns_service_client::{
     types::{DnsConfigParams, DnsConfigZone, DnsRecord, Srv},
     Client,
 };
-use dropshot::test_util::LogContext;
+use dropshot::{test_util::LogContext, HandlerTaskMode};
 use omicron_test_utils::dev::test_setup_log;
 use slog::o;
-use std::{collections::HashMap, net::Ipv6Addr};
+use std::{
+    collections::HashMap,
+    net::Ipv6Addr,
+    net::{IpAddr, Ipv4Addr},
+};
 use trust_dns_resolver::error::ResolveErrorKind;
 use trust_dns_resolver::TokioAsyncResolver;
 use trust_dns_resolver::{
@@ -19,6 +23,36 @@ use trust_dns_resolver::{
 };
 
 const TEST_ZONE: &'static str = "oxide.internal";
+
+#[tokio::test]
+pub async fn a_crud() -> Result<(), anyhow::Error> {
+    let test_ctx = init_client_server("a_crud").await?;
+    let client = &test_ctx.client;
+    let resolver = &test_ctx.resolver;
+
+    // records should initially be empty
+    let records = dns_records_list(client, TEST_ZONE).await?;
+    assert!(records.is_empty());
+
+    // add an a record
+    let name = "devron".to_string();
+    let addr = Ipv4Addr::new(10, 1, 2, 3);
+    let a = DnsRecord::A(addr);
+    let input_records = HashMap::from([(name.clone(), vec![a])]);
+    dns_records_create(client, TEST_ZONE, input_records.clone()).await?;
+
+    // read back the a record
+    let records = dns_records_list(client, TEST_ZONE).await?;
+    assert_eq!(input_records, records);
+
+    // resolve the name
+    let response = resolver.lookup_ip(name + "." + TEST_ZONE + ".").await?;
+    let address = response.iter().next().expect("no addresses returned!");
+    assert_eq!(address, addr);
+
+    test_ctx.cleanup().await;
+    Ok(())
+}
 
 #[tokio::test]
 pub async fn aaaa_crud() -> Result<(), anyhow::Error> {
@@ -62,8 +96,13 @@ pub async fn srv_crud() -> Result<(), anyhow::Error> {
 
     // add a srv record
     let name = "hromi".to_string();
-    let srv =
-        Srv { prio: 47, weight: 74, port: 99, target: "outpost47".into() };
+    let target = "outpost47";
+    let srv = Srv {
+        prio: 47,
+        weight: 74,
+        port: 99,
+        target: format!("{target}.{TEST_ZONE}"),
+    };
     let rec = DnsRecord::Srv(srv.clone());
     let input_records = HashMap::from([(name.clone(), vec![rec])]);
     dns_records_create(client, TEST_ZONE, input_records.clone()).await?;
@@ -72,13 +111,25 @@ pub async fn srv_crud() -> Result<(), anyhow::Error> {
     let records = dns_records_list(client, TEST_ZONE).await?;
     assert_eq!(records, input_records);
 
+    // add some aaaa records corresponding to the srv target
+    let addr1 = Ipv6Addr::new(0xfd, 0, 0, 0, 0, 0, 0, 0x1);
+    let addr2 = Ipv6Addr::new(0xfd, 0, 0, 0, 0, 0, 0, 0x2);
+    let input_records = HashMap::from([(
+        target.to_string(),
+        vec![DnsRecord::Aaaa(addr1), DnsRecord::Aaaa(addr2)],
+    )]);
+    dns_records_create(client, TEST_ZONE, input_records.clone()).await?;
+
     // resolve the srv
     let response = resolver.srv_lookup(name + "." + TEST_ZONE + ".").await?;
-    let srvr = response.iter().next().expect("no addresses returned!");
+    let srvr = response.iter().next().expect("no srv records returned!");
     assert_eq!(srvr.priority(), srv.prio);
     assert_eq!(srvr.weight(), srv.weight);
     assert_eq!(srvr.port(), srv.port);
     assert_eq!(srvr.target().to_string(), srv.target + ".");
+    let mut aaaa_records = response.ip_iter().collect::<Vec<_>>();
+    aaaa_records.sort();
+    assert_eq!(aaaa_records, [IpAddr::from(addr1), IpAddr::from(addr2)]);
 
     test_ctx.cleanup().await;
     Ok(())
@@ -324,7 +375,7 @@ async fn init_client_server(
 
     let mut rc = ResolverConfig::new();
     rc.add_name_server(NameServerConfig {
-        socket_addr: *dns_server.local_address(),
+        socket_addr: dns_server.local_address(),
         protocol: Protocol::Udp,
         tls_dns_name: None,
         trust_nx_responses: false,
@@ -367,7 +418,7 @@ fn test_config(
     let config_dropshot = dropshot::ConfigDropshot {
         bind_address: "[::1]:0".to_string().parse().unwrap(),
         request_body_max_bytes: 1024,
-        ..Default::default()
+        default_handler_task_mode: HandlerTaskMode::Detached,
     };
 
     Ok((tmp_dir, config_storage, config_dropshot, logctx))

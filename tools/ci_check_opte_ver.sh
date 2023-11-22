@@ -15,7 +15,7 @@ for rev in "${opte_deps_revs[@]}"; do
 done
 
 # Grab the API version for this revision
-API_VER=$(curl -s https://raw.githubusercontent.com/oxidecomputer/opte/$OPTE_REV/opte-api/src/lib.rs | sed -n 's/pub const API_VERSION: u64 = \([0-9]*\);/\1/p')
+API_VER=$(curl -s https://raw.githubusercontent.com/oxidecomputer/opte/"$OPTE_REV"/crates/opte-api/src/lib.rs | sed -n 's/pub const API_VERSION: u64 = \([0-9]*\);/\1/p')
 
 # Grab the patch version which is based on the number of commits.
 # Essentially `git rev-list --count $OPTE_REV` but without cloning the repo.
@@ -44,7 +44,7 @@ fi
 
 # Also check that the buildomat deploy job is using the same version
 BUILDOMAT_DEPLOY_TARGET=$(cat .github/buildomat/jobs/deploy.sh | sed -n 's/#:[ ]*target[ ]*=[ ]*"\(.*\)"/\1/p')
-if [ "lab-opte-0.$API_VER" != "$BUILDOMAT_DEPLOY_TARGET" ]; then
+if [ "lab-2.0-opte-0.$API_VER" != "$BUILDOMAT_DEPLOY_TARGET" ]; then
     echo "OPTE version mismatch:"
     echo "Cargo.toml: $OPTE_REV ($OPTE_VER)"
     echo "buildomat deploy job: $BUILDOMAT_DEPLOY_TARGET (expected lab-opte-0.$API_VER)"

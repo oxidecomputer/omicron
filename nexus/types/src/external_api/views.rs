@@ -12,17 +12,23 @@ use api_identity::ObjectIdentity;
 use chrono::DateTime;
 use chrono::Utc;
 use omicron_common::api::external::{
-    ByteCount, Digest, IdentityMetadata, Ipv4Net, Ipv6Net, Name,
+    ByteCount, Digest, IdentityMetadata, InstanceState, Ipv4Net, Ipv6Net, Name,
     ObjectIdentity, RoleName, SemverVersion,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::net::IpAddr;
 use uuid::Uuid;
 
+use super::params::PhysicalDiskKind;
+
 // SILOS
 
-/// Client view of a ['Silo']
+/// View of a Silo
+///
+/// A Silo is the highest level unit of isolation.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Silo {
     #[serde(flatten)]
@@ -34,6 +40,13 @@ pub struct Silo {
 
     /// How users and groups are managed in this Silo
     pub identity_mode: shared::SiloIdentityMode,
+
+    /// Mapping of which Fleet roles are conferred by each Silo role
+    ///
+    /// The default is that no Fleet roles are conferred by any Silo roles
+    /// unless there's a corresponding entry in this map.
+    pub mapped_fleet_roles:
+        BTreeMap<shared::SiloRole, BTreeSet<shared::FleetRole>>,
 }
 
 // IDENTITY PROVIDER
@@ -45,7 +58,7 @@ pub enum IdentityProviderType {
     Saml,
 }
 
-/// Client view of an [`IdentityProvider`]
+/// View of an Identity Provider
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct IdentityProvider {
     #[serde(flatten)]
@@ -60,28 +73,32 @@ pub struct SamlIdentityProvider {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 
-    /// idp's entity id
+    /// IdP's entity id
     pub idp_entity_id: String,
 
-    /// sp's client id
+    /// SP's client id
     pub sp_client_id: String,
 
-    /// service provider endpoint where the response will be sent
+    /// Service provider endpoint where the response will be sent
     pub acs_url: String,
 
-    /// service provider endpoint where the idp should send log out requests
+    /// Service provider endpoint where the idp should send log out requests
     pub slo_url: String,
 
-    /// customer's technical contact for saml configuration
+    /// Customer's technical contact for saml configuration
     pub technical_contact_email: String,
 
-    /// optional request signing public certificate (base64 encoded der file)
+    /// Optional request signing public certificate (base64 encoded der file)
     pub public_cert: Option<String>,
+
+    /// If set, attributes with this name will be considered to denote a user's
+    /// group membership, where the values will be the group names.
+    pub group_attribute_name: Option<String>,
 }
 
 // PROJECTS
 
-/// Client view of a [`Project`]
+/// View of a Project
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Project {
     // TODO-correctness is flattening here (and in all the other types) the
@@ -93,7 +110,7 @@ pub struct Project {
 
 // CERTIFICATES
 
-/// Client view of a [`Certificate`]
+/// View of a Certificate
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Certificate {
     #[serde(flatten)]
@@ -103,32 +120,11 @@ pub struct Certificate {
 
 // IMAGES
 
-/// Client view of global Images
-#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct GlobalImage {
-    #[serde(flatten)]
-    pub identity: IdentityMetadata,
-
-    /// URL source of this image, if any
-    pub url: Option<String>,
-
-    /// Image distribution
-    pub distribution: String,
-
-    /// Image version
-    pub version: String,
-
-    /// Hash of the image contents, if applicable
-    pub digest: Option<Digest>,
-
-    /// size of blocks in bytes
-    pub block_size: ByteCount,
-
-    /// total size in bytes
-    pub size: ByteCount,
-}
-
-/// Client view of images
+/// View of an image
+///
+/// If `project_id` is present then the image is only visible inside that
+/// project. If it's not present then the image is visible to all projects in
+/// the silo.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Image {
     #[serde(flatten)]
@@ -167,7 +163,7 @@ pub enum SnapshotState {
     Destroyed,
 }
 
-/// Client view of a Snapshot
+/// View of a Snapshot
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Snapshot {
     #[serde(flatten)]
@@ -183,7 +179,7 @@ pub struct Snapshot {
 
 // VPCs
 
-/// Client view of a [`Vpc`]
+/// View of a VPC
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Vpc {
     #[serde(flatten)]
@@ -248,11 +244,14 @@ pub struct VpcRouter {
 pub struct IpPool {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
+    pub silo_id: Option<Uuid>,
+    pub is_default: bool,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct IpPoolRange {
     pub id: Uuid,
+    pub ip_pool_id: Uuid,
     pub time_created: DateTime<Utc>,
     pub range: IpRange,
 }
@@ -268,22 +267,52 @@ pub struct ExternalIp {
 
 // RACKS
 
-/// Client view of an [`Rack`]
+/// View of an Rack
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Rack {
     #[serde(flatten)]
     pub identity: AssetIdentityMetadata,
 }
 
-// SLEDS
+/// View of a sled that has not been added to an initialized rack yet
+#[derive(
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    PartialOrd,
+    Ord,
+    PartialEq,
+    Eq,
+)]
+pub struct UninitializedSled {
+    pub baseboard: Baseboard,
+    pub rack_id: Uuid,
+    pub cubby: u16,
+}
 
-/// Properties that should uniquely identify a Sled.
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+// FRUs
+
+/// Properties that uniquely identify an Oxide hardware component
+#[derive(
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    PartialOrd,
+    Ord,
+    PartialEq,
+    Eq,
+)]
 pub struct Baseboard {
     pub serial: String,
     pub part: String,
     pub revision: i64,
 }
+
+// SLEDS
 
 /// An operator's view of a Sled.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -299,16 +328,39 @@ pub struct Sled {
     pub usable_physical_ram: ByteCount,
 }
 
-// PHYSICAL DISKS
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum PhysicalDiskType {
-    Internal,
-    External,
+/// An operator's view of an instance running on a given sled
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SledInstance {
+    #[serde(flatten)]
+    pub identity: AssetIdentityMetadata,
+    pub active_sled_id: Uuid,
+    pub migration_id: Option<Uuid>,
+    pub name: Name,
+    pub silo_name: Name,
+    pub project_name: Name,
+    pub state: InstanceState,
+    pub ncpus: i64,
+    pub memory: i64,
 }
 
-/// Client view of a [`PhysicalDisk`]
+// SWITCHES
+
+/// An operator's view of a Switch.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct Switch {
+    #[serde(flatten)]
+    pub identity: AssetIdentityMetadata,
+    pub baseboard: Baseboard,
+    /// The rack to which this Switch is currently attached
+    pub rack_id: Uuid,
+}
+
+// PHYSICAL DISKS
+
+/// View of a Physical Disk
+///
+/// Physical disks reside in a particular sled and are used to store both
+/// Instance Disk data as well as internal metadata.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct PhysicalDisk {
     #[serde(flatten)]
@@ -321,12 +373,12 @@ pub struct PhysicalDisk {
     pub serial: String,
     pub model: String,
 
-    pub disk_type: PhysicalDiskType,
+    pub form_factor: PhysicalDiskKind,
 }
 
 // SILO USERS
 
-/// Client view of a [`User`]
+/// View of a User
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct User {
     pub id: Uuid,
@@ -352,21 +404,24 @@ pub struct CurrentUser {
 
 // SILO GROUPS
 
-/// Client view of a [`Group`]
+/// View of a Group
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct Group {
     pub id: Uuid,
 
-    /** Human-readable name that can identify the group */
+    /// Human-readable name that can identify the group
     pub display_name: String,
 
-    /** Uuid of the silo to which this group belongs */
+    /// Uuid of the silo to which this group belongs
     pub silo_id: Uuid,
 }
 
 // BUILT-IN USERS
 
-/// Client view of a [`UserBuiltin`]
+/// View of a Built-in User
+///
+/// A Built-in User is explicitly created as opposed to being derived from an
+/// Identify Provider.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct UserBuiltin {
     // TODO-correctness is flattening here (and in all the other types) the
@@ -377,7 +432,7 @@ pub struct UserBuiltin {
 
 // ROLES
 
-/// Client view of a [`Role`]
+/// View of a Role
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct Role {
     pub name: RoleName,
@@ -386,7 +441,7 @@ pub struct Role {
 
 // SSH KEYS
 
-/// Client view of a [`SshKey`]
+/// View of an SSH Key
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SshKey {
     #[serde(flatten)]
@@ -494,4 +549,19 @@ pub struct UpdateDeployment {
     pub identity: AssetIdentityMetadata,
     pub version: SemverVersion,
     pub status: UpdateStatus,
+}
+
+// SYSTEM HEALTH
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PingStatus {
+    Ok,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Ping {
+    /// Whether the external API is reachable. Will always be Ok if the endpoint
+    /// returns anything at all.
+    pub status: PingStatus,
 }

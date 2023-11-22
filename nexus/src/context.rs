@@ -2,13 +2,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Shared state used by API request handlers
-use super::authn;
-use super::authz;
 use super::config;
-use super::db;
 use super::Nexus;
-use crate::authn::external::session_cookie::SessionStore;
-use crate::authn::ConsoleSessionWithSiloId;
 use crate::saga_interface::SagaContext;
 use async_trait::async_trait;
 use authn::external::session_cookie::HttpAuthnSessionCookie;
@@ -17,8 +12,12 @@ use authn::external::token::HttpAuthnToken;
 use authn::external::HttpAuthnScheme;
 use chrono::Duration;
 use internal_dns::ServiceName;
+use nexus_db_queries::authn::external::session_cookie::SessionStore;
+use nexus_db_queries::authn::ConsoleSessionWithSiloId;
 use nexus_db_queries::context::{OpContext, OpKind};
-use omicron_common::address::{Ipv6Subnet, AZ_PREFIX, COCKROACH_PORT};
+use nexus_db_queries::db::lookup::LookupPath;
+use nexus_db_queries::{authn, authz, db};
+use omicron_common::address::{Ipv6Subnet, AZ_PREFIX};
 use omicron_common::nexus_config;
 use omicron_common::postgres_config::PostgresConfigWithUrl;
 use oximeter::types::ProducerRegistry;
@@ -35,30 +34,31 @@ pub struct ServerContext {
     /// reference to the underlying nexus
     pub nexus: Arc<Nexus>,
     /// debug log
-    pub log: Logger,
+    #[allow(dead_code)]
+    log: Logger,
     /// authenticator for external HTTP requests
-    pub external_authn: authn::external::Authenticator<ServerContext>,
+    pub(crate) external_authn: authn::external::Authenticator<ServerContext>,
     /// authentication context used for internal HTTP requests
-    pub internal_authn: Arc<authn::Context>,
+    pub(crate) internal_authn: Arc<authn::Context>,
     /// authorizer
-    pub authz: Arc<authz::Authz>,
+    pub(crate) authz: Arc<authz::Authz>,
     /// internal API request latency tracker
-    pub internal_latencies: LatencyTracker,
+    pub(crate) internal_latencies: LatencyTracker,
     /// external API request latency tracker
-    pub external_latencies: LatencyTracker,
+    pub(crate) external_latencies: LatencyTracker,
     /// registry of metric producers
-    pub producer_registry: ProducerRegistry,
+    pub(crate) producer_registry: ProducerRegistry,
+    /// TLS enabled on the external Dropshot server
+    pub(crate) external_tls_enabled: bool,
     /// tunable settings needed for the console at runtime
-    pub console_config: ConsoleConfig,
+    pub(crate) console_config: ConsoleConfig,
 }
 
-pub struct ConsoleConfig {
+pub(crate) struct ConsoleConfig {
     /// how long a session can be idle before expiring
     pub session_idle_timeout: Duration,
     /// how long a session can exist before expiring
     pub session_absolute_timeout: Duration,
-    /// how long browsers can cache static assets
-    pub cache_control_max_age: Duration,
     /// directory containing static file to serve
     pub static_dir: Option<PathBuf>,
 }
@@ -94,8 +94,8 @@ impl ServerContext {
                 name: name.to_string(),
                 id: config.deployment.id,
             };
-            const START_LATENCY_DECADE: i8 = -6;
-            const END_LATENCY_DECADE: i8 = 3;
+            const START_LATENCY_DECADE: i16 = -6;
+            const END_LATENCY_DECADE: i16 = 3;
             LatencyTracker::with_latency_decades(
                 target,
                 START_LATENCY_DECADE,
@@ -136,37 +136,80 @@ impl ServerContext {
         // nexus in dev for everyone
 
         // Set up DNS Client
-        let az_subnet =
-            Ipv6Subnet::<AZ_PREFIX>::new(config.deployment.subnet.net().ip());
-        info!(log, "Setting up resolver on subnet: {:?}", az_subnet);
-        let resolver = internal_dns::resolver::Resolver::new_from_subnet(
-            log.new(o!("component" => "DnsResolver")),
-            az_subnet,
-        )
-        .map_err(|e| format!("Failed to create DNS resolver: {}", e))?;
+        let resolver = match config.deployment.internal_dns {
+            nexus_config::InternalDns::FromSubnet { subnet } => {
+                let az_subnet = Ipv6Subnet::<AZ_PREFIX>::new(subnet.net().ip());
+                info!(
+                    log,
+                    "Setting up resolver using DNS servers for subnet: {:?}",
+                    az_subnet
+                );
+                internal_dns::resolver::Resolver::new_from_subnet(
+                    log.new(o!("component" => "DnsResolver")),
+                    az_subnet,
+                )
+                .map_err(|e| format!("Failed to create DNS resolver: {}", e))?
+            }
+            nexus_config::InternalDns::FromAddress { address } => {
+                info!(
+                    log,
+                    "Setting up resolver using DNS address: {:?}", address
+                );
+
+                internal_dns::resolver::Resolver::new_from_addrs(
+                    log.new(o!("component" => "DnsResolver")),
+                    &[address],
+                )
+                .map_err(|e| format!("Failed to create DNS resolver: {}", e))?
+            }
+        };
 
         // Set up DB pool
         let url = match &config.deployment.database {
             nexus_config::Database::FromUrl { url } => url.clone(),
             nexus_config::Database::FromDns => {
                 info!(log, "Accessing DB url from DNS");
-                let address = resolver
-                    .lookup_ipv6(ServiceName::Cockroach)
-                    .await
-                    .map_err(|e| format!("Failed to lookup IP: {}", e))?;
-                info!(log, "DB address: {}", address);
+                // It's been requested but unfortunately not supported to
+                // directly connect using SRV based lookup.
+                // TODO-robustness: the set of cockroachdb hosts we'll use will
+                // be fixed to whatever we got back from DNS at Nexus start.
+                // This means a new cockroachdb instance won't picked up until
+                // Nexus restarts.
+                let addrs = loop {
+                    match resolver
+                        .lookup_all_socket_v6(ServiceName::Cockroach)
+                        .await
+                    {
+                        Ok(addrs) => break addrs,
+                        Err(e) => {
+                            warn!(
+                                log,
+                                "Failed to lookup cockroach addresses: {e}"
+                            );
+                            tokio::time::sleep(std::time::Duration::from_secs(
+                                1,
+                            ))
+                            .await;
+                        }
+                    }
+                };
+                let addrs_str = addrs
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(",");
+                info!(log, "DB addresses: {}", addrs_str);
                 PostgresConfigWithUrl::from_str(&format!(
-                    "postgresql://root@[{}]:{}/omicron?sslmode=disable",
-                    address, COCKROACH_PORT
+                    "postgresql://root@{addrs_str}/omicron?sslmode=disable",
                 ))
                 .map_err(|e| format!("Cannot parse Postgres URL: {}", e))?
             }
         };
-        let pool = db::Pool::new(&db::Config { url });
+        let pool = db::Pool::new(&log, &db::Config { url });
         let nexus = Nexus::new_with_id(
             rack_id,
             log.new(o!("component" => "nexus")),
-            Arc::new(tokio::sync::Mutex::new(resolver)),
+            resolver,
             pool,
             &producer_registry,
             config,
@@ -183,6 +226,7 @@ impl ServerContext {
             internal_latencies,
             external_latencies,
             producer_registry,
+            external_tls_enabled: config.deployment.dropshot_external.tls,
             console_config: ConsoleConfig {
                 session_idle_timeout: Duration::minutes(
                     config.pkg.console.session_idle_timeout_minutes.into(),
@@ -191,9 +235,6 @@ impl ServerContext {
                     config.pkg.console.session_absolute_timeout_minutes.into(),
                 ),
                 static_dir,
-                cache_control_max_age: Duration::minutes(
-                    config.pkg.console.cache_control_max_age_minutes.into(),
-                ),
             },
         }))
     }
@@ -201,7 +242,7 @@ impl ServerContext {
 
 /// Authenticates an incoming request to the external API and produces a new
 /// operation context for it
-pub async fn op_context_for_external_api(
+pub(crate) async fn op_context_for_external_api(
     rqctx: &dropshot::RequestContext<Arc<ServerContext>>,
 ) -> Result<OpContext, dropshot::HttpError> {
     let apictx = rqctx.context();
@@ -224,7 +265,7 @@ pub async fn op_context_for_external_api(
     .await
 }
 
-pub async fn op_context_for_internal_api(
+pub(crate) async fn op_context_for_internal_api(
     rqctx: &dropshot::RequestContext<Arc<ServerContext>>,
 ) -> OpContext {
     let apictx = rqctx.context();
@@ -247,7 +288,7 @@ pub async fn op_context_for_internal_api(
     .expect("infallible")
 }
 
-pub fn op_context_for_saga_action<T>(
+pub(crate) fn op_context_for_saga_action<T>(
     sagactx: &steno::ActionContext<T>,
     serialized_authn: &authn::saga::Serialized,
 ) -> OpContext
@@ -282,6 +323,31 @@ where
         OpKind::Saga,
     )
     .expect("infallible")
+}
+
+#[async_trait]
+impl authn::external::AuthenticatorContext for ServerContext {
+    async fn silo_authn_policy_for(
+        &self,
+        actor: &authn::Actor,
+    ) -> Result<
+        Option<authn::SiloAuthnPolicy>,
+        omicron_common::api::external::Error,
+    > {
+        let Some(silo_id) = actor.silo_id() else { return Ok(None) };
+
+        // TODO-performance In general, this could almost always use a
+        // nexus_db_model::Silo from the ExternalEndpoints subsystem instead of
+        // doing an explicit database lookup here.  However, that's potentially
+        // out of date (e.g., immediately after creating a Silo), so we'd have
+        // to fallback to an explicit lookup.
+        let opctx = self.nexus.opctx_external_authn();
+        let datastore = self.nexus.datastore();
+        let (_, db_silo) =
+            LookupPath::new(opctx, datastore).silo_id(silo_id).fetch().await?;
+        let silo_authn_policy = authn::SiloAuthnPolicy::try_from(&db_silo)?;
+        Ok(Some(silo_authn_policy))
+    }
 }
 
 #[async_trait]

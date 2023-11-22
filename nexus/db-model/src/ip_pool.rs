@@ -22,42 +22,55 @@ use std::net::IpAddr;
 use uuid::Uuid;
 
 /// An IP Pool is a collection of IP addresses external to the rack.
+///
+/// IP pools can be external or internal. External IP pools can be associated
+/// with a silo or project so that instance IP allocation draws from that pool
+/// instead of a system pool.
 #[derive(Queryable, Insertable, Selectable, Clone, Debug, Resource)]
 #[diesel(table_name = ip_pool)]
 pub struct IpPool {
     #[diesel(embed)]
     pub identity: IpPoolIdentity,
 
-    /// If true, identifies that this IP pool is dedicated to "Control-Plane
-    /// Services", such as Nexus.
-    ///
-    /// Otherwise, this IP pool is intended for usage by customer VMs.
-    pub internal: bool,
-
     /// Child resource generation number, for optimistic concurrency control of
     /// the contained ranges.
     pub rcgen: i64,
+
+    /// Silo, if IP pool is associated with a particular silo. One special use
+    /// for this is  associating a pool with the internal silo oxide-internal,
+    /// which is used for internal services. If there is no silo ID, the
+    /// pool is considered a fleet-wide pool and will be used for allocating
+    /// instance IPs in silos that don't have their own pool.
+    pub silo_id: Option<Uuid>,
+
+    pub is_default: bool,
 }
 
 impl IpPool {
     pub fn new(
         pool_identity: &external::IdentityMetadataCreateParams,
-        internal: bool,
+        silo_id: Option<Uuid>,
+        is_default: bool,
     ) -> Self {
         Self {
             identity: IpPoolIdentity::new(
                 Uuid::new_v4(),
                 pool_identity.clone(),
             ),
-            internal,
             rcgen: 0,
+            silo_id,
+            is_default,
         }
     }
 }
 
 impl From<IpPool> for views::IpPool {
     fn from(pool: IpPool) -> Self {
-        Self { identity: pool.identity() }
+        Self {
+            identity: pool.identity(),
+            silo_id: pool.silo_id,
+            is_default: pool.is_default,
+        }
     }
 }
 
@@ -127,6 +140,7 @@ impl From<IpPoolRange> for views::IpPoolRange {
     fn from(range: IpPoolRange) -> Self {
         Self {
             id: range.id,
+            ip_pool_id: range.ip_pool_id,
             time_created: range.time_created,
             range: IpRange::from(&range),
         }

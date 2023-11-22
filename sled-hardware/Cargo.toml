@@ -7,11 +7,14 @@ license = "MPL-2.0"
 
 [dependencies]
 anyhow.workspace = true
+camino.workspace = true
 cfg-if.workspace = true
 futures.workspace = true
 illumos-utils.workspace = true
 libc.workspace = true
-nexus-client.workspace = true
+macaddr.workspace = true
+omicron-common.workspace = true
+rand.workspace = true
 schemars.workspace = true
 serde.workspace = true
 slog.workspace = true
@@ -19,6 +22,7 @@ thiserror.workspace = true
 tofino.workspace = true
 tokio.workspace = true
 uuid.workspace = true
+omicron-workspace-hack.workspace = true
 
 [target.'cfg(target_os = "illumos")'.dependencies]
 illumos-devinfo = { git = "https://github.com/oxidecomputer/illumos-devinfo", branch = "main" }

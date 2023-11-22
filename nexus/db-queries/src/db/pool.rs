@@ -44,21 +44,40 @@ pub struct Pool {
 }
 
 impl Pool {
-    pub fn new(db_config: &DbConfig) -> Self {
-        let manager =
-            ConnectionManager::<DbConnection>::new(&db_config.url.url());
-        let pool = bb8::Builder::new()
-            .connection_customizer(Box::new(DisallowFullTableScans {}))
-            .build_unchecked(manager);
-        Pool { pool }
+    pub fn new(log: &slog::Logger, db_config: &DbConfig) -> Self {
+        // Make sure diesel-dtrace's USDT probes are enabled.
+        usdt::register_probes().expect("Failed to register USDT DTrace probes");
+        Self::new_builder(log, db_config, bb8::Builder::new())
     }
 
-    pub fn new_failfast_for_tests(db_config: &DbConfig) -> Self {
-        let manager =
-            ConnectionManager::<DbConnection>::new(&db_config.url.url());
-        let pool = bb8::Builder::new()
+    pub fn new_failfast_for_tests(
+        log: &slog::Logger,
+        db_config: &DbConfig,
+    ) -> Self {
+        Self::new_builder(
+            log,
+            db_config,
+            bb8::Builder::new()
+                .connection_timeout(std::time::Duration::from_millis(1)),
+        )
+    }
+
+    fn new_builder(
+        log: &slog::Logger,
+        db_config: &DbConfig,
+        builder: bb8::Builder<ConnectionManager<DbConnection>>,
+    ) -> Self {
+        let url = db_config.url.url();
+        let log = log.new(o!(
+            "database_url" => url.clone(),
+            "component" => "db::Pool"
+        ));
+        info!(&log, "database connection pool");
+        let error_sink = LoggingErrorSink::new(log);
+        let manager = ConnectionManager::<DbConnection>::new(url);
+        let pool = builder
             .connection_customizer(Box::new(DisallowFullTableScans {}))
-            .connection_timeout(std::time::Duration::from_millis(1))
+            .error_sink(Box::new(error_sink))
             .build_unchecked(manager);
         Pool { pool }
     }
@@ -82,6 +101,33 @@ impl CustomizeConnection<Connection<DbConnection>, ConnectionError>
         &self,
         conn: &mut Connection<DbConnection>,
     ) -> Result<(), ConnectionError> {
-        conn.batch_execute_async(DISALLOW_FULL_TABLE_SCAN_SQL).await
+        conn.batch_execute_async(DISALLOW_FULL_TABLE_SCAN_SQL)
+            .await
+            .map_err(|e| e.into())
+    }
+}
+
+#[derive(Clone, Debug)]
+struct LoggingErrorSink {
+    log: slog::Logger,
+}
+
+impl LoggingErrorSink {
+    fn new(log: slog::Logger) -> LoggingErrorSink {
+        LoggingErrorSink { log }
+    }
+}
+
+impl bb8::ErrorSink<ConnectionError> for LoggingErrorSink {
+    fn sink(&self, error: ConnectionError) {
+        error!(
+            &self.log,
+            "database connection error";
+            "error_message" => #%error
+        );
+    }
+
+    fn boxed_clone(&self) -> Box<dyn bb8::ErrorSink<ConnectionError>> {
+        Box::new(self.clone())
     }
 }

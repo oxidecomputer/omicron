@@ -1,14 +1,12 @@
 [dropshot]
 # 100 MiB.  This ought to be large enough for a while, but not so large that
-# we'll use tons of memory parsing it.
+# we'll use tons of memory parsing incoming HTTP requests.
 request_body_max_bytes = 104857600
 
 [log]
 # Show log messages of this level and more severe
 level = "info"
-mode = "file"
-path = "/dev/stdout"
-if_exists = "append"
+mode = "stderr-terminal"
 
 [storage]
 storage_path = "./dns-storage"

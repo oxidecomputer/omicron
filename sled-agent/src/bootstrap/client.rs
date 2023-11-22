@@ -7,15 +7,11 @@
 use super::params::version;
 use super::params::Request;
 use super::params::RequestEnvelope;
-use super::params::SledAgentRequest;
-use super::trust_quorum::ShareDistribution;
+use super::params::StartSledAgentRequest;
 use super::views::SledAgentResponse;
 use crate::bootstrap::views::Response;
 use crate::bootstrap::views::ResponseEnvelope;
-use crate::sp::SpHandle;
-use crate::sp::SprocketsRole;
 use slog::Logger;
-use sprockets_host::Ed25519Certificate;
 use std::borrow::Cow;
 use std::io;
 use std::net::SocketAddrV6;
@@ -23,15 +19,11 @@ use thiserror::Error;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
-use vsss_rs::Share;
 
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("Could not connect to {addr}: {err}")]
     Connect { addr: SocketAddrV6, err: io::Error },
-
-    #[error("Could not establish sprockets session: {0}")]
-    SprocketsSession(String),
 
     #[error("Failed serializing request: {0}")]
     Serialize(serde_json::Error),
@@ -67,55 +59,33 @@ pub enum Error {
     InvalidResponse { expected: &'static str, received: &'static str },
 }
 
-pub(crate) struct Client<'a> {
+/// A TCP client used to connect to bootstrap agents for rack initialization
+///
+/// TODO: This will transition to a sprockets channel in the fullness of time.
+/// In all likelyhood, the sprockets channels will actually be managed by
+/// the bootstore which will proxy requests and resposnes as needed for the
+/// bootstrap agent.
+pub(crate) struct Client {
     addr: SocketAddrV6,
-    sp: &'a Option<SpHandle>,
-    trust_quorum_members: &'a [Ed25519Certificate],
-    log: Logger,
+    _log: Logger,
 }
 
-impl<'a> Client<'a> {
-    pub(crate) fn new(
-        addr: SocketAddrV6,
-        sp: &'a Option<SpHandle>,
-        trust_quorum_members: &'a [Ed25519Certificate],
-        log: Logger,
-    ) -> Self {
-        Self { addr, sp, trust_quorum_members, log }
+impl Client {
+    pub(crate) fn new(addr: SocketAddrV6, _log: Logger) -> Self {
+        Self { addr, _log }
     }
 
-    pub(crate) fn addr(&self) -> SocketAddrV6 {
-        self.addr
-    }
-
-    pub(crate) async fn start_sled(
+    /// Start sled agent by sending an initialization request determined from
+    /// RSS input. This client is on the same scrimlet as RSS, and is talking
+    /// over TCP to all other bootstrap agents.
+    pub(crate) async fn start_sled_agent(
         &self,
-        request: &SledAgentRequest,
-        trust_quorum_share: Option<ShareDistribution>,
+        request: &StartSledAgentRequest,
     ) -> Result<SledAgentResponse, Error> {
-        let request = Request::SledAgentRequest(
-            Cow::Borrowed(request),
-            trust_quorum_share.map(Into::into),
-        );
+        let request = Request::StartSledAgentRequest(Cow::Borrowed(request));
 
         match self.request_response(request).await? {
             Response::SledAgentResponse(response) => Ok(response),
-            Response::ShareResponse(_) => Err(Error::InvalidResponse {
-                expected: "SledAgentResponse",
-                received: "ShareResponse",
-            }),
-        }
-    }
-
-    pub(crate) async fn request_share(&self) -> Result<Share, Error> {
-        let request = Request::ShareRequest;
-
-        match self.request_response(request).await? {
-            Response::ShareResponse(response) => Ok(response),
-            Response::SledAgentResponse(_) => Err(Error::InvalidResponse {
-                expected: "ShareResponse",
-                received: "SledAgentResponse",
-            }),
         }
     }
 
@@ -135,23 +105,11 @@ impl<'a> Client<'a> {
             .await
             .map_err(|err| Error::Connect { addr: self.addr, err })?;
 
-        let mut stream = crate::sp::maybe_wrap_stream(
-            stream,
-            self.sp,
-            SprocketsRole::Client,
-            Some(self.trust_quorum_members),
-            &self.log,
-        )
-        .await
-        .map_err(|err| Error::SprocketsSession(err.to_string()))?;
+        let mut stream = Box::new(tokio::io::BufStream::new(stream));
 
         // Build and serialize our request.
         let envelope = RequestEnvelope { version: version::V1, request };
-
-        // "danger" note: `buf` contains a raw trust quorum share; we must not
-        // log or otherwise persist it! We only write it to `stream`.
-        let buf =
-            envelope.danger_serialize_as_json().map_err(Error::Serialize)?;
+        let buf = serde_json::to_vec(&envelope).map_err(Error::Serialize)?;
         let request_length = u32::try_from(buf.len())
             .expect("serialized bootstrap-agent request length overflowed u32");
 

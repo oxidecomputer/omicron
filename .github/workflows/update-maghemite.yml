@@ -1,0 +1,84 @@
+name: Update maghemite
+
+on:
+  workflow_dispatch:
+    inputs:
+      reflector_access_token:
+        description: Access token for use in authenticating as the Reflector bot
+        type: string
+      reflector_user_id:
+        description: User id of the Reflector bot
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+  # This is a workaround for the GitHub cli requiring excessive permissions when updating a pull
+  # request (https://github.com/cli/cli/discussions/5307)
+  repository-projects: read
+
+jobs:
+  generate-update:
+    concurrency:
+      group: maghemite-integration
+      cancel-in-progress: true
+    runs-on: ubuntu-22.04
+    env:
+      INT_BRANCH: maghemite-integration
+      TARGET_BRANCH: main
+    steps:
+
+      # Checkout both the target and integration branches
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        with:
+          token: ${{ inputs.reflector_access_token }}
+          fetch-depth: 0
+
+      - name: Update from main
+        run: |
+          . ./tools/reflector/helpers.sh
+
+          PATHS=("tools")
+          merge $TARGET_BRANCH $INT_BRANCH ${{ inputs.reflector_user_id }} "${PATHS[@]}"
+
+      - name: Update maghemite versions
+        run: |
+          ./tools/update_maghemite.sh
+
+      - name: Extract new maghemite package version
+        run: |
+          eval $(cat tools/maghemite_openapi_version | grep COMMIT)
+          echo "version=${COMMIT:0:7}" >> $GITHUB_OUTPUT
+        id: updated
+
+      - name: Commit changes
+        run: |
+          . ./tools/reflector/helpers.sh
+
+          PATHS=("tools/maghemite_openapi_version")
+          CHANGES=()
+          commit $TARGET_BRANCH $INT_BRANCH ${{ inputs.reflector_user_id }} PATHS CHANGES
+
+          echo "api=${CHANGES[0]}" >> $GITHUB_OUTPUT
+        id: committed
+
+      - name: Update pull request
+        env:
+          GH_TOKEN: ${{ inputs.reflector_access_token }}
+        run: |
+          . ./tools/reflector/helpers.sh
+
+          TITLE=""
+          echo "" > body
+
+          if [ ${{ steps.committed.outputs.api }} ]
+          then
+            TITLE+=" maghemite to ${{ steps.updated.outputs.version }}"
+
+            echo "Updated maghemite to commit ${{ steps.updated.outputs.version }}." >> body
+            echo "" >> body
+          fi
+
+          TITLE="Update${TITLE}"
+
+          update_pr $TARGET_BRANCH $INT_BRANCH "$TITLE" "body"

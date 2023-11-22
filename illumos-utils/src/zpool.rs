@@ -5,9 +5,10 @@
 //! Utilities for managing Zpools.
 
 use crate::{execute, ExecutionError, PFEXEC};
-use serde::{Deserialize, Deserializer};
+use camino::{Utf8Path, Utf8PathBuf};
+use schemars::JsonSchema;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
-use std::path::Path;
 use std::str::FromStr;
 use uuid::Uuid;
 
@@ -26,11 +27,21 @@ pub enum Error {
 
     #[error(transparent)]
     Parse(#[from] ParseError),
+
+    #[error("No Zpools found")]
+    NoZpools,
 }
 
 #[derive(thiserror::Error, Debug)]
 #[error("Failed to create zpool: {err}")]
 pub struct CreateError {
+    #[from]
+    err: Error,
+}
+
+#[derive(thiserror::Error, Debug)]
+#[error("Failed to destroy zpool: {err}")]
+pub struct DestroyError {
     #[from]
     err: Error,
 }
@@ -85,7 +96,7 @@ impl FromStr for ZpoolHealth {
 }
 
 /// Describes a Zpool.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ZpoolInfo {
     name: String,
     size: u64,
@@ -116,6 +127,17 @@ impl ZpoolInfo {
     #[allow(dead_code)]
     pub fn health(&self) -> ZpoolHealth {
         self.health
+    }
+
+    #[cfg(any(test, feature = "testing"))]
+    pub fn new_hardcoded(name: String) -> ZpoolInfo {
+        ZpoolInfo {
+            name,
+            size: 1024 * 1024 * 64,
+            allocated: 1024,
+            free: 1024 * 1023 * 64,
+            health: ZpoolHealth::Online,
+        }
     }
 }
 
@@ -163,7 +185,10 @@ pub struct Zpool {}
 
 #[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
 impl Zpool {
-    pub fn create(name: ZpoolName, vdev: &Path) -> Result<(), CreateError> {
+    pub fn create(
+        name: &ZpoolName,
+        vdev: &Utf8Path,
+    ) -> Result<(), CreateError> {
         let mut cmd = std::process::Command::new(PFEXEC);
         cmd.env_clear();
         cmd.env("LC_ALL", "C.UTF-8");
@@ -185,7 +210,17 @@ impl Zpool {
         Ok(())
     }
 
-    pub fn import(name: ZpoolName) -> Result<(), Error> {
+    pub fn destroy(name: &ZpoolName) -> Result<(), DestroyError> {
+        let mut cmd = std::process::Command::new(PFEXEC);
+        cmd.env_clear();
+        cmd.env("LC_ALL", "C.UTF-8");
+        cmd.arg(ZPOOL).arg("destroy");
+        cmd.arg(&name.to_string());
+        execute(&mut cmd).map_err(Error::from)?;
+        Ok(())
+    }
+
+    pub fn import(name: &ZpoolName) -> Result<(), Error> {
         let mut cmd = std::process::Command::new(PFEXEC);
         cmd.env_clear();
         cmd.env("LC_ALL", "C.UTF-8");
@@ -207,6 +242,29 @@ impl Zpool {
             }
             Err(e) => Err(e.into()),
         }
+    }
+
+    pub fn export(name: &ZpoolName) -> Result<(), Error> {
+        let mut cmd = std::process::Command::new(PFEXEC);
+        cmd.env_clear();
+        cmd.env("LC_ALL", "C.UTF-8");
+        cmd.arg(ZPOOL).arg("export").arg(&name.to_string());
+        execute(&mut cmd)?;
+
+        Ok(())
+    }
+
+    /// `zpool set failmode=continue <name>`
+    pub fn set_failmode_continue(name: &ZpoolName) -> Result<(), Error> {
+        let mut cmd = std::process::Command::new(PFEXEC);
+        cmd.env_clear();
+        cmd.env("LC_ALL", "C.UTF-8");
+        cmd.arg(ZPOOL)
+            .arg("set")
+            .arg("failmode=continue")
+            .arg(&name.to_string());
+        execute(&mut cmd)?;
+        Ok(())
     }
 
     pub fn list() -> Result<Vec<ZpoolName>, ListError> {
@@ -244,7 +302,8 @@ impl Zpool {
     }
 }
 
-#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 pub enum ZpoolKind {
     // This zpool is used for external storage (u.2)
     External,
@@ -260,6 +319,39 @@ pub enum ZpoolKind {
 pub struct ZpoolName {
     id: Uuid,
     kind: ZpoolKind,
+}
+
+const ZPOOL_NAME_REGEX: &str = r"^ox[ip]_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$";
+
+/// Custom JsonSchema implementation to encode the constraints on Name.
+impl JsonSchema for ZpoolName {
+    fn schema_name() -> String {
+        "ZpoolName".to_string()
+    }
+    fn json_schema(
+        _: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::SchemaObject {
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                title: Some(
+                    "The name of a Zpool".to_string(),
+                ),
+                description: Some(
+                    "Zpool names are of the format ox{i,p}_<UUID>. They are either \
+                     Internal or External, and should be unique"
+                        .to_string(),
+                ),
+                ..Default::default()
+            })),
+            instance_type: Some(schemars::schema::InstanceType::String.into()),
+            string: Some(Box::new(schemars::schema::StringValidation {
+                pattern: Some(ZPOOL_NAME_REGEX.to_owned()),
+                ..Default::default()
+            })),
+            ..Default::default()
+        }
+        .into()
+    }
 }
 
 impl ZpoolName {
@@ -278,6 +370,21 @@ impl ZpoolName {
     pub fn kind(&self) -> ZpoolKind {
         self.kind
     }
+
+    /// Returns a path to a dataset's mountpoint within the zpool.
+    ///
+    /// For example: oxp_(UUID) -> /pool/ext/(UUID)/(dataset)
+    pub fn dataset_mountpoint(&self, dataset: &str) -> Utf8PathBuf {
+        let mut path = Utf8PathBuf::new();
+        path.push("/pool");
+        match self.kind {
+            ZpoolKind::External => path.push("ext"),
+            ZpoolKind::Internal => path.push("int"),
+        };
+        path.push(self.id().to_string());
+        path.push(dataset);
+        path
+    }
 }
 
 impl<'de> Deserialize<'de> for ZpoolName {
@@ -287,6 +394,15 @@ impl<'de> Deserialize<'de> for ZpoolName {
     {
         let s = String::deserialize(deserializer)?;
         ZpoolName::from_str(&s).map_err(serde::de::Error::custom)
+    }
+}
+
+impl Serialize for ZpoolName {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
     }
 }
 
@@ -321,6 +437,70 @@ impl fmt::Display for ZpoolName {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn test_zpool_name_regex() {
+        let valid = [
+            "oxi_d462a7f7-b628-40fe-80ff-4e4189e2d62b",
+            "oxp_d462a7f7-b628-40fe-80ff-4e4189e2d62b",
+        ];
+
+        let invalid = [
+            "",
+            // Whitespace
+            " oxp_d462a7f7-b628-40fe-80ff-4e4189e2d62b",
+            "oxp_d462a7f7-b628-40fe-80ff-4e4189e2d62b ",
+            // Case sensitivity
+            "oxp_D462A7F7-b628-40fe-80ff-4e4189e2d62b",
+            // Bad prefix
+            "ox_d462a7f7-b628-40fe-80ff-4e4189e2d62b",
+            "oxa_d462a7f7-b628-40fe-80ff-4e4189e2d62b",
+            "oxi-d462a7f7-b628-40fe-80ff-4e4189e2d62b",
+            "oxp-d462a7f7-b628-40fe-80ff-4e4189e2d62b",
+            // Missing Prefix
+            "d462a7f7-b628-40fe-80ff-4e4189e2d62b",
+            // Bad UUIDs (Not following UUIDv4 format)
+            "oxi_d462a7f7-b628-30fe-80ff-4e4189e2d62b",
+            "oxi_d462a7f7-b628-40fe-c0ff-4e4189e2d62b",
+        ];
+
+        let r = regress::Regex::new(ZPOOL_NAME_REGEX)
+            .expect("validation regex is valid");
+        for input in valid {
+            let m = r
+                .find(input)
+                .unwrap_or_else(|| panic!("input {input} did not match regex"));
+            assert_eq!(m.start(), 0, "input {input} did not match start");
+            assert_eq!(m.end(), input.len(), "input {input} did not match end");
+        }
+
+        for input in invalid {
+            assert!(
+                r.find(input).is_none(),
+                "invalid input {input} should not match validation regex"
+            );
+        }
+    }
+
+    #[test]
+    fn test_parse_zpool_name_json() {
+        #[derive(Serialize, Deserialize, JsonSchema)]
+        struct TestDataset {
+            pool_name: ZpoolName,
+        }
+
+        // Confirm that we can convert from a JSON string to a a ZpoolName
+        let json_string =
+            r#"{"pool_name":"oxi_d462a7f7-b628-40fe-80ff-4e4189e2d62b"}"#;
+        let dataset: TestDataset = serde_json::from_str(json_string)
+            .expect("Could not parse ZpoolName from Json Object");
+        assert!(matches!(dataset.pool_name.kind, ZpoolKind::Internal));
+
+        // Confirm we can go the other way (ZpoolName to JSON string) too.
+        let j = serde_json::to_string(&dataset)
+            .expect("Cannot convert back to JSON string");
+        assert_eq!(j, json_string);
+    }
 
     fn toml_string(s: &str) -> String {
         format!("zpool_name = \"{}\"", s)

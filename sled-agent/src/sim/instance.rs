@@ -2,21 +2,27 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Simulated sled agent implementation
+//! Implements simulated instances.
 
 use super::simulatable::Simulatable;
 
-use crate::common::instance::InstanceState;
+use crate::common::instance::{ObservedPropolisState, PublishedVmmState};
 use crate::nexus::NexusClient;
 use crate::params::{InstanceMigrationSourceParams, InstanceStateRequested};
 use async_trait::async_trait;
+use chrono::Utc;
 use nexus_client;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::InstanceState as ApiInstanceState;
 use omicron_common::api::external::ResourceType;
-use omicron_common::api::internal::nexus::InstanceRuntimeState;
-use propolis_client::api::InstanceState as PropolisInstanceState;
+use omicron_common::api::internal::nexus::{
+    InstanceRuntimeState, SledInstanceState,
+};
+use propolis_client::types::{
+    InstanceMigrateStatusResponse as PropolisMigrateStatus,
+    InstanceState as PropolisInstanceState, InstanceStateMonitorResponse,
+};
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -24,61 +30,130 @@ use uuid::Uuid;
 
 use crate::common::instance::{Action as InstanceAction, InstanceStates};
 
+#[derive(Clone, Debug)]
+enum MonitorChange {
+    InstanceState(PropolisInstanceState),
+    MigrateStatus(PropolisMigrateStatus),
+}
+
 /// A simulation of an Instance created by the external Oxide API.
 ///
 /// This simulation tries to emulate Propolis's state machine as faithfully as
 /// possible within reason so that it can be used as a test double in Nexus
 /// integration tests.
+///
+/// The simulated instance contains a fake instance state stored as a
+/// [`propolis_client::api::InstanceStateMonitorResponse`]. Transition requests
+/// enqueue changes to either the instance state or the migration status fields
+/// of this response. When poked, the simulated instance applies the next
+/// transition, translates this to an observed Propolis state, and sends it
+/// off for processing.
 #[derive(Debug)]
 struct SimInstanceInner {
     /// The current simulated instance state.
     state: InstanceStates,
 
-    /// A queue of Propolis instance states for the simulated state driver to
-    /// observe in response to calls to `execute_desired_transition`.
-    propolis_queue: VecDeque<PropolisInstanceState>,
+    /// The fake Propolis state that was last used to update the instance
+    /// runtime state.
+    last_response: InstanceStateMonitorResponse,
 
-    /// Indicates whether the instance has been logically destroyed.
+    /// The queue of changes to apply to the fake Propolis state.
+    queue: VecDeque<MonitorChange>,
+
+    /// True if the instance has undergone a transition to a terminal Propolis
+    /// state (i.e. one where the internal Propolis instance is destroyed).
     destroyed: bool,
 }
 
 impl SimInstanceInner {
+    /// Pushes a Propolis instance state transition to the state change queue.
+    fn queue_propolis_state(&mut self, propolis_state: PropolisInstanceState) {
+        self.queue.push_back(MonitorChange::InstanceState(propolis_state));
+    }
+
+    /// Pushes a Propolis migration status to the state change queue.
+    fn queue_migration_status(
+        &mut self,
+        migrate_status: PropolisMigrateStatus,
+    ) {
+        self.queue.push_back(MonitorChange::MigrateStatus(migrate_status))
+    }
+
+    /// Searches the queue for its last Propolis state change transition. If
+    /// one exists, returns the associated Propolis state.
+    fn last_queued_instance_state(&self) -> Option<PropolisInstanceState> {
+        self.queue
+            .iter()
+            .filter_map(|entry| match entry {
+                MonitorChange::InstanceState(state) => Some(state),
+                _ => None,
+            })
+            .last()
+            .copied()
+    }
+
+    /// Handles a request of the simulated sled agent to change an instance's
+    /// state by queuing the appropriate state transitions and, if necessary,
+    /// returning an action for the caller to simulate.
     fn request_transition(
         &mut self,
         target: &InstanceStateRequested,
     ) -> Result<Option<InstanceAction>, Error> {
         match target {
+            // When Nexus intends to migrate into a VMM, it should create that
+            // VMM in the Migrating state and shouldn't request anything else
+            // from it before asking to migrate in.
             InstanceStateRequested::MigrationTarget(_) => {
-                match self.next_resting_state() {
-                    ApiInstanceState::Creating => {
-                        self.propolis_queue
-                            .push_back(PropolisInstanceState::Migrating);
-                        self.propolis_queue
-                            .push_back(PropolisInstanceState::Running);
-                    }
-                    _ => {
-                        return Err(Error::invalid_request(&format!(
-                            "can't request migration in with pending resting \
-                            state {}",
-                            self.next_resting_state()
-                        )))
-                    }
+                if !self.queue.is_empty() {
+                    return Err(Error::invalid_request(&format!(
+                        "can't request migration in with a non-empty state
+                        transition queue (current state: {:?})",
+                        self
+                    )));
                 }
+                if self.state.vmm().state != ApiInstanceState::Migrating {
+                    return Err(Error::invalid_request(&format!(
+                        "can't request migration in for a vmm that wasn't \
+                        created in the migrating state (current state: {:?})",
+                        self
+                    )));
+                }
+
+                // Propolis transitions to the Migrating state once before
+                // actually starting migration.
+                self.queue_propolis_state(PropolisInstanceState::Migrating);
+                let migration_id =
+                    self.state.instance().migration_id.unwrap_or_else(|| {
+                        panic!(
+                        "should have migration ID set before getting request to
+                        migrate in (current state: {:?})",
+                        self
+                    )
+                    });
+                self.queue_migration_status(PropolisMigrateStatus {
+                    migration_id,
+                    state: propolis_client::types::MigrationState::Sync,
+                });
+                self.queue_migration_status(PropolisMigrateStatus {
+                    migration_id,
+                    state: propolis_client::types::MigrationState::Finish,
+                });
+                self.queue_propolis_state(PropolisInstanceState::Running);
             }
             InstanceStateRequested::Running => {
                 match self.next_resting_state() {
-                    ApiInstanceState::Creating => {
-                        // The non-simulated sled agent explicitly and
-                        // synchronously publishes the "Starting" state when
-                        // cold-booting a new VM (so that the VM appears to be
-                        // starting while its Propolis process is being
-                        // launched).
-                        self.state.transition(ApiInstanceState::Starting);
-                        self.propolis_queue
-                            .push_back(PropolisInstanceState::Running);
+                    // It's only valid to request the Running state after
+                    // successfully registering a VMM, and a registered VMM
+                    // should never be in the Creating state.
+                    ApiInstanceState::Creating => unreachable!(
+                        "VMMs should never try to reach the Creating state"
+                    ),
+                    ApiInstanceState::Starting => {
+                        self.queue_propolis_state(
+                            PropolisInstanceState::Running,
+                        );
                     }
-                    ApiInstanceState::Starting
-                    | ApiInstanceState::Running
+                    ApiInstanceState::Running
                     | ApiInstanceState::Rebooting
                     | ApiInstanceState::Migrating => {}
 
@@ -92,25 +167,35 @@ impl SimInstanceInner {
                     | ApiInstanceState::Destroyed => {
                         return Err(Error::invalid_request(&format!(
                             "can't request state Running with pending resting \
-                        state {}",
-                            self.next_resting_state()
+                            state {} (current state: {:?})",
+                            self.next_resting_state(),
+                            self
                         )))
                     }
                 }
             }
             InstanceStateRequested::Stopped => {
                 match self.next_resting_state() {
-                    ApiInstanceState::Creating => {
-                        self.state.transition(ApiInstanceState::Destroyed);
+                    ApiInstanceState::Creating => unreachable!(
+                        "VMMs should never try to reach the Creating state"
+                    ),
+                    ApiInstanceState::Starting => {
+                        self.state.terminate_rudely();
                     }
                     ApiInstanceState::Running => {
-                        self.state.transition(ApiInstanceState::Stopping);
-                        self.propolis_queue
-                            .push_back(PropolisInstanceState::Stopping);
-                        self.propolis_queue
-                            .push_back(PropolisInstanceState::Stopped);
-                        self.propolis_queue
-                            .push_back(PropolisInstanceState::Destroyed);
+                        self.state.transition_vmm(
+                            PublishedVmmState::Stopping,
+                            Utc::now(),
+                        );
+                        self.queue_propolis_state(
+                            PropolisInstanceState::Stopping,
+                        );
+                        self.queue_propolis_state(
+                            PropolisInstanceState::Stopped,
+                        );
+                        self.queue_propolis_state(
+                            PropolisInstanceState::Destroyed,
+                        );
                     }
                     // Idempotently allow requests to stop an instance that is
                     // already stopping.
@@ -120,8 +205,9 @@ impl SimInstanceInner {
                     _ => {
                         return Err(Error::invalid_request(&format!(
                             "can't request state Stopped with pending resting \
-                        state {}",
-                            self.next_resting_state()
+                            state {} (current state: {:?})",
+                            self.next_resting_state(),
+                            self
                         )))
                     }
                 }
@@ -130,21 +216,27 @@ impl SimInstanceInner {
                 ApiInstanceState::Running => {
                     // Further requests to reboot are ignored if the instance
                     // is currently rebooting or about to reboot.
-                    if self.state.current().run_state
-                        != ApiInstanceState::Rebooting
+                    if self.state.vmm().state != ApiInstanceState::Rebooting
                         && !self.reboot_pending()
                     {
-                        self.state.transition(ApiInstanceState::Rebooting);
-                        self.propolis_queue
-                            .push_back(PropolisInstanceState::Rebooting);
-                        self.propolis_queue
-                            .push_back(PropolisInstanceState::Running);
+                        self.state.transition_vmm(
+                            PublishedVmmState::Rebooting,
+                            Utc::now(),
+                        );
+                        self.queue_propolis_state(
+                            PropolisInstanceState::Rebooting,
+                        );
+                        self.queue_propolis_state(
+                            PropolisInstanceState::Running,
+                        );
                     }
                 }
                 _ => {
                     return Err(Error::invalid_request(&format!(
-                        "can't request Reboot with pending resting state {}",
-                        self.next_resting_state()
+                        "can't request Reboot with pending resting state {} \
+                        (current state: {:?})",
+                        self.next_resting_state(),
+                        self
                     )))
                 }
             },
@@ -153,23 +245,35 @@ impl SimInstanceInner {
         Ok(None)
     }
 
+    /// Simulates the next state transition on the queue, if one exists.
     fn execute_desired_transition(&mut self) -> Option<InstanceAction> {
-        if let Some(propolis_state) = self.propolis_queue.pop_front() {
-            if matches!(propolis_state, PropolisInstanceState::Destroyed) {
-                self.destroyed = true;
+        if let Some(change) = self.queue.pop_front() {
+            match change {
+                MonitorChange::InstanceState(state) => {
+                    if matches!(state, PropolisInstanceState::Destroyed) {
+                        self.destroyed = true;
+                    }
+                    self.last_response.state = state;
+                }
+                MonitorChange::MigrateStatus(status) => {
+                    self.last_response.migration = Some(status);
+                }
             }
-            self.state.observe_transition(&propolis_state)
+
+            self.state.apply_propolis_observation(&ObservedPropolisState::new(
+                &self.state.instance(),
+                &self.last_response,
+            ))
         } else {
             None
         }
     }
 
-    fn current(&self) -> InstanceRuntimeState {
-        self.state.current().clone()
-    }
-
+    /// If the state change queue contains at least once instance state change,
+    /// returns the requested instance state associated with the last instance
+    /// state on the queue. Returns None otherwise.
     fn desired(&self) -> Option<InstanceStateRequested> {
-        self.propolis_queue.back().map(|terminal| match terminal {
+        self.last_queued_instance_state().map(|terminal| match terminal {
             // State change requests may queue these states as intermediate
             // states, but the simulation (and the tests that rely on it) is
             // currently not expected to come to rest in any of these states.
@@ -194,6 +298,7 @@ impl SimInstanceInner {
         })
     }
 
+    /// Indicates whether the instance is logically destroyed.
     fn ready_to_destroy(&self) -> bool {
         self.destroyed
     }
@@ -201,46 +306,73 @@ impl SimInstanceInner {
     /// Returns the "resting" state the simulated instance will reach if its
     /// queue is drained.
     fn next_resting_state(&self) -> ApiInstanceState {
-        match self.propolis_queue.back() {
-            None => self.state.current().run_state,
-            Some(p) => InstanceState::from(*p).0,
+        if self.queue.is_empty() {
+            self.state.vmm().state
+        } else {
+            if let Some(last_state) = self.last_queued_instance_state() {
+                use ApiInstanceState as ApiState;
+                use PropolisInstanceState as PropolisState;
+                match last_state {
+                    PropolisState::Creating | PropolisState::Starting => {
+                        ApiState::Starting
+                    }
+                    PropolisState::Running => ApiState::Running,
+                    PropolisState::Stopping => ApiState::Stopping,
+                    PropolisState::Stopped => ApiState::Stopped,
+                    PropolisState::Rebooting => ApiState::Rebooting,
+                    PropolisState::Migrating => ApiState::Migrating,
+                    PropolisState::Repairing => ApiState::Repairing,
+                    PropolisState::Failed => ApiState::Failed,
+                    PropolisState::Destroyed => ApiState::Destroyed,
+                }
+            } else {
+                self.state.vmm().state
+            }
         }
     }
 
     /// Indicates whether there is a reboot transition pending for this
     /// instance.
     fn reboot_pending(&self) -> bool {
-        self.propolis_queue
-            .iter()
-            .any(|s| matches!(s, PropolisInstanceState::Rebooting))
+        self.queue.iter().any(|s| {
+            matches!(
+                s,
+                MonitorChange::InstanceState(PropolisInstanceState::Rebooting)
+            )
+        })
     }
 
-    fn terminate(&mut self) -> InstanceRuntimeState {
-        self.state.transition(ApiInstanceState::Destroyed);
-        self.propolis_queue.clear();
-        self.state.current().clone()
+    /// Simulates rude termination by moving the instance to the Destroyed state
+    /// immediately and clearing the queue of pending state transitions.
+    fn terminate(&mut self) -> SledInstanceState {
+        self.state.terminate_rudely();
+        self.queue.clear();
+        self.destroyed = true;
+        self.state.sled_instance_state()
     }
+
+    /// Stores a set of migration IDs in the instance's runtime state.
     fn put_migration_ids(
         &mut self,
         old_runtime: &InstanceRuntimeState,
         ids: &Option<InstanceMigrationSourceParams>,
-    ) -> Result<InstanceRuntimeState, Error> {
+    ) -> Result<SledInstanceState, Error> {
         if self.state.migration_ids_already_set(old_runtime, ids) {
-            return Ok(self.state.current().clone());
+            return Ok(self.state.sled_instance_state());
         }
 
-        if self.state.current().propolis_gen != old_runtime.propolis_gen {
+        if self.state.instance().gen != old_runtime.gen {
             return Err(Error::InvalidRequest {
                 message: format!(
                     "wrong Propolis ID generation: expected {}, got {}",
-                    self.state.current().propolis_gen,
-                    old_runtime.propolis_gen
+                    self.state.instance().gen,
+                    old_runtime.gen
                 ),
             });
         }
 
-        self.state.set_migration_ids(ids);
-        Ok(self.state.current().clone())
+        self.state.set_migration_ids(ids, Utc::now());
+        Ok(self.state.sled_instance_state())
     }
 }
 
@@ -265,7 +397,7 @@ pub struct SimInstance {
 }
 
 impl SimInstance {
-    pub fn terminate(&self) -> InstanceRuntimeState {
+    pub fn terminate(&self) -> SledInstanceState {
         self.inner.lock().unwrap().terminate()
     }
 
@@ -273,7 +405,7 @@ impl SimInstance {
         &self,
         old_runtime: &InstanceRuntimeState,
         ids: &Option<InstanceMigrationSourceParams>,
-    ) -> Result<InstanceRuntimeState, Error> {
+    ) -> Result<SledInstanceState, Error> {
         let mut inner = self.inner.lock().unwrap();
         inner.put_migration_ids(old_runtime, ids)
     }
@@ -281,16 +413,33 @@ impl SimInstance {
 
 #[async_trait]
 impl Simulatable for SimInstance {
-    type CurrentState = InstanceRuntimeState;
+    type CurrentState = SledInstanceState;
     type RequestedState = InstanceStateRequested;
     type ProducerArgs = ();
     type Action = InstanceAction;
 
-    fn new(current: InstanceRuntimeState) -> Self {
+    fn new(current: SledInstanceState) -> Self {
+        assert!(matches!(
+            current.vmm_state.state,
+            ApiInstanceState::Starting | ApiInstanceState::Migrating),
+            "new VMMs should always be registered in the Starting or Migrating \
+            state (supplied state: {:?})",
+            current.vmm_state.state
+        );
+
         SimInstance {
             inner: Arc::new(Mutex::new(SimInstanceInner {
-                state: InstanceStates::new(current),
-                propolis_queue: VecDeque::new(),
+                state: InstanceStates::new(
+                    current.instance_state,
+                    current.vmm_state,
+                    current.propolis_id,
+                ),
+                last_response: InstanceStateMonitorResponse {
+                    gen: 1,
+                    state: PropolisInstanceState::Starting,
+                    migration: None,
+                },
+                queue: VecDeque::new(),
                 destroyed: false,
             })),
         }
@@ -316,11 +465,11 @@ impl Simulatable for SimInstance {
     }
 
     fn generation(&self) -> Generation {
-        self.inner.lock().unwrap().current().gen
+        self.inner.lock().unwrap().state.vmm().gen
     }
 
     fn current(&self) -> Self::CurrentState {
-        self.inner.lock().unwrap().current()
+        self.inner.lock().unwrap().state.sled_instance_state()
     }
 
     fn desired(&self) -> Option<Self::RequestedState> {
@@ -339,7 +488,7 @@ impl Simulatable for SimInstance {
         nexus_client
             .cpapi_instances_put(
                 id,
-                &nexus_client::types::InstanceRuntimeState::from(current),
+                &nexus_client::types::SledInstanceState::from(current),
             )
             .await
             .map(|_| ())

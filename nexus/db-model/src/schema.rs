@@ -6,6 +6,8 @@
 //!
 //! NOTE: Should be kept up-to-date with dbinit.sql.
 
+use omicron_common::api::external::SemverVersion;
+
 table! {
     disk (id) {
         id -> Uuid,
@@ -21,6 +23,7 @@ table! {
         attach_instance_id -> Nullable<Uuid>,
         state_generation -> Int8,
         time_state_updated -> Timestamptz,
+        slot -> Nullable<Int2>,
         size_bytes -> Int8,
         block_size -> crate::BlockSizeEnum,
         origin_snapshot -> Nullable<Uuid>,
@@ -89,6 +92,216 @@ table! {
 }
 
 table! {
+    switch_port (id) {
+        id -> Uuid,
+        rack_id -> Uuid,
+        switch_location -> Text,
+        port_name -> Text,
+        port_settings_id -> Nullable<Uuid>,
+    }
+}
+
+table! {
+    switch_port_settings_group (id) {
+        id -> Uuid,
+        port_settings_id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+    }
+}
+
+table! {
+    switch_port_settings_groups (port_settings_id, port_settings_group_id) {
+        port_settings_id -> Uuid,
+        port_settings_group_id -> Uuid,
+    }
+}
+
+table! {
+    switch_port_settings (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+    }
+}
+
+table! {
+    switch_port_settings_port_config (port_settings_id) {
+        port_settings_id -> Uuid,
+        geometry -> crate::SwitchPortGeometryEnum,
+    }
+}
+
+table! {
+    switch_port_settings_link_config (port_settings_id, link_name) {
+        port_settings_id -> Uuid,
+        lldp_service_config_id -> Uuid,
+        link_name -> Text,
+        mtu -> Int4,
+        fec -> crate::SwitchLinkFecEnum,
+        speed -> crate::SwitchLinkSpeedEnum,
+    }
+}
+
+table! {
+    lldp_service_config (id) {
+        id -> Uuid,
+        enabled -> Bool,
+        lldp_config_id -> Nullable<Uuid>,
+    }
+}
+
+table! {
+    lldp_config (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        chassis_id -> Text,
+        system_name -> Text,
+        system_description -> Text,
+        management_ip -> Inet,
+    }
+}
+
+table! {
+    switch_port_settings_interface_config (id) {
+        port_settings_id -> Uuid,
+        id -> Uuid,
+        interface_name -> Text,
+        v6_enabled -> Bool,
+        kind -> crate::DbSwitchInterfaceKindEnum,
+    }
+}
+
+table! {
+    switch_vlan_interface_config (interface_config_id, vid) {
+        interface_config_id -> Uuid,
+        vid -> Int4,
+    }
+}
+
+table! {
+    switch_port_settings_route_config (port_settings_id, interface_name, dst, gw) {
+        port_settings_id -> Uuid,
+        interface_name -> Text,
+        dst -> Inet,
+        gw -> Inet,
+        vid -> Nullable<Int4>,
+    }
+}
+
+table! {
+    switch_port_settings_bgp_peer_config (port_settings_id, interface_name, addr) {
+        port_settings_id -> Uuid,
+        bgp_config_id -> Uuid,
+        interface_name -> Text,
+        addr -> Inet,
+        hold_time -> Int8,
+        idle_hold_time -> Int8,
+        delay_open -> Int8,
+        connect_retry -> Int8,
+        keepalive -> Int8,
+    }
+}
+
+table! {
+    bgp_config (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        asn -> Int8,
+        bgp_announce_set_id -> Uuid,
+        vrf -> Nullable<Text>,
+    }
+}
+
+table! {
+    bgp_announce_set (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+    }
+}
+
+table! {
+    bgp_announcement (announce_set_id, network) {
+        announce_set_id -> Uuid,
+        address_lot_block_id -> Uuid,
+        network -> Inet,
+    }
+}
+
+table! {
+    switch_port_settings_address_config (port_settings_id, address, interface_name) {
+        port_settings_id -> Uuid,
+        address_lot_block_id -> Uuid,
+        rsvd_address_lot_block_id -> Uuid,
+        address -> Inet,
+        interface_name -> Text,
+    }
+}
+
+table! {
+    address_lot (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        kind -> crate::AddressLotKindEnum,
+    }
+}
+
+table! {
+    address_lot_block (id) {
+        id -> Uuid,
+        address_lot_id -> Uuid,
+        first_address -> Inet,
+        last_address -> Inet,
+    }
+}
+
+table! {
+    address_lot_rsvd_block (id) {
+        id -> Uuid,
+        address_lot_id -> Uuid,
+        first_address -> Inet,
+        last_address -> Inet,
+        anycast -> Bool,
+    }
+}
+
+table! {
+    loopback_address (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        address_lot_block_id -> Uuid,
+        rsvd_address_lot_block_id -> Uuid,
+        rack_id -> Uuid,
+        switch_location -> Text,
+        address -> Inet,
+        anycast -> Bool,
+    }
+}
+
+table! {
     global_image (id) {
         id -> Uuid,
         name -> Text,
@@ -138,18 +351,46 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         project_id -> Uuid,
         user_data -> Binary,
-        state -> crate::InstanceStateEnum,
-        time_state_updated -> Timestamptz,
-        state_generation -> Int8,
-        active_server_id -> Uuid,
-        active_propolis_id -> Uuid,
-        active_propolis_ip -> Nullable<Inet>,
-        target_propolis_id -> Nullable<Uuid>,
-        migration_id -> Nullable<Uuid>,
-        propolis_generation -> Int8,
         ncpus -> Int8,
         memory -> Int8,
         hostname -> Text,
+        boot_on_fault -> Bool,
+        state -> crate::InstanceStateEnum,
+        time_state_updated -> Timestamptz,
+        state_generation -> Int8,
+        active_propolis_id -> Nullable<Uuid>,
+        target_propolis_id -> Nullable<Uuid>,
+        migration_id -> Nullable<Uuid>,
+    }
+}
+
+table! {
+    vmm (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        instance_id -> Uuid,
+        sled_id -> Uuid,
+        propolis_ip -> Inet,
+        state -> crate::InstanceStateEnum,
+        time_state_updated -> Timestamptz,
+        state_generation -> Int8,
+    }
+}
+
+table! {
+    sled_instance (id) {
+        id -> Uuid,
+        name -> Text,
+        silo_name -> Text,
+        project_name -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        state -> crate::InstanceStateEnum,
+        active_sled_id -> Uuid,
+        migration_id -> Nullable<Uuid>,
+        ncpus -> Int8,
+        memory -> Int8,
     }
 }
 
@@ -158,6 +399,7 @@ table! {
         id -> Uuid,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
+        kind -> Nullable<crate::ProducerKindEnum>,
         ip -> Inet,
         port -> Int4,
         interval -> Float8,
@@ -229,8 +471,9 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
-        internal -> Bool,
         rcgen -> Int8,
+        silo_id -> Nullable<Uuid>,
+        is_default -> Bool,
     }
 }
 
@@ -248,6 +491,32 @@ table! {
 }
 
 table! {
+    ipv4_nat_entry (id) {
+        id -> Uuid,
+        external_address -> Inet,
+        first_port -> Int4,
+        last_port -> Int4,
+        sled_address -> Inet,
+        vni -> Int4,
+        mac -> Int8,
+        version_added -> Int8,
+        version_removed -> Nullable<Int8>,
+        time_created -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+    }
+}
+
+// This is the sequence used for the version number
+// in ipv4_nat_entry.
+table! {
+    ipv4_nat_version (last_value) {
+        last_value -> Int8,
+        log_cnt -> Int8,
+        is_called -> Bool,
+    }
+}
+
+table! {
     external_ip (id) {
         id -> Uuid,
         name -> Nullable<Text>,
@@ -257,7 +526,8 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         ip_pool_id -> Uuid,
         ip_pool_range_id -> Uuid,
-        instance_id -> Nullable<Uuid>,
+        is_service -> Bool,
+        parent_id -> Nullable<Uuid>,
         kind -> crate::IpKindEnum,
         ip -> Inet,
         first_port -> Int4,
@@ -277,6 +547,8 @@ table! {
         discoverable -> Bool,
         authentication_mode -> crate::AuthenticationModeEnum,
         user_provision_type -> crate::UserProvisionTypeEnum,
+
+        mapped_fleet_roles -> Jsonb,
 
         rcgen -> Int8,
     }
@@ -435,6 +707,7 @@ table! {
         time_modified -> Timestamptz,
         initialized -> Bool,
         tuf_base_url -> Nullable<Text>,
+        rack_subnet -> Nullable<Inet>,
     }
 }
 
@@ -463,6 +736,7 @@ table! {
 
         usable_hardware_threads -> Int8,
         usable_physical_ram -> Int8,
+        reservoir_size -> Int8,
 
         ip -> Inet,
         port -> Int4,
@@ -482,22 +756,31 @@ table! {
 }
 
 table! {
+    switch (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        rcgen -> Int8,
+
+        rack_id -> Uuid,
+        serial_number -> Text,
+        part_number -> Text,
+        revision -> Int8,
+    }
+}
+
+table! {
     service (id) {
         id -> Uuid,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
 
         sled_id -> Uuid,
+        zone_id -> Nullable<Uuid>,
         ip -> Inet,
         port -> Int4,
         kind -> crate::ServiceKindEnum,
-    }
-}
-
-table! {
-    nexus_service (id) {
-        id -> Uuid,
-        external_ip_id -> Uuid,
     }
 }
 
@@ -527,6 +810,7 @@ table! {
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
 
+        silo_id -> Uuid,
         service -> crate::ServiceKindEnum,
         cert -> Binary,
         key -> Binary,
@@ -561,6 +845,11 @@ table! {
         cpus_provisioned -> Int8,
         ram_provisioned -> Int8,
     }
+}
+
+allow_tables_to_appear_in_same_query! {
+    virtual_provisioning_resource,
+    instance
 }
 
 table! {
@@ -618,6 +907,7 @@ table! {
         snapshot_id -> Uuid,
         snapshot_addr -> Text,
         volume_references -> Int8,
+        deleting -> Bool,
     }
 }
 
@@ -877,6 +1167,111 @@ table! {
     }
 }
 
+/* hardware inventory */
+
+table! {
+    hw_baseboard_id (id) {
+        id -> Uuid,
+        part_number -> Text,
+        serial_number -> Text,
+    }
+}
+
+table! {
+    sw_caboose (id) {
+        id -> Uuid,
+        board -> Text,
+        git_commit -> Text,
+        name -> Text,
+        version -> Text,
+    }
+}
+
+table! {
+    inv_collection (id) {
+        id -> Uuid,
+        time_started -> Timestamptz,
+        time_done -> Timestamptz,
+        collector -> Text,
+    }
+}
+
+table! {
+    inv_collection_error (inv_collection_id, idx) {
+        inv_collection_id -> Uuid,
+        idx -> Int4,
+        message -> Text,
+    }
+}
+
+table! {
+    inv_service_processor (inv_collection_id, hw_baseboard_id) {
+        inv_collection_id -> Uuid,
+        hw_baseboard_id -> Uuid,
+        time_collected -> Timestamptz,
+        source -> Text,
+
+        sp_type -> crate::SpTypeEnum,
+        sp_slot -> Int4,
+
+        baseboard_revision -> Int8,
+        hubris_archive_id -> Text,
+        power_state -> crate::HwPowerStateEnum,
+    }
+}
+
+table! {
+    inv_root_of_trust (inv_collection_id, hw_baseboard_id) {
+        inv_collection_id -> Uuid,
+        hw_baseboard_id -> Uuid,
+        time_collected -> Timestamptz,
+        source -> Text,
+
+        slot_active -> crate::HwRotSlotEnum,
+        slot_boot_pref_transient -> Nullable<crate::HwRotSlotEnum>,
+        slot_boot_pref_persistent -> crate::HwRotSlotEnum,
+        slot_boot_pref_persistent_pending -> Nullable<crate::HwRotSlotEnum>,
+        slot_a_sha3_256 -> Nullable<Text>,
+        slot_b_sha3_256 -> Nullable<Text>,
+    }
+}
+
+table! {
+    inv_caboose (inv_collection_id, hw_baseboard_id, which) {
+        inv_collection_id -> Uuid,
+        hw_baseboard_id -> Uuid,
+        time_collected -> Timestamptz,
+        source -> Text,
+
+        which -> crate::CabooseWhichEnum,
+        sw_caboose_id -> Uuid,
+    }
+}
+
+table! {
+    bootstore_keys (key, generation) {
+        key -> Text,
+        generation -> Int8,
+    }
+}
+
+table! {
+    db_metadata (singleton) {
+        singleton -> Bool,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        version -> Text,
+        target_version -> Nullable<Text>,
+    }
+}
+
+/// The version of the database schema this particular version of Nexus was
+/// built against.
+///
+/// This should be updated whenever the schema is changed. For more details,
+/// refer to: schema/crdb/README.adoc
+pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(12, 0, 0);
+
 allow_tables_to_appear_in_same_query!(
     system_update,
     component_update,
@@ -886,6 +1281,10 @@ joinable!(system_update_component_update -> component_update (component_update_i
 
 allow_tables_to_appear_in_same_query!(ip_pool_range, ip_pool);
 joinable!(ip_pool_range -> ip_pool (ip_pool_id));
+
+allow_tables_to_appear_in_same_query!(inv_collection, inv_collection_error);
+joinable!(inv_collection_error -> inv_collection (inv_collection_id));
+allow_tables_to_appear_in_same_query!(hw_baseboard_id, sw_caboose, inv_caboose);
 
 allow_tables_to_appear_in_same_query!(
     dataset,
@@ -912,6 +1311,7 @@ allow_tables_to_appear_in_same_query!(
     sled,
     sled_resource,
     router_route,
+    vmm,
     volume,
     vpc,
     vpc_subnet,
@@ -923,3 +1323,9 @@ allow_tables_to_appear_in_same_query!(
 );
 
 allow_tables_to_appear_in_same_query!(dns_zone, dns_version, dns_name);
+allow_tables_to_appear_in_same_query!(external_ip, service);
+
+allow_tables_to_appear_in_same_query!(
+    switch_port,
+    switch_port_settings_route_config
+);

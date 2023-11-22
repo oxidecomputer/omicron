@@ -5,20 +5,19 @@
 //! sled-agent's handle to the Rack Setup Service it spawns
 
 use super::client as bootstrap_agent_client;
-use super::params::SledAgentRequest;
-use super::trust_quorum::ShareDistribution;
+use super::params::StartSledAgentRequest;
 use crate::rack_setup::config::SetupServiceConfig;
 use crate::rack_setup::service::RackSetupService;
 use crate::rack_setup::service::SetupServiceError;
-use crate::sp::SpHandle;
 use ::bootstrap_agent_client::Client as BootstrapAgentClient;
+use bootstore::schemes::v0 as bootstore;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use omicron_common::backoff::retry_notify;
 use omicron_common::backoff::retry_policy_local;
 use omicron_common::backoff::BackoffError;
+use sled_storage::manager::StorageHandle;
 use slog::Logger;
-use sprockets_host::Ed25519Certificate;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use tokio::sync::mpsc;
@@ -47,21 +46,20 @@ impl RssHandle {
         log: &Logger,
         config: SetupServiceConfig,
         our_bootstrap_address: Ipv6Addr,
-        switch_zone_bootstrap_address: Ipv6Addr,
-        sp: Option<SpHandle>,
-        member_device_id_certs: Vec<Ed25519Certificate>,
+        storage_manager: StorageHandle,
+        bootstore: bootstore::NodeHandle,
     ) -> Result<(), SetupServiceError> {
-        let (tx, rx) =
-            rss_channel(our_bootstrap_address, switch_zone_bootstrap_address);
+        let (tx, rx) = rss_channel(our_bootstrap_address);
 
         let rss = RackSetupService::new(
             log.new(o!("component" => "RSS")),
             config,
+            storage_manager,
             tx,
-            member_device_id_certs,
+            bootstore,
         );
         let log = log.new(o!("component" => "BootstrapAgentRssHandler"));
-        rx.await_local_request(&log, &sp).await;
+        rx.await_local_rss_request(&log).await;
         rss.join().await
     }
 
@@ -69,50 +67,33 @@ impl RssHandle {
     pub(super) async fn run_rss_reset(
         log: &Logger,
         our_bootstrap_address: Ipv6Addr,
-        switch_zone_bootstrap_address: Ipv6Addr,
-        sp: Option<SpHandle>,
     ) -> Result<(), SetupServiceError> {
-        let (tx, rx) =
-            rss_channel(our_bootstrap_address, switch_zone_bootstrap_address);
+        let (tx, rx) = rss_channel(our_bootstrap_address);
 
         let rss = RackSetupService::new_reset_rack(
             log.new(o!("component" => "RSS")),
             tx,
         );
         let log = log.new(o!("component" => "BootstrapAgentRssHandler"));
-        rx.await_local_request(&log, &sp).await;
+        rx.await_local_rss_request(&log).await;
         rss.join().await
     }
 }
 
+// Send a message to start a sled agent via bootstrap agent client
 async fn initialize_sled_agent(
     log: &Logger,
     bootstrap_addr: SocketAddrV6,
-    request: &SledAgentRequest,
-    trust_quorum_share: Option<ShareDistribution>,
-    sp: &Option<SpHandle>,
+    request: &StartSledAgentRequest,
 ) -> Result<(), bootstrap_agent_client::Error> {
     let client = bootstrap_agent_client::Client::new(
         bootstrap_addr,
-        sp,
-        // TODO-cleanup: Creating a bootstrap client requires the list of trust
-        // quorum members (as clients should always know the set of possible
-        // servers they can connect to), but `trust_quorum_share` is
-        // optional for now because we don't yet require trust quorum in all
-        // sled-agent deployments. We use `.map_or(&[], ...)` here to pass an
-        // empty set of trust quorum members if we're in such a
-        // trust-quorum-free deployment. This would cause any sprockets
-        // connections to fail with unknown peers, but in a trust-quorum-free
-        // deployment we don't actually wrap connections in sprockets.
-        trust_quorum_share
-            .as_ref()
-            .map_or(&[], |share| share.member_device_id_certs.as_slice()),
         log.new(o!("BootstrapAgentClient" => bootstrap_addr.to_string())),
     );
 
     let sled_agent_initialize = || async {
         client
-            .start_sled(request, trust_quorum_share.clone())
+            .start_sled_agent(request)
             .await
             .map_err(BackoffError::transient)?;
 
@@ -137,21 +118,15 @@ async fn initialize_sled_agent(
 // communication mechanism.
 fn rss_channel(
     our_bootstrap_address: Ipv6Addr,
-    switch_zone_bootstrap_address: Ipv6Addr,
 ) -> (BootstrapAgentHandle, BootstrapAgentHandleReceiver) {
     let (tx, rx) = mpsc::channel(32);
     (
-        BootstrapAgentHandle {
-            inner: tx,
-            our_bootstrap_address,
-            switch_zone_bootstrap_address,
-        },
+        BootstrapAgentHandle { inner: tx, our_bootstrap_address },
         BootstrapAgentHandleReceiver { inner: rx },
     )
 }
 
-type InnerInitRequest =
-    Vec<(SocketAddrV6, SledAgentRequest, Option<ShareDistribution>)>;
+type InnerInitRequest = Vec<(SocketAddrV6, StartSledAgentRequest)>;
 type InnerResetRequest = Vec<SocketAddrV6>;
 
 #[derive(Debug)]
@@ -169,7 +144,6 @@ enum RequestKind {
 pub(crate) struct BootstrapAgentHandle {
     inner: mpsc::Sender<Request>,
     our_bootstrap_address: Ipv6Addr,
-    switch_zone_bootstrap_address: Ipv6Addr,
 }
 
 impl BootstrapAgentHandle {
@@ -183,11 +157,7 @@ impl BootstrapAgentHandle {
     /// that failed to initialize).
     pub(crate) async fn initialize_sleds(
         self,
-        requests: Vec<(
-            SocketAddrV6,
-            SledAgentRequest,
-            Option<ShareDistribution>,
-        )>,
+        requests: Vec<(SocketAddrV6, StartSledAgentRequest)>,
     ) -> Result<(), String> {
         let (tx, rx) = oneshot::channel();
 
@@ -219,10 +189,6 @@ impl BootstrapAgentHandle {
     pub(crate) fn our_address(&self) -> Ipv6Addr {
         self.our_bootstrap_address
     }
-
-    pub(crate) fn switch_zone_bootstrap_address(&self) -> Ipv6Addr {
-        self.switch_zone_bootstrap_address
-    }
 }
 
 struct BootstrapAgentHandleReceiver {
@@ -230,11 +196,9 @@ struct BootstrapAgentHandleReceiver {
 }
 
 impl BootstrapAgentHandleReceiver {
-    async fn await_local_request(
-        mut self,
-        log: &Logger,
-        sp: &Option<SpHandle>,
-    ) {
+    // Wait for a request from RSS telling us to initialize or reset all sled agents
+    // via the bootstrap client.
+    async fn await_local_rss_request(mut self, log: &Logger) {
         let Request { kind, tx } = match self.inner.recv().await {
             Some(requests) => requests,
             None => {
@@ -249,27 +213,21 @@ impl BootstrapAgentHandleReceiver {
                 // of the initialization requests, allowing them to run concurrently.
                 let mut futs = requests
                     .into_iter()
-                    .map(|(bootstrap_addr, request, trust_quorum_share)| async move {
+                    .map(|(bootstrap_addr, request)| async move {
                         info!(
                             log, "Received initialization request from RSS";
                             "request" => ?request,
                             "target_sled" => %bootstrap_addr,
                         );
 
-                        initialize_sled_agent(
-                            log,
-                            bootstrap_addr,
-                            &request,
-                            trust_quorum_share,
-                            sp,
-                        )
-                        .await
-                        .map_err(|err| {
-                            format!(
-                                "Failed to initialize sled agent at {}: {}",
-                                bootstrap_addr, err
-                            )
-                        })?;
+                        initialize_sled_agent(log, bootstrap_addr, &request)
+                            .await
+                            .map_err(|err| {
+                                format!(
+                                    "Failed to initialize sled agent at {}: {}",
+                                    bootstrap_addr, err
+                                )
+                            })?;
 
                         info!(
                             log, "Initialized sled agent";

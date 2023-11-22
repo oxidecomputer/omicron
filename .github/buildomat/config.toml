@@ -16,5 +16,7 @@ org_only = true
 #
 allow_users = [
 	"dependabot[bot]",
+	"oxide-reflector-bot[bot]",
+	"oxide-renovate[bot]",
 	"renovate[bot]",
 ]

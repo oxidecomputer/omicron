@@ -18,12 +18,12 @@ use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::populate_ip_pool;
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::params;
 use omicron_common::api::external::{
     ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
     InstanceNetworkInterface, Ipv4Net,
 };
 use omicron_common::nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
-use omicron_nexus::external_api::params;
 use std::net::Ipv4Addr;
 
 type ControlPlaneTestContext =
@@ -140,7 +140,9 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
             &format!("i{}", i),
             &nic,
             // Disks=
-            vec![],
+            Vec::<params::InstanceDiskAttachment>::new(),
+            // External IPs=
+            Vec::<params::ExternalIpCreate>::new(),
         )
         .await;
     }

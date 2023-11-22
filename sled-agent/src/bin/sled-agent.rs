@@ -4,17 +4,15 @@
 
 //! Executable program to run the sled agent
 
+use anyhow::anyhow;
+use camino::Utf8PathBuf;
 use clap::{Parser, Subcommand};
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
-use omicron_sled_agent::bootstrap::{
-    config::Config as BootstrapConfig, server as bootstrap_server,
-};
+use omicron_sled_agent::bootstrap::server as bootstrap_server;
+use omicron_sled_agent::bootstrap::RssAccessError;
 use omicron_sled_agent::rack_setup::config::SetupServiceConfig as RssConfig;
-use omicron_sled_agent::sp::SimSpConfig;
 use omicron_sled_agent::{config::Config as SledConfig, server as sled_server};
-use std::path::PathBuf;
-use uuid::Uuid;
 
 #[derive(Subcommand, Debug)]
 enum OpenapiFlavor {
@@ -38,7 +36,7 @@ enum Args {
     /// Runs the Sled Agent server.
     Run {
         #[clap(name = "CONFIG_FILE_PATH", action)]
-        config_path: PathBuf,
+        config_path: Utf8PathBuf,
     },
 }
 
@@ -54,16 +52,14 @@ async fn do_run() -> Result<(), CmdError> {
 
     match args {
         Args::Openapi(flavor) => match flavor {
-            OpenapiFlavor::Sled => {
-                sled_server::run_openapi().map_err(CmdError::Failure)
-            }
-            OpenapiFlavor::Bootstrap => {
-                bootstrap_server::run_openapi().map_err(CmdError::Failure)
-            }
+            OpenapiFlavor::Sled => sled_server::run_openapi()
+                .map_err(|err| CmdError::Failure(anyhow!(err))),
+            OpenapiFlavor::Bootstrap => bootstrap_server::run_openapi()
+                .map_err(|err| CmdError::Failure(anyhow!(err))),
         },
         Args::Run { config_path } => {
             let config = SledConfig::from_file(&config_path)
-                .map_err(|e| CmdError::Failure(e.to_string()))?;
+                .map_err(|e| CmdError::Failure(anyhow!(e)))?;
 
             // - Sled agent starts with the normal config file - typically
             // called "config.toml".
@@ -86,61 +82,35 @@ async fn do_run() -> Result<(), CmdError> {
             let rss_config = if rss_config_path.exists() {
                 Some(
                     RssConfig::from_file(rss_config_path)
-                        .map_err(|e| CmdError::Failure(e.to_string()))?,
-                )
-            } else {
-                None
-            };
-            let sp_config_path = {
-                let mut sp_config_path = config_path.clone();
-                sp_config_path.pop();
-                sp_config_path.push("config-sp.toml");
-                sp_config_path
-            };
-            let sp_config = if sp_config_path.exists() {
-                Some(
-                    SimSpConfig::from_file(sp_config_path)
-                        .map_err(|e| CmdError::Failure(e.to_string()))?,
+                        .map_err(|e| CmdError::Failure(anyhow!(e)))?,
                 )
             } else {
                 None
             };
 
-            // Derive the bootstrap addresses from the data link's MAC address.
-            let link = config
-                .get_link()
-                .map_err(|e| CmdError::Failure(e.to_string()))?;
-
-            // Configure and run the Bootstrap server.
-            let bootstrap_config = BootstrapConfig {
-                id: Uuid::new_v4(),
-                link,
-                log: config.log.clone(),
-                updates: config.updates.clone(),
-                sp_config,
-            };
-
-            // TODO: It's a little silly to pass the config this way - namely,
-            // that we construct the bootstrap config from `config`, but then
-            // pass it separately just so the sled agent can ingest it later on.
-            let server =
-                bootstrap_server::Server::start(bootstrap_config, config)
-                    .await
-                    .map_err(CmdError::Failure)?;
+            let server = bootstrap_server::Server::start(config)
+                .await
+                .map_err(|err| CmdError::Failure(anyhow!(err)))?;
 
             // If requested, automatically supply the RSS configuration.
             //
             // This should remain equivalent to the HTTP request which can
             // be invoked by Wicket.
             if let Some(rss_config) = rss_config {
-                server
-                    .agent()
-                    .rack_initialize(rss_config)
-                    .await
-                    .map_err(|e| CmdError::Failure(e.to_string()))?;
+                match server.start_rack_initialize(rss_config) {
+                    // If the rack has already been initialized, we shouldn't
+                    // abandon the server.
+                    Ok(_) | Err(RssAccessError::AlreadyInitialized) => {}
+                    Err(e) => {
+                        return Err(CmdError::Failure(anyhow!(e)));
+                    }
+                }
             }
 
-            server.wait_for_finish().await.map_err(CmdError::Failure)?;
+            server
+                .wait_for_finish()
+                .await
+                .map_err(|err| CmdError::Failure(anyhow!(err)))?;
 
             Ok(())
         }

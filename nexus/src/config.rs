@@ -8,7 +8,6 @@
 // TODO: Use them directly? No need for this file
 
 pub use omicron_common::nexus_config::Config;
-pub use omicron_common::nexus_config::PackageConfig;
-pub use omicron_common::nexus_config::SchemeName;
-pub use omicron_common::nexus_config::Tunables;
-pub use omicron_common::nexus_config::UpdatesConfig;
+pub(crate) use omicron_common::nexus_config::SchemeName;
+pub(crate) use omicron_common::nexus_config::Tunables;
+pub(crate) use omicron_common::nexus_config::UpdatesConfig;

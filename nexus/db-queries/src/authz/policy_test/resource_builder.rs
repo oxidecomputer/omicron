@@ -244,9 +244,27 @@ macro_rules! impl_dyn_authorized_resource_for_global {
 
 impl_dyn_authorized_resource_for_global!(authz::oso_generic::Database);
 impl_dyn_authorized_resource_for_global!(authz::ConsoleSessionList);
-impl_dyn_authorized_resource_for_global!(authz::GlobalImageList);
-impl_dyn_authorized_resource_for_global!(authz::IpPoolList);
 impl_dyn_authorized_resource_for_global!(authz::DeviceAuthRequestList);
+impl_dyn_authorized_resource_for_global!(authz::DnsConfig);
+impl_dyn_authorized_resource_for_global!(authz::IpPoolList);
+impl_dyn_authorized_resource_for_global!(authz::Inventory);
+
+impl DynAuthorizedResource for authz::SiloCertificateList {
+    fn do_authorize<'a, 'b>(
+        &'a self,
+        opctx: &'b OpContext,
+        action: authz::Action,
+    ) -> BoxFuture<'a, Result<(), Error>>
+    where
+        'b: 'a,
+    {
+        opctx.authorize(action, self).boxed()
+    }
+
+    fn resource_name(&self) -> String {
+        format!("{}: certificate list", self.silo().resource_name())
+    }
+}
 
 impl DynAuthorizedResource for authz::SiloIdentityProviderList {
     fn do_authorize<'a, 'b>(

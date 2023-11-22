@@ -1,0 +1,880 @@
+:showtitle:
+:toc: left
+:icons: font
+
+= Omicron Networking
+
+This is a very rough introduction to how networking works within the Oxide system and particularly the control plane (Omicron).  Much more information is available in various RFDs, particularly <<rfd63>>.
+
+== IPv6: the least you need to know
+
+While IPv4 can be used for connectivity between Omicron and the outside world, everything else in the system uses IPv6.  This section provides a _very_ cursory introduction to IPv6 for people only familiar with IPv4.  You can skip this if you know IPv6.  If you want slightly more detail than what's here, see https://www.roesen.org/files/ipv6_cheat_sheet.pdf[this cheat sheet].
+
+=== IPv6 addresses
+
+Most people are familiar with IPv4 addresses, which are 32 bits, usually grouped into four octets (bytes) printed in decimal and separated by dots: `10.1.2.3`.
+
+IPv6 addresses are 128 bits, usually grouped into eight two-byte blocks printed in hex and separated by colons.  Additionally, leading 0s in a block can be omitted and an entire string of all-zero blocks can be replaced with just two colons.  So in the IPv6 address `fdb0:a840:2504:3d5::1`, there's a `0` before `3d5` and everything from there to the last byte is a zero.
+
+IPv6 addresses can be used in most places that an IPv4 address can be.  That includes command-line tools like `ping(8)` and `dig(1)`.  If you're using it where something expects and IP and port, as in an HTTP URL, you generally put the IP address in square brackets: `http://[fdb0:a840:2504:3d5::1]:8080`.
+
+=== IPv6 address space
+
+The IPv6 address space is huge.  Many blocks are assigned specific purposes.  Some that are notable for us:
+
+* `fe80::/10`: https://en.wikipedia.org/wiki/Link-local_address[Link-local addresses].  Every IPv6 interface has one of these and it's assigned automatically without DHCP or anything.  However, these addresses are only valid on the network segment (L2) that the interface is attached to.
+* `fc00::/7`: https://en.wikipedia.org/wiki/Unique_local_address[Unique local address (ULA)], "somewhat analogous to IPv4 private network addressing" (e.g., `10.0.0.0/8`).
+** `fd00::/8`: the part of the ULA that's _not_ centrally assigned.  The control plane primarily uses addresses in this range.  ULAs are broken up into `/48` subnets.  The 40 other bits that make up the prefix are supposed to be randomly generated.
+
+Because link-local addresses are only valid for the network that the link is attached to, whenever you use a link-local address, you usually have to specify which link's network you mean.  You might see `fe80::aa40:25ff:fe04:3d5%cxgbe0`, where `fe80::aa40:25ff:fe04:3d5` is the link-local address and `cxgbe0` is the **scope_id** (denoting "the network attached to cxgbe0").  We'll look at an example below.
+
+== Inspecting networking configuration on illumos
+
+illumos supports lightweight OS-based virtualization in the form of **zones**.  Each system has a **global zone** (GZ) that contains all other **non-global zones.**  Each zone looks like its own separate illumos system with its own root filesystem, datalinks, and (importantly for us) its own netstack.  It has its own set of IP interfaces, addresses, etc.
+
+Let's start at the link layer (L2) in the GZ of a sled.  https://illumos.org/man/8/dladm[dladm(8)] shows all the L2 links in the system:
+
+[source,console]
+----
+BRM44220011 # dladm
+LINK        CLASS     MTU    STATE    BRIDGE     OVER
+tfpkt0      phys      1500   down     --         --
+cxgbe0      phys      9000   up       --         --
+cxgbe1      phys      9000   up       --         --
+bootstrap_stub0 etherstub 9000 up     --         --
+bootstrap0  vnic      1500   up       --         bootstrap_stub0
+underlay_stub0 etherstub 9000 up      --         --
+underlay0   vnic      9000   up       --         underlay_stub0
+----
+
+We can see:
+
+* Three `phys` links that correspond to physical devices.  We're interested in `cxgbe0` and `cxgbe1`, which correspond to the two ports provided by the Chelsio NIC on Gimlets.
+* Two `vnic` devices, `bootstrap0` and `underlay0`.
+* Two `etherstub` devices, `bootstrap_stub0` and `underlay_stub0`.
+
+**VNICs** are virtual NICs created _over_ some other link.  These behave as though each VNIC were plugged into the same network as that other link.  For example, suppose we create three VNICs over `cxgbe0`.  This logically looks like this:
+
+```mermaid
+graph TD
+    subgraph "illumos host"
+        vnic1 --- vswitch1
+        vnic2 --- vswitch1
+        vnic3 --- vswitch1
+        vswitch1 --- cxgbe0
+    end
+
+    cxgbe0 --- switch
+    switch --- exthost1
+    switch --- exthost2
+
+    %% Labels are defined as needed at the end here to avoid changing the layout.
+    vnic1["net1\n(vnic over cxgbe0)"]
+    vnic2["net2\n(vnic over cxgbe0)"]
+    vnic3["net3\n(vnic over cxgbe0)"]
+    vswitch1["virtual switch"]
+    cxgbe0["cxgbe0\n(physical NIC)"]
+
+    switch["physical switch"]
+    exthost1["other host"]
+    exthost2["other host"]
+
+    classDef switch fill:#f96
+    class vswitch1 switch
+    class switch switch
+
+    classDef datalink fill:#6df
+    class vnic1 datalink
+    class vnic2 datalink
+    class vnic3 datalink
+    class cxgbe0 datalink
+```
+
+That is: when we create three VNICs over `cxgbe0`, the system behaves as though there's a virtual switch connecting these VNICs and `cxgbe0`.  Traffic flowing out `net1` destined for the MAC of either `net2` or `net3` goes directly to those VNICs.  Traffic destined for the rest of the network goes out `cxgbe0`.  Traffic incoming to `cxgbe0` is sent to the VNIC with the corresponding MAC.
+
+To make this more concrete, imagine this is on a typical home network, where the "physical switch" is a router that's also running DHCP using 192.168.0.1/24.  Now let's draw the IP interfaces in green atop these datalinks:
+
+```mermaid
+graph TD
+    subgraph "illumos host"
+        if1 --- vnic1
+        if2 --- vnic2
+        if3 --- vnic3
+        vnic1 --- vswitch1
+        vnic2 --- vswitch1
+        vnic3 --- vswitch1
+        vswitch1 --- cxgbe0
+    end
+
+    cxgbe0 --- switch
+    switch --- exthost1
+    switch --- exthost2
+
+    %% Labels are defined as needed at the end here to avoid changing the layout.
+    vnic1["net1\n(vnic over cxgbe0)"]
+    vnic2["net2\n(vnic over cxgbe0)"]
+    vnic3["net3\n(vnic over cxgbe0)"]
+    vswitch1["virtual switch"]
+    if1["net1\n192.168.1.104"]
+    if2["net2\n192.168.1.105"]
+    if3["net3\n192.168.1.106"]
+
+    switch["physical switch"]
+    exthost1["other host\n192.168.1.102"]
+    exthost2["other host\n192.168.1.103"]
+
+    classDef switch fill:#f96
+    class vswitch1 switch
+    class switch switch
+
+    classDef if fill:#9d6
+    class if0 if
+    class if1 if
+    class if2 if
+    class if3 if
+
+    classDef datalink fill:#6df
+    class vnic1 datalink
+    class vnic2 datalink
+    class vnic3 datalink
+    class cxgbe0 datalink
+```
+
+As far as the physical network is concerned, it looks like there are _three_ devices there.  As we'll see, this allows us to put each Omicron component into its own zone with its own VNIC, IP interface, and IP address, allowing us to treat them like separate hosts whether they're deployed on the same physical system or not.  (Don't worry if you didn't follow all that.)
+
+**Etherstubs** are devices over which you can create VNICs that will appear connected to each other, but not to anything else.  Logically, it looks like this:
+
+```mermaid
+graph TD
+    subgraph "illumos host"
+        vnic1 --- vswitch1
+        vnic2 --- vswitch1
+        vnic3 --- vswitch1
+        vswitch1 --- etherstub
+    end
+
+    %% Labels are defined as needed at the end here to avoid changing the layout.
+    vnic1["net1\n(vnic over cxgbe0)"]
+    vnic2["net2\n(vnic over cxgbe0)"]
+    vnic3["net3\n(vnic over cxgbe0)"]
+    vswitch1["virtual switch"]
+    etherstub["etherstub\n"]
+
+    classDef switch fill:#f96
+    class vswitch1 switch
+    class switch switch
+
+    classDef datalink fill:#6df
+    class vnic1 datalink
+    class vnic2 datalink
+    class vnic3 datalink
+    class etherstub datalink
+```
+
+These devices form their own L2 network.  They can talk to each other, but nothing else.
+
+Going back to the `dladm` output from our example above:
+
+[source,console]
+----
+BRM44220011 # dladm
+LINK        CLASS     MTU    STATE    BRIDGE     OVER
+tfpkt0      phys      1500   down     --         --
+cxgbe0      phys      9000   up       --         --
+cxgbe1      phys      9000   up       --         --
+bootstrap_stub0 etherstub 9000 up     --         --
+bootstrap0  vnic      1500   up       --         bootstrap_stub0
+underlay_stub0 etherstub 9000 up      --         --
+underlay0   vnic      9000   up       --         underlay_stub0
+----
+
+We see now that we have:
+
+* the three physical devices mentioned earlier
+* an etherstub `underlay_stub0` with a VNIC `underlay0` over it
+* an etherstub `bootstrap_stub0` with a VNIC `boostrap0` over it
+
+We'll discuss these in more detail later.  There are also many other kinds of links and commands to list specific types.  See the manual page for more details.
+
+Moving up to the IP layer (L3), https://illumos.org/man/8/ipadm[ipadm(8)] shows the IP interfaces configured on the system:
+
+[source,console]
+----
+BRM44220011 # ipadm show-if
+IFNAME     CLASS     STATE    CURRENT      PERSISTENT
+lo0        VIRTUAL   ok       -m-v------46 ---
+cxgbe0     IP        ok       bm--------46 ---
+cxgbe1     IP        ok       bm--------46 ---
+bootstrap0 IP        ok       bm--------46 ---
+----
+
+Each IP interface is _over_ a datalink of the same name.  Traffic sent via the IP interface `cxgbe0` gets sent to the datalink `cxgbe0`.  You usually don't have to think about IP interfaces.  More important at the IP layer are the addresses:
+
+[source,console]
+----
+BRM44220011 # ipadm
+ADDROBJ           TYPE     STATE        ADDR
+lo0/v4            static   ok           127.0.0.1/8
+lo0/v6            static   ok           ::1/128
+cxgbe0/ll         addrconf ok           fe80::aa40:25ff:fe04:3d5%cxgbe0/10
+cxgbe1/ll         addrconf ok           fe80::aa40:25ff:fe04:3dd%cxgbe1/10
+bootstrap0/ll     addrconf ok           fe80::8:20ff:fe44:e1a3%bootstrap0/10
+bootstrap0/bootstrap6 static ok         fdb0:a840:2504:3d5::1/64
+----
+
+Let's take apart the line for `cxgbe0/ll`:
+
+* `ADDROBJ` (identifies this address when running other `ipadm` commands): `cxgbe0/ll`:
+** `cxgbe0`: the IP interface name, which is also the datalink name
+** `ll`: names this specific address on this IP interface.  The software that configures networking can call this whatever it wants.  `ll` is link-local.  Some software configures `v4` or `v6` (as on the loopback interface).  Other software uses the name of the network (as on `bootstrap0`).
+* `ADDR`: `fe80::aa40:25ff:fe04:3d5%cxgbe0/10`
+** `fe80::aa40:25ff:fe04:3d5`: IPv6 address in the link-local space (because it starts with `fe80::` -- see above)
+** `%cxgbe0`: scope_id is `cxgbe0`.  Because this is a link-local address, it needs a scope_id to specify which network it's on.  A scope_id of `cxgbe0` means "the network attached to cxgbe0".  That seems obvious in this context, but it's needed in other contexts where you want to use the address (e.g., `ssh fe80::aa40:25ff:fe04:3d5%cxgbe0`).
+** `/10`: As with IPv4, addresses are often written with the netmask.  Here, the first 10 bits of the address identify the network.
+
+The other big piece of networking configuration is the _routing table_, which you can see using `netstat -rn`:
+
+[source,console]
+----
+# netstat -rn
+
+Routing Table: IPv4
+  Destination            Gateway          Flags  Ref     Use     Interface
+-------------------- -------------------- ----- ----- ---------- ---------
+127.0.0.1            127.0.0.1            UH        2         92 lo0
+
+Routing Table: IPv6
+  Destination/Mask            Gateway                   Flags Ref   Use    If
+--------------------------- --------------------------- ----- --- ------- -----
+::1                         ::1                         UH      2      14 lo0
+fd00:1122:3344:104::/64     fe80::aa40:25ff:fe05:1c     UG      1       0 cxgbe0
+fd00:1122:3344:104::/64     fe80::aa40:25ff:fe05:41c    UG      1       0 cxgbe1
+fd00:1122:3344:105::/64     fe80::aa40:25ff:fe05:1c     UG      1       0 cxgbe0
+fdb0:a840:2504:357::/64     fe80::aa40:25ff:fe05:1c     UG      1       0 cxgbe0
+fd00:1122:3344:105::/64     fe80::aa40:25ff:fe05:41c    UG      1       0 cxgbe1
+...
+----
+
+We'll talk about this more later.
+
+Finally, if you're used to using `ifconfig` to look at this information, you can use that on illumos, too.  However, we prefer using `ipadm` for managing network configuration and so we'll stick to that throughout this document.
+
+== Networking in Omicron
+
+=== Networks
+
+We talk about a few major networks in a single-rack Oxide system:
+
+* the **underlay network**.  This is the main network used by Omicron components like Nexus, internal/external DNS, CockroachDB, Sled Agents, Dendrite, and Management Gateway Service to talk to each other.  (See <<rfd61>>.)  Customer traffic is also encapsulated and sent between components on this network.
+* the **bootstrap** network.  This network is used by bootstrap agents (part of the sled agent) to reach other bootstrap agents so that sleds can discover each other and form a trust quorum.  Once the trust quorum is established, sleds can unlock encrypted local storage and start the rest of the control plane, which enables the underlay network to be configured.
+* the **management network**.  This is the network that service processors (SPs) and the technician ports on the Sidecars are connected to.  It's constrained, in part because the devices on it have limited capabilities (e.g., limited throughput, generally no TCP, etc.) and also because those devices are critical to the safety of the system (like keeping sleds from melting).  The only control plane component on this network is the Management Gateway Service (MGS).  See <<rfd210>> for more on MGS and the management network.
+* the **external network** or **customer network**.  The Oxide system exposes services directly to customers: namely, external DNS (which serves as a directory for services provided by the rack) and the external API/web console.  The rack's NTP servers (not for external consumption) also connect to other NTP servers using this network.  All of these services use addresses on the customer's network.  This is the only network that can be IPv4.
+
+```mermaid
+graph RL
+
+    net_external --- ExternalDns
+    net_external --- Nexus
+    net_external --- BoundaryNtp
+
+    ExternalDns --- net_underlay
+    Nexus --- net_underlay
+    BoundaryNtp --- net_underlay
+    InternalNtp --- net_underlay
+    CockroachDB --- net_underlay
+    InternalDns --- net_underlay
+    Oximeter --- net_underlay
+    Dendrite --- net_underlay
+    Clickhouse --- net_underlay
+    SledAgent --- net_underlay
+    MGS --- net_underlay
+
+    net_management --- MGS
+    SPs --- net_management
+    TechPorts --- net_management
+
+    net_bootstrap --- SledAgent
+
+    Custs --- net_external
+
+    %% Labels are defined as needed at the end here to avoid changing the layout.
+    Custs["Customer systems\n(outside the rack)"]
+    ExternalDns["External DNS"]
+    BoundaryNtp["Boundary NTP"]
+    InternalNtp["Internal NTP"]
+    InternalDns["Internal DNS"]
+    SledAgent["Sled Agent"]
+    MGS["Management Gateway Service"]
+    SPs["Service Processors"]
+    TechPorts["Technician Ports"]
+
+    net_underlay["underlay network"]
+    net_external["external network"]
+    net_management["management network"]
+    net_bootstrap["bootstrap network"]
+
+    classDef network fill:#f96
+    class net_external network
+    class net_management network
+    class net_underlay network
+    class net_bootstrap network
+```
+
+Most of these components run in a dedicated non-global zone.  Sled Agent runs in the global zone because it needs to manage other zones and other resources that aren't available inside zones.  All components thus have their own netstack with their own datalinks, IPs, etc.
+
+The terminology here is a simplification for various reasons.  There are really two management networks per rack (one per Sidecar).  There may be many external networks.  Most importantly, the "underlay network" is not one L2/L3 network.  In fact, each sled has its own subnet and L3 routing is used to pass traffic between sleds.  This is described in more detail below.
+
+=== IPv6 address space
+
+We divide our address space hierarchically:footnote:[This is covered in much more detail in <<rfd63>>.]
+
+* each _availability zone_ (AZ) has its own IPv6 `/48` subnet.  Within this `/48`:
+** the first `/56` in each AZ is reserved for rack-wide network services (notably, control plane internal DNS)
+** each _rack_ has its own `/56` subnet.  Within each rack's subnet:
+*** each _sled_ has its own `/64` subnet.
+
+In our example deployment:
+
+[source,text]
+----
+AZ subnet: fd00:1122:3344::/48
+internal : fd00:1122:3344::/56
+    DNS 1: fd00:1122:3344:1::/64
+    DNS 2: fd00:1122:3344:2::/64
+    DNS 3: fd00:1122:3344:3::/64
+rack:      fd00:1122:3344:100::/56
+sleds:     fd00:1122:3344:101::/64
+           fd00:1122:3344:102::/64
+           fd00:1122:3344:103::/64
+	   ...
+----
+
+Note that `fd00` is part of the IPv6 ULA space (basically, private addressing) so we can use the exact same underlay network addresses for all racks in the world as long as we don't try to connect two racks together as a single control plane without resetting one of them first.
+
+=== Data path between components on the same sled
+
+This section assumes familiarity with how traffic flows in IP networks.  If you at least vaguely know what a "routing table" and ARP or NDP are, this should make sense.
+
+Let's look at one sled in a (non-production) multi-sled deployment.  This sled is running a bunch of components, including "customer" zones, Nexus, and CockroachDB.  In the global zone we have a familiar set of IP addresses:
+
+[source,console]
+----
+BRM44220005 # ipadm
+ADDROBJ           TYPE     STATE        ADDR
+lo0/v4            static   ok           127.0.0.1/8
+lo0/v6            static   ok           ::1/128
+cxgbe0/ll         addrconf ok           fe80::aa40:25ff:fe04:357%cxgbe0/10
+cxgbe1/ll         addrconf ok           fe80::aa40:25ff:fe04:35f%cxgbe1/10
+bootstrap0/ll     addrconf ok           fe80::8:20ff:fe1e:b320%bootstrap0/10
+bootstrap0/bootstrap6 static ok         fdb0:a840:2504:357::1/64
+underlay0/ll      addrconf ok           fe80::8:20ff:febe:31b9%underlay0/10
+underlay0/sled6   static   ok           fd00:1122:3344:104::1/64
+----
+
+There are a whole lot more datalinks, though:
+
+[source,console]
+----
+BRM44220005 # dladm
+LINK        CLASS     MTU    STATE    BRIDGE     OVER
+tfpkt0      phys      1500   down     --         --
+cxgbe0      phys      9000   up       --         --
+cxgbe1      phys      9000   up       --         --
+bootstrap_stub0 etherstub 9000 up     --         --
+bootstrap0  vnic      1500   up       --         bootstrap_stub0
+underlay_stub0 etherstub 9000 up      --         --
+underlay0   vnic      9000   up       --         underlay_stub0
+oxControlService0 vnic 9000  up       --         underlay_stub0
+oxControlService1 vnic 9000  up       --         underlay_stub0
+oxControlService2 vnic 9000  up       --         underlay_stub0
+oxControlService3 vnic 9000  up       --         underlay_stub0
+oxControlService4 vnic 9000  up       --         underlay_stub0
+oxControlService5 vnic 9000  up       --         underlay_stub0
+oxControlService6 vnic 9000  up       --         underlay_stub0
+oxControlService7 vnic 9000  up       --         underlay_stub0
+oxControlService8 vnic 9000  up       --         underlay_stub0
+oxControlService9 vnic 9000  up       --         underlay_stub0
+oxControlService10 vnic 9000 up       --         underlay_stub0
+oxControlService11 vnic 9000 up       --         underlay_stub0
+opte0       misc      1500   up       --         --
+vopte0      vnic      1500   up       --         opte0
+oxControlService12 vnic 9000 up       --         underlay_stub0
+opte1       misc      1500   up       --         --
+vopte1      vnic      1500   up       --         opte1
+oxControlInstance0 vnic 9000 up       --         underlay_stub0
+opte2       misc      1500   up       --         --
+vopte2      vnic      1500   up       --         opte2
+oxControlInstance1 vnic 9000 up       --         underlay_stub0
+opte3       misc      1500   up       --         --
+vopte3      vnic      1500   up       --         opte3
+oxControlInstance2 vnic 9000 up       --         underlay_stub0
+opte4       misc      1500   up       --         --
+vopte4      vnic      1500   up       --         opte4
+oxControlInstance3 vnic 9000 up       --         underlay_stub0
+opte5       misc      1500   up       --         --
+vopte5      vnic      1500   up       --         opte5
+oxControlInstance4 vnic 9000 up       --         underlay_stub0
+opte6       misc      1500   up       --         --
+vopte6      vnic      1500   up       --         opte6
+oxControlInstance5 vnic 9000 up       --         underlay_stub0
+opte7       misc      1500   up       --         --
+vopte7      vnic      1500   up       --         opte7
+oxControlInstance6 vnic 9000 up       --         underlay_stub0
+oxControlInstance7 vnic 9000 up       --         underlay_stub0
+----
+
+We talked about the cxgbe interfaces before.  From `ipadm` above we see that these just have the standard link-local addresses.
+
+Now it's time to talk about the etherstubs `underlay_stub0` and `bootstrap_stub0`.  These are used to provide the underlay and bootstrap networks _on this sled_.  The global zone has one VNIC over each of these etherstubs, called `underlay0` and `bootstrap0`, respectively.  These have the usual link-local addresses _and_ addresses on the underlay network: `fd00:1122:3344:104::1/64` and `fdb0:a840:2504:357::1/64`.  These are thus the sled's addresses on these two networks.  And so this _sled agent_'s address on the underlay network is `fd00:1122:3344:104::1`.
+
+More generally, the `fd00` addresses are underlay addresses and `fdb0` addresses are bootstrap addresses.
+
+What else is on the underlay network?  Well, all the VNICs we saw above.  We can filter those with `dladm`:
+
+[source,console]
+----
+BRM44220005 # dladm show-vnic --link underlay_stub0
+LINK         OVER         SPEED    MACADDRESS        MACADDRTYPE         VID
+underlay0    underlay_stub0 0      2:8:20:be:31:b9   random              0
+oxControlService0 underlay_stub0 0 2:8:20:b9:98:de   random              0
+oxControlService1 underlay_stub0 0 2:8:20:15:28:cd   random              0
+oxControlService2 underlay_stub0 0 2:8:20:24:51:16   random              0
+oxControlService3 underlay_stub0 0 2:8:20:4f:f3:f8   random              0
+oxControlService4 underlay_stub0 0 2:8:20:9f:86:5f   random              0
+oxControlService5 underlay_stub0 0 2:8:20:e5:b6:b4   random              0
+oxControlService6 underlay_stub0 0 2:8:20:49:46:94   random              0
+oxControlService7 underlay_stub0 0 2:8:20:3a:ce:18   random              0
+oxControlService8 underlay_stub0 0 2:8:20:89:fe:f0   random              0
+oxControlService9 underlay_stub0 0 2:8:20:80:ea:e0   random              0
+oxControlService10 underlay_stub0 0 2:8:20:e:25:56   random              0
+oxControlService11 underlay_stub0 0 2:8:20:4f:3e:d5  random              0
+oxControlService12 underlay_stub0 0 2:8:20:57:0:a9   random              0
+oxControlInstance0 underlay_stub0 0 2:8:20:8:ad:5d   random              0
+oxControlInstance1 underlay_stub0 0 2:8:20:c6:45:43  random              0
+oxControlInstance2 underlay_stub0 0 2:8:20:5:1e:b3   random              0
+oxControlInstance3 underlay_stub0 0 2:8:20:a3:a9:b7  random              0
+oxControlInstance4 underlay_stub0 0 2:8:20:ec:25:f9  random              0
+oxControlInstance5 underlay_stub0 0 2:8:20:8c:12:c2  random              0
+oxControlInstance6 underlay_stub0 0 2:8:20:58:f2:54  random              0
+oxControlInstance7 underlay_stub0 0 2:8:20:32:ba:8d  random              0
+----
+
+We can group these into:
+
+* `underlay0`: the global zone VNIC that we just talked about.  This is how the global zone (and sled agent) has an address on the underlay network.
+* `oxControlServiceN`: these VNICs are handed to non-global zones running control plane components.  They have no IP interfaces in the _global_ zone but we'll see them in the non-global zones below.
+* `oxControlInstanceN`: these VNICs are handed to non-global zones running customer instances.
+
+Let's dig into a control plane component on this system.  (You can list all zones with `zoneadm list -c`.)
+
+[source,console]
+----
+BRM44220005 # zlogin oxz_cockroachdb_7804178a-2ce6-4e8e-8681-2567da10963a
+[Connected to zone 'oxz_cockroachdb_7804178a-2ce6-4e8e-8681-2567da10963a' pts/3]
+Last login: Fri Jul 21 00:09:43 on pts/3
+The illumos Project     helios-2.0.22095        July 2023
+
+root@oxz_cockroachdb_7804178a-2ce6-4e8e-8681-2567da10963a:~# dladm
+LINK        CLASS     MTU    STATE    BRIDGE     OVER
+oxControlService1 vnic 9000  up       --         ?
+
+root@oxz_cockroachdb_7804178a-2ce6-4e8e-8681-2567da10963a:~# ipadm
+ADDROBJ           TYPE     STATE        ADDR
+lo0/v4            static   ok           127.0.0.1/8
+lo0/v6            static   ok           ::1/128
+oxControlService1/ll addrconf ok        fe80::8:20ff:fe15:28cd%oxControlService1/10
+oxControlService1/omicron6 static ok    fd00:1122:3344:104::3/64
+----
+
+Here we see that the CockroachDB zone has `oxControlService1`, which we saw from the global zone `dladm` output is over `underlay_stub0`.  So this VNIC is on the underlay network.  (More precisely, it's attached to this sled's L2/L3 segment that's part of the broader underlay network.)  The corresponding IP interface has the usual link-local address plus an address we can recognize as on the underlay network (because it starts with `fd00`).
+
+If we log into a Nexus zone instead, we see a different link and address:
+
+[source,console]
+----
+BRM44220005 # zlogin oxz_nexus_c4c40c19-60de-4c8b-b201-2a367d8aa322
+[Connected to zone 'oxz_nexus_c4c40c19-60de-4c8b-b201-2a367d8aa322' pts/3]
+Last login: Thu Jul 20 10:32:03 on pts/3
+The illumos Project     helios-2.0.22095        July 2023
+
+root@oxz_nexus_c4c40c19-60de-4c8b-b201-2a367d8aa322:~# dladm
+LINK        CLASS     MTU    STATE    BRIDGE     OVER
+vopte0      vnic      1500   up       --         ?
+oxControlService12 vnic 9000 up       --         ?
+
+root@oxz_nexus_c4c40c19-60de-4c8b-b201-2a367d8aa322:~# ipadm
+ADDROBJ           TYPE     STATE        ADDR
+lo0/v4            static   ok           127.0.0.1/8
+vopte0/public     dhcp     ok           172.30.2.6/32
+lo0/v6            static   ok           ::1/128
+oxControlService12/ll addrconf ok       fe80::8:20ff:fe57:a9%oxControlService12/10
+oxControlService12/omicron6 static ok   fd00:1122:3344:104::4/64
+----
+
+The Nexus zone got `oxControlService12` with `fd00:1122:3344:104::4`.  (These ids are sequentially assigned by Sled Agent when creating the zones.  They have no particular meaning.  They just need to be unique across the whole system.)  `vopte0` will be explained later when we talk about <<_external_connectivity_using_boundary_services>>.
+
+So if this Nexus zone connects to the CockroachDB zone on the same sled, how does traffic get there?  For this, we use the routing table.  Nexus is `fd00:1122:3344:104::4` and will be trying to reach `fd00:1122:3344:104::22`.  It does work:
+
+[source,console]
+----
+root@oxz_nexus_c4c40c19-60de-4c8b-b201-2a367d8aa322:~# ping fd00:1122:3344:104::22
+fd00:1122:3344:104::22 is alive
+----
+
+Because the Nexus zone's `oxControlService12` VNIC is over the same etherstub as the CockroachDB zone's `oxControlService1` VNIC, they are logically on the same L2 segment.  IPv6 uses NDP (very roughly analogous to IPv4's ARP) to find hosts on the same segment.  We can print known NDP neighbors:
+
+[source,console]
+----
+root@oxz_nexus_c4c40c19-60de-4c8b-b201-2a367d8aa322:~# ndp -a
+
+Net to Media Table: IPv6
+ If   Physical Address    Type      State      Destination/Mask
+----- -----------------  ------- ------------ ---------------------------
+oxControlService12 02:08:20:be:31:b9  dynamic REACHABLE    fd00:1122:3344:104::1      
+oxControlService12 33:33:00:00:00:01  other   REACHABLE    ff02::1                    
+oxControlService12 33:33:00:00:00:02  other   REACHABLE    ff02::2                    
+oxControlService12 33:33:00:01:00:02  other   REACHABLE    ff02::1:2                  
+oxControlService12 33:33:ff:00:00:04  other   REACHABLE    ff02::1:ff00:4             
+oxControlService12 02:08:20:57:00:a9  local   REACHABLE    fd00:1122:3344:104::4      
+oxControlService12 33:33:00:00:00:16  other   REACHABLE    ff02::16                   
+oxControlService12 02:08:20:08:ad:5d  dynamic REACHABLE    fd00:1122:3344:104::22     
+oxControlService12 02:08:20:c6:45:43  dynamic REACHABLE    fd00:1122:3344:104::23     
+oxControlService12 02:08:20:05:1e:b3  dynamic REACHABLE    fd00:1122:3344:104::24     
+oxControlService12 02:08:20:a3:a9:b7  dynamic REACHABLE    fd00:1122:3344:104::25     
+oxControlService12 02:08:20:ec:25:f9  dynamic REACHABLE    fd00:1122:3344:104::26     
+oxControlService12 02:08:20:8c:12:c2  dynamic REACHABLE    fd00:1122:3344:104::27     
+oxControlService12 02:08:20:58:f2:54  dynamic REACHABLE    fd00:1122:3344:104::29     
+oxControlService12 02:08:20:32:ba:8d  dynamic REACHABLE    fd00:1122:3344:104::2a     
+oxControlService12 02:08:20:57:00:a9  local   REACHABLE    fe80::8:20ff:fe57:a9       
+oxControlService12 33:33:ff:57:00:a9  other   REACHABLE    ff02::1:ff57:a9            
+----
+
+We see that `fd00:1122:3344:104::22` is there with MAC address `02:08:20:08:ad:5d`.  So Nexus can send packets directly to `fd00:1122:3344:104::22`.  The L2 frame will have MAC addr `fd00:1122:3344:104::22`.  Where will it go?  Let's see the routing table:
+
+[source,console]
+----
+root@oxz_nexus_c4c40c19-60de-4c8b-b201-2a367d8aa322:~# netstat -rn -f inet6
+
+Routing Table: IPv6
+  Destination/Mask            Gateway                   Flags Ref   Use    If
+--------------------------- --------------------------- ----- --- ------- -----
+::1                         ::1                         UH      2       0 lo0
+fd00:1122:3344:104::/64     fd00:1122:3344:104::4       U      11    2386 oxControlService12
+fe80::/10                   fe80::8:20ff:fe57:a9        U       2       0 oxControlService12
+default                     fd00:1122:3344:104::1       UG     13  210937
+----
+
+Traffic aimed at `fd00:1122:3344:104::22` will match the rule for `fd00:1122:3344:104::/64`.  The fact that the gateway address is in this zone and there's an interface in the rule (`oxControlService12`) means that we're directly connected to hosts in this prefix and traffic is sent directly out the `oxControlService12` VNIC.  The packet reaches the etherstub, which acts as a virtual switch and so knows that MAC `02:08:20:08:ad:5d` is on `oxControlService1` and delivers it to that VNIC -- in the CockroachDB zone.  Hooray!
+
+We can summarize the underlay networking configuration on a typical sled like this:
+
+```mermaid
+graph TD
+    Sidecar0
+    Sidecar1
+    cxgbe0["cxgbe0 (phys)"]
+    cxgbe1["cxgbe1 (phys)"]
+    cxgbe0-- "backplane" --- Sidecar0
+    cxgbe1-- "backplane"  --- Sidecar1
+    cxgbe0_ip["cxgbe0 (IP, GZ)\naddresses:\nLL: fe80::..."]
+    cxgbe1_ip["cxgbe1 (IP, GZ)\naddresses:\nLL: fe80::..."]
+    cxgbe0_ip --- cxgbe0
+    cxgbe1_ip --- cxgbe1
+
+    underlay0["underlay0 (VNIC, GZ)"]
+    underlay0_ip["underlay0 (IP, GZ)\naddresses:\nLL: fe80::..."]
+
+    subgraph cpzone["Every control plane zone"]
+        oxControlServiceN["oxControlServiceN (VNIC)"]
+        oxControlServiceN_ip["oxControlServiceN (IP)\naddresses:\nLL: fe80::...\nomicron6: «underlay address»\n"]
+        oxControlServiceN_ip --- oxControlServiceN
+    end
+
+    underlay0_ip --- underlay0
+    underlay0 --- underlay_stub0
+    oxControlServiceN --- underlay_stub0
+    underlay_stub0["underlay_stub0\n(etherstub)"]
+```
+
+=== Data path between components on different sleds
+
+Here are the addresses on another sled's global zone:
+
+[source,console]
+----
+BRM42220009 # ipadm
+ADDROBJ           TYPE     STATE        ADDR
+lo0/v4            static   ok           127.0.0.1/8
+lo0/v6            static   ok           ::1/128
+cxgbe0/ll         addrconf ok           fe80::aa40:25ff:fe04:3d4%cxgbe0/10
+cxgbe1/ll         addrconf ok           fe80::aa40:25ff:fe04:3dc%cxgbe1/10
+bootstrap0/ll     addrconf ok           fe80::8:20ff:fefe:7054%bootstrap0/10
+bootstrap0/bootstrap6 static ok         fdb0:a840:2504:3d4::1/64
+underlay0/ll      addrconf ok           fe80::8:20ff:fea3:598c%underlay0/10
+underlay0/sled6   static   ok           fd00:1122:3344:102::1/64
+----
+
+It has a control plane zone for Oximeter with these addresses:
+
+[source,console]
+----
+root@oxz_oximeter_0744c3b0-0b1b-4df5-b1dc-198440324216:~# ipadm
+ADDROBJ           TYPE     STATE        ADDR
+lo0/v4            static   ok           127.0.0.1/8
+lo0/v6            static   ok           ::1/128
+oxControlService9/ll addrconf ok        fe80::8:20ff:feae:86a9%oxControlService9/10
+oxControlService9/omicron6 static ok    fd00:1122:3344:102::4/64
+----
+
+The underlay address here is `fd00:1122:3344:102::4`.  Note that it's on a different subnet than the Nexus on our first system.  (The network for `fd00:1122:3344:102::4/64` is just `fd00:1122:3344:102::/64`.  The nexus zone is at `fd00:1122:3344:104::4/64`, whose network is `fd00:1122:3344:104::0/64`.)  How can the Nexus zone reach this Oximeter?  Let's look at the routing table again:
+
+[source,console]
+----
+root@oxz_nexus_c4c40c19-60de-4c8b-b201-2a367d8aa322:~# netstat -rn -f inet6
+
+Routing Table: IPv6
+  Destination/Mask            Gateway                   Flags Ref   Use    If
+--------------------------- --------------------------- ----- --- ------- -----
+::1                         ::1                         UH      2       0 lo0
+fd00:1122:3344:104::/64     fd00:1122:3344:104::4       U      11    2386 oxControlService12
+fe80::/10                   fe80::8:20ff:fe57:a9        U       2       0 oxControlService12
+default                     fd00:1122:3344:104::1       UG     13  210937
+----
+
+The only matching route here is the default route using a gateway of `fd00:1122:3344:104::1`.  That's the underlay address of the GZ on the same sled as the Nexus.  So Nexus sends this packet to the global zone.  The global zone has IP forwarding enabled.  Where will _it_ send the packet?  Now we come back to the GZ's routing table:
+
+[source,console]
+----
+BRM44220005 # netstat -rn -f inet6
+
+Routing Table: IPv6
+  Destination/Mask            Gateway                   Flags Ref   Use    If
+--------------------------- --------------------------- ----- --- ------- -----
+::1                         ::1                         UH      2    3104 lo0
+fd00:1122:3344:104::/64     fd00:1122:3344:104::1       U      22 228398263 underlay0
+fd00:1122:3344:105::/64     fe80::aa40:25ff:fe05:c      UG      2  133720 cxgbe0
+fd00:1122:3344:105::/64     fe80::aa40:25ff:fe05:40c    UG      2      47 cxgbe1
+fdb0:a840:2504:195::/64     fe80::aa40:25ff:fe05:40c    UG      2   12820 cxgbe1
+fdb0:a840:2504:357::/64     fdb0:a840:2504:357::1       U       3     126 bootstrap0
+fdb0:a840:2504:3d4::/64     fe80::aa40:25ff:fe05:c      UG      1       0 cxgbe0
+fdb0:a840:2504:354::/64     fe80::aa40:25ff:fe05:c      UG      1       0 cxgbe0
+fd00:1122:3344:106::/64     fe80::aa40:25ff:fe05:c      UG      2 3781628 cxgbe0
+fd00:1122:3344:106::/64     fe80::aa40:25ff:fe05:40c    UG      2 18678270 cxgbe1
+fdb0:a840:2504:354::/64     fe80::aa40:25ff:fe05:40c    UG      1       0 cxgbe1
+fdb0:a840:2504:3d4::/64     fe80::aa40:25ff:fe05:40c    UG      1       0 cxgbe1
+fdb0:a840:2504:3d5::/64     fe80::aa40:25ff:fe05:c      UG      1       0 cxgbe0
+fd00:1122:3344:107::/64     fe80::aa40:25ff:fe05:40c    UG      2 75590674 cxgbe1
+fdb0:a840:2504:3d5::/64     fe80::aa40:25ff:fe05:40c    UG      1       0 cxgbe1
+fdb0:a840:2504:352::/64     fe80::aa40:25ff:fe05:c      UG      2     640 cxgbe0
+fd00:1122:3344:1::/64       fe80::aa40:25ff:fe05:c      UG      2    2401 cxgbe0
+fd00:1122:3344:1::/64       fe80::aa40:25ff:fe05:40c    UG      2      51 cxgbe1
+fdb0:a840:2504:352::/64     fe80::aa40:25ff:fe05:40c    UG      2   11090 cxgbe1
+fd00:99::/64                fe80::aa40:25ff:fe05:c      UG      1       0 cxgbe0
+fdb0:a840:2504:1d1::/64     fe80::aa40:25ff:fe05:c      UG      1       0 cxgbe0
+fdb0:a840:2504:393::/64     fe80::aa40:25ff:fe05:c      UG      1       0 cxgbe0
+fdb0:a840:2504:191::/64     fe80::aa40:25ff:fe05:c      UG      1       0 cxgbe0
+fdb0:a840:2504:353::/64     fe80::aa40:25ff:fe05:c      UG      1       0 cxgbe0
+fd00:1122:3344:101::/64     fe80::aa40:25ff:fe05:c      UG      2  634578 cxgbe0
+fd00:99::/64                fe80::aa40:25ff:fe05:40c    UG      1       0 cxgbe1
+fd00:1122:3344:101::/64     fe80::aa40:25ff:fe05:40c    UG      2 14094545 cxgbe1
+fdb0:a840:2504:1d1::/64     fe80::aa40:25ff:fe05:40c    UG      1       0 cxgbe1
+fdb0:a840:2504:353::/64     fe80::aa40:25ff:fe05:40c    UG      1       0 cxgbe1
+fdb0:a840:2504:393::/64     fe80::aa40:25ff:fe05:40c    UG      1       0 cxgbe1
+fdb0:a840:2504:191::/64     fe80::aa40:25ff:fe05:40c    UG      1       0 cxgbe1
+fdb0:a840:2504:192::/64     fe80::aa40:25ff:fe05:c      UG      1       0 cxgbe0
+fd00:1122:3344:102::/64     fe80::aa40:25ff:fe05:c      UG      2 6241451 cxgbe0
+fd00:1122:3344:3::/64       fe80::aa40:25ff:fe05:c      UG      2    2401 cxgbe0
+fd00:1122:3344:3::/64       fe80::aa40:25ff:fe05:40c    UG      2   13358 cxgbe1
+fd00:1122:3344:102::/64     fe80::aa40:25ff:fe05:40c    UG      2   12352 cxgbe1
+fdb0:a840:2504:192::/64     fe80::aa40:25ff:fe05:40c    UG      1       0 cxgbe1
+fd00:1122:3344:2::/64       fe80::aa40:25ff:fe05:c      UG      2    2401 cxgbe0
+fd00:1122:3344:103::/64     fe80::aa40:25ff:fe05:c      UG      2 19157172 cxgbe0
+fd00:1122:3344:2::/64       fe80::aa40:25ff:fe05:40c    UG      2      38 cxgbe1
+fd00:1122:3344:103::/64     fe80::aa40:25ff:fe05:40c    UG      2   32969 cxgbe1
+fdb0:a840:2504:351::/64     fe80::aa40:25ff:fe05:40c    UG      1       0 cxgbe1
+fe80::/10                   fe80::8:20ff:febe:31b9      U       2       0 underlay0
+fe80::/10                   fe80::8:20ff:fe1e:b320      U       2       0 bootstrap0
+fe80::/10                   fe80::aa40:25ff:fe04:35f    U       3   52411 cxgbe1
+fe80::/10                   fe80::aa40:25ff:fe04:357    U       3   59075 cxgbe0
+----
+
+There's a lot to unpack here.  There are two important groups of routes here:
+
+* `fd00:1122:3344:101::/64` through `fd00:1122:3344:107::/64`: routes for the underlay network (12 routes)
+* `fd00:1122:3344:1::/64` through `fd00:1122:3344:3::/64`: routes for the internal DNS servers (6 routes)
+* `fdb0:...`: routes for the bootstrap network (21 routes)
+
+NOTE: DNS servers each get their own /64 subnet.  The reason is a little subtle: IPv6 only allows routes for /64 or larger subnets.  And we're distributing per-sled routes.  So if we want different DNS servers to be on different sleds (which we do), they have to have separate routes.  And the smallest route we can have is a /64.  So each DNS server gets its own /64.
+
+If we sort the underlay routes by destination address, we notice that each prefix has two routes: one through cxgbe0 and one through cxgbe1:
+
+[source,console]
+----
+BRM44220005 # netstat -rn -f inet6 | grep ^fd00:1122 | sort
+fd00:1122:3344:101::/64     fe80::aa40:25ff:fe05:40c    UG      2 14094545 cxgbe1
+fd00:1122:3344:101::/64     fe80::aa40:25ff:fe05:c      UG      2  643952 cxgbe0
+fd00:1122:3344:102::/64     fe80::aa40:25ff:fe05:40c    UG      2   12352 cxgbe1
+fd00:1122:3344:102::/64     fe80::aa40:25ff:fe05:c      UG      2 6354653 cxgbe0
+fd00:1122:3344:103::/64     fe80::aa40:25ff:fe05:40c    UG      2   32969 cxgbe1
+fd00:1122:3344:103::/64     fe80::aa40:25ff:fe05:c      UG      2 19512229 cxgbe0
+fd00:1122:3344:104::/64     fd00:1122:3344:104::1       U      22 229164829 underlay0
+fd00:1122:3344:105::/64     fe80::aa40:25ff:fe05:40c    UG      2      47 cxgbe1
+fd00:1122:3344:105::/64     fe80::aa40:25ff:fe05:c      UG      2  134024 cxgbe0
+fd00:1122:3344:106::/64     fe80::aa40:25ff:fe05:40c    UG      2 18678270 cxgbe1
+fd00:1122:3344:106::/64     fe80::aa40:25ff:fe05:c      UG      2 3848371 cxgbe0
+fd00:1122:3344:107::/64     fe80::aa40:25ff:fe05:40c    UG      2 75927564 cxgbe1
+fd00:1122:3344:1::/64       fe80::aa40:25ff:fe05:40c    UG      2      51 cxgbe1
+fd00:1122:3344:1::/64       fe80::aa40:25ff:fe05:c      UG      2    2437 cxgbe0
+fd00:1122:3344:2::/64       fe80::aa40:25ff:fe05:40c    UG      2      38 cxgbe1
+fd00:1122:3344:2::/64       fe80::aa40:25ff:fe05:c      UG      2    2437 cxgbe0
+fd00:1122:3344:3::/64       fe80::aa40:25ff:fe05:40c    UG      2   13358 cxgbe1
+fd00:1122:3344:3::/64       fe80::aa40:25ff:fe05:c      UG      2    2437 cxgbe0
+----
+
+Recall that cxgbe0 and cxgbe1 are connected to separate switches in the rack.  So we're seeing the prefixes for the other sleds in this deployment.  We have two routes to reach each sled: one through each switch.  The gateway is the link-local address _of each switch_ on the corresponding link.  One notable exception: the route for this same sled (`fd00:1122:3344:104::/64`) points to `underlay0`, the GZ's VNIC on the sled's underlay network.  In this way, traffic leaving the GZ (whether it originated in this GZ or arrived from one of the switches) is directed to the sled's underlay network etherstub and from there to the right zone VNIC.
+
+(Questions: Why does 107 only have one route?  What are the `fd00:99::` routes?)
+
+There are similar routes for other sleds' prefixes on the bootstrap network.
+
+So traffic from our Nexus zone (`fd00:1122:3344:104::4`) to the Oximeter zone on another sled (`fd00:1122:3344:102::4`) goes:
+
+* in the Nexus zone: via the default route to gateway `fd00:1122:3344:104::1`, which is the GZ on the same sled
+* in the GZ on the Nexus sled: via the per-sled route for the Oximeter sled (`fd00:1122:3344:102::0/64``) to the switch
+* from the switch to the Oximeter sled GZ
+* in the GZ on the Oximeter sled: via the same-sled route to the `underlay0` VNIC
+* through the etherstub's virtual switch to the Oximeter zone's VNIC
+
+=== Data path on the bootstrap network
+
+Once set up, the bootstrap network works largely the same way as the underlay network:
+
+* each sled has an etherstub that implements the per-sled bootstrap network
+* each sled in the rack has two routes to each other sled: one through each switch
+
+It's simpler than the underlay network because there are many fewer components on it: only global zones and the switch zones have addresses on the bootstrap network.
+
+=== Connectivity to the Management Network
+
+Most control plane components do not communicate directly with the service processors (SPs) on the management network.  Requests are made instead to the Management Gateway Service (MGS), which makes RPC calls to the corresponding SPs.  The details are outside the scope of this document but see <<rfd210>> for an introduction.
+
+=== External connectivity using Boundary Services
+
+**Boundary Services** is the general term for the components that provide network connectivity between software running inside the rack (including the control plane as well as customer instances) and anything outside the rack.  Today, boundary services is implemented by a combination of:
+
+* the Tofino switch ASIC
+* Dendrite, which receives requests from the control plane and configures the switch ASIC
+* OPTE, the Oxide Packet Transformation Engine, a kernel component running on every sled
+
+During initial setup of the system, customers configure everything needed for the rack to provide connectivity to the customer's network for the software that needs it.  It's easiest to use a concrete example.
+
+This rack has been set up with the following configuration:
+
+[source,toml]
+----
+# IP ranges that can be used by the rack for its various externally-facing services.
+# Currently, these include:
+# - external DNS (see below)
+# - the public API and web console (served by Nexus)
+# - boundary NTP servers, which only need to be able to connect to
+#   DNS servers that can resolve the external NTP servers and the external NTP
+#   servers themselves.
+internal_services_ip_pool_ranges = [
+    { first = "172.20.26.1", last = "172.20.26.10" }
+]
+
+# Addresses on the external (customer) network to assign to the rack's external
+# DNS servers.  These DNS servers are used to resolve the rest of the rack's
+# externally-facing services.
+external_dns_ips = [
+  "172.20.26.1",
+  "172.20.26.2",
+]
+----
+
+Let's look at how external connectivity works for the Nexus zone we've been looking at.  What addresses did it have?
+
+[source,console]
+----
+root@oxz_nexus_c4c40c19-60de-4c8b-b201-2a367d8aa322:~# ipadm
+ADDROBJ           TYPE     STATE        ADDR
+lo0/v4            static   ok           127.0.0.1/8
+vopte0/public     dhcp     ok           172.30.2.6/32
+lo0/v6            static   ok           ::1/128
+oxControlService12/ll addrconf ok       fe80::8:20ff:fe57:a9%oxControlService12/10
+oxControlService12/omicron6 static ok   fd00:1122:3344:104::4/64
+----
+
+External connectivity uses the (aptly-named) `vopte0/public` address.  But the address there is 172.30.2.6, not in the configured range of 172.20.26.1 - 172.26.1.10.  It's a coincidence that these ranges look so similar.  No matter the actual customer-provided addresses, Nexus always uses fixed 172.30 prefixes for DNS, Nexus, and Boundary NTP.  Customers can choose what range is used for their VPCs.
+
+Still, one of the real external addresses must map to this Nexus zone.  How do we find out what that is?  Because boundary services uses OPTE, we can use `opteadm` in the GZ to shed some light:
+
+[source,console]
+----
+BRM44220005 # /opt/oxide/opte/bin/opteadm list-ports
+LINK                             MAC ADDRESS              IPv4 ADDRESS     EXTERNAL IPv4    IPv6 ADDRESS                             EXTERNAL IPv6                            STATE
+opte0                            A8:40:25:FF:A7:C1        172.30.2.6       172.20.26.4      None                                     None                                     running
+opte1                            A8:40:25:F2:6F:96        172.30.0.5       172.20.26.12     None                                     None                                     running
+opte2                            A8:40:25:FE:2F:F1        172.30.0.25      172.20.26.24     None                                     None                                     running
+opte3                            A8:40:25:F5:B0:49        172.30.0.37      172.20.26.34     None                                     None                                     running
+opte4                            A8:40:25:F2:52:4B        172.30.0.9       172.20.26.35     None                                     None                                     running
+opte5                            A8:40:25:F7:F7:4A        172.30.0.39      172.20.26.37     None                                     None                                     running
+opte6                            A8:40:25:F7:19:71        172.30.0.41      172.20.26.39     None                                     None                                     running
+opte7                            A8:40:25:F2:BB:4B        192.168.0.17     172.20.26.45     None                                     None                                     running
+----
+
+This command lists key configuration: it says that external IP 172.20.26.4 maps to an internal IPv4 address 172.30.2.6 on `opte0`.  This corresponds with `vopte0` in the Nexus zone (because it's the same-numbered device name).
+
+Okay, so given incoming external traffic for 172.20.26.4, we can see how this sled translates that to 172.30.2.6 and gets it to the right zone.  How did it get to this sled in the first place?  For that, we look at the configuration in one of the `oxz_switch` zones, which manage the Tofino switch:
+
+[source,console]
+----
+root@oxz_switch:~# /opt/oxide/dendrite/bin/swadm nat list
+External IP   Port low  Port high  Internal IP            Inner MAC          VNI
+172.20.26.1   0         65535      fd00:1122:3344:105::1  a8:40:25:ff:ed:78  100
+172.20.26.2   0         65535      fd00:1122:3344:106::1  a8:40:25:ff:da:2a  100
+172.20.26.3   0         65535      fd00:1122:3344:103::1  a8:40:25:ff:bf:fc  100
+172.20.26.4   0         65535      fd00:1122:3344:104::1  a8:40:25:ff:a7:c1  100
+...
+----
+
+So the switch has a mapping saying that traffic from 172.20.26.4 should be forwarded to `fd00:1122:3344:104::1` on the underlay network, which is the GZ of our Nexus sled.  What's that MAC?  On our sled:
+
+[source,console]
+----
+BRM44220011 # dladm show-vnic
+LINK         OVER         SPEED    MACADDRESS        MACADDRTYPE         VID
+...
+vopte0       opte0        0        a8:40:25:ff:a7:c1 fixed               0
+...
+----
+
+To summarize (and grossly oversimplify):
+
+* incoming traffic for 172.20.26.4 reaches Tofino
+* Tofino encapsulates the traffic and forwards it to `fd00:1122:3344:104::1` MAC `a8:40:25:ff:a7:c1`, which is on the GZ of the sled running Nexus
+* the Sled receives that traffic and passes it to vopte0, which is OPTE
+* OPTE decapsulates the packet, performs NAT, and sends the traffic to opte0, which is our Nexus zone
+
+The reverse happens on the way out.
+
+== Simulated deployments
+
+In real deployments, the "switch" mentioned above is the Tofino ASIC sitting inside a Sidecar chassis.  Tofino is responsible for routing both intra-rack traffic and boundary services traffic to the external network.  This kind of deployment is possible on a real rack and "on the bench".  But in both cases it requires sleds to be connected to an actual Sidecar.
+
+It's extremely useful to be able to run Omicron without a real Sidecar.  This is done to be able to run the system:
+
+* on a PC (i.e., non-Gimlet hardware), for availability and cost reasons
+* in automated testing (CI), also on a PC
+* on a Gimlet on the bench _without_ a dedicated Sidecar
+
+This can be done using SoftNPU, essentially a software implementation of Tofino.  It uses much of the same P4 program as the real Tofino runs but executes it in software on Gimlet.  It also uses most of the same Dendrite, allowing Nexus and the rest of the control plane to function the same whether using SoftNPU or a real Sidecar.  For more on running SoftNPU, see the xref:how-to-run.adoc[How to Run Omicron] docs.
+
+[bibliography]
+== References
+
+RFDs are currently Oxide-internal.  Most of this content could be documented publicly, though.  If you're interested, please open an issue in the Omicron repo to let us know.
+
+* [[[rfd61, RFD 61]]] https://61.rfd.oxide.computer/[RFD 61 Control Plane Architecture and Design]
+* [[[rfd63, RFD 63]]] https://63.rfd.oxide.computer/[RFD 63 Network Architecture]
+* [[[rfd210, RFD 210]]] https://210.rfd.oxide.computer/[RFD 210 Omicron, service processors, and power shelf controllers]

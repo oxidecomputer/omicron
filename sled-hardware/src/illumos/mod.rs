@@ -3,10 +3,12 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
-    Baseboard, DendriteAsic, DiskIdentity, DiskVariant, HardwareUpdate,
-    SledMode, UnparsedDisk,
+    Baseboard, DendriteAsic, DiskVariant, HardwareUpdate, SledMode,
+    UnparsedDisk,
 };
+use camino::Utf8PathBuf;
 use illumos_devinfo::{DevInfo, DevLinkType, DevLinks, Node, Property};
+use omicron_common::disk::DiskIdentity;
 use slog::debug;
 use slog::error;
 use slog::info;
@@ -14,17 +16,16 @@ use slog::o;
 use slog::warn;
 use slog::Logger;
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
 use tokio::sync::broadcast;
-use tokio::task::JoinHandle;
+use uuid::Uuid;
 
-mod disk;
 mod gpt;
+mod partitions;
 mod sysconf;
 
-pub use disk::ensure_partition_layout;
+pub use partitions::ensure_partition_layout;
 
 #[derive(thiserror::Error, Debug)]
 enum Error {
@@ -34,8 +35,14 @@ enum Error {
     #[error("Device does not appear to be an Oxide Gimlet: {0}")]
     NotAGimlet(String),
 
+    #[error("Invalid Utf8 path: {0}")]
+    FromPathBuf(#[from] camino::FromPathBufError),
+
     #[error("Node {node} missing device property {name}")]
     MissingDeviceProperty { node: String, name: String },
+
+    #[error("Invalid value for boot-storage-unit property: {0}")]
+    InvalidBootStorageUnitValue(i64),
 
     #[error("Unrecognized slot for device {slot}")]
     UnrecognizedSlot { slot: i64 },
@@ -44,7 +51,7 @@ enum Error {
     UnexpectedPropertyType { name: String, ty: String },
 
     #[error("Could not translate {0} to '/dev' path: no links")]
-    NoDevLinks(PathBuf),
+    NoDevLinks(Utf8PathBuf),
 
     #[error("Failed to issue request to sysconf: {0}")]
     SysconfError(#[from] sysconf::Error),
@@ -75,6 +82,25 @@ impl TofinoSnapshot {
     }
 }
 
+// Which BSU (i.e., host flash rom) slot did we boot from?
+#[derive(Debug, Clone, Copy)]
+enum BootStorageUnit {
+    A,
+    B,
+}
+
+impl TryFrom<i64> for BootStorageUnit {
+    type Error = Error;
+
+    fn try_from(raw: i64) -> Result<Self, Self::Error> {
+        match raw {
+            0x41 => Ok(Self::A),
+            0x42 => Ok(Self::B),
+            _ => Err(Error::InvalidBootStorageUnitValue(raw)),
+        }
+    }
+}
+
 // A snapshot of information about the underlying hardware
 struct HardwareSnapshot {
     tofino: TofinoSnapshot,
@@ -91,8 +117,12 @@ impl HardwareSnapshot {
         let mut node_walker = device_info.walk_node();
 
         // First, check the root node. If we aren't running on a Gimlet, bail.
-        let Some(root) = node_walker.next().transpose().map_err(Error::DevInfo)? else {
-            return Err(Error::DevInfo(anyhow::anyhow!("No nodes in device tree")));
+        let Some(root) =
+            node_walker.next().transpose().map_err(Error::DevInfo)?
+        else {
+            return Err(Error::DevInfo(anyhow::anyhow!(
+                "No nodes in device tree"
+            )));
         };
         let root_node = root.node_name();
         if root_node != GIMLET_ROOT_NODE_NAME {
@@ -101,13 +131,20 @@ impl HardwareSnapshot {
 
         let properties = find_properties(
             &root,
-            ["baseboard-identifier", "baseboard-model", "baseboard-revision"],
+            [
+                "baseboard-identifier",
+                "baseboard-model",
+                "baseboard-revision",
+                "boot-storage-unit",
+            ],
         )?;
-        let baseboard = Baseboard::new(
+        let baseboard = Baseboard::new_gimlet(
             string_from_property(&properties[0])?,
             string_from_property(&properties[1])?,
             i64_from_property(&properties[2])?,
         );
+        let boot_storage_unit =
+            BootStorageUnit::try_from(i64_from_property(&properties[3])?)?;
 
         // Monitor for the Tofino device and driver.
         let tofino = get_tofino_snapshot(log, &mut device_info);
@@ -118,7 +155,7 @@ impl HardwareSnapshot {
         while let Some(node) =
             node_walker.next().transpose().map_err(Error::DevInfo)?
         {
-            poll_blkdev_node(&log, &mut disks, node)?;
+            poll_blkdev_node(&log, &mut disks, node, boot_storage_unit)?;
         }
 
         Ok(Self { tofino, disks, baseboard })
@@ -240,6 +277,14 @@ fn slot_to_disk_variant(slot: i64) -> Option<DiskVariant> {
     }
 }
 
+fn slot_is_boot_disk(slot: i64, boot_storage_unit: BootStorageUnit) -> bool {
+    match (boot_storage_unit, slot) {
+        // See reference for these values in `slot_to_disk_variant` above.
+        (BootStorageUnit::A, 0x11) | (BootStorageUnit::B, 0x12) => true,
+        _ => false,
+    }
+}
+
 fn get_tofino_snapshot(log: &Logger, devinfo: &mut DevInfo) -> TofinoSnapshot {
     let (exists, driver_loaded) = match tofino::get_tofino_from_devinfo(devinfo)
     {
@@ -262,7 +307,7 @@ fn get_tofino_snapshot(log: &Logger, devinfo: &mut DevInfo) -> TofinoSnapshot {
 
 fn get_dev_path_of_whole_disk(
     node: &Node<'_>,
-) -> Result<Option<PathBuf>, Error> {
+) -> Result<Option<Utf8PathBuf>, Error> {
     let mut wm = node.minors();
     while let Some(m) = wm.next().transpose().map_err(Error::DevInfo)? {
         // "wd" stands for "whole disk"
@@ -298,9 +343,9 @@ fn get_dev_path_of_whole_disk(
             .collect::<Vec<_>>();
 
         if paths.is_empty() {
-            return Err(Error::NoDevLinks(PathBuf::from(devfs_path)));
+            return Err(Error::NoDevLinks(Utf8PathBuf::from(devfs_path)));
         }
-        return Ok(Some(paths[0].path().to_path_buf()));
+        return Ok(Some(paths[0].path().to_path_buf().try_into()?));
     }
     Ok(None)
 }
@@ -310,7 +355,10 @@ fn get_parent_node<'a>(
     expected_parent_driver_name: &'static str,
 ) -> Result<Node<'a>, Error> {
     let Some(parent) = node.parent().map_err(Error::DevInfo)? else {
-        return Err(Error::DevInfo(anyhow::anyhow!("{} has no parent node", node.node_name())));
+        return Err(Error::DevInfo(anyhow::anyhow!(
+            "{} has no parent node",
+            node.node_name()
+        )));
     };
     if parent.driver_name().as_deref() != Some(expected_parent_driver_name) {
         return Err(Error::DevInfo(anyhow::anyhow!(
@@ -377,6 +425,7 @@ fn poll_blkdev_node(
     log: &Logger,
     disks: &mut HashSet<UnparsedDisk>,
     node: Node<'_>,
+    boot_storage_unit: BootStorageUnit,
 ) -> Result<(), Error> {
     let Some(driver_name) = node.driver_name() else {
         return Ok(());
@@ -439,15 +488,16 @@ fn poll_blkdev_node(
     )?;
     let Some(variant) = slot_to_disk_variant(slot) else {
         warn!(log, "Slot# {slot} is not recognized as a disk: {devfs_path}");
-        return Err(Error::UnrecognizedSlot { slot } );
+        return Err(Error::UnrecognizedSlot { slot });
     };
 
     let disk = UnparsedDisk::new(
-        PathBuf::from(&devfs_path),
+        Utf8PathBuf::from(&devfs_path),
         dev_path,
         slot,
         variant,
         device_id,
+        slot_is_boot_disk(slot, boot_storage_unit),
     );
     disks.insert(disk);
     Ok(())
@@ -461,7 +511,38 @@ fn poll_device_tree(
     tx: &broadcast::Sender<HardwareUpdate>,
 ) -> Result<(), Error> {
     // Construct a view of hardware by walking the device tree.
-    let polled_hw = HardwareSnapshot::new(log)?;
+    let polled_hw = match HardwareSnapshot::new(log) {
+        Ok(polled_hw) => polled_hw,
+
+        Err(e) => {
+            if let Error::NotAGimlet(root_node) = &e {
+                if root_node.as_str() == "i86pc" {
+                    // If on i86pc, generate some baseboard information before
+                    // returning this error. Each sled agent has to be uniquely
+                    // identified for multiple non-gimlets to work.
+                    {
+                        let mut inner = inner.lock().unwrap();
+
+                        if inner.baseboard.is_none() {
+                            let pc_baseboard = Baseboard::new_pc(
+                                Uuid::new_v4().simple().to_string(),
+                                root_node.clone(),
+                            );
+
+                            info!(
+                                log,
+                                "Generated i86pc baseboard {:?}", pc_baseboard
+                            );
+
+                            inner.baseboard = Some(pc_baseboard);
+                        }
+                    }
+                }
+            }
+
+            return Err(e);
+        }
+    };
 
     // After inspecting the device tree, diff with the old view, and provide
     // necessary updates.
@@ -507,11 +588,11 @@ async fn hardware_tracking_task(
 ///
 /// This structure provides interfaces for both querying and for receiving new
 /// events.
+#[derive(Clone)]
 pub struct HardwareManager {
     log: Logger,
     inner: Arc<Mutex<HardwareView>>,
     tx: broadcast::Sender<HardwareUpdate>,
-    _worker: JoinHandle<()>,
 }
 
 impl HardwareManager {
@@ -529,34 +610,37 @@ impl HardwareManager {
         // receiver will receive a tokio::sync::broadcast::error::RecvError::Lagged
         // error, indicating they should re-scan the hardware themselves.
         let (tx, _) = broadcast::channel(1024);
-        let hw = match sled_mode {
-            // Treat as a possible scrimlet and setup to scan for real Tofino device.
-            SledMode::Auto
-            | SledMode::Scrimlet { asic: DendriteAsic::TofinoAsic } => {
-                HardwareView::new()
-            }
+        let hw =
+            match sled_mode {
+                // Treat as a possible scrimlet and setup to scan for real Tofino device.
+                SledMode::Auto
+                | SledMode::Scrimlet { asic: DendriteAsic::TofinoAsic } => {
+                    HardwareView::new()
+                }
 
-            // Treat sled as gimlet and ignore any attached Tofino device.
-            SledMode::Gimlet => HardwareView::new_stub_tofino(
-                // active=
-                false,
-            ),
+                // Treat sled as gimlet and ignore any attached Tofino device.
+                SledMode::Gimlet => HardwareView::new_stub_tofino(
+                    // active=
+                    false,
+                ),
 
-            // Treat as scrimlet and use the stub Tofino device.
-            SledMode::Scrimlet { asic: DendriteAsic::TofinoStub } => {
-                HardwareView::new_stub_tofino(true)
-            }
+                // Treat as scrimlet and use the stub Tofino device.
+                SledMode::Scrimlet { asic: DendriteAsic::TofinoStub } => {
+                    HardwareView::new_stub_tofino(true)
+                }
 
-            // Treat as scrimlet (w/ SoftNPU) and use the stub Tofino device.
-            // TODO-correctness:
-            // I'm not sure whether or not we should be treating softnpu
-            // as a stub or treating it as a different HardwareView variant,
-            // so this might change.
-            SledMode::Scrimlet { asic: DendriteAsic::SoftNpu } => {
-                HardwareView::new_stub_tofino(true)
+                // Treat as scrimlet (w/ SoftNPU) and use the stub Tofino device.
+                // TODO-correctness:
+                // I'm not sure whether or not we should be treating softnpu
+                // as a stub or treating it as a different HardwareView variant,
+                // so this might change.
+                SledMode::Scrimlet {
+                    asic:
+                        DendriteAsic::SoftNpuZone
+                        | DendriteAsic::SoftNpuPropolisDevice,
+                } => HardwareView::new_stub_tofino(true),
             }
-        }
-        .map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())?;
         let inner = Arc::new(Mutex::new(hw));
 
         // Force the device tree to be polled at least once before returning.
@@ -578,11 +662,11 @@ impl HardwareManager {
         let log2 = log.clone();
         let inner2 = inner.clone();
         let tx2 = tx.clone();
-        let _worker = tokio::task::spawn(async move {
+        tokio::task::spawn(async move {
             hardware_tracking_task(log2, inner2, tx2).await
         });
 
-        Ok(Self { log, inner, tx, _worker })
+        Ok(Self { log, inner, tx })
     }
 
     pub fn baseboard(&self) -> Baseboard {

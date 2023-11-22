@@ -10,8 +10,8 @@ host_phase2_recovery_image_cache_max_images = 1
 
 [dropshot]
 # We want to allow uploads of host phase 2 recovery images, which may be
-# measured in the (small) hundreds of MiB. Set this to 512 MiB.
-request_body_max_bytes = 536870912
+# measured in the (small) hundreds of MiB. Set this to 1 GiB for testing.
+request_body_max_bytes = 1_073_741_824
 
 [switch]
 # Which interface is connected to our local sidecar SP (i.e., the SP that acts

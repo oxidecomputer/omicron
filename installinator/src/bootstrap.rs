@@ -9,32 +9,77 @@
 use anyhow::ensure;
 use anyhow::Context;
 use anyhow::Result;
+use ddm_admin_client::Client as DdmAdminClient;
 use illumos_utils::addrobj::AddrObject;
+use illumos_utils::dladm;
+use illumos_utils::dladm::Dladm;
+use illumos_utils::zone::Zones;
+use omicron_common::address::Ipv6Subnet;
 use sled_hardware::underlay;
+use sled_hardware::underlay::BootstrapInterface;
 use slog::info;
 use slog::Logger;
 
-const MG_DDM_SERVICE_FMRI: &str = "svc:/system/illumos/mg-ddm";
+const MG_DDM_SERVICE_FMRI: &str = "svc:/oxide/mg-ddm";
 const MG_DDM_MANIFEST_PATH: &str = "/opt/oxide/mg-ddm/pkg/ddm/manifest.xml";
 
 // TODO-cleanup The implementation of this function is heavily derived from
 // `sled_agent::bootstrap::server::Server::start()`; consider whether we could
 // find a way for them to share it.
-pub(crate) async fn bootstrap_sled(log: Logger) -> Result<()> {
+pub(crate) async fn bootstrap_sled(
+    data_links: &[String; 2],
+    log: Logger,
+) -> Result<()> {
     // Find address objects to pass to maghemite.
-    let mg_addr_objs = underlay::find_nics()
-        .context("failed to find address objects for maghemite")?;
+    let links = underlay::find_chelsio_links(data_links)
+        .context("failed to find chelsio links")?;
     ensure!(
-        !mg_addr_objs.is_empty(),
-        "underlay::find_nics() returned 0 address objects"
+        !links.is_empty(),
+        "underlay::find_chelsio_nics() returned 0 links"
     );
 
+    let mg_addr_objs =
+        underlay::ensure_links_have_global_zone_link_local_v6_addresses(&links)
+            .context("failed to create address objects for maghemite")?;
+
     info!(log, "Starting mg-ddm service");
-    tokio::task::spawn_blocking(|| {
-        enable_mg_ddm_service_blocking(log, mg_addr_objs)
-    })
-    .await
-    .unwrap()
+    {
+        let log = log.clone();
+        tokio::task::spawn_blocking(|| {
+            enable_mg_ddm_service_blocking(log, mg_addr_objs)
+        })
+        .await
+        .unwrap()?;
+    }
+
+    // Set up an interface for our bootstrap network.
+    let bootstrap_etherstub =
+        Dladm::ensure_etherstub(dladm::BOOTSTRAP_ETHERSTUB_NAME)
+            .context("failed to ensure bootstrap etherstub existence")?;
+
+    let bootstrap_etherstub_vnic =
+        Dladm::ensure_etherstub_vnic(&bootstrap_etherstub)
+            .context("failed to ensure bootstrap etherstub vnic existence")?;
+
+    // Use the mac address of the first link to derive our bootstrap address.
+    let ip =
+        BootstrapInterface::GlobalZone.ip(&links[0]).with_context(|| {
+            format!("failed to derive a bootstrap prefix from {:?}", links[0])
+        })?;
+
+    Zones::ensure_has_global_zone_v6_address(
+        bootstrap_etherstub_vnic,
+        ip,
+        "bootstrap6",
+    )
+    .context("failed to create v6 address for bootstrap etherstub vnic")?;
+
+    // Spawn a background task to notify our local ddmd of our bootstrap address
+    // so it can advertise it to other sleds.
+    let ddmd_client = DdmAdminClient::localhost(&log)?;
+    ddmd_client.advertise_prefix(Ipv6Subnet::new(ip));
+
+    Ok(())
 }
 
 fn enable_mg_ddm_service_blocking(

@@ -28,6 +28,9 @@ pub struct SledSystemHardware {
     pub is_scrimlet: bool,
     pub usable_hardware_threads: u32,
     pub usable_physical_ram: ByteCount,
+
+    // current VMM reservoir size
+    pub reservoir_size: ByteCount,
 }
 
 /// Database representation of a Sled.
@@ -46,8 +49,9 @@ pub struct Sled {
     part_number: String,
     revision: i64,
 
-    usable_hardware_threads: SqlU32,
-    usable_physical_ram: ByteCount,
+    pub usable_hardware_threads: SqlU32,
+    pub usable_physical_ram: ByteCount,
+    pub reservoir_size: ByteCount,
 
     // ServiceAddress (Sled Agent).
     pub ip: ipv6::Ipv6Addr,
@@ -83,6 +87,7 @@ impl Sled {
                 hardware.usable_hardware_threads,
             ),
             usable_physical_ram: hardware.usable_physical_ram,
+            reservoir_size: hardware.reservoir_size,
             ip: ipv6::Ipv6Addr::from(addr.ip()),
             port: addr.port().into(),
             last_used_address,
@@ -103,6 +108,10 @@ impl Sled {
 
     pub fn address_with_port(&self, port: u16) -> SocketAddrV6 {
         SocketAddrV6::new(self.ip(), port, 0, 0)
+    }
+
+    pub fn serial_number(&self) -> &str {
+        &self.serial_number
     }
 }
 
@@ -142,4 +151,55 @@ impl DatastoreCollectionConfig<super::Service> for Sled {
     type GenerationNumberColumn = sled::dsl::rcgen;
     type CollectionTimeDeletedColumn = sled::dsl::time_deleted;
     type CollectionIdColumn = service::dsl::sled_id;
+}
+
+/// A set of constraints that can be placed on operations that select a sled.
+#[derive(Debug)]
+pub struct SledReservationConstraints {
+    must_select_from: Vec<Uuid>,
+}
+
+impl SledReservationConstraints {
+    /// Creates a constraint set with no constraints in it.
+    pub fn none() -> Self {
+        Self { must_select_from: Vec::new() }
+    }
+
+    /// If the constraints include a set of sleds that the caller must select
+    /// from, returns `Some` and a slice containing the members of that set.
+    ///
+    /// If no "must select from these" constraint exists, returns None.
+    pub fn must_select_from(&self) -> Option<&[Uuid]> {
+        if self.must_select_from.is_empty() {
+            None
+        } else {
+            Some(&self.must_select_from)
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct SledReservationConstraintBuilder {
+    constraints: SledReservationConstraints,
+}
+
+impl SledReservationConstraintBuilder {
+    pub fn new() -> Self {
+        SledReservationConstraintBuilder {
+            constraints: SledReservationConstraints::none(),
+        }
+    }
+
+    /// Adds a "must select from the following sled IDs" constraint. If such a
+    /// constraint already exists, appends the supplied sled IDs to the "must
+    /// select from" list.
+    pub fn must_select_from(mut self, sled_ids: &[Uuid]) -> Self {
+        self.constraints.must_select_from.extend(sled_ids);
+        self
+    }
+
+    /// Builds a set of constraints from this builder's current state.
+    pub fn build(self) -> SledReservationConstraints {
+        self.constraints
+    }
 }

@@ -8,7 +8,7 @@ use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
-use crate::db::error::public_error_from_diesel_pool;
+use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::model::Certificate;
 use crate::db::model::Name;
@@ -21,6 +21,7 @@ use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
+use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::ResourceType;
 use ref_cast::RefCast;
@@ -34,7 +35,12 @@ impl DataStore {
     ) -> CreateResult<Certificate> {
         use db::schema::certificate::dsl;
 
-        opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
+        let authz_silo = opctx
+            .authn
+            .silo_required()
+            .internal_context("creating a Certificate")?;
+        let authz_cert_list = authz::SiloCertificateList::new(authz_silo);
+        opctx.authorize(authz::Action::CreateChild, &authz_cert_list).await?;
 
         let name = certificate.name().clone();
         diesel::insert_into(dsl::certificate)
@@ -43,10 +49,10 @@ impl DataStore {
             .do_update()
             .set(dsl::time_modified.eq(dsl::time_modified))
             .returning(Certificate::as_returning())
-            .get_result_async(self.pool_authorized(opctx).await?)
+            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::Conflict(
                         ResourceType::Certificate,
@@ -61,10 +67,25 @@ impl DataStore {
         opctx: &OpContext,
         kind: Option<ServiceKind>,
         pagparams: &PaginatedBy<'_>,
+        silo_only: bool,
     ) -> ListResultVec<Certificate> {
         use db::schema::certificate::dsl;
 
-        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        let silo = if silo_only {
+            let authz_silo = opctx
+                .authn
+                .silo_required()
+                .internal_context("listing Certificates")?;
+            let silo_id = authz_silo.id();
+            let authz_cert_list = authz::SiloCertificateList::new(authz_silo);
+            opctx
+                .authorize(authz::Action::ListChildren, &authz_cert_list)
+                .await?;
+            Some(silo_id)
+        } else {
+            opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+            None
+        };
 
         let query;
         match pagparams {
@@ -88,11 +109,19 @@ impl DataStore {
             query
         };
 
+        let query = if let Some(silo_id) = silo {
+            query.filter(dsl::silo_id.eq(silo_id))
+        } else {
+            query
+        };
+
         query
             .select(Certificate::as_select())
-            .load_async::<Certificate>(self.pool_authorized(opctx).await?)
+            .load_async::<Certificate>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
             .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     pub async fn certificate_delete(
@@ -109,10 +138,10 @@ impl DataStore {
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(authz_cert.id()))
             .set(dsl::time_deleted.eq(now))
-            .execute_async(self.pool_authorized(opctx).await?)
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::NotFoundByResource(authz_cert),
                 )

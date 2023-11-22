@@ -17,11 +17,16 @@ pub mod sim;
 pub mod common;
 
 // Modules for the non-simulated sled agent.
+mod backing_fs;
 pub mod bootstrap;
 pub mod config;
+pub(crate) mod dump_setup;
+pub(crate) mod hardware_monitor;
 mod http_entrypoints;
 mod instance;
 mod instance_manager;
+mod long_running_tasks;
+mod metrics;
 mod nexus;
 pub mod params;
 mod profile;
@@ -30,12 +35,13 @@ pub mod server;
 mod services;
 mod sled_agent;
 mod smf_helper;
-pub mod sp;
-mod storage_manager;
+mod storage_monitor;
+mod swap_device;
 mod updates;
+mod zone_bundle;
 
 #[cfg(test)]
-mod mocks;
+mod fakes;
 
 #[macro_use]
 extern crate slog;

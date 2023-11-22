@@ -11,23 +11,30 @@ use crossterm::terminal::{
     LeaveAlternateScreen,
 };
 use futures::StreamExt;
+use ratatui::backend::CrosstermBackend;
+use ratatui::Terminal;
+use slog::Logger;
 use slog::{debug, error, info};
 use std::io::{stdout, Stdout};
 use std::net::SocketAddrV6;
+use std::time::Instant;
 use tokio::sync::mpsc::{
     unbounded_channel, UnboundedReceiver, UnboundedSender,
 };
 use tokio::time::{interval, Duration};
-use tui::backend::CrosstermBackend;
-use tui::Terminal;
+use wicketd_client::types::AbortUpdateOptions;
 
+use crate::events::EventReportMap;
+use crate::helpers::get_update_test_error;
+use crate::state::CreateClearUpdateStateOptions;
+use crate::state::CreateStartUpdateOptions;
 use crate::ui::Screen;
 use crate::wicketd::{self, WicketdHandle, WicketdManager};
 use crate::{Action, Cmd, Event, KeyHandler, Recorder, State, TICK_INTERVAL};
 
 // We can avoid a bunch of unnecessary type parameters by picking them ahead of time.
 pub type Term = Terminal<CrosstermBackend<Stdout>>;
-pub type Frame<'a> = tui::Frame<'a, CrosstermBackend<Stdout>>;
+pub type Frame<'a> = ratatui::Frame<'a, CrosstermBackend<Stdout>>;
 
 const MAX_RECORDED_EVENTS: usize = 10000;
 
@@ -49,9 +56,23 @@ pub struct RunnerCore {
 
     // Our friendly neighborhood logger
     pub log: slog::Logger,
+
+    // Helper to limit our logging of event reports (which can be quite large)
+    // to a slower cadence than their arrival.
+    log_throttler: EventReportLogThrottler,
 }
 
 impl RunnerCore {
+    pub fn new(log: Logger) -> Self {
+        Self {
+            screen: Screen::new(&log),
+            state: State::new(),
+            terminal: Terminal::new(CrosstermBackend::new(stdout())).unwrap(),
+            log,
+            log_throttler: EventReportLogThrottler::default(),
+        }
+    }
+
     /// Resize and draw the initial screen before handling `Event`s
     pub fn init_screen(&mut self) -> anyhow::Result<()> {
         // Size the initial screen
@@ -108,17 +129,31 @@ impl RunnerCore {
                 self.state.inventory.update_inventory(inventory)?;
                 self.screen.draw(&self.state, &mut self.terminal)?;
             }
-            Event::UpdateArtifacts { system_version, artifacts } => {
+            Event::ArtifactsAndEventReports {
+                system_version,
+                artifacts,
+                event_reports,
+            } => {
                 self.state.service_status.reset_wicketd(Duration::ZERO);
-                self.state
-                    .update_state
-                    .update_artifacts(system_version, artifacts);
+                self.log_throttler.log_event_report(&event_reports, &self.log);
+                self.state.update_state.update_artifacts_and_reports(
+                    &self.log,
+                    system_version,
+                    artifacts,
+                    event_reports,
+                );
                 self.screen.draw(&self.state, &mut self.terminal)?;
             }
-            Event::UpdateLog(logs) => {
-                self.state.service_status.reset_wicketd(Duration::ZERO);
-                debug!(self.log, "{:#?}", logs);
-                self.state.update_state.update_logs(&self.log, logs);
+            Event::RssConfig(config) => {
+                self.state.rss_config = Some(config);
+                self.screen.draw(&self.state, &mut self.terminal)?;
+            }
+            Event::RackSetupStatus(result) => {
+                self.state.rack_setup_state = result;
+                self.screen.draw(&self.state, &mut self.terminal)?;
+            }
+            Event::WicketdLocation(location) => {
+                self.state.wicketd_location = location;
                 self.screen.draw(&self.state, &mut self.terminal)?;
             }
             Event::Shutdown => return Ok(true),
@@ -132,18 +167,57 @@ impl RunnerCore {
         wicketd: Option<&WicketdHandle>,
     ) -> anyhow::Result<()> {
         let Some(action) = action else {
-         return Ok(());
+            return Ok(());
         };
 
         match action {
             Action::Redraw => {
                 self.screen.draw(&self.state, &mut self.terminal)?;
             }
-            Action::Update(component_id) => {
+            Action::StartUpdate(component_id) => {
                 if let Some(wicketd) = wicketd {
-                    wicketd.tx.blocking_send(wicketd::Request::StartUpdate(
-                        component_id,
-                    ))?;
+                    let options = CreateStartUpdateOptions {
+                        force_update_rot: self
+                            .state
+                            .force_update_state
+                            .force_update_rot,
+                        force_update_sp: self
+                            .state
+                            .force_update_state
+                            .force_update_sp,
+                    }
+                    .to_start_update_options()?;
+
+                    wicketd.tx.blocking_send(
+                        wicketd::Request::StartUpdate { component_id, options },
+                    )?;
+                }
+            }
+            Action::AbortUpdate(component_id) => {
+                if let Some(wicketd) = wicketd {
+                    let test_error = get_update_test_error(
+                        "WICKET_TEST_ABORT_UPDATE_ERROR",
+                    )?;
+
+                    let options = AbortUpdateOptions {
+                        message: "Aborted by wicket user".to_owned(),
+                        test_error,
+                    };
+                    wicketd.tx.blocking_send(
+                        wicketd::Request::AbortUpdate { component_id, options },
+                    )?;
+                }
+            }
+            Action::ClearUpdateState(component_id) => {
+                if let Some(wicketd) = wicketd {
+                    let options = CreateClearUpdateStateOptions {};
+                    let options = options.to_clear_update_state_options()?;
+                    wicketd.tx.blocking_send(
+                        wicketd::Request::ClearUpdateState {
+                            component_id,
+                            options,
+                        },
+                    )?;
                 }
             }
             Action::Ignition(component_id, ignition_command) => {
@@ -154,6 +228,20 @@ impl RunnerCore {
                             ignition_command,
                         ),
                     )?;
+                }
+            }
+            Action::StartRackSetup => {
+                if let Some(wicketd) = wicketd {
+                    wicketd
+                        .tx
+                        .blocking_send(wicketd::Request::StartRackSetup)?;
+                }
+            }
+            Action::StartRackReset => {
+                if let Some(wicketd) = wicketd {
+                    wicketd
+                        .tx
+                        .blocking_send(wicketd::Request::StartRackReset)?;
                 }
             }
         }
@@ -193,19 +281,13 @@ pub struct Runner {
 impl Runner {
     pub fn new(log: slog::Logger, wicketd_addr: SocketAddrV6) -> Runner {
         let (events_tx, events_rx) = unbounded_channel();
-        let backend = CrosstermBackend::new(stdout());
         let tokio_rt = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
             .unwrap();
         let (wicketd, wicketd_manager) =
             WicketdManager::new(&log, events_tx.clone(), wicketd_addr);
-        let core = RunnerCore {
-            screen: Screen::new(&log),
-            state: State::new(),
-            terminal: Terminal::new(backend).unwrap(),
-            log,
-        };
+        let core = RunnerCore::new(log);
         Runner {
             core,
             events_rx,
@@ -328,4 +410,53 @@ async fn run_event_listener(
             }
         }
     });
+}
+
+struct EventReportLogThrottler {
+    last_log: Option<Instant>,
+    min_time_between_logs: Duration,
+}
+
+impl Default for EventReportLogThrottler {
+    fn default() -> Self {
+        const DEFAULT_TIME_BETWEEN_LOGS: Duration = Duration::from_secs(15);
+        Self::new(DEFAULT_TIME_BETWEEN_LOGS)
+    }
+}
+
+impl EventReportLogThrottler {
+    fn new(min_time_between_logs: Duration) -> Self {
+        Self { last_log: None, min_time_between_logs }
+    }
+
+    fn log_event_report(
+        &mut self,
+        event_report: &EventReportMap,
+        log: &slog::Logger,
+    ) {
+        let should_log_full_report = self
+            .last_log
+            .map(|last| last.elapsed() >= self.min_time_between_logs)
+            .unwrap_or(true);
+
+        if should_log_full_report {
+            debug!(
+                log,
+                "received event reports for {} sleds",
+                event_report.len();
+                "details" => format!("{:#?}", event_report),
+            );
+            self.last_log = Some(Instant::now());
+        } else {
+            debug!(
+                log,
+                "received event reports for {} sleds",
+                event_report.len();
+                "details" => format!(
+                    "(omitted; only logged every {:?})",
+                    self.min_time_between_logs,
+                ),
+            );
+        }
+    }
 }

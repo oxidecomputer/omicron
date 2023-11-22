@@ -10,6 +10,8 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use serde::{Deserialize, Serialize};
 
+use crate::state::ComponentId;
+
 /// All commands handled by [`crate::Control::on`].
 ///
 /// These are mostly user input commands from the keyboard,
@@ -22,6 +24,9 @@ pub enum Cmd {
 
     /// Exit the current context
     Exit,
+
+    /// Toggle the currently-selected item (e.g., checkbox).
+    Toggle,
 
     /// Expand the current tree context
     Expand,
@@ -42,7 +47,7 @@ pub enum Cmd {
     /// Raw(KeyEvent),
 
     /// Display details for the given selection
-    /// This can be used to do things like open a scollable popup for a given
+    /// This can be used to do things like open a scrollable popup for a given
     /// `Control`.
     Details,
 
@@ -64,6 +69,26 @@ pub enum Cmd {
     /// Accept
     Yes,
 
+    /// Begin an update.
+    StartUpdate,
+
+    /// Force cancel an update.
+    AbortUpdate,
+
+    /// Reset screen-specific state (e.g., clearing the state for a
+    /// completed/failed update, or resetting the rack from the rack setup
+    /// screen).
+    ResetState,
+
+    /// Begin rack setup.
+    StartRackSetup,
+
+    /// Page up.
+    PageUp,
+
+    /// Page down.
+    PageDown,
+
     /// Goto top of list/screen/etc...
     GotoTop,
 
@@ -80,6 +105,12 @@ pub enum Cmd {
     /// animations.
     Tick,
 
+    /// Display a popup.
+    ///
+    /// This isn't a key shortcut (it is typically driven by the system) but
+    /// needs to be handled by screens the same way keys are.
+    ShowPopup(ShowPopupCmd),
+
     /// Switch to the next pane.
     NextPane,
 
@@ -90,12 +121,46 @@ pub enum Cmd {
     DumpSnapshot,
 }
 
+/// A command to display a popup.
+///
+/// Part of [`Cmd::ShowPopup`].
+///
+/// This isn't a key shortcut (it is typically driven by the system) but
+/// needs to be handled by screens the same way keys are.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ShowPopupCmd {
+    /// A response to a start-update request.
+    StartUpdateResponse {
+        component_id: ComponentId,
+        response: Result<(), String>,
+    },
+
+    /// A response to a abort-update request.
+    AbortUpdateResponse {
+        component_id: ComponentId,
+        response: Result<(), String>,
+    },
+
+    /// A response to a clear-update-state request.
+    ClearUpdateStateResponse {
+        component_id: ComponentId,
+        response: Result<(), String>,
+    },
+
+    /// A response to a rack-setup request.
+    StartRackSetupResponse(Result<(), String>),
+
+    /// A response to a rack-reset request.
+    StartRackResetResponse(Result<(), String>),
+}
+
 /// We allow certain multi-key sequences, and explicitly enumerate the starting
 /// key(s) here.
 #[derive(Debug, Clone, Copy)]
 #[allow(non_camel_case_types)]
 enum MultiKeySeqStart {
     g,
+    CtrlR,
 }
 
 /// A Key Handler maintains any state that is needed across key presses,
@@ -127,6 +192,33 @@ impl KeyHandler {
                     }
                     _ => (),
                 },
+                MultiKeySeqStart::CtrlR => match event.code {
+                    KeyCode::Char('a')
+                        if event.modifiers == KeyModifiers::CONTROL =>
+                    {
+                        self.seq = None;
+                        return Some(Cmd::AbortUpdate);
+                    }
+                    KeyCode::Char('r')
+                        if event.modifiers == KeyModifiers::CONTROL =>
+                    {
+                        self.seq = None;
+                        return Some(Cmd::ResetState);
+                    }
+                    KeyCode::Char('s')
+                        if event.modifiers == KeyModifiers::CONTROL =>
+                    {
+                        self.seq = None;
+                        return Some(Cmd::DumpSnapshot);
+                    }
+                    KeyCode::Char('t')
+                        if event.modifiers == KeyModifiers::CONTROL =>
+                    {
+                        self.seq = None;
+                        return Some(Cmd::KnightRiderMode);
+                    }
+                    _ => (),
+                },
             }
         }
 
@@ -137,6 +229,7 @@ impl KeyHandler {
         let cmd = match event.code {
             KeyCode::Enter => Cmd::Enter,
             KeyCode::Esc => Cmd::Exit,
+            KeyCode::Char(' ') => Cmd::Toggle,
             KeyCode::Char('e') => Cmd::Expand,
             KeyCode::Char('c') => Cmd::Collapse,
             KeyCode::Char('d') => Cmd::Details,
@@ -145,16 +238,24 @@ impl KeyHandler {
             KeyCode::Down => Cmd::Down,
             KeyCode::Right => Cmd::Right,
             KeyCode::Left => Cmd::Left,
+            KeyCode::PageUp => Cmd::PageUp,
+            KeyCode::PageDown => Cmd::PageDown,
+            KeyCode::Home => Cmd::GotoTop,
+            KeyCode::End => Cmd::GotoBottom,
             KeyCode::Char('y') => Cmd::Yes,
-            KeyCode::Char('n') => Cmd::No,
-            KeyCode::Char('k') if event.modifiers == KeyModifiers::CONTROL => {
-                Cmd::KnightRiderMode
+            KeyCode::Char('u') if event.modifiers == KeyModifiers::CONTROL => {
+                Cmd::StartUpdate
             }
+            KeyCode::Char('r') if event.modifiers == KeyModifiers::CONTROL => {
+                self.seq = Some(MultiKeySeqStart::CtrlR);
+                return None;
+            }
+            KeyCode::Char('k') if event.modifiers == KeyModifiers::CONTROL => {
+                Cmd::StartRackSetup
+            }
+            KeyCode::Char('n') => Cmd::No,
             KeyCode::Tab => Cmd::NextPane,
             KeyCode::BackTab => Cmd::PrevPane,
-            KeyCode::Char('r') if event.modifiers == KeyModifiers::CONTROL => {
-                Cmd::DumpSnapshot
-            }
 
             // Vim navigation
             KeyCode::Char('k') => Cmd::Up,

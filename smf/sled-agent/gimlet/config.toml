@@ -12,11 +12,7 @@ sled_mode = "auto"
 # Identifies the revision of the sidecar that is attached, if one is attached.
 # TODO: This field should be removed once Gimlets have the ability to auto-detect
 # this information.
-sidecar_revision = "b"
-
-# Setting this to true causes sled-agent to always report that its time is
-# in-sync, rather than querying its NTP zone.
-skip_timesync = true
+sidecar_revision.physical = "b"
 
 # An optional data link from which we extract a MAC address.
 # This is used as a unique identifier for the bootstrap address.
@@ -24,6 +20,22 @@ skip_timesync = true
 # If empty, this will be equivalent to the first result from:
 # $ dladm show-phys -p -o LINK
 data_link = "cxgbe0"
+
+# Percentage of usable physical DRAM to use for the VMM reservoir, which
+# guest memory is pulled from.
+vmm_reservoir_percentage = 80
+
+# Swap device size for the system. The device is a sparsely allocated zvol on
+# the internal zpool of the M.2 that we booted from.
+#
+# If use of the VMM reservoir is configured, it is likely the system will not
+# work without a swap device configured.
+#
+# We pick 256 GiB somewhat arbitrarily, since the device is sparsely
+# allocated.
+swap_device_size_gb = 256
+
+data_links = ["cxgbe0", "cxgbe1"]
 
 [log]
 level = "info"

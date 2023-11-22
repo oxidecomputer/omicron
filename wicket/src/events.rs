@@ -5,11 +5,17 @@ use crate::{keymap::Cmd, state::ComponentId, State};
 use camino::Utf8PathBuf;
 use humantime::format_rfc3339;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs::File;
 use std::time::{Duration, SystemTime};
+use wicket_common::update_events::EventReport;
 use wicketd_client::types::{
-    ArtifactId, IgnitionCommand, RackV1Inventory, SemverVersion, UpdateLogAll,
+    ArtifactId, CurrentRssUserConfig, GetLocationResponse, IgnitionCommand,
+    RackOperationStatus, RackV1Inventory, SemverVersion,
 };
+
+/// Event report type returned by the get_artifacts_and_event_reports API call.
+pub type EventReportMap = HashMap<String, HashMap<String, EventReport>>;
 
 /// An event that will update state
 ///
@@ -22,14 +28,21 @@ pub enum Event {
     /// An Inventory Update Event
     Inventory { inventory: RackV1Inventory, mgs_last_seen: Duration },
 
-    /// Update Log Event
-    UpdateLog(UpdateLogAll),
-
-    /// TUF repo artifacts unpacked by wicketd
-    UpdateArtifacts {
+    /// TUF repo artifacts unpacked by wicketd, and event reports
+    ArtifactsAndEventReports {
         system_version: Option<SemverVersion>,
         artifacts: Vec<ArtifactId>,
+        event_reports: EventReportMap,
     },
+
+    /// The current RSS configuration.
+    RssConfig(CurrentRssUserConfig),
+
+    /// The current state of rack initialization.
+    RackSetupStatus(Result<RackOperationStatus, String>),
+
+    /// The location within the rack where wicketd is running.
+    WicketdLocation(GetLocationResponse),
 
     /// The tick of a Timer
     /// This can be used to draw a frame to the terminal
@@ -62,8 +75,12 @@ impl Event {
 /// testable.
 pub enum Action {
     Redraw,
-    Update(ComponentId),
+    StartUpdate(ComponentId),
+    AbortUpdate(ComponentId),
+    ClearUpdateState(ComponentId),
     Ignition(ComponentId, IgnitionCommand),
+    StartRackSetup,
+    StartRackReset,
 }
 
 impl Action {
@@ -73,7 +90,13 @@ impl Action {
     /// Some downstream operations will not trigger this in the future.
     pub fn should_redraw(&self) -> bool {
         match self {
-            Action::Redraw | Action::Update(_) | Action::Ignition(_, _) => true,
+            Action::Redraw
+            | Action::StartUpdate(_)
+            | Action::AbortUpdate(_)
+            | Action::ClearUpdateState(_)
+            | Action::Ignition(_, _)
+            | Action::StartRackSetup
+            | Action::StartRackReset => true,
         }
     }
 }

@@ -5,6 +5,7 @@ use ring::rand::SecureRandom;
 use ring::signature::Ed25519KeyPair;
 use std::fmt::Display;
 use std::str::FromStr;
+use tough::async_trait;
 use tough::key_source::KeySource;
 use tough::sign::{Sign, SignKeyPair};
 
@@ -38,30 +39,32 @@ impl Key {
     }
 }
 
+#[async_trait]
 impl Sign for Key {
     fn tuf_key(&self) -> tough::schema::key::Key {
         self.as_sign().tuf_key()
     }
 
-    fn sign(
+    async fn sign(
         &self,
         msg: &[u8],
-        rng: &dyn SecureRandom,
+        rng: &(dyn SecureRandom + Sync),
     ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync + 'static>>
     {
-        self.as_sign().sign(msg, rng)
+        self.as_sign().sign(msg, rng).await
     }
 }
 
+#[async_trait]
 impl KeySource for Key {
-    fn as_sign(
+    async fn as_sign(
         &self,
     ) -> Result<Box<dyn Sign>, Box<dyn std::error::Error + Send + Sync + 'static>>
     {
         Ok(Box::new(self.clone()))
     }
 
-    fn write(
+    async fn write(
         &self,
         _value: &str,
         _key_id_hex: &str,

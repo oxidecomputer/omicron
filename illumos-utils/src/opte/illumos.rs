@@ -6,10 +6,11 @@
 
 use crate::addrobj::AddrObject;
 use crate::dladm;
+use camino::Utf8Path;
+use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use opte_ioctl::OpteHdl;
 use slog::info;
 use slog::Logger;
-use std::path::Path;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -44,7 +45,7 @@ pub enum Error {
     InvalidPortIpConfig,
 
     #[error("Tried to release non-existent port ({0}, {1:?})")]
-    ReleaseMissingPort(uuid::Uuid, super::params::NetworkInterfaceKind),
+    ReleaseMissingPort(uuid::Uuid, NetworkInterfaceKind),
 }
 
 /// Delete all xde devices on the system.
@@ -71,7 +72,7 @@ pub fn initialize_xde_driver(
     underlay_nics: &[AddrObject],
 ) -> Result<(), Error> {
     const XDE_CONF: &str = "/kernel/drv/xde.conf";
-    let xde_conf = Path::new(XDE_CONF);
+    let xde_conf = Utf8Path::new(XDE_CONF);
     if !xde_conf.exists() {
         return Err(Error::NoXdeConf);
     }

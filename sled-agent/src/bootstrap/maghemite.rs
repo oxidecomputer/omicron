@@ -8,7 +8,7 @@ use illumos_utils::addrobj::AddrObject;
 use slog::Logger;
 use thiserror::Error;
 
-const SERVICE_FMRI: &str = "svc:/system/illumos/mg-ddm";
+const SERVICE_FMRI: &str = "svc:/oxide/mg-ddm";
 const MANIFEST_PATH: &str = "/opt/oxide/mg-ddm/pkg/ddm/manifest.xml";
 
 #[derive(Debug, Error)]
@@ -26,17 +26,7 @@ pub enum Error {
     Argument(String),
 }
 
-pub async fn enable_mg_ddm_service(
-    log: Logger,
-    interfaces: Vec<AddrObject>,
-) -> Result<(), Error> {
-    tokio::task::spawn_blocking(|| {
-        enable_mg_ddm_service_blocking(log, interfaces)
-    })
-    .await?
-}
-
-fn enable_mg_ddm_service_blocking(
+pub(super) fn enable_mg_ddm_service_blocking(
     log: Logger,
     interfaces: Vec<AddrObject>,
 ) -> Result<(), Error> {

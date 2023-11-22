@@ -23,8 +23,8 @@ struct PortInner {
     // Geneve VNI for the VPC
     vni: Vni,
     // Information about the virtual gateway, aka OPTE
-    _gateway: Gateway,
-    // TODO-correctness: Remove this once we can put Viona directly on top of an
+    gateway: Gateway,
+    // TODO-remove(#2932): Remove this once we can put Viona directly on top of an
     // OPTE port device.
     //
     // NOTE: This is intentionally not an actual `Vnic` object. We'd like to
@@ -99,7 +99,7 @@ impl Port {
                 mac,
                 slot,
                 vni,
-                _gateway: gateway,
+                gateway,
                 vnic,
             }),
         }
@@ -107,6 +107,10 @@ impl Port {
 
     pub fn name(&self) -> &str {
         &self.inner.name
+    }
+
+    pub fn gateway(&self) -> &Gateway {
+        &self.inner.gateway
     }
 
     #[allow(dead_code)]

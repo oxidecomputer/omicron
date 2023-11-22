@@ -23,24 +23,44 @@ guide at xref:how-to-run.adoc[].
 
 == Installing Prerequisites
 
-Prerequisite software may be installed with the following script:
+First, set up your environment to include executables that will be installed shortly:
+
+[source,text]
+----
+$ source env.sh
+----
+
+Then install prerequisite software with the following script:
 
 [source,text]
 ----
 $ ./tools/install_builder_prerequisites.sh
 ----
 
+You need to do this once per workspace and potentially again each time you fetch new changes.  If the script reports any PATH problems, you'll need to correct those before proceeding.
+
 == Running
 
-To **run Omicron** you need to run four programs:
+To run anything, you'll need to set up your environment as before:
+
+[source,text]
+----
+$ source env.sh
+----
+
+You don't need to do this again if you just did it.  But you'll need to do it each time you start a new shell session to work in this workspace.
+
+To **run Omicron** you need to run several programs:
 
 * a CockroachDB cluster.  For development, you can use the `omicron-dev` tool in this repository to start a single-node CockroachDB cluster **that will delete the database when you shut it down.**
 * a ClickHouse server. You should use the `omicron-dev` tool for this as well, see below, and as with CockroachDB,
 the database files will be deleted when you stop the program.
 * `nexus`: the guts of the control plane
 * `sled-agent-sim`: a simulator for the component that manages a single sled
+* an `external-dns` server
+* `oximeter`, which collects metrics from control plane components
 
-The easiest way to start the required databases is to use the built-in `omicron-dev` tool.  This tool assumes that the `cockroach` and `clickhouse` executables are on your PATH, and match the versions above.
+You can run these by hand, but it's easier to use `omicron-dev run-all`.  See below for more on both options.
 
 === Quick start
 
@@ -54,9 +74,15 @@ log file: /dangerzone/omicron_tmp/omicron-dev-omicron-dev.4647.0.log
 note: configured to log to "/dangerzone/omicron_tmp/omicron-dev-omicron-dev.4647.0.log"
 omicron-dev: services are running.
 omicron-dev: nexus external API:    127.0.0.1:12220
-omicron-dev: nexus internal API:    127.0.0.1:12221
-omicron-dev: cockroachdb:           postgresql://root@127.0.0.1:54649/omicron?sslmode=disable
+omicron-dev: nexus internal API:    [::1]:12221
+omicron-dev: cockroachdb pid:       7180
+omicron-dev: cockroachdb:           postgresql://root@[::]:54649/omicron?sslmode=disable
 omicron-dev: cockroachdb directory: /dangerzone/omicron_tmp/.tmpB8FNBT
+omicron-dev: internal DNS HTTP:     http://[::1]:33652
+omicron-dev: internal DNS:          [::1]:37503
+omicron-dev: external DNS name:     oxide-dev.test
+omicron-dev: external DNS HTTP:     http://[::1]:38374
+omicron-dev: external DNS:          [::1]:54342
 ----
 +
 . If you use CTRL-C to shut this down, it will gracefully terminate CockroachDB and remove the temporary directory:
@@ -133,22 +159,40 @@ $ cargo run --bin omicron-dev -- ch-run
 omicron-dev: running ClickHouse (PID: 2463), full command is "clickhouse server --log-file /var/folders/67/2tlym22x1r3d2kwbh84j298w0000gn/T/.tmpJ5nhot/clickhouse-server.log --errorlog-file /var/folders/67/2tlym22x1r3d2kwbh84j298w0000gn/T/.tmpJ5nhot/clickhouse-server.errlog -- --http_port 8123 --path /var/folders/67/2tlym22x1r3d2kwbh84j298w0000gn/T/.tmpJ5nhot"
 omicron-dev: using /var/folders/67/2tlym22x1r3d2kwbh84j298w0000gn/T/.tmpJ5nhot for ClickHouse data storage
 ----
++
+If you wish to start a ClickHouse replicated cluster instead of a single node, run the following instead:
+[source,text]
+---
+$ cargo run --bin omicron-dev -- ch-run --replicated
+    Finished dev [unoptimized + debuginfo] target(s) in 0.31s
+     Running `target/debug/omicron-dev ch-run --replicated`
+omicron-dev: running ClickHouse cluster with configuration files:
+ replicas: /home/{user}/src/omicron/oximeter/db/src/configs/replica_config.xml
+ keepers: /home/{user}/src/omicron/oximeter/db/src/configs/keeper_config.xml
+omicron-dev: ClickHouse cluster is running with PIDs: 1113482, 1113681, 1113387, 1113451, 1113419
+omicron-dev: ClickHouse HTTP servers listening on ports: 8123, 8124
+omicron-dev: using /tmp/.tmpFH6v8h and /tmp/.tmpkUjDji for ClickHouse data storage
+---
 
 . `nexus` requires a configuration file to run.  You can use `nexus/examples/config.toml` to start with.  Build and run it like this:
 +
 [source,text]
 ----
 $ cargo run --bin=nexus -- nexus/examples/config.toml
-...
-listening: http://127.0.0.1:12220
 ----
 Nexus can also serve the web console. Instructions for downloading (or building) the console's static assets and pointing Nexus to them are https://github.com/oxidecomputer/console/blob/main/docs/serve-from-nexus.md[here]. Without console assets, Nexus will still start and run normally as an API. A few link:./nexus/src/external_api/console_api.rs[console-specific routes] will 404.
 
-. `sled-agent-sim` only accepts configuration on the command line.  Run it with a uuid identifying itself (this would be a uuid for the sled it's managing), an IP:port for itself, and the IP:port of `nexus`'s _internal_ interface.  Using default config, this might look like this:
+. `dns-server` is run similar to Nexus, except that the bind addresses are specified on the command line:
 +
 [source,text]
 ----
-$ cargo run --bin=sled-agent-sim -- $(uuidgen) [::1]:12345 127.0.0.1:12221
+$ cargo run --bin=dns-server -- --config-file dns-server/examples/config.toml --http-address [::1]:5353 --dns-address [::1]:5354
+----
+. `sled-agent-sim` only accepts configuration on the command line.  Run it with a uuid identifying itself (this would be a uuid for the sled it's managing), an IP:port for itself, and the IP:port of `nexus`'s _internal_ interface.  It's recommended that you also provide some arguments specific to RSS (the rack setup service): Nexus's _external_ address and the external DNS server's _internal_ address.  Using default config, this might look like this:
++
+[source,text]
+----
+$ cargo run --bin=sled-agent-sim -- $(uuidgen) [::1]:12345 [::1]:12221 --rss-nexus-external-addr 127.0.0.1:12220 --rss-external-dns-internal-addr [::1]:5353 --rss-internal-dns-dns-addr [::1]:3535
 ----
 
 . `oximeter` is similar to `nexus`, requiring a configuration file. You can use `oximeter/collector/config.toml`, and the whole thing can be run with:
@@ -167,3 +211,27 @@ Once everything is up and running, you can use the system in a few ways:
 
 * Use the browser-based console.  The Nexus log output will show what IP address and port it's listening on.  This is also configured in the config file.  If you're using the defaults, you can reach the console at `http://127.0.0.1:12220/projects`.  Depending on the environment where you're running this, you may need an ssh tunnel or the like to reach this from your browser.
 * Use the xref:cli.adoc[`oxide` CLI].
+
+== Running with TLS
+
+When you run the above, you will wind up with Nexus listening on HTTP (with no TLS) on its external address.  This is convenient for debugging, but not representative of a real system.  If you want to run it with TLS, you need to tweak the above procedure slightly:
+
+1. You'll need to use the "Running the pieces by hand" section.  `omicron-dev run-all` does not currently provide a way to do this (because it doesn't have a way to specify a certificate to be used during rack initialization).
+2. Acquire a TLS certificate.  The easiest approach is to use `omicron-dev cert-create` to create a self-signed certificate.  However you get one, it should be valid for the domain corresponding to your recovery Silo.  When you run the pieces by hand, this would be `demo-silo.sys.oxide-dev.test`.  If you want a certificate you can use for multiple Silos, make it a wildcard certificate.  Here's an example:
++
+[source,text]
+----
+$ cargo run --bin=omicron-dev -- cert-create demo- '*.sys.oxide-dev.test'
+wrote certificate to demo-cert.pem
+wrote private key to demo-key.pem
+----
+3. Modify your Nexus configuration file to include `tls = true`.  See `./nexus/examples/config.toml` for an example.  This property is present but commented-out in that file.  If you're running on standard port 80 (which is not usually the case in development), you may also want to change the `deployment.dropshot_external.bind_address` port to 443.
+4. When you run `sled-agent-sim`, pass the `--rss-tls-cert` and `--rss-tls-key` options as well.  These should refer to the files created by `omicron-dev cert-create` above.  (They can be any PEM-formatted x509 certificate and associated private key.)
+5. Usually at this point you'll be using a self-signed certificate for a domain that's not publicly resolvable with DNS.  This makes it hard to use standard clients.  Fortunately, `curl` does have flags to make this easy.  Continuing with this example, assuming your Nexus HTTPS server is listening on 127.0.0.1:12220 and your Silo's DNS name is `demo-silo.sys.oxide-dev.test`:
++
+[source,text]
+----
+$ curl -i --resolve test-suite-silo.sys.oxide-dev.test:12220:127.0.0.1 --cacert /path/to/your/certificate.pem https://test-suite-silo.sys.oxide-dev.test:12220
+----
++
+The Oxide CLI supports identical flags.

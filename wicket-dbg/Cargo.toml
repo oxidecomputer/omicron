@@ -17,11 +17,11 @@ slog-async.workspace = true
 slog-term.workspace = true
 slog-envlogger.workspace = true
 tokio = { workspace = true, features = ["full"] }
-tui.workspace = true
 wicket.workspace = true
 
 # used only by wicket-dbg binary
-reedline = "0.18.0"
+reedline = "0.26.0"
+omicron-workspace-hack.workspace = true
 
 [[bin]]
 name = "wicket-dbg"

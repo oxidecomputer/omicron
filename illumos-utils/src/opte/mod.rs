@@ -25,6 +25,7 @@ pub use port_manager::PortTicket;
 use ipnetwork::IpNetwork;
 use macaddr::MacAddr6;
 pub use oxide_vpc::api::BoundaryServices;
+pub use oxide_vpc::api::DhcpCfg;
 pub use oxide_vpc::api::Vni;
 use std::net::IpAddr;
 
@@ -76,5 +77,9 @@ impl Gateway {
                 .nth(1)
                 .expect("IP subnet must have at least 2 addresses"),
         }
+    }
+
+    pub fn ip(&self) -> &IpAddr {
+        &self.ip
     }
 }

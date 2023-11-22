@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use diesel::backend::{Backend, RawValue};
+use diesel::backend::Backend;
 use diesel::deserialize::{self, FromSql};
 use diesel::query_builder::bind_collector::RawBytesBindCollector;
 use diesel::serialize::{self, ToSql};
@@ -123,12 +123,12 @@ fn from_sortable_string(s: String) -> String {
 
 impl<DB> ToSql<sql_types::Text, DB> for SemverVersion
 where
-    DB: Backend<BindCollector = RawBytesBindCollector<DB>>,
+    for<'c> DB: Backend<BindCollector<'c> = RawBytesBindCollector<DB>>,
     String: ToSql<sql_types::Text, DB>,
 {
-    fn to_sql<'a>(
-        &'a self,
-        out: &mut serialize::Output<'a, '_, DB>,
+    fn to_sql<'b>(
+        &'b self,
+        out: &mut serialize::Output<'b, '_, DB>,
     ) -> serialize::Result {
         let v = (self.0).0.to_owned();
         to_sortable_string(v)?.to_sql(&mut out.reborrow())
@@ -142,7 +142,7 @@ where
 {
     /// Remove the zero-padding before running it through
     /// `semver::Version::parse` because the extra zeros are not allowed.
-    fn from_sql(raw: RawValue<DB>) -> deserialize::Result<Self> {
+    fn from_sql(raw: DB::RawValue<'_>) -> deserialize::Result<Self> {
         from_sortable_string(String::from_sql(raw)?)
             .parse()
             .map(|s| SemverVersion(external::SemverVersion(s)))

@@ -9,13 +9,17 @@ extern crate diesel;
 #[macro_use]
 extern crate newtype_derive;
 
+mod address_lot;
+mod bgp;
 mod block_size;
+mod bootstore;
 mod bytecount;
 mod certificate;
 mod collection;
 mod console_session;
 mod dataset;
 mod dataset_kind;
+mod db_metadata;
 mod device_auth;
 mod digest;
 mod disk;
@@ -23,12 +27,12 @@ mod disk_state;
 mod dns;
 mod external_ip;
 mod generation;
-mod global_image;
 mod identity_provider;
 mod image;
 mod instance;
 mod instance_cpu_count;
 mod instance_state;
+mod inventory;
 mod ip_pool;
 mod ipv4net;
 mod ipv6;
@@ -37,17 +41,19 @@ mod l4_port_range;
 mod macaddr;
 mod name;
 mod network_interface;
-mod nexus_service;
 mod oximeter_info;
 mod physical_disk;
 mod physical_disk_kind;
 mod producer_endpoint;
 mod project;
 mod semver_version;
+mod switch_interface;
+mod switch_port;
 mod system_update;
 // These actually represent subqueries, not real table.
 // However, they must be defined in the same crate as our tables
 // for join-based marker trait generation.
+mod ipv4_nat_entry;
 pub mod queries;
 mod rack;
 mod region;
@@ -63,15 +69,18 @@ mod silo_group;
 mod silo_user;
 mod silo_user_password_hash;
 mod sled;
+mod sled_instance;
 mod sled_resource;
 mod sled_resource_kind;
 mod snapshot;
 mod ssh_key;
+mod switch;
 mod unsigned;
 mod update_artifact;
 mod user_builtin;
 mod virtual_provisioning_collection;
 mod virtual_provisioning_resource;
+mod vmm;
 mod vni;
 mod volume;
 mod vpc;
@@ -91,13 +100,17 @@ mod db {
 
 pub use self::macaddr::*;
 pub use self::unsigned::*;
+pub use address_lot::*;
+pub use bgp::*;
 pub use block_size::*;
+pub use bootstore::*;
 pub use bytecount::*;
 pub use certificate::*;
 pub use collection::*;
 pub use console_session::*;
 pub use dataset::*;
 pub use dataset_kind::*;
+pub use db_metadata::*;
 pub use device_auth::*;
 pub use digest::*;
 pub use disk::*;
@@ -105,20 +118,20 @@ pub use disk_state::*;
 pub use dns::*;
 pub use external_ip::*;
 pub use generation::*;
-pub use global_image::*;
 pub use identity_provider::*;
 pub use image::*;
 pub use instance::*;
 pub use instance_cpu_count::*;
 pub use instance_state::*;
+pub use inventory::*;
 pub use ip_pool::*;
+pub use ipv4_nat_entry::*;
 pub use ipv4net::*;
 pub use ipv6::*;
 pub use ipv6net::*;
 pub use l4_port_range::*;
 pub use name::*;
 pub use network_interface::*;
-pub use nexus_service::*;
 pub use oximeter_info::*;
 pub use physical_disk::*;
 pub use physical_disk_kind::*;
@@ -137,15 +150,20 @@ pub use silo_group::*;
 pub use silo_user::*;
 pub use silo_user_password_hash::*;
 pub use sled::*;
+pub use sled_instance::*;
 pub use sled_resource::*;
 pub use sled_resource_kind::*;
 pub use snapshot::*;
 pub use ssh_key::*;
+pub use switch::*;
+pub use switch_interface::*;
+pub use switch_port::*;
 pub use system_update::*;
 pub use update_artifact::*;
 pub use user_builtin::*;
 pub use virtual_provisioning_collection::*;
 pub use virtual_provisioning_resource::*;
+pub use vmm::*;
 pub use vni::*;
 pub use volume::*;
 pub use vpc::*;
@@ -199,8 +217,8 @@ macro_rules! impl_enum_wrapper {
         }
 
         impl ::diesel::deserialize::FromSql<$diesel_type, ::diesel::pg::Pg> for $model_type {
-            fn from_sql(bytes: ::diesel::backend::RawValue<::diesel::pg::Pg>) -> ::diesel::deserialize::Result<Self> {
-                match ::diesel::backend::RawValue::<::diesel::pg::Pg>::as_bytes(&bytes) {
+            fn from_sql(bytes: <::diesel::pg::Pg as ::diesel::backend::Backend>::RawValue<'_>) -> ::diesel::deserialize::Result<Self> {
+                match <::diesel::pg::Pg as ::diesel::backend::Backend>::RawValue::<'_>::as_bytes(&bytes) {
                     $(
                     $sql_value => {
                         Ok($model_type(<$ext_type>::$enum_item))
@@ -260,8 +278,8 @@ macro_rules! impl_enum_type {
         }
 
         impl ::diesel::deserialize::FromSql<$diesel_type, ::diesel::pg::Pg> for $model_type {
-            fn from_sql(bytes: ::diesel::backend::RawValue<::diesel::pg::Pg>) -> ::diesel::deserialize::Result<Self> {
-                match ::diesel::backend::RawValue::<::diesel::pg::Pg>::as_bytes(&bytes) {
+            fn from_sql(bytes: <::diesel::pg::Pg as ::diesel::backend::Backend>::RawValue<'_>) -> ::diesel::deserialize::Result<Self> {
+                match <::diesel::pg::Pg as ::diesel::backend::Backend>::RawValue::<'_>::as_bytes(&bytes) {
                     $(
                     $sql_value => {
                         Ok($model_type::$enum_item)
@@ -299,6 +317,85 @@ pub trait DatabaseString: Sized {
 
     fn to_database_string(&self) -> &str;
     fn from_database_string(s: &str) -> Result<Self, Self::Error>;
+}
+
+use anyhow::anyhow;
+use nexus_types::external_api::shared::FleetRole;
+use nexus_types::external_api::shared::ProjectRole;
+use nexus_types::external_api::shared::SiloRole;
+
+impl DatabaseString for FleetRole {
+    type Error = anyhow::Error;
+
+    fn to_database_string(&self) -> &str {
+        match self {
+            FleetRole::Admin => "admin",
+            FleetRole::Collaborator => "collaborator",
+            FleetRole::Viewer => "viewer",
+        }
+    }
+
+    // WARNING: if you're considering changing this (including removing
+    // variants), be sure you've considered how Nexus will handle rows written
+    // previous to your change.
+    fn from_database_string(s: &str) -> Result<Self, Self::Error> {
+        match s {
+            "admin" => Ok(FleetRole::Admin),
+            "collaborator" => Ok(FleetRole::Collaborator),
+            "viewer" => Ok(FleetRole::Viewer),
+            _ => Err(anyhow!("unsupported Fleet role from database: {:?}", s)),
+        }
+    }
+}
+
+impl DatabaseString for SiloRole {
+    type Error = anyhow::Error;
+
+    fn to_database_string(&self) -> &str {
+        match self {
+            SiloRole::Admin => "admin",
+            SiloRole::Collaborator => "collaborator",
+            SiloRole::Viewer => "viewer",
+        }
+    }
+
+    // WARNING: if you're considering changing this (including removing
+    // variants), be sure you've considered how Nexus will handle rows written
+    // previous to your change.
+    fn from_database_string(s: &str) -> Result<Self, Self::Error> {
+        match s {
+            "admin" => Ok(SiloRole::Admin),
+            "collaborator" => Ok(SiloRole::Collaborator),
+            "viewer" => Ok(SiloRole::Viewer),
+            _ => Err(anyhow!("unsupported Silo role from database: {:?}", s)),
+        }
+    }
+}
+
+impl DatabaseString for ProjectRole {
+    type Error = anyhow::Error;
+
+    fn to_database_string(&self) -> &str {
+        match self {
+            ProjectRole::Admin => "admin",
+            ProjectRole::Collaborator => "collaborator",
+            ProjectRole::Viewer => "viewer",
+        }
+    }
+
+    // WARNING: if you're considering changing this (including removing
+    // variants), be sure you've considered how Nexus will handle rows written
+    // previous to your change.
+    fn from_database_string(s: &str) -> Result<Self, Self::Error> {
+        match s {
+            "admin" => Ok(ProjectRole::Admin),
+            "collaborator" => Ok(ProjectRole::Collaborator),
+            "viewer" => Ok(ProjectRole::Viewer),
+            _ => {
+                Err(anyhow!("unsupported Project role from database: {:?}", s))
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -423,5 +520,87 @@ mod tests {
         assert!(subnet.check_requestable_addr("fd00::a".parse().unwrap()));
         assert!(!subnet.check_requestable_addr("fd00::1".parse().unwrap()));
         assert!(subnet.check_requestable_addr("fd00::1:1".parse().unwrap()));
+    }
+
+    /// Does some basic smoke checks on an impl of `DatabaseString`
+    ///
+    /// This tests:
+    ///
+    /// - that for every variant, if we serialize it and deserialize the result,
+    ///   we get back the original variant
+    /// - that if we attempt to deserialize some _other_ input, we get back an
+    ///   error
+    /// - that the serialized form for each variant matches what's found in
+    ///   `expected_output_file`.  This output file is generated by this test
+    ///   using expectorate.
+    ///
+    /// This cannot completely test the correctness of the implementation, but it
+    /// can catch some basic copy/paste errors and accidental compatibility
+    /// breakage.
+    #[cfg(test)]
+    pub fn test_database_string_impl<T, P>(expected_output_file: P)
+    where
+        T: std::fmt::Debug
+            + PartialEq
+            + super::DatabaseString
+            + strum::IntoEnumIterator,
+        P: std::convert::AsRef<std::path::Path>,
+    {
+        let mut output = String::new();
+        let mut maxlen: Option<usize> = None;
+
+        for variant in T::iter() {
+            // Serialize the variant.  Verify that we can deserialize the thing
+            // we just got back.
+            let serialized = variant.to_database_string();
+            let deserialized = T::from_database_string(serialized)
+                .unwrap_or_else(|_| {
+                    panic!(
+                        "failed to deserialize the string {:?}, which we \
+                    got by serializing {:?}",
+                        serialized, variant
+                    )
+                });
+            assert_eq!(variant, deserialized);
+
+            // Put the serialized form into "output".  At the end, we'll compare
+            // this to the expected output.  This will fail if somebody has
+            // incompatibly changed things.
+            output.push_str(&format!(
+                "variant {:?}: serialized form = {}\n",
+                variant, serialized
+            ));
+
+            // Keep track of the maximum length of the serialized strings.
+            // We'll use this to construct an input to `from_database_string()`
+            // that was not emitted by any of the variants'
+            // `to_database_string()` functions.
+            maxlen = maxlen.max(Some(serialized.len()));
+        }
+
+        // Check that `from_database_string()` fails when given input that
+        // doesn't match any of the variants' serialized forms.  We construct
+        // this input by providing a string that's longer than all strings
+        // emitted by `to_database_string()`.
+        if let Some(maxlen) = maxlen {
+            let input = String::from_utf8(vec![b'-'; maxlen + 1]).unwrap();
+            T::from_database_string(&input)
+                .expect_err("expected failure to deserialize unknown string");
+        }
+
+        expectorate::assert_contents(expected_output_file, &output);
+    }
+
+    #[test]
+    fn test_roles_database_strings() {
+        test_database_string_impl::<super::FleetRole, _>(
+            "tests/output/authz-roles-fleet.txt",
+        );
+        test_database_string_impl::<super::SiloRole, _>(
+            "tests/output/authz-roles-silo.txt",
+        );
+        test_database_string_impl::<super::ProjectRole, _>(
+            "tests/output/authz-roles-project.txt",
+        );
     }
 }

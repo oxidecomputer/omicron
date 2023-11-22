@@ -280,7 +280,7 @@ fn build_resource_identity(
     let identity_name = format_ident!("{}Identity", struct_name);
     quote! {
         #[doc = #identity_doc]
-        #[derive(Clone, Debug, PartialEq, Selectable, Queryable, Insertable, serde::Serialize, serde::Deserialize)]
+        #[derive(Clone, Debug, PartialEq, Eq, Selectable, Queryable, Insertable, serde::Serialize, serde::Deserialize)]
         #[diesel(table_name = #table_name) ]
         pub struct #identity_name {
             pub id: ::uuid::Uuid,

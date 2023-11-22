@@ -1,0 +1,18 @@
+# Reflector configuration (oxidecompuer/reflector)
+
+# When any of the listeners configured below activate, run .github/workflows/update-maghemite.yml targeting main
+
+workflow = "update-maghemite.yml"
+branch = "main"
+
+# Request an installation token when running this workflow
+
+requires_token = true
+
+# Run in response to the image buildomat job in maghemite completing
+
+[[on]]
+repository = "oxidecomputer/maghemite"
+event = "check_run"
+action = "completed"
+check = "image"

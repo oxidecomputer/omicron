@@ -7,15 +7,13 @@
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils_macros::nexus_test;
 
+use nexus_types::external_api::params;
+use nexus_types::external_api::shared;
+use nexus_types::external_api::views;
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_nexus::external_api::params;
-use omicron_nexus::external_api::shared;
-use omicron_nexus::external_api::views;
 
 use dropshot::ResultsPage;
 use nexus_test_utils::resource_helpers::{create_local_user, create_silo};
-
-use httptest::{matchers::*, responders::*, Expectation, ServerBuilder};
 
 use uuid::Uuid;
 
@@ -40,7 +38,7 @@ async fn test_cannot_read_others_ssh_keys(cptestctx: &ControlPlaneTestContext) {
         client,
         &silo,
         &"user1".parse().unwrap(),
-        params::UserPassword::InvalidPassword,
+        params::UserPassword::LoginDisallowed,
     )
     .await
     .id;
@@ -48,7 +46,7 @@ async fn test_cannot_read_others_ssh_keys(cptestctx: &ControlPlaneTestContext) {
         client,
         &silo,
         &"user2".parse().unwrap(),
-        params::UserPassword::InvalidPassword,
+        params::UserPassword::LoginDisallowed,
     )
     .await
     .id;
@@ -128,90 +126,6 @@ async fn test_cannot_read_others_ssh_keys(cptestctx: &ControlPlaneTestContext) {
     assert!(user2_keys.items.is_empty());
 }
 
-// Test that an authenticated, unprivileged user can list and read global images
-#[nexus_test]
-async fn test_global_image_read_for_unpriv(
-    cptestctx: &ControlPlaneTestContext,
-) {
-    let client = &cptestctx.external_client;
-
-    // Create a silo with an unprivileged user
-    let silo = create_silo(
-        &client,
-        "authz",
-        true,
-        shared::SiloIdentityMode::LocalOnly,
-    )
-    .await;
-
-    let new_silo_user_id = create_local_user(
-        client,
-        &silo,
-        &"unpriv".parse().unwrap(),
-        params::UserPassword::InvalidPassword,
-    )
-    .await
-    .id;
-
-    // Create a global image using AuthnMode::PrivilegedUser
-    let server = ServerBuilder::new().run().unwrap();
-    server.expect(
-        Expectation::matching(request::method_path("HEAD", "/image.raw"))
-            .times(1..)
-            .respond_with(
-                status_code(200).append_header(
-                    "Content-Length",
-                    format!("{}", 4096 * 1000),
-                ),
-            ),
-    );
-
-    let image_create_params = params::GlobalImageCreate {
-        identity: IdentityMetadataCreateParams {
-            name: "alpine-edge".parse().unwrap(),
-            description: String::from(
-                "you can boot any image, as long as it's alpine",
-            ),
-        },
-        source: params::ImageSource::Url {
-            url: server.url("/image.raw").to_string(),
-        },
-        distribution: params::Distribution {
-            name: "alpine".parse().unwrap(),
-            version: "edge".into(),
-        },
-        block_size: params::BlockSize::try_from(512).unwrap(),
-    };
-
-    NexusRequest::objects_post(client, "/system/images", &image_create_params)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .unwrap();
-
-    // The unprivileged user:
-
-    // - can list global images
-    let _images: ResultsPage<views::GlobalImage> =
-        NexusRequest::object_get(client, &"/system/images")
-            .authn_as(AuthnMode::SiloUser(new_silo_user_id))
-            .execute()
-            .await
-            .expect("failed to make GET request")
-            .parsed_body()
-            .unwrap();
-
-    // - can read a global image
-    let _image: views::GlobalImage =
-        NexusRequest::object_get(client, &"/system/images/alpine-edge")
-            .authn_as(AuthnMode::SiloUser(new_silo_user_id))
-            .execute()
-            .await
-            .expect("failed to make GET request")
-            .parsed_body()
-            .unwrap();
-}
-
 // Test that an authenticated, unprivileged user can list their silo's users
 #[nexus_test]
 async fn test_list_silo_users_for_unpriv(cptestctx: &ControlPlaneTestContext) {
@@ -230,7 +144,7 @@ async fn test_list_silo_users_for_unpriv(cptestctx: &ControlPlaneTestContext) {
         client,
         &silo,
         &"unpriv".parse().unwrap(),
-        params::UserPassword::InvalidPassword,
+        params::UserPassword::LoginDisallowed,
     )
     .await
     .id;
@@ -248,7 +162,7 @@ async fn test_list_silo_users_for_unpriv(cptestctx: &ControlPlaneTestContext) {
         client,
         &silo,
         &"otheruser".parse().unwrap(),
-        params::UserPassword::InvalidPassword,
+        params::UserPassword::LoginDisallowed,
     )
     .await;
 
@@ -286,7 +200,7 @@ async fn test_list_silo_idps_for_unpriv(cptestctx: &ControlPlaneTestContext) {
         client,
         &silo,
         &"unpriv".parse().unwrap(),
-        params::UserPassword::InvalidPassword,
+        params::UserPassword::LoginDisallowed,
     )
     .await
     .id;
@@ -322,7 +236,7 @@ async fn test_session_me_for_unpriv(cptestctx: &ControlPlaneTestContext) {
         client,
         &silo,
         &"unpriv".parse().unwrap(),
-        params::UserPassword::InvalidPassword,
+        params::UserPassword::LoginDisallowed,
     )
     .await
     .id;
@@ -352,7 +266,7 @@ async fn test_silo_read_for_unpriv(cptestctx: &ControlPlaneTestContext) {
         client,
         &silo,
         &"unpriv".parse().unwrap(),
-        params::UserPassword::InvalidPassword,
+        params::UserPassword::LoginDisallowed,
     )
     .await
     .id;

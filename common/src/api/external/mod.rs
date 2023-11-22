@@ -12,17 +12,18 @@ pub mod http_pagination;
 use dropshot::HttpError;
 pub use error::*;
 
+pub use crate::api::internal::shared::SwitchLocation;
 use anyhow::anyhow;
 use anyhow::Context;
 use api_identity::ObjectIdentity;
 use chrono::DateTime;
 use chrono::Utc;
 pub use dropshot::PaginationOrder;
-use futures::future::ready;
 use futures::stream::BoxStream;
-use futures::stream::StreamExt;
 use parse_display::Display;
 use parse_display::FromStr;
+use rand::thread_rng;
+use rand::Rng;
 use schemars::JsonSchema;
 use semver;
 use serde::Deserialize;
@@ -82,7 +83,7 @@ pub trait ObjectIdentity {
 ///
 /// `NameType` is the type of the field used to sort the returned values and it's
 /// usually `Name`.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct DataPageParams<'a, NameType> {
     /// If present, this is the value of the sort field for the last object seen
     pub marker: Option<&'a NameType>,
@@ -98,6 +99,13 @@ pub struct DataPageParams<'a, NameType> {
 }
 
 impl<'a, NameType> DataPageParams<'a, NameType> {
+    pub fn max_page() -> Self {
+        Self {
+            marker: None,
+            direction: dropshot::PaginationOrder::Ascending,
+            limit: NonZeroU32::new(u32::MAX).unwrap(),
+        }
+    }
     /// Maps the marker type to a new type.
     ///
     /// Equivalent to [std::option::Option::map], because that's what it calls.
@@ -400,7 +408,7 @@ impl SemverVersion {
 
     /// This is the official ECMAScript-compatible validation regex for
     /// semver:
-    /// https://semver.org/#is-there-a-suggested-regular-expression-regex-to-check-a-semver-string
+    /// <https://semver.org/#is-there-a-suggested-regular-expression-regex-to-check-a-semver-string>
     const VALIDATION_REGEX: &str = r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$";
 }
 
@@ -490,18 +498,19 @@ impl JsonSchema for RoleName {
     }
 }
 
-/// A count of bytes, typically used either for memory or storage capacity
-///
-/// The maximum supported byte count is [`i64::MAX`].  This makes it somewhat
-/// inconvenient to define constructors: a u32 constructor can be infallible, but
-/// an i64 constructor can fail (if the value is negative) and a u64 constructor
-/// can fail (if the value is larger than i64::MAX).  We provide all of these for
-/// consumers' convenience.
-// TODO-cleanup This could benefit from a more complete implementation.
+/// Byte count to express memory or storage capacity.
 //
-// The maximum byte count of i64::MAX comes from the fact that this is stored in
-// the database as an i64.  Constraining it here ensures that we can't fail to
-// serialize the value.
+// The maximum supported byte count is [`i64::MAX`].  This makes it somewhat
+// inconvenient to define constructors: a u32 constructor can be infallible,
+// but an i64 constructor can fail (if the value is negative) and a u64
+// constructor can fail (if the value is larger than i64::MAX).  We provide
+// all of these for consumers' convenience.
+//
+// The maximum byte count of i64::MAX comes from the fact that this is stored
+// in the database as an i64.  Constraining it here ensures that we can't fail
+// to serialize the value.
+//
+// TODO: custom JsonSchema and Deserialize impls to enforce i64::MAX limit
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct ByteCount(u64);
 
@@ -651,6 +660,12 @@ impl From<&Generation> for i64 {
     }
 }
 
+impl From<u32> for Generation {
+    fn from(value: u32) -> Self {
+        Generation(u64::from(value))
+    }
+}
+
 impl TryFrom<i64> for Generation {
     type Error = anyhow::Error;
 
@@ -680,6 +695,11 @@ impl TryFrom<i64> for Generation {
 )]
 #[display(style = "kebab-case")]
 pub enum ResourceType {
+    AddressLot,
+    AddressLotBlock,
+    BackgroundTask,
+    BgpConfig,
+    BgpAnnounceSet,
     Fleet,
     Silo,
     SiloUser,
@@ -691,7 +711,6 @@ pub enum ResourceType {
     ConsoleSession,
     DeviceAuthRequest,
     DeviceAccessToken,
-    GlobalImage,
     Project,
     Dataset,
     Disk,
@@ -699,12 +718,17 @@ pub enum ResourceType {
     SiloImage,
     ProjectImage,
     Instance,
+    LoopbackAddress,
+    SwitchPortSettings,
     IpPool,
     InstanceNetworkInterface,
     PhysicalDisk,
     Rack,
     Service,
+    ServiceNetworkInterface,
     Sled,
+    SledInstance,
+    Switch,
     SagaDbg,
     Snapshot,
     Volume,
@@ -717,6 +741,7 @@ pub enum ResourceType {
     MetricProducer,
     RoleBuiltin,
     UpdateArtifact,
+    SwitchPort,
     SystemUpdate,
     ComponentUpdate,
     SystemUpdateComponentUpdate,
@@ -724,17 +749,8 @@ pub enum ResourceType {
     UpdateableComponent,
     UserBuiltin,
     Zpool,
-}
-
-pub async fn to_list<T, U>(object_stream: ObjectStream<T>) -> Vec<U>
-where
-    T: Into<U>,
-{
-    object_stream
-        .filter(|maybe_object| ready(maybe_object.is_ok()))
-        .map(|maybe_object| maybe_object.unwrap().into())
-        .collect::<Vec<U>>()
-        .await
+    Vmm,
+    Ipv4NatEntry,
 }
 
 // IDENTITY METADATA
@@ -862,25 +878,6 @@ impl InstanceState {
             InstanceState::Destroyed => "destroyed",
         }
     }
-
-    /// Returns true if the given state represents a fully stopped Instance.
-    /// This means that a transition from an !is_stopped() state must go
-    /// through Stopping.
-    pub fn is_stopped(&self) -> bool {
-        match self {
-            InstanceState::Starting => false,
-            InstanceState::Running => false,
-            InstanceState::Stopping => false,
-            InstanceState::Rebooting => false,
-            InstanceState::Migrating => false,
-
-            InstanceState::Creating => true,
-            InstanceState::Stopped => true,
-            InstanceState::Repairing => true,
-            InstanceState::Failed => true,
-            InstanceState::Destroyed => true,
-        }
-    }
 }
 
 /// The number of CPUs in an Instance
@@ -901,25 +898,14 @@ impl From<&InstanceCpuCount> for i64 {
     }
 }
 
-/// Client view of an [`InstanceRuntimeState`]
+/// The state of an `Instance`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceRuntimeState {
     pub run_state: InstanceState,
     pub time_run_state_updated: DateTime<Utc>,
 }
 
-impl From<crate::api::internal::nexus::InstanceRuntimeState>
-    for InstanceRuntimeState
-{
-    fn from(state: crate::api::internal::nexus::InstanceRuntimeState) -> Self {
-        InstanceRuntimeState {
-            run_state: state.run_state,
-            time_run_state_updated: state.time_updated,
-        }
-    }
-}
-
-/// Client view of an [`Instance`]
+/// View of an Instance
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Instance {
     // TODO is flattening here the intent in RFD 4?
@@ -942,13 +928,15 @@ pub struct Instance {
 
 // DISKS
 
-/// Client view of a [`Disk`]
+/// View of a Disk
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Disk {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
     pub project_id: Uuid,
+    /// ID of snapshot from which disk was created, if any
     pub snapshot_id: Option<Uuid>,
+    /// ID of image from which disk was created, if any
     pub image_id: Option<Uuid>,
     pub size: ByteCount,
     pub block_size: ByteCount,
@@ -956,7 +944,7 @@ pub struct Disk {
     pub device_path: String,
 }
 
-/// State of a Disk (primarily: attached or not)
+/// State of a Disk
 #[derive(
     Clone,
     Debug,
@@ -1077,79 +1065,8 @@ impl DiskState {
     }
 }
 
-// Sagas
-//
-// These are currently only intended for observability by developers.  We will
-// eventually want to flesh this out into something more observable for end
-// users.
-#[derive(Clone, Debug, Serialize, JsonSchema)]
-pub struct Saga {
-    pub id: Uuid,
-    pub state: SagaState,
-}
-
-impl From<steno::SagaView> for Saga {
-    fn from(s: steno::SagaView) -> Self {
-        Saga { id: Uuid::from(s.id), state: SagaState::from(s.state) }
-    }
-}
-
-#[derive(Clone, Debug, Serialize, JsonSchema)]
-#[serde(tag = "state", rename_all = "snake_case")]
-pub enum SagaState {
-    Running,
-    Succeeded,
-    Failed { error_node_name: steno::NodeName, error_info: SagaErrorInfo },
-}
-
-#[derive(Clone, Debug, Serialize, JsonSchema)]
-#[serde(tag = "error", rename_all = "snake_case")]
-pub enum SagaErrorInfo {
-    ActionFailed { source_error: serde_json::Value },
-    DeserializeFailed { message: String },
-    InjectedError,
-    SerializeFailed { message: String },
-    SubsagaCreateFailed { message: String },
-}
-
-impl From<steno::SagaStateView> for SagaState {
-    fn from(st: steno::SagaStateView) -> Self {
-        match st {
-            steno::SagaStateView::Ready { .. } => SagaState::Running,
-            steno::SagaStateView::Running { .. } => SagaState::Running,
-            steno::SagaStateView::Done {
-                result: steno::SagaResult { kind: Ok(_), .. },
-                ..
-            } => SagaState::Succeeded,
-            steno::SagaStateView::Done {
-                result: steno::SagaResult { kind: Err(e), .. },
-                ..
-            } => SagaState::Failed {
-                error_node_name: e.error_node_name,
-                error_info: match e.error_source {
-                    steno::ActionError::ActionFailed { source_error } => {
-                        SagaErrorInfo::ActionFailed { source_error }
-                    }
-                    steno::ActionError::DeserializeFailed { message } => {
-                        SagaErrorInfo::DeserializeFailed { message }
-                    }
-                    steno::ActionError::InjectedError => {
-                        SagaErrorInfo::InjectedError
-                    }
-                    steno::ActionError::SerializeFailed { message } => {
-                        SagaErrorInfo::SerializeFailed { message }
-                    }
-                    steno::ActionError::SubsagaCreateFailed { message } => {
-                        SagaErrorInfo::SubsagaCreateFailed { message }
-                    }
-                },
-            },
-        }
-    }
-}
-
 /// An `Ipv4Net` represents a IPv4 subnetwork, including the address and network mask.
-#[derive(Clone, Copy, Debug, Deserialize, Hash, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Hash, PartialEq, Eq, Serialize)]
 pub struct Ipv4Net(pub ipnetwork::Ipv4Network);
 
 impl Ipv4Net {
@@ -1197,7 +1114,7 @@ impl JsonSchema for Ipv4Net {
                     concat!(
                         r#"^(([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\.){3}"#,
                         r#"([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])"#,
-                        r#"/([8-9]|1[0-9]|2[0-9]|3[0-2])$"#,
+                        r#"/([0-9]|1[0-9]|2[0-9]|3[0-2])$"#,
                     )
                     .to_string(),
                 ),
@@ -1291,7 +1208,8 @@ impl JsonSchema for Ipv6Net {
                         r#"^([fF][dD])[0-9a-fA-F]{2}:("#,
                         r#"([0-9a-fA-F]{1,4}:){6}[0-9a-fA-F]{1,4}"#,
                         r#"|([0-9a-fA-F]{1,4}:){1,6}:)"#,
-                        r#"\/([1-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])$"#,
+                        r#"([0-9a-fA-F]{1,4})?"#,
+                        r#"\/([0-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])$"#,
                     )
                     .to_string(),
                 ),
@@ -1304,13 +1222,29 @@ impl JsonSchema for Ipv6Net {
 }
 
 /// An `IpNet` represents an IP network, either IPv4 or IPv6.
-#[derive(Clone, Copy, Debug, PartialEq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum IpNet {
     V4(Ipv4Net),
     V6(Ipv6Net),
 }
 
 impl IpNet {
+    /// Return the underlying address.
+    pub fn ip(&self) -> IpAddr {
+        match self {
+            IpNet::V4(inner) => inner.ip().into(),
+            IpNet::V6(inner) => inner.ip().into(),
+        }
+    }
+
+    /// Return the underlying prefix length.
+    pub fn prefix(&self) -> u8 {
+        match self {
+            IpNet::V4(inner) => inner.prefix(),
+            IpNet::V6(inner) => inner.prefix(),
+        }
+    }
+
     /// Return the first address in this subnet
     pub fn first_address(&self) -> IpAddr {
         match self {
@@ -1528,8 +1462,8 @@ pub enum RouteTarget {
 /// destination of that traffic.
 ///
 /// When traffic is to be sent to a destination that is within a given
-/// `RouteDestination`, the corresponding [`RouterRoute`] applies, and traffic
-/// will be forward to the [`RouteTarget`] for that rule.
+/// `RouteDestination`, the corresponding `RouterRoute` applies, and traffic
+/// will be forward to the `RouteTarget` for that rule.
 #[derive(
     Clone,
     Debug,
@@ -1553,18 +1487,20 @@ pub enum RouteDestination {
     Subnet(Name),
 }
 
-/// The classification of a [`RouterRoute`] as defined by the system.
+/// The kind of a `RouterRoute`
+///
 /// The kind determines certain attributes such as if the route is modifiable
 /// and describes how or where the route was created.
-///
-/// See [RFD-21](https://rfd.shared.oxide.computer/rfd/0021#concept-router) for more context
+//
+// See [RFD-21](https://rfd.shared.oxide.computer/rfd/0021#concept-router) for more context
 #[derive(
     Clone, Copy, Debug, PartialEq, Deserialize, Serialize, Display, JsonSchema,
 )]
 #[display("{}")]
 #[serde(rename_all = "snake_case")]
 pub enum RouterRouteKind {
-    /// Determines the default destination of traffic, such as whether it goes to the internet or not.
+    /// Determines the default destination of traffic, such as whether it goes
+    /// to the internet or not.
     ///
     /// `Destination: An Internet Gateway`
     /// `Modifiable: true`
@@ -1579,22 +1515,22 @@ pub enum RouterRouteKind {
     /// `Destination: A different VPC`
     /// `Modifiable: false`
     VpcPeering,
-    /// Created by a user
-    /// See [`RouteTarget`]
+    /// Created by a user; see `RouteTarget`
     ///
     /// `Destination: User defined`
     /// `Modifiable: true`
     Custom,
 }
 
-///  A route defines a rule that governs where traffic should be sent based on its destination.
+/// A route defines a rule that governs where traffic should be sent based on
+/// its destination.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RouterRoute {
     /// common identifying metadata
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 
-    /// The VPC Router to which the route belongs.
+    /// The ID of the VPC Router to which the route belongs
     pub vpc_router_id: Uuid,
 
     /// Describes the kind of router. Set at creation. `read-only`
@@ -1723,7 +1659,7 @@ pub enum VpcFirewallRuleAction {
     Deny,
 }
 
-/// A `VpcFirewallRuleTarget` is used to specify the set of [`Instance`]s to
+/// A `VpcFirewallRuleTarget` is used to specify the set of `Instance`s to
 /// which a firewall rule applies.
 #[derive(
     Clone,
@@ -1910,9 +1846,94 @@ impl JsonSchema for L4PortRange {
 // NOTE: We're using the `macaddr` crate for the internal representation. But as with the `ipnet`,
 // this crate does not implement `JsonSchema`.
 #[derive(
-    Clone, Copy, Debug, DeserializeFromStr, PartialEq, SerializeDisplay,
+    Clone,
+    Copy,
+    Debug,
+    DeserializeFromStr,
+    PartialEq,
+    Eq,
+    SerializeDisplay,
+    Hash,
 )]
 pub struct MacAddr(pub macaddr::MacAddr6);
+
+impl MacAddr {
+    // Guest MAC addresses begin with the Oxide OUI A8:40:25. Further, guest
+    // address are constrained to be in the virtual address range
+    // A8:40:25:F_:__:__. Even further, the range F0:00:00 - FE:FF:FF is
+    // reserved for customer-visible addresses (FF:00:00-FF:FF:FF is for
+    // system MAC addresses). See RFD 174 for the discussion of the virtual
+    // range, and
+    // https://github.com/oxidecomputer/omicron/pull/955#discussion_r856432498
+    // for an initial discussion of the customer/system address range split.
+    // The system range is further split between FF:00:00-FF:7F:FF for
+    // fixed addresses (e.g., the OPTE virtual gateway MAC) and
+    // FF:80:00-FF:FF:FF for dynamically allocated addresses (e.g., service
+    // vNICs).
+    //
+    // F0:00:00 - FF:FF:FF    Oxide Virtual Address Range
+    //     F0:00:00 - FE:FF:FF    Guest Addresses
+    //     FF:00:00 - FF:FF:FF    System Addresses
+    //         FF:00:00 - FF:7F:FF    Reserved Addresses
+    //         FF:80:00 - FF:FF:FF    Runtime allocatable
+    pub const MIN_GUEST_ADDR: i64 = 0xA8_40_25_F0_00_00;
+    pub const MAX_GUEST_ADDR: i64 = 0xA8_40_25_FE_FF_FF;
+    pub const MIN_SYSTEM_ADDR: i64 = 0xA8_40_25_FF_00_00;
+    pub const MAX_SYSTEM_RESV: i64 = 0xA8_40_25_FF_7F_FF;
+    pub const MAX_SYSTEM_ADDR: i64 = 0xA8_40_25_FF_FF_FF;
+
+    /// Generate a random MAC address for a guest network interface
+    pub fn random_guest() -> Self {
+        let value =
+            thread_rng().gen_range(Self::MIN_GUEST_ADDR..=Self::MAX_GUEST_ADDR);
+        Self::from_i64(value)
+    }
+
+    /// Generate a random MAC address in the system address range
+    pub fn random_system() -> Self {
+        let value = thread_rng()
+            .gen_range((Self::MAX_SYSTEM_RESV + 1)..=Self::MAX_SYSTEM_ADDR);
+        Self::from_i64(value)
+    }
+
+    /// Iterate the MAC addresses in the system address range
+    /// (used as an allocator in contexts where collisions are not expected and
+    /// determinism is useful, like in the test suite)
+    pub fn iter_system() -> impl Iterator<Item = MacAddr> {
+        ((Self::MAX_SYSTEM_RESV + 1)..=Self::MAX_SYSTEM_ADDR)
+            .map(Self::from_i64)
+    }
+
+    /// Is this a MAC in the Guest Addresses range
+    pub fn is_guest(&self) -> bool {
+        let value = self.to_i64();
+        value >= Self::MIN_GUEST_ADDR && value <= Self::MAX_GUEST_ADDR
+    }
+
+    /// Is this a MAC in the System Addresses range
+    pub fn is_system(&self) -> bool {
+        let value = self.to_i64();
+        value >= Self::MIN_SYSTEM_ADDR && value <= Self::MAX_SYSTEM_ADDR
+    }
+
+    /// Construct a MAC address from its i64 big-endian byte representation.
+    // NOTE: This is the representation used in the database.
+    pub fn from_i64(value: i64) -> Self {
+        let bytes = value.to_be_bytes();
+        Self(macaddr::MacAddr6::new(
+            bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+        ))
+    }
+
+    /// Convert a MAC address to its i64 big-endian byte representation
+    // NOTE: This is the representation used in the database.
+    pub fn to_i64(self) -> i64 {
+        let bytes = self.0.as_bytes();
+        i64::from_be_bytes([
+            0, 0, bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5],
+        ])
+    }
+}
 
 impl From<macaddr::MacAddr6> for MacAddr {
     fn from(mac: macaddr::MacAddr6) -> Self {
@@ -2006,13 +2027,20 @@ impl Vni {
     /// Virtual Network Identifiers are constrained to be 24-bit values.
     pub const MAX_VNI: u32 = 0xFF_FFFF;
 
+    /// The VNI for the builtin services VPC.
+    pub const SERVICES_VNI: Self = Self(100);
+
     /// Oxide reserves a slice of initial VNIs for its own use.
     pub const MIN_GUEST_VNI: u32 = 1024;
 
     /// Create a new random VNI.
     pub fn random() -> Self {
-        use rand::Rng;
         Self(rand::thread_rng().gen_range(Self::MIN_GUEST_VNI..=Self::MAX_VNI))
+    }
+
+    /// Create a new random VNI in the Oxide-reserved space.
+    pub fn random_system() -> Self {
+        Self(rand::thread_rng().gen_range(0..Self::MIN_GUEST_VNI))
     }
 }
 
@@ -2124,6 +2152,456 @@ impl std::fmt::Display for Digest {
             }
         )
     }
+}
+
+/// An address lot and associated blocks resulting from creating an address lot.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct AddressLotCreateResponse {
+    /// The address lot that was created.
+    pub lot: AddressLot,
+
+    /// The address lot blocks that were created.
+    pub blocks: Vec<AddressLotBlock>,
+}
+
+/// Represents an address lot object, containing the id of the lot that can be
+/// used in other API calls.
+// TODO Add kind attribute to AddressLot
+// https://github.com/oxidecomputer/omicron/issues/3064
+#[derive(
+    ObjectIdentity, Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq,
+)]
+pub struct AddressLot {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    /// Desired use of `AddressLot`
+    pub kind: AddressLotKind,
+}
+
+/// The kind associated with an address lot.
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum AddressLotKind {
+    /// Infrastructure address lots are used for network infrastructure like
+    /// addresses assigned to rack switches.
+    Infra,
+
+    /// Pool address lots are used by IP pools.
+    Pool,
+}
+
+/// An address lot block is a part of an address lot and contains a range of
+/// addresses. The range is inclusive.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct AddressLotBlock {
+    /// The id of the address lot block.
+    pub id: Uuid,
+
+    /// The first address of the block (inclusive).
+    pub first_address: IpAddr,
+
+    /// The last address of the block (inclusive).
+    pub last_address: IpAddr,
+}
+
+/// A loopback address is an address that is assigned to a rack switch but is
+/// not associated with any particular port.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct LoopbackAddress {
+    /// The id of the loopback address.
+    pub id: Uuid,
+
+    /// The address lot block this address came from.
+    pub address_lot_block_id: Uuid,
+
+    /// The id of the rack where this loopback address is assigned.
+    pub rack_id: Uuid,
+
+    /// Switch location where this loopback address is assigned.
+    pub switch_location: String,
+
+    /// The loopback IP address and prefix length.
+    pub address: IpNet,
+}
+
+/// A switch port represents a physical external port on a rack switch.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct SwitchPort {
+    /// The id of the switch port.
+    pub id: Uuid,
+
+    /// The rack this switch port belongs to.
+    pub rack_id: Uuid,
+
+    /// The switch location of this switch port.
+    pub switch_location: String,
+
+    /// The name of this switch port.
+    // TODO: possibly re-export and use the dpd_client::types::PortId here
+    // https://github.com/oxidecomputer/omicron/issues/3059
+    pub port_name: String,
+
+    /// The primary settings group of this switch port. Will be `None` until
+    /// this switch port is configured.
+    pub port_settings_id: Option<Uuid>,
+}
+
+/// A switch port settings identity whose id may be used to view additional
+/// details.
+#[derive(
+    ObjectIdentity, Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq,
+)]
+pub struct SwitchPortSettings {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+}
+
+/// This structure contains all port settings information in one place. It's a
+/// convenience data structure for getting a complete view of a particular
+/// port's settings.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct SwitchPortSettingsView {
+    /// The primary switch port settings handle.
+    pub settings: SwitchPortSettings,
+
+    /// Switch port settings included from other switch port settings groups.
+    pub groups: Vec<SwitchPortSettingsGroups>,
+
+    /// Layer 1 physical port settings.
+    pub port: SwitchPortConfig,
+
+    /// Layer 2 link settings.
+    pub links: Vec<SwitchPortLinkConfig>,
+
+    /// Link-layer discovery protocol (LLDP) settings.
+    pub link_lldp: Vec<LldpServiceConfig>,
+
+    /// Layer 3 interface settings.
+    pub interfaces: Vec<SwitchInterfaceConfig>,
+
+    /// Vlan interface settings.
+    pub vlan_interfaces: Vec<SwitchVlanInterfaceConfig>,
+
+    /// IP route settings.
+    pub routes: Vec<SwitchPortRouteConfig>,
+
+    /// BGP peer settings.
+    pub bgp_peers: Vec<SwitchPortBgpPeerConfig>,
+
+    /// Layer 3 IP address settings.
+    pub addresses: Vec<SwitchPortAddressConfig>,
+}
+
+/// This structure maps a port settings object to a port settings groups. Port
+/// settings objects may inherit settings from groups. This mapping defines the
+/// relationship between settings objects and the groups they reference.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct SwitchPortSettingsGroups {
+    /// The id of a port settings object referencing a port settings group.
+    pub port_settings_id: Uuid,
+
+    /// The id of a port settings group being referenced by a port settings
+    /// object.
+    pub port_settings_group_id: Uuid,
+}
+
+/// A port settings group is a named object that references a port settings
+/// object.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct SwitchPortSettingsGroup {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    /// The port settings that comprise this group.
+    pub port_settings_id: Uuid,
+}
+
+/// The link geometry associated with a switch port.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum SwitchPortGeometry {
+    /// The port contains a single QSFP28 link with four lanes.
+    Qsfp28x1,
+
+    /// The port contains two QSFP28 links each with two lanes.
+    Qsfp28x2,
+
+    /// The port contains four SFP28 links each with one lane.
+    Sfp28x4,
+}
+
+/// A physical port configuration for a port settings object.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct SwitchPortConfig {
+    /// The id of the port settings object this configuration belongs to.
+    pub port_settings_id: Uuid,
+
+    /// The physical link geometry of the port.
+    pub geometry: SwitchPortGeometry,
+}
+
+/// A link configuration for a port settings object.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct SwitchPortLinkConfig {
+    /// The port settings this link configuration belongs to.
+    pub port_settings_id: Uuid,
+
+    /// The link-layer discovery protocol service configuration id for this
+    /// link.
+    pub lldp_service_config_id: Uuid,
+
+    /// The name of this link.
+    pub link_name: String,
+
+    /// The maximum transmission unit for this link.
+    pub mtu: u16,
+}
+
+/// A link layer discovery protocol (LLDP) service configuration.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct LldpServiceConfig {
+    /// The id of this LLDP service instance.
+    pub id: Uuid,
+
+    /// The link-layer discovery protocol configuration for this service.
+    pub lldp_config_id: Option<Uuid>,
+
+    /// Whether or not the LLDP service is enabled.
+    pub enabled: bool,
+}
+
+/// A link layer discovery protocol (LLDP) base configuration.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct LldpConfig {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    /// The LLDP chassis identifier TLV.
+    pub chassis_id: String,
+
+    /// THE LLDP system name TLV.
+    pub system_name: String,
+
+    /// THE LLDP system description TLV.
+    pub system_description: String,
+
+    /// THE LLDP management IP TLV.
+    pub management_ip: IpNet,
+}
+
+/// Describes the kind of an switch interface.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum SwitchInterfaceKind {
+    /// Primary interfaces are associated with physical links. There is exactly
+    /// one primary interface per physical link.
+    Primary,
+
+    /// VLAN interfaces allow physical interfaces to be multiplexed onto
+    /// multiple logical links, each distinguished by a 12-bit 802.1Q Ethernet
+    /// tag.
+    Vlan,
+
+    /// Loopback interfaces are anchors for IP addresses that are not specific
+    /// to any particular port.
+    Loopback,
+}
+
+/// A switch port interface configuration for a port settings object.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct SwitchInterfaceConfig {
+    /// The port settings object this switch interface configuration belongs to.
+    pub port_settings_id: Uuid,
+
+    /// A unique identifier for this switch interface.
+    pub id: Uuid,
+
+    /// The name of this switch interface.
+    // TODO: https://github.com/oxidecomputer/omicron/issues/3050
+    // Use `Name` instead of `String` for `interface_name` type
+    pub interface_name: String,
+
+    /// Whether or not IPv6 is enabled on this interface.
+    pub v6_enabled: bool,
+
+    /// The switch interface kind.
+    pub kind: SwitchInterfaceKind,
+}
+
+/// A switch port VLAN interface configuration for a port settings object.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct SwitchVlanInterfaceConfig {
+    /// The switch interface configuration this VLAN interface configuration
+    /// belongs to.
+    pub interface_config_id: Uuid,
+
+    /// The virtual network id for this interface that is used for producing and
+    /// consuming 802.1Q Ethernet tags. This field has a maximum value of 4095
+    /// as 802.1Q tags are twelve bits.
+    pub vlan_id: u16,
+}
+
+/// A route configuration for a port settings object.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct SwitchPortRouteConfig {
+    /// The port settings object this route configuration belongs to.
+    pub port_settings_id: Uuid,
+
+    /// The interface name this route configuration is assigned to.
+    // TODO: https://github.com/oxidecomputer/omicron/issues/3050
+    // Use `Name` instead of `String` for `interface_name` type
+    pub interface_name: String,
+
+    /// The route's destination network.
+    pub dst: IpNet,
+
+    /// The route's gateway address.
+    pub gw: IpNet,
+
+    /// The VLAN identifier for the route. Use this if the gateway is reachable
+    /// over an 802.1Q tagged L2 segment.
+    pub vlan_id: Option<u16>,
+}
+
+/// A BGP peer configuration for a port settings object.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct SwitchPortBgpPeerConfig {
+    /// The port settings object this BGP configuration belongs to.
+    pub port_settings_id: Uuid,
+
+    /// The id of the global BGP configuration referenced by this peer
+    /// configuration.
+    pub bgp_config_id: Uuid,
+
+    /// The interface name used to establish a peer session.
+    // TODO: https://github.com/oxidecomputer/omicron/issues/3050
+    // Use `Name` instead of `String` for `interface_name` type
+    pub interface_name: String,
+
+    /// The address of the peer.
+    pub addr: IpAddr,
+}
+
+/// A base BGP configuration.
+#[derive(
+    ObjectIdentity, Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq,
+)]
+pub struct BgpConfig {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    /// The autonomous system number of this BGP configuration.
+    pub asn: u32,
+
+    /// Optional virtual routing and forwarding identifier for this BGP
+    /// configuration.
+    pub vrf: Option<String>,
+}
+
+/// Represents a BGP announce set by id. The id can be used with other API calls
+/// to view and manage the announce set.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct BgpAnnounceSet {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+}
+
+/// A BGP announcement tied to an address lot block.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct BgpAnnouncement {
+    /// The id of the set this announcement is a part of.
+    pub announce_set_id: Uuid,
+
+    /// The address block the IP network being announced is drawn from.
+    pub address_lot_block_id: Uuid,
+
+    /// The IP network being announced.
+    pub network: IpNet,
+}
+
+/// An IP address configuration for a port settings object.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct SwitchPortAddressConfig {
+    /// The port settings object this address configuration belongs to.
+    pub port_settings_id: Uuid,
+
+    /// The id of the address lot block this address is drawn from.
+    pub address_lot_block_id: Uuid,
+
+    /// The IP address and prefix.
+    pub address: IpNet,
+
+    /// The interface name this address belongs to.
+    // TODO: https://github.com/oxidecomputer/omicron/issues/3050
+    // Use `Name` instead of `String` for `interface_name` type
+    pub interface_name: String,
+}
+
+/// The current state of a BGP peer.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum BgpPeerState {
+    /// Initial state. Refuse all incomming BGP connections. No resources
+    /// allocated to peer.
+    Idle,
+
+    /// Waiting for the TCP connection to be completed.
+    Connect,
+
+    /// Trying to acquire peer by listening for and accepting a TCP connection.
+    Active,
+
+    /// Waiting for open message from peer.
+    OpenSent,
+
+    /// Waiting for keepaliave or notification from peer.
+    OpenConfirm,
+
+    /// Synchronizing with peer.
+    SessionSetup,
+
+    /// Session established. Able to exchange update, notification and keepliave
+    /// messages with peers.
+    Established,
+}
+
+/// The current status of a BGP peer.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct BgpPeerStatus {
+    /// IP address of the peer.
+    pub addr: IpAddr,
+
+    /// Local autonomous system number.
+    pub local_asn: u32,
+
+    /// Remote autonomous system number.
+    pub remote_asn: u32,
+
+    /// State of the peer.
+    pub state: BgpPeerState,
+
+    /// Time of last state change.
+    pub state_duration_millis: u64,
+
+    /// Switch with the peer session.
+    pub switch: SwitchLocation,
+}
+
+/// A route imported from a BGP peer.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct BgpImportedRouteIpv4 {
+    /// The destination network prefix.
+    pub prefix: Ipv4Net,
+
+    /// The nexthop the prefix is reachable through.
+    pub nexthop: Ipv4Addr,
+
+    /// BGP identifier of the originating router.
+    pub id: u32,
+
+    /// Switch the route is imported into.
+    pub switch: SwitchLocation,
 }
 
 #[cfg(test)]
@@ -2607,6 +3085,13 @@ mod test {
     }
 
     #[test]
+    fn test_ipv4_net_operations() {
+        use super::{IpNet, Ipv4Net};
+        let x: IpNet = "0.0.0.0/0".parse().unwrap();
+        assert_eq!(x, IpNet::V4(Ipv4Net("0.0.0.0/0".parse().unwrap())))
+    }
+
+    #[test]
     fn test_route_target_parse() {
         let name: Name = "foo".parse().unwrap();
         let address = "192.168.0.10".parse().unwrap();
@@ -2736,6 +3221,9 @@ mod test {
 
     #[test]
     fn test_ipnet_serde() {
+        //TODO: none of this actually exercises
+        // schemars::schema::StringValidation bits and the schemars
+        // documentation is not forthcoming on how this might be accomplished.
         let net_str = "fd00:2::/32";
         let net = IpNet::from_str(net_str).unwrap();
         let ser = serde_json::to_string(&net).unwrap();
@@ -2744,7 +3232,23 @@ mod test {
         let net_des = serde_json::from_str::<IpNet>(&ser).unwrap();
         assert_eq!(net, net_des);
 
+        let net_str = "fd00:99::1/64";
+        let net = IpNet::from_str(net_str).unwrap();
+        let ser = serde_json::to_string(&net).unwrap();
+
+        assert_eq!(format!(r#""{}""#, net_str), ser);
+        let net_des = serde_json::from_str::<IpNet>(&ser).unwrap();
+        assert_eq!(net, net_des);
+
         let net_str = "192.168.1.1/16";
+        let net = IpNet::from_str(net_str).unwrap();
+        let ser = serde_json::to_string(&net).unwrap();
+
+        assert_eq!(format!(r#""{}""#, net_str), ser);
+        let net_des = serde_json::from_str::<IpNet>(&ser).unwrap();
+        assert_eq!(net, net_des);
+
+        let net_str = "0.0.0.0/0";
         let net = IpNet::from_str(net_str).unwrap();
         let ser = serde_json::to_string(&net).unwrap();
 
@@ -2818,5 +3322,28 @@ mod test {
         let _ = MacAddr::from_str("g:g:g:g:g:g").unwrap_err();
         // Too many characters
         let _ = MacAddr::from_str("fff:ff:ff:ff:ff:ff").unwrap_err();
+    }
+
+    #[test]
+    fn test_mac_system_iterator() {
+        use super::MacAddr;
+
+        let mut count = 0;
+        for m in MacAddr::iter_system() {
+            assert!(m.is_system());
+            assert!(m.to_i64() > MacAddr::MAX_SYSTEM_RESV);
+            count += 1;
+        }
+        assert_eq!(count, MacAddr::MAX_SYSTEM_ADDR - MacAddr::MAX_SYSTEM_RESV);
+    }
+
+    #[test]
+    fn test_mac_to_int_conversions() {
+        use super::MacAddr;
+        let original: i64 = 0xa8_40_25_ff_00_01;
+        let mac = MacAddr::from_i64(original);
+        assert_eq!(mac.0.as_bytes(), &[0xa8, 0x40, 0x25, 0xff, 0x00, 0x01]);
+        let conv = mac.to_i64();
+        assert_eq!(original, conv);
     }
 }

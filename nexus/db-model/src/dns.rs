@@ -10,6 +10,7 @@ use omicron_common::api::external::Error;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::HashMap;
+use std::net::Ipv4Addr;
 use std::{fmt, net::Ipv6Addr};
 use uuid::Uuid;
 
@@ -128,6 +129,7 @@ impl DnsName {
 #[allow(clippy::upper_case_acronyms)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum DnsRecord {
+    A(Ipv4Addr),
     AAAA(Ipv6Addr),
     SRV(SRV),
 }
@@ -135,6 +137,7 @@ pub enum DnsRecord {
 impl From<params::DnsRecord> for DnsRecord {
     fn from(value: params::DnsRecord) -> Self {
         match value {
+            params::DnsRecord::A(addr) => DnsRecord::A(addr),
             params::DnsRecord::Aaaa(addr) => DnsRecord::AAAA(addr),
             params::DnsRecord::Srv(srv) => DnsRecord::SRV(SRV::from(srv)),
         }
@@ -144,6 +147,7 @@ impl From<params::DnsRecord> for DnsRecord {
 impl From<DnsRecord> for params::DnsRecord {
     fn from(value: DnsRecord) -> Self {
         match value {
+            DnsRecord::A(addr) => params::DnsRecord::A(addr),
             DnsRecord::AAAA(addr) => params::DnsRecord::Aaaa(addr),
             DnsRecord::SRV(srv) => {
                 params::DnsRecord::Srv(params::Srv::from(srv))

@@ -9,15 +9,13 @@ set -o xtrace
 set -o errexit
 
 SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-ARG0="$(basename ${BASH_SOURCE[0]})"
+ARG0="$(basename "${BASH_SOURCE[0]}")"
 
 TARGET_DIR="out"
 # Location where intermediate artifacts are downloaded / unpacked.
 DOWNLOAD_DIR="$TARGET_DIR/downloads"
 # Location where the final console directory should end up.
 DEST_DIR="./$TARGET_DIR/console-assets"
-# Base URL
-URL_BASE="https://dl.oxide.computer/releases/console"
 
 source "$SOURCE_DIR/console_version"
 
@@ -45,7 +43,6 @@ function main
 	fi
 
 	mkdir -p "$DOWNLOAD_DIR"
-	mkdir -p "$DEST_DIR"
 
 	if [ "$DO_DOWNLOAD" == "true" ]; then
 	echo "Downloading..."
@@ -62,13 +59,17 @@ function main
 
 	fi
 
+	# clear out existing console assets
+	rm -rf "$DEST_DIR"
+	mkdir -p "$DEST_DIR"
+
 	# Unpack the tarball into a local directory
 	do_untar "$TARBALL_FILE" "$DEST_DIR"
 }
 
 function fail
 {
-	echo "$ARG0: $@" >&2
+	echo "$ARG0: $*" >&2
 	exit 1
 }
 

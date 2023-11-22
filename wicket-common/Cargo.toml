@@ -1,0 +1,16 @@
+[package]
+name = "wicket-common"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[dependencies]
+anyhow.workspace = true
+omicron-common.workspace = true
+gateway-client.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+update-engine.workspace = true
+omicron-workspace-hack.workspace = true

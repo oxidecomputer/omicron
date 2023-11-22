@@ -1,6 +1,6 @@
 # Example configuration file for running an oximeter collector server
 
-nexus_address = "127.0.0.1:12221"
+nexus_address = "[::1]:12221"
 
 [db]
 address = "[::1]:8123"

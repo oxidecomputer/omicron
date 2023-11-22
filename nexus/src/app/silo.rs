@@ -4,18 +4,21 @@
 
 //! Silos, Users, and SSH Keys.
 
-use crate::authz::ApiResource;
-use crate::db::identity::{Asset, Resource};
-use crate::db::lookup::LookupPath;
-use crate::db::model::Name;
-use crate::db::model::SshKey;
-use crate::db::{self, lookup};
 use crate::external_api::params;
 use crate::external_api::shared;
-use crate::{authn, authz};
 use anyhow::Context;
-use nexus_db_model::UserProvisionType;
+use nexus_db_model::{DnsGroup, UserProvisionType};
+use nexus_db_queries::authz::ApiResource;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::datastore::Discoverability;
+use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
+use nexus_db_queries::db::identity::{Asset, Resource};
+use nexus_db_queries::db::lookup::LookupPath;
+use nexus_db_queries::db::model::Name;
+use nexus_db_queries::db::model::SshKey;
+use nexus_db_queries::db::{self, lookup};
+use nexus_db_queries::{authn, authz};
+use nexus_types::internal_api::params::DnsRecord;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
@@ -26,6 +29,7 @@ use omicron_common::api::external::{DeleteResult, NameOrId};
 use omicron_common::api::external::{Error, InternalContext};
 use omicron_common::bail_unless;
 use ref_cast::RefCast;
+use std::net::IpAddr;
 use std::str::FromStr;
 use uuid::Uuid;
 
@@ -61,46 +65,121 @@ impl super::Nexus {
         }
     }
 
-    pub async fn silo_create(
+    pub(crate) async fn silo_fq_dns_names(
+        &self,
+        opctx: &OpContext,
+        silo_id: Uuid,
+    ) -> ListResultVec<String> {
+        let (_, silo) =
+            self.silo_lookup(opctx, silo_id.into())?.fetch().await?;
+        let silo_dns_name = silo_dns_name(&silo.name());
+        let external_dns_zones = self
+            .db_datastore
+            .dns_zones_list_all(opctx, nexus_db_model::DnsGroup::External)
+            .await?;
+
+        Ok(external_dns_zones
+            .into_iter()
+            .map(|zone| format!("{silo_dns_name}.{}", zone.zone_name))
+            .collect())
+    }
+
+    pub(crate) async fn silo_create(
         &self,
         opctx: &OpContext,
         new_silo_params: params::SiloCreate,
     ) -> CreateResult<db::model::Silo> {
-        // Silo group creation happens as Nexus's "external authn" context,
-        // not the user's context here.  The user may not have permission to
-        // create arbitrary groups in the Silo, but we allow them to create
-        // this one in this case.
-        let external_authn_opctx = self.opctx_external_authn();
-        self.datastore()
-            .silo_create(&opctx, &external_authn_opctx, new_silo_params)
-            .await
+        // Silo creation involves several operations that ordinary users cannot
+        // generally do, like reading and modifying the fleet-wide external DNS
+        // config.  Nexus assumes its own identity to do these operations in
+        // this (very specific) context.
+        let nexus_opctx = self.opctx_external_authn();
+        let datastore = self.datastore();
+
+        // Set up an external DNS name for this Silo's API and console
+        // endpoints (which are the same endpoint).
+        let (nexus_external_ips, nexus_external_dns_zones) =
+            datastore.nexus_external_addresses(nexus_opctx).await?;
+        let dns_records: Vec<DnsRecord> = nexus_external_ips
+            .into_iter()
+            .map(|addr| match addr {
+                IpAddr::V4(addr) => DnsRecord::A(addr),
+                IpAddr::V6(addr) => DnsRecord::Aaaa(addr),
+            })
+            .collect();
+
+        let silo_name = &new_silo_params.identity.name;
+        let mut dns_update = DnsVersionUpdateBuilder::new(
+            DnsGroup::External,
+            format!("create silo: {:?}", silo_name.as_str()),
+            self.id.to_string(),
+        );
+        let silo_dns_name = silo_dns_name(silo_name);
+        let new_silo_dns_names = nexus_external_dns_zones
+            .into_iter()
+            .map(|zone| format!("{silo_dns_name}.{}", zone.zone_name))
+            .collect::<Vec<_>>();
+
+        dns_update.add_name(silo_dns_name, dns_records)?;
+
+        let silo = datastore
+            .silo_create(
+                &opctx,
+                &nexus_opctx,
+                new_silo_params,
+                &new_silo_dns_names,
+                dns_update,
+            )
+            .await?;
+        self.background_tasks
+            .activate(&self.background_tasks.task_external_dns_config);
+        self.background_tasks
+            .activate(&self.background_tasks.task_external_endpoints);
+        Ok(silo)
     }
 
-    pub async fn silos_list(
+    pub(crate) async fn silos_list(
         &self,
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::Silo> {
-        self.db_datastore.silos_list(opctx, pagparams).await
+        self.db_datastore
+            .silos_list(opctx, pagparams, Discoverability::DiscoverableOnly)
+            .await
     }
 
-    pub async fn silo_delete(
+    pub(crate) async fn silo_delete(
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
     ) -> DeleteResult {
+        let dns_opctx = self.opctx_external_authn();
+        let datastore = self.datastore();
         let (.., authz_silo, db_silo) =
             silo_lookup.fetch_for(authz::Action::Delete).await?;
-        self.db_datastore.silo_delete(opctx, &authz_silo, &db_silo).await
+        let mut dns_update = DnsVersionUpdateBuilder::new(
+            DnsGroup::External,
+            format!("delete silo: {:?}", db_silo.name()),
+            self.id.to_string(),
+        );
+        dns_update.remove_name(silo_dns_name(&db_silo.name()))?;
+        datastore
+            .silo_delete(opctx, &authz_silo, &db_silo, dns_opctx, dns_update)
+            .await?;
+        self.background_tasks
+            .activate(&self.background_tasks.task_external_dns_config);
+        self.background_tasks
+            .activate(&self.background_tasks.task_external_endpoints);
+        Ok(())
     }
 
     // Role assignments
 
-    pub async fn silo_fetch_policy(
+    pub(crate) async fn silo_fetch_policy(
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
-    ) -> LookupResult<shared::Policy<authz::SiloRole>> {
+    ) -> LookupResult<shared::Policy<shared::SiloRole>> {
         let (.., authz_silo) =
             silo_lookup.lookup_for(authz::Action::ReadPolicy).await?;
         let role_assignments = self
@@ -114,12 +193,12 @@ impl super::Nexus {
         Ok(shared::Policy { role_assignments })
     }
 
-    pub async fn silo_update_policy(
+    pub(crate) async fn silo_update_policy(
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
-        policy: &shared::Policy<authz::SiloRole>,
-    ) -> UpdateResult<shared::Policy<authz::SiloRole>> {
+        policy: &shared::Policy<shared::SiloRole>,
+    ) -> UpdateResult<shared::Policy<shared::SiloRole>> {
         let (.., authz_silo) =
             silo_lookup.lookup_for(authz::Action::ModifyPolicy).await?;
 
@@ -164,7 +243,7 @@ impl super::Nexus {
     }
 
     /// List the users in a Silo
-    pub async fn silo_list_users(
+    pub(crate) async fn silo_list_users(
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
@@ -178,7 +257,7 @@ impl super::Nexus {
     }
 
     /// Fetch a user in a Silo
-    pub async fn silo_user_fetch(
+    pub(crate) async fn silo_user_fetch(
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
@@ -219,7 +298,7 @@ impl super::Nexus {
     }
 
     /// Create a user in a Silo's local identity provider
-    pub async fn local_idp_create_user(
+    pub(crate) async fn local_idp_create_user(
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
@@ -257,7 +336,7 @@ impl super::Nexus {
     }
 
     /// Delete a user in a Silo's local identity provider
-    pub async fn local_idp_delete_user(
+    pub(crate) async fn local_idp_delete_user(
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
@@ -384,7 +463,7 @@ impl super::Nexus {
     /// If `password` is `UserPassword::Password`, the password is set to the
     /// requested value.  Otherwise, any existing password is invalidated so
     /// that it cannot be used for authentication any more.
-    pub async fn local_idp_user_set_password(
+    pub(crate) async fn local_idp_user_set_password(
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
@@ -424,9 +503,9 @@ impl super::Nexus {
         password_value: params::UserPassword,
     ) -> UpdateResult<()> {
         let password_hash = match password_value {
-            params::UserPassword::InvalidPassword => None,
+            params::UserPassword::LoginDisallowed => None,
             params::UserPassword::Password(password) => {
-                let mut hasher = nexus_passwords::Hasher::default();
+                let mut hasher = omicron_passwords::Hasher::default();
                 let password_hash = hasher
                     .create_password(password.as_ref())
                     .map_err(|e| {
@@ -458,11 +537,11 @@ impl super::Nexus {
     /// callers are expected to invoke this function during authentication even
     /// if they've found no user to match the requested credentials.  That's why
     /// this function accepts `Option<SiloUser>` rather than just a `SiloUser`.
-    pub async fn silo_user_password_verify(
+    pub(crate) async fn silo_user_password_verify(
         &self,
         opctx: &OpContext,
         maybe_authz_silo_user: Option<&authz::SiloUser>,
-        password: &nexus_passwords::Password,
+        password: &omicron_passwords::Password,
     ) -> Result<bool, Error> {
         let maybe_hash = match maybe_authz_silo_user {
             None => None,
@@ -473,7 +552,7 @@ impl super::Nexus {
             }
         };
 
-        let mut hasher = nexus_passwords::Hasher::default();
+        let mut hasher = omicron_passwords::Hasher::default();
         match maybe_hash {
             None => {
                 // If the user or their password hash does not exist, create a
@@ -496,7 +575,7 @@ impl super::Nexus {
 
     /// Given a silo name and username/password credentials, verify the
     /// credentials and return the corresponding SiloUser.
-    pub async fn login_local(
+    pub(crate) async fn login_local(
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
@@ -595,7 +674,7 @@ impl super::Nexus {
         }
     }
 
-    pub async fn ssh_key_create(
+    pub(crate) async fn ssh_key_create(
         &self,
         opctx: &OpContext,
         silo_user_id: Uuid,
@@ -610,7 +689,7 @@ impl super::Nexus {
         self.db_datastore.ssh_key_create(opctx, &authz_user, ssh_key).await
     }
 
-    pub async fn ssh_keys_list(
+    pub(crate) async fn ssh_keys_list(
         &self,
         opctx: &OpContext,
         silo_user_id: Uuid,
@@ -624,7 +703,7 @@ impl super::Nexus {
         self.db_datastore.ssh_keys_list(opctx, &authz_user, page_params).await
     }
 
-    pub async fn ssh_key_delete(
+    pub(crate) async fn ssh_key_delete(
         &self,
         opctx: &OpContext,
         silo_user_id: Uuid,
@@ -670,7 +749,7 @@ impl super::Nexus {
         }
     }
 
-    pub async fn identity_provider_list(
+    pub(crate) async fn identity_provider_list(
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
@@ -686,7 +765,7 @@ impl super::Nexus {
 
     // Silo authn identity providers
 
-    pub async fn saml_identity_provider_create(
+    pub(crate) async fn saml_identity_provider_create(
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
@@ -733,6 +812,7 @@ impl super::Nexus {
                 let client = reqwest::ClientBuilder::new()
                     .connect_timeout(dur)
                     .timeout(dur)
+                    .dns_resolver(self.external_resolver.clone())
                     .build()
                     .map_err(|e| {
                         Error::internal_error(&format!(
@@ -780,6 +860,59 @@ impl super::Nexus {
             }
         };
 
+        // Once the IDP metadata document is available, parse it into an
+        // EntityDescriptor
+        use samael::metadata::EntityDescriptor;
+        let idp_metadata: EntityDescriptor =
+            idp_metadata_document_string.parse().map_err(|e| {
+                Error::invalid_request(&format!(
+                    "idp_metadata_document_string could not be parsed as an EntityDescriptor! {}",
+                    e
+                ))
+            })?;
+
+        // Check for at least one signing key - do not accept IDPs that have
+        // none!
+        let mut found_signing_key = false;
+
+        if let Some(idp_sso_descriptors) = idp_metadata.idp_sso_descriptors {
+            for idp_sso_descriptor in &idp_sso_descriptors {
+                for key_descriptor in &idp_sso_descriptor.key_descriptors {
+                    // Key use is an optional attribute. If it's present, check
+                    // if it's "signing". If it's not present, the contained key
+                    // information could be used for either signing or
+                    // encryption.
+                    let is_signing_key =
+                        if let Some(key_use) = &key_descriptor.key_use {
+                            key_use == "signing"
+                        } else {
+                            true
+                        };
+
+                    if is_signing_key {
+                        if let Some(x509_data) =
+                            &key_descriptor.key_info.x509_data
+                        {
+                            if !x509_data.certificates.is_empty() {
+                                found_signing_key = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            return Err(Error::invalid_request(
+                "no md:IDPSSODescriptor section",
+            ));
+        }
+
+        if !found_signing_key {
+            return Err(Error::invalid_request(
+                "no signing key found in IDP metadata",
+            ));
+        }
+
         let provider = db::model::SamlIdentityProvider {
             identity: db::model::SamlIdentityProviderIdentity::new(
                 Uuid::new_v4(),
@@ -825,4 +958,17 @@ impl super::Nexus {
     ) -> db::lookup::SiloGroup<'a> {
         LookupPath::new(opctx, &self.db_datastore).silo_group_id(*group_id)
     }
+}
+
+/// Returns the (relative) DNS name for this Silo's API and console endpoints
+/// _within_ the external DNS zone (i.e., without that zone's suffix)
+///
+/// This specific naming scheme is determined under RFD 357.
+pub(crate) fn silo_dns_name(
+    name: &omicron_common::api::external::Name,
+) -> String {
+    // RFD 4 constrains resource names (including Silo names) to DNS-safe
+    // strings, which is why it's safe to directly put the name of the
+    // resource into the DNS name rather than doing any kind of escaping.
+    format!("{}.sys", name)
 }

@@ -3,16 +3,24 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Traits used to describe metric data and its sources.
+
 // Copyright 2021 Oxide Computer Company
 
 use crate::histogram::Histogram;
 use crate::types;
 use crate::types::{Measurement, Sample};
-use crate::{DatumType, Field, FieldType, FieldValue, MetricsError};
+use crate::DatumType;
+use crate::Field;
+use crate::FieldType;
+use crate::FieldValue;
+use crate::MetricsError;
 use bytes::Bytes;
-use chrono::{DateTime, Utc};
-use num_traits::{One, Zero};
-use std::ops::{Add, AddAssign};
+use chrono::DateTime;
+use chrono::Utc;
+use num::traits::One;
+use num::traits::Zero;
+use std::ops::Add;
+use std::ops::AddAssign;
 
 /// The `Target` trait identifies a source of metric data by a sequence of fields.
 ///
@@ -77,7 +85,7 @@ pub trait Target {
     fn fields(&self) -> Vec<Field> {
         self.field_names()
             .iter()
-            .zip(self.field_values().into_iter())
+            .zip(self.field_values())
             .map(|(name, value)| Field { name: name.to_string(), value })
             .collect()
     }
@@ -153,7 +161,7 @@ pub trait Metric {
     fn fields(&self) -> Vec<Field> {
         self.field_names()
             .iter()
-            .zip(self.field_values().into_iter())
+            .zip(self.field_values())
             .map(|(name, value)| Field { name: name.to_string(), value })
             .collect()
     }
@@ -199,85 +207,87 @@ pub trait Datum: Clone {
     fn datum_type(&self) -> DatumType;
 }
 
-impl Datum for bool {
-    fn datum_type(&self) -> DatumType {
-        DatumType::Bool
-    }
+macro_rules! impl_datum {
+    ($type:ty, $variant:path) => {
+        impl Datum for $type {
+            fn datum_type(&self) -> DatumType {
+                $variant
+            }
+        }
+    };
 }
 
-impl Datum for i64 {
-    fn datum_type(&self) -> DatumType {
-        DatumType::I64
-    }
+macro_rules! impl_datum_with_start_time {
+    ($type:ty, $variant:path) => {
+        impl Datum for $type {
+            fn start_time(&self) -> Option<DateTime<Utc>> {
+                Some(types::Cumulative::start_time(&self))
+            }
+
+            fn datum_type(&self) -> DatumType {
+                $variant
+            }
+        }
+    };
 }
 
-impl Datum for f64 {
-    fn datum_type(&self) -> DatumType {
-        DatumType::F64
-    }
+macro_rules! impl_datum_for_histogram {
+    ($type:ty, $variant:path) => {
+        impl Datum for $type {
+            fn start_time(&self) -> Option<DateTime<Utc>> {
+                Some(Histogram::start_time(&self))
+            }
+
+            fn datum_type(&self) -> DatumType {
+                $variant
+            }
+        }
+    };
 }
 
-impl Datum for String {
-    fn datum_type(&self) -> DatumType {
-        DatumType::String
-    }
-}
+impl_datum! { bool, DatumType::Bool }
+impl_datum! { i8, DatumType::I8 }
+impl_datum! { u8, DatumType::U8 }
+impl_datum! { i16, DatumType::I16 }
+impl_datum! { u16, DatumType::U16 }
+impl_datum! { i32, DatumType::I32 }
+impl_datum! { u32, DatumType::U32 }
+impl_datum! { i64, DatumType::I64 }
+impl_datum! { u64, DatumType::U64 }
+impl_datum! { f32, DatumType::F32 }
+impl_datum! { f64, DatumType::F64 }
+impl_datum! { String, DatumType::String }
+impl_datum! { Bytes, DatumType::Bytes }
 
-impl Datum for Bytes {
-    fn datum_type(&self) -> DatumType {
-        DatumType::Bytes
-    }
-}
+impl_datum_with_start_time! { types::Cumulative<i64>, DatumType::CumulativeI64 }
+impl_datum_with_start_time! { types::Cumulative<u64>, DatumType::CumulativeU64 }
+impl_datum_with_start_time! { types::Cumulative<f32>, DatumType::CumulativeF32 }
+impl_datum_with_start_time! { types::Cumulative<f64>, DatumType::CumulativeF64 }
 
-impl Datum for types::Cumulative<i64> {
-    fn start_time(&self) -> Option<DateTime<Utc>> {
-        Some(types::Cumulative::start_time(&self))
-    }
-    fn datum_type(&self) -> DatumType {
-        DatumType::CumulativeI64
-    }
-}
-
-impl Datum for types::Cumulative<f64> {
-    fn start_time(&self) -> Option<DateTime<Utc>> {
-        Some(types::Cumulative::start_time(&self))
-    }
-    fn datum_type(&self) -> DatumType {
-        DatumType::CumulativeF64
-    }
-}
-
-impl Datum for Histogram<i64> {
-    fn start_time(&self) -> Option<DateTime<Utc>> {
-        Some(self.start_time())
-    }
-    fn datum_type(&self) -> DatumType {
-        DatumType::HistogramI64
-    }
-}
-
-impl Datum for Histogram<f64> {
-    fn start_time(&self) -> Option<DateTime<Utc>> {
-        Some(self.start_time())
-    }
-    fn datum_type(&self) -> DatumType {
-        DatumType::HistogramF64
-    }
-}
+impl_datum_for_histogram! { Histogram<i64>, DatumType::HistogramI64 }
+impl_datum_for_histogram! { Histogram<u64>, DatumType::HistogramU64 }
+impl_datum_for_histogram! { Histogram<f32>, DatumType::HistogramF32 }
+impl_datum_for_histogram! { Histogram<f64>, DatumType::HistogramF64 }
 
 /// A trait identifying types used in [`types::Cumulative`] data.
 pub trait Cumulative: Datum + Add + AddAssign + Copy + One + Zero {}
 
 impl Cumulative for i64 {}
+impl Cumulative for u64 {}
+impl Cumulative for f32 {}
 impl Cumulative for f64 {}
 
 /// A trait identifying types used as gauges
 pub trait Gauge: Datum {}
 
-impl Gauge for String {}
-impl Gauge for bool {}
-impl Gauge for i64 {}
-impl Gauge for f64 {}
+macro_rules! impl_gauge {
+    ($($type:ty,)+) => {
+        $(
+            impl Gauge for $type {}
+        )+
+    };
+}
+impl_gauge! { bool, i8, u8, i16, u16, i32, u32, i64, u64, f32, f64, String, Bytes, }
 
 pub use crate::histogram::HistogramSupport;
 
@@ -344,7 +354,7 @@ pub use crate::histogram::HistogramSupport;
 ///
 /// impl Producer for RequestCounter {
 ///     fn produce(&mut self) -> Result<Box<dyn Iterator<Item = Sample>>, MetricsError> {
-///         let sample = Sample::new(&self.target, &self.metric);
+///         let sample = Sample::new(&self.target, &self.metric).unwrap();
 ///         Ok(Box::new(vec![sample].into_iter()))
 ///     }
 /// }
@@ -401,8 +411,8 @@ mod tests {
 
     #[derive(Debug, Clone, Target)]
     struct Targ {
-        pub good: bool,
-        pub id: i64,
+        pub happy: bool,
+        pub tid: i64,
     }
 
     #[derive(Debug, Clone, Metric)]
@@ -424,7 +434,7 @@ mod tests {
         ) -> Result<Box<dyn Iterator<Item = types::Sample>>, MetricsError>
         {
             Ok(Box::new(
-                vec![types::Sample::new(&self.target, &self.metric)]
+                vec![types::Sample::new(&self.target, &self.metric)?]
                     .into_iter(),
             ))
         }
@@ -432,10 +442,10 @@ mod tests {
 
     #[test]
     fn test_target_trait() {
-        let t = Targ { good: false, id: 2 };
+        let t = Targ { happy: false, tid: 2 };
 
         assert_eq!(t.name(), "targ");
-        assert_eq!(t.field_names(), &["good", "id"]);
+        assert_eq!(t.field_names(), &["happy", "tid"]);
         assert_eq!(t.field_types(), &[FieldType::Bool, FieldType::I64]);
         assert_eq!(
             t.field_values(),
@@ -459,7 +469,7 @@ mod tests {
 
     #[test]
     fn test_producer_trait() {
-        let t = Targ { good: false, id: 2 };
+        let t = Targ { happy: false, tid: 2 };
         let m = Met { good: false, id: 2, datum: 0 };
         let mut p = Prod { target: t.clone(), metric: m.clone() };
         let sample = p.produce().unwrap().next().unwrap();

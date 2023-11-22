@@ -2,21 +2,26 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Params define the request bodies of API endpoints for creating or updating resources.
+//! Params define the request bodies of API endpoints for creating or updating
+//! resources.
 
 use crate::external_api::shared;
 use base64::Engine;
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::{
-    ByteCount, IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
-    InstanceCpuCount, Ipv4Net, Ipv6Net, Name, NameOrId, RouteDestination,
-    RouteTarget, SemverVersion,
+    AddressLotKind, ByteCount, IdentityMetadataCreateParams,
+    IdentityMetadataUpdateParams, InstanceCpuCount, IpNet, Ipv4Net, Ipv6Net,
+    Name, NameOrId, PaginationOrder, RouteDestination, RouteTarget,
+    SemverVersion,
 };
 use schemars::JsonSchema;
 use serde::{
     de::{self, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
 };
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
+use std::collections::HashMap;
 use std::{net::IpAddr, str::FromStr};
 use uuid::Uuid;
 
@@ -27,6 +32,17 @@ macro_rules! path_param {
             #[doc = "Name or ID of the "]
             #[doc = $name]
             pub $param: NameOrId,
+        }
+    };
+}
+
+macro_rules! id_path_param {
+    ($struct:ident, $param:ident, $name:tt) => {
+        #[derive(Serialize, Deserialize, JsonSchema)]
+        pub struct $struct {
+            #[doc = "ID of the "]
+            #[doc = $name]
+            pub $param: Uuid,
         }
     };
 }
@@ -45,15 +61,23 @@ path_param!(SiloPath, silo, "silo");
 path_param!(ProviderPath, provider, "SAML identity provider");
 path_param!(IpPoolPath, pool, "IP pool");
 path_param!(SshKeyPath, ssh_key, "SSH key");
+path_param!(AddressLotPath, address_lot, "address lot");
 
-// Only by ID because groups have an `external_id` instead of a name and
-// therefore don't implement `ObjectIdentity`, which makes lookup by name
-// inconvenient. We should figure this out more generally, as there are several
-// resources like this.
-#[derive(Deserialize, JsonSchema)]
-pub struct GroupPath {
-    /// ID of the group
-    pub group: Uuid,
+id_path_param!(GroupPath, group_id, "group");
+
+// TODO: The hardware resources should be represented by its UUID or a hardware
+// ID that can be used to deterministically generate the UUID.
+id_path_param!(SledPath, sled_id, "sled");
+id_path_param!(SwitchPath, switch_id, "switch");
+
+pub struct SledSelector {
+    /// ID of the sled
+    pub sled: Uuid,
+}
+
+pub struct SwitchSelector {
+    /// ID of the switch
+    pub switch: Uuid,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
@@ -66,6 +90,12 @@ impl From<Name> for SiloSelector {
     fn from(name: Name) -> Self {
         SiloSelector { silo: name.into() }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct OptionalSiloSelector {
+    /// Name or ID of the silo
+    pub silo: Option<NameOrId>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
@@ -113,51 +143,6 @@ pub struct SnapshotSelector {
     pub project: Option<NameOrId>,
     /// Name or ID of the snapshot
     pub snapshot: NameOrId,
-}
-
-/// A specialized selector for image list, it contains an extra field to indicate
-/// if silo scoped images should be included when listing project images.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
-pub struct ImageListSelector {
-    /// Name or ID of the project
-    pub project: Option<NameOrId>,
-    /// Flag used to indicate if silo scoped images should be included when
-    /// listing project images. Only valid when `project` is provided.
-    #[serde(default)]
-    #[serde(deserialize_with = "deserialize_optional_bool_from_string")]
-    pub include_silo_images: Option<bool>,
-}
-
-// Unfortunately `include_silo_images` can't used the default `Deserialize`
-// derive given the selector that uses it is embedded via `serde(flatten)` which
-// causes it to attempt to deserialize all flattened values a string. Similar workarounds
-// have been implemented here: https://github.com/oxidecomputer/omicron/blob/efb03b501d7febe961cc8793b4d72e8542d28eab/gateway/src/http_entrypoints.rs#L443
-fn deserialize_optional_bool_from_string<'de, D>(
-    deserializer: D,
-) -> Result<Option<bool>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    use serde::de::Unexpected;
-
-    #[derive(Debug, Deserialize)]
-    #[serde(untagged)]
-    enum StringOrOptionalBool {
-        String(String),
-        OptionalBool(Option<bool>),
-    }
-
-    match StringOrOptionalBool::deserialize(deserializer)? {
-        StringOrOptionalBool::String(s) => match s.as_str() {
-            "true" => Ok(Some(true)),
-            "false" => Ok(None),
-            "" => Ok(None),
-            _ => {
-                Err(de::Error::invalid_type(Unexpected::Str(&s), &"a boolean"))
-            }
-        },
-        StringOrOptionalBool::OptionalBool(b) => Ok(b),
-    }
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -254,7 +239,7 @@ pub struct RouteSelector {
 
 // Silos
 
-/// Create-time parameters for a [`Silo`](crate::external_api::views::Silo)
+/// Create-time parameters for a `Silo`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SiloCreate {
     #[serde(flatten)]
@@ -270,16 +255,28 @@ pub struct SiloCreate {
     ///
     /// Note that if configuring a SAML based identity provider,
     /// group_attribute_name must be set for users to be considered part of a
-    /// group. See [`SamlIdentityProviderCreate`] for more information.
+    /// group. See `SamlIdentityProviderCreate` for more information.
     pub admin_group_name: Option<String>,
+
+    /// Initial TLS certificates to be used for the new Silo's console and API
+    /// endpoints.  These should be valid for the Silo's DNS name(s).
+    pub tls_certificates: Vec<CertificateCreate>,
+
+    /// Mapping of which Fleet roles are conferred by each Silo role
+    ///
+    /// The default is that no Fleet roles are conferred by any Silo roles
+    /// unless there's a corresponding entry in this map.
+    #[serde(default)]
+    pub mapped_fleet_roles:
+        BTreeMap<shared::SiloRole, BTreeSet<shared::FleetRole>>,
 }
 
-/// Create-time parameters for a [`User`](crate::external_api::views::User)
+/// Create-time parameters for a `User`
 #[derive(Clone, Deserialize, Serialize, JsonSchema)]
 pub struct UserCreate {
     /// username used to log in
     pub external_id: UserId,
-    /// password used to log in
+    /// how to set the user's login password
     pub password: UserPassword,
 }
 
@@ -329,11 +326,11 @@ impl JsonSchema for UserId {
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(try_from = "String")]
 #[serde(into = "String")]
-// We store both the raw String and nexus_passwords::Password forms of the
-// password.  That's because `nexus_passwords::Password` does not support
+// We store both the raw String and omicron_passwords::Password forms of the
+// password.  That's because `omicron_passwords::Password` does not support
 // getting the String back out (by design), but we may need to do that in order
 // to impl Serialize.  See the `From<Password> for String` impl below.
-pub struct Password(String, nexus_passwords::Password);
+pub struct Password(String, omicron_passwords::Password);
 
 impl FromStr for Password {
     type Err = String;
@@ -346,7 +343,7 @@ impl FromStr for Password {
 impl TryFrom<String> for Password {
     type Error = String;
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        let inner = nexus_passwords::Password::new(&value)
+        let inner = omicron_passwords::Password::new(&value)
             .map_err(|e| format!("unsupported password: {:#}", e))?;
         // TODO-security If we want to apply password policy rules, this seems
         // like the place.  We presumably want to also document them in the
@@ -388,7 +385,7 @@ impl JsonSchema for Password {
             instance_type: Some(schemars::schema::InstanceType::String.into()),
             string: Some(Box::new(schemars::schema::StringValidation {
                 max_length: Some(
-                    u32::try_from(nexus_passwords::MAX_PASSWORD_LENGTH)
+                    u32::try_from(omicron_passwords::MAX_PASSWORD_LENGTH)
                         .unwrap(),
                 ),
                 min_length: None,
@@ -400,8 +397,8 @@ impl JsonSchema for Password {
     }
 }
 
-impl AsRef<nexus_passwords::Password> for Password {
-    fn as_ref(&self) -> &nexus_passwords::Password {
+impl AsRef<omicron_passwords::Password> for Password {
+    fn as_ref(&self) -> &omicron_passwords::Password {
         &self.1
     }
 }
@@ -409,12 +406,12 @@ impl AsRef<nexus_passwords::Password> for Password {
 /// Parameters for setting a user's password
 #[derive(Clone, Deserialize, JsonSchema, Serialize)]
 #[serde(rename_all = "snake_case")]
-#[serde(tag = "user_password_value", content = "details")]
+#[serde(tag = "mode", content = "value")]
 pub enum UserPassword {
     /// Sets the user's password to the provided value
     Password(Password),
     /// Invalidates any current password (disabling password authentication)
-    InvalidPassword,
+    LoginDisallowed,
 }
 
 /// Credentials for local user login
@@ -571,6 +568,7 @@ pub struct SamlIdentityProviderCreate {
     pub technical_contact_email: String,
 
     /// request signing key pair
+    #[serde(default)]
     #[serde(deserialize_with = "validate_key_pair")]
     pub signing_keypair: Option<DerEncodedKeyPair>,
 
@@ -645,14 +643,14 @@ where
 
 // PROJECTS
 
-/// Create-time parameters for a [`Project`](crate::external_api::views::Project)
+/// Create-time parameters for a `Project`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ProjectCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
 }
 
-/// Updateable properties of a [`Project`](crate::external_api::views::Project)
+/// Updateable properties of a `Project`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ProjectUpdate {
     #[serde(flatten)]
@@ -661,8 +659,7 @@ pub struct ProjectUpdate {
 
 // NETWORK INTERFACES
 
-/// Create-time parameters for an
-/// [`InstanceNetworkInterface`](omicron_common::api::external::InstanceNetworkInterface).
+/// Create-time parameters for an `InstanceNetworkInterface`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceNetworkInterfaceCreate {
     #[serde(flatten)]
@@ -675,8 +672,7 @@ pub struct InstanceNetworkInterfaceCreate {
     pub ip: Option<IpAddr>,
 }
 
-/// Parameters for updating an
-/// [`InstanceNetworkInterface`](omicron_common::api::external::InstanceNetworkInterface).
+/// Parameters for updating an `InstanceNetworkInterface`
 ///
 /// Note that modifying IP addresses for an interface is not yet supported, a
 /// new interface must be created instead.
@@ -704,17 +700,16 @@ pub struct InstanceNetworkInterfaceUpdate {
 
 // CERTIFICATES
 
-/// Create-time parameters for a
-/// [`Certificate`](crate::external_api::views::Certificate)
+/// Create-time parameters for a `Certificate`
 #[derive(Clone, Deserialize, Serialize, JsonSchema)]
 pub struct CertificateCreate {
     /// common identifying metadata
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
-    /// PEM file containing public certificate chain
-    pub cert: Vec<u8>,
-    /// PEM file containing private key
-    pub key: Vec<u8>,
+    /// PEM-formatted string containing public certificate chain
+    pub cert: String,
+    /// PEM-formatted string containing private key
+    pub key: String,
     /// The service using this certificate
     pub service: shared::ServiceUsingCertificate,
 }
@@ -731,13 +726,22 @@ impl std::fmt::Debug for CertificateCreate {
 
 // IP POOLS
 
-/// Create-time parameters for an IP Pool.
-///
-/// See [`IpPool`](crate::external_api::views::IpPool)
+/// Create-time parameters for an `IpPool`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct IpPoolCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
+
+    /// If an IP pool is associated with a silo, instance IP allocations in that
+    /// silo can draw from that pool.
+    pub silo: Option<NameOrId>,
+
+    /// Whether the IP pool is considered a default pool for its scope (fleet
+    /// or silo). If a pool is marked default and is associated with a silo,
+    /// instances created in that silo will draw IPs from that pool unless
+    /// another pool is specified at instance create time.
+    #[serde(default)]
+    pub is_default: bool,
 }
 
 /// Parameters for updating an IP Pool
@@ -748,8 +752,6 @@ pub struct IpPoolUpdate {
 }
 
 // INSTANCES
-
-pub const MIN_MEMORY_SIZE_BYTES: u32 = 1 << 30; // 1 GiB
 
 /// Describes an attachment of an `InstanceNetworkInterface` to an `Instance`,
 /// at the time the instance is created.
@@ -819,7 +821,7 @@ pub enum ExternalIpCreate {
     // TODO: Add floating IPs: https://github.com/oxidecomputer/omicron/issues/1334
 }
 
-/// Create-time parameters for an [`Instance`](omicron_common::api::external::Instance)
+/// Create-time parameters for an `Instance`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceCreate {
     #[serde(flatten)]
@@ -933,7 +935,7 @@ impl JsonSchema for UserData {
     }
 }
 
-/// Migration parameters for an [`Instance`](omicron_common::api::external::Instance)
+/// Migration parameters for an `Instance`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceMigrate {
     pub dst_sled_id: Uuid,
@@ -955,9 +957,17 @@ pub struct InstanceSerialConsoleRequest {
     /// Maximum number of bytes of buffered serial console contents to return. If the requested
     /// range runs to the end of the available buffer, the data returned will be shorter than
     /// `max_bytes`.
-    /// This parameter is only useful for the non-streaming GET request for serial console data,
-    /// and *ignored* by the streaming websocket endpoint.
     pub max_bytes: Option<u64>,
+}
+
+/// Forwarded to a propolis server to request the contents of an Instance's serial console.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct InstanceSerialConsoleStreamRequest {
+    /// Name or ID of the project, only required if `instance` is provided as a `Name`
+    pub project: Option<NameOrId>,
+    /// Character index in the serial buffer from which to read, counting *backward* from the most
+    /// recently buffered data retrieved from the instance.
+    pub most_recent: Option<u64>,
 }
 
 /// Contents of an Instance's serial console buffer.
@@ -973,23 +983,23 @@ pub struct InstanceSerialConsoleData {
 
 // VPCS
 
-/// Create-time parameters for a [`Vpc`](crate::external_api::views::Vpc)
+/// Create-time parameters for a `Vpc`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
 
-    /// The IPv6 prefix for this VPC.
+    /// The IPv6 prefix for this VPC
     ///
     /// All IPv6 subnets created from this VPC must be taken from this range,
-    /// which sould be a Unique Local Address in the range `fd00::/48`. The
+    /// which should be a Unique Local Address in the range `fd00::/48`. The
     /// default VPC Subnet will have the first `/64` range from this prefix.
     pub ipv6_prefix: Option<Ipv6Net>,
 
     pub dns_name: Name,
 }
 
-/// Updateable properties of a [`Vpc`](crate::external_api::views::Vpc)
+/// Updateable properties of a `Vpc`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcUpdate {
     #[serde(flatten)]
@@ -997,7 +1007,7 @@ pub struct VpcUpdate {
     pub dns_name: Option<Name>,
 }
 
-/// Create-time parameters for a [`VpcSubnet`](crate::external_api::views::VpcSubnet)
+/// Create-time parameters for a `VpcSubnet`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcSubnetCreate {
     #[serde(flatten)]
@@ -1018,7 +1028,7 @@ pub struct VpcSubnetCreate {
     pub ipv6_block: Option<Ipv6Net>,
 }
 
-/// Updateable properties of a [`VpcSubnet`](crate::external_api::views::VpcSubnet)
+/// Updateable properties of a `VpcSubnet`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcSubnetUpdate {
     #[serde(flatten)]
@@ -1027,14 +1037,14 @@ pub struct VpcSubnetUpdate {
 
 // VPC ROUTERS
 
-/// Create-time parameters for a [`VpcRouter`](crate::external_api::views::VpcRouter)
+/// Create-time parameters for a `VpcRouter`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcRouterCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
 }
 
-/// Updateable properties of a [`VpcRouter`](crate::external_api::views::VpcRouter)
+/// Updateable properties of a `VpcRouter`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcRouterUpdate {
     #[serde(flatten)]
@@ -1043,7 +1053,7 @@ pub struct VpcRouterUpdate {
 
 // VPC ROUTER ROUTES
 
-/// Create-time parameters for a [`omicron_common::api::external::RouterRoute`]
+/// Create-time parameters for a `RouterRoute`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RouterRouteCreate {
     #[serde(flatten)]
@@ -1052,7 +1062,7 @@ pub struct RouterRouteCreate {
     pub destination: RouteDestination,
 }
 
-/// Updateable properties of a [`omicron_common::api::external::RouterRoute`]
+/// Updateable properties of a `RouterRoute`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RouterRouteUpdate {
     #[serde(flatten)]
@@ -1062,8 +1072,6 @@ pub struct RouterRouteUpdate {
 }
 
 // DISKS
-
-pub const MIN_DISK_SIZE_BYTES: u32 = 1 << 30; // 1 GiB
 
 #[derive(Copy, Clone, Debug, Deserialize, Serialize)]
 #[serde(try_from = "u32")] // invoke the try_from validation routine below
@@ -1117,6 +1125,16 @@ impl JsonSchema for BlockSize {
     }
 }
 
+/// Describes the form factor of physical disks.
+#[derive(
+    Debug, Serialize, Deserialize, JsonSchema, Clone, Copy, PartialEq, Eq,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum PhysicalDiskKind {
+    M2,
+    U2,
+}
+
 /// Different sources for a disk
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -1128,16 +1146,14 @@ pub enum DiskSource {
     },
     /// Create a disk from a disk snapshot
     Snapshot { snapshot_id: Uuid },
-    /// Create a disk from a project image
+    /// Create a disk from an image
     Image { image_id: Uuid },
-    /// Create a disk from a global image
-    GlobalImage { image_id: Uuid },
     /// Create a blank disk that will accept bulk writes or pull blocks from an
     /// external source.
     ImportingBlocks { block_size: BlockSize },
 }
 
-/// Create-time parameters for a [`Disk`](omicron_common::api::external::Disk)
+/// Create-time parameters for a `Disk`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct DiskCreate {
     /// common identifying metadata
@@ -1183,6 +1199,436 @@ pub struct FinalizeDisk {
     pub snapshot_name: Option<Name>,
 }
 
+/// Select an address lot by an optional name or id.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct AddressLotSelector {
+    /// Name or id of the address lot to select
+    pub address_lot: NameOrId,
+}
+
+/// Parameters for creating an address lot.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct AddressLotCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+    /// The kind of address lot to create.
+    pub kind: AddressLotKind,
+    /// The blocks to add along with the new address lot.
+    pub blocks: Vec<AddressLotBlockCreate>,
+}
+
+/// Parameters for creating an address lot block. Fist and last addresses are
+/// inclusive.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct AddressLotBlockCreate {
+    /// The first address in the lot (inclusive).
+    pub first_address: IpAddr,
+    /// The last address in the lot (inclusive).
+    pub last_address: IpAddr,
+}
+
+/// Parameters for creating a loopback address on a particular rack switch.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct LoopbackAddressCreate {
+    /// The name or id of the address lot this loopback address will pull an
+    /// address from.
+    pub address_lot: NameOrId,
+
+    /// The containing the switch this loopback address will be configured on.
+    pub rack_id: Uuid,
+
+    // TODO: #3604 Consider using `SwitchLocation` type instead of `Name` for `LoopbackAddressCreate.switch_location`
+    /// The location of the switch within the rack this loopback address will be
+    /// configured on.
+    pub switch_location: Name,
+
+    /// The address to create.
+    pub address: IpAddr,
+
+    /// The subnet mask to use for the address.
+    pub mask: u8,
+
+    /// Address is an anycast address.
+    /// This allows the address to be assigned to multiple locations simultaneously.
+    pub anycast: bool,
+}
+
+/// Parameters for creating a port settings group.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SwtichPortSettingsGroupCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+    /// Switch port settings to associate with the settings group being created.
+    pub settings: SwitchPortSettingsCreate,
+}
+
+/// Parameters for creating switch port settings. Switch port settings are the
+/// central data structure for setting up external networking. Switch port
+/// settings include link, interface, route, address and dynamic network
+/// protocol configuration.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SwitchPortSettingsCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+    pub port_config: SwitchPortConfig,
+    pub groups: Vec<NameOrId>,
+    /// Links indexed by phy name. On ports that are not broken out, this is
+    /// always phy0. On a 2x breakout the options are phy0 and phy1, on 4x
+    /// phy0-phy3, etc.
+    pub links: HashMap<String, LinkConfig>,
+    /// Interfaces indexed by link name.
+    pub interfaces: HashMap<String, SwitchInterfaceConfig>,
+    /// Routes indexed by interface name.
+    pub routes: HashMap<String, RouteConfig>,
+    /// BGP peers indexed by interface name.
+    pub bgp_peers: HashMap<String, BgpPeerConfig>,
+    /// Addresses indexed by interface name.
+    pub addresses: HashMap<String, AddressConfig>,
+}
+
+impl SwitchPortSettingsCreate {
+    pub fn new(identity: IdentityMetadataCreateParams) -> Self {
+        Self {
+            identity,
+            port_config: SwitchPortConfig {
+                geometry: SwitchPortGeometry::Qsfp28x1,
+            },
+            groups: Vec::new(),
+            links: HashMap::new(),
+            interfaces: HashMap::new(),
+            routes: HashMap::new(),
+            bgp_peers: HashMap::new(),
+            addresses: HashMap::new(),
+        }
+    }
+}
+
+/// Physical switch port configuration.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct SwitchPortConfig {
+    /// Link geometry for the switch port.
+    pub geometry: SwitchPortGeometry,
+}
+
+/// The link geometry associated with a switch port.
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SwitchPortGeometry {
+    /// The port contains a single QSFP28 link with four lanes.
+    Qsfp28x1,
+
+    /// The port contains two QSFP28 links each with two lanes.
+    Qsfp28x2,
+
+    /// The port contains four SFP28 links each with one lane.
+    Sfp28x4,
+}
+
+/// The forward error correction mode of a link.
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LinkFec {
+    /// Firecode foward error correction.
+    Firecode,
+    /// No forward error correction.
+    None,
+    /// Reed-Solomon forward error correction.
+    Rs,
+}
+
+/// The speed of a link.
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LinkSpeed {
+    /// Zero gigabits per second.
+    Speed0G,
+    /// 1 gigabit per second.
+    Speed1G,
+    /// 10 gigabits per second.
+    Speed10G,
+    /// 25 gigabits per second.
+    Speed25G,
+    /// 40 gigabits per second.
+    Speed40G,
+    /// 50 gigabits per second.
+    Speed50G,
+    /// 100 gigabits per second.
+    Speed100G,
+    /// 200 gigabits per second.
+    Speed200G,
+    /// 400 gigabits per second.
+    Speed400G,
+}
+
+/// Switch link configuration.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct LinkConfig {
+    /// Maximum transmission unit for the link.
+    pub mtu: u16,
+
+    /// The link-layer discovery protocol (LLDP) configuration for the link.
+    pub lldp: LldpServiceConfig,
+
+    /// The forward error correction mode of the link.
+    pub fec: LinkFec,
+
+    /// The speed of the link.
+    pub speed: LinkSpeed,
+}
+
+/// The LLDP configuration associated with a port. LLDP may be either enabled or
+/// disabled, if enabled, an LLDP configuration must be provided by name or id.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct LldpServiceConfig {
+    /// Whether or not LLDP is enabled.
+    pub enabled: bool,
+
+    /// A reference to the LLDP configuration used. Must not be `None` when
+    /// `enabled` is `true`.
+    pub lldp_config: Option<NameOrId>,
+}
+
+/// A layer-3 switch interface configuration. When IPv6 is enabled, a link local
+/// address will be created for the interface.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SwitchInterfaceConfig {
+    /// Whether or not IPv6 is enabled.
+    pub v6_enabled: bool,
+
+    /// What kind of switch interface this configuration represents.
+    pub kind: SwitchInterfaceKind,
+}
+
+/// Indicates the kind for a switch interface.
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SwitchInterfaceKind {
+    /// Primary interfaces are associated with physical links. There is exactly
+    /// one primary interface per physical link.
+    Primary,
+
+    /// VLAN interfaces allow physical interfaces to be multiplexed onto
+    /// multiple logical links, each distinguished by a 12-bit 802.1Q Ethernet
+    /// tag.
+    Vlan(SwitchVlanInterface),
+
+    /// Loopback interfaces are anchors for IP addresses that are not specific
+    /// to any particular port.
+    Loopback,
+}
+
+/// Configuration data associated with a switch VLAN interface. The VID
+/// indicates a VLAN identifier. Must be between 1 and 4096.
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SwitchVlanInterface {
+    /// The virtual network id (VID) that distinguishes this interface and is
+    /// used for producing and consuming 802.1Q Ethernet tags. This field has a
+    /// maximum value of 4095 as 802.1Q tags are twelve bits.
+    pub vid: u16,
+}
+
+/// Route configuration data associated with a switch port configuration.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RouteConfig {
+    /// The set of routes assigned to a switch port.
+    pub routes: Vec<Route>,
+}
+
+/// A route to a destination network through a gateway address.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct Route {
+    /// The route destination.
+    pub dst: IpNet,
+
+    /// The route gateway.
+    pub gw: IpAddr,
+
+    /// VLAN id the gateway is reachable over.
+    pub vid: Option<u16>,
+}
+
+/// Select a BGP config by a name or id.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct BgpConfigSelector {
+    /// A name or id to use when selecting BGP config.
+    pub name_or_id: NameOrId,
+}
+
+/// List BGP configs with an optional name or id.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct BgpConfigListSelector {
+    /// A name or id to use when selecting BGP config.
+    pub name_or_id: Option<NameOrId>,
+}
+
+/// A BGP peer configuration for an interface. Includes the set of announcements
+/// that will be advertised to the peer identified by `addr`. The `bgp_config`
+/// parameter is a reference to global BGP parameters. The `interface_name`
+/// indicates what interface the peer should be contacted on.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct BgpPeerConfig {
+    /// The set of announcements advertised by the peer.
+    pub bgp_announce_set: NameOrId,
+
+    /// The global BGP configuration used for establishing a session with this
+    /// peer.
+    pub bgp_config: NameOrId,
+
+    /// The name of interface to peer on. This is relative to the port
+    /// configuration this BGP peer configuration is a part of. For example this
+    /// value could be phy0 to refer to a primary physical interface. Or it
+    /// could be vlan47 to refer to a VLAN interface.
+    pub interface_name: String,
+
+    /// The address of the host to peer with.
+    pub addr: IpAddr,
+
+    /// How long to hold peer connections between keppalives (seconds).
+    pub hold_time: u32,
+
+    /// How long to hold a peer in idle before attempting a new session
+    /// (seconds).
+    pub idle_hold_time: u32,
+
+    /// How long to delay sending an open request after establishing a TCP
+    /// session (seconds).
+    pub delay_open: u32,
+
+    /// How long to to wait between TCP connection retries (seconds).
+    pub connect_retry: u32,
+
+    /// How often to send keepalive requests (seconds).
+    pub keepalive: u32,
+}
+
+/// Parameters for creating a named set of BGP announcements.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct BgpAnnounceSetCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+
+    /// The announcements in this set.
+    pub announcement: Vec<BgpAnnouncementCreate>,
+}
+
+/// Select a BGP announce set by a name or id.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct BgpAnnounceSetSelector {
+    /// A name or id to use when selecting BGP port settings
+    pub name_or_id: NameOrId,
+}
+
+/// List BGP announce set with an optional name or id.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct BgpAnnounceListSelector {
+    /// A name or id to use when selecting BGP config.
+    pub name_or_id: Option<NameOrId>,
+}
+
+/// Selector used for querying imported BGP routes.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct BgpRouteSelector {
+    /// The ASN to filter on. Required.
+    pub asn: u32,
+}
+
+/// A BGP announcement tied to a particular address lot block.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct BgpAnnouncementCreate {
+    /// Address lot this announcement is drawn from.
+    pub address_lot_block: NameOrId,
+
+    /// The network being announced.
+    pub network: IpNet,
+}
+
+/// Parameters for creating a BGP configuration. This includes and autonomous
+/// system number (ASN) and a virtual routing and forwarding (VRF) identifier.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct BgpConfigCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+
+    /// The autonomous system number of this BGP configuration.
+    pub asn: u32,
+
+    pub bgp_announce_set_id: NameOrId,
+
+    /// Optional virtual routing and forwarding identifier for this BGP
+    /// configuration.
+    pub vrf: Option<Name>,
+}
+
+/// Select a BGP status information by BGP config id.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct BgpStatusSelector {
+    /// A name or id of the BGP configuration to get status for
+    pub name_or_id: NameOrId,
+}
+
+/// A set of addresses associated with a port configuration.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct AddressConfig {
+    /// The set of addresses assigned to the port configuration.
+    pub addresses: Vec<Address>,
+}
+
+/// An address tied to an address lot.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct Address {
+    /// The address lot this address is drawn from.
+    pub address_lot: NameOrId,
+
+    /// The address and prefix length of this address.
+    pub address: IpNet,
+}
+
+/// Select a port settings object by an optional name or id.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct SwitchPortSettingsSelector {
+    /// An optional name or id to use when selecting port settings.
+    pub port_settings: Option<NameOrId>,
+}
+
+/// Select a port settings info object by name or id.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct SwitchPortSettingsInfoSelector {
+    /// A name or id to use when selecting switch port settings info objects.
+    pub port: NameOrId,
+}
+
+/// Select a switch port by name.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct SwitchPortPathSelector {
+    /// A name to use when selecting switch ports.
+    pub port: Name,
+}
+
+/// Select switch ports by rack id and location.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct SwitchPortSelector {
+    /// A rack id to use when selecting switch ports.
+    pub rack_id: Uuid,
+
+    /// A switch location to use when selecting switch ports.
+    pub switch_location: Name,
+}
+
+/// Select switch port interfaces by id.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct SwitchPortPageSelector {
+    /// An optional switch port id to use when listing switch ports.
+    pub switch_port_id: Option<Uuid>,
+}
+
+/// Parameters for applying settings to switch ports.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct SwitchPortApplySettings {
+    /// A name or id to use when applying switch port settings.
+    pub port_settings: NameOrId,
+}
+
 // IMAGES
 
 /// The source of the underlying image.
@@ -1191,6 +1637,9 @@ pub struct FinalizeDisk {
 pub enum ImageSource {
     Url {
         url: String,
+
+        /// The block size in bytes
+        block_size: BlockSize,
     },
     Snapshot {
         id: Uuid,
@@ -1210,26 +1659,7 @@ pub struct Distribution {
     pub version: String,
 }
 
-/// Create-time parameters for an
-/// [`GlobalImage`](crate::external_api::views::GlobalImage)
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct GlobalImageCreate {
-    /// common identifying metadata
-    #[serde(flatten)]
-    pub identity: IdentityMetadataCreateParams,
-
-    /// OS image distribution
-    pub distribution: Distribution,
-
-    /// block size in bytes
-    pub block_size: BlockSize,
-
-    /// The source of the image's contents.
-    pub source: ImageSource,
-}
-
-/// Create-time parameters for an
-/// [`Image`](crate::external_api::views::Image)
+/// Create-time parameters for an `Image`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ImageCreate {
     /// common identifying metadata
@@ -1242,24 +1672,21 @@ pub struct ImageCreate {
     /// The version of the operating system (e.g. 18.04, 20.04, etc.)
     pub version: String,
 
-    /// block size in bytes
-    pub block_size: BlockSize,
-
     /// The source of the image's contents.
     pub source: ImageSource,
 }
 
 // SNAPSHOTS
 
-/// Create-time parameters for a [`Snapshot`](crate::external_api::views::Snapshot)
+/// Create-time parameters for a `Snapshot`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SnapshotCreate {
     /// common identifying metadata
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
 
-    /// The name of the disk to be snapshotted
-    pub disk: Name,
+    /// The disk to be snapshotted
+    pub disk: NameOrId,
 }
 
 // USERS AND GROUPS
@@ -1275,7 +1702,7 @@ pub struct OptionalGroupSelector {
 // for creating them internally as we use for types that can be created in the
 // external API.
 
-/// Create-time parameters for a [`UserBuiltin`](crate::external_api::views::UserBuiltin)
+/// Create-time parameters for a `UserBuiltin`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct UserBuiltinCreate {
     #[serde(flatten)]
@@ -1293,7 +1720,7 @@ pub struct UserBuiltinSelector {
 // and so have an implicit silo user ID which must be passed seperately
 // to the creation routine. Note that this disagrees with RFD 44.
 
-/// Create-time parameters for an [`SshKey`](crate::external_api::views::SshKey)
+/// Create-time parameters for an `SshKey`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SshKeyCreate {
     #[serde(flatten)]
@@ -1312,6 +1739,8 @@ pub struct ResourceMetrics {
     pub start_time: DateTime<Utc>,
     /// An exclusive end time of metrics.
     pub end_time: DateTime<Utc>,
+    /// Query result order
+    pub order: Option<PaginationOrder>,
 }
 
 // SYSTEM UPDATE

@@ -4,13 +4,13 @@
 
 //! Built-ins and roles
 
-use crate::authz;
-use crate::db;
-use crate::db::lookup::{self, LookupPath};
-use crate::db::model::Name;
 use crate::external_api::shared;
 use anyhow::Context;
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
+use nexus_db_queries::db::lookup::{self, LookupPath};
+use nexus_db_queries::db::model::Name;
 use nexus_types::external_api::params;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -25,10 +25,10 @@ use uuid::Uuid;
 impl super::Nexus {
     // Global (fleet-wide) policy
 
-    pub async fn fleet_fetch_policy(
+    pub(crate) async fn fleet_fetch_policy(
         &self,
         opctx: &OpContext,
-    ) -> LookupResult<shared::Policy<authz::FleetRole>> {
+    ) -> LookupResult<shared::Policy<shared::FleetRole>> {
         let role_assignments = self
             .db_datastore
             .role_assignment_fetch_visible(opctx, &authz::FLEET)
@@ -40,11 +40,11 @@ impl super::Nexus {
         Ok(shared::Policy { role_assignments })
     }
 
-    pub async fn fleet_update_policy(
+    pub(crate) async fn fleet_update_policy(
         &self,
         opctx: &OpContext,
-        policy: &shared::Policy<authz::FleetRole>,
-    ) -> UpdateResult<shared::Policy<authz::FleetRole>> {
+        policy: &shared::Policy<shared::FleetRole>,
+    ) -> UpdateResult<shared::Policy<shared::FleetRole>> {
         let role_assignments = self
             .db_datastore
             .role_assignment_replace_visible(
@@ -62,7 +62,7 @@ impl super::Nexus {
     // Silo users
 
     /// List users in the current Silo
-    pub async fn silo_users_list_current(
+    pub(crate) async fn silo_users_list_current(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
@@ -79,7 +79,7 @@ impl super::Nexus {
     }
 
     /// List users in the current Silo, filtered by group ID
-    pub async fn current_silo_group_users_list(
+    pub(crate) async fn current_silo_group_users_list(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
@@ -108,7 +108,7 @@ impl super::Nexus {
     }
 
     /// Fetch the currently-authenticated Silo user
-    pub async fn silo_user_fetch_self(
+    pub(crate) async fn silo_user_fetch_self(
         &self,
         opctx: &OpContext,
     ) -> LookupResult<db::model::SiloUser> {
@@ -123,21 +123,7 @@ impl super::Nexus {
         Ok(db_silo_user)
     }
 
-    /// Fetch the currently-authenticated Silo user's Silo
-    pub async fn silo_user_fetch_silo(
-        &self,
-        opctx: &OpContext,
-    ) -> LookupResult<db::model::Silo> {
-        let authz_silo = opctx
-            .authn
-            .silo_required()
-            .internal_context("loading current user's silo")?;
-        let silo_id = authz_silo.id().into();
-        let (.., db_silo) = self.silo_lookup(&opctx, silo_id)?.fetch().await?;
-        Ok(db_silo)
-    }
-
-    pub async fn silo_user_fetch_groups_for_self(
+    pub(crate) async fn silo_user_fetch_groups_for_self(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
@@ -147,7 +133,7 @@ impl super::Nexus {
 
     // Silo groups
 
-    pub async fn silo_groups_list(
+    pub(crate) async fn silo_groups_list(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
@@ -163,7 +149,7 @@ impl super::Nexus {
 
     // Built-in users
 
-    pub async fn users_builtin_list(
+    pub(crate) async fn users_builtin_list(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Name>,
@@ -190,7 +176,7 @@ impl super::Nexus {
 
     // Built-in roles
 
-    pub async fn roles_builtin_list(
+    pub(crate) async fn roles_builtin_list(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, (String, String)>,
@@ -198,7 +184,7 @@ impl super::Nexus {
         self.db_datastore.roles_builtin_list_by_name(opctx, pagparams).await
     }
 
-    pub async fn role_builtin_fetch(
+    pub(crate) async fn role_builtin_fetch(
         &self,
         opctx: &OpContext,
         name: &str,

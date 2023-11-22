@@ -10,7 +10,7 @@
 //! 3) inserts the child resource row
 
 use super::pool::DbConnection;
-use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionError, PoolError};
+use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::associations::HasTable;
 use diesel::helper_types::*;
 use diesel::pg::Pg;
@@ -18,6 +18,7 @@ use diesel::prelude::*;
 use diesel::query_builder::*;
 use diesel::query_dsl::methods as query_methods;
 use diesel::query_source::Table;
+use diesel::result::Error as DieselError;
 use diesel::sql_types::SingleValue;
 use nexus_db_model::DatastoreCollectionConfig;
 use std::fmt::Debug;
@@ -170,7 +171,7 @@ pub enum AsyncInsertError {
     /// The collection that the query was inserting into does not exist
     CollectionNotFound,
     /// Other database error
-    DatabaseError(PoolError),
+    DatabaseError(DieselError),
 }
 
 impl<ResourceType, ISR, C> InsertIntoCollectionStatement<ResourceType, ISR, C>
@@ -188,20 +189,17 @@ where
     /// - Ok(new row)
     /// - Error(collection not found)
     /// - Error(other diesel error)
-    pub async fn insert_and_get_result_async<ConnErr>(
+    pub async fn insert_and_get_result_async(
         self,
-        conn: &(impl async_bb8_diesel::AsyncConnection<DbConnection, ConnErr>
-              + Sync),
+        conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> AsyncInsertIntoCollectionResult<ResourceType>
     where
         // We require this bound to ensure that "Self" is runnable as query.
         Self: query_methods::LoadQuery<'static, DbConnection, ResourceType>,
-        ConnErr: From<diesel::result::Error> + Send + 'static,
-        PoolError: From<ConnErr>,
     {
         self.get_result_async::<ResourceType>(conn)
             .await
-            .map_err(|e| Self::translate_async_error(PoolError::from(e)))
+            .map_err(|e| Self::translate_async_error(e))
     }
 
     /// Issues the CTE asynchronously and parses the result.
@@ -210,20 +208,17 @@ where
     /// - Ok(Vec of new rows)
     /// - Error(collection not found)
     /// - Error(other diesel error)
-    pub async fn insert_and_get_results_async<ConnErr>(
+    pub async fn insert_and_get_results_async(
         self,
-        conn: &(impl async_bb8_diesel::AsyncConnection<DbConnection, ConnErr>
-              + Sync),
+        conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> AsyncInsertIntoCollectionResult<Vec<ResourceType>>
     where
         // We require this bound to ensure that "Self" is runnable as query.
         Self: query_methods::LoadQuery<'static, DbConnection, ResourceType>,
-        ConnErr: From<diesel::result::Error> + Send + 'static,
-        PoolError: From<ConnErr>,
     {
         self.get_results_async::<ResourceType>(conn)
             .await
-            .map_err(|e| Self::translate_async_error(PoolError::from(e)))
+            .map_err(|e| Self::translate_async_error(e))
     }
 
     /// Check for the intentional division by zero error
@@ -244,14 +239,11 @@ where
 
     /// Translate from diesel errors into AsyncInsertError, handling the
     /// intentional division-by-zero error in the CTE.
-    fn translate_async_error(err: PoolError) -> AsyncInsertError {
-        match err {
-            PoolError::Connection(ConnectionError::Query(err))
-                if Self::error_is_division_by_zero(&err) =>
-            {
-                AsyncInsertError::CollectionNotFound
-            }
-            other => AsyncInsertError::DatabaseError(other),
+    fn translate_async_error(err: DieselError) -> AsyncInsertError {
+        if Self::error_is_division_by_zero(&err) {
+            AsyncInsertError::CollectionNotFound
+        } else {
+            AsyncInsertError::DatabaseError(err)
         }
     }
 }
@@ -393,8 +385,10 @@ where
 mod test {
     use super::*;
     use crate::db::{self, identity::Resource as IdentityResource};
-    use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
-    use chrono::{DateTime, NaiveDateTime, Utc};
+    use async_bb8_diesel::{
+        AsyncRunQueryDsl, AsyncSimpleConnection, ConnectionManager,
+    };
+    use chrono::{NaiveDateTime, TimeZone, Utc};
     use db_macros::Resource;
     use diesel::expression_methods::ExpressionMethods;
     use diesel::pg::Pg;
@@ -426,7 +420,9 @@ mod test {
         }
     }
 
-    async fn setup_db(pool: &crate::db::Pool) {
+    async fn setup_db(
+        pool: &crate::db::Pool,
+    ) -> bb8::PooledConnection<ConnectionManager<DbConnection>> {
         let connection = pool.pool().get().await.unwrap();
         (*connection)
             .batch_execute_async(
@@ -452,6 +448,7 @@ mod test {
             )
             .await
             .unwrap();
+        connection
     }
 
     /// Describes an organization within the database.
@@ -480,13 +477,11 @@ mod test {
         let resource_id =
             uuid::Uuid::parse_str("223cb7f7-0d3a-4a4e-a5e1-ad38ecb785d8")
                 .unwrap();
-        let create_time = DateTime::<Utc>::from_utc(
-            NaiveDateTime::from_timestamp_opt(0, 0).unwrap(),
-            Utc,
+        let create_time = Utc.from_utc_datetime(
+            &NaiveDateTime::from_timestamp_opt(0, 0).unwrap(),
         );
-        let modify_time = DateTime::<Utc>::from_utc(
-            NaiveDateTime::from_timestamp_opt(1, 0).unwrap(),
-            Utc,
+        let modify_time = Utc.from_utc_datetime(
+            &NaiveDateTime::from_timestamp_opt(1, 0).unwrap(),
         );
         let insert = Collection::insert_resource(
             collection_id,
@@ -548,9 +543,9 @@ mod test {
         let logctx = dev::test_setup_log("test_collection_not_present");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&cfg);
+        let pool = db::Pool::new(&logctx.log, &cfg);
 
-        setup_db(&pool).await;
+        let conn = setup_db(&pool).await;
 
         let collection_id = uuid::Uuid::new_v4();
         let resource_id = uuid::Uuid::new_v4();
@@ -565,7 +560,7 @@ mod test {
                 resource::dsl::collection_id.eq(collection_id),
             )),
         )
-        .insert_and_get_result_async(pool.pool())
+        .insert_and_get_result_async(&conn)
         .await;
         assert!(matches!(insert, Err(AsyncInsertError::CollectionNotFound)));
 
@@ -578,9 +573,9 @@ mod test {
         let logctx = dev::test_setup_log("test_collection_present");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&cfg);
+        let pool = db::Pool::new(&logctx.log, &cfg);
 
-        setup_db(&pool).await;
+        let conn = setup_db(&pool).await;
 
         let collection_id = uuid::Uuid::new_v4();
         let resource_id = uuid::Uuid::new_v4();
@@ -595,17 +590,15 @@ mod test {
                 collection::dsl::time_modified.eq(Utc::now()),
                 collection::dsl::rcgen.eq(1),
             )])
-            .execute_async(pool.pool())
+            .execute_async(&*conn)
             .await
             .unwrap();
 
-        let create_time = DateTime::<Utc>::from_utc(
-            NaiveDateTime::from_timestamp_opt(0, 0).unwrap(),
-            Utc,
+        let create_time = Utc.from_utc_datetime(
+            &NaiveDateTime::from_timestamp_opt(0, 0).unwrap(),
         );
-        let modify_time = DateTime::<Utc>::from_utc(
-            NaiveDateTime::from_timestamp_opt(1, 0).unwrap(),
-            Utc,
+        let modify_time = Utc.from_utc_datetime(
+            &NaiveDateTime::from_timestamp_opt(1, 0).unwrap(),
         );
         let resource = Collection::insert_resource(
             collection_id,
@@ -618,7 +611,7 @@ mod test {
                 resource::dsl::collection_id.eq(collection_id),
             )]),
         )
-        .insert_and_get_result_async(pool.pool())
+        .insert_and_get_result_async(&conn)
         .await
         .unwrap();
         assert_eq!(resource.id(), resource_id);
@@ -631,7 +624,7 @@ mod test {
         let collection_rcgen = collection::table
             .find(collection_id)
             .select(collection::dsl::rcgen)
-            .first_async::<i64>(pool.pool())
+            .first_async::<i64>(&*conn)
             .await
             .unwrap();
 

@@ -11,7 +11,7 @@ use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::cte_utils::BoxedQuery;
-use crate::db::error::public_error_from_diesel_pool;
+use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
 use crate::db::model::IncompleteNetworkInterface;
@@ -23,11 +23,13 @@ use crate::db::model::NetworkInterfaceKind;
 use crate::db::model::NetworkInterfaceUpdate;
 use crate::db::model::VpcSubnet;
 use crate::db::pagination::paginated;
+use crate::db::pool::DbConnection;
 use crate::db::queries::network_interface;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use diesel::result::Error as DieselError;
 use omicron_common::api::external;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::DeleteResult;
@@ -66,14 +68,10 @@ impl From<NicInfo> for sled_client_types::NetworkInterface {
         };
         let kind = match nic.kind {
             NetworkInterfaceKind::Instance => {
-                sled_client_types::NetworkInterfaceKind::Instance {
-                    id: nic.parent_id,
-                }
+                sled_client_types::NetworkInterfaceKind::Instance(nic.parent_id)
             }
             NetworkInterfaceKind::Service => {
-                sled_client_types::NetworkInterfaceKind::Service {
-                    id: nic.parent_id,
-                }
+                sled_client_types::NetworkInterfaceKind::Service(nic.parent_id)
             }
         };
         sled_client_types::NetworkInterface {
@@ -115,7 +113,6 @@ impl DataStore {
         opctx: &OpContext,
         interface: IncompleteNetworkInterface,
     ) -> Result<InstanceNetworkInterface, network_interface::InsertError> {
-        use db::schema::network_interface::dsl;
         if interface.kind != NetworkInterfaceKind::Instance {
             return Err(network_interface::InsertError::External(
                 Error::invalid_request(
@@ -123,21 +120,62 @@ impl DataStore {
                 ),
             ));
         }
+        self.create_network_interface_raw(opctx, interface)
+            .await
+            // Convert to `InstanceNetworkInterface` before returning; we know
+            // this is valid as we've checked the condition on-entry.
+            .map(NetworkInterface::as_instance)
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn service_create_network_interface_raw(
+        &self,
+        opctx: &OpContext,
+        interface: IncompleteNetworkInterface,
+    ) -> Result<
+        db::model::ServiceNetworkInterface,
+        network_interface::InsertError,
+    > {
+        if interface.kind != NetworkInterfaceKind::Service {
+            return Err(network_interface::InsertError::External(
+                Error::invalid_request(
+                    "expected service type network interface",
+                ),
+            ));
+        }
+        self.create_network_interface_raw(opctx, interface)
+            .await
+            // Convert to `ServiceNetworkInterface` before returning; we know
+            // this is valid as we've checked the condition on-entry.
+            .map(NetworkInterface::as_service)
+    }
+
+    async fn create_network_interface_raw(
+        &self,
+        opctx: &OpContext,
+        interface: IncompleteNetworkInterface,
+    ) -> Result<NetworkInterface, network_interface::InsertError> {
+        let conn = self
+            .pool_connection_authorized(opctx)
+            .await
+            .map_err(network_interface::InsertError::External)?;
+        self.create_network_interface_raw_conn(&conn, interface).await
+    }
+
+    pub(crate) async fn create_network_interface_raw_conn(
+        &self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        interface: IncompleteNetworkInterface,
+    ) -> Result<NetworkInterface, network_interface::InsertError> {
+        use db::schema::network_interface::dsl;
         let subnet_id = interface.subnet.identity.id;
         let query = network_interface::InsertQuery::new(interface.clone());
         VpcSubnet::insert_resource(
             subnet_id,
             diesel::insert_into(dsl::network_interface).values(query),
         )
-        .insert_and_get_result_async(
-            self.pool_authorized(opctx)
-                .await
-                .map_err(network_interface::InsertError::External)?,
-        )
+        .insert_and_get_result_async(conn)
         .await
-        // Convert to `InstanceNetworkInterface` before returning; we know
-        // this is valid as we've checked the condition on-entry.
-        .map(NetworkInterface::as_instance)
         .map_err(|e| match e {
             AsyncInsertError::CollectionNotFound => {
                 network_interface::InsertError::External(
@@ -148,7 +186,7 @@ impl DataStore {
                 )
             }
             AsyncInsertError::DatabaseError(e) => {
-                network_interface::InsertError::from_pool(e, &interface)
+                network_interface::InsertError::from_diesel(e, &interface)
             }
         })
     }
@@ -168,10 +206,10 @@ impl DataStore {
             .filter(dsl::kind.eq(NetworkInterfaceKind::Instance))
             .filter(dsl::time_deleted.is_null())
             .set(dsl::time_deleted.eq(now))
-            .execute_async(self.pool_authorized(opctx).await?)
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::NotFoundByResource(authz_instance),
                 )
@@ -201,13 +239,14 @@ impl DataStore {
         query
             .clone()
             .execute_async(
-                self.pool_authorized(opctx)
+                &*self
+                    .pool_connection_authorized(opctx)
                     .await
                     .map_err(network_interface::DeleteError::External)?,
             )
             .await
             .map_err(|e| {
-                network_interface::DeleteError::from_pool(e, &query)
+                network_interface::DeleteError::from_diesel(e, &query)
             })?;
         Ok(())
     }
@@ -249,11 +288,11 @@ impl DataStore {
                 network_interface::is_primary,
                 network_interface::slot,
             ))
-            .get_results_async::<NicInfo>(self.pool_authorized(opctx).await?)
+            .get_results_async::<NicInfo>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
-            })?;
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
         Ok(rows
             .into_iter()
             .map(sled_client_types::NetworkInterface::from)
@@ -344,10 +383,10 @@ impl DataStore {
         .filter(dsl::instance_id.eq(authz_instance.id()))
         .select(InstanceNetworkInterface::as_select())
         .load_async::<InstanceNetworkInterface>(
-            self.pool_authorized(opctx).await?,
+            &*self.pool_connection_authorized(opctx).await?,
         )
         .await
-        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Update a network interface associated with a given instance.
@@ -425,19 +464,18 @@ impl DataStore {
         #[derive(Debug)]
         enum NetworkInterfaceUpdateError {
             InstanceNotStopped,
-            FailedToUnsetPrimary(async_bb8_diesel::ConnectionError),
+            FailedToUnsetPrimary(DieselError),
         }
         type TxnError = TransactionError<NetworkInterfaceUpdateError>;
 
-        let pool = self.pool_authorized(opctx).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
         if primary {
-            pool.transaction_async(|conn| async move {
-                let instance_state = instance_query
-                    .get_result_async(&conn)
-                    .await?
-                    .runtime_state
-                    .state;
-                if instance_state != stopped {
+            conn.transaction_async(|conn| async move {
+                let instance_runtime =
+                    instance_query.get_result_async(&conn).await?.runtime_state;
+                if instance_runtime.propolis_id.is_some()
+                    || instance_runtime.nexus_state != stopped
+                {
                     return Err(TxnError::CustomError(
                         NetworkInterfaceUpdateError::InstanceNotStopped,
                     ));
@@ -475,13 +513,12 @@ impl DataStore {
             // be done there. The other columns always need to be updated, and
             // we're only hitting a single row. Note that we still need to
             // verify the instance is stopped.
-            pool.transaction_async(|conn| async move {
-                let instance_state = instance_query
-                    .get_result_async(&conn)
-                    .await?
-                    .runtime_state
-                    .state;
-                if instance_state != stopped {
+            conn.transaction_async(|conn| async move {
+                let instance_state =
+                    instance_query.get_result_async(&conn).await?.runtime_state;
+                if instance_state.propolis_id.is_some()
+                    || instance_state.nexus_state != stopped
+                {
                     return Err(TxnError::CustomError(
                         NetworkInterfaceUpdateError::InstanceNotStopped,
                     ));

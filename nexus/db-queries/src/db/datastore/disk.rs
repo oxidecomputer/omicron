@@ -15,7 +15,7 @@ use crate::db::collection_detach::DatastoreDetachTarget;
 use crate::db::collection_detach::DetachError;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
-use crate::db::error::public_error_from_diesel_pool;
+use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Resource;
 use crate::db::lookup::LookupPath;
@@ -26,6 +26,7 @@ use crate::db::model::Instance;
 use crate::db::model::Name;
 use crate::db::model::Project;
 use crate::db::pagination::paginated;
+use crate::db::queries::disk::DiskSetClauseForAttach;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -70,9 +71,9 @@ impl DataStore {
         .filter(dsl::time_deleted.is_null())
         .filter(dsl::attach_instance_id.eq(authz_instance.id()))
         .select(Disk::as_select())
-        .load_async::<Disk>(self.pool_authorized(opctx).await?)
+        .load_async::<Disk>(&*self.pool_connection_authorized(opctx).await?)
         .await
-        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     pub async fn project_create_disk(
@@ -97,16 +98,16 @@ impl DataStore {
                 .do_update()
                 .set(dsl::time_modified.eq(dsl::time_modified)),
         )
-        .insert_and_get_result_async(self.pool_authorized(opctx).await?)
+        .insert_and_get_result_async(
+            &*self.pool_connection_authorized(opctx).await?,
+        )
         .await
         .map_err(|e| match e {
             AsyncInsertError::CollectionNotFound => authz_project.not_found(),
-            AsyncInsertError::DatabaseError(e) => {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::Conflict(ResourceType::Disk, name.as_str()),
-                )
-            }
+            AsyncInsertError::DatabaseError(e) => public_error_from_diesel(
+                e,
+                ErrorHandler::Conflict(ResourceType::Disk, name.as_str()),
+            ),
         })?;
 
         let runtime = disk.runtime();
@@ -145,9 +146,9 @@ impl DataStore {
         .filter(dsl::time_deleted.is_null())
         .filter(dsl::project_id.eq(authz_project.id()))
         .select(Disk::as_select())
-        .load_async::<Disk>(self.pool_authorized(opctx).await?)
+        .load_async::<Disk>(&*self.pool_connection_authorized(opctx).await?)
         .await
-        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Attaches a disk to an instance, if both objects:
@@ -183,26 +184,24 @@ impl DataStore {
             db::model::InstanceState(api::external::InstanceState::Stopped),
         ];
 
-        let attached_label =
-            api::external::DiskState::Attached(authz_instance.id()).label();
+        let attach_update = DiskSetClauseForAttach::new(authz_instance.id());
 
-        let (instance, disk) = Instance::attach_resource(
+        let query = Instance::attach_resource(
             authz_instance.id(),
             authz_disk.id(),
-            instance::table
-                .into_boxed()
-                .filter(instance::dsl::state.eq_any(ok_to_attach_instance_states)),
-            disk::table
-                .into_boxed()
-                .filter(disk::dsl::disk_state.eq_any(ok_to_attach_disk_state_labels)),
+            instance::table.into_boxed().filter(
+                instance::dsl::state
+                    .eq_any(ok_to_attach_instance_states)
+                    .and(instance::dsl::active_propolis_id.is_null()),
+            ),
+            disk::table.into_boxed().filter(
+                disk::dsl::disk_state.eq_any(ok_to_attach_disk_state_labels),
+            ),
             max_disks,
-            diesel::update(disk::dsl::disk)
-                .set((
-                    disk::dsl::disk_state.eq(attached_label),
-                    disk::dsl::attach_instance_id.eq(authz_instance.id())
-                ))
-        )
-        .attach_and_get_result_async(self.pool_authorized(opctx).await?)
+            diesel::update(disk::dsl::disk).set(attach_update),
+        );
+
+        let (instance, disk) = query.attach_and_get_result_async(&*self.pool_connection_authorized(opctx).await?)
         .await
         .or_else(|e| {
             match e {
@@ -233,7 +232,15 @@ impl DataStore {
                         // why we did not attach.
                         api::external::DiskState::Creating |
                         api::external::DiskState::Detached => {
-                            match collection.runtime_state.state.state() {
+                            if collection.runtime_state.propolis_id.is_some() {
+                                return Err(
+                                    Error::invalid_request(
+                                        "cannot attach disk: instance is not \
+                                        fully stopped"
+                                    )
+                                );
+                            }
+                            match collection.runtime_state.nexus_state.state() {
                                 // Ok-to-be-attached instance states:
                                 api::external::InstanceState::Creating |
                                 api::external::InstanceState::Stopped => {
@@ -257,7 +264,7 @@ impl DataStore {
                                 _ => {
                                     Err(Error::invalid_request(&format!(
                                         "cannot attach disk to instance in {} state",
-                                        collection.runtime_state.state.state(),
+                                        collection.runtime_state.nexus_state.state(),
                                     )))
                                 }
                             }
@@ -281,7 +288,7 @@ impl DataStore {
                     }
                 },
                 AttachError::DatabaseError(e) => {
-                    Err(public_error_from_diesel_pool(e, ErrorHandler::Server))
+                    Err(public_error_from_diesel(e, ErrorHandler::Server))
                 },
             }
         })?;
@@ -323,17 +330,20 @@ impl DataStore {
             authz_disk.id(),
             instance::table
                 .into_boxed()
-                .filter(instance::dsl::state.eq_any(ok_to_detach_instance_states)),
+                .filter(instance::dsl::state
+                        .eq_any(ok_to_detach_instance_states)
+                        .and(instance::dsl::active_propolis_id.is_null())),
             disk::table
                 .into_boxed()
                 .filter(disk::dsl::disk_state.eq_any(ok_to_detach_disk_state_labels)),
             diesel::update(disk::dsl::disk)
                 .set((
                     disk::dsl::disk_state.eq(detached_label),
-                    disk::dsl::attach_instance_id.eq(Option::<Uuid>::None)
+                    disk::dsl::attach_instance_id.eq(Option::<Uuid>::None),
+                    disk::dsl::slot.eq(Option::<i16>::None)
                 ))
         )
-        .detach_and_get_result_async(self.pool_authorized(opctx).await?)
+        .detach_and_get_result_async(&*self.pool_connection_authorized(opctx).await?)
         .await
         .or_else(|e| {
             match e {
@@ -363,7 +373,15 @@ impl DataStore {
                         // Ok-to-detach disk states: Inspect the state to infer
                         // why we did not detach.
                         api::external::DiskState::Attached(id) if id == authz_instance.id() => {
-                            match collection.runtime_state.state.state() {
+                            if collection.runtime_state.propolis_id.is_some() {
+                                return Err(
+                                    Error::invalid_request(
+                                        "cannot attach disk: instance is not \
+                                        fully stopped"
+                                    )
+                                );
+                            }
+                            match collection.runtime_state.nexus_state.state() {
                                 // Ok-to-be-detached instance states:
                                 api::external::InstanceState::Creating |
                                 api::external::InstanceState::Stopped => {
@@ -377,7 +395,7 @@ impl DataStore {
                                 _ => {
                                     Err(Error::invalid_request(&format!(
                                         "cannot detach disk from instance in {} state",
-                                        collection.runtime_state.state.state(),
+                                        collection.runtime_state.nexus_state.state(),
                                     )))
                                 }
                             }
@@ -407,7 +425,7 @@ impl DataStore {
                     }
                 },
                 DetachError::DatabaseError(e) => {
-                    Err(public_error_from_diesel_pool(e, ErrorHandler::Server))
+                    Err(public_error_from_diesel(e, ErrorHandler::Server))
                 },
             }
         })?;
@@ -440,14 +458,14 @@ impl DataStore {
             .filter(dsl::state_generation.lt(new_runtime.gen))
             .set(new_runtime.clone())
             .check_if_exists::<Disk>(disk_id)
-            .execute_and_check(self.pool())
+            .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map(|r| match r.status {
                 UpdateStatus::Updated => true,
                 UpdateStatus::NotUpdatedButExists => false,
             })
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::NotFoundByResource(authz_disk),
                 )
@@ -471,14 +489,14 @@ impl DataStore {
             .filter(dsl::id.eq(disk_id))
             .set(dsl::pantry_address.eq(pantry_address.to_string()))
             .check_if_exists::<Disk>(disk_id)
-            .execute_and_check(self.pool_authorized(opctx).await?)
+            .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map(|r| match r.status {
                 UpdateStatus::Updated => true,
                 UpdateStatus::NotUpdatedButExists => false,
             })
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::NotFoundByResource(authz_disk),
                 )
@@ -501,14 +519,14 @@ impl DataStore {
             .filter(dsl::id.eq(disk_id))
             .set(&DiskUpdate { pantry_address: None })
             .check_if_exists::<Disk>(disk_id)
-            .execute_and_check(self.pool_authorized(opctx).await?)
+            .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map(|r| match r.status {
                 UpdateStatus::Updated => true,
                 UpdateStatus::NotUpdatedButExists => false,
             })
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::NotFoundByResource(authz_disk),
                 )
@@ -570,16 +588,11 @@ impl DataStore {
     pub async fn project_delete_disk_no_auth(
         &self,
         disk_id: &Uuid,
+        ok_to_delete_states: &[api::external::DiskState],
     ) -> Result<db::model::Disk, Error> {
         use db::schema::disk::dsl;
-        let pool = self.pool();
+        let conn = self.pool_connection_unauthorized().await?;
         let now = Utc::now();
-
-        let ok_to_delete_states = vec![
-            api::external::DiskState::Detached,
-            api::external::DiskState::Faulted,
-            api::external::DiskState::Creating,
-        ];
 
         let ok_to_delete_state_labels: Vec<_> =
             ok_to_delete_states.iter().map(|s| s.label()).collect();
@@ -592,10 +605,10 @@ impl DataStore {
             .filter(dsl::attach_instance_id.is_null())
             .set((dsl::disk_state.eq(destroyed), dsl::time_deleted.eq(now)))
             .check_if_exists::<Disk>(*disk_id)
-            .execute_and_check(pool)
+            .execute_and_check(&conn)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::NotFoundByLookup(
                         ResourceType::Disk,

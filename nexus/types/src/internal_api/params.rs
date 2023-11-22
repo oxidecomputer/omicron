@@ -4,15 +4,21 @@
 
 //! Params define the request bodies of API endpoints for creating or updating resources.
 
+use crate::external_api::params::PhysicalDiskKind;
+use crate::external_api::params::UserId;
 use crate::external_api::shared::IpRange;
 use omicron_common::api::external::ByteCount;
+use omicron_common::api::external::MacAddr;
+use omicron_common::api::external::Name;
+use omicron_common::api::internal::shared::ExternalPortDiscovery;
+use omicron_common::api::internal::shared::RackNetworkConfig;
+use omicron_common::api::internal::shared::SourceNatConfig;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
-use std::str::FromStr;
 use uuid::Uuid;
 
 /// Describes the role of the sled within the rack.
@@ -29,11 +35,12 @@ pub enum SledRole {
     Scrimlet,
 }
 
-/// Describes properties that should uniquely identify a Gimlet.
+// TODO: We need a unified representation of these hardware identifiers
+/// Describes properties that should uniquely identify Oxide manufactured hardware
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct Baseboard {
-    pub identifier: String,
-    pub model: String,
+    pub serial_number: String,
+    pub part_number: String,
     pub revision: i64,
 }
 
@@ -54,17 +61,21 @@ pub struct SledAgentStartupInfo {
 
     /// Amount of RAM which may be used by the Sled's OS
     pub usable_physical_ram: ByteCount,
+
+    /// Amount of RAM dedicated to the VMM reservoir
+    ///
+    /// Must be smaller than "usable_physical_ram"
+    pub reservoir_size: ByteCount,
 }
 
-/// Describes the type of physical disk.
-#[derive(
-    Debug, Serialize, Deserialize, JsonSchema, Clone, Copy, PartialEq, Eq,
-)]
-#[serde(rename_all = "snake_case", tag = "type", content = "content")]
-pub enum PhysicalDiskKind {
-    M2,
-    U2,
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct SwitchPutRequest {
+    pub baseboard: Baseboard,
+    pub rack_id: Uuid,
 }
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct SwitchPutResponse {}
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct PhysicalDiskPutRequest {
@@ -114,6 +125,9 @@ pub enum DatasetKind {
     Crucible,
     Cockroach,
     Clickhouse,
+    ClickhouseKeeper,
+    ExternalDns,
+    InternalDns,
 }
 
 impl fmt::Display for DatasetKind {
@@ -123,24 +137,11 @@ impl fmt::Display for DatasetKind {
             Crucible => "crucible",
             Cockroach => "cockroach",
             Clickhouse => "clickhouse",
+            ClickhouseKeeper => "clickhouse_keeper",
+            ExternalDns => "external_dns",
+            InternalDns => "internal_dns",
         };
         write!(f, "{}", s)
-    }
-}
-
-impl FromStr for DatasetKind {
-    type Err = omicron_common::api::external::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        use DatasetKind::*;
-        match s {
-            "crucible" => Ok(Crucible),
-            "cockroach" => Ok(Cockroach),
-            "clickhouse" => Ok(Clickhouse),
-            _ => Err(Self::Err::InternalError {
-                internal_message: format!("Unknown dataset kind: {}", s),
-            }),
-        }
     }
 }
 
@@ -155,38 +156,52 @@ pub struct DatasetPutRequest {
     pub kind: DatasetKind,
 }
 
+/// Describes the RSS allocated values for a service vnic
+#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone, PartialEq, Eq)]
+pub struct ServiceNic {
+    pub id: Uuid,
+    pub name: Name,
+    pub ip: IpAddr,
+    pub mac: MacAddr,
+}
+
 /// Describes the purpose of the service.
-#[derive(
-    Debug, Serialize, Deserialize, JsonSchema, Clone, Copy, PartialEq, Eq,
-)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone, PartialEq, Eq)]
 #[serde(rename_all = "snake_case", tag = "type", content = "content")]
 pub enum ServiceKind {
-    ExternalDns,
-    ExternalDnsConfig,
+    Clickhouse,
+    ClickhouseKeeper,
+    Cockroach,
+    Crucible,
+    CruciblePantry,
+    ExternalDns { external_address: IpAddr, nic: ServiceNic },
     InternalDns,
-    InternalDnsConfig,
-    Nexus { external_address: IpAddr },
+    Nexus { external_address: IpAddr, nic: ServiceNic },
     Oximeter,
     Dendrite,
     Tfport,
-    CruciblePantry,
-    Ntp,
+    BoundaryNtp { snat: SourceNatConfig, nic: ServiceNic },
+    InternalNtp,
+    Mgd,
 }
 
 impl fmt::Display for ServiceKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use ServiceKind::*;
         let s = match self {
-            ExternalDnsConfig => "external_dns_config",
-            ExternalDns => "external_dns",
-            InternalDnsConfig => "internal_dns_config",
+            Clickhouse => "clickhouse",
+            ClickhouseKeeper => "clickhouse_keeper",
+            Cockroach => "cockroach",
+            Crucible => "crucible",
+            ExternalDns { .. } => "external_dns",
             InternalDns => "internal_dns",
             Nexus { .. } => "nexus",
             Oximeter => "oximeter",
             Dendrite => "dendrite",
             Tfport => "tfport",
             CruciblePantry => "crucible_pantry",
-            Ntp => "ntp",
+            BoundaryNtp { .. } | InternalNtp => "ntp",
+            Mgd => "mgd",
         };
         write!(f, "{}", s)
     }
@@ -197,6 +212,7 @@ impl fmt::Display for ServiceKind {
 pub struct ServicePutRequest {
     pub service_id: Uuid,
     pub sled_id: Uuid,
+    pub zone_id: Option<Uuid>,
 
     /// Address on which a service is responding to requests.
     pub address: SocketAddrV6,
@@ -214,8 +230,8 @@ pub struct DatasetCreateRequest {
 
 #[derive(Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Certificate {
-    pub cert: Vec<u8>,
-    pub key: Vec<u8>,
+    pub cert: String,
+    pub key: String,
 }
 
 impl std::fmt::Debug for Certificate {
@@ -227,7 +243,7 @@ impl std::fmt::Debug for Certificate {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct RackInitializationRequest {
     /// Services on the rack which have been created by RSS.
     pub services: Vec<ServicePutRequest>,
@@ -240,12 +256,27 @@ pub struct RackInitializationRequest {
     pub certs: Vec<Certificate>,
     /// initial internal DNS config
     pub internal_dns_zone_config: dns_service_client::types::DnsConfigParams,
+    /// delegated DNS name for external DNS
+    pub external_dns_zone_name: String,
+    /// configuration for the initial (recovery) Silo
+    pub recovery_silo: RecoverySiloConfig,
+    /// The external qsfp ports per sidecar
+    pub external_port_count: ExternalPortDiscovery,
+    /// Initial rack network configuration
+    pub rack_network_config: Option<RackNetworkConfig>,
 }
 
 pub type DnsConfigParams = dns_service_client::types::DnsConfigParams;
 pub type DnsConfigZone = dns_service_client::types::DnsConfigZone;
 pub type DnsRecord = dns_service_client::types::DnsRecord;
 pub type Srv = dns_service_client::types::Srv;
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct RecoverySiloConfig {
+    pub silo_name: Name,
+    pub user_name: UserId,
+    pub user_password_hash: omicron_passwords::NewPasswordHash,
+}
 
 /// Message used to notify Nexus that this oximeter instance is up and running.
 #[derive(Debug, Clone, Copy, JsonSchema, Serialize, Deserialize)]

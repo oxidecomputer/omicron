@@ -1,0 +1,116 @@
+:showtitle:
+:numbered:
+
+= Database Schemas
+
+This directory describes the schema(s) used by CockroachDB.
+
+We use the following conventions:
+
+* `schema/crdb/VERSION/up*.sql`: Files containing the necessary idempotent
+  statements to transition from the previous version of the database schema to
+  this version.  All of the statements in a given file will be executed
+  together in one transaction; however, usually only one statement should
+  appear in each file.  More on this below.
+** If there's only one statement required, we put it into `up.sql`.
+** If more than one change is needed, any number of files starting with `up`
+   and ending with `.sql` may be used. These files will be sorted in
+   lexicographic order before being executed.  Each will be executed in a
+   separate transaction.
+** CockroachDB documentation recommends the following: "Execute schema
+   changes ... in an explicit transaction consisting of the single schema
+   change statement.".  Practically this means: If you want to change multiple
+   tables, columns, types, indices, or constraints, do so in separate files.
+   See https://www.cockroachlabs.com/docs/stable/online-schema-changes for
+   more.
+* `schema/crdb/dbinit.sql`: The necessary operations to create the latest
+  version of the schema. Should be equivalent to running all `up.sql`
+  migrations, in-order.
+* `schema/crdb/dbwipe.sql`: The necessary operations to delete the latest
+  version of the schema.
+
+Note that to upgrade from version N to version N+2, we always apply the N+1
+upgrade first, before applying the N+2 upgrade. This simplifies our model of DB
+schema changes by ensuring an incremental, linear history.
+
+== Offline Upgrade
+
+Nexus currently supports **offline** schema migrations.
+This means we're operating with the following constraints:
+
+* We assume that downtime is acceptable to perform an update.
+* We assume that while an update is occuring, all Nexus services
+  are running the same version of software.
+* We assume that no (non-upgrade) concurrent database requests will happen for
+  the duration of the migration.
+
+This is not an acceptable long-term solution - we must be able to update
+without downtime - but it is an interim solution, and one which provides a
+fall-back pathway for performing upgrades.
+
+See RFD 319 for more discussion of the online upgrade plans.
+
+== How to change the schema
+
+Assumptions:
+
+* The (previously) latest schema version is referred to as `OLD_VERSION`
+* Your new changes will bring the schema to a new version, `NEW_VERSION`
+
+Process:
+
+* Choose a `NEW_VERSION` number. This should almost certainly be a major
+  version bump over `OLD_VERSION`.
+* Create directory `schema/crdb/NEW_VERSION`.
+* If only one SQL statement is necessary to get from `OLD_VERSION` to
+  `NEW_VERSION`, put that statement into `schema/crdb/NEW_VERSION/up.sql`.  If
+  multiple statements are required, put each one into a separate file, naming
+  these `schema/crdb/NEW_VERSION/upN.sql` for as many `N` as you need.
+** Each file should contain _either_ one schema-modifying statement _or_ some
+   number of data-modifying statements.  You can combine multiple data-modifying
+   statements.  But you should not mix schema-modifying statements and
+   data-modifying statements in one file.  And you should not include multiple
+   schema-modifying statements in one file.
+** Beware that the entire file will be run in one transaction.  Expensive data-
+   modifying operations leading to long-running transactions are generally
+   to-be-avoided; however, there's no better way to do this today if you really
+   do need to update thousands of rows as part of the update.
+* Update `schema/crdb/dbinit.sql` to match what the database should look like
+  after your update is applied. Don't forget to update the version field of
+  `db_metadata` at the bottom of the file!
+** If necessary, do the same thing for `schema/crdb/dbwipe.sql`.
+* Update Nexus's idea of the latest schema, by updating its `SCHEMA_VERSION` to
+  `NEW_VERSION` within `nexus/db-model/src/schema.rs`.
+
+SQL Validation, via Automated Tests:
+
+* The `SCHEMA_VERSION` matches the version used in `dbinit.sql`
+* The combination of all `up.sql` files results in the same schema as
+  `dbinit.sql`
+* All `up.sql` files can be applied twice without error
+
+=== General notes
+
+CockroachDB's representation of the schema includes some opaque
+internally-generated fields that are order dependent, like the names of
+anonymous CHECK constraints.  Our schema comparison tools intentionally ignore
+these values. As a result, when performing schema changes, the order of new
+tables and constraints should generally not be important.
+
+As convention, however, we recommend keeping the `db_metadata` file at the end
+of `dbinit.sql`, so that the database does not contain a version until it is
+fully populated.
+
+=== Scenario-specific gotchas
+
+==== Renaming columns
+
+Idempotently renaming existing columns is unfortunately not possible in our
+current database configuration. (Postgres doesn't support the use of an `IF
+EXISTS` qualifier on an `ALTER TABLE RENAME COLUMN` statement, and the version
+of CockroachDB we use at this writing doesn't support the use of user-defined
+functions as a workaround.)
+
+An (imperfect) workaround is to use the `#[diesel(column_name = foo)]` attribute
+in Rust code to preserve the existing name of a column in the database while
+giving its corresponding struct field a different, more meaningful name.

@@ -481,6 +481,38 @@ pub enum AuthnMode {
     Session(String),
 }
 
+impl AuthnMode {
+    pub fn authn_header(
+        &self,
+    ) -> Result<
+        (http::header::HeaderName, http::header::HeaderValue),
+        anyhow::Error,
+    > {
+        use nexus_db_queries::authn;
+        match self {
+            AuthnMode::UnprivilegedUser => {
+                let header_value = spoof::make_header_value(
+                    authn::USER_TEST_UNPRIVILEGED.id(),
+                );
+                Ok((http::header::AUTHORIZATION, header_value.0.encode()))
+            }
+            AuthnMode::PrivilegedUser => {
+                let header_value =
+                    spoof::make_header_value(authn::USER_TEST_PRIVILEGED.id());
+                Ok((http::header::AUTHORIZATION, header_value.0.encode()))
+            }
+            AuthnMode::SiloUser(silo_user_id) => {
+                let header_value = spoof::make_header_value(*silo_user_id);
+                Ok((http::header::AUTHORIZATION, header_value.0.encode()))
+            }
+            AuthnMode::Session(session_token) => {
+                let header_value = format!("session={}", session_token);
+                parse_header_pair(http::header::COOKIE, header_value)
+            }
+        }
+    }
+}
+
 /// Helper for constructing requests to Nexus's external API
 ///
 /// This is a thin wrapper around [`RequestBuilder`] that exists to allow
@@ -506,41 +538,15 @@ impl<'a> NexusRequest<'a> {
     /// Causes the request to authenticate to Nexus as a user specified by
     /// `mode`
     pub fn authn_as(mut self, mode: AuthnMode) -> Self {
-        use nexus_db_queries::authn;
-
-        match mode {
-            AuthnMode::UnprivilegedUser => {
-                let header_value = spoof::make_header_value(
-                    authn::USER_TEST_UNPRIVILEGED.id(),
-                );
-                self.request_builder = self.request_builder.header(
-                    &http::header::AUTHORIZATION,
-                    header_value.0.encode(),
-                );
+        match mode.authn_header() {
+            Ok((header_name, header_value)) => {
+                self.request_builder =
+                    self.request_builder.header(header_name, header_value);
             }
-            AuthnMode::PrivilegedUser => {
-                let header_value =
-                    spoof::make_header_value(authn::USER_TEST_PRIVILEGED.id());
-                self.request_builder = self.request_builder.header(
-                    &http::header::AUTHORIZATION,
-                    header_value.0.encode(),
-                );
-            }
-            AuthnMode::SiloUser(silo_user_id) => {
-                let header_value = spoof::make_header_value(silo_user_id);
-                self.request_builder = self.request_builder.header(
-                    &http::header::AUTHORIZATION,
-                    header_value.0.encode(),
-                );
-            }
-            AuthnMode::Session(session_token) => {
-                self.request_builder = self.request_builder.header(
-                    &http::header::COOKIE,
-                    format!("session={}", session_token),
-                );
+            Err(error) => {
+                self.request_builder.error = Some(error);
             }
         }
-
         self
     }
 

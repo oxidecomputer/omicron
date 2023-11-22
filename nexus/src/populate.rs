@@ -42,35 +42,34 @@
 //! you define a single data-insertion step.  We have tests that ensure that
 //! each populator behaves as expected in the above ways.
 
-use crate::db::DataStore;
 use futures::future::BoxFuture;
 use futures::FutureExt;
-use lazy_static::lazy_static;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::DataStore;
 use omicron_common::api::external::Error;
 use omicron_common::backoff;
 use std::sync::Arc;
 use uuid::Uuid;
 
 #[derive(Clone, Debug)]
-pub enum PopulateStatus {
+pub(crate) enum PopulateStatus {
     NotDone,
     Done,
     Failed(String),
 }
 
 /// Auxiliary data necessary to populate the database.
-pub struct PopulateArgs {
+pub(crate) struct PopulateArgs {
     rack_id: Uuid,
 }
 
 impl PopulateArgs {
-    pub fn new(rack_id: Uuid) -> Self {
+    pub(crate) fn new(rack_id: Uuid) -> Self {
         Self { rack_id }
     }
 }
 
-pub fn populate_start(
+pub(crate) fn populate_start(
     opctx: OpContext,
     datastore: Arc<DataStore>,
     args: PopulateArgs,
@@ -95,7 +94,7 @@ async fn populate(
     datastore: &DataStore,
     args: &PopulateArgs,
 ) -> Result<(), String> {
-    for p in *ALL_POPULATORS {
+    for p in ALL_POPULATORS {
         let db_result = backoff::retry_notify(
             backoff::retry_policy_internal_service(),
             || async {
@@ -216,7 +215,41 @@ impl Populator for PopulateBuiltinSilos {
     where
         'a: 'b,
     {
-        async { datastore.load_builtin_silos(opctx).await.map(|_| ()) }.boxed()
+        async { datastore.load_builtin_silos(opctx).await }.boxed()
+    }
+}
+
+/// Populates the built-in projects
+#[derive(Debug)]
+struct PopulateBuiltinProjects;
+impl Populator for PopulateBuiltinProjects {
+    fn populate<'a, 'b>(
+        &self,
+        opctx: &'a OpContext,
+        datastore: &'a DataStore,
+        _args: &'a PopulateArgs,
+    ) -> BoxFuture<'b, Result<(), Error>>
+    where
+        'a: 'b,
+    {
+        async { datastore.load_builtin_projects(opctx).await }.boxed()
+    }
+}
+
+/// Populates the built-in vpcs
+#[derive(Debug)]
+struct PopulateBuiltinVpcs;
+impl Populator for PopulateBuiltinVpcs {
+    fn populate<'a, 'b>(
+        &self,
+        opctx: &'a OpContext,
+        datastore: &'a DataStore,
+        _args: &'a PopulateArgs,
+    ) -> BoxFuture<'b, Result<(), Error>>
+    where
+        'a: 'b,
+    {
+        async { datastore.load_builtin_vpcs(opctx).await }.boxed()
     }
 }
 
@@ -301,29 +334,29 @@ impl Populator for PopulateRack {
     }
 }
 
-lazy_static! {
-    static ref ALL_POPULATORS: [&'static dyn Populator; 8] = [
-        &PopulateBuiltinUsers,
-        &PopulateBuiltinRoles,
-        &PopulateBuiltinRoleAssignments,
-        &PopulateBuiltinSilos,
-        &PopulateSiloUsers,
-        &PopulateSiloUserRoleAssignments,
-        &PopulateFleet,
-        &PopulateRack,
-    ];
-}
+const ALL_POPULATORS: [&dyn Populator; 10] = [
+    &PopulateBuiltinUsers {},
+    &PopulateBuiltinRoles {},
+    &PopulateBuiltinRoleAssignments {},
+    &PopulateBuiltinSilos {},
+    &PopulateBuiltinProjects {},
+    &PopulateBuiltinVpcs {},
+    &PopulateSiloUsers {},
+    &PopulateSiloUserRoleAssignments {},
+    &PopulateFleet {},
+    &PopulateRack {},
+];
 
 #[cfg(test)]
 mod test {
     use super::PopulateArgs;
     use super::Populator;
     use super::ALL_POPULATORS;
-    use crate::authn;
-    use crate::authz;
-    use crate::db;
     use anyhow::Context;
+    use nexus_db_queries::authn;
+    use nexus_db_queries::authz;
     use nexus_db_queries::context::OpContext;
+    use nexus_db_queries::db;
     use nexus_test_utils::db::test_setup_database;
     use omicron_common::api::external::Error;
     use omicron_test_utils::dev;
@@ -332,17 +365,25 @@ mod test {
 
     #[tokio::test]
     async fn test_populators() {
-        for p in *ALL_POPULATORS {
-            do_test_populator_idempotent(p).await;
+        let pop_len = ALL_POPULATORS.len();
+        for idx in 0..pop_len {
+            let prev = &ALL_POPULATORS[..idx];
+            let p = ALL_POPULATORS[idx];
+            do_test_populator_idempotent(prev, p).await;
         }
     }
 
-    async fn do_test_populator_idempotent(p: &dyn Populator) {
+    async fn do_test_populator_idempotent(
+        prev: &[&dyn Populator],
+        p: &dyn Populator,
+    ) {
         let logctx = dev::test_setup_log("test_populator");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = Arc::new(db::Pool::new(&cfg));
-        let datastore = Arc::new(db::DataStore::new(pool));
+        let pool = Arc::new(db::Pool::new(&logctx.log, &cfg));
+        let datastore = Arc::new(
+            db::DataStore::new(&logctx.log, pool, None).await.unwrap(),
+        );
         let opctx = OpContext::for_background(
             logctx.log.clone(),
             Arc::new(authz::Authz::new(&logctx.log)),
@@ -352,6 +393,14 @@ mod test {
         let log = &logctx.log;
 
         let args = PopulateArgs::new(Uuid::new_v4());
+
+        // Satisfy any prerequisites by running the previous populators.
+        for p in prev {
+            p.populate(&opctx, &datastore, &args)
+                .await
+                .with_context(|| format!("prev populator {:?}", p))
+                .unwrap();
+        }
 
         // Running each populator once under normal conditions should work.
         info!(&log, "populator {:?}, run 1", p);
@@ -373,9 +422,6 @@ mod test {
             })
             .unwrap();
 
-        info!(&log, "cleaning up database");
-        db.cleanup().await.unwrap();
-
         // Test again with the database offline.  In principle we could do this
         // immediately without creating a new pool and datastore.  However, the
         // pool's default behavior is to wait 30 seconds for a connection, which
@@ -387,14 +433,22 @@ mod test {
         //
         // Anyway, if we try again with a broken database, we should get a
         // ServiceUnavailable error, which indicates a transient failure.
-        let pool = Arc::new(db::Pool::new_failfast_for_tests(&cfg));
-        let datastore = Arc::new(db::DataStore::new(pool));
+        let pool =
+            Arc::new(db::Pool::new_failfast_for_tests(&logctx.log, &cfg));
+        // We need to create the datastore before tearing down the database, as
+        // it verifies the schema version of the DB while booting.
+        let datastore = Arc::new(
+            db::DataStore::new(&logctx.log, pool, None).await.unwrap(),
+        );
         let opctx = OpContext::for_background(
             logctx.log.clone(),
             Arc::new(authz::Authz::new(&logctx.log)),
             authn::Context::internal_db_init(),
             Arc::clone(&datastore),
         );
+
+        info!(&log, "cleaning up database");
+        db.cleanup().await.unwrap();
 
         info!(&log, "populator {:?}, with database offline", p);
         match p.populate(&opctx, &datastore, &args).await {

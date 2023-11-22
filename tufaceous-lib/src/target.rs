@@ -1,15 +1,15 @@
 use anyhow::Result;
+use camino::Utf8PathBuf;
+use camino_tempfile::NamedUtf8TempFile;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::io::Write;
-use std::path::PathBuf;
-use tempfile::NamedTempFile;
 use tough::editor::RepositoryEditor;
 use tough::schema::{Hashes, Target};
 
 pub(crate) struct TargetWriter {
-    file: NamedTempFile,
-    targets_dir: PathBuf,
+    file: NamedUtf8TempFile,
+    targets_dir: Utf8PathBuf,
     name: String,
     length: u64,
     hasher: Sha256,
@@ -17,12 +17,12 @@ pub(crate) struct TargetWriter {
 
 impl TargetWriter {
     pub(crate) fn new(
-        targets_dir: impl Into<PathBuf>,
+        targets_dir: impl Into<Utf8PathBuf>,
         name: impl Into<String>,
     ) -> Result<TargetWriter> {
         let targets_dir = targets_dir.into();
         Ok(TargetWriter {
-            file: NamedTempFile::new_in(&targets_dir)?,
+            file: NamedUtf8TempFile::new_in(&targets_dir)?,
             targets_dir,
             name: name.into(),
             length: 0,

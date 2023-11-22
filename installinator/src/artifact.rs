@@ -2,13 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::net::SocketAddrV6;
+use std::net::SocketAddr;
 
 use anyhow::{Context, Result};
 use clap::Args;
 use futures::StreamExt;
 use installinator_artifact_client::ClientError;
-use installinator_common::ProgressReport;
+use installinator_common::EventReport;
 use ipcc_key_value::{InstallinatorImageId, Ipcc};
 use omicron_common::update::{ArtifactHash, ArtifactHashId};
 use tokio::sync::mpsc;
@@ -67,8 +67,17 @@ pub(crate) struct ArtifactClient {
 }
 
 impl ArtifactClient {
-    pub(crate) fn new(addr: SocketAddrV6, log: &slog::Logger) -> Self {
-        let endpoint = format!("http://[{}]:{}", addr.ip(), addr.port());
+    pub(crate) fn new(addr: SocketAddr, log: &slog::Logger) -> Self {
+        // NOTE: the production code path is always IPv6. IPv4 is supported for
+        // testing only.
+        let endpoint = match addr {
+            SocketAddr::V4(addr) => {
+                format!("http://{}:{}", addr.ip(), addr.port())
+            }
+            SocketAddr::V6(addr) => {
+                format!("http://[{}]:{}", addr.ip(), addr.port())
+            }
+        };
         let log = log.new(
             slog::o!("component" => "ArtifactClient", "peer" => addr.to_string()),
         );
@@ -127,7 +136,7 @@ impl ArtifactClient {
     pub(crate) async fn report_progress(
         &self,
         update_id: Uuid,
-        report: ProgressReport,
+        report: EventReport,
     ) -> Result<(), ClientError> {
         self.client
             .report_progress(&update_id, &report)

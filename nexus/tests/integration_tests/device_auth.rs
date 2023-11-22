@@ -4,11 +4,11 @@
 
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::views::{
+    DeviceAccessTokenGrant, DeviceAccessTokenType, DeviceAuthResponse,
+};
 use omicron_nexus::external_api::device_auth::{
     DeviceAccessTokenRequest, DeviceAuthRequest, DeviceAuthVerify,
-};
-use omicron_nexus::external_api::views::{
-    DeviceAccessTokenGrant, DeviceAccessTokenType, DeviceAuthResponse,
 };
 
 use http::{header, method::Method, StatusCode};
@@ -71,7 +71,10 @@ async fn test_device_auth_flow(cptestctx: &ControlPlaneTestContext) {
         .expect_status(Some(StatusCode::FOUND))
         .expect_response_header(
             header::LOCATION,
-            "/spoof_login?state=%2Fdevice%2Fverify",
+            &format!(
+                "/login/{}/local?redirect_uri=%2Fdevice%2Fverify",
+                cptestctx.silo_name
+            ),
         )
         .execute()
         .await

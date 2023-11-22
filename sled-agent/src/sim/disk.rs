@@ -17,8 +17,10 @@ use omicron_common::api::external::Generation;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
+use omicron_common::api::internal::nexus::ProducerKind;
+use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
-use propolis_client::api::DiskAttachmentState as PropolisDiskState;
+use propolis_client::types::DiskAttachmentState as PropolisDiskState;
 use std::net::{Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
@@ -119,12 +121,12 @@ mod producers {
             oximeter::MetricsError,
         > {
             let samples = vec![
-                Sample::new(&self.target, &self.activated_count),
-                Sample::new(&self.target, &self.write_count),
-                Sample::new(&self.target, &self.write_bytes),
-                Sample::new(&self.target, &self.read_count),
-                Sample::new(&self.target, &self.read_bytes),
-                Sample::new(&self.target, &self.flush_count),
+                Sample::new(&self.target, &self.activated_count)?,
+                Sample::new(&self.target, &self.write_count)?,
+                Sample::new(&self.target, &self.write_bytes)?,
+                Sample::new(&self.target, &self.read_count)?,
+                Sample::new(&self.target, &self.read_bytes)?,
+                Sample::new(&self.target, &self.flush_count)?,
             ];
 
             *self.activated_count.datum_mut() += 1;
@@ -167,6 +169,7 @@ impl SimDisk {
         let producer_address = SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 0);
         let server_info = ProducerEndpoint {
             id,
+            kind: Some(ProducerKind::SledAgent),
             address: producer_address,
             base_route: "/collect".to_string(),
             interval: Duration::from_millis(200),
@@ -174,13 +177,13 @@ impl SimDisk {
         let config = oximeter_producer::Config {
             server_info,
             registration_address: nexus_address,
-            dropshot_config: ConfigDropshot {
+            dropshot: ConfigDropshot {
                 bind_address: producer_address,
                 ..Default::default()
             },
-            logging_config: ConfigLogging::StderrTerminal {
+            log: LogConfig::Config(ConfigLogging::StderrTerminal {
                 level: ConfigLoggingLevel::Error,
-            },
+            }),
         };
         let server =
             ProducerServer::start(&config).await.map_err(|e| e.to_string())?;

@@ -2,17 +2,17 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use nexus_db_queries::authn::silos::{
+    IdentityProviderType, SamlIdentityProvider, SamlLoginPost,
+};
 use nexus_test_utils::assert_same_items;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{create_silo, object_create};
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::views::{self, Silo};
+use nexus_types::external_api::{params, shared};
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_nexus::authn::silos::{
-    IdentityProviderType, SamlIdentityProvider, SamlLoginPost,
-};
 use omicron_nexus::external_api::console_api;
-use omicron_nexus::external_api::views::{self, Silo};
-use omicron_nexus::external_api::{params, shared};
 use omicron_nexus::TestInterfaces;
 
 use base64::Engine;
@@ -29,6 +29,10 @@ type ControlPlaneTestContext =
 // note: no signing keys
 pub const SAML_IDP_DESCRIPTOR: &str =
     include_str!("data/saml_idp_descriptor.xml");
+pub const SAML_IDP_DESCRIPTOR_ENCRYPTION_KEY_ONLY: &str =
+    include_str!("data/saml_idp_descriptor_encryption_key_only.xml");
+pub const SAML_IDP_DESCRIPTOR_NO_KEYS: &str =
+    include_str!("data/saml_idp_descriptor_no_keys.xml");
 
 // Create a SAML IdP
 #[nexus_test]
@@ -129,7 +133,7 @@ async fn test_create_a_saml_idp(cptestctx: &ControlPlaneTestContext) {
             client,
             Method::GET,
             &format!(
-                "/login/{}/saml/{}",
+                "/login/{}/saml/{}/redirect",
                 silo.identity.name, silo_saml_idp.identity.name
             ),
         )
@@ -279,6 +283,120 @@ async fn test_create_a_saml_idp_invalid_descriptor_no_redirect_binding(
     .expect("unexpected success");
 }
 
+// Fail to create a SAML IdP from a metadata document that only has encryption
+// keys
+#[nexus_test]
+async fn test_create_a_saml_idp_metadata_only_encryption_keys(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    const SILO_NAME: &str = "saml-silo";
+    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::SamlJit)
+        .await;
+
+    let saml_idp_descriptor =
+        SAML_IDP_DESCRIPTOR_ENCRYPTION_KEY_ONLY.to_string();
+
+    let server = Server::run();
+    server.expect(
+        Expectation::matching(request::method_path("GET", "/descriptor"))
+            .respond_with(status_code(200).body(saml_idp_descriptor)),
+    );
+
+    NexusRequest::new(
+        RequestBuilder::new(
+            client,
+            Method::POST,
+            &format!("/v1/system/identity-providers/saml?silo={}", SILO_NAME),
+        )
+        .body(Some(&params::SamlIdentityProviderCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "some-totally-real-saml-provider"
+                    .to_string()
+                    .parse()
+                    .unwrap(),
+                description: "a demo provider".to_string(),
+            },
+
+            idp_metadata_source: params::IdpMetadataSource::Url {
+                url: server.url("/descriptor").to_string(),
+            },
+
+            idp_entity_id: "entity_id".to_string(),
+            sp_client_id: "client_id".to_string(),
+            acs_url: "http://acs".to_string(),
+            slo_url: "http://slo".to_string(),
+            technical_contact_email: "technical@fake".to_string(),
+
+            signing_keypair: None,
+
+            group_attribute_name: None,
+        }))
+        .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("unexpected success");
+}
+
+// Fail to create a SAML IdP from a metadata document that has no keys
+#[nexus_test]
+async fn test_create_a_saml_idp_metadata_no_keys(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    const SILO_NAME: &str = "saml-silo";
+    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::SamlJit)
+        .await;
+
+    let saml_idp_descriptor = SAML_IDP_DESCRIPTOR_NO_KEYS.to_string();
+
+    let server = Server::run();
+    server.expect(
+        Expectation::matching(request::method_path("GET", "/descriptor"))
+            .respond_with(status_code(200).body(saml_idp_descriptor)),
+    );
+
+    NexusRequest::new(
+        RequestBuilder::new(
+            client,
+            Method::POST,
+            &format!("/v1/system/identity-providers/saml?silo={}", SILO_NAME),
+        )
+        .body(Some(&params::SamlIdentityProviderCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "some-totally-real-saml-provider"
+                    .to_string()
+                    .parse()
+                    .unwrap(),
+                description: "a demo provider".to_string(),
+            },
+
+            idp_metadata_source: params::IdpMetadataSource::Url {
+                url: server.url("/descriptor").to_string(),
+            },
+
+            idp_entity_id: "entity_id".to_string(),
+            sp_client_id: "client_id".to_string(),
+            acs_url: "http://acs".to_string(),
+            slo_url: "http://slo".to_string(),
+            technical_contact_email: "technical@fake".to_string(),
+
+            signing_keypair: None,
+
+            group_attribute_name: None,
+        }))
+        .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("unexpected success");
+}
+
 // Create a hidden Silo with a SAML IdP
 #[nexus_test]
 async fn test_create_a_hidden_silo_saml_idp(
@@ -332,7 +450,10 @@ async fn test_create_a_hidden_silo_saml_idp(
         RequestBuilder::new(
             client,
             Method::GET,
-            &format!("/login/hidden/saml/{}", silo_saml_idp.identity.name),
+            &format!(
+                "/login/hidden/saml/{}/redirect",
+                silo_saml_idp.identity.name
+            ),
         )
         .expect_status(Some(StatusCode::FOUND)),
     )
@@ -720,6 +841,47 @@ fn test_correct_saml_response_ecdsa_sha256() {
         "some@customer.com".to_string()
     );
     assert_eq!(relay_state, None);
+}
+
+// Test rejecting a SAML response signed with a key that doesn't match the silo
+// identity provider's key
+#[test]
+fn test_reject_saml_response_signed_with_other_key() {
+    let silo_saml_identity_provider = SamlIdentityProvider {
+        idp_metadata_document_string: SAML_RESPONSE_IDP_DESCRIPTOR.to_string(),
+
+        idp_entity_id: "https://some.idp.test/oxide_rack/".to_string(),
+        sp_client_id: "https://customer.site/oxide_rack/saml".to_string(),
+        acs_url: "https://customer.site/oxide_rack/saml".to_string(),
+        slo_url: "http://slo".to_string(),
+        technical_contact_email: "technical@fake".to_string(),
+
+        public_cert: None,
+        private_key: None,
+
+        group_attribute_name: None,
+    };
+
+    let body_bytes = serde_urlencoded::to_string(SamlLoginPost {
+        saml_response: base64::engine::general_purpose::STANDARD
+            .encode(&SAML_RESPONSE_SIGNED_WITH_ECDSA_SHA256),
+        relay_state: None,
+    })
+    .unwrap();
+
+    let result = silo_saml_identity_provider.authenticated_subject(
+        &body_bytes,
+        // Set max_issue_delay so that SAMLResponse is valid
+        Some(
+            chrono::Utc::now()
+                - "2022-05-04T15:36:12.631Z"
+                    .parse::<chrono::DateTime<chrono::Utc>>()
+                    .unwrap()
+                + chrono::Duration::seconds(60),
+        ),
+    );
+
+    assert!(result.is_err());
 }
 
 // Test a SAML response with only the assertion signed
@@ -1137,7 +1299,9 @@ async fn test_post_saml_response_with_relay_state(
                     .encode(SAML_RESPONSE),
                 relay_state: Some(
                     console_api::RelayState {
-                        referer: Some("/some/actual/nexus/url".to_string()),
+                        redirect_uri: Some(
+                            "/some/actual/nexus/url".parse().unwrap(),
+                        ),
                     }
                     .to_encoded()
                     .unwrap(),

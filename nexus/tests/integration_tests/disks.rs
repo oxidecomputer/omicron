@@ -4,17 +4,15 @@
 
 //! Tests basic disk support in the API
 
-use super::metrics::{
-    query_for_latest_metric, query_for_metrics_until_they_exist,
-};
-
+use super::metrics::{get_latest_silo_metric, query_for_metrics};
 use chrono::Utc;
-use crucible_agent_client::types::State as RegionState;
 use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use http::method::Method;
 use http::StatusCode;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::fixed_data::{silo::SILO_ID, FLEET_ID};
+use nexus_db_queries::db::lookup::LookupPath;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::Collection;
 use nexus_test_utils::http_testing::NexusRequest;
@@ -28,15 +26,17 @@ use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::populate_ip_pool;
 use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::params;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::Name;
-use omicron_nexus::db::fixed_data::{silo::SILO_ID, FLEET_ID};
+use omicron_common::api::external::NameOrId;
+use omicron_nexus::app::{MAX_DISK_SIZE_BYTES, MIN_DISK_SIZE_BYTES};
+use omicron_nexus::Nexus;
 use omicron_nexus::TestInterfaces as _;
-use omicron_nexus::{external_api::params, Nexus};
 use oximeter::types::Datum;
 use oximeter::types::Measurement;
 use sled_agent_client::TestInterfaces as _;
@@ -63,18 +63,36 @@ fn get_instance_disks_url(instance_name: &str) -> String {
     format!("/v1/instances/{instance_name}/disks?project={}", PROJECT_NAME)
 }
 
-fn get_disk_attach_url(instance_name: &str) -> String {
-    format!(
-        "/v1/instances/{instance_name}/disks/attach?project={}",
-        PROJECT_NAME
-    )
+fn get_disk_attach_url(instance: &NameOrId) -> String {
+    match instance {
+        NameOrId::Name(instance_name) => format!(
+            "/v1/instances/{}/disks/attach?project={}",
+            instance_name.as_str(),
+            PROJECT_NAME
+        ),
+        NameOrId::Id(instance_id) => {
+            format!(
+                "/v1/instances/{}/disks/attach",
+                instance_id.to_string().as_str()
+            )
+        }
+    }
 }
 
-fn get_disk_detach_url(instance_name: &str) -> String {
-    format!(
-        "/v1/instances/{instance_name}/disks/detach?project={}",
-        PROJECT_NAME
-    )
+fn get_disk_detach_url(instance: &NameOrId) -> String {
+    match instance {
+        NameOrId::Name(instance_name) => format!(
+            "/v1/instances/{}/disks/detach?project={}",
+            instance_name.as_str(),
+            PROJECT_NAME
+        ),
+        NameOrId::Id(instance_id) => {
+            format!(
+                "/v1/instances/{}/disks/detach",
+                instance_id.to_string().as_str()
+            )
+        }
+    }
 }
 
 async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
@@ -154,7 +172,11 @@ async fn set_instance_state(
 }
 
 async fn instance_simulate(nexus: &Arc<Nexus>, id: &Uuid) {
-    let sa = nexus.instance_sled_by_id(id).await.unwrap();
+    let sa = nexus
+        .instance_sled_by_id(id)
+        .await
+        .unwrap()
+        .expect("instance must be on a sled to simulate a state change");
     sa.instance_finish_transition(*id).await;
 }
 
@@ -217,9 +239,9 @@ async fn test_disk_create_attach_detach_delete(
     assert_eq!(disks.len(), 0);
 
     let url_instance_attach_disk =
-        get_disk_attach_url(instance.identity.name.as_str());
+        get_disk_attach_url(&instance.identity.id.into());
     let url_instance_detach_disk =
-        get_disk_detach_url(instance.identity.name.as_str());
+        get_disk_detach_url(&instance.identity.id.into());
 
     // Start attaching the disk to the instance.
     let attached_disk = disk_post(
@@ -335,6 +357,112 @@ async fn test_disk_create_disk_that_already_exists_fails(
 }
 
 #[nexus_test]
+async fn test_disk_slot_assignment(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    DiskTest::new(&cptestctx).await;
+    create_org_and_project(client).await;
+    let nexus = &cptestctx.server.apictx().nexus;
+
+    let disk_names = ["a", "b", "c", "d"];
+    let mut disks = Vec::new();
+    for name in disk_names {
+        let disk = create_disk(&client, PROJECT_NAME, name).await;
+        disks.push(disk);
+    }
+
+    // Create an instance to which to attach the disks, then force it to stop
+    // to allow disks to be attached. There should be no disks attached
+    // initially.
+    let instance = create_instance(&client, PROJECT_NAME, INSTANCE_NAME).await;
+    let instance_id = &instance.identity.id;
+    let instance_next =
+        set_instance_state(&client, INSTANCE_NAME, "stop").await;
+    instance_simulate(nexus, &instance_next.identity.id).await;
+    let url_instance_disks =
+        get_instance_disks_url(instance.identity.name.as_str());
+    let listed_disks = disks_list(&client, &url_instance_disks).await;
+    assert_eq!(listed_disks.len(), 0);
+
+    let url_instance_attach_disk =
+        get_disk_attach_url(&instance.identity.id.into());
+
+    async fn get_disk_slot(ctx: &ControlPlaneTestContext, disk_id: Uuid) -> u8 {
+        let apictx = &ctx.server.apictx();
+        let nexus = &apictx.nexus;
+        let datastore = nexus.datastore();
+        let opctx =
+            OpContext::for_tests(ctx.logctx.log.new(o!()), datastore.clone());
+
+        let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+            .disk_id(disk_id)
+            .fetch()
+            .await
+            .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
+
+        db_disk.slot.expect("test disk should be attached").0
+    }
+
+    // Slots are assigned serially as disks are attached.
+    for (expected_slot, disk) in disks.iter().enumerate() {
+        let attached_disk = disk_post(
+            client,
+            &url_instance_attach_disk,
+            disk.identity.name.clone(),
+        )
+        .await;
+
+        assert_eq!(attached_disk.identity.name, disk.identity.name);
+        assert_eq!(attached_disk.identity.id, disk.identity.id);
+        assert_eq!(attached_disk.state, DiskState::Attached(*instance_id));
+
+        assert_eq!(
+            get_disk_slot(cptestctx, attached_disk.identity.id).await,
+            expected_slot as u8
+        );
+    }
+
+    // Detach disks 1 and 2 and reattach them in reverse order. Verify that
+    // this inverts their slots but leaves the other disks alone.
+    let url_instance_detach_disk =
+        get_disk_detach_url(&instance.identity.id.into());
+    disk_post(
+        client,
+        &url_instance_detach_disk,
+        disks[1].identity.name.clone(),
+    )
+    .await;
+    disk_post(
+        client,
+        &url_instance_detach_disk,
+        disks[2].identity.name.clone(),
+    )
+    .await;
+
+    disk_post(
+        client,
+        &url_instance_attach_disk,
+        disks[2].identity.name.clone(),
+    )
+    .await;
+    disk_post(
+        client,
+        &url_instance_attach_disk,
+        disks[1].identity.name.clone(),
+    )
+    .await;
+
+    // The slice here is constructed so that slice[x] yields the index of the
+    // disk that should be assigned to slot x.
+    for (expected_slot, disk_index) in [0, 2, 1, 3].iter().enumerate() {
+        assert_eq!(
+            get_disk_slot(cptestctx, disks[*disk_index as usize].identity.id)
+                .await,
+            expected_slot as u8
+        );
+    }
+}
+
+#[nexus_test]
 async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     let nexus = &cptestctx.server.apictx().nexus;
@@ -364,9 +492,9 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(disks.len(), 0);
 
     let url_instance_attach_disk =
-        get_disk_attach_url(instance.identity.name.as_str());
+        get_disk_attach_url(&instance.identity.name.clone().into());
     let url_instance_detach_disk =
-        get_disk_detach_url(instance.identity.name.as_str());
+        get_disk_detach_url(&instance.identity.name.into());
 
     // Start attaching the disk to the instance.
     let attached_disk = disk_post(
@@ -393,9 +521,9 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
     instance_simulate(nexus, &instance_next.identity.id).await;
 
     let url_instance2_attach_disk =
-        get_disk_attach_url(instance2.identity.name.as_str());
+        get_disk_attach_url(&instance2.identity.id.into());
     let url_instance2_detach_disk =
-        get_disk_detach_url(instance2.identity.name.as_str());
+        get_disk_detach_url(&instance2.identity.id.into());
 
     let error: HttpErrorResponseBody = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &url_instance2_attach_disk)
@@ -604,38 +732,10 @@ async fn test_disk_region_creation_failure(
     .await
     .unwrap();
 
-    // After the failed allocation, the disk should not exist.
+    // After the failed allocation, the disk should be Faulted
     let disks = disks_list(&client, &disks_url).await;
-    assert_eq!(disks.len(), 0);
-
-    // After the failed allocation, regions will exist, but be "Failed".
-    for zpool in &test.zpools {
-        for dataset in &zpool.datasets {
-            let crucible = test
-                .sled_agent
-                .get_crucible_dataset(zpool.id, dataset.id)
-                .await;
-            let regions = crucible.list().await;
-            assert_eq!(regions.len(), 1);
-            assert_eq!(regions[0].state, RegionState::Failed);
-        }
-    }
-
-    // Validate that the underlying regions were released as a part of
-    // unwinding the failed disk allocation, by performing another disk
-    // allocation that should succeed.
-    for zpool in &test.zpools {
-        for dataset in &zpool.datasets {
-            let crucible = test
-                .sled_agent
-                .get_crucible_dataset(zpool.id, dataset.id)
-                .await;
-            crucible
-                .set_create_callback(Box::new(|_| RegionState::Created))
-                .await;
-        }
-    }
-    let _ = create_disk(client, PROJECT_NAME, DISK_NAME).await;
+    assert_eq!(disks.len(), 1);
+    assert_eq!(disks[0].state, DiskState::Faulted);
 }
 
 // Tests that invalid block sizes are rejected
@@ -725,13 +825,13 @@ async fn test_disk_reject_total_size_not_divisible_by_block_size(
 
 // Tests that a disk is rejected if the total size is less than MIN_DISK_SIZE
 #[nexus_test]
-async fn test_disk_reject_total_size_less_than_one_gibibyte(
+async fn test_disk_reject_total_size_less_than_min_disk_size_bytes(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
     create_org_and_project(client).await;
 
-    let disk_size = ByteCount::from(params::MIN_DISK_SIZE_BYTES / 2);
+    let disk_size = ByteCount::from(MIN_DISK_SIZE_BYTES / 2);
 
     // Attempt to allocate the disk, observe a server error.
     let disks_url = get_disks_url();
@@ -761,7 +861,50 @@ async fn test_disk_reject_total_size_less_than_one_gibibyte(
         error.message,
         format!(
             "unsupported value for \"size\": total size must be at least {}",
-            ByteCount::from(params::MIN_DISK_SIZE_BYTES)
+            ByteCount::from(MIN_DISK_SIZE_BYTES)
+        )
+    );
+}
+
+#[nexus_test]
+async fn test_disk_reject_total_size_greater_than_max_disk_size_bytes(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    create_org_and_project(client).await;
+
+    let disk_size =
+        ByteCount::try_from(MAX_DISK_SIZE_BYTES + (1 << 30)).unwrap();
+
+    // Atempt to allocate the disk, observe a server error.
+    let disks_url = get_disks_url();
+    let new_disk = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: DISK_NAME.parse().unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_source: params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(512).unwrap(),
+        },
+        size: disk_size,
+    };
+
+    let error = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&new_disk))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<dropshot::HttpErrorResponseBody>()
+    .unwrap();
+    assert_eq!(
+        error.message,
+        format!(
+            "unsupported value for \"size\": total size must be less than {}",
+            ByteCount::try_from(MAX_DISK_SIZE_BYTES).unwrap()
         )
     );
 }
@@ -805,7 +948,7 @@ async fn test_disk_reject_total_size_not_divisible_by_min_disk_size(
         error.message,
         format!(
             "unsupported value for \"size\": total size must be a multiple of {}",
-            ByteCount::from(params::MIN_DISK_SIZE_BYTES)
+            ByteCount::from(MIN_DISK_SIZE_BYTES)
         )
     );
 }
@@ -1340,6 +1483,7 @@ async fn create_instance_with_disk(client: &ClientTestContext) {
         vec![params::InstanceDiskAttachment::Attach(
             params::InstanceDiskAttach { name: DISK_NAME.parse().unwrap() },
         )],
+        Vec::<params::ExternalIpCreate>::new(),
     )
     .await;
 }
@@ -1360,24 +1504,16 @@ async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
     let disk = create_disk(&client, PROJECT_NAME, DISK_NAME).await;
     oximeter.force_collect().await;
 
-    // Whenever we grab this URL, get the surrounding few seconds of metrics.
+    // When grabbing a metric, we look for data points going back to the
+    // start of this test all the way up to the current time.
     let metric_url = |metric: &str| {
         format!(
             "/v1/disks/{}/metrics/{}?start_time={:?}&end_time={:?}&project={}",
             DISK_NAME,
             metric,
-            Utc::now() - chrono::Duration::seconds(10),
-            Utc::now() + chrono::Duration::seconds(10),
+            cptestctx.start_time,
+            Utc::now(),
             PROJECT_NAME,
-        )
-    };
-    // Check the utilization info for the whole project too.
-    let utilization_url = |id: Uuid| {
-        format!(
-            "/v1/system/metrics/virtual_disk_space_provisioned?start_time={:?}&end_time={:?}&id={:?}",
-            Utc::now() - chrono::Duration::seconds(10),
-            Utc::now() + chrono::Duration::seconds(10),
-            id,
         )
     };
 
@@ -1391,7 +1527,12 @@ async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
     assert!(measurements.items.is_empty());
 
     assert_eq!(
-        query_for_latest_metric(client, &utilization_url(project_id)).await,
+        get_latest_silo_metric(
+            cptestctx,
+            "virtual_disk_space_provisioned",
+            Some(project_id),
+        )
+        .await,
         i64::from(disk.size)
     );
 
@@ -1400,9 +1541,7 @@ async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
     oximeter.force_collect().await;
 
     for metric in &ALL_METRICS {
-        let measurements =
-            query_for_metrics_until_they_exist(client, &metric_url(metric))
-                .await;
+        let measurements = query_for_metrics(client, &metric_url(metric)).await;
 
         assert!(!measurements.items.is_empty());
         for item in &measurements.items {
@@ -1416,7 +1555,12 @@ async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
 
     // Check the utilization info for the whole project too.
     assert_eq!(
-        query_for_latest_metric(client, &utilization_url(project_id)).await,
+        get_latest_silo_metric(
+            cptestctx,
+            "virtual_disk_space_provisioned",
+            Some(project_id),
+        )
+        .await,
         i64::from(disk.size)
     );
 }
@@ -1442,8 +1586,8 @@ async fn test_disk_metrics_paginated(cptestctx: &ControlPlaneTestContext) {
         );
         let initial_params = format!(
             "start_time={:?}&end_time={:?}",
-            Utc::now() - chrono::Duration::seconds(2),
-            Utc::now() + chrono::Duration::seconds(2),
+            cptestctx.start_time,
+            Utc::now(),
         );
 
         objects_list_page_authz::<Measurement>(
@@ -1526,6 +1670,84 @@ async fn test_disk_create_for_importing(cptestctx: &ControlPlaneTestContext) {
     let disks = disks_list(&client, &disks_url).await;
     assert_eq!(disks.len(), 1);
     disks_eq(&disks[0], &disk);
+}
+
+#[nexus_test]
+async fn test_project_delete_disk_no_auth_idempotent(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    DiskTest::new(&cptestctx).await;
+    create_org_and_project(client).await;
+
+    // Create a disk
+    let disks_url = get_disks_url();
+
+    let new_disk = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: DISK_NAME.parse().unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_source: params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(512).unwrap(),
+        },
+        size: ByteCount::from_gibibytes_u32(1),
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&new_disk))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<Disk>()
+    .unwrap();
+
+    let disk_url = get_disk_url(DISK_NAME);
+    let disk = disk_get(&client, &disk_url).await;
+    assert_eq!(disk.state, DiskState::Detached);
+
+    // Call project_delete_disk_no_auth twice, ensuring that the disk is either
+    // there before deleting and not afterwards.
+
+    let nexus = &cptestctx.server.apictx().nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+        .disk_id(disk.identity.id)
+        .fetch()
+        .await
+        .unwrap();
+
+    assert_eq!(db_disk.id(), disk.identity.id);
+
+    datastore
+        .project_delete_disk_no_auth(
+            &disk.identity.id,
+            &[DiskState::Detached, DiskState::Faulted],
+        )
+        .await
+        .unwrap();
+
+    let r = LookupPath::new(&opctx, &datastore)
+        .disk_id(disk.identity.id)
+        .fetch()
+        .await;
+
+    assert!(r.is_err());
+
+    datastore
+        .project_delete_disk_no_auth(
+            &disk.identity.id,
+            &[DiskState::Detached, DiskState::Faulted],
+        )
+        .await
+        .unwrap();
 }
 
 async fn disk_get(client: &ClientTestContext, disk_url: &str) -> Disk {

@@ -83,6 +83,34 @@ impl<'t> SmfHelper<'t> {
         Ok(())
     }
 
+    pub fn addpropvalue_type<P, V, T>(
+        &self,
+        prop: P,
+        val: V,
+        valtype: T,
+    ) -> Result<(), Error>
+    where
+        P: ToString,
+        V: ToString,
+        T: ToString,
+    {
+        self.running_zone
+            .run_cmd(&[
+                illumos_utils::zone::SVCCFG,
+                "-s",
+                &self.smf_name,
+                "addpropvalue",
+                &prop.to_string(),
+                &format!("{}:", valtype.to_string()),
+                &val.to_string(),
+            ])
+            .map_err(|err| Error::ZoneCommand {
+                intent: format!("add {} smf property value", prop.to_string()),
+                err,
+            })?;
+        Ok(())
+    }
+
     pub fn addpropvalue<P, V>(&self, prop: P, val: V) -> Result<(), Error>
     where
         P: ToString,
@@ -99,6 +127,57 @@ impl<'t> SmfHelper<'t> {
             ])
             .map_err(|err| Error::ZoneCommand {
                 intent: format!("add {} smf property value", prop.to_string()),
+                err,
+            })?;
+        Ok(())
+    }
+
+    pub fn addpropgroup<P, T>(
+        &self,
+        propgroup: P,
+        grouptype: T,
+    ) -> Result<(), Error>
+    where
+        P: ToString,
+        T: ToString,
+    {
+        self.running_zone
+            .run_cmd(&[
+                illumos_utils::zone::SVCCFG,
+                "-s",
+                &self.smf_name,
+                "addpg",
+                &propgroup.to_string(),
+                &grouptype.to_string(),
+            ])
+            .map_err(|err| Error::ZoneCommand {
+                intent: format!(
+                    "add {} ({}) smf property group",
+                    propgroup.to_string(),
+                    grouptype.to_string()
+                ),
+                err,
+            })?;
+        Ok(())
+    }
+
+    pub fn delpropgroup<P>(&self, propgroup: P) -> Result<(), Error>
+    where
+        P: ToString,
+    {
+        self.running_zone
+            .run_cmd(&[
+                illumos_utils::zone::SVCCFG,
+                "-s",
+                &self.smf_name,
+                "delpg",
+                &propgroup.to_string(),
+            ])
+            .map_err(|err| Error::ZoneCommand {
+                intent: format!(
+                    "del {} smf property group",
+                    propgroup.to_string()
+                ),
                 err,
             })?;
         Ok(())

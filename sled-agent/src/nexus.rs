@@ -2,9 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-#[cfg(test)]
-pub use crate::mocks::MockNexusClient as NexusClient;
-#[cfg(not(test))]
 pub use nexus_client::Client as NexusClient;
 
 use internal_dns::resolver::{ResolveError, Resolver};
@@ -12,56 +9,66 @@ use internal_dns::ServiceName;
 use omicron_common::address::NEXUS_INTERNAL_PORT;
 use slog::Logger;
 use std::future::Future;
-use std::net::Ipv6Addr;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-struct Inner {
-    log: Logger,
-    resolver: Resolver,
-}
-
-/// Wrapper around a [`NexusClient`] object, which allows deferring
-/// the DNS lookup until accessed.
+/// A thin wrapper over a progenitor-generated NexusClient.
 ///
-/// Without the assistance of OS-level DNS lookups, the [`NexusClient`]
-/// interface requires knowledge of the target service IP address.
-/// For some services, like Nexus, this can be painful, as the IP address
-/// may not have even been allocated when the Sled Agent starts.
-///
-/// This structure allows clients to access the client on-demand, performing
-/// the DNS lookup only once it is actually needed.
+/// Also attaches the "DNS resolver" for historical reasons.
 #[derive(Clone)]
-pub struct LazyNexusClient {
-    inner: Arc<Inner>,
+pub struct NexusClientWithResolver {
+    client: NexusClient,
+    resolver: Arc<Resolver>,
 }
 
-impl LazyNexusClient {
-    pub fn new(log: Logger, addr: Ipv6Addr) -> Result<Self, ResolveError> {
-        Ok(Self {
-            inner: Arc::new(Inner {
-                log: log.clone(),
-                resolver: Resolver::new_from_ip(
-                    log.new(o!("component" => "DnsResolver")),
-                    addr,
-                )?,
-            }),
-        })
-    }
-
-    pub async fn get_ip(&self) -> Result<Ipv6Addr, ResolveError> {
-        self.inner.resolver.lookup_ipv6(ServiceName::Nexus).await
-    }
-
-    pub async fn get(&self) -> Result<NexusClient, ResolveError> {
-        let address = self.get_ip().await?;
-
-        Ok(NexusClient::new(
-            &format!("http://[{}]:{}", address, NEXUS_INTERNAL_PORT),
-            self.inner.log.clone(),
+impl NexusClientWithResolver {
+    pub fn new(
+        log: &Logger,
+        resolver: Arc<Resolver>,
+    ) -> Result<Self, ResolveError> {
+        Ok(Self::new_from_resolver_with_port(
+            log,
+            resolver,
+            NEXUS_INTERNAL_PORT,
         ))
+    }
+
+    pub fn new_from_resolver_with_port(
+        log: &Logger,
+        resolver: Arc<Resolver>,
+        port: u16,
+    ) -> Self {
+        let client = reqwest::ClientBuilder::new()
+            .dns_resolver(resolver.clone())
+            .build()
+            .expect("Failed to build client");
+
+        let dns_name = ServiceName::Nexus.srv_name();
+        Self {
+            client: NexusClient::new_with_client(
+                &format!("http://{dns_name}:{port}"),
+                client,
+                log.new(o!("component" => "NexusClient")),
+            ),
+            resolver,
+        }
+    }
+
+    /// Access the progenitor-based Nexus Client.
+    pub fn client(&self) -> &NexusClient {
+        &self.client
+    }
+
+    /// Access the DNS resolver used by the Nexus Client.
+    ///
+    /// WARNING: If you're using this resolver to access an IP address of
+    /// another service, be aware that it might change if that service moves
+    /// around! Be cautious when accessing and persisting IP addresses of other
+    /// services.
+    pub fn resolver(&self) -> &Arc<Resolver> {
+        &self.resolver
     }
 }
 
@@ -131,6 +138,9 @@ fn d2n_record(
     record: &dns_service_client::types::DnsRecord,
 ) -> nexus_client::types::DnsRecord {
     match record {
+        dns_service_client::types::DnsRecord::A(addr) => {
+            nexus_client::types::DnsRecord::A(*addr)
+        }
         dns_service_client::types::DnsRecord::Aaaa(addr) => {
             nexus_client::types::DnsRecord::Aaaa(*addr)
         }
@@ -141,6 +151,54 @@ fn d2n_record(
                 target: srv.target.clone(),
                 weight: srv.weight,
             })
+        }
+    }
+}
+
+// Although it is a bit awkward to define these conversions here, it frees us
+// from depending on sled_storage/sled_hardware in the nexus_client crate.
+
+pub(crate) trait ConvertInto<T>: Sized {
+    fn convert(self) -> T;
+}
+
+impl ConvertInto<nexus_client::types::PhysicalDiskKind>
+    for sled_hardware::DiskVariant
+{
+    fn convert(self) -> nexus_client::types::PhysicalDiskKind {
+        use nexus_client::types::PhysicalDiskKind;
+
+        match self {
+            sled_hardware::DiskVariant::U2 => PhysicalDiskKind::U2,
+            sled_hardware::DiskVariant::M2 => PhysicalDiskKind::M2,
+        }
+    }
+}
+
+impl ConvertInto<nexus_client::types::Baseboard> for sled_hardware::Baseboard {
+    fn convert(self) -> nexus_client::types::Baseboard {
+        nexus_client::types::Baseboard {
+            serial_number: self.identifier().to_string(),
+            part_number: self.model().to_string(),
+            revision: self.revision(),
+        }
+    }
+}
+
+impl ConvertInto<nexus_client::types::DatasetKind>
+    for sled_storage::dataset::DatasetKind
+{
+    fn convert(self) -> nexus_client::types::DatasetKind {
+        use nexus_client::types::DatasetKind;
+        use sled_storage::dataset::DatasetKind::*;
+
+        match self {
+            CockroachDb => DatasetKind::Cockroach,
+            Crucible => DatasetKind::Crucible,
+            Clickhouse => DatasetKind::Clickhouse,
+            ClickhouseKeeper => DatasetKind::ClickhouseKeeper,
+            ExternalDns => DatasetKind::ExternalDns,
+            InternalDns => DatasetKind::InternalDns,
         }
     }
 }

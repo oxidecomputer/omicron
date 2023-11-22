@@ -1,0 +1,18 @@
+# Reflector configuration (oxidecompuer/reflector)
+
+# When any of the listeners configured below activate, run .github/workflows/update-dendrite.yml targeting main
+
+workflow = "update-dendrite.yml"
+branch = "main"
+
+# Request an installation token when running this workflow
+
+requires_token = true
+
+# Run in response to the image buildomat job in dendrite completing
+
+[[on]]
+repository = "oxidecomputer/dendrite"
+event = "check_run"
+action = "completed"
+check = "image"

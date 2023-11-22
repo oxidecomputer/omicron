@@ -17,13 +17,13 @@ use nexus_test_utils::resource_helpers::object_create;
 use nexus_test_utils::resource_helpers::populate_ip_pool;
 use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::params;
+use nexus_types::external_api::views::Snapshot;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
-use omicron_nexus::external_api::params;
-use omicron_nexus::external_api::views::Snapshot;
 use omicron_nexus::Nexus;
 use omicron_nexus::TestInterfaces as _;
 use sled_agent_client::TestInterfaces as _;
@@ -84,7 +84,11 @@ async fn set_instance_state(
 }
 
 async fn instance_simulate(nexus: &Arc<Nexus>, id: &Uuid) {
-    let sa = nexus.instance_sled_by_id(id).await.unwrap();
+    let sa = nexus
+        .instance_sled_by_id(id)
+        .await
+        .unwrap()
+        .expect("instance must be on a sled to simulate a state change");
     sa.instance_finish_transition(*id).await;
 }
 

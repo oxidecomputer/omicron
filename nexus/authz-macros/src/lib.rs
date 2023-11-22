@@ -169,6 +169,22 @@ fn do_authz_resource(
                         fn resource_id(&self) -> Uuid {
                             self.key
                         }
+
+                        fn conferred_roles_by(
+                            &self,
+                            _authn: &authn::Context,
+                        ) ->
+                            Result<
+                                Option<(
+                                    ResourceType,
+                                    Uuid,
+                                )>,
+                                Error,
+                            >
+                        {
+                            Ok(None)
+                        }
+
                     }
                 },
             )

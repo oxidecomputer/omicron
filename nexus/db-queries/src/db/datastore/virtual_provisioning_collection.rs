@@ -7,13 +7,13 @@
 use super::DataStore;
 use crate::context::OpContext;
 use crate::db;
-use crate::db::error::public_error_from_diesel_pool;
+use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::model::ByteCount;
 use crate::db::model::VirtualProvisioningCollection;
 use crate::db::pool::DbConnection;
 use crate::db::queries::virtual_provisioning_collection_update::VirtualProvisioningCollectionUpdate;
-use async_bb8_diesel::{AsyncRunQueryDsl, PoolError};
+use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use omicron_common::api::external::{DeleteResult, Error};
 use uuid::Uuid;
@@ -46,26 +46,19 @@ impl DataStore {
         opctx: &OpContext,
         virtual_provisioning_collection: VirtualProvisioningCollection,
     ) -> Result<Vec<VirtualProvisioningCollection>, Error> {
-        let pool = self.pool_authorized(opctx).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
         self.virtual_provisioning_collection_create_on_connection(
-            pool,
+            &conn,
             virtual_provisioning_collection,
         )
         .await
     }
 
-    pub(crate) async fn virtual_provisioning_collection_create_on_connection<
-        ConnErr,
-    >(
+    pub(crate) async fn virtual_provisioning_collection_create_on_connection(
         &self,
-        conn: &(impl async_bb8_diesel::AsyncConnection<DbConnection, ConnErr>
-              + Sync),
+        conn: &async_bb8_diesel::Connection<DbConnection>,
         virtual_provisioning_collection: VirtualProvisioningCollection,
-    ) -> Result<Vec<VirtualProvisioningCollection>, Error>
-    where
-        ConnErr: From<diesel::result::Error> + Send + 'static,
-        PoolError: From<ConnErr>,
-    {
+    ) -> Result<Vec<VirtualProvisioningCollection>, Error> {
         use db::schema::virtual_provisioning_collection::dsl;
 
         let provisions: Vec<VirtualProvisioningCollection> =
@@ -75,13 +68,10 @@ impl DataStore {
                 .get_results_async(conn)
                 .await
                 .map_err(|e| {
-                    public_error_from_diesel_pool(
-                        PoolError::from(e),
-                        ErrorHandler::Server,
-                    )
+                    public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
         self.virtual_provisioning_collection_producer
-            .append_all_metrics(&provisions);
+            .append_all_metrics(&provisions)?;
         Ok(provisions)
     }
 
@@ -96,10 +86,12 @@ impl DataStore {
             dsl::virtual_provisioning_collection
                 .find(id)
                 .select(VirtualProvisioningCollection::as_select())
-                .get_result_async(self.pool_authorized(opctx).await?)
+                .get_result_async(
+                    &*self.pool_connection_authorized(opctx).await?,
+                )
                 .await
                 .map_err(|e| {
-                    public_error_from_diesel_pool(e, ErrorHandler::Server)
+                    public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
         Ok(virtual_provisioning_collection)
     }
@@ -110,24 +102,17 @@ impl DataStore {
         opctx: &OpContext,
         id: Uuid,
     ) -> DeleteResult {
-        let pool = self.pool_authorized(opctx).await?;
-        self.virtual_provisioning_collection_delete_on_connection(pool, id)
+        let conn = self.pool_connection_authorized(opctx).await?;
+        self.virtual_provisioning_collection_delete_on_connection(&conn, id)
             .await
     }
 
     /// Delete a [`VirtualProvisioningCollection`] object.
-    pub(crate) async fn virtual_provisioning_collection_delete_on_connection<
-        ConnErr,
-    >(
+    pub(crate) async fn virtual_provisioning_collection_delete_on_connection(
         &self,
-        conn: &(impl async_bb8_diesel::AsyncConnection<DbConnection, ConnErr>
-              + Sync),
+        conn: &async_bb8_diesel::Connection<DbConnection>,
         id: Uuid,
-    ) -> DeleteResult
-    where
-        ConnErr: From<diesel::result::Error> + Send + 'static,
-        PoolError: From<ConnErr>,
-    {
+    ) -> DeleteResult {
         use db::schema::virtual_provisioning_collection::dsl;
 
         // NOTE: We don't really need to extract the value we're deleting from
@@ -138,12 +123,7 @@ impl DataStore {
             .returning(VirtualProvisioningCollection::as_select())
             .get_result_async(conn)
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    PoolError::from(e),
-                    ErrorHandler::Server,
-                )
-            })?;
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
         assert!(
             collection.is_empty(),
             "Collection deleted while non-empty: {collection:?}"
@@ -209,13 +189,11 @@ impl DataStore {
                 project_id,
                 storage_type,
             )
-            .get_results_async(self.pool_authorized(opctx).await?)
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
-            })?;
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
         self.virtual_provisioning_collection_producer
-            .append_disk_metrics(&provisions);
+            .append_disk_metrics(&provisions)?;
         Ok(provisions)
     }
 
@@ -265,13 +243,11 @@ impl DataStore {
                 disk_byte_diff,
                 project_id,
             )
-            .get_results_async(self.pool_authorized(opctx).await?)
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
-            })?;
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
         self.virtual_provisioning_collection_producer
-            .append_disk_metrics(&provisions);
+            .append_disk_metrics(&provisions)?;
         Ok(provisions)
     }
 
@@ -288,17 +264,19 @@ impl DataStore {
             VirtualProvisioningCollectionUpdate::new_insert_instance(
                 id, cpus_diff, ram_diff, project_id,
             )
-            .get_results_async(self.pool_authorized(opctx).await?)
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
-            })?;
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
         self.virtual_provisioning_collection_producer
-            .append_cpu_metrics(&provisions);
+            .append_cpu_metrics(&provisions)?;
         Ok(provisions)
     }
 
-    /// Transitively updates all CPU/RAM provisions from project -> fleet.
+    /// Transitively removes the CPU and memory charges for an instance from the
+    /// instance's project, silo, and fleet, provided that the instance's state
+    /// generation is less than `max_instance_gen`. This allows a caller who is
+    /// about to apply generation G to an instance to avoid deleting resources
+    /// if its update was superseded.
     pub async fn virtual_provisioning_collection_delete_instance(
         &self,
         opctx: &OpContext,
@@ -306,18 +284,21 @@ impl DataStore {
         project_id: Uuid,
         cpus_diff: i64,
         ram_diff: ByteCount,
+        max_instance_gen: i64,
     ) -> Result<Vec<VirtualProvisioningCollection>, Error> {
         let provisions =
             VirtualProvisioningCollectionUpdate::new_delete_instance(
-                id, cpus_diff, ram_diff, project_id,
+                id,
+                max_instance_gen,
+                cpus_diff,
+                ram_diff,
+                project_id,
             )
-            .get_results_async(self.pool_authorized(opctx).await?)
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
-            })?;
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
         self.virtual_provisioning_collection_producer
-            .append_cpu_metrics(&provisions);
+            .append_cpu_metrics(&provisions)?;
         Ok(provisions)
     }
 

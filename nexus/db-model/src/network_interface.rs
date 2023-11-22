@@ -207,9 +207,9 @@ pub struct IncompleteNetworkInterface {
     pub identity: NetworkInterfaceIdentity,
     pub kind: NetworkInterfaceKind,
     pub parent_id: Uuid,
-    pub vpc_id: Uuid,
     pub subnet: VpcSubnet,
     pub ip: Option<std::net::IpAddr>,
+    pub mac: Option<external::MacAddr>,
 }
 
 impl IncompleteNetworkInterface {
@@ -217,29 +217,43 @@ impl IncompleteNetworkInterface {
         interface_id: Uuid,
         kind: NetworkInterfaceKind,
         parent_id: Uuid,
-        vpc_id: Uuid,
         subnet: VpcSubnet,
         identity: external::IdentityMetadataCreateParams,
         ip: Option<std::net::IpAddr>,
+        mac: Option<external::MacAddr>,
     ) -> Result<Self, external::Error> {
         if let Some(ip) = ip {
             subnet.check_requestable_addr(ip)?;
         };
+        match (mac, kind) {
+            (Some(mac), NetworkInterfaceKind::Instance) if !mac.is_guest() => {
+                return Err(external::Error::invalid_request(&format!(
+                    "invalid MAC address {} for guest NIC",
+                    mac
+                )));
+            }
+            (Some(mac), NetworkInterfaceKind::Service) if !mac.is_system() => {
+                return Err(external::Error::invalid_request(&format!(
+                    "invalid MAC address {} for service NIC",
+                    mac
+                )));
+            }
+            _ => {}
+        }
         let identity = NetworkInterfaceIdentity::new(interface_id, identity);
         Ok(IncompleteNetworkInterface {
             identity,
             kind,
             parent_id,
             subnet,
-            vpc_id,
             ip,
+            mac,
         })
     }
 
     pub fn new_instance(
         interface_id: Uuid,
         instance_id: Uuid,
-        vpc_id: Uuid,
         subnet: VpcSubnet,
         identity: external::IdentityMetadataCreateParams,
         ip: Option<std::net::IpAddr>,
@@ -248,29 +262,29 @@ impl IncompleteNetworkInterface {
             interface_id,
             NetworkInterfaceKind::Instance,
             instance_id,
-            vpc_id,
             subnet,
             identity,
             ip,
+            None,
         )
     }
 
     pub fn new_service(
         interface_id: Uuid,
         service_id: Uuid,
-        vpc_id: Uuid,
         subnet: VpcSubnet,
         identity: external::IdentityMetadataCreateParams,
         ip: Option<std::net::IpAddr>,
+        mac: Option<external::MacAddr>,
     ) -> Result<Self, external::Error> {
         Self::new(
             interface_id,
             NetworkInterfaceKind::Service,
             service_id,
-            vpc_id,
             subnet,
             identity,
             ip,
+            mac,
         )
     }
 }

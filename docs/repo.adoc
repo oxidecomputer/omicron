@@ -1,0 +1,65 @@
+:showtitle:
+:numbered:
+
+= Omicron repository
+
+The Omicron git repo is a consolidation of several different components that work together but are deployed separately.  Developers new to Omicron can get tripped up by the size and complexity of the repo.  The README contains tips for working in Omicron, including how to iterate more quickly by only building parts of it.  This document explains more about why the repo is structured the way it is.  This largely comes from experience with previous systems that were similarly complicated but structured differently.
+
+Overall, we want to make it easy and fast for people to iterate on Omicron, reflecting Oxide's values of teamwork, rigor, and urgency.  A lot of what we've done here seeks to cut out common causes of paper cuts and make it easy to write and run comprehensive tests so that we can quickly have high confidence in any software changes.
+
+Where we've fallen down, **please** let someone know by filing an issue!  It's easy for active developers to get used to various speed bumps or learn to work around them.  But we'd rather fix them to improve the experience for everyone.
+
+== Operating goals
+
+To help the development process, we seek:
+
+* to have clear and up-to-date https://github.com/oxidecomputer/omicron/blob/main/docs/how-to-run-simulated.adoc#installing-prerequisites[instructions] for setting up a development environment from scratch.  Most of this is automated.  CI uses the same automation to go from a bare environment to one that builds and tests Omicron, so this automation is tested regularly with the rest of the repo.
+* to have clear instructions for basic activities like formatting code, running clippy, running tests, etc.  These should be consistent across components and across local development vs. CI.
+* to prioritize debugging and fixing flaky tests so that developers can always expect the tests to pass.  Failures don't necessarily need to be reproducible to debug them.  The test suite preserves trace-level log files and database contents from failed test runs.  You can inspect the database contents using `omicron-dev db-run` to spin up a transient database instance pointed at the saved database contents.
+* to ensure that a fresh clone and build of the repo should produce equivalent software to any other clone, including the CI environment.  If tests pass for one developer on the tip of "main", they should pass for other developers as well as CI.  We use rust-toolchain and Cargo.lock to ensure that developers are getting a consistent toolchain and packages as each other and CI.
+
+Omicron houses many related components in one repo:
+
+* There's a clear place to put overall system documentation, including how to set up one's dev environment.  This lives with the repo that people are regularly using (as opposed to a separate meta-repo).
+* There's a single set of steps for setting up your dev environment, formatting code, running clippy, and running tests, no matter which component(s) you're working on.  (To move faster, you can still operate on individual components rather than the whole repo.)
+* Various component test suites depend on other components in the repo so that they can spin up transient instances of them for testing.
+* When we want to update a dependency used in many places, we can often just make one (git) change to update it everywhere.  (This doesn't solve the problem of _deploying_ all those changes, of course.)
+
+To make it easy to run tests, the test suite automates setup and teardown of the service under test _and_ other services that it depends on (rather than relying on error-prone manual steps to set these up).  A standard `ControlPlaneTestContext` in the Nexus test suite spins up real instances of CockroachDB, Clickhouse, Nexus, and internal/external DNS; plus mock versions of Sled Agent and optionally parts of Crucible.  All of this makes it very easy to write a new integration test that uses a great deal of the real stack.  You can also spin all this up and poke around interactively using the `omicron-dev run-all` command.
+
+To make it easy to write comprehensive, reliable tests:
+
+* Individual tests generally don't need to worry about interference from other tests.  Because spin-up/spin-down of these services is automated, every Nexus integration test gets its own copy of everything (including the database).  Server sockets use the pattern of binding to port 0 in the test suite (letting the OS pick a free port) so they don't collide with each other or any other running software.
+* With the above infrastructure for standing up transient instances of dependencies, it's possible to write end-to-end integration tests that exercise multiple components together with minimal boilerplate.
+
+We use automation (dependabot and Renovate) to keep dependencies (including Rust itself) up to date so that we don't suddenly find we need to make big leaps in these.
+
+For many components used by Omicron, we create https://github.com/oxidecomputer/dropshot/blob/main/CHANGELOG.adoc#090-released-2023-01-20[changelogs] that describe for each breaking change how to know if you're affected and what you have to do to move past it.  These are written for maintainers of consumers, who might not be very familiar with a library's other recent changes or internal details.  (We don't yet do this for the tightly coupled components within Omicron.)
+
+These are all related: using dependabot for keeping dependencies up to date is only tenable _because_ Rust is so well statically-checked (so the build usually breaks when a dependency makes a breaking change) and we have good test coverage so that it's generally fair to say that if CI passes, the change didn't break Omicron.  We have good test coverage in large part _because_ it's relatively easy to write reliable tests.  It's easy to write tests in part because they're in the same repo as the software, they operate on their own isolated copies of the stack, etc.
+
+== Caveats, downsides, alternatives
+
+Above we talk up the value of easy-to-run, easy-to-write, comprehensive automated tests.
+This doesn't work for everything.  Sled Agent by nature takes over whatever system it's managing, and the resources it manages are not themselves virtualized, so it's not possible to fully test it outside of, say, giving it a whole VM.  (On the plus side, thanks to Rust, it _is_ possible to have confidence in many mundane refactoring-type changes just by virtue of them compiling.)  Networking is another area where it's hard to automate testing in the way we've described above without a much richer virtualized environment.
+
+A large, consolidated repo like Omicron has its downsides, though using separate repos doesn't address most of these problems:
+
+* It can be hard to find the stuff you need.  With separate repos, it can be hard to find which _repo_ you need.
+* If you try to build the whole thing, it can take a while.  But you generally don't need to do this.  You can easily build subsets of it, though people don't always know about the Cargo options for doing that.  These have their own pitfalls, like the way workspace feature unification works.  (See "Working with Omicron" in the README.)  To run with that example: the problem with workspace feature unification is that when you change what package you're building, you might find Cargo unexpectedly rebuilding some common dependency.  If we used separate repos, Cargo would _always_ rebuild that dependency when you switched repos.
+* All things being equal, a larger repo means more developers in the same repo, meaning more merge conflicts.  But merge conflicts for unrelated changes should be automatically resolved.
+* All things being equal, a full CI run takes longer, since it tests more.  (This can likely be mitigated with a merge queue.  We haven't tried that yet.)
+* Putting a bunch of components into one repo can create the illusion that if you update both sides of a client/server interface, you're done.  That's not true.  We need to consider when a newer client is deployed against an older server and vice versa.  But given that we need to do that, we don't _also_ need to make it harder to mechanically _make_ such API changes by requiring coordinated pushes to separate repos.
+* It takes a lot of compute resources (CPU, memory, and disk space) on one's development machine to build the whole repo.
+* Dependabot is incredibly noisy and annoying to work with for various reasons.  These are mostly implementation issues, and we could probably improve it considerably if we want to invest time in setting it up better (e.g., having it merge into a separate branch and merge _that_ branch into main once a week or so).  With separate repos that _also_ used dependabot, the noise would presumably be much larger since many dependencies would be updated separately in each repo.
+
+Some of us have worked on large systems that used separate repos for deployed components, particularly Joyent's https://github.com/TritonDataCenter/manta[Manta].  We ran into many challenges with this.  Some of these are implementation details, and not all of these have to do with using separate repos, but many were exacerbated by that pattern:
+
+* There were https://github.com/TritonDataCenter/manta#repositories[10] - https://github.com/TritonDataCenter/manta/blob/master/docs/operator-guide/architecture.md#manta-components-at-a-glance[20] major top-level components, and https://github.com/TritonDataCenter/manta/blob/master/tools/jr-manifest.json[over 100 git repos] in all.  We eventually built a meta-repo with documentation about the whole system.  But since the active developers rarely needed this, it was often out of date.
+* There were no system-level automated tests, in part because there was no place to put them.  We could have put them in the above meta-repo.  That would mean inventing a mechanism to bind it to specific versions of all the different components.  It would also mean the tests would live separately from all the components being tested.  Any change that also updated the system test suite (presumably most of them) would have to coordinate commits to multiple repos.
+* Each repo had its own bespoke process for setting up a development environment.  They would assume various tools on your PATH, but often not say where to get them or what version was required.  Things would fail bafflingly.  For example, although they all used Node, they depended on different versions.  Having the wrong Node on your PATH might cause a syntax error when running the service.
+* Each repo had its own infrastructure for checking style and lint, running tests, etc.  Even though we had https://github.com/TritonDataCenter/eng/blob/master/docs/index.md[standardized on things like how to run these checks], and even provided a https://github.com/TritonDataCenter/eng/blob/master/docs/index.md#writing-makefiles[library of Makefiles] to make it easy to stick to this interface, in practice, every repo assumed different things about its environment.  These assumptions were not always documented.  When things failed, they often did so in baffling ways.
+* Each repo had its own idea about what `make test` means.  Most them assumed that you had started the service under test already.  That in turn means you had also started its dependencies, which means cloning all those repos, figuring out _their_ dev environment setup steps, etc.  This approach also made it impossible to write tests that would stop or start the service under test, since that was outside the control of the test suite.
+* Updating a common dependency (including Node) across the board involved separately updating it in each repo.  This was harder in Node than in Rust because breaking API changes only fail at runtime.  Plus, test coverage wasn't great (for all the reasons mentioned here), so this cost was even higher.
+
+The net result was that Manta became _very_ slow to iterate on, even for experienced developers.

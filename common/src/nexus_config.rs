@@ -5,18 +5,24 @@
 //! Configuration parameters to Nexus that are usually only known
 //! at deployment time.
 
+use crate::address::NEXUS_TECHPORT_EXTERNAL_PORT;
+use crate::api::internal::shared::SwitchLocation;
+
 use super::address::{Ipv6Subnet, RACK_PREFIX};
 use super::postgres_config::PostgresConfigWithUrl;
 use anyhow::anyhow;
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use serde_with::DeserializeFromStr;
 use serde_with::DisplayFromStr;
 use serde_with::DurationSeconds;
 use serde_with::SerializeDisplay;
+use std::collections::HashMap;
 use std::fmt;
+use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -94,35 +100,69 @@ impl std::cmp::PartialEq<std::io::Error> for LoadError {
 }
 
 #[serde_as]
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[allow(clippy::large_enum_variant)]
 pub enum Database {
     FromDns,
     FromUrl {
         #[serde_as(as = "DisplayFromStr")]
+        #[schemars(with = "String")]
         url: PostgresConfigWithUrl,
     },
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+/// The mechanism Nexus should use to contact the internal DNS servers.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum InternalDns {
+    /// Nexus should infer the DNS server addresses from this subnet.
+    ///
+    /// This is a more common usage for production.
+    FromSubnet { subnet: Ipv6Subnet<RACK_PREFIX> },
+    /// Nexus should use precisely the following address.
+    ///
+    /// This is less desirable in production, but can give value
+    /// in test scenarios.
+    FromAddress { address: SocketAddr },
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
 pub struct DeploymentConfig {
     /// Uuid of the Nexus instance
     pub id: Uuid,
     /// Uuid of the Rack where Nexus is executing.
     pub rack_id: Uuid,
-    /// Dropshot configuration for the external API server.
+    /// Port on which the "techport external" dropshot server should listen.
+    /// This dropshot server copies _most_ of its config from
+    /// `dropshot_external` (so that it matches TLS, etc.), but builds its
+    /// listening address by combining `dropshot_internal`'s IP address with
+    /// this port.
     ///
-    /// If certificate information is available to Nexus, these
-    /// settings will also be used to launch an HTTPS server
-    /// on [PackageConfig::nexus_https_port].
-    pub dropshot_external: ConfigDropshot,
+    /// We use `serde(default = ...)` to ensure we don't break any serialized
+    /// configs that were created before this field was added. In production we
+    /// always expect this port to be constant, but we need to be able to
+    /// override it when running tests.
+    #[schemars(skip)]
+    #[serde(default = "default_techport_external_server_port")]
+    pub techport_external_server_port: u16,
+    /// Dropshot configuration for the external API server.
+    #[schemars(skip)] // TODO we're protected against dropshot changes
+    pub dropshot_external: ConfigDropshotWithTls,
     /// Dropshot configuration for internal API server.
+    #[schemars(skip)] // TODO we're protected against dropshot changes
     pub dropshot_internal: ConfigDropshot,
-    /// Portion of the IP space to be managed by the Rack.
-    pub subnet: Ipv6Subnet<RACK_PREFIX>,
+    /// Describes how Nexus should find internal DNS servers
+    /// for bootstrapping.
+    pub internal_dns: InternalDns,
     /// DB configuration.
     pub database: Database,
+    /// External DNS servers Nexus can use to resolve external hosts.
+    pub external_dns_servers: Vec<IpAddr>,
+}
+
+fn default_techport_external_server_port() -> u16 {
+    NEXUS_TECHPORT_EXTERNAL_PORT
 }
 
 impl DeploymentConfig {
@@ -140,6 +180,22 @@ impl DeploymentConfig {
     }
 }
 
+/// Thin wrapper around `ConfigDropshot` that adds a boolean for enabling TLS
+///
+/// The configuration for TLS consists of the list of TLS certificates used.
+/// This is dynamic, driven by what's in CockroachDB.  That's why we only need a
+/// boolean here.  (If in the future we want to configure other things about
+/// TLS, this could be extended.)
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct ConfigDropshotWithTls {
+    /// Regular Dropshot configuration parameters
+    #[serde(flatten)]
+    pub dropshot: ConfigDropshot,
+    /// Whether TLS is enabled (default: false)
+    #[serde(default)]
+    pub tls: bool,
+}
+
 // By design, we require that all config properties be specified (i.e., we don't
 // use `serde(default)`).
 
@@ -152,8 +208,6 @@ pub struct AuthnConfig {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ConsoleConfig {
     pub static_dir: PathBuf,
-    /// how long the browser can cache static assets
-    pub cache_control_max_age_minutes: u32,
     /// how long a session can be idle before expiring
     pub session_idle_timeout_minutes: u32,
     /// how long a session can exist before expiring
@@ -168,6 +222,12 @@ pub struct UpdatesConfig {
     pub default_base_url: String,
 }
 
+/// Options to tweak database schema changes.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct SchemaConfig {
+    pub schema_dir: PathBuf,
+}
+
 /// Optional configuration for the timeseries database.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct TimeseriesDbConfig {
@@ -176,10 +236,15 @@ pub struct TimeseriesDbConfig {
 }
 
 /// Configuration for the `Dendrite` dataplane daemon.
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct DpdConfig {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub address: Option<SocketAddr>,
+    pub address: SocketAddr,
+}
+
+/// Configuration for the `Dendrite` dataplane daemon.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct MgdConfig {
+    pub address: SocketAddr,
 }
 
 // A deserializable type that does no validation on the tunable parameters.
@@ -261,10 +326,6 @@ impl Default for Tunables {
     }
 }
 
-fn default_https_port() -> u16 {
-    443
-}
-
 /// Background task configuration
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct BackgroundTaskConfig {
@@ -272,6 +333,12 @@ pub struct BackgroundTaskConfig {
     pub dns_internal: DnsTasksConfig,
     /// configuration for external DNS background tasks
     pub dns_external: DnsTasksConfig,
+    /// configuration for external endpoint list watcher
+    pub external_endpoints: ExternalEndpointsConfig,
+    /// configuration for nat table garbage collector
+    pub nat_cleanup: NatCleanupConfig,
+    /// configuration for inventory tasks
+    pub inventory: InventoryConfig,
 }
 
 #[serde_as]
@@ -296,6 +363,48 @@ pub struct DnsTasksConfig {
     pub max_concurrent_server_updates: usize,
 }
 
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ExternalEndpointsConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+    // Other policy around the TLS certificates could go here (e.g.,
+    // allow/disallow wildcard certs, don't serve expired certs, etc.)
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct NatCleanupConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct InventoryConfig {
+    /// period (in seconds) for periodic activations of this background task
+    ///
+    /// Each activation fetches information about all harware and software in
+    /// the system and inserts it into the database.  This generates a moderate
+    /// amount of data.
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+
+    /// maximum number of past collections to keep in the database
+    ///
+    /// This is a very coarse mechanism to keep the system from overwhelming
+    /// itself with inventory data.
+    pub nkeep: u32,
+
+    /// disable inventory collection altogether
+    ///
+    /// This is an emergency lever for support / operations.  It should never be
+    /// necessary.
+    pub disable: bool,
+}
+
 /// Configuration for a nexus server
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct PackageConfig {
@@ -305,9 +414,6 @@ pub struct PackageConfig {
     pub log: ConfigLogging,
     /// Authentication-related configuration
     pub authn: AuthnConfig,
-    /// Port Nexus should use for launching HTTPS servers
-    #[serde(default = "default_https_port")]
-    pub nexus_https_port: u16,
     /// Timeseries database configuration.
     #[serde(default)]
     pub timeseries_db: TimeseriesDbConfig,
@@ -315,14 +421,22 @@ pub struct PackageConfig {
     /// this is unconfigured.
     #[serde(default)]
     pub updates: Option<UpdatesConfig>,
+    /// Describes how to handle and perform schema changes.
+    #[serde(default)]
+    pub schema: Option<SchemaConfig>,
     /// Tunable configuration for testing and experimentation
     #[serde(default)]
     pub tunables: Tunables,
     /// `Dendrite` dataplane daemon configuration
     #[serde(default)]
-    pub dendrite: DpdConfig,
+    pub dendrite: HashMap<SwitchLocation, DpdConfig>,
+    /// Maghemite mgd daemon configuration
+    #[serde(default)]
+    pub mgd: HashMap<SwitchLocation, MgdConfig>,
     /// Background task configuration
     pub background_tasks: BackgroundTaskConfig,
+    /// Default Crucible region allocation strategy
+    pub default_region_allocation_strategy: RegionAllocationStrategy,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -389,21 +503,22 @@ impl std::fmt::Display for SchemeName {
 
 #[cfg(test)]
 mod test {
-    use super::Tunables;
     use super::{
-        AuthnConfig, Config, ConsoleConfig, LoadError, PackageConfig,
-        SchemeName, TimeseriesDbConfig, UpdatesConfig,
+        default_techport_external_server_port, AuthnConfig,
+        BackgroundTaskConfig, Config, ConfigDropshotWithTls, ConsoleConfig,
+        Database, DeploymentConfig, DnsTasksConfig, DpdConfig,
+        ExternalEndpointsConfig, InternalDns, InventoryConfig, LoadError,
+        LoadErrorKind, MgdConfig, NatCleanupConfig, PackageConfig, SchemeName,
+        TimeseriesDbConfig, Tunables, UpdatesConfig,
     };
     use crate::address::{Ipv6Subnet, RACK_PREFIX};
-    use crate::nexus_config::{
-        BackgroundTaskConfig, Database, DeploymentConfig, DnsTasksConfig,
-        DpdConfig, LoadErrorKind,
-    };
+    use crate::api::internal::shared::SwitchLocation;
     use dropshot::ConfigDropshot;
     use dropshot::ConfigLogging;
     use dropshot::ConfigLoggingIfExists;
     use dropshot::ConfigLoggingLevel;
     use libc;
+    use std::collections::HashMap;
     use std::fs;
     use std::net::{Ipv6Addr, SocketAddr};
     use std::path::Path;
@@ -499,7 +614,6 @@ mod test {
             r##"
             [console]
             static_dir = "tests/static"
-            cache_control_max_age_minutes = 10
             session_idle_timeout_minutes = 60
             session_absolute_timeout_minutes = 480
             [authn]
@@ -519,18 +633,22 @@ mod test {
             [deployment]
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
+            external_dns_servers = [ "1.1.1.1", "9.9.9.9" ]
             [deployment.dropshot_external]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024
             [deployment.dropshot_internal]
             bind_address = "10.1.2.3:4568"
             request_body_max_bytes = 1024
-            [deployment.subnet]
-            net = "::/56"
+            [deployment.internal_dns]
+            type = "from_subnet"
+            subnet.net = "::/56"
             [deployment.database]
             type = "from_dns"
-            [dendrite]
+            [dendrite.switch0]
             address = "[::1]:12224"
+            [mgd.switch0]
+            address = "[::1]:4676"
             [background_tasks]
             dns_internal.period_secs_config = 1
             dns_internal.period_secs_servers = 2
@@ -540,6 +658,14 @@ mod test {
             dns_external.period_secs_servers = 6
             dns_external.period_secs_propagation = 7
             dns_external.max_concurrent_server_updates = 8
+            external_endpoints.period_secs = 9
+            nat_cleanup.period_secs = 30
+            inventory.period_secs = 10
+            inventory.nkeep = 11
+            inventory.disable = false
+            [default_region_allocation_strategy]
+            type = "random"
+            seed = 0
             "##,
         )
         .unwrap();
@@ -552,11 +678,16 @@ mod test {
                     rack_id: "38b90dc4-c22a-65ba-f49a-f051fe01208f"
                         .parse()
                         .unwrap(),
-                    dropshot_external: ConfigDropshot {
-                        bind_address: "10.1.2.3:4567"
-                            .parse::<SocketAddr>()
-                            .unwrap(),
-                        ..Default::default()
+                    techport_external_server_port:
+                        default_techport_external_server_port(),
+                    dropshot_external: ConfigDropshotWithTls {
+                        tls: false,
+                        dropshot: ConfigDropshot {
+                            bind_address: "10.1.2.3:4567"
+                                .parse::<SocketAddr>()
+                                .unwrap(),
+                            ..Default::default()
+                        }
                     },
                     dropshot_internal: ConfigDropshot {
                         bind_address: "10.1.2.3:4568"
@@ -564,18 +695,24 @@ mod test {
                             .unwrap(),
                         ..Default::default()
                     },
-                    subnet: Ipv6Subnet::<RACK_PREFIX>::new(Ipv6Addr::LOCALHOST),
+                    internal_dns: InternalDns::FromSubnet {
+                        subnet: Ipv6Subnet::<RACK_PREFIX>::new(
+                            Ipv6Addr::LOCALHOST
+                        )
+                    },
                     database: Database::FromDns,
+                    external_dns_servers: vec![
+                        "1.1.1.1".parse().unwrap(),
+                        "9.9.9.9".parse().unwrap(),
+                    ],
                 },
                 pkg: PackageConfig {
                     console: ConsoleConfig {
                         static_dir: "tests/static".parse().unwrap(),
-                        cache_control_max_age_minutes: 10,
                         session_idle_timeout_minutes: 60,
                         session_absolute_timeout_minutes: 480
                     },
                     authn: AuthnConfig { schemes_external: Vec::new() },
-                    nexus_https_port: 443,
                     log: ConfigLogging::File {
                         level: ConfigLoggingLevel::Debug,
                         if_exists: ConfigLoggingIfExists::Fail,
@@ -588,12 +725,22 @@ mod test {
                         trusted_root: PathBuf::from("/path/to/root.json"),
                         default_base_url: "http://example.invalid/".into(),
                     }),
+                    schema: None,
                     tunables: Tunables { max_vpc_ipv4_subnet_prefix: 27 },
-                    dendrite: DpdConfig {
-                        address: Some(
-                            SocketAddr::from_str("[::1]:12224").unwrap()
-                        )
-                    },
+                    dendrite: HashMap::from([(
+                        SwitchLocation::Switch0,
+                        DpdConfig {
+                            address: SocketAddr::from_str("[::1]:12224")
+                                .unwrap(),
+                        }
+                    )]),
+                    mgd: HashMap::from([(
+                        SwitchLocation::Switch0,
+                        MgdConfig {
+                            address: SocketAddr::from_str("[::1]:4676")
+                                .unwrap(),
+                        }
+                    )]),
                     background_tasks: BackgroundTaskConfig {
                         dns_internal: DnsTasksConfig {
                             period_secs_config: Duration::from_secs(1),
@@ -607,7 +754,22 @@ mod test {
                             period_secs_propagation: Duration::from_secs(7),
                             max_concurrent_server_updates: 8,
                         },
+                        external_endpoints: ExternalEndpointsConfig {
+                            period_secs: Duration::from_secs(9),
+                        },
+                        nat_cleanup: NatCleanupConfig {
+                            period_secs: Duration::from_secs(30),
+                        },
+                        inventory: InventoryConfig {
+                            period_secs: Duration::from_secs(10),
+                            nkeep: 11,
+                            disable: false,
+                        }
                     },
+                    default_region_allocation_strategy:
+                        crate::nexus_config::RegionAllocationStrategy::Random {
+                            seed: Some(0)
+                        }
                 },
             }
         );
@@ -617,7 +779,6 @@ mod test {
             r##"
             [console]
             static_dir = "tests/static"
-            cache_control_max_age_minutes = 10
             session_idle_timeout_minutes = 60
             session_absolute_timeout_minutes = 480
             [authn]
@@ -632,17 +793,20 @@ mod test {
             [deployment]
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
+            techport_external_server_port = 12345
+            external_dns_servers = [ "1.1.1.1", "9.9.9.9" ]
             [deployment.dropshot_external]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024
             [deployment.dropshot_internal]
             bind_address = "10.1.2.3:4568"
             request_body_max_bytes = 1024
-            [deployment.subnet]
-            net = "::/56"
+            [deployment.internal_dns]
+            type = "from_subnet"
+            subnet.net = "::/56"
             [deployment.database]
             type = "from_dns"
-            [dendrite]
+            [dendrite.switch0]
             address = "[::1]:12224"
             [background_tasks]
             dns_internal.period_secs_config = 1
@@ -653,6 +817,13 @@ mod test {
             dns_external.period_secs_servers = 6
             dns_external.period_secs_propagation = 7
             dns_external.max_concurrent_server_updates = 8
+            external_endpoints.period_secs = 9
+            nat_cleanup.period_secs = 30
+            inventory.period_secs = 10
+            inventory.nkeep = 3
+            inventory.disable = false
+            [default_region_allocation_strategy]
+            type = "random"
             "##,
         )
         .unwrap();
@@ -661,6 +832,7 @@ mod test {
             config.pkg.authn.schemes_external,
             vec![SchemeName::Spoof, SchemeName::SessionCookie],
         );
+        assert_eq!(config.deployment.techport_external_server_port, 12345);
     }
 
     #[test]
@@ -670,7 +842,6 @@ mod test {
             r##"
             [console]
             static_dir = "tests/static"
-            cache_control_max_age_minutes = 10
             session_idle_timeout_minutes = 60
             session_absolute_timeout_minutes = 480
             [authn]
@@ -685,14 +856,16 @@ mod test {
             [deployment]
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
+            external_dns_servers = [ "1.1.1.1", "9.9.9.9" ]
             [deployment.dropshot_external]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024
             [deployment.dropshot_internal]
             bind_address = "10.1.2.3:4568"
             request_body_max_bytes = 1024
-            [deployment.subnet]
-            net = "::/56"
+            [deployment.internal_dns]
+            type = "from_subnet"
+            subnet.net = "::/56"
             [deployment.database]
             type = "from_dns"
             "##,
@@ -721,7 +894,6 @@ mod test {
             r##"
             [console]
             static_dir = "tests/static"
-            cache_control_max_age_minutes = 10
             session_idle_timeout_minutes = 60
             session_absolute_timeout_minutes = 480
             [authn]
@@ -741,14 +913,16 @@ mod test {
             [deployment]
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
+            external_dns_servers = [ "1.1.1.1", "9.9.9.9" ]
             [deployment.dropshot_external]
             bind_address = "10.1.2.3:4567"
             request_body_max_bytes = 1024
             [deployment.dropshot_internal]
             bind_address = "10.1.2.3:4568"
             request_body_max_bytes = 1024
-            [deployment.subnet]
-            net = "::/56"
+            [deployment.internal_dns]
+            type = "from_subnet"
+            subnet.net = "::/56"
             [deployment.database]
             type = "from_dns"
             "##,
@@ -791,24 +965,66 @@ mod test {
         struct DummyConfig {
             deployment: DeploymentConfig,
         }
-        let config_path = "../smf/nexus/config-partial.toml";
-        println!(
-            "checking {:?} with example deployment section added",
-            config_path
-        );
-        let mut contents = std::fs::read_to_string(config_path)
-            .expect("failed to read Nexus SMF config file");
-        contents.push_str(
-            "\n\n\n \
-            # !! content below added by test_repo_configs_are_valid()\n\
-            \n\n\n",
-        );
         let example_deployment = toml::to_string_pretty(&DummyConfig {
             deployment: example_config.deployment,
         })
         .unwrap();
-        contents.push_str(&example_deployment);
-        let _: Config = toml::from_str(&contents)
-            .expect("Nexus SMF config file is not valid");
+
+        let nexus_config_paths = [
+            "../smf/nexus/single-sled/config-partial.toml",
+            "../smf/nexus/multi-sled/config-partial.toml",
+        ];
+        for config_path in nexus_config_paths {
+            println!(
+                "checking {:?} with example deployment section added",
+                config_path
+            );
+            let mut contents = std::fs::read_to_string(config_path)
+                .expect("failed to read Nexus SMF config file");
+            contents.push_str(
+                "\n\n\n \
+            # !! content below added by test_repo_configs_are_valid()\n\
+            \n\n\n",
+            );
+            contents.push_str(&example_deployment);
+            let _: Config = toml::from_str(&contents)
+                .expect("Nexus SMF config file is not valid");
+        }
     }
+
+    #[test]
+    fn test_deployment_config_schema() {
+        let schema = schemars::schema_for!(DeploymentConfig);
+        expectorate::assert_contents(
+            "../schema/deployment-config.json",
+            &serde_json::to_string_pretty(&schema).unwrap(),
+        );
+    }
+}
+
+/// Defines a strategy for choosing what physical disks to use when allocating
+/// new crucible regions.
+///
+/// NOTE: More strategies can - and should! - be added.
+///
+/// See <https://rfd.shared.oxide.computer/rfd/0205> for a more
+/// complete discussion.
+///
+/// Longer-term, we should consider:
+/// - Storage size + remaining free space
+/// - Sled placement of datasets
+/// - What sort of loads we'd like to create (even split across all disks
+///   may not be preferable, especially if maintenance is expected)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum RegionAllocationStrategy {
+    /// Choose disks pseudo-randomly. An optional seed may be provided to make
+    /// the ordering deterministic, otherwise the current time in nanoseconds
+    /// will be used. Ordering is based on sorting the output of `md5(UUID of
+    /// candidate dataset + seed)`. The seed does not need to come from a
+    /// cryptographically secure source.
+    Random { seed: Option<u64> },
+
+    /// Like Random, but ensures that each region is allocated on its own sled.
+    RandomWithDistinctSleds { seed: Option<u64> },
 }

@@ -1,33 +1,184 @@
 :showtitle:
 :toc: left
 :icons: font
+ifdef::env-github[]
+:tip-caption: :bulb:
+:note-caption: :information_source:
+:important-caption: :heavy_exclamation_mark:
+:caution-caption: :fire:
+:warning-caption: :warning:
+endif::[]
 
-= Running Omicron (Non-Simulated)
+= Running Omicron
 
-Omicron is the control plane for an Oxide rack. It expects to execute
-on Helios systems, and Sleds use Helios-specific interfaces to manage
-resources.
+Omicron is the control plane for the Oxide system.  There are a few different ways to run Omicron depending on what resources you have available and how much of the stack you want to run using real components vs. simulated ones.  Generally speaking, it's easier to get things going and automate testing with simulated components, but of course much of the system's functionality is missing or faked up when using simulated components.
 
-If you're interested in running the control plane on other platforms, including
-Linux and Mac, refer to the guide on xref:how-to-run-simulated.adoc[running
-simulated Omicron].
+The most common development configurations are:
 
-== Installing Prerequisite Software
+1. Using one or more simulated Sled Agents.  There are no real VMs.  All components listen on localhost and talk to each other directly.  The automated tests in this repo generally use this kind of deployment.  This is the only mode that's supported on non-illumos systems (i.e., Linux and MacOS).
+2. Using one or more real Sled Agents (on separate physical machines) using SoftNPU-based Boundary Services.  You can provision real VMs this way.  Intra-"rack" networking and boundary Services (i.e., external connectivity) are fully functional using SoftNPU, a software-based simulation of the Tofino device that's normally responsible for these functions.
++
+Within this mode, you can run on real Oxide hardware ("Gimlets") or ordinary server PCs.
 
-A major prerequisite is to have a machine already running Helios. An easy way to
-do this is by using a https://github.com/oxidecomputer/helios-engvm[Helios VM].
-ISOs are also available for download https://pkg.oxide.computer/install[here].
+These are historically called "simulated" vs. "non-simulated", though they both involve simulation of some parts of a real Oxide system.
 
-Any additional prerequisite software may be installed with the following script:
+Here's a summary of the tradeoffs:
+
+[cols="1h,1,1", options="header"]
+|===
+|
+|"Simulated" deployment
+|"Non-simulated" deployment
+
+|Works on
+|illumos, Linux, MacOS
+|illumos only
+
+|Nexus
+|Real implementation
+|Real implementation
+
+|CockroachDB
+|Real implementation, 1-node cluster
+|Real implementation, multi-node cluster
+
+|Internal/External DNS
+|Real implementation
+|Real implementation
+
+|Crucible Pantry
+|Real implementation
+|Real implementation
+
+|Sled Agent
+|Simulated, multiple okay
+|Real implementation, requires separate machines for each
+
+|Propolis
+|Missing (VMs are faked-up by simulated Sled Agent)
+|Real implementation
+
+|Dendrite
+|Stub implementation
+|Simulated implementation
+
+|Management Gateway Service (MGS)
+|Missing
+|Real implementation
+
+|Internal ("rack") networking
+|Localhost
+|Real implementation on-sled, simulated implementation across sleds (SoftNPU)
+
+|Boundary services (external connectivity)
+|Missing.  Externally-facing Oxide services listen directly on localhost.  The VMs are fake, so external connectivity is moot.
+|Simulated implementation (SoftNPU)
+
+|Wicket
+|Missing
+|Not used
+
+|Management network
+|Missing
+|Not used
+
+|===
+
+**To run the simulated control plane, refer to the guide on xref:how-to-run-simulated.adoc[running simulated Omicron].**  The rest of this document describes how to run a single-Sled Omicron with a real Sled Agent and SoftNPU-based Boundary Services.
+
+There are other configurations besides the ones mentioned here:
+
+* A real Oxide rack: real hardware with real implementations of all components.
+* A Gimlet in a real Oxide rack, deployed as a single system in isolation from the rest of the rack.
+* A Gimlet on a bench (i.e., not in a rack -- requires separate hardware to connect power and networking) connected a Sidecar (the Oxide switch), also on a bench.
+* A Gimlet on a bench with no Sidecar.
+
+This document doesn't describe how to deploy these cases.
+
+== Prerequisites
+
+=== Bare-metal operating system
+
+This guide assumes that you have a system running https://github.com/oxidecomputer/helios[Helios] on a bare-metal system.footnote:[You can in principle use a VM, but you wouldn't be able to provision Instances because nested virtualization is not supported.]
+
+=== External networking
+
+Two modes of external networking are described here:
+
+1. You'll be plugging your Omicron system into an existing IPv4 network (e.g., a home network or a lab network) from which you can allocate a few IP addresses that won't be used elsewhere on the network.  The existing network will be used as the "external" network for the system, meaning that externally-facing services (like the API and console) will use IPs on this network.  If you want to be able to reach the the internet from Instances, there must be a gateway on this network that provides access to the internet.
++
+As an example, in this doc:
++
+* The network is 192.168.1.0/24.
+* The network's gateway is 192.168.1.199.
+* You can carve off a range from 192.168.1.20 to 192.168.1.40 for use by the rack:
+** 192.168.1.20 - 192.168.1.29 for externally-facing services provided by the system,
+** 192.168.1.30 as the address used by SoftNPU on the external network, and
+** 192.168.1.31 - 192.168.1.40 as the addresses used for Instances that need some public IPs (even if just for NAT to the internet).
+
+2. Alternatively, you'll set up an "external" network that only exists on your
+   test machine.  If you go this route, we'll choose 192.168.1.0/24 and all the
+   same other details as in the case above, just for convenience, and it happens
+   to match what is in the non-gimlet.toml file.  In this mode, you'll need to
+   create your made-up network, give the global zone an IP address on it,
+   and set up IPv4 forwarding and address translation (NAT) so that the NTP
+   zone and any instances can get out to the outside world.
+   We'll use 192.168.1.199 for the GZ interface.
+
+NOTE: In the two `map` lines, replace `igb0` with the name of your machine's
+      physical interface that connects to the outside world.
+
+[source,text]
+----
+$ pfexec dladm create-etherstub -t fake_external_stub0
+$ pfexec dladm create-vnic -t -l fake_external_stub0 fake_external0
+$ pfexec ipadm create-if -t fake_external0
+$ pfexec ipadm create-addr -t -T static --address 192.168.1.199 fake_external0/external
+$ echo "map igb0 192.168.1.0/24 -> 0/32 portmap tcp/udp auto" > /tmp/ipnat.conf
+$ echo "map igb0 192.168.1.0/24 -> 0/32" >> /tmp/ipnat.conf
+$ pfexec cp /tmp/ipnat.conf /etc/ipf/ipnat.conf
+$ pfexec routeadm -e ipv4-forwarding -u
+$ svcadm enable ipfilter
+----
+
+Other network configurations are possible but beyond the scope of this doc.
+
+When making this choice, note that **in order to use the system once it's set
+up, you will need to be able to access it from a web browser.**  If you go with
+option 2 here, you may need to use an SSH tunnel (see:
+<<setting-up-an-ssh-tunnel-for-console-access>>) or the like to do this.
+
+=== Picking a "machine" type
+
+Omicron packages (discussed in more detail below) are associated with a particular _machine_ type, which is one of:
+
+* `gimlet` (real Oxide hardware deployed in a real Oxide rack with a bunch of other Gimlets that together form a multi-sled system)
+* `gimlet-standalone` (real Oxide server hardware deployed in a real Oxide rack, but running as a separate single-node system)
+* `non-gimlet` (some kind of PC running as a single-machine "rack"; can potentially also be used for Gimlet running on the bench?)
+
+The main difference are the configuration files used for the Sled Agent and Rack Setup Service (RSS).
+
+=== Prerequisite software
+
+The steps below will install several executables that will need to be in your `PATH`.  You can set that up first using:
+
+[source,text]
+----
+$ source env.sh
+----
+
+(You'll want to do this in the future in every shell where you work in this workspace.)
+
+Then install prerequisite software with the following script:
 
 [source,text]
 ----
 $ pfexec ./tools/install_prerequisites.sh
 ----
 
-This script expects that you are both attempting to compile code and execute
-it on the same machine. If you'd like to have a different machine for a "builder"
-and a "runner", you can use the two more fine-grained scripts:
+You need to do this step once per workspace and potentially again each time you fetch new changes.  If the script reports any PATH problems, you'll need to correct those before proceeding.
+
+This script expects that you are both attempting to compile code and execute it on the same machine. If you'd like to have a different machine for a "builder" and a "runner", you can use the two more fine-grained scripts:
 
 [source,text]
 ----
@@ -37,65 +188,157 @@ $ ./tools/install_builder_prerequisites.sh
 $ ./tools/install_runner_prerequisites.sh
 ----
 
-There will be several binaries that will need to be in your `PATH`. The various
-prerequisites scripts will alert you to where you can find the binaries to add
-them to your `PATH`. You can also reference the file in `tools/setup-path.sh` for
-an example of how to add them to your `PATH`.
+Again, if these scripts report any PATH problems, you'll need to correct those before proceeding.
 
-=== Make (or unmake) me a Gimlet!
+The rest of these instructions assume that you're building and running Omicron on the same machine.
 
-The sled agent expects to manage a real Gimlet. However, until those are built,
-developers generally make do with something else, usually a commodity machine.
-To make your machine "look" like a Gimlet, the
-`pfexec ./tools/create_virtual_hardware.sh` script can be used. This creates a few
-file-based ZFS vdevs and ZFS zpools on top of those, and a couple of VNICs. The
-vdevs model the actual U.2s that will be in a Gimlet, and the VNICs model the
-two Chelsio NIC ports.
+== Build and deploy Omicron
 
-To access the outside world or other gimlets, we also set up a virtual sidecar
-device for those network paths.
+=== Set up virtual hardware
 
-Optionally, the `PHYSICAL_LINK` environment variable can be set to override the
-default logic used to automatically determine the physical network connection
-used for external communication. For example:
+The Sled Agent supports operation on both:
 
+* a Gimlet (i.e., real Oxide hardware), and
+* an ordinary PC that's been set up to look like a Gimlet using the `./tools/create_virtual_hardware.sh` script (described next).
+
+This script also sets up a "softnpu" zone to implement Boundary Services.  SoftNPU simulates the Tofino device that's used in real systems.  Just like Tofino, it can implement sled-to-sled networking, but that's beyond the scope of this doc.
+
+If you're running on a PC and using either of the networking configurations mentioned above, you can usually just run this script with a few environment vaiables set. These environment variables tell SoftNPU about your local network.  You will need the gateway for your network as well as the whole range of IPs that you've carved out for the Oxide system (see <<_external_networking>> above):
+
+[source,bash]
 ----
-$ PHYSICAL_LINK=ixgbe0 pfexec ./tools/create_virtual_hardware.sh
+export GATEWAY_IP=192.168.1.199     # The gateway IP address for your local network (see above)
+export PXA_START=192.168.1.20       # The first IP address your Oxide cluster can use (see above)
+export PXA_END=192.168.1.40         # The last IP address your Oxide cluster can use (see above)
 ----
 
-You can clean up these resources with `pfexec ./tools/destroy_virtual_hardware.sh`.
-This script requires Omicron be uninstalled, e.g., with `pfexec
-./target/release/omicron-package uninstall`, and a warning will be printed if
-that is not the case. The script will then remove the file-based vdevs and the
-VNICs created by `create_virtual_hardware.sh`.
+If you're using the fake sled-local external network mentioned above, then you'll need to set PHYSICAL_LINK:
 
-=== Make me a certificate!
+[source,bash]
+----
+export PHYSICAL_LINK=fake_external_stub0 	# The etherstub for the fake external network
+----
 
-Nexus's external interface will typically be served using public-facing x.509
-certificate. While we are still configuring the mechanism to integrate this real
-certificate into the package system, `./tools/create_self_signed_cert.sh` can be
-used to generate an equivalent self-signed certificate.
+If you're using an existing external network, you likely don't need to specify anything here because the script will choose one.  You can specify a particular one if you want, though:
 
-== Deploying Omicron
+[source,bash]
+----
+export PHYSICAL_LINK=igb0           # The physical link for your external network.
+----
 
-The control plane repository contains a packaging tool which bundles binaries
-and SMF manifests. After building the expected binaries, they can be packaged
-in a format which lets them be transferred to a Helios machine.
+Having set those variables, you're ready to run:
 
-This tool acts on a `package-manifest.toml` file which describes the packages to be
-bundled in the build.
+[source,bash]
+----
+$ pfexec ./tools/create_virtual_hardware.sh
+----
 
-Configuration files are used to select IP addresses, and to manage Zpools
-utilized by the Sled Agent. These configuration files are located within
-`smf/`, and likely need to be modified to use addresses and zpools which match
-your hardware. Much of this configuration will be automated in the future
-(e.g., IP addresses will be inferred and posted to a DNS system, Zpools will
-automatically be detected on discovered disks), but for now it remains
-hard-coded.
+If you're running on a Gimlet, you don't need (or want) most of what `create_virtual_hardware.sh` does, but you do still need SoftNPU.  You'll have to look at the script and run that part by hand.
 
-Packages also have a notion of "build targets", which are used to select
-between different variants of certain components. A build target is composed
-of an image type, a machine type, and a switch type:
+Later, you can clean up the resources created by `create_virtual_hardware.sh` with:
+
+----
+$ pfexec ./tools/destroy_virtual_hardware.sh
+----
+
+If you've done all this before and Omicron is still running, these resources will be in use and this script will fail.  Uninstall Omicron (see below) before running this script.
+
+=== Create a TLS certificate for the external API
+
+You can skip this step.  In that case, the externally-facing services (API and console) will run on insecure HTTP.
+
+You can generate a self-signed TLS certificate chain with:
+
+----
+$ cargo run --bin=omicron-dev -- cert-create ./smf/sled-agent/$MACHINE/initial-tls- '*.sys.oxide.test'
+----
+
+=== Rack setup configuration
+
+The relevant configuration files are in `./smf/sled-agent/$MACHINE`.  Start with `config-rss.toml` in one of those directories.  There are only a few parts you need to review:
+
+[source,toml]
+----
+[[internal_services_ip_pool_ranges]]
+first = "192.168.1.20"
+last = "192.168.1.29"
+----
+
+This is a range of IP addresses on your external network that Omicron can assign to externally-facing services (like DNS and the API).  You'll need to change these if you've picked different addresses for your external network.  See <<_external_networking>> above for more on this.
+
+You will also need to update route information if your `$GATEWAY_IP` differs from the default.
+The below example demonstrates a single static gateway route; in-depth explanations for testing with BGP can be found https://docs.oxide.computer/guides/system/network-preparations#_rack_switch_configuration_with_bgp[in the Network Preparations guide] and https://docs.oxide.computer/guides/operator/configuring-bgp[the Configuring BGP guide]:
+
+[source,toml]
+----
+# Configuration to bring up boundary services and make Nexus reachable from the
+# outside.  This block assumes that you're following option (2) above: putting
+# your Oxide system on an existing network that you control.
+[rack_network_config]
+# An internal-only IPv6 address block which contains AZ-wide services.
+# This does not need to be changed.
+rack_subnet = "fd00:1122:3344:01::/56"
+# A range of IP addresses used by Boundary Services on the network.  In a real
+# system, these would be addresses of the uplink ports on the Sidecar.  With
+# softnpu, only one address is used.
+infra_ip_first = "192.168.1.30"
+infra_ip_last = "192.168.1.30"
+
+# Configurations for BGP routers to run on the scrimlets.
+# This array can typically be safely left empty for home/local use,
+# otherwise this is a list of { asn: u32, originate: ["<v4 network>"] }
+# structs which will be be inserted when Nexus is started by sled-agent.
+# See the 'Network Preparations' guide linked above.
+bgp = []
+
+[[rack_network_config.ports]]
+# Routes associated with this port.
+# NOTE: The below `nexthop` should be set to $GATEWAY_IP for your configuration
+routes = [{nexthop = "192.168.1.199", destination = "0.0.0.0/0"}]
+# Addresses associated with this port.
+# For softnpu, an address within the "infra" block above that will be used for
+# the softnpu uplink port.  You can just pick the first address in that pool.
+addresses = ["192.168.1.30/32"]
+# Name of the uplink port.  This should always be "qsfp0" when using softnpu.
+port = "qsfp0"
+# The speed of this port.
+uplink_port_speed = "40G"
+# The forward error correction mode for this port.
+uplink_port_fec="none"
+# Switch to use for the uplink. For single-rack deployments this can be
+# "switch0" (upper slot) or "switch1" (lower slot). For single-node softnpu
+# and dendrite stub environments, use "switch0"
+switch = "switch0"
+# Neighbors we expect to peer with over BGP on this port.
+# see: common/src/api/internal/shared.rs – BgpPeerConfig
+bgp_peers = []
+----
+
+In some configurations (not the one described here), it may be necessary to update `smf/sled-agent/$MACHINE/config.toml`:
+
+----
+# An optional data link from which we extract a MAC address.
+# This is used as a unique identifier for the bootstrap address.
+#
+# If empty, this will be equivalent to the first result from:
+# $ dladm show-phys -p -o LINK
+# data_link = "igb0"
+
+# On a multi-sled system, transit-mode Maghemite runs in the `oxz_switch` zone
+# to configure routes between sleds.  This runs over the Sidecar's rear ports
+# (whether simulated with SoftNPU or not).  On a Gimlet deployed in a rack,
+# tfportd will create the necessary links and Maghemite will be configured to
+# use those.  But on non-Gimlet systems, you need to specify physical links to
+# be passed into the `oxz_switch` zone for this purpose.  You can skip this if
+# you're deploying a single-sled system.
+# switch_zone_maghemite_links = ["ixgbe0", "ixgbe1"]
+----
+
+=== Build Omicron packages
+
+The `omicron-package` tool builds Omicron and bundles all required files into _packages_ that can be copied to another system (if necessary) and installed there.  This tool acts on `package-manifest.toml`, which describes the contents of the packages.
+
+Packages have a notion of "build targets", which are used to select between different variants of certain components.  A build target is composed of an image type, a machine type, and a switch type:
 
 [source,console]
 ----
@@ -107,52 +350,63 @@ Error: Creates a new build target, and sets it as "active"
 Usage: omicron-package target create [OPTIONS]
 
 Options:
-  -i, --image <IMAGE>      [default: standard] [possible values: standard, trampoline]
-  -m, --machine <MACHINE>  [possible values: gimlet, gimlet-standalone, non-gimlet]
-  -s, --switch <SWITCH>    [possible values: asic, stub, softnpu]
-  -h, --help               Print help (see more with '--help')
+  -i, --image <IMAGE>
+          [default: standard]
+
+          Possible values:
+          - standard:   A typical host OS image
+          - trampoline: A recovery host OS image, intended to bootstrap a Standard image
+
+  -m, --machine <MACHINE>
+          Possible values:
+          - gimlet:            Use sled agent configuration for a Gimlet
+          - gimlet-standalone: Use sled agent configuration for a Gimlet running in isolation
+          - non-gimlet:        Use sled agent configuration for a device emulating a Gimlet
+
+  -s, --switch <SWITCH>
+          Possible values:
+          - asic:    Use the "real" Dendrite, that attempts to interact with the Tofino
+          - stub:    Use a "stub" Dendrite that does not require any real hardware
+          - softnpu: Use a "softnpu" Dendrite that uses the SoftNPU asic emulator
+
+  -r, --rack-topology <RACK_TOPOLOGY>
+          Possible values:
+          - multi-sled:  Use configurations suitable for a multi-sled deployment, such as dogfood and production racks
+          - single-sled: Use configurations suitable for a single-sled deployment, such as CI and dev machines
+
+  -h, --help
+          Print help (see a summary with '-h')
 
 ----
 
-To setup a build target for a non-Gimlet machine with external networking, you
-would run:
+To set up a build target for a non-Gimlet machine with simulated (but fully functional) external networking, you would run:
 
 [source,console]
 ----
-$ cargo run --release --bin omicron-package -- -t default target create -i standard -m non-gimlet -s softnpu
+$ cargo run --release --bin omicron-package -- -t default target create -i standard -m non-gimlet -s softnpu -r single-sled
     Finished release [optimized] target(s) in 0.66s
-     Running `target/release/omicron-package -t default target create -i standard -m non-gimlet -s softnpu`
+     Running `target/release/omicron-package -t default target create -i standard -m non-gimlet -s softnpu -r single-sled`
 Created new build target 'default' and set it as active
 ----
 
-NOTE: The `target create` command will set the new target as active and thus let you
-omit the `-t` flag in subsequent commands.
+NOTE: The `target create` command will set the new target as active and thus let you omit the `-t` flag in subsequent commands.
 
-=== Building
-
-To actually kick off the build and package everything, you can run:
+To kick off the build and package everything up, you can run:
 
 [source,console]
 ----
-cargo run --release --bin omicron-package -- package
+$ cargo run --release --bin omicron-package -- package
 ----
 
-This will take all the packages defined in the manifest and further selected
-by the active build target and either build them (if local) or download them
-before packaging them into tarballs. The final artifacts will be placed in
-a target directory of your choice (by default, `out/`) ready to be unpacked
-as services.
+This will package up all the packages defined in the manifest that are selected by the active build target.  Packing involves building software from this repo, downloading prebuilt pieces from elsewhere, and assembling the results into tarballs. The final artifacts will be placed in a target directory of your choice (by default, `out/`) ready to be unpacked as services.
 
-NOTE: Running in `release` mode isn't strictly required, but improves
-the performance of the packaging tools significantly.
+NOTE: Running in `release` mode isn't strictly required, but improves the performance of the packaging tools significantly.
 
-NOTE: Instead of `package` you can also use the `check` subcommand to just
-essentially run `cargo check` without building or creating packages.
+NOTE: Instead of `package` you can also use the `check` subcommand to essentially run `cargo check` without building or creating packages.
 
 === Installing
 
-To install the services on a target machine, the following command
-may be executed:
+To install the services on a target machine:
 
 [source,console]
 ----
@@ -160,32 +414,23 @@ $ cargo build --release --bin omicron-package
 $ pfexec ./target/release/omicron-package install
 ----
 
-[NOTE]
+[WARNING]
 ====
 **Do not use `pfexec cargo run` directly**; it will cause files in `~/.cargo` and `target/` to be owned by root, which will cause problems down the road.
 
 If you've done this already, and you wish to recover, run from the root of this repository `pfexec chown -R $USER:$(id -ng $USER) target ${CARGO_HOME:-~/.cargo}`.
 ====
 
-This command installs a bootstrap service called
-`svc:/oxide/sled-agent:default`, which itself loads other requested
-services. The bootstrap service is currently the only service which is
-"persistent" across reboots - although it will initialize other services as part
-of its setup sequence anyway.
-
-The first time the bootstrap service runs, it will take a while to initialize
-the Omicron zones:
+This command installs an SMF service called `svc:/oxide/sled-agent:default`, which itself starts the other required services.  This will take a few minutes.  You can watch the progress by looking at the Sled Agent log:
 
 [source,console]
 ----
-# List all services:
-$ svcs
-
-# View logs for sled-agent:
 $ tail -F $(svcs -L sled-agent)
 ----
 
-Once the zones are initialized, they'll show up in `zoneadm`:
+(You may want to pipe that to https://github.com/oxidecomputer/looker[looker] for better readability.)
+
+You can also list the zones that have been created so far:
 
 [source,console]
 ----
@@ -193,13 +438,207 @@ Once the zones are initialized, they'll show up in `zoneadm`:
 $ zoneadm list -cnv
 
 # View logs for a service:
-$ pfexec tail -f $(pfexec svcs -z oxz_nexus -L nexus)
+$ pfexec tail -f $(pfexec svcs -z oxz_nexus_<UUID> -L nexus)
 ----
 
-=== Uninstalling
+== Using Omicron
 
-To uninstall all Omicron services from a machine, the following may be
-executed:
+At this point, the system should be up and running!  You should be able to reach the external API and web console from your external network.  But how?  The URL for the API and console will be:
+
+* `http://` / `https://` (depending on whether you provided TLS certificates in the steps above)
+* `recovery` (assuming you did not change the default recovery Silo name)
+* `.sys.`
+* `oxide.test` (assuming you did not change the delegated DNS domain).
+
+This won't be in public DNS, though.  You'd need to be using the deployed system's external DNS servers as your DNS server for things to "just work".footnote:[If you did this, everything _else_ would be broken because the Omicron-provided DNS servers do not serve any domains except the ones operated by Omicron.]  You can query them directly:
+
+[source,console]
+----
+$ dig recovery.sys.oxide.test @192.168.1.20 +short
+192.168.1.21
+----
+
+Where did 192.168.1.20 come from?  That's the external address of the external
+DNS server.  We knew that because it's listed in the `external_dns_ips` entry of
+the `config-rss.toml` file we're using.
+
+Having looked this up, the easiest thing will be to use `http://192.168.1.21` for your URL (replacing with `https` if you used a certificate, and replacing that IP if needed).  If you've set up networking right, you should be able to reach this from your web browser.  You may have to instruct the browser to accept a self-signed TLS certificate.  See also <<connecting-securely-with-tls-using-the-cli>>.
+
+=== Setting up an SSH tunnel for console access
+
+If you set up a fake external network (method 2 in <<external-networking>>), one
+way to be able to access the console of your deployment is by setting up an SSH
+tunnel. Console access is required to use the CLI for device authentication.
+The following is an example of how to access the console with an SSH tunnel.
+
+Nexus serves the console, so first get a nexus IP from the instructions above.
+
+In this example, Omicron is running on the lab machine `dunkin`. Usually, you'll
+want to set up the tunnel from the machine where you run a browser, to the
+machine running Omicron. In this example, one would run this on the machine
+running the browser:
+
+```
+$ ssh -L 1234:192.168.1.22:80 dunkin.eng.oxide.computer
+```
+
+The above command configures `ssh` to bind to the TCP port `1234` on the machine
+running the browser, forward packets through the ssh connection, and redirect
+them to 192.168.1.22 port 80 *as seen from the other side of the connection*.
+
+Now you should be able to access the console from the browser on this machine,
+via something like: `127.0.0.1:1234`, using the port from the `ssh` command.
+
+=== Using the CLI
+
+Follow the instructions to set up the https://github.com/oxidecomputer/oxide.rs[Oxide CLI].  See the previous section to find the URL for the API.  Then you can log in with:
+
+[source,console]
+----
+oxide auth login --host http://192.168.1.21
+----
+
+=== Create an IP pool
+
+An IP pool is needed to provide external connectivity to Instances.  The addresses you use here should be addresses you've reserved from the external network (see <<_external_networking>>).
+
+[source,console]
+----
+$ oxide ip-pool range add --pool default --first 192.168.1.31 --last 192.168.1.40
+success
+IpPoolRange {
+    id: 4a61e65a-d96d-4c56-9cfd-dc1e44d9e99b,
+    ip_pool_id: 1b1289a7-cefe-4a7e-a8c9-d93330846301,
+    range: V4(
+        Ipv4Range {
+            first: 192.168.1.31,
+            last: 192.168.1.40,
+        },
+    ),
+    time_created: 2023-08-02T16:31:43.679785Z,
+}
+----
+
+With SoftNPU you will generally also need to configure Proxy ARP.  Below, `IP_POOL_START` and `IP_POOL_END` are the first and last addresses you used in the previous command:
+
+[source,console]
+----
+# dladm won't return leading zeroes but `scadm` expects them
+$ SOFTNPU_MAC=$(dladm show-vnic sc0_1 -p -o macaddress | gsed 's/\b\(\w\)\b/0\1/g')
+$ pfexec zlogin sidecar_softnpu /softnpu/scadm \
+  --server /softnpu/server \
+  --client /softnpu/client \
+  standalone \
+  add-proxy-arp \
+  $IP_POOL_START \
+  $IP_POOL_END \
+  $SOFTNPU_MAC
+----
+
+=== Create a Project and Image
+
+First, create a Project:
+
+[source,console]
+----
+$ oxide project create --name=myproj --description demo
+----
+
+Create a Project Image that will be used as initial disk contents.
+
+This can be the alpine.iso image that ships with propolis:
+
+[source,console]
+----
+$ oxide api /v1/images?project=myproj --method POST --input - <<EOF
+{
+  "name": "alpine",
+  "description": "boot from propolis zone blob!",
+  "os": "linux",
+  "version": "1",
+  "source": {
+    "type": "you_can_boot_anything_as_long_as_its_alpine"
+  }
+}
+EOF
+----
+
+Or an ISO / raw disk image / etc hosted at a URL:
+
+[source,console]
+----
+$ oxide api /v1/images --method POST --input - <<EOF
+{
+  "name": "crucible-tester-sparse",
+  "description": "boot from a url!",
+  "os": "debian",
+  "version": "9",
+  "source": {
+    "type": "url",
+    "url": "http://[fd00:1122:3344:101::15]/crucible-tester-sparse.img",
+    "block_size": 512
+  }
+}
+EOF
+----
+
+=== Provision an instance using the CLI
+
+You'll need the id `$IMAGE_ID` of the image you just created. You can fetch that
+with `oxide image view --image $IMAGE_NAME`.
+
+Now, create a Disk from that Image.  The disk size must be a multiple of 1 GiB and at least as large as the image size.  The example below creates a disk using the image made from the alpine ISO that ships with propolis, and sets the size to the next 1GiB multiple of the original alpine source:
+
+[source,console]
+----
+$ oxide api /v1/disks?project=myproj --method POST --input - <<EOF
+{
+  "name": "alpine",
+  "description": "alpine.iso blob",
+  "block_size": 512,
+  "size": 1073741824,
+  "disk_source": {
+      "type": "image",
+      "image_id": "$IMAGE_ID"
+  }
+}
+EOF
+----
+
+Now we're ready to create an Instance, attaching the alpine disk created above:
+
+[source,console]
+----
+$ oxide api /v1/instances?project=myproj --method POST --input - <<EOF
+{
+  "name": "myinst",
+  "description": "my inst",
+  "hostname": "myinst",
+  "memory": 1073741824,
+  "ncpus": 2,
+  "disks": [
+    {
+      "type": "attach",
+      "name": "alpine"
+    }
+  ],
+  "external_ips": [{"type": "ephemeral"}]
+}
+EOF
+----
+
+=== Attach to the serial console
+
+You can attach to the proxied propolis server serial console.  You'll need the id returned from the previous command, which we'll call $INSTANCE_ID:
+
+[source,console]
+----
+$ oxide instance serial console --instance $INSTANCE_ID
+----
+
+== Cleaning up
+
+To uninstall all Omicron services from a machine:
 
 [source,console]
 ----
@@ -207,24 +646,34 @@ $ cargo build --release --bin omicron-package
 $ pfexec ./target/release/omicron-package uninstall
 ----
 
-Once all the omicron services are uninstalled, you can also remove the
-previously created virtual hardware as mentioned above:
+Once all the Omicron services are uninstalled, you can also remove the previously created virtual hardware as mentioned above:
 
 [source,console]
 ----
 $ pfexec ./tools/destroy_virtual_hardware.sh
 ----
 
-==== Switch Zone
+== More information
 
-In a real rack, two of the Gimlets (referred to as Scrimlets) will be connected
-directly to the switch (Sidecar). Those sleds will thus be configured with a switch
-zone (`oxz_switch`) used to manage the switch. The `sled_mode` option in Sled Agent's
-config will indicate whether the sled its running on is potentially a Scrimlet or Gimlet.
+=== Connecting securely with TLS using the CLI
 
-The relevant config will be in `smf/sled-agent/$MACHINE/config.toml`, where `$MACHINE`
-is the machine type (e.g. `gimlet`, `gimlet-standalone`, `non-gimlet`) as specified
-in the build target.
+If you provided TLS certificates during setup, you can connect securely to the API.  But you'll need to be accessing it via its DNS name.  That's usually hard because in development, you're not using a real top-level domain that's in public DNS.  Both curl(1) and the Oxide CLI provide (identical) flags that can help here:
+
+[source,console]
+----
+$ curl -i --resolve recovery.sys.oxide.test:443:192.168.1.21 --cacert ./smf/sled-agent/$MACHINE/initial-tls-key.pem https://recovery.sys.oxide.test
+----
+
+[source,console]
+----
+$ oxide --resolve recovery.sys.oxide.test:443:192.168.1.21 --cacert ./smf/sled-agent/$MACHINE/initial-tls-key.pem auth login --host https://recovery.sys.oxide.test
+----
+
+=== Switch Zone
+
+In a real rack, two of the Gimlets (referred to as Scrimlets) will be connected directly to the switch (Sidecar). Those sleds will thus be configured with a switch zone (`oxz_switch`) used to manage the switch. The `sled_mode` option in Sled Agent's config will indicate whether the sled its running on is potentially a Scrimlet or Gimlet.
+
+The relevant config will be in `smf/sled-agent/$MACHINE/config.toml`.
 
 [source,text]
 ----
@@ -238,9 +687,7 @@ in the build target.
 sled_mode = "scrimlet"
 ----
 
-Once Sled Agent has been configured to run as a Scrimlet (whether explicitly or
-implicitly), it will attempt to create and start the switch zone. This will
-depend on the switch type that was specified in the build target:
+Once Sled Agent has been configured to run as a Scrimlet (whether explicitly or implicitly), it will attempt to create and start the switch zone. This will depend on the switch type that was specified in the build target:
 
 1. `asic` implies we're running on a real Gimlet and are directly attached to the
 Tofino ASIC.
@@ -249,39 +696,11 @@ require any hardware.
 3. `softnpu` provides a simulated switch implementation that
 runs the same P4 program as the ASIC, but in software.
 
-For the purposes of local development, the `softnpu` switch provides is used.
-Unfortunately, Omicron does not currently automatically configure the switch
-with respect to external networking, so you'll need to manually do so.
-
-After installing omicron with `omicron-package install`, you can run the
-`softnpu-init.sh` script to configure SoftNPU. By default, it'll attempt to
-automatically detect your local network's gateway IP and MAC but those can
-be overridden by setting the `GATEWAY_IP` and `GATEWAY_MAC` environment
-variables, respectively.
-
-[source,console]
-----
-$ ./tools/scrimlet/softnpu-init.sh
-----
+For the purposes of local development, the `softnpu` switch is used.  Unfortunately, Omicron does not currently automatically configure the switch with respect to external networking, so you'll need to manually do so.
 
 === Test Environment
 
-When we deploy, we're effectively creating a number of different zones
-for all the components that make up Omicron (Nexus, Clickhouse, Crucible, etc).
-Since all these services run in different zones they cannot communicate with
-each other (and Sled Agent in the global zone) via `localhost`. In practice,
-we'll assign addresses as per RFD 63 as well as incorporating DNS based
-service discovery.
-
-For the purposes of local development today, we specify some hardcoded IPv6
-unique local addresses in the subnet of the first Sled Agent: `fd00:1122:3344:1::/64`.
-
-If you'd like to modify these values to suit your local network, you can modify
-them within the https://github.com/oxidecomputer/omicron/tree/main/smf[`smf/` subdirectory].
-Notably, Nexus is being served from IPv4 address, which may be configured to be
-external. By default, it uses a private IPv4 address and no Internet gateway, but may
-be configured to use a public-facing IP address with an Internet gateway that may
-be set as a default route for the Nexus zone.
+The components of Omicron are deployed into separate zones that act as separate hosts on the network, each with their own address.  Since this network is private to the deployment, we can use the same IPv6 prefix in all development deployments and even hardcode the IPv6 addresses of each component.  If you'd like to modify these values to suit your local network, you can modify them within the https://github.com/oxidecomputer/omicron/tree/main/smf[`smf/` subdirectory].
 
 [options="header"]
 |===================================================================================================
@@ -299,136 +718,13 @@ be set as a default route for the Nexus zone.
 | Internal DNS Service       | `[fd00:1122:3344:0001::1]:5353`
 | External DNS               | `192.168.1.20:53`
 | Nexus: External API        | `192.168.1.21:80`
-| Internet Gateway           | None, but can be set in `smf/sled-agent/config-rss.toml`
 |===================================================================================================
 
-Note that Sled Agent runs in the global zone and is the one responsible for bringing up all the other
-other services and allocating them with vNICs and IPv6 addresses.
-
-=== How to provision an instance using the CLI
-
-Here are the current steps to provision an instance using the https://github.com/oxidecomputer/cli[oxide]
-command line interface.  Note that the `jq` command is required. In addition, the examples build on each other, so a previous name (or org, or project) are used in later steps.
-
-1. Create a project that the resources will live under:
-
-    oxide project create myproj
-
-2. Create an IP Pool, for providing external connectivity to the instance later.
-We need to create an IP Pool itself, and a range of IP addresses in that pool.
-**Important:** The addresses used here are appropriate for the Oxide lab
-environment, but not for an arbitrary environment. The actual IP range must
-currently be something that matches the physical network that the host is
-running in, at least if you'd like to be able to SSH into the guest. This is
-most often a private address range, like `10.0.0.0/8` or `192.168.0.0/16`, but
-the exact addresses that are available depends on the environment.
-+
-[source,console]
-----
-$ oxide api /v1/system/ip-pools/default/ranges/add --method POST --input - <<EOF
-{
-  "first": "172.20.15.227",
-  "last": "172.20.15.239"
-}
-EOF
-----
-+
-Additionally, if you're using SoftNPU and your chosen IP range is on the same
-L2 network as the router or other non-oxide hosts, you'll need to configure
-Proxy ARP:
-+
-[source,console]
-----
-# dladm won't return leading zeroes but `scadm` expects them
-$ SOFTNPU_MAC=$(dladm show-vnic sc0_1 -p -o macaddress | gsed 's/\b\(\w\)\b/0\1/g')
-$ pfexec /opt/oxide/softnpu/stuff/scadm \
-  --server /opt/oxide/softnpu/stuff/server \
-  --client /opt/oxide/softnpu/stuff/client \
-  standalone \
-  add-proxy-arp \
-  $IP_POOL_START \
-  $IP_POOL_END \
-  $SOFTNPU_MAC
-----
-
-3. Define a project image that will be used as initial disk contents.
-
- a. This can be the alpine.iso image that ships with propolis:
-
-    oxide api /v1/images?project=<proj> --method POST --input - <<EOF
-    {
-      "name": "alpine",
-      "description": "boot from propolis zone blob!",
-      "block_size": 512,
-      "distribution": {
-        "name": "alpine",
-        "version": "propolis-blob"
-      },
-      "source": {
-        "type": "you_can_boot_anything_as_long_as_its_alpine"
-      }
-    }
-    EOF
-
- b. Or an ISO / raw disk image / etc hosted at a URL:
-
-    oxide api /v1/images?project=<proj> --method POST --input - <<EOF
-    {
-      "name": "crucible-tester-sparse",
-      "description": "boot from a url!",
-      "block_size": 512,
-      "distribution": {
-        "name": "debian",
-        "version": "9"
-      },
-      "source": {
-        "type": "url",
-        "url": "http://[fd00:1122:3344:101::15]/crucible-tester-sparse.img"
-      }
-    }
-    EOF
-
-4. Create a disk from that global image (note that disk size must be greater than or equal to image size and a 1GiB multiple!). The example below creates a disk using the image made from the alpine ISO that ships with propolis, and sets the size to the next 1GiB multiple of the original alpine source:
-
-    oxide api /v1/disks?project=myproj --method POST --input - <<EOF
-    {
-      "name": "alpine",
-      "description": "alpine.iso blob",
-      "block_size": 512,
-      "size": 1073741824,
-      "disk_source": {
-          "type": "global_image",
-          "image_id": "$(oxide api /system/images/alpine | jq -r .id)"
-      }
-    }
-    EOF
-
-5. Create an instance, attaching the alpine disk created above:
-
-    oxide api /v1/instances?project=myproj --method POST --input - <<EOF
-    {
-      "name": "myinst",
-      "description": "my inst",
-      "hostname": "myinst",
-      "memory": 1073741824,
-      "ncpus": 2,
-      "disks": [
-        {
-          "type": "attach",
-          "name": "alpine"
-        }
-      ],
-      "external_ips": [{"type": "ephemeral"}]
-    }
-    EOF
-
-6. Optionally, attach to the proxied propolis server serial console (this requires https://github.com/oxidecomputer/cli/commit/adab246142270778db7208126fb03724f5d35858[this commit] or newer of the CLI.)
-
-    oxide instance serial --interactive -p myproj -o myorg myinst
+Note that Sled Agent runs in the global zone and is the one responsible for bringing up all the other other services and allocating them with VNICs and IPv6 addresses.
 
 == Building host images
 
-Host images for both the standard omicron install and the trampoline/recovery
+Host images for both the standard Omicron install and the trampoline/recovery
 install are built as a part of CI. To build them locally, first run the CI
 script:
 
@@ -439,11 +735,8 @@ $ ./.github/buildomat/jobs/package.sh
 
 This will create a `/work` directory with a few tarballs in it. Building a host
 image requires a checkout of
-https://github.com/oxidecomputer/helios-engvm[helios]; the instructions below
-use `$HELIOS_PATH` for the path to this repository. To match CI builds, you
-should check out the commit specified in `./tools/helios_version`. (The script
-will check your current commit hash and will refuse to run if it doesn't match
-unless you pass `-f`.)
+https://github.com/oxidecomputer/helios[helios]; the instructions below
+use `$HELIOS_PATH` for the path to this repository.
 
 To build a standard host image:
 
@@ -457,4 +750,38 @@ To build a recovery host image:
 [source,console]
 ----
 $ ./tools/build-host-image.sh -R $HELIOS_PATH /work/trampoline-global-zone-packages.tar.gz
+----
+
+
+== Running `oximeter` in standalone mode
+
+`oximeter` is the program used to collect metrics from producers in the control
+plane. Normally, the producers register themselves with `nexus`, which creates a
+durable assignment between the producer and an `oximeter` collector in the
+database. That allows components to survive restarts, while still producing
+metrics.
+
+To ease development, `oximeter` can be run in "standalone" mode. In this case, a
+mock `nexus` server is started, with only the minimal subset of the internal API
+needed to register producers and collectors. Neither CockroachDB nor ClickHouse
+is required, although ClickHouse _can_ be used, if one wants to see how data is
+inserted into the database.
+
+To run `oximeter` in standalone, use:
+
+[source,console]
+----
+$ cargo run --bin oximeter -- standalone
+----
+
+The producer should still register with `nexus` as normal, which is usually done
+with an explicit IP address and port. This defaults to `[::1]:12221`.
+
+When run this way, `oximeter` will print the samples it collects from the
+producers to its logs, like so:
+
+[source,console]
+----
+Sep 26 17:48:56.006 INFO sample: Sample { measurement: Measurement { timestamp: 2023-09-26T17:48:56.004565890Z, datum: CumulativeF64(Cumulative { start_time: 2023-09-26T17:48:45.997404777Z, value: 10.007154703 }) }, timeseries_name: "virtual_machine:cpu_busy", target: FieldSet { name: "virtual_machine", fields: {"instance_id": Field { name: "instance_id", value: Uuid(564ef6df-d5f6-4204-88f7-5c615859cfa7) }, "project_id": Field { name: "project_id", value: Uuid(2dc7e1c9-f8ac-49d7-8292-46e9e2b1a61d) }} }, metric: FieldSet { name: "cpu_busy", fields: {"cpu_id": Field { name: "cpu_id", value: I64(0) }} } }, component: results-sink, collector_id: 78c7c9a5-1569-460a-8899-aada9ad5db6c, component: oximeter-standalone, component: nexus-standalone, file: oximeter/collector/src/lib.rs:280
+Sep 26 17:48:56.006 INFO sample: Sample { measurement: Measurement { timestamp: 2023-09-26T17:48:56.004700841Z, datum: CumulativeF64(Cumulative { start_time: 2023-09-26T17:48:45.997405187Z, value: 10.007154703 }) }, timeseries_name: "virtual_machine:cpu_busy", target: FieldSet { name: "virtual_machine", fields: {"instance_id": Field { name: "instance_id", value: Uuid(564ef6df-d5f6-4204-88f7-5c615859cfa7) }, "project_id": Field { name: "project_id", value: Uuid(2dc7e1c9-f8ac-49d7-8292-46e9e2b1a61d) }} }, metric: FieldSet { name: "cpu_busy", fields: {"cpu_id": Field { name: "cpu_id", value: I64(1) }} } }, component: results-sink, collector_id: 78c7c9a5-1569-460a-8899-aada9ad5db6c, component: oximeter-standalone, component: nexus-standalone, file: oximeter/collector/src/lib.rs:280
 ----

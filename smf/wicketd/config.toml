@@ -1,11 +1,9 @@
 #
-# Example wicketd config file
+# wicketd config file
 #
 
 [log]
-# Show log messages of this level and more severe
-level = "debug"
-# Example output to a terminal (with colors)
-mode = "stderr-terminal"
-
-
+level = "info"
+mode = "file"
+path = "/dev/stdout"
+if_exists = "append"

@@ -4,17 +4,16 @@
 
 //! Oximeter-related functionality
 
-use crate::db;
-use crate::db::identity::Asset;
 use crate::external_api::params::ResourceMetrics;
 use crate::internal_api::params::OximeterInfo;
 use dropshot::PaginationParams;
 use internal_dns::resolver::{ResolveError, Resolver};
 use internal_dns::ServiceName;
+use nexus_db_queries::db;
+use nexus_db_queries::db::identity::Asset;
 use omicron_common::address::CLICKHOUSE_PORT;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::PaginationOrder;
 use omicron_common::api::internal::nexus;
 use omicron_common::backoff;
@@ -26,9 +25,7 @@ use slog::Logger;
 use std::convert::TryInto;
 use std::net::SocketAddr;
 use std::num::NonZeroU32;
-use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::Mutex;
 use uuid::Uuid;
 
 /// A client which knows how to connect to Clickhouse, but does so
@@ -44,12 +41,12 @@ pub struct LazyTimeseriesClient {
 }
 
 enum ClientSource {
-    FromDns { resolver: Arc<Mutex<Resolver>> },
+    FromDns { resolver: Resolver },
     FromIp { address: SocketAddr },
 }
 
 impl LazyTimeseriesClient {
-    pub fn new_from_dns(log: Logger, resolver: Arc<Mutex<Resolver>>) -> Self {
+    pub fn new_from_dns(log: Logger, resolver: Resolver) -> Self {
         Self { log, source: ClientSource::FromDns { resolver } }
     }
 
@@ -57,15 +54,13 @@ impl LazyTimeseriesClient {
         Self { log, source: ClientSource::FromIp { address } }
     }
 
-    pub async fn get(&self) -> Result<oximeter_db::Client, ResolveError> {
+    pub(crate) async fn get(
+        &self,
+    ) -> Result<oximeter_db::Client, ResolveError> {
         let address = match &self.source {
             ClientSource::FromIp { address } => *address,
             ClientSource::FromDns { resolver } => SocketAddr::new(
-                resolver
-                    .lock()
-                    .await
-                    .lookup_ip(ServiceName::Clickhouse)
-                    .await?,
+                resolver.lookup_ip(ServiceName::Clickhouse).await?,
                 CLICKHOUSE_PORT,
             ),
         };
@@ -76,7 +71,7 @@ impl LazyTimeseriesClient {
 
 impl super::Nexus {
     /// Insert a new record of an Oximeter collector server.
-    pub async fn upsert_oximeter_collector(
+    pub(crate) async fn upsert_oximeter_collector(
         &self,
         oximeter_info: &OximeterInfo,
     ) -> Result<(), Error> {
@@ -92,35 +87,49 @@ impl super::Nexus {
             "address" => oximeter_info.address,
         );
 
-        // Regardless, notify the collector of any assigned metric producers. This should be empty
-        // if this Oximeter collector is registering for the first time, but may not be if the
-        // service is re-registering after failure.
-        let pagparams = DataPageParams {
-            marker: None,
-            direction: PaginationOrder::Ascending,
-            limit: std::num::NonZeroU32::new(100).unwrap(),
-        };
-        let producers = self
-            .db_datastore
-            .producers_list_by_oximeter_id(
-                oximeter_info.collector_id,
-                &pagparams,
-            )
-            .await?;
-        if !producers.is_empty() {
+        // Regardless, notify the collector of any assigned metric producers.
+        //
+        // This should be empty if this Oximeter collector is registering for
+        // the first time, but may not be if the service is re-registering after
+        // failure.
+        let client = self.build_oximeter_client(
+            &oximeter_info.collector_id,
+            oximeter_info.address,
+        );
+        let mut last_producer_id = None;
+        loop {
+            let pagparams = DataPageParams {
+                marker: last_producer_id.as_ref(),
+                direction: PaginationOrder::Ascending,
+                limit: std::num::NonZeroU32::new(100).unwrap(),
+            };
+            let producers = self
+                .db_datastore
+                .producers_list_by_oximeter_id(
+                    oximeter_info.collector_id,
+                    &pagparams,
+                )
+                .await?;
+            if producers.is_empty() {
+                return Ok(());
+            }
             debug!(
                 self.log,
-                "registered oximeter collector that is already assigned producers, re-assigning them to the collector";
+                "re-assigning existing metric producers to a collector";
                 "n_producers" => producers.len(),
                 "collector_id" => ?oximeter_info.collector_id,
             );
-            let client = self.build_oximeter_client(
-                &oximeter_info.collector_id,
-                oximeter_info.address,
-            );
+            // Be sure to continue paginating from the last producer.
+            //
+            // Safety: We check just above if the list is empty, so there is a
+            // last element.
+            last_producer_id.replace(producers.last().unwrap().id());
             for producer in producers.into_iter() {
                 let producer_info = oximeter_client::types::ProducerEndpoint {
                     id: producer.id(),
+                    kind: producer
+                        .kind
+                        .map(|kind| nexus::ProducerKind::from(kind).into()),
                     address: SocketAddr::new(
                         producer.ip.ip(),
                         producer.port.try_into().unwrap(),
@@ -137,21 +146,13 @@ impl super::Nexus {
                     .map_err(Error::from)?;
             }
         }
-        Ok(())
-    }
-
-    /// List all registered Oximeter collector instances.
-    pub async fn oximeter_list(
-        &self,
-        page_params: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<db::model::OximeterInfo> {
-        self.db_datastore.oximeter_list(page_params).await
     }
 
     /// Register as a metric producer with the oximeter metric collection server.
-    pub async fn register_as_producer(&self, address: SocketAddr) {
+    pub(crate) async fn register_as_producer(&self, address: SocketAddr) {
         let producer_endpoint = nexus::ProducerEndpoint {
             id: self.id,
+            kind: Some(nexus::ProducerKind::Service),
             address,
             base_route: String::from("/metrics/collect"),
             interval: Duration::from_secs(10),
@@ -178,7 +179,7 @@ impl super::Nexus {
     }
 
     /// Assign a newly-registered metric producer to an oximeter collector server.
-    pub async fn assign_producer(
+    pub(crate) async fn assign_producer(
         &self,
         producer_info: nexus::ProducerEndpoint,
     ) -> Result<(), Error> {
@@ -200,6 +201,58 @@ impl super::Nexus {
         Ok(())
     }
 
+    /// Idempotently un-assign a producer from an oximeter collector.
+    pub(crate) async fn unassign_producer(
+        &self,
+        id: &Uuid,
+    ) -> Result<(), Error> {
+        if let Some(collector_id) =
+            self.db_datastore.producer_endpoint_delete(id).await?
+        {
+            debug!(
+                self.log,
+                "deleted metric producer assignment";
+                "producer_id" => %id,
+                "collector_id" => %collector_id,
+            );
+            let oximeter_info =
+                self.db_datastore.oximeter_lookup(&collector_id).await?;
+            let address =
+                SocketAddr::new(oximeter_info.ip.ip(), *oximeter_info.port);
+            let client = self.build_oximeter_client(&id, address);
+            if let Err(e) = client.producer_delete(&id).await {
+                error!(
+                    self.log,
+                    "failed to delete producer from collector";
+                    "producer_id" => %id,
+                    "collector_id" => %collector_id,
+                    "address" => %address,
+                    "error" => ?e,
+                );
+                return Err(Error::internal_error(
+                    format!("failed to delete producer from collector: {e:?}")
+                        .as_str(),
+                ));
+            } else {
+                debug!(
+                    self.log,
+                    "successfully deleted producer from collector";
+                    "producer_id" => %id,
+                    "collector_id" => %collector_id,
+                    "address" => %address,
+                );
+                Ok(())
+            }
+        } else {
+            trace!(
+                self.log,
+                "un-assigned non-existent metric producer";
+                "producer_id" => %id,
+            );
+            Ok(())
+        }
+    }
+
     /// Returns a results from the timeseries DB based on the provided query
     /// parameters.
     ///
@@ -212,7 +265,7 @@ impl super::Nexus {
     /// results to return.
     /// * `limit`: The maximum number of results to return in a paginated
     /// request.
-    pub async fn select_timeseries(
+    pub(crate) async fn select_timeseries(
         &self,
         timeseries_name: &str,
         criteria: &[&str],
@@ -224,12 +277,13 @@ impl super::Nexus {
             dropshot::ResultsPage { next_page: None, items: Vec::new() }
         }
 
-        let (start_time, end_time, query) = match query_params.page {
+        let (start_time, end_time, order, query) = match query_params.page {
             // Generally, we want the time bounds to be inclusive for the
             // start time, and exclusive for the end time...
             dropshot::WhichPage::First(query) => (
                 Timestamp::Inclusive(query.start_time),
                 Timestamp::Exclusive(query.end_time),
+                query.order,
                 query,
             ),
             // ... but for subsequent pages, we use the "last observed"
@@ -240,6 +294,7 @@ impl super::Nexus {
             dropshot::WhichPage::Next(query) => (
                 Timestamp::Exclusive(query.start_time),
                 Timestamp::Exclusive(query.end_time),
+                query.order,
                 query,
             ),
         };
@@ -263,6 +318,7 @@ impl super::Nexus {
                 Some(start_time),
                 Some(end_time),
                 Some(limit),
+                order,
             )
             .await
             .or_else(|err| {
@@ -299,6 +355,7 @@ impl super::Nexus {
                 ResourceMetrics {
                     start_time: last_measurement.timestamp(),
                     end_time: query.end_time,
+                    order: None,
                 }
             },
         )

@@ -40,6 +40,20 @@ resource: authz::ConsoleSessionList
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
+resource: authz::DnsConfig
+
+  USER                             Q  R LC RP  M MP CC  D
+  fleet-admin                      ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
+  fleet-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  fleet-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                  !  !  !  !  !  !  !  !
+
 resource: authz::DeviceAuthRequestList
 
   USER                             Q  R LC RP  M MP CC  D
@@ -54,18 +68,18 @@ resource: authz::DeviceAuthRequestList
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
-resource: authz::GlobalImageList
+resource: authz::Inventory
 
   USER                             Q  R LC RP  M MP CC  D
-  fleet-admin                      ✘  ✘  ✔  ✘  ✔  ✔  ✔  ✔
-  fleet-collaborator               ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
-  fleet-viewer                     ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
-  silo1-admin                      ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
-  silo1-collaborator               ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
-  silo1-viewer                     ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
-  silo1-proj1-admin                ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
-  silo1-proj1-collaborator         ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
-  silo1-proj1-viewer               ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
+  fleet-admin                      ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
+  fleet-collaborator               ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
+  fleet-viewer                     ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
+  silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
 resource: authz::IpPoolList
@@ -94,6 +108,34 @@ resource: Silo "silo1"
   silo1-proj1-admin                ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
   silo1-proj1-collaborator         ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
+  unauthenticated                  !  !  !  !  !  !  !  !
+
+resource: Silo "silo1": certificate list
+
+  USER                             Q  R LC RP  M MP CC  D
+  fleet-admin                      ✘  ✘  ✔  ✘  ✘  ✘  ✔  ✘
+  fleet-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  fleet-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-admin                      ✘  ✘  ✔  ✘  ✘  ✘  ✔  ✘
+  silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                  !  !  !  !  !  !  !  !
+
+resource: Certificate "silo1-certificate"
+
+  USER                             Q  R LC RP  M MP CC  D
+  fleet-admin                      ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
+  fleet-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  fleet-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-admin                      ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
+  silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
 resource: Silo "silo1": identity provider list
@@ -460,6 +502,34 @@ resource: Silo "silo2"
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
+resource: Silo "silo2": certificate list
+
+  USER                             Q  R LC RP  M MP CC  D
+  fleet-admin                      ✘  ✘  ✔  ✘  ✘  ✘  ✔  ✘
+  fleet-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  fleet-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                  !  !  !  !  !  !  !  !
+
+resource: Certificate "silo2-certificate"
+
+  USER                             Q  R LC RP  M MP CC  D
+  fleet-admin                      ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
+  fleet-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  fleet-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                  !  !  !  !  !  !  !  !
+
 resource: Silo "silo2": identity provider list
 
   USER                             Q  R LC RP  M MP CC  D
@@ -726,7 +796,7 @@ resource: Sled id "8a785566-adaf-c8d8-e886-bee7f9b73ca7"
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
-resource: PhysicalDisk id "vendor-serial-model"
+resource: Zpool id "aaaaaaaa-1233-af7d-9220-afe1d8090900"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
@@ -740,21 +810,35 @@ resource: PhysicalDisk id "vendor-serial-model"
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
-resource: GlobalImage id "b46bf5b5-e6e4-49e6-fe78-8e25d698dabc"
+resource: Service id "6b1f15ee-d6b3-424c-8436-94413a0b682d"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   fleet-collaborator               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   fleet-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-admin                      ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
-  silo1-collaborator               ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
-  silo1-viewer                     ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
-  silo1-proj1-admin                ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
-  silo1-proj1-collaborator         ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
-  silo1-proj1-viewer               ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
+  silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
-resource: Certificate id "c56bf5b5-e6e4-49e6-fe78-8e25d698dabc"
+resource: Service id "7f7bb301-5dc9-41f1-ab29-d369f4835079"
+
+  USER                             Q  R LC RP  M MP CC  D
+  fleet-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  fleet-collaborator               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  fleet-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                  !  !  !  !  !  !  !  !
+
+resource: PhysicalDisk id "vendor-serial-model"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
@@ -811,6 +895,34 @@ resource: SystemUpdate id "9c86d713-1bc2-4927-9892-ada3eb6f5f62"
   unauthenticated                  !  !  !  !  !  !  !  !
 
 resource: UpdateDeployment id "c617a035-7c42-49ff-a36a-5dfeee382832"
+
+  USER                             Q  R LC RP  M MP CC  D
+  fleet-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  fleet-collaborator               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  fleet-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                  !  !  !  !  !  !  !  !
+
+resource: AddressLot id "43259fdc-c5c0-4a21-8b1d-2f673ad00d93"
+
+  USER                             Q  R LC RP  M MP CC  D
+  fleet-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  fleet-collaborator               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  fleet-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                  !  !  !  !  !  !  !  !
+
+resource: LoopbackAddress id "9efbf1b1-16f9-45ab-864a-f7ebe501ae5b"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔

@@ -8,7 +8,7 @@ use super::NexusSaga;
 use crate::app::sagas;
 use crate::app::sagas::declare_saga_actions;
 use crate::external_api::params;
-use crate::{authn, authz, db};
+use nexus_db_queries::{authn, authz, db};
 use nexus_defaults as defaults;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -19,7 +19,7 @@ use steno::ActionError;
 // project create saga: input parameters
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Params {
+pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub project_create: params::ProjectCreate,
     pub authz_silo: authz::Silo,
@@ -41,7 +41,7 @@ declare_saga_actions! {
 // project create saga: definition
 
 #[derive(Debug)]
-pub struct SagaProjectCreate;
+pub(crate) struct SagaProjectCreate;
 impl NexusSaga for SagaProjectCreate {
     const NAME: &'static str = "project-create";
     type Params = Params;
@@ -155,15 +155,18 @@ async fn spc_create_vpc_params(
 mod test {
     use crate::{
         app::saga::create_saga_dag, app::sagas::project_create::Params,
-        app::sagas::project_create::SagaProjectCreate, authn::saga::Serialized,
-        authz, db::datastore::DataStore, external_api::params,
+        app::sagas::project_create::SagaProjectCreate, external_api::params,
     };
     use async_bb8_diesel::{
         AsyncConnection, AsyncRunQueryDsl, AsyncSimpleConnection,
-        OptionalExtension,
     };
-    use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
-    use nexus_db_queries::context::OpContext;
+    use diesel::{
+        ExpressionMethods, OptionalExtension, QueryDsl, SelectableHelper,
+    };
+    use nexus_db_queries::{
+        authn::saga::Serialized, authz, context::OpContext,
+        db::datastore::DataStore,
+    };
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::api::external::IdentityMetadataCreateParams;
 
@@ -202,13 +205,18 @@ mod test {
     }
 
     async fn no_projects_exist(datastore: &DataStore) -> bool {
-        use crate::db::model::Project;
-        use crate::db::schema::project::dsl;
+        use nexus_db_queries::db::fixed_data::project::SERVICES_PROJECT_ID;
+        use nexus_db_queries::db::model::Project;
+        use nexus_db_queries::db::schema::project::dsl;
 
         dsl::project
             .filter(dsl::time_deleted.is_null())
+            // ignore built-in services project
+            .filter(dsl::id.ne(*SERVICES_PROJECT_ID))
             .select(Project::as_select())
-            .first_async::<Project>(datastore.pool_for_tests().await.unwrap())
+            .first_async::<Project>(
+                &*datastore.pool_connection_for_tests().await.unwrap(),
+            )
             .await
             .optional()
             .unwrap()
@@ -221,10 +229,11 @@ mod test {
     async fn no_virtual_provisioning_collection_records_for_projects(
         datastore: &DataStore,
     ) -> bool {
-        use crate::db::model::VirtualProvisioningCollection;
-        use crate::db::schema::virtual_provisioning_collection::dsl;
+        use nexus_db_queries::db::fixed_data::project::SERVICES_PROJECT_ID;
+        use nexus_db_queries::db::model::VirtualProvisioningCollection;
+        use nexus_db_queries::db::schema::virtual_provisioning_collection::dsl;
 
-        datastore.pool_for_tests()
+        datastore.pool_connection_for_tests()
             .await
             .unwrap()
             .transaction_async(|conn| async move {
@@ -232,9 +241,11 @@ mod test {
                     .batch_execute_async(nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL)
                     .await
                     .unwrap();
-                Ok::<_, crate::db::TransactionError<()>>(
+                Ok::<_, nexus_db_queries::db::TransactionError<()>>(
                     dsl::virtual_provisioning_collection
-                        .filter(dsl::collection_type.eq(crate::db::model::CollectionTypeProvisioned::Project.to_string()))
+                        .filter(dsl::collection_type.eq(nexus_db_queries::db::model::CollectionTypeProvisioned::Project.to_string()))
+                        // ignore built-in services project
+                        .filter(dsl::id.ne(*SERVICES_PROJECT_ID))
 
                         .select(VirtualProvisioningCollection::as_select())
                         .get_results_async::<VirtualProvisioningCollection>(&conn)
@@ -270,41 +281,33 @@ mod test {
         cptestctx: &ControlPlaneTestContext,
     ) {
         let log = &cptestctx.logctx.log;
-
         let nexus = &cptestctx.server.apictx().nexus;
-
-        // Build the saga DAG with the provided test parameters
         let opctx = test_opctx(&cptestctx);
-        let authz_silo = opctx.authn.silo_required().unwrap();
-        let params = new_test_params(&opctx, authz_silo);
-        let dag = create_saga_dag::<SagaProjectCreate>(params).unwrap();
-
-        for node in dag.get_nodes() {
-            // Create a new saga for this node.
-            info!(
-                log,
-                "Creating new saga which will fail at index {:?}", node.index();
-                "node_name" => node.name().as_ref(),
-                "label" => node.label(),
-            );
-
-            let runnable_saga =
-                nexus.create_runnable_saga(dag.clone()).await.unwrap();
-
-            // Inject an error instead of running the node.
-            //
-            // This should cause the saga to unwind.
-            nexus
-                .sec()
-                .saga_inject_error(runnable_saga.id(), node.index())
-                .await
-                .unwrap();
-            nexus
-                .run_saga(runnable_saga)
-                .await
-                .expect_err("Saga should have failed");
-
-            verify_clean_slate(nexus.datastore()).await;
-        }
+        crate::app::sagas::test_helpers::action_failure_can_unwind::<
+            SagaProjectCreate,
+            _,
+            _,
+        >(
+            nexus,
+            || {
+                Box::pin({
+                    async {
+                        new_test_params(
+                            &opctx,
+                            opctx.authn.silo_required().unwrap(),
+                        )
+                    }
+                })
+            },
+            || {
+                Box::pin({
+                    async {
+                        verify_clean_slate(nexus.datastore()).await;
+                    }
+                })
+            },
+            log,
+        )
+        .await;
     }
 }

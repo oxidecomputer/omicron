@@ -4,27 +4,30 @@
 
 //! API for controlling multiple instances on a sled.
 
-use crate::nexus::LazyNexusClient;
+use crate::instance::propolis_zone_name;
+use crate::instance::Instance;
+use crate::nexus::NexusClientWithResolver;
+use crate::params::ZoneBundleMetadata;
 use crate::params::{
     InstanceHardware, InstanceMigrationSourceParams, InstancePutStateResponse,
-    InstanceStateRequested, InstanceUnregisterResponse, VpcFirewallRule,
+    InstanceStateRequested, InstanceUnregisterResponse,
 };
+use crate::zone_bundle::BundleError;
+use crate::zone_bundle::ZoneBundler;
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
-use illumos_utils::opte::params::SetVirtualNetworkInterfaceHost;
 use illumos_utils::opte::PortManager;
-use macaddr::MacAddr6;
+use illumos_utils::vmm_reservoir;
+use omicron_common::api::external::ByteCount;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
+use omicron_common::api::internal::nexus::SledInstanceState;
+use omicron_common::api::internal::nexus::VmmRuntimeState;
+use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::collections::BTreeMap;
-use std::net::Ipv6Addr;
+use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
-
-#[cfg(not(test))]
-use crate::instance::Instance;
-#[cfg(test)]
-use crate::instance::MockInstance as Instance;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -37,16 +40,31 @@ pub enum Error {
     #[error("OPTE port management error: {0}")]
     Opte(#[from] illumos_utils::opte::Error),
 
+    #[error("Failed to create reservoir: {0}")]
+    Reservoir(#[from] vmm_reservoir::Error),
+
+    #[error("Invalid reservoir configuration: {0}")]
+    ReservoirConfig(String),
+
     #[error("Cannot find data link: {0}")]
     Underlay(#[from] sled_hardware::underlay::Error),
 
-    #[error("No datalinks found")]
-    NoDatalinks,
+    #[error("Zone bundle error")]
+    ZoneBundle(#[from] BundleError),
+}
+
+pub enum ReservoirMode {
+    None,
+    Size(u32),
+    Percentage(u8),
 }
 
 struct InstanceManagerInternal {
     log: Logger,
-    lazy_nexus_client: LazyNexusClient,
+    nexus_client: NexusClientWithResolver,
+
+    /// Last set size of the VMM reservoir (in bytes)
+    reservoir_size: Mutex<ByteCount>,
 
     // TODO: If we held an object representing an enum of "Created OR Running"
     // instance, we could avoid the methods within "instance.rs" that panic
@@ -56,6 +74,16 @@ struct InstanceManagerInternal {
 
     vnic_allocator: VnicAllocator<Etherstub>,
     port_manager: PortManager,
+    storage: StorageHandle,
+    zone_bundler: ZoneBundler,
+}
+
+pub(crate) struct InstanceManagerServices {
+    pub nexus_client: NexusClientWithResolver,
+    pub vnic_allocator: VnicAllocator<Etherstub>,
+    pub port_manager: PortManager,
+    pub storage: StorageHandle,
+    pub zone_bundler: ZoneBundler,
 }
 
 /// All instances currently running on the sled.
@@ -67,24 +95,102 @@ impl InstanceManager {
     /// Initializes a new [`InstanceManager`] object.
     pub fn new(
         log: Logger,
-        lazy_nexus_client: LazyNexusClient,
+        nexus_client: NexusClientWithResolver,
         etherstub: Etherstub,
-        underlay_ip: Ipv6Addr,
-        gateway_mac: MacAddr6,
+        port_manager: PortManager,
+        storage: StorageHandle,
+        zone_bundler: ZoneBundler,
     ) -> Result<InstanceManager, Error> {
         Ok(InstanceManager {
             inner: Arc::new(InstanceManagerInternal {
                 log: log.new(o!("component" => "InstanceManager")),
-                lazy_nexus_client,
+                nexus_client,
+
+                // no reservoir size set on startup
+                reservoir_size: Mutex::new(ByteCount::from_kibibytes_u32(0)),
                 instances: Mutex::new(BTreeMap::new()),
                 vnic_allocator: VnicAllocator::new("Instance", etherstub),
-                port_manager: PortManager::new(
-                    log.new(o!("component" => "PortManager")),
-                    underlay_ip,
-                    gateway_mac,
-                ),
+                port_manager,
+                storage,
+                zone_bundler,
             }),
         })
+    }
+
+    /// Sets the VMM reservoir to the requested percentage of usable physical
+    /// RAM or to a size in MiB. Either mode will round down to the nearest
+    /// aligned size required by the control plane.
+    pub fn set_reservoir_size(
+        &self,
+        hardware: &sled_hardware::HardwareManager,
+        mode: ReservoirMode,
+    ) -> Result<(), Error> {
+        let hardware_physical_ram_bytes = hardware.usable_physical_ram_bytes();
+        let req_bytes = match mode {
+            ReservoirMode::None => return Ok(()),
+            ReservoirMode::Size(mb) => {
+                let bytes = ByteCount::from_mebibytes_u32(mb).to_bytes();
+                if bytes > hardware_physical_ram_bytes {
+                    return Err(Error::ReservoirConfig(format!(
+                        "cannot specify a reservoir of {bytes} bytes when \
+                        physical memory is {hardware_physical_ram_bytes} bytes",
+                    )));
+                }
+                bytes
+            }
+            ReservoirMode::Percentage(percent) => {
+                if !matches!(percent, 1..=99) {
+                    return Err(Error::ReservoirConfig(format!(
+                        "VMM reservoir percentage of {} must be between 0 and \
+                        100",
+                        percent
+                    )));
+                };
+                (hardware_physical_ram_bytes as f64 * (percent as f64 / 100.0))
+                    .floor() as u64
+            }
+        };
+
+        let req_bytes_aligned = vmm_reservoir::align_reservoir_size(req_bytes);
+
+        if req_bytes_aligned == 0 {
+            warn!(
+                self.inner.log,
+                "Requested reservoir size of {} bytes < minimum aligned size \
+                of {} bytes",
+                req_bytes,
+                vmm_reservoir::RESERVOIR_SZ_ALIGN
+            );
+            return Ok(());
+        }
+
+        // The max ByteCount value is i64::MAX, which is ~8 million TiB.
+        // As this value is either a percentage of DRAM or a size in MiB
+        // represented as a u32, constructing this should always work.
+        let reservoir_size = ByteCount::try_from(req_bytes_aligned).unwrap();
+        if let ReservoirMode::Percentage(percent) = mode {
+            info!(
+                self.inner.log,
+                "{}% of {} physical ram = {} bytes)",
+                percent,
+                hardware_physical_ram_bytes,
+                req_bytes,
+            );
+        }
+        info!(
+            self.inner.log,
+            "Setting reservoir size to {reservoir_size} bytes"
+        );
+        vmm_reservoir::ReservoirControl::set(reservoir_size)?;
+
+        *self.inner.reservoir_size.lock().unwrap() = reservoir_size;
+
+        Ok(())
+    }
+
+    /// Returns the last-set size of the reservoir
+    pub fn reservoir_size(&self) -> ByteCount {
+        *self.inner.reservoir_size.lock().unwrap()
     }
 
     /// Ensures that the instance manager contains a registered instance with
@@ -107,14 +213,21 @@ impl InstanceManager {
     pub async fn ensure_registered(
         &self,
         instance_id: Uuid,
-        initial_hardware: InstanceHardware,
-    ) -> Result<InstanceRuntimeState, Error> {
-        let requested_propolis_id = initial_hardware.runtime.propolis_id;
+        propolis_id: Uuid,
+        hardware: InstanceHardware,
+        instance_runtime: InstanceRuntimeState,
+        vmm_runtime: VmmRuntimeState,
+        propolis_addr: SocketAddr,
+    ) -> Result<SledInstanceState, Error> {
         info!(
             &self.inner.log,
             "ensuring instance is registered";
             "instance_id" => %instance_id,
-            "propolis_id" => %requested_propolis_id
+            "propolis_id" => %propolis_id,
+            "hardware" => ?hardware,
+            "instance_runtime" => ?instance_runtime,
+            "vmm_runtime" => ?vmm_runtime,
+            "propolis_addr" => ?propolis_addr,
         );
 
         let instance = {
@@ -122,7 +235,7 @@ impl InstanceManager {
             if let Some((existing_propolis_id, existing_instance)) =
                 instances.get(&instance_id)
             {
-                if requested_propolis_id != *existing_propolis_id {
+                if propolis_id != *existing_propolis_id {
                     info!(&self.inner.log,
                           "instance already registered with another Propolis ID";
                           "instance_id" => %instance_id,
@@ -146,18 +259,33 @@ impl InstanceManager {
                 let instance_log = self.inner.log.new(o!());
                 let ticket =
                     InstanceTicket::new(instance_id, self.inner.clone());
+
+                let services = InstanceManagerServices {
+                    nexus_client: self.inner.nexus_client.clone(),
+                    vnic_allocator: self.inner.vnic_allocator.clone(),
+                    port_manager: self.inner.port_manager.clone(),
+                    storage: self.inner.storage.clone(),
+                    zone_bundler: self.inner.zone_bundler.clone(),
+                };
+
+                let state = crate::instance::InstanceInitialState {
+                    hardware,
+                    instance_runtime,
+                    vmm_runtime,
+                    propolis_addr,
+                };
+
                 let instance = Instance::new(
                     instance_log,
                     instance_id,
+                    propolis_id,
                     ticket,
-                    initial_hardware,
-                    self.inner.vnic_allocator.clone(),
-                    self.inner.port_manager.clone(),
-                    self.inner.lazy_nexus_client.clone(),
+                    state,
+                    services,
                 )?;
                 let instance_clone = instance.clone();
-                let _old = instances
-                    .insert(instance_id, (requested_propolis_id, instance));
+                let _old =
+                    instances.insert(instance_id, (propolis_id, instance));
                 assert!(_old.is_none());
                 instance_clone
             }
@@ -236,7 +364,7 @@ impl InstanceManager {
         instance_id: Uuid,
         old_runtime: &InstanceRuntimeState,
         migration_ids: &Option<InstanceMigrationSourceParams>,
-    ) -> Result<InstanceRuntimeState, Error> {
+    ) -> Result<SledInstanceState, Error> {
         let (_, instance) = self
             .inner
             .instances
@@ -269,51 +397,33 @@ impl InstanceManager {
             .map_err(Error::from)
     }
 
-    pub async fn firewall_rules_ensure(
+    /// Create a zone bundle from a named instance zone, if it exists.
+    pub async fn create_zone_bundle(
         &self,
-        rules: &[VpcFirewallRule],
-    ) -> Result<(), Error> {
-        info!(
-            &self.inner.log,
-            "Ensuring VPC firewall rules";
-            "rules" => ?&rules,
-        );
-        self.inner.port_manager.firewall_rules_ensure(rules)?;
-        Ok(())
-    }
-
-    pub async fn set_virtual_nic_host(
-        &self,
-        mapping: &SetVirtualNetworkInterfaceHost,
-    ) -> Result<(), Error> {
-        info!(
-            &self.inner.log,
-            "Mapping virtual NIC to physical host";
-            "mapping" => ?&mapping,
-        );
-        self.inner.port_manager.set_virtual_nic_host(mapping)?;
-        Ok(())
-    }
-
-    pub async fn unset_virtual_nic_host(
-        &self,
-        mapping: &SetVirtualNetworkInterfaceHost,
-    ) -> Result<(), Error> {
-        info!(
-            &self.inner.log,
-            "Unmapping virtual NIC to physical host";
-            "mapping" => ?&mapping,
-        );
-        self.inner.port_manager.unset_virtual_nic_host(mapping)?;
-        Ok(())
-    }
-
-    /// Generates an instance ticket associated with this instance manager. This
-    /// allows tests in other modules to create an Instance even though they
-    /// lack visibility to `InstanceManagerInternal`.
-    #[cfg(test)]
-    pub fn test_instance_ticket(&self, instance_id: Uuid) -> InstanceTicket {
-        InstanceTicket::new(instance_id, self.inner.clone())
+        name: &str,
+    ) -> Result<ZoneBundleMetadata, BundleError> {
+        // We need to find the instance and take its lock, but:
+        //
+        // 1. The instance-map lock is sync, and
+        // 2. we don't want to hold the instance-map lock for the entire
+        //    bundling duration.
+        //
+        // Instead, we cheaply clone the instance through its `Arc` around the
+        // `InstanceInner`, which is ultimately what we want.
+        let Some((_propolis_id, instance)) = self
+            .inner
+            .instances
+            .lock()
+            .unwrap()
+            .values()
+            .find(|(propolis_id, _instance)| {
+                name == propolis_zone_name(propolis_id)
+            })
+            .cloned()
+        else {
+            return Err(BundleError::NoSuchZone { name: name.to_string() });
+        };
+        instance.request_zone_bundle().await
     }
 }
 
@@ -343,258 +453,5 @@ impl InstanceTicket {
 impl Drop for InstanceTicket {
     fn drop(&mut self) {
         self.terminate();
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-    use crate::instance::MockInstance;
-    use crate::nexus::LazyNexusClient;
-    use crate::params::InstanceStateRequested;
-    use crate::params::SourceNatConfig;
-    use chrono::Utc;
-    use illumos_utils::dladm::Etherstub;
-    use illumos_utils::{dladm::MockDladm, zone::MockZones};
-    use macaddr::MacAddr6;
-    use omicron_common::api::external::{
-        ByteCount, Generation, InstanceCpuCount, InstanceState,
-    };
-    use omicron_common::api::internal::nexus::InstanceRuntimeState;
-    use omicron_test_utils::dev::test_setup_log;
-    use std::net::IpAddr;
-    use std::net::Ipv4Addr;
-
-    static INST_UUID_STR: &str = "e398c5d5-5059-4e55-beac-3a1071083aaa";
-
-    fn test_uuid() -> Uuid {
-        INST_UUID_STR.parse().unwrap()
-    }
-
-    fn new_initial_instance() -> InstanceHardware {
-        InstanceHardware {
-            runtime: InstanceRuntimeState {
-                run_state: InstanceState::Creating,
-                sled_id: Uuid::new_v4(),
-                propolis_id: Uuid::new_v4(),
-                dst_propolis_id: None,
-                propolis_addr: None,
-                migration_id: None,
-                propolis_gen: Generation::new(),
-                ncpus: InstanceCpuCount(2),
-                memory: ByteCount::from_mebibytes_u32(512),
-                hostname: "myvm".to_string(),
-                gen: Generation::new(),
-                time_updated: Utc::now(),
-            },
-            nics: vec![],
-            source_nat: SourceNatConfig {
-                ip: IpAddr::from(Ipv4Addr::new(10, 0, 0, 1)),
-                first_port: 0,
-                last_port: 1 << (14 - 1),
-            },
-            external_ips: vec![],
-            firewall_rules: vec![],
-            disks: vec![],
-            cloud_init_bytes: None,
-        }
-    }
-
-    #[tokio::test]
-    #[serial_test::serial]
-    async fn ensure_instance() {
-        let logctx = test_setup_log("ensure_instance");
-        let log = &logctx.log;
-        let lazy_nexus_client =
-            LazyNexusClient::new(log.clone(), std::net::Ipv6Addr::LOCALHOST)
-                .unwrap();
-
-        // Creation of the instance manager incurs some "global" system
-        // checks: cleanup of existing zones + vnics.
-
-        let zones_get_ctx = MockZones::get_context();
-        zones_get_ctx.expect().return_once(|| Ok(vec![]));
-
-        let dladm_get_vnics_ctx = MockDladm::get_vnics_context();
-        dladm_get_vnics_ctx.expect().return_once(|| Ok(vec![]));
-
-        let im = InstanceManager::new(
-            log.clone(),
-            lazy_nexus_client,
-            Etherstub("mylink".to_string()),
-            std::net::Ipv6Addr::new(
-                0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
-            ),
-            MacAddr6::from([0u8; 6]),
-        )
-        .unwrap();
-
-        // Verify that no instances exist.
-        assert!(im.inner.instances.lock().unwrap().is_empty());
-
-        // Insert a new instance, verify that it exists.
-        //
-        // In the process, we'll clone the instance reference out
-        // of the manager, "start" and "transition" it to the desired state.
-        //
-        // Note that we need to perform some manual intervention to hold onto
-        // the "InstanceTicket". Normally, the "Instance" object would drop
-        // the ticket at the end of the instance lifetime to imply tracking
-        // should stop.
-        let ticket = Arc::new(std::sync::Mutex::new(None));
-        let ticket_clone = ticket.clone();
-        let instance_new_ctx = MockInstance::new_context();
-        let mut seq = mockall::Sequence::new();
-
-        // Expect one call to new() that produces an instance that expects to be
-        // cloned once. The clone should expect to ask to be put into the
-        // Running state.
-        instance_new_ctx.expect().return_once(move |_, _, t, _, _, _, _| {
-            let mut inst = MockInstance::default();
-
-            // Move the instance ticket out to the test, since the mock instance
-            // won't hold onto it.
-            let mut ticket_guard = ticket_clone.lock().unwrap();
-            *ticket_guard = Some(t);
-
-            // Expect to be cloned twice, once during registration (to fish the
-            // current state out of the instance) and once during the state
-            // transition (to hoist the instance reference out of the instance
-            // manager lock).
-            inst.expect_clone().times(1).in_sequence(&mut seq).return_once(
-                move || {
-                    let mut inst = MockInstance::default();
-                    inst.expect_current_state()
-                        .return_once(|| new_initial_instance().runtime);
-                    inst
-                },
-            );
-
-            inst.expect_clone().times(1).in_sequence(&mut seq).return_once(
-                move || {
-                    let mut inst = MockInstance::default();
-                    inst.expect_put_state().return_once(|_| {
-                        let mut rt_state = new_initial_instance();
-                        rt_state.runtime.run_state = InstanceState::Running;
-                        Ok(rt_state.runtime)
-                    });
-                    inst
-                },
-            );
-
-            Ok(inst)
-        });
-
-        im.ensure_registered(test_uuid(), new_initial_instance())
-            .await
-            .unwrap();
-
-        // The instance exists now.
-        assert_eq!(im.inner.instances.lock().unwrap().len(), 1);
-
-        let rt_state = im
-            .ensure_state(test_uuid(), InstanceStateRequested::Running)
-            .await
-            .unwrap();
-
-        // At this point, we can observe the expected state of the instance
-        // manager: containing the created instance...
-        assert_eq!(
-            rt_state.updated_runtime.unwrap().run_state,
-            InstanceState::Running
-        );
-        assert_eq!(im.inner.instances.lock().unwrap().len(), 1);
-
-        // ... however, when we drop the ticket of the corresponding instance,
-        // the entry is automatically removed from the instance manager.
-        ticket.lock().unwrap().take();
-        assert_eq!(im.inner.instances.lock().unwrap().len(), 0);
-
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    #[serial_test::serial]
-    async fn ensure_instance_state_repeatedly() {
-        let logctx = test_setup_log("ensure_instance_repeatedly");
-        let log = &logctx.log;
-        let lazy_nexus_client =
-            LazyNexusClient::new(log.clone(), std::net::Ipv6Addr::LOCALHOST)
-                .unwrap();
-
-        // Instance Manager creation.
-
-        let zones_get_ctx = MockZones::get_context();
-        zones_get_ctx.expect().return_once(|| Ok(vec![]));
-
-        let dladm_get_vnics_ctx = MockDladm::get_vnics_context();
-        dladm_get_vnics_ctx.expect().return_once(|| Ok(vec![]));
-
-        let im = InstanceManager::new(
-            log.clone(),
-            lazy_nexus_client,
-            Etherstub("mylink".to_string()),
-            std::net::Ipv6Addr::new(
-                0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
-            ),
-            MacAddr6::from([0u8; 6]),
-        )
-        .unwrap();
-
-        let ticket = Arc::new(std::sync::Mutex::new(None));
-        let ticket_clone = ticket.clone();
-        let instance_new_ctx = MockInstance::new_context();
-        let mut seq = mockall::Sequence::new();
-        instance_new_ctx.expect().return_once(move |_, _, t, _, _, _, _| {
-            let mut inst = MockInstance::default();
-            let mut ticket_guard = ticket_clone.lock().unwrap();
-            *ticket_guard = Some(t);
-
-            // First call to ensure (start + transition).
-            inst.expect_clone().times(1).in_sequence(&mut seq).return_once(
-                move || {
-                    let mut inst = MockInstance::default();
-
-                    inst.expect_current_state()
-                        .returning(|| new_initial_instance().runtime);
-
-                    inst.expect_put_state().return_once(|_| {
-                        let mut rt_state = new_initial_instance();
-                        rt_state.runtime.run_state = InstanceState::Running;
-                        Ok(rt_state.runtime)
-                    });
-                    inst
-                },
-            );
-
-            // Next calls to ensure (transition only).
-            inst.expect_clone().times(3).in_sequence(&mut seq).returning(
-                move || {
-                    let mut inst = MockInstance::default();
-                    inst.expect_put_state().returning(|_| {
-                        let mut rt_state = new_initial_instance();
-                        rt_state.runtime.run_state = InstanceState::Running;
-                        Ok(rt_state.runtime)
-                    });
-                    inst
-                },
-            );
-            Ok(inst)
-        });
-
-        let id = test_uuid();
-        let rt = new_initial_instance();
-
-        // Register the instance, then issue all three state transitions.
-        im.ensure_registered(id, rt).await.unwrap();
-        im.ensure_state(id, InstanceStateRequested::Running).await.unwrap();
-        im.ensure_state(id, InstanceStateRequested::Running).await.unwrap();
-        im.ensure_state(id, InstanceStateRequested::Running).await.unwrap();
-
-        assert_eq!(im.inner.instances.lock().unwrap().len(), 1);
-        ticket.lock().unwrap().take();
-        assert_eq!(im.inner.instances.lock().unwrap().len(), 0);
-
-        logctx.cleanup_successful();
     }
 }

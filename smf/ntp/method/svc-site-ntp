@@ -95,8 +95,13 @@ function generate_config_file {
 }
 
 function start_daemon {
+<<<<<<< HEAD
     echo "* Starting daemon"
     /usr/sbin/chronyd -f "$file"
+=======
+	echo "* Starting daemon"
+	/usr/sbin/chronyd -d -f "$file" &
+>>>>>>> main
 }
 
 function stop_daemon {
@@ -109,7 +114,26 @@ function stop_daemon {
     ((rc == 2)) && smf_kill_contract $contract KILL 1
 }
 
+# The NTP zone delivers a logadm fragment into /etc/logadm.d/ that needs to
+# be added to the system's /etc/logadm.conf. Unfortunately, the service which
+# does this - system/logadm-upgrade - only processes files with mode 444 and
+# root:sys ownership so we need to adjust things here (until omicron package
+# supports including ownership and permissions in the generated tar files).
+function update_logadm {
+	typeset cf=/etc/logadm.conf
+	typeset ff=/etc/logadm.d/chrony.logadm.conf
+
+	egrep -s "chrony_logs" $cf && return
+
+	echo "* Updating logadm"
+	chown root:sys $ff
+	chmod 444 $ff
+	touch $ff
+	svcadm refresh logadm-upgrade
+}
+
 case $action in
+<<<<<<< HEAD
     start)
         generate_config_file
         start_daemon
@@ -124,6 +148,23 @@ case $action in
     *)
         fatal "Unknown action '$action'"
         ;;
+=======
+	start)
+		generate_config_file
+		update_logadm
+		start_daemon
+		;;
+	refresh)
+		generate_config_file && stop_daemon
+		# SMF will restart the service since the contract is now empty.
+		;;
+	stop)
+		stop_daemon
+		;;
+	*)
+		fatal "Unknown action '$action'"
+		;;
+>>>>>>> main
 esac
 
 exit $SMF_EXIT_OK

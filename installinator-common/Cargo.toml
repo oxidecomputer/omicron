@@ -5,8 +5,13 @@ edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
+anyhow.workspace = true
 camino.workspace = true
-omicron-common.workspace = true
+illumos-utils.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+serde_with.workspace = true
+thiserror.workspace = true
+update-engine.workspace = true
+omicron-workspace-hack.workspace = true

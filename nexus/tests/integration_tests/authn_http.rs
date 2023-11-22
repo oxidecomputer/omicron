@@ -19,13 +19,14 @@ use dropshot::HttpErrorResponseBody;
 use dropshot::RequestContext;
 use headers::authorization::Credentials;
 use http::header::HeaderValue;
-use omicron_nexus::authn::external::session_cookie;
-use omicron_nexus::authn::external::spoof;
-use omicron_nexus::authn::external::spoof::HttpAuthnSpoof;
-use omicron_nexus::authn::external::spoof::SPOOF_SCHEME_NAME;
-use omicron_nexus::authn::external::HttpAuthnScheme;
-use omicron_nexus::authn::external::SiloUserSilo;
-use omicron_nexus::db::fixed_data::silo::SILO_ID;
+use nexus_db_queries::authn::external::session_cookie;
+use nexus_db_queries::authn::external::spoof;
+use nexus_db_queries::authn::external::spoof::HttpAuthnSpoof;
+use nexus_db_queries::authn::external::spoof::SPOOF_SCHEME_NAME;
+use nexus_db_queries::authn::external::AuthenticatorContext;
+use nexus_db_queries::authn::external::HttpAuthnScheme;
+use nexus_db_queries::authn::external::SiloUserSilo;
+use nexus_db_queries::db::fixed_data::silo::SILO_ID;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use uuid::Uuid;
@@ -47,7 +48,7 @@ async fn test_authn_spoof_allowed() {
         HashMap::new(),
     )
     .await;
-    let tried_spoof = vec![SPOOF_SCHEME_NAME]
+    let tried_spoof = [SPOOF_SCHEME_NAME]
         .iter()
         .map(|s| s.to_string())
         .collect::<Vec<String>>();
@@ -289,7 +290,7 @@ async fn start_whoami_server(
     };
 
     let server_state = {
-        let authn = omicron_nexus::authn::external::Authenticator::new(
+        let authn = nexus_db_queries::authn::external::Authenticator::new(
             authn_schemes_configured,
         );
 
@@ -300,15 +301,28 @@ async fn start_whoami_server(
     TestContext::new(
         whoami_api,
         server_state,
-        &config.deployment.dropshot_external,
+        &config.deployment.dropshot_external.dropshot,
         Some(logctx),
         log,
     )
 }
 
 struct WhoamiServerState {
-    authn: omicron_nexus::authn::external::Authenticator<WhoamiServerState>,
+    authn: nexus_db_queries::authn::external::Authenticator<WhoamiServerState>,
     sessions: Mutex<HashMap<String, FakeSession>>,
+}
+
+#[async_trait]
+impl AuthenticatorContext for WhoamiServerState {
+    async fn silo_authn_policy_for(
+        &self,
+        _: &nexus_db_queries::authn::Actor,
+    ) -> Result<
+        Option<nexus_db_queries::authn::SiloAuthnPolicy>,
+        omicron_common::api::external::Error,
+    > {
+        Ok(None)
+    }
 }
 
 #[async_trait]
@@ -316,7 +330,7 @@ impl SiloUserSilo for WhoamiServerState {
     async fn silo_user_silo(
         &self,
         silo_user_id: Uuid,
-    ) -> Result<Uuid, omicron_nexus::authn::Reason> {
+    ) -> Result<Uuid, nexus_db_queries::authn::Reason> {
         assert_eq!(
             silo_user_id.to_string(),
             "7f927c86-3371-4295-c34a-e3246a4b9c02"

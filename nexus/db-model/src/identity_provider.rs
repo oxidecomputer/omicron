@@ -97,6 +97,7 @@ impl From<SamlIdentityProvider> for views::SamlIdentityProvider {
             slo_url: saml_idp.slo_url,
             technical_contact_email: saml_idp.technical_contact_email,
             public_cert: saml_idp.public_cert,
+            group_attribute_name: saml_idp.group_attribute_name,
         }
     }
 }

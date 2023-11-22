@@ -4,16 +4,17 @@
 
 use std::collections::BTreeMap;
 
-use super::{Control, OverviewPane, StatefulList, UpdatePane};
+use super::{Control, OverviewPane, RackSetupPane, StatefulList, UpdatePane};
 use crate::ui::defaults::colors::*;
 use crate::ui::defaults::style;
 use crate::ui::widgets::Fade;
 use crate::{Action, Cmd, Frame, State, Term};
+use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
+use ratatui::style::{Modifier, Style};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, Paragraph};
 use slog::{o, Logger};
-use tui::layout::{Alignment, Constraint, Direction, Layout, Rect};
-use tui::style::{Modifier, Style};
-use tui::text::{Span, Spans};
-use tui::widgets::{Block, BorderType, Borders, List, ListItem, Paragraph};
+use wicketd_client::types::GetLocationResponse;
 
 /// The [`MainScreen`] is the primary UI element of the terminal, covers the
 /// entire terminal window/buffer and is visible for all interactions except
@@ -22,7 +23,7 @@ use tui::widgets::{Block, BorderType, Borders, List, ListItem, Paragraph};
 /// This structure allows us to maintain similar styling and navigation
 /// throughout wicket with a minimum of code.
 ///
-/// Specific functionality is put inside [`Pane`]s, which can be customized
+/// Specific functionality is put inside Panes, which can be customized
 /// as needed.
 pub struct MainScreen {
     #[allow(unused)]
@@ -39,7 +40,8 @@ impl MainScreen {
         // We want the sidebar ordered in this specific manner
         let sidebar_ordered_panes = vec![
             ("overview", Box::new(OverviewPane::new()) as Box<dyn Control>),
-            ("update", Box::new(UpdatePane::new(log)) as Box<dyn Control>),
+            ("update", Box::new(UpdatePane::new(log))),
+            ("rack setup", Box::<RackSetupPane>::default()),
         ];
         let sidebar_keys: Vec<_> =
             sidebar_ordered_panes.iter().map(|&(title, _)| title).collect();
@@ -191,14 +193,18 @@ impl MainScreen {
         frame: &mut Frame<'_>,
         rect: Rect,
     ) {
+        let location_spans = location_spans(&state.wicketd_location);
         let wicketd_spans = state.service_status.wicketd_liveness().to_spans();
         let mgs_spans = state.service_status.mgs_liveness().to_spans();
-        let mut spans = vec![Span::styled("WICKETD: ", style::service())];
+        let mut spans = vec![Span::styled("You are here: ", style::service())];
+        spans.extend_from_slice(&location_spans);
+        spans.push(Span::styled(" | ", style::divider()));
+        spans.push(Span::styled("WICKETD: ", style::service()));
         spans.extend_from_slice(&wicketd_spans);
         spans.push(Span::styled(" | ", style::divider()));
         spans.push(Span::styled("MGS: ", style::service()));
         spans.extend_from_slice(&mgs_spans);
-        let main = Paragraph::new(Spans::from(spans));
+        let main = Paragraph::new(Line::from(spans));
         frame.render_widget(main, rect);
 
         let system_version = state
@@ -207,7 +213,7 @@ impl MainScreen {
             .as_ref()
             .map_or_else(|| "UNKNOWN".to_string(), |v| v.to_string());
 
-        let test = Paragraph::new(Spans::from(vec![
+        let test = Paragraph::new(Line::from(vec![
             Span::styled(
                 "UPDATE VERSION: ",
                 Style::default().fg(TUI_GREEN_DARK),
@@ -217,6 +223,41 @@ impl MainScreen {
         .alignment(Alignment::Right);
         frame.render_widget(test, rect);
     }
+}
+
+fn location_spans(location: &GetLocationResponse) -> Vec<Span<'static>> {
+    // We reuse `style::connected()` and `style::delayed()` in these spans to
+    // match the wicketd/mgs connection statuses that follow us in the status
+    // bar.
+    let mut spans = Vec::new();
+    if let Some(id) = location.sled_id.as_ref() {
+        spans.push(Span::styled(
+            format!("Sled {}", id.slot),
+            style::connected(),
+        ));
+    } else if let Some(baseboard) = location.sled_baseboard.as_ref() {
+        spans.push(Span::styled(
+            format!("Sled {}", baseboard.identifier()),
+            style::connected(),
+        ));
+    } else {
+        spans.push(Span::styled("Sled UNKNOWN", style::delayed()));
+    };
+    spans.push(Span::styled("/", style::divider()));
+    if let Some(id) = location.switch_id.as_ref() {
+        spans.push(Span::styled(
+            format!("Switch {}", id.slot),
+            style::connected(),
+        ));
+    } else if let Some(baseboard) = location.switch_baseboard.as_ref() {
+        spans.push(Span::styled(
+            format!("Switch {}", baseboard.identifier()),
+            style::connected(),
+        ));
+    } else {
+        spans.push(Span::styled("Switch UNKNOWN", style::delayed()));
+    };
+    spans
 }
 
 /// The mechanism for selecting panes
@@ -282,7 +323,6 @@ impl Control for Sidebar {
         let panes = List::new(items)
             .block(
                 Block::default()
-                    .title("<ESC>")
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
                     .style(border_style),

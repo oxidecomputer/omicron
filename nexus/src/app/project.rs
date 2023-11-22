@@ -5,15 +5,16 @@
 //! Project APIs
 
 use crate::app::sagas;
-use crate::authn;
-use crate::authz;
-use crate::db;
-use crate::db::lookup;
-use crate::db::lookup::LookupPath;
 use crate::external_api::params;
 use crate::external_api::shared;
 use anyhow::Context;
+use nexus_db_model::Name;
+use nexus_db_queries::authn;
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
+use nexus_db_queries::db::lookup;
+use nexus_db_queries::db::lookup::LookupPath;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
@@ -23,6 +24,7 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
+use ref_cast::RefCast;
 use std::sync::Arc;
 
 impl super::Nexus {
@@ -42,7 +44,7 @@ impl super::Nexus {
         })
     }
 
-    pub async fn project_create(
+    pub(crate) async fn project_create(
         self: &Arc<Self>,
         opctx: &OpContext,
         new_project: &params::ProjectCreate,
@@ -72,7 +74,7 @@ impl super::Nexus {
         Ok(db_project)
     }
 
-    pub async fn project_list(
+    pub(crate) async fn project_list(
         &self,
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
@@ -80,7 +82,7 @@ impl super::Nexus {
         self.db_datastore.projects_list(opctx, pagparams).await
     }
 
-    pub async fn project_update(
+    pub(crate) async fn project_update(
         &self,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
@@ -93,7 +95,7 @@ impl super::Nexus {
             .await
     }
 
-    pub async fn project_delete(
+    pub(crate) async fn project_delete(
         &self,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
@@ -107,11 +109,11 @@ impl super::Nexus {
 
     // Role assignments
 
-    pub async fn project_fetch_policy(
+    pub(crate) async fn project_fetch_policy(
         &self,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
-    ) -> LookupResult<shared::Policy<authz::ProjectRole>> {
+    ) -> LookupResult<shared::Policy<shared::ProjectRole>> {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::ReadPolicy).await?;
         let role_assignments = self
@@ -125,12 +127,12 @@ impl super::Nexus {
         Ok(shared::Policy { role_assignments })
     }
 
-    pub async fn project_update_policy(
+    pub(crate) async fn project_update_policy(
         &self,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
-        policy: &shared::Policy<authz::ProjectRole>,
-    ) -> UpdateResult<shared::Policy<authz::ProjectRole>> {
+        policy: &shared::Policy<shared::ProjectRole>,
+    ) -> UpdateResult<shared::Policy<shared::ProjectRole>> {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::ModifyPolicy).await?;
 
@@ -146,5 +148,41 @@ impl super::Nexus {
             .map(|r| r.try_into())
             .collect::<Result<Vec<_>, _>>()?;
         Ok(shared::Policy { role_assignments })
+    }
+
+    pub(crate) async fn project_ip_pools_list(
+        &self,
+        opctx: &OpContext,
+        project_lookup: &lookup::Project<'_>,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<db::model::IpPool> {
+        let (.., authz_project) =
+            project_lookup.lookup_for(authz::Action::ListChildren).await?;
+
+        self.db_datastore
+            .project_ip_pools_list(opctx, &authz_project, pagparams)
+            .await
+    }
+
+    pub fn project_ip_pool_lookup<'a>(
+        &'a self,
+        opctx: &'a OpContext,
+        pool: &'a NameOrId,
+        _project_lookup: &Option<lookup::Project<'_>>,
+    ) -> LookupResult<lookup::IpPool<'a>> {
+        // TODO(2148, 2056): check that the given project has access (if one
+        // is provided to the call) once that relation is implemented
+        match pool {
+            NameOrId::Name(name) => {
+                let pool = LookupPath::new(opctx, &self.db_datastore)
+                    .ip_pool_name(Name::ref_cast(name));
+                Ok(pool)
+            }
+            NameOrId::Id(id) => {
+                let pool =
+                    LookupPath::new(opctx, &self.db_datastore).ip_pool_id(*id);
+                Ok(pool)
+            }
+        }
     }
 }

@@ -8,8 +8,12 @@ mod common;
 mod dns_config;
 mod dns_propagation;
 mod dns_servers;
+mod external_endpoints;
 mod init;
+mod inventory_collection;
+mod nat_cleanup;
+mod status;
 
 pub use common::Driver;
 pub use common::TaskHandle;
-pub use init::init;
+pub use init::BackgroundTasks;

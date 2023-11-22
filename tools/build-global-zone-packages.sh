@@ -5,18 +5,20 @@ set -eux
 TOOLS_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 
 # Use the default "out" dir in omicron to find the needed packages if one isn't given
-tarball_src_dir="$(readlink -f ${1:-"$TOOLS_DIR/../out"})"
+tarball_src_dir="$(readlink -f "${1:-"$TOOLS_DIR/../out"}")"
 # Stash the final tgz in the given src dir if a different target isn't given
-out_dir="$(readlink -f ${2:-$tarball_src_dir})"
+out_dir="$(readlink -f "${2:-"$tarball_src_dir"}")"
 
 # Make sure needed packages exist
 deps=(
-    $tarball_src_dir/omicron-sled-agent.tar
-    $tarball_src_dir/maghemite.tar
+    "$tarball_src_dir/omicron-sled-agent.tar"
+    "$tarball_src_dir/mg-ddm-gz.tar"
+    "$tarball_src_dir/propolis-server.tar.gz"
+    "$tarball_src_dir/overlay.tar.gz"
 )
-for dep in ${deps[@]}; do
+for dep in "${deps[@]}"; do
     if [[ ! -e $dep ]]; then
-        echo "Missing Global Zone dep: $(basename $dep)"
+        echo "Missing Global Zone dep: $(basename "$dep")"
         exit 1
     fi
 done
@@ -44,8 +46,15 @@ cd -
 pkg_dir="$tmp_gz/root/opt/oxide/mg-ddm"
 mkdir -p "$pkg_dir"
 cd "$pkg_dir"
-tar -xvfz "$tarball_src_dir/maghemite.tar"
+tar -xvfz "$tarball_src_dir/mg-ddm-gz.tar"
 cd -
 
+# propolis should be bundled with this OS: Put the propolis-server zone image
+# under /opt/oxide in the gz.
+cp "$tarball_src_dir/propolis-server.tar.gz" "$tmp_gz/root/opt/oxide"
+
+# The zone overlay should also be bundled.
+cp "$tarball_src_dir/overlay.tar.gz" "$tmp_gz/root/opt/oxide"
+
 # Create the final output and we're done
-cd "$tmp_gz" && tar cvfz $out_dir/global-zone-packages.tar.gz oxide.json root
+cd "$tmp_gz" && tar cvfz "$out_dir"/global-zone-packages.tar.gz oxide.json root

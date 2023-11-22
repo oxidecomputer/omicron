@@ -5,7 +5,6 @@
 //! Database-friendly IPv6 addresses
 
 use diesel::backend::Backend;
-use diesel::backend::RawValue;
 use diesel::deserialize;
 use diesel::deserialize::FromSql;
 use diesel::pg::Pg;
@@ -55,7 +54,7 @@ where
     DB: Backend,
     IpNetwork: FromSql<Inet, DB>,
 {
-    fn from_sql(bytes: RawValue<DB>) -> deserialize::Result<Self> {
+    fn from_sql(bytes: DB::RawValue<'_>) -> deserialize::Result<Self> {
         match IpNetwork::from_sql(bytes)?.ip() {
             std::net::IpAddr::V6(ip) => Ok(Self(ip)),
             v4 => {
