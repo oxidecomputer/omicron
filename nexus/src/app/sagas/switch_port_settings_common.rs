@@ -575,3 +575,40 @@ pub struct EarlyNetworkPortUpdate {
     port: PortConfigV1,
     bgp_configs: Vec<BgpConfig>,
 }
+
+pub(crate) async fn select_dendrite_client(
+    sagactx: &NexusActionContext,
+    opctx: &OpContext,
+    switch_port_id: Uuid,
+) -> Result<Arc<dpd_client::Client>, ActionError> {
+    let osagactx = sagactx.user_data();
+    let nexus = osagactx.nexus();
+
+    let switch_port =
+        nexus.get_switch_port(&opctx, switch_port_id).await.map_err(|e| {
+            ActionError::action_failed(format!(
+                "get switch port for dendrite client selection {e}"
+            ))
+        })?;
+
+    let switch_location: SwitchLocation =
+        switch_port.switch_location.parse().map_err(
+            |e: ParseSwitchLocationError| {
+                ActionError::action_failed(format!(
+                    "get switch location for uplink: {e:?}",
+                ))
+            },
+        )?;
+
+    let dpd_client: Arc<dpd_client::Client> = osagactx
+        .nexus()
+        .dpd_clients
+        .get(&switch_location)
+        .ok_or_else(|| {
+            ActionError::action_failed(format!(
+                "requested switch not available: {switch_location}"
+            ))
+        })?
+        .clone();
+    Ok(dpd_client)
+}

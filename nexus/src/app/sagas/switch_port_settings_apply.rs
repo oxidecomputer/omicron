@@ -6,8 +6,8 @@ use super::{NexusActionContext, NEXUS_DPD_TAG};
 use crate::app::sagas::retry_until_known_result;
 use crate::app::sagas::switch_port_settings_common::{
     api_to_dpd_port_settings, ensure_switch_port_bgp_settings,
-    ensure_switch_port_uplink, select_mg_client, switch_sled_agent,
-    write_bootstore_config,
+    ensure_switch_port_uplink, select_dendrite_client, select_mg_client,
+    switch_sled_agent, write_bootstore_config,
 };
 use crate::app::sagas::{
     declare_saga_actions, ActionRegistry, NexusSaga, SagaInitError,
@@ -19,9 +19,7 @@ use nexus_db_model::NETWORK_KEY;
 use nexus_db_queries::db::datastore::UpdatePrecondition;
 use nexus_db_queries::{authn, db};
 use omicron_common::api::external::{self, NameOrId};
-use omicron_common::api::internal::shared::{
-    ParseSwitchLocationError, SwitchLocation,
-};
+use omicron_common::api::internal::shared::SwitchLocation;
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 use std::str::FromStr;
@@ -160,6 +158,10 @@ async fn spa_ensure_switch_port_settings(
 ) -> Result<(), ActionError> {
     let params = sagactx.saga_params::<Params>()?;
     let log = sagactx.user_data().log();
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let settings = sagactx
         .lookup::<SwitchPortSettingsCombinedResult>("switch_port_settings")?;
@@ -170,7 +172,7 @@ async fn spa_ensure_switch_port_settings(
         })?;
 
     let dpd_client: Arc<dpd_client::Client> =
-        select_dendrite_client(&sagactx).await?;
+        select_dendrite_client(&sagactx, &opctx, params.switch_port_id).await?;
 
     let dpd_port_settings =
         api_to_dpd_port_settings(&settings).map_err(|e| {
@@ -227,8 +229,8 @@ async fn spa_undo_ensure_switch_port_settings(
         .lookup::<Option<Uuid>>("original_switch_port_settings_id")
         .map_err(|e| external::Error::internal_error(&e.to_string()))?;
 
-    let dpd_client: Arc<dpd_client::Client> =
-        select_dendrite_client(&sagactx).await?;
+    let dpd_client =
+        select_dendrite_client(&sagactx, &opctx, params.switch_port_id).await?;
 
     let id = match orig_port_settings_id {
         Some(id) => id,
@@ -469,48 +471,6 @@ async fn spa_disassociate_switch_port(
         })?;
 
     Ok(())
-}
-
-pub(crate) async fn select_dendrite_client(
-    sagactx: &NexusActionContext,
-) -> Result<Arc<dpd_client::Client>, ActionError> {
-    let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params::<Params>()?;
-    let nexus = osagactx.nexus();
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
-
-    let switch_port = nexus
-        .get_switch_port(&opctx, params.switch_port_id)
-        .await
-        .map_err(|e| {
-            ActionError::action_failed(format!(
-                "get switch port for dendrite client selection {e}"
-            ))
-        })?;
-
-    let switch_location: SwitchLocation =
-        switch_port.switch_location.parse().map_err(
-            |e: ParseSwitchLocationError| {
-                ActionError::action_failed(format!(
-                    "get switch location for uplink: {e:?}",
-                ))
-            },
-        )?;
-
-    let dpd_client: Arc<dpd_client::Client> = osagactx
-        .nexus()
-        .dpd_clients
-        .get(&switch_location)
-        .ok_or_else(|| {
-            ActionError::action_failed(format!(
-                "requested switch not available: {switch_location}"
-            ))
-        })?
-        .clone();
-    Ok(dpd_client)
 }
 
 async fn spa_ensure_switch_port_bgp_settings(

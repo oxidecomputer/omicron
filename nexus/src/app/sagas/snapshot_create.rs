@@ -496,17 +496,19 @@ async fn ssc_create_destination_volume_record(
 async fn ssc_create_destination_volume_record_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
+    let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
 
     let destination_volume_id =
         sagactx.lookup::<Uuid>("destination_volume_id")?;
 
-    osagactx
-        .datastore()
-        .decrease_crucible_resource_count_and_soft_delete_volume(
-            destination_volume_id,
-        )
-        .await?;
+    // This saga contains what is necessary to clean up the destination volume
+    // resources. It's safe here to perform a volume hard delete without
+    // decreasing the crucible resource count because the destination volume is
+    // guaranteed to never have read only resources that require that
+    // accounting.
+
+    info!(log, "hard deleting volume {}", destination_volume_id,);
 
     osagactx.datastore().volume_hard_delete(destination_volume_id).await?;
 
@@ -1396,16 +1398,21 @@ async fn ssc_create_volume_record_undo(
     let osagactx = sagactx.user_data();
     let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
 
+    // `volume_create` will increase the resource count for read only resources
+    // in a volume, which there are guaranteed to be for snapshot volumes.
+    // decreasing crucible resources is necessary as an undo step. Do not call
+    // `volume_hard_delete` here: soft deleting volumes is necessary for
+    // `find_deleted_volume_regions` to work.
+
     info!(
         log,
         "calling decrease crucible resource count for volume {}", volume_id
     );
+
     osagactx
         .datastore()
         .decrease_crucible_resource_count_and_soft_delete_volume(volume_id)
         .await?;
-
-    osagactx.datastore().volume_hard_delete(volume_id).await?;
 
     Ok(())
 }
