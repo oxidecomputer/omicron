@@ -110,6 +110,16 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
+    /// Lookup an IP pool within the current silo which contains a target IP
+    /// address.
+    pub async fn ip_pools_fetch_for_ip(
+        &self,
+        opctx: &OpContext,
+        ip_addr: std::net::IpAddr,
+    ) -> LookupResult<IpPool> {
+        todo!()
+    }
+
     /// Looks up an IP pool intended for internal services.
     ///
     /// This method may require an index by Availability Zone in the future.

@@ -98,7 +98,8 @@ const MAX_PORT: u16 = u16::MAX;
 ///         <kind> AS kind,
 ///         candidate_ip AS ip,
 ///         CAST(candidate_first_port AS INT4) AS first_port,
-///         CAST(candidate_last_port AS INT4) AS last_port
+///         CAST(candidate_last_port AS INT4) AS last_port,
+///         <project_id> AS project_id
 ///     FROM
 ///         SELECT * FROM (
 ///             -- Select all IP addresses by pool and range.
@@ -371,6 +372,13 @@ impl NextExternalIp {
         out.push_identifier(dsl::first_port::NAME)?;
         out.push_sql(", CAST(candidate_last_port AS INT4) AS ");
         out.push_identifier(dsl::last_port::NAME)?;
+        out.push_sql(", ");
+
+        // Project ID, possibly null
+        out.push_bind_param::<sql_types::Nullable<sql_types::Uuid>, Option<Uuid>>(self.ip.project_id())?;
+        out.push_sql(" AS ");
+        out.push_identifier(dsl::project_id::NAME)?;
+
         out.push_sql(" FROM (");
         self.push_address_sequence_subquery(out.reborrow())?;
         out.push_sql(") CROSS JOIN (");
@@ -622,7 +630,7 @@ impl NextExternalIp {
         out.push_sql(" WHERE ");
         out.push_identifier(dsl::ip_pool_id::NAME)?;
         out.push_sql(" = ");
-        out.push_bind_param::<sql_types::Nullable<sql_types::Uuid>, Option<Uuid>>(self.ip.pool_id())?;
+        out.push_bind_param::<sql_types::Uuid, Uuid>(self.ip.pool_id())?;
         out.push_sql(" AND ");
         out.push_identifier(dsl::time_deleted::NAME)?;
         out.push_sql(" IS NULL");

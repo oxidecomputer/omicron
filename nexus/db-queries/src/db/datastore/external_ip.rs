@@ -132,20 +132,52 @@ impl DataStore {
     pub async fn allocate_floating_ip(
         &self,
         opctx: &OpContext,
+        pool_id: Option<Uuid>,
         project_id: Uuid,
         ip_id: Uuid,
         name: &Name,
         description: &str,
-        ip: IpAddr,
+        ip: Option<IpAddr>,
     ) -> CreateResult<ExternalIp> {
-        let data = IncompleteExternalIp::for_floating_explicit(
-            ip_id,
-            name,
-            description,
-            project_id,
-            ip,
-        );
+        // XXX: mux here to scan *all* project pools in
+        //      current silo for convenience?
+        let pool_id = if let Some(id) = pool_id {
+            id
+        } else {
+            self.ip_pools_fetch_default(opctx).await?.id()
+        };
+
+        // XXX: Verify that chosen pool comes from my silo.
+
+        let data = if let Some(ip) = ip {
+            IncompleteExternalIp::for_floating_explicit(
+                ip_id,
+                name,
+                description,
+                project_id,
+                ip,
+                pool_id,
+            )
+        } else {
+            IncompleteExternalIp::for_floating(
+                ip_id,
+                name,
+                description,
+                project_id,
+                pool_id,
+            )
+        };
+
+        // TODO: need to disambiguate no IP and/or IP taken
+        //       from resource name collision, and expose those in
+        //       a nice way.
         self.allocate_external_ip(opctx, data).await
+        //     .map_err(|e| {
+        //         public_error_from_diesel(
+        //             e,
+        //             ErrorHandler::Conflict(todo!(), name.as_str())
+        //         )
+        //     })
     }
 
     /// Allocates a floating IP address for instance usage.

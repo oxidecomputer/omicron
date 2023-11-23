@@ -1,3 +1,6 @@
-ALTER TABLE omicron.public.external_ip ADD CONSTRAINT IF NOT EXISTS null_non_fip_pool_id CHECK (
-	kind = 'floating' OR (ip_pool_id IS NOT NULL AND ip_pool_range_id IS NOT NULL)
-);
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_floating_ip_by_name on omicron.public.external_ip (
+    name
+) WHERE
+    kind = 'floating' AND
+    time_deleted is NULL AND
+    project_id is NULL;

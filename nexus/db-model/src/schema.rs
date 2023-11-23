@@ -524,14 +524,16 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
-        ip_pool_id -> Nullable<Uuid>,
-        ip_pool_range_id -> Nullable<Uuid>,
+
+        ip_pool_id -> Uuid,
+        ip_pool_range_id -> Uuid,
         is_service -> Bool,
         parent_id -> Nullable<Uuid>,
         kind -> crate::IpKindEnum,
         ip -> Inet,
         first_port -> Int4,
         last_port -> Int4,
+
         project_id -> Nullable<Uuid>,
     }
 }

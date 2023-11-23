@@ -54,6 +54,7 @@ path_param!(VpcPath, vpc, "VPC");
 path_param!(SubnetPath, subnet, "subnet");
 path_param!(RouterPath, router, "router");
 path_param!(RoutePath, route, "route");
+path_param!(FloatingIpPath, floating_ip, "Floating IP");
 path_param!(DiskPath, disk, "disk");
 path_param!(SnapshotPath, snapshot, "snapshot");
 path_param!(ImagePath, image, "image");
@@ -127,6 +128,14 @@ pub struct ProjectSelector {
 pub struct OptionalProjectSelector {
     /// Name or ID of the project
     pub project: Option<NameOrId>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct FloatingIpSelector {
+    /// Name or ID of the project, only required if `floating_ip` is provided as a `Name`
+    pub project: Option<NameOrId>,
+    /// Name or ID of the Floating IP
+    pub floating_ip: NameOrId,
 }
 
 #[derive(Deserialize, JsonSchema)]

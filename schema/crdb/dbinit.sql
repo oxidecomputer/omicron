@@ -1579,10 +1579,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.external_ip (
     time_deleted TIMESTAMPTZ,
 
     /* FK to the `ip_pool` table. */
-    ip_pool_id UUID,
+    ip_pool_id UUID NOT NULL,
 
     /* FK to the `ip_pool_range` table. */
-    ip_pool_range_id UUID,
+    ip_pool_range_id UUID NOT NULL,
 
     /* True if this IP is associated with a service rather than an instance. */
     is_service BOOL NOT NULL,
@@ -1602,7 +1602,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.external_ip (
     /* The last port in the allowed range, also inclusive. */
     last_port INT4 NOT NULL,
 
-    /* FK to the `ip_pool` table. */
+    /* FK to the `project` table. */
     project_id UUID,
 
     /* The name must be non-NULL iff this is a floating IP. */
@@ -1617,11 +1617,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.external_ip (
         (kind = 'floating' AND description IS NOT NULL)
     ),
 
-    /* Only floating IPs can be attached to a project.
-     * Projects are nullable in such a case.
+    /* Only floating IPs can be attached to a project, and
+     * they must have a parent project if they are instance FIPs.
      */
     CONSTRAINT null_project_id CHECK (
-        kind = 'floating' OR project_id IS NULL
+        (kind = 'floating' AND is_service = FALSE AND project_id is NOT NULL) OR
+        ((kind != 'floating' OR is_service = TRUE) AND project_id IS NULL)
     ),
 
     /* Ephemeral/SNAT IPs must have a parent pool and range, while this
@@ -1629,12 +1630,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.external_ip (
      */
     CONSTRAINT null_non_fip_pool_id CHECK (
         kind = 'floating' OR (ip_pool_id IS NOT NULL AND ip_pool_range_id IS NOT NULL)
-    ),
-
-    /* If the IP pool is defined, the IP pool range must also be. */
-    CONSTRAINT null_pool_range_id CHECK (
-        (ip_pool_id IS NULL AND ip_pool_range_id IS NULL) OR
-        (ip_pool_id IS NOT NULL AND ip_pool_range_id IS NOT NULL)
     ),
 
     /*
@@ -1679,6 +1674,23 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_external_ip_by_parent ON omicron.public
     id
 )
     WHERE parent_id IS NOT NULL AND time_deleted IS NULL;
+
+/* Enforce name-uniqueness of floating (service) IPs at fleet level. */
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_floating_ip_by_name on omicron.public.external_ip (
+    name
+) WHERE
+    kind = 'floating' AND
+    time_deleted is NULL AND
+    project_id is NULL;
+
+/* Enforce name-uniqueness of floating IPs at project level. */
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_floating_ip_by_name_and_project on omicron.public.external_ip (
+    project_id,
+    name
+) WHERE
+    kind = 'floating' AND
+    time_deleted is NULL AND
+    project_id is NOT NULL;
 
 /*******************************************************************/
 

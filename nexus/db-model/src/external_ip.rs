@@ -57,8 +57,8 @@ pub struct ExternalIp {
     pub time_created: DateTime<Utc>,
     pub time_modified: DateTime<Utc>,
     pub time_deleted: Option<DateTime<Utc>>,
-    pub ip_pool_id: Option<Uuid>,
-    pub ip_pool_range_id: Option<Uuid>,
+    pub ip_pool_id: Uuid,
+    pub ip_pool_range_id: Uuid,
     pub is_service: bool,
     // This is Some(_) for:
     //  - all instance/service SNAT IPs
@@ -69,6 +69,7 @@ pub struct ExternalIp {
     pub ip: IpNetwork,
     pub first_port: SqlU16,
     pub last_port: SqlU16,
+    // Only Some(_) for instance Floating IPs
     pub project_id: Option<Uuid>,
 }
 
@@ -93,7 +94,7 @@ pub struct IncompleteExternalIp {
     kind: IpKind,
     is_service: bool,
     parent_id: Option<Uuid>,
-    pool_id: Option<Uuid>,
+    pool_id: Uuid,
     project_id: Option<Uuid>,
     // Optional address requesting that a specific IP address be allocated.
     explicit_ip: Option<IpNetwork>,
@@ -115,7 +116,7 @@ impl IncompleteExternalIp {
             kind: IpKind::SNat,
             is_service: false,
             parent_id: Some(instance_id),
-            pool_id: Some(pool_id),
+            pool_id,
             project_id: None,
             explicit_ip: None,
             explicit_port_range: None,
@@ -131,7 +132,7 @@ impl IncompleteExternalIp {
             kind: IpKind::Ephemeral,
             is_service: false,
             parent_id: Some(instance_id),
-            pool_id: Some(pool_id),
+            pool_id,
             project_id: None,
             explicit_ip: None,
             explicit_port_range: None,
@@ -153,7 +154,7 @@ impl IncompleteExternalIp {
             kind: IpKind::Floating,
             is_service: false,
             parent_id: None,
-            pool_id: Some(pool_id),
+            pool_id,
             project_id: Some(project_id),
             explicit_ip: None,
             explicit_port_range: None,
@@ -166,6 +167,7 @@ impl IncompleteExternalIp {
         description: &str,
         project_id: Uuid,
         explicit_ip: IpAddr,
+        pool_id: Uuid,
     ) -> Self {
         Self {
             id,
@@ -175,7 +177,7 @@ impl IncompleteExternalIp {
             kind: IpKind::Floating,
             is_service: false,
             parent_id: None,
-            pool_id: None,
+            pool_id,
             project_id: Some(project_id),
             explicit_ip: Some(explicit_ip.into()),
             explicit_port_range: None,
@@ -198,7 +200,7 @@ impl IncompleteExternalIp {
             kind: IpKind::Floating,
             is_service: true,
             parent_id: Some(service_id),
-            pool_id: Some(pool_id),
+            pool_id,
             project_id: None,
             explicit_ip: Some(IpNetwork::from(address)),
             explicit_port_range: None,
@@ -227,7 +229,7 @@ impl IncompleteExternalIp {
             kind: IpKind::SNat,
             is_service: true,
             parent_id: Some(service_id),
-            pool_id: Some(pool_id),
+            pool_id,
             project_id: None,
             explicit_ip: Some(IpNetwork::from(address)),
             explicit_port_range,
@@ -249,7 +251,7 @@ impl IncompleteExternalIp {
             kind: IpKind::Floating,
             is_service: true,
             parent_id: Some(service_id),
-            pool_id: Some(pool_id),
+            pool_id,
             project_id: None,
             explicit_ip: None,
             explicit_port_range: None,
@@ -265,7 +267,7 @@ impl IncompleteExternalIp {
             kind: IpKind::SNat,
             is_service: true,
             parent_id: Some(service_id),
-            pool_id: Some(pool_id),
+            pool_id,
             project_id: None,
             explicit_ip: None,
             explicit_port_range: None,
@@ -300,7 +302,7 @@ impl IncompleteExternalIp {
         &self.parent_id
     }
 
-    pub fn pool_id(&self) -> &Option<Uuid> {
+    pub fn pool_id(&self) -> &Uuid {
         &self.pool_id
     }
 
