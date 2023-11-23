@@ -76,8 +76,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.rack (
 CREATE TYPE IF NOT EXISTS omicron.public.sled_provision_state AS ENUM (
     -- New resources can be provisioned onto the sled
     'provisionable',
-    -- Resources must not be provisioned onto the sled
-    'not_provisionable'
+    -- New resources must not be provisioned onto the sled
+    'non_provisionable'
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.sled (
@@ -99,9 +99,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.sled (
     part_number STRING(63) NOT NULL,
     revision INT8 NOT NULL,
 
-    /* The state of whether resources should be provisioned onto the sled */
-    provision_state omicron.public.sled_provision_state NOT NULL,
-
     /* CPU & RAM summary for the sled */
     usable_hardware_threads INT8 CHECK (usable_hardware_threads BETWEEN 0 AND 4294967295) NOT NULL,
     usable_physical_ram INT8 NOT NULL,
@@ -113,6 +110,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.sled (
 
     /* The last address allocated to an Oxide service on this sled. */
     last_used_address INET NOT NULL,
+
+    /* The state of whether resources should be provisioned onto the sled */
+    provision_state omicron.public.sled_provision_state NOT NULL,
 
     -- This constraint should be upheld, even for deleted disks
     -- in the fleet.

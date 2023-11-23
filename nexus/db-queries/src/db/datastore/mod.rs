@@ -616,11 +616,12 @@ mod test {
         opctx: &OpContext,
         sled_id: Uuid,
     ) {
-        datastore
+        let sled_lookup = LookupPath::new(opctx, datastore).sled_id(sled_id);
+        let old_state = datastore
             .sled_set_provision_state(
                 &opctx,
-                sled_id,
-                SledProvisionState::NotProvisionable,
+                &sled_lookup,
+                SledProvisionState::NonProvisionable,
             )
             .await
             .unwrap_or_else(|error| {
@@ -628,6 +629,9 @@ mod test {
                     "error marking sled {sled_id} as non-provisionable: {error}"
                 )
             });
+        // The old state should always be provisionable since that's where we
+        // start.
+        assert_eq!(old_state, SledProvisionState::Provisionable);
     }
 
     fn test_zpool_size() -> ByteCount {

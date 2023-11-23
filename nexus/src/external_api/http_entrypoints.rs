@@ -4466,18 +4466,18 @@ async fn sled_view(
 async fn sled_set_provision_state(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::SledPath>,
-    query_params: Query<params::SledProvisionStateParams>,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    new_provision_state: TypedBody<params::SledProvisionStateParams>,
+) -> Result<HttpResponseOk<params::SledProvisionStateResponse>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
 
         let path = path_params.into_inner();
-        let provision_state = query_params.into_inner().provision_state;
+        let provision_state = new_provision_state.into_inner().state;
 
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         // Convert the external `SledProvisionState` into our internal data model.
-        let provision_state = db::model::SledProvisionState::try_from(
+        let new_state = db::model::SledProvisionState::try_from(
             provision_state,
         )
         .map_err(|error| {
@@ -4489,12 +4489,16 @@ async fn sled_set_provision_state(
 
         let sled_lookup = nexus.sled_lookup(&opctx, &path.sled_id)?;
 
-        nexus
-            .sled_set_provision_state(&opctx, &sled_lookup, provision_state)
+        let old_state = nexus
+            .sled_set_provision_state(&opctx, &sled_lookup, new_state)
             .await?;
-        // XXX: Should we return the old value as an indication of whether the
-        // state has changed?
-        Ok(HttpResponseUpdatedNoContent())
+
+        let response = params::SledProvisionStateResponse {
+            old_state: old_state.into(),
+            new_state: new_state.into(),
+        };
+
+        Ok(HttpResponseOk(response))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

@@ -139,12 +139,13 @@ impl super::Nexus {
             .await
     }
 
+    /// Returns the old state.
     pub(crate) async fn sled_set_provision_state(
         &self,
         opctx: &OpContext,
         sled_lookup: &lookup::Sled<'_>,
         state: db::model::SledProvisionState,
-    ) -> Result<(), Error> {
+    ) -> Result<db::model::SledProvisionState, Error> {
         self.db_datastore
             .sled_set_provision_state(opctx, sled_lookup, state)
             .await

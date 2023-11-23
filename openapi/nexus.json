@@ -3806,20 +3806,28 @@
               "type": "string",
               "format": "uuid"
             }
-          },
-          {
-            "in": "query",
-            "name": "provision_state",
-            "description": "The provision state.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/SledProvisionState"
-            }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SledProvisionStateParams"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
-          "204": {
-            "description": "resource updated"
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SledProvisionStateResponse"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -13145,6 +13153,49 @@
               "unknown"
             ]
           }
+        ]
+      },
+      "SledProvisionStateParams": {
+        "description": "Parameters for `sled_set_provision_state`.",
+        "type": "object",
+        "properties": {
+          "state": {
+            "description": "The provision state.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SledProvisionState"
+              }
+            ]
+          }
+        },
+        "required": [
+          "state"
+        ]
+      },
+      "SledProvisionStateResponse": {
+        "description": "Response to `sled_set_provision_state`.",
+        "type": "object",
+        "properties": {
+          "new_state": {
+            "description": "The new provision state.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SledProvisionState"
+              }
+            ]
+          },
+          "old_state": {
+            "description": "The old provision state.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SledProvisionState"
+              }
+            ]
+          }
+        },
+        "required": [
+          "new_state",
+          "old_state"
         ]
       },
       "SledResultsPage": {

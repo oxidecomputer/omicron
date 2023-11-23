@@ -18,7 +18,7 @@ impl_enum_type!(
 
     // Enum values
     Provisionable => b"provisionable"
-    NotProvisionable => b"not_provisionable"
+    NonProvisionable => b"non_provisionable"
 );
 
 impl From<SledProvisionState> for views::SledProvisionState {
@@ -27,7 +27,7 @@ impl From<SledProvisionState> for views::SledProvisionState {
             SledProvisionState::Provisionable => {
                 views::SledProvisionState::Provisionable
             }
-            SledProvisionState::NotProvisionable => {
+            SledProvisionState::NonProvisionable => {
                 views::SledProvisionState::NonProvisionable
             }
         }
@@ -43,7 +43,7 @@ impl TryFrom<views::SledProvisionState> for SledProvisionState {
                 Ok(SledProvisionState::Provisionable)
             }
             views::SledProvisionState::NonProvisionable => {
-                Ok(SledProvisionState::NotProvisionable)
+                Ok(SledProvisionState::NonProvisionable)
             }
             views::SledProvisionState::Unknown => {
                 Err(UnknownSledProvisionState)

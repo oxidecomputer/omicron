@@ -629,7 +629,14 @@ impl InformationSchema {
             self.referential_constraints,
             other.referential_constraints
         );
-        similar_asserts::assert_eq!(self.statistics, other.statistics);
+        similar_asserts::assert_eq!(
+            self.statistics,
+            other.statistics,
+            "Statistics did not match. This often means that in dbinit.sql, a new \
+            column was added into the middle of a table rather than to the end. \
+            If that is the case, change dbinit.sql to add the column to the end \
+            of the table."
+        );
         similar_asserts::assert_eq!(self.sequences, other.sequences);
         similar_asserts::assert_eq!(self.pg_indexes, other.pg_indexes);
     }

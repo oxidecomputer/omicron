@@ -47,6 +47,12 @@ lazy_static! {
         format!("/v1/system/hardware/uninitialized-sleds");
     pub static ref HARDWARE_SLED_URL: String =
         format!("/v1/system/hardware/sleds/{}", SLED_AGENT_UUID);
+    pub static ref HARDWARE_SLED_PROVISION_STATE_URL: String =
+        format!("/v1/system/hardware/sleds/{}/provision-state", SLED_AGENT_UUID);
+    pub static ref DEMO_SLED_PROVISION_STATE: params::SledProvisionStateParams =
+        params::SledProvisionStateParams {
+            state: nexus_types::external_api::views::SledProvisionState::NonProvisionable,
+        };
     pub static ref HARDWARE_SWITCH_URL: String =
         format!("/v1/system/hardware/switches/{}", SWITCH_UUID);
     pub static ref HARDWARE_DISK_URL: String =
@@ -1592,6 +1598,15 @@ lazy_static! {
             visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Get],
+        },
+
+        VerifyEndpoint {
+            url: &HARDWARE_SLED_PROVISION_STATE_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![AllowedMethod::Put(
+                serde_json::to_value(&*DEMO_SLED_PROVISION_STATE).unwrap()
+            )],
         },
 
         VerifyEndpoint {

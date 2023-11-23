@@ -231,11 +231,12 @@ impl DataStore {
         opctx: &OpContext,
         sled_lookup: &lookup::Sled<'_>,
         state: db::model::SledProvisionState,
-    ) -> Result<(), external::Error> {
+    ) -> Result<db::model::SledProvisionState, external::Error> {
         // Ensure that opctx is authorized to modify this sled.
         let (_, sled) = sled_lookup.fetch_for(authz::Action::Modify).await?;
-        if sled.provision_state() == state {
-            return Ok(());
+        let old_state = sled.provision_state();
+        if old_state == state {
+            return Ok(old_state);
         }
 
         use db::schema::sled::dsl;
@@ -249,7 +250,7 @@ impl DataStore {
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-        Ok(())
+        Ok(old_state)
     }
 }
 
