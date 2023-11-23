@@ -201,6 +201,14 @@ impl DataStore {
             .await
             .map_err(|e| match e {
                 TxnError::CustomError(SledReservationError::NotFound) => {
+                    // XXX: Should this be a different error? 503 Service
+                    // Unavailable is often for transient errors, and this
+                    // message isn't exposed to users (which seems wrong?)
+                    //
+                    // Maybe 409 Conflict as documented at
+                    // https://stackoverflow.com/a/11093566, since this request
+                    // if completed would put the system into an inconsistent
+                    // state.
                     external::Error::unavail(
                         "No sleds can fit the requested instance",
                     )
@@ -261,12 +269,14 @@ mod test {
     use crate::db::datastore::test::{
         sled_baseboard_for_test, sled_system_hardware_for_test,
     };
+    use crate::db::lookup::LookupPath;
     use crate::db::model::ByteCount;
     use crate::db::model::SqlU32;
     use nexus_test_utils::db::test_setup_database;
     use omicron_common::api::external;
     use omicron_test_utils::dev;
     use std::net::{Ipv6Addr, SocketAddrV6};
+    use std::num::NonZeroU32;
 
     fn rack_id() -> Uuid {
         Uuid::parse_str(nexus_test_utils::RACK_UUID).unwrap()
@@ -278,19 +288,9 @@ mod test {
         let mut db = test_setup_database(&logctx.log).await;
         let (_opctx, datastore) = datastore_test(&logctx, &db).await;
 
-        let sled_id = Uuid::new_v4();
-        let addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0);
-        let mut sled_update = SledUpdate::new(
-            sled_id,
-            addr,
-            sled_baseboard_for_test(),
-            sled_system_hardware_for_test(),
-            rack_id(),
-        );
-        let observed_sled = datastore
-            .sled_upsert(sled_update.clone())
-            .await
-            .expect("Could not upsert sled during test prep");
+        let mut sled_update = test_new_sled_update();
+        let observed_sled =
+            datastore.sled_upsert(sled_update.clone()).await.unwrap();
         assert_eq!(
             observed_sled.usable_hardware_threads,
             sled_update.usable_hardware_threads
@@ -335,5 +335,109 @@ mod test {
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
+    }
+
+    /// Test that new reservations aren't created on non-provisionable sleds.
+    #[tokio::test]
+    async fn sled_reservation_create_non_provisionable() {
+        let logctx =
+            dev::test_setup_log("sled_reservation_create_non_provisionable");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        let sled_update = test_new_sled_update();
+        let non_provisionable_sled =
+            datastore.sled_upsert(sled_update.clone()).await.unwrap();
+        datastore
+            .sled_set_provision_state(
+                &opctx,
+                &LookupPath::new(&opctx, &datastore)
+                    .sled_id(non_provisionable_sled.id()),
+                db::model::SledProvisionState::NonProvisionable,
+            )
+            .await
+            .unwrap();
+
+        // This should be an error since there are no provisionable sleds.
+        let resources = db::model::Resources::new(
+            1,
+            // Just require the bare non-zero amount of RAM.
+            ByteCount::try_from(1024).unwrap(),
+            ByteCount::try_from(1024).unwrap(),
+        );
+        let constraints = db::model::SledReservationConstraints::none();
+        let error = datastore
+            .sled_reservation_create(
+                &opctx,
+                Uuid::new_v4(),
+                db::model::SledResourceKind::Instance,
+                resources.clone(),
+                constraints,
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(error, external::Error::ServiceUnavailable { .. }));
+
+        // Now add a provisionable sled and try again.
+        let sled_update = test_new_sled_update();
+        let provisionable_sled =
+            datastore.sled_upsert(sled_update.clone()).await.unwrap();
+
+        let sleds = datastore
+            .sled_list(&opctx, &first_page(NonZeroU32::new(10).unwrap()))
+            .await
+            .unwrap();
+        println!("sleds: {:?}", sleds);
+
+        // Try a few times to ensure that resources never get allocated to the
+        // non-provisionable sled.
+        for _ in 0..10 {
+            let constraints = db::model::SledReservationConstraints::none();
+            let resource = datastore
+                .sled_reservation_create(
+                    &opctx,
+                    Uuid::new_v4(),
+                    db::model::SledResourceKind::Instance,
+                    resources.clone(),
+                    constraints,
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                resource.sled_id,
+                provisionable_sled.id(),
+                "resource is always allocated to the provisionable sled"
+            );
+
+            datastore
+                .sled_reservation_delete(&opctx, resource.id)
+                .await
+                .unwrap();
+        }
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    fn test_new_sled_update() -> SledUpdate {
+        let sled_id = Uuid::new_v4();
+        let addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0);
+        SledUpdate::new(
+            sled_id,
+            addr,
+            sled_baseboard_for_test(),
+            sled_system_hardware_for_test(),
+            rack_id(),
+        )
+    }
+
+    /// Returns pagination parameters to fetch the first page of results for a
+    /// paginated endpoint
+    fn first_page<'a, T>(limit: NonZeroU32) -> DataPageParams<'a, T> {
+        DataPageParams {
+            marker: None,
+            direction: dropshot::PaginationOrder::Ascending,
+            limit,
+        }
     }
 }

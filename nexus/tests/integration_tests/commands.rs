@@ -95,7 +95,7 @@ fn run_command_with_arg(arg: &str) -> (String, String) {
     fs::remove_file(&config_path).expect("failed to remove temporary file");
     assert_exit_code(exit_status, EXIT_SUCCESS, &stderr_text);
 
-        (stdout_text, stderr_text)
+    (stdout_text, stderr_text)
 }
 
 #[test]
