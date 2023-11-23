@@ -73,7 +73,9 @@ pub(crate) async fn ensure_region_in_dataset(
     let log_create_failure = |_, delay| {
         warn!(
             log,
-            "Region requested, not yet created. Retrying in {:?}", delay
+            "Region requested, not yet created. Retrying in {:?}",
+            delay;
+            "region" => %region.id(),
         );
     };
 
@@ -157,7 +159,12 @@ pub(super) async fn delete_crucible_region(
     .await;
 
     if let Err(e) = result {
-        error!(log, "delete_crucible_region: region_get saw {:?}", e);
+        error!(
+            log,
+            "delete_crucible_region: region_get saw {:?}",
+            e;
+            "region_id" => %region_id,
+        );
         match e {
             crucible_agent_client::Error::ErrorResponse(rv) => {
                 match rv.status() {
@@ -191,7 +198,12 @@ pub(super) async fn delete_crucible_region(
     })
     .await
     .map_err(|e| {
-        error!(log, "delete_crucible_region: region_delete saw {:?}", e);
+        error!(
+            log,
+            "delete_crucible_region: region_delete saw {:?}",
+            e;
+            "region_id" => %region_id,
+        );
         match e {
             crucible_agent_client::Error::ErrorResponse(rv) => {
                 match rv.status() {
@@ -226,7 +238,12 @@ pub(super) async fn delete_crucible_region(
             })
             .await
             .map_err(|e| {
-                error!(log, "delete_crucible_region: region_get saw {:?}", e);
+                error!(
+                    log,
+                    "delete_crucible_region: region_get saw {:?}",
+                    e;
+                    "region_id" => %region_id,
+                );
 
                 match e {
                     crucible_agent_client::Error::ErrorResponse(rv) => {
@@ -250,29 +267,33 @@ pub(super) async fn delete_crucible_region(
             })?;
 
             match region.state {
-                RegionState::Tombstoned => {
-                    Err(BackoffError::transient(WaitError::Transient(anyhow!(
-                        "region {} not deleted yet",
-                        region_id.to_string(),
-                    ))))
-                }
+                RegionState::Tombstoned => Err(BackoffError::transient(
+                    WaitError::Transient(anyhow!("region not deleted yet")),
+                )),
 
                 RegionState::Destroyed => {
-                    info!(log, "region {} deleted", region_id.to_string(),);
+                    info!(
+                        log,
+                        "region deleted";
+                        "region_id" => %region_id,
+                    );
 
                     Ok(())
                 }
 
-                _ => {
-                    Err(BackoffError::transient(WaitError::Transient(anyhow!(
-                        "region {} unexpected state",
-                        region_id.to_string(),
-                    ))))
-                }
+                _ => Err(BackoffError::transient(WaitError::Transient(
+                    anyhow!("region unexpected state {:?}", region.state),
+                ))),
             }
         },
         |e: WaitError, delay| {
-            info!(log, "{:?}, trying again in {:?}", e, delay,);
+            info!(
+                log,
+                "{:?}, trying again in {:?}",
+                e,
+                delay;
+                "region_id" => %region_id,
+            );
         },
     )
     .await
@@ -338,8 +359,10 @@ pub(super) async fn delete_crucible_running_snapshot(
     .map_err(|e| {
         error!(
             log,
-            "delete_crucible_snapshot: region_delete_running_snapshot saw {:?}",
-            e
+            "delete_crucible_running_snapshot: region_delete_running_snapshot saw {:?}",
+            e;
+            "region_id" => %region_id,
+            "snapshot_id" => %snapshot_id,
         );
         match e {
             crucible_agent_client::Error::ErrorResponse(rv) => {
@@ -377,7 +400,14 @@ pub(super) async fn delete_crucible_running_snapshot(
                 })
                 .await
                 .map_err(|e| {
-                    error!(log, "delete_crucible_snapshot: region_get_snapshots saw {:?}", e);
+                    error!(
+                        log,
+                        "delete_crucible_running_snapshot: region_get_snapshots saw {:?}",
+                        e;
+                        "region_id" => %region_id,
+                        "snapshot_id" => %snapshot_id,
+                    );
+
                     match e {
                         crucible_agent_client::Error::ErrorResponse(rv) => {
                             match rv.status() {
@@ -409,19 +439,17 @@ pub(super) async fn delete_crucible_running_snapshot(
                 Some(running_snapshot) => {
                     info!(
                         log,
-                        "region {} snapshot {} running_snapshot is Some, state is {}",
-                        region_id.to_string(),
-                        snapshot_id.to_string(),
-                        running_snapshot.state.to_string(),
+                        "running_snapshot is Some, state is {}",
+                        running_snapshot.state.to_string();
+                        "region_id" => %region_id,
+                        "snapshot_id" => %snapshot_id,
                     );
 
                     match running_snapshot.state {
                         RegionState::Tombstoned => {
                             Err(BackoffError::transient(
                                 WaitError::Transient(anyhow!(
-                                    "region {} snapshot {} running_snapshot not deleted yet",
-                                    region_id.to_string(),
-                                    snapshot_id.to_string(),
+                                    "running_snapshot tombstoned, not deleted yet",
                                 )
                             )))
                         }
@@ -429,9 +457,7 @@ pub(super) async fn delete_crucible_running_snapshot(
                         RegionState::Destroyed => {
                             info!(
                                 log,
-                                "region {} snapshot {} running_snapshot deleted",
-                                region_id.to_string(),
-                                snapshot_id.to_string(),
+                                "running_snapshot deleted",
                             );
 
                             Ok(())
@@ -440,9 +466,7 @@ pub(super) async fn delete_crucible_running_snapshot(
                         _ => {
                             Err(BackoffError::transient(
                                 WaitError::Transient(anyhow!(
-                                    "region {} snapshot {} running_snapshot unexpected state",
-                                    region_id.to_string(),
-                                    snapshot_id.to_string(),
+                                    "running_snapshot unexpected state",
                                 )
                             )))
                         }
@@ -453,9 +477,9 @@ pub(super) async fn delete_crucible_running_snapshot(
                     // deleted?
                     info!(
                         log,
-                        "region {} snapshot {} running_snapshot is None",
-                        region_id.to_string(),
-                        snapshot_id.to_string(),
+                        "running_snapshot is None";
+                        "region_id" => %region_id,
+                        "snapshot_id" => %snapshot_id,
                     );
 
                     // break here - it's possible that the running snapshot
@@ -469,7 +493,9 @@ pub(super) async fn delete_crucible_running_snapshot(
                 log,
                 "{:?}, trying again in {:?}",
                 e,
-                delay,
+                delay;
+                "region_id" => %region_id,
+                "snapshot_id" => %snapshot_id,
             );
         }
     )
@@ -494,7 +520,14 @@ pub(super) async fn delete_crucible_snapshot(
     region_id: Uuid,
     snapshot_id: Uuid,
 ) -> Result<(), Error> {
-    // delete snapshot - this endpoint is synchronous, it is not only a request
+    // Unlike other Crucible agent endpoints, this one is synchronous in that it
+    // is not only a request to the Crucible agent: `zfs destroy` is performed
+    // right away. However this is still a request to illumos that may not take
+    // effect right away. Wait until the snapshot no longer appears in the list
+    // of region snapshots, meaning it was not returned from `zfs list`.
+
+    info!(log, "deleting region {region_id} snapshot {snapshot_id}");
+
     retry_until_known_result(log, || async {
         client
             .region_delete_snapshot(
@@ -507,7 +540,10 @@ pub(super) async fn delete_crucible_snapshot(
     .map_err(|e| {
         error!(
             log,
-            "delete_crucible_snapshot: region_delete_snapshot saw {:?}", e
+            "delete_crucible_snapshot: region_delete_snapshot saw {:?}",
+            e;
+            "region_id" => %region_id,
+            "snapshot_id" => %snapshot_id,
         );
         match e {
             crucible_agent_client::Error::ErrorResponse(rv) => {
@@ -524,7 +560,101 @@ pub(super) async fn delete_crucible_snapshot(
         }
     })?;
 
-    Ok(())
+    #[derive(Debug, thiserror::Error)]
+    enum WaitError {
+        #[error("Transient error: {0}")]
+        Transient(#[from] anyhow::Error),
+
+        #[error("Permanent error: {0}")]
+        Permanent(#[from] Error),
+    }
+
+    backoff::retry_notify(
+        backoff::retry_policy_internal_service_aggressive(),
+        || async {
+            let response = retry_until_known_result(log, || async {
+                client
+                    .region_get_snapshots(&RegionId(region_id.to_string()))
+                    .await
+            })
+            .await
+            .map_err(|e| {
+                error!(
+                    log,
+                    "delete_crucible_snapshot: region_get_snapshots saw {:?}",
+                    e;
+                    "region_id" => %region_id,
+                    "snapshot_id" => %snapshot_id,
+                );
+                match e {
+                    crucible_agent_client::Error::ErrorResponse(rv) => {
+                        match rv.status() {
+                            status if status.is_client_error() => {
+                                BackoffError::Permanent(WaitError::Permanent(
+                                    Error::invalid_request(&rv.message),
+                                ))
+                            }
+                            _ => BackoffError::Permanent(WaitError::Permanent(
+                                Error::internal_error(&rv.message),
+                            )),
+                        }
+                    }
+                    _ => BackoffError::Permanent(WaitError::Permanent(
+                        Error::internal_error(
+                            "unexpected failure during `region_get_snapshots`",
+                        ),
+                    )),
+                }
+            })?;
+
+            if response
+                .snapshots
+                .iter()
+                .any(|x| x.name == snapshot_id.to_string())
+            {
+                info!(
+                    log,
+                    "snapshot still exists, waiting";
+                    "region_id" => %region_id,
+                    "snapshot_id" => %snapshot_id,
+                );
+
+                Err(BackoffError::transient(WaitError::Transient(anyhow!(
+                    "snapshot not deleted yet",
+                ))))
+            } else {
+                info!(
+                    log,
+                    "snapshot deleted";
+                    "region_id" => %region_id,
+                    "snapshot_id" => %snapshot_id,
+                );
+
+                Ok(())
+            }
+        },
+        |e: WaitError, delay| {
+            info!(
+                log,
+                "{:?}, trying again in {:?}",
+                e,
+                delay;
+                "region_id" => %region_id,
+                "snapshot_id" => %snapshot_id,
+            );
+        },
+    )
+    .await
+    .map_err(|e| match e {
+        WaitError::Transient(e) => {
+            // The backoff crate can be configured with a maximum elapsed time
+            // before giving up, which means that Transient could be returned
+            // here. Our current policies do **not** set this though.
+            Error::internal_error(&e.to_string())
+        }
+
+        WaitError::Permanent(e) => e,
+    })
 }
 
 // Given a list of datasets and region snapshots, send DELETE calls to the
@@ -645,10 +775,8 @@ pub(crate) async fn call_pantry_attach_for_disk(
 
     info!(
         log,
-        "sending attach for disk {} volume {} to endpoint {}",
-        disk_id,
+        "sending attach for disk {disk_id} volume {} to endpoint {endpoint}",
         disk.volume_id,
-        endpoint,
     );
 
     let volume_construction_request: crucible_pantry_client::types::VolumeConstructionRequest =
@@ -684,7 +812,7 @@ pub(crate) async fn call_pantry_detach_for_disk(
 ) -> Result<(), ActionError> {
     let endpoint = format!("http://{}", pantry_address);
 
-    info!(log, "sending detach for disk {} to endpoint {}", disk_id, endpoint,);
+    info!(log, "sending detach for disk {disk_id} to endpoint {endpoint}");
 
     let client = crucible_pantry_client::Client::new(&endpoint);
 

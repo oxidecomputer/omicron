@@ -127,7 +127,7 @@ pub struct HostPhaseImages {
 }
 
 impl HostPhaseImages {
-    pub fn extract<R: io::Read>(reader: R) -> Result<Self> {
+    pub fn extract<R: io::BufRead>(reader: R) -> Result<Self> {
         let mut phase_1 = Vec::new();
         let mut phase_2 = Vec::new();
         Self::extract_into(
@@ -138,13 +138,12 @@ impl HostPhaseImages {
         Ok(Self { phase_1: phase_1.into(), phase_2: phase_2.into() })
     }
 
-    pub fn extract_into<R: io::Read, W: io::Write>(
+    pub fn extract_into<R: io::BufRead, W: io::Write>(
         reader: R,
         phase_1: W,
         phase_2: W,
     ) -> Result<()> {
-        let uncompressed =
-            flate2::bufread::GzDecoder::new(BufReader::new(reader));
+        let uncompressed = flate2::bufread::GzDecoder::new(reader);
         let mut archive = tar::Archive::new(uncompressed);
 
         let mut oxide_json_found = false;
@@ -248,7 +247,7 @@ pub struct RotArchives {
 }
 
 impl RotArchives {
-    pub fn extract<R: io::Read>(reader: R) -> Result<Self> {
+    pub fn extract<R: io::BufRead>(reader: R) -> Result<Self> {
         let mut archive_a = Vec::new();
         let mut archive_b = Vec::new();
         Self::extract_into(
@@ -259,13 +258,12 @@ impl RotArchives {
         Ok(Self { archive_a: archive_a.into(), archive_b: archive_b.into() })
     }
 
-    pub fn extract_into<R: io::Read, W: io::Write>(
+    pub fn extract_into<R: io::BufRead, W: io::Write>(
         reader: R,
         archive_a: W,
         archive_b: W,
     ) -> Result<()> {
-        let uncompressed =
-            flate2::bufread::GzDecoder::new(BufReader::new(reader));
+        let uncompressed = flate2::bufread::GzDecoder::new(reader);
         let mut archive = tar::Archive::new(uncompressed);
 
         let mut oxide_json_found = false;

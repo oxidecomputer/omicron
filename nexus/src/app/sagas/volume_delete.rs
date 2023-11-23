@@ -332,6 +332,74 @@ async fn svd_delete_crucible_snapshot_records(
 /// be a different volume id (i.e. for a previously deleted disk) than the one
 /// in this saga's params struct.
 ///
+/// It's insufficient to rely on the struct of CrucibleResources to clean up
+/// that is returned as part of svd_decrease_crucible_resource_count. Imagine a
+/// disk that is composed of three regions (a subset of
+/// [`VolumeConstructionRequest`] is shown here):
+///
+/// {
+///   "type": "volume",
+///   "id": "6b353c87-afac-4ee2-b71a-6fe35fcf9e46",
+///   "sub_volumes": [
+///     {
+///       "type": "region",
+///       "opts": {
+///         "targets": [
+///           "[fd00:1122:3344:101::5]:1000",
+///           "[fd00:1122:3344:102::9]:1000",
+///           "[fd00:1122:3344:103::2]:1000"
+///         ],
+///         "read_only": false
+///       }
+///     }
+///   ],
+///   "read_only_parent": null,
+/// }
+///
+/// Taking a snapshot of this will produce the following volume:
+///
+/// {
+///   "type": "volume",
+///   "id": "1ef7282e-a3fb-4222-85a8-b16d3fbfd738",   <-- new UUID
+///   "sub_volumes": [
+///     {
+///       "type": "region",
+///       "opts": {
+///         "targets": [
+///           "[fd00:1122:3344:101::5]:1001",         <-- port changed
+///           "[fd00:1122:3344:102::9]:1001",         <-- port changed
+///           "[fd00:1122:3344:103::2]:1001"          <-- port changed
+///         ],
+///         "read_only": true                         <-- read_only now true
+///       }
+///     }
+///   ],
+///   "read_only_parent": null,
+/// }
+///
+/// The snapshot targets will use the same IP but different port: snapshots are
+/// initially located on the same filesystem as their region.
+///
+/// The disk's volume has no read only resources, while the snapshot's volume
+/// does. The disk volume's targets are all regions (backed by downstairs that
+/// are read/write) while the snapshot volume's targets are all snapshots
+/// (backed by volumes that are read-only). The two volumes are linked in the
+/// sense that the snapshots from the second are contained *within* the regions
+/// of the first, reflecting the resource nesting from ZFS. This is also
+/// reflected in the REST endpoint that the Crucible agent uses:
+///
+///   /crucible/0/regions/{id}/snapshots/{name}
+///
+/// If the disk is then deleted, the volume delete saga will run for the first
+/// volume shown here. The CrucibleResources struct returned as part of
+/// [`svd_decrease_crucible_resource_count`] will contain *nothing* to clean up:
+/// the regions contain snapshots that are part of other volumes and cannot be
+/// deleted, and the disk's volume doesn't reference any read-only resources.
+///
+/// This is expected and normal: regions are "leaked" all the time due to
+/// snapshots preventing their deletion. This part of the saga detects when
+/// those regions can be cleaned up.
+///
 /// Note: each delete of a snapshot could trigger another delete of a region, if
 /// that region's use has gone to zero. A snapshot delete will never trigger
 /// another snapshot delete.
@@ -353,42 +421,46 @@ async fn svd_delete_freed_crucible_regions(
             },
         )?;
 
-    // Send DELETE calls to the corresponding Crucible agents
-    delete_crucible_regions(
-        log,
+    for (dataset, region, region_snapshot, volume) in
         freed_datasets_regions_and_volumes
-            .iter()
-            .map(|(d, r, _)| (d.clone(), r.clone()))
-            .collect(),
-    )
-    .await
-    .map_err(|e| {
-        ActionError::action_failed(format!(
-            "failed to delete_crucible_regions: {:?}",
-            e,
-        ))
-    })?;
+    {
+        if region_snapshot.is_some() {
+            // We cannot delete this region yet, the snapshot has not been
+            // deleted. This can occur when multiple volume delete sagas run
+            // concurrently: one will decrement the crucible resources (but
+            // hasn't made the appropriate DELETE calls to remove the running
+            // snapshots and snapshots yet), and the other will be here trying
+            // to delete the region. This race results in the crucible agent
+            // returning "must delete snapshots first" and causing saga unwinds.
+            //
+            // Another volume delete (probably the one racing with this one!)
+            // will pick up this region and remove it.
+            continue;
+        }
 
-    // Remove region DB records
-    osagactx
-        .datastore()
-        .regions_hard_delete(
-            log,
-            freed_datasets_regions_and_volumes
-                .iter()
-                .map(|(_, r, _)| r.id())
-                .collect(),
-        )
-        .await
-        .map_err(|e| {
-            ActionError::action_failed(format!(
-                "failed to regions_hard_delete: {:?}",
-                e,
-            ))
-        })?;
+        // Send DELETE calls to the corresponding Crucible agents
+        delete_crucible_regions(log, vec![(dataset.clone(), region.clone())])
+            .await
+            .map_err(|e| {
+                ActionError::action_failed(format!(
+                    "failed to delete_crucible_regions: {:?}",
+                    e,
+                ))
+            })?;
 
-    // Remove volume DB records
-    for (_, _, volume) in &freed_datasets_regions_and_volumes {
+        // Remove region DB record
+        osagactx
+            .datastore()
+            .regions_hard_delete(log, vec![region.id()])
+            .await
+            .map_err(|e| {
+                ActionError::action_failed(format!(
+                    "failed to regions_hard_delete: {:?}",
+                    e,
+                ))
+            })?;
+
+        // Remove volume DB record
         osagactx.datastore().volume_hard_delete(volume.id()).await.map_err(
             |e| {
                 ActionError::action_failed(format!(

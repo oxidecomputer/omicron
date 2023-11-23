@@ -50,7 +50,7 @@ pub(super) struct ArtifactsWithPlan {
 }
 
 impl ArtifactsWithPlan {
-    pub(super) fn from_zip<T>(
+    pub(super) async fn from_zip<T>(
         zip_data: T,
         log: &Logger,
     ) -> Result<Self, RepositoryError>
@@ -68,10 +68,12 @@ impl ArtifactsWithPlan {
         // anyone can sign the repositories and this code will accept that.
         let repository =
             OmicronRepo::load_untrusted_ignore_expiration(log, dir.path())
+                .await
                 .map_err(RepositoryError::LoadRepository)?;
 
         let artifacts = repository
             .read_artifacts()
+            .await
             .map_err(RepositoryError::ReadArtifactsDocument)?;
 
         // Create another temporary directory where we'll "permanently" (as long
@@ -132,9 +134,10 @@ impl ArtifactsWithPlan {
                     .map_err(RepositoryError::TargetHashLength)?,
             );
 
-            let reader = repository
+            let stream = repository
                 .repo()
                 .read_target(&target_name)
+                .await
                 .map_err(|error| RepositoryError::LocateTarget {
                     target: artifact.target.clone(),
                     error: Box::new(error),
@@ -143,13 +146,15 @@ impl ArtifactsWithPlan {
                     RepositoryError::MissingTarget(artifact.target.clone())
                 })?;
 
-            plan_builder.add_artifact(
-                artifact.into_id(),
-                artifact_hash,
-                io::BufReader::new(reader),
-                &mut by_id,
-                &mut by_hash,
-            )?;
+            plan_builder
+                .add_artifact(
+                    artifact.into_id(),
+                    artifact_hash,
+                    stream,
+                    &mut by_id,
+                    &mut by_hash,
+                )
+                .await?;
         }
 
         // Ensure we know how to apply updates from this set of artifacts; we'll
@@ -218,8 +223,11 @@ mod tests {
 
     /// Test that `ArtifactsWithPlan` can extract the fake repository generated
     /// by tufaceous.
-    #[test]
-    fn test_extract_fake() -> Result<()> {
+    ///
+    /// See documentation for extract_nested_artifact_pair in update_plan.rs
+    /// for why multi_thread is required.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_extract_fake() -> Result<()> {
         let logctx = test_setup_log("test_extract_fake");
         let temp_dir = Utf8TempDir::new()?;
         let archive_path = temp_dir.path().join("archive.zip");
@@ -233,12 +241,15 @@ mod tests {
         ])
         .context("error parsing args")?;
 
-        args.exec(&logctx.log).context("error executing assemble command")?;
+        args.exec(&logctx.log)
+            .await
+            .context("error executing assemble command")?;
 
         // Now check that it can be read by the archive extractor.
         let zip_bytes = std::fs::File::open(&archive_path)
             .context("error opening archive.zip")?;
         let plan = ArtifactsWithPlan::from_zip(zip_bytes, &logctx.log)
+            .await
             .context("error reading archive.zip")?;
         // Check that all known artifact kinds are present in the map.
         let by_id_kinds: BTreeSet<_> =

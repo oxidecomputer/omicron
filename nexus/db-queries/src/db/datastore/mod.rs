@@ -103,6 +103,7 @@ pub use rack::RackInit;
 pub use silo::Discoverability;
 pub use switch_port::SwitchPortSettingsCombinedResult;
 pub use virtual_provisioning_collection::StorageType;
+pub use volume::read_only_resources_associated_with_volume;
 pub use volume::CrucibleResources;
 pub use volume::CrucibleTargets;
 
@@ -370,8 +371,8 @@ mod test {
     use crate::db::model::{
         BlockSize, ComponentUpdate, ComponentUpdateIdentity, ConsoleSession,
         Dataset, DatasetKind, ExternalIp, PhysicalDisk, PhysicalDiskKind,
-        Project, Rack, Region, Service, ServiceKind, SiloUser, Sled,
-        SledBaseboard, SledSystemHardware, SshKey, SystemUpdate,
+        Project, Rack, Region, Service, ServiceKind, SiloUser, SledBaseboard,
+        SledSystemHardware, SledUpdate, SshKey, SystemUpdate,
         UpdateableComponentType, VpcSubnet, Zpool,
     };
     use crate::db::queries::vpc_subnet::FilterConflictingVpcSubnetRangesQuery;
@@ -598,14 +599,14 @@ mod test {
         let rack_id = Uuid::new_v4();
         let sled_id = Uuid::new_v4();
 
-        let sled = Sled::new(
+        let sled_update = SledUpdate::new(
             sled_id,
             bogus_addr,
             sled_baseboard_for_test(),
             sled_system_hardware_for_test(),
             rack_id,
         );
-        datastore.sled_upsert(sled).await.unwrap();
+        datastore.sled_upsert(sled_update).await.unwrap();
         sled_id
     }
 
@@ -1204,7 +1205,7 @@ mod test {
         let rack_id = Uuid::new_v4();
         let addr1 = "[fd00:1de::1]:12345".parse().unwrap();
         let sled1_id = "0de4b299-e0b4-46f0-d528-85de81a7095f".parse().unwrap();
-        let sled1 = db::model::Sled::new(
+        let sled1 = db::model::SledUpdate::new(
             sled1_id,
             addr1,
             sled_baseboard_for_test(),
@@ -1215,7 +1216,7 @@ mod test {
 
         let addr2 = "[fd00:1df::1]:12345".parse().unwrap();
         let sled2_id = "66285c18-0c79-43e0-e54f-95271f271314".parse().unwrap();
-        let sled2 = db::model::Sled::new(
+        let sled2 = db::model::SledUpdate::new(
             sled2_id,
             addr2,
             sled_baseboard_for_test(),

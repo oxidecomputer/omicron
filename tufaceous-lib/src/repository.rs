@@ -4,9 +4,11 @@
 
 use crate::{key::Key, target::TargetWriter, AddArtifact, ArchiveBuilder};
 use anyhow::{anyhow, bail, Context, Result};
+use buf_list::BufList;
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, Utc};
-use fs_err::{self as fs, File};
+use fs_err::{self as fs};
+use futures::TryStreamExt;
 use omicron_common::{
     api::external::SemverVersion,
     update::{Artifact, ArtifactsDocument},
@@ -28,38 +30,41 @@ pub struct OmicronRepo {
 
 impl OmicronRepo {
     /// Initializes a new repository at the given path, writing it to disk.
-    pub fn initialize(
+    pub async fn initialize(
         log: &slog::Logger,
         repo_path: &Utf8Path,
         system_version: SemverVersion,
         keys: Vec<Key>,
         expiry: DateTime<Utc>,
     ) -> Result<Self> {
-        let root = crate::root::new_root(keys.clone(), expiry)?;
+        let root = crate::root::new_root(keys.clone(), expiry).await?;
         let editor = OmicronRepoEditor::initialize(
             repo_path.to_owned(),
             root,
             system_version,
-        )?;
+        )
+        .await?;
 
         editor
             .sign_and_finish(keys, expiry)
+            .await
             .context("error signing new repository")?;
 
         // In theory we "trust" the key we just used to sign this repository,
         // but the code path is equivalent to `load_untrusted`.
-        Self::load_untrusted(log, repo_path)
+        Self::load_untrusted(log, repo_path).await
     }
 
     /// Loads a repository from the given path.
     ///
     /// This method enforces expirations. To load without expiration enforcement, use
     /// [`Self::load_untrusted_ignore_expiration`].
-    pub fn load_untrusted(
+    pub async fn load_untrusted(
         log: &slog::Logger,
         repo_path: &Utf8Path,
     ) -> Result<Self> {
         Self::load_untrusted_impl(log, repo_path, ExpirationEnforcement::Safe)
+            .await
     }
 
     /// Loads a repository from the given path, ignoring expiration.
@@ -68,30 +73,36 @@ impl OmicronRepo {
     ///
     /// 1. When you're editing an existing repository and will re-sign it afterwards.
     /// 2. In an environment in which time isn't available.
-    pub fn load_untrusted_ignore_expiration(
+    pub async fn load_untrusted_ignore_expiration(
         log: &slog::Logger,
         repo_path: &Utf8Path,
     ) -> Result<Self> {
         Self::load_untrusted_impl(log, repo_path, ExpirationEnforcement::Unsafe)
+            .await
     }
 
-    fn load_untrusted_impl(
+    async fn load_untrusted_impl(
         log: &slog::Logger,
         repo_path: &Utf8Path,
         exp: ExpirationEnforcement,
     ) -> Result<Self> {
         let log = log.new(slog::o!("component" => "OmicronRepo"));
         let repo_path = repo_path.canonicalize_utf8()?;
+        let root_json = repo_path.join("metadata").join("1.root.json");
+        let root = tokio::fs::read(&root_json)
+            .await
+            .with_context(|| format!("error reading from {root_json}"))?;
 
         let repo = RepositoryLoader::new(
-            File::open(repo_path.join("metadata").join("1.root.json"))?,
+            &root,
             Url::from_file_path(repo_path.join("metadata"))
                 .expect("the canonical path is not absolute?"),
             Url::from_file_path(repo_path.join("targets"))
                 .expect("the canonical path is not absolute?"),
         )
         .expiration_enforcement(exp)
-        .load()?;
+        .load()
+        .await?;
 
         Ok(Self { log, repo, repo_path })
     }
@@ -107,12 +118,17 @@ impl OmicronRepo {
     }
 
     /// Reads the artifacts document from the repo.
-    pub fn read_artifacts(&self) -> Result<ArtifactsDocument> {
+    pub async fn read_artifacts(&self) -> Result<ArtifactsDocument> {
         let reader = self
             .repo
-            .read_target(&"artifacts.json".try_into()?)?
+            .read_target(&"artifacts.json".try_into()?)
+            .await?
             .ok_or_else(|| anyhow!("artifacts.json should be present"))?;
-        serde_json::from_reader(reader)
+        let buf_list = reader
+            .try_collect::<BufList>()
+            .await
+            .context("error reading from artifacts.json")?;
+        serde_json::from_reader(buf_list::Cursor::new(&buf_list))
             .context("error deserializing artifacts.json")
     }
 
@@ -177,8 +193,8 @@ impl OmicronRepo {
 
     /// Converts `self` into an `OmicronRepoEditor`, which can be used to perform
     /// modifications to the repository.
-    pub fn into_editor(self) -> Result<OmicronRepoEditor> {
-        OmicronRepoEditor::new(self)
+    pub async fn into_editor(self) -> Result<OmicronRepoEditor> {
+        OmicronRepoEditor::new(self).await
     }
 
     /// Prepends the target digest to the name if using consistent snapshots. Returns both the
@@ -210,8 +226,8 @@ pub struct OmicronRepoEditor {
 }
 
 impl OmicronRepoEditor {
-    fn new(repo: OmicronRepo) -> Result<Self> {
-        let artifacts = repo.read_artifacts()?;
+    async fn new(repo: OmicronRepo) -> Result<Self> {
+        let artifacts = repo.read_artifacts().await?;
 
         let existing_target_names = repo
             .repo
@@ -226,7 +242,8 @@ impl OmicronRepoEditor {
                 .join("metadata")
                 .join(format!("{}.root.json", repo.repo.root().signed.version)),
             repo.repo,
-        )?;
+        )
+        .await?;
 
         Ok(Self {
             editor,
@@ -236,7 +253,7 @@ impl OmicronRepoEditor {
         })
     }
 
-    fn initialize(
+    async fn initialize(
         repo_path: Utf8PathBuf,
         root: SignedRole<Root>,
         system_version: SemverVersion,
@@ -250,7 +267,7 @@ impl OmicronRepoEditor {
         fs::create_dir_all(&targets_dir)?;
         fs::write(&root_path, root.buffer())?;
 
-        let editor = RepositoryEditor::new(&root_path)?;
+        let editor = RepositoryEditor::new(&root_path).await?;
 
         Ok(Self {
             editor,
@@ -297,7 +314,7 @@ impl OmicronRepoEditor {
     }
 
     /// Consumes self, signing the repository and writing out this repository to disk.
-    pub fn sign_and_finish(
+    pub async fn sign_and_finish(
         mut self,
         keys: Vec<Key>,
         expiry: DateTime<Utc>,
@@ -313,9 +330,11 @@ impl OmicronRepoEditor {
         let signed = self
             .editor
             .sign(&crate::key::boxed_keys(keys))
+            .await
             .context("error signing keys")?;
         signed
             .write(self.repo_path.join("metadata"))
+            .await
             .context("error writing repository")?;
         Ok(())
     }
@@ -346,8 +365,8 @@ mod tests {
     use chrono::Days;
     use omicron_test_utils::dev::test_setup_log;
 
-    #[test]
-    fn reject_artifacts_with_the_same_filename() {
+    #[tokio::test]
+    async fn reject_artifacts_with_the_same_filename() {
         let logctx = test_setup_log("reject_artifacts_with_the_same_filename");
         let tempdir = Utf8TempDir::new().unwrap();
         let mut repo = OmicronRepo::initialize(
@@ -357,8 +376,10 @@ mod tests {
             vec![Key::generate_ed25519()],
             Utc::now() + Days::new(1),
         )
+        .await
         .unwrap()
         .into_editor()
+        .await
         .unwrap();
 
         // Targets are uniquely identified by their kind/name/version triple;
