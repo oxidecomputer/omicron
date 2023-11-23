@@ -365,7 +365,7 @@ pub struct OmicronZoneConfigLocal {
 struct SwitchZoneConfig {
     id: Uuid,
     addresses: Vec<Ipv6Addr>,
-    services: Vec<ServiceType>,
+    services: Vec<SwitchService>,
 }
 
 /// Describes one of several services that may be deployed in a switch zone
@@ -373,10 +373,8 @@ struct SwitchZoneConfig {
 /// Some of these are only present in certain configurations (e.g., with a real
 /// Tofino vs. SoftNPU) or are configured differently depending on the
 /// configuration.
-// XXX-dap towards the end, rename this to SwitchService.  Saving it for later
-// to avoid having to deal with it more than necessary in merge conflicts.
 #[derive(Clone)]
-enum ServiceType {
+enum SwitchService {
     ManagementGatewayService,
     Wicketd { baseboard: Baseboard },
     Dendrite { asic: DendriteAsic },
@@ -387,17 +385,17 @@ enum ServiceType {
     SpSim,
 }
 
-impl crate::smf_helper::Service for ServiceType {
+impl crate::smf_helper::Service for SwitchService {
     fn service_name(&self) -> String {
         match self {
-            ServiceType::ManagementGatewayService => "mgs",
-            ServiceType::Wicketd { .. } => "wicketd",
-            ServiceType::Dendrite { .. } => "dendrite",
-            ServiceType::Tfport { .. } => "tfport",
-            ServiceType::Uplink { .. } => "uplink",
-            ServiceType::MgDdm { .. } => "mg-ddm",
-            ServiceType::Mgd => "mgd",
-            ServiceType::SpSim => "sp-sim",
+            SwitchService::ManagementGatewayService => "mgs",
+            SwitchService::Wicketd { .. } => "wicketd",
+            SwitchService::Dendrite { .. } => "dendrite",
+            SwitchService::Tfport { .. } => "tfport",
+            SwitchService::Uplink { .. } => "uplink",
+            SwitchService::MgDdm { .. } => "mg-ddm",
+            SwitchService::Mgd => "mgd",
+            SwitchService::SpSim => "sp-sim",
         }
         .to_owned()
     }
@@ -438,7 +436,7 @@ impl<'a> ZoneArgs<'a> {
     /// supposed to be running
     pub fn sled_local_services(
         &self,
-    ) -> Box<dyn Iterator<Item = &'a ServiceType> + 'a> {
+    ) -> Box<dyn Iterator<Item = &'a SwitchService> + 'a> {
         match self {
             ZoneArgs::Omicron(_) => Box::new(std::iter::empty()),
             ZoneArgs::SledLocal(request) => {
@@ -974,7 +972,7 @@ impl ServiceManager {
         let mut devices = vec![];
         for svc_details in zone_args.sled_local_services() {
             match svc_details {
-                ServiceType::Dendrite { asic: DendriteAsic::TofinoAsic } => {
+                SwitchService::Dendrite { asic: DendriteAsic::TofinoAsic } => {
                     if let Ok(Some(n)) = tofino::get_tofino() {
                         if let Ok(device_path) = n.device_path() {
                             devices.push(device_path);
@@ -985,7 +983,7 @@ impl ServiceManager {
                         device: "tofino".to_string(),
                     });
                 }
-                ServiceType::Dendrite {
+                SwitchService::Dendrite {
                     asic: DendriteAsic::SoftNpuPropolisDevice,
                 } => {
                     devices.push("/dev/tty03".into());
@@ -1054,7 +1052,7 @@ impl ServiceManager {
 
         for svc_details in zone_args.sled_local_services() {
             match &svc_details {
-                ServiceType::Tfport { pkt_source, asic: _ } => {
+                SwitchService::Tfport { pkt_source, asic: _ } => {
                     // The tfport service requires a MAC device to/from which sidecar
                     // packets may be multiplexed.  If the link isn't present, don't
                     // bother trying to start the zone.
@@ -1073,7 +1071,7 @@ impl ServiceManager {
                         }
                     }
                 }
-                ServiceType::MgDdm { .. } => {
+                SwitchService::MgDdm { .. } => {
                     // If on a non-gimlet, sled-agent can be configured to map
                     // links into the switch zone. Validate those links here.
                     for link in &self.inner.switch_zone_maghemite_links {
@@ -1263,7 +1261,7 @@ impl ServiceManager {
         let mut needed = Vec::new();
         for svc_details in zone_args.sled_local_services() {
             match svc_details {
-                ServiceType::Tfport { .. } => {
+                SwitchService::Tfport { .. } => {
                     needed.push("default".to_string());
                     needed.push("sys_dl_config".to_string());
                 }
@@ -2136,7 +2134,7 @@ impl ServiceManager {
                     smfh.import_manifest()?;
 
                     match service {
-                        ServiceType::ManagementGatewayService => {
+                        SwitchService::ManagementGatewayService => {
                             info!(self.inner.log, "Setting up MGS service");
                             smfh.setprop("config/id", request.zone.id)?;
 
@@ -2164,13 +2162,13 @@ impl ServiceManager {
 
                             smfh.refresh()?;
                         }
-                        ServiceType::SpSim => {
+                        SwitchService::SpSim => {
                             info!(
                                 self.inner.log,
                                 "Setting up Simulated SP service"
                             );
                         }
-                        ServiceType::Wicketd { baseboard } => {
+                        SwitchService::Wicketd { baseboard } => {
                             info!(self.inner.log, "Setting up wicketd service");
 
                             smfh.setprop(
@@ -2254,7 +2252,7 @@ impl ServiceManager {
 
                             smfh.refresh()?;
                         }
-                        ServiceType::Dendrite { asic } => {
+                        SwitchService::Dendrite { asic } => {
                             info!(
                                 self.inner.log,
                                 "Setting up dendrite service"
@@ -2371,7 +2369,7 @@ impl ServiceManager {
                     };
                             smfh.refresh()?;
                         }
-                        ServiceType::Tfport { pkt_source, asic } => {
+                        SwitchService::Tfport { pkt_source, asic } => {
                             info!(self.inner.log, "Setting up tfport service");
 
                             let is_gimlet = is_gimlet().map_err(|e| {
@@ -2425,16 +2423,16 @@ impl ServiceManager {
 
                             smfh.refresh()?;
                         }
-                        ServiceType::Uplink => {
+                        SwitchService::Uplink => {
                             // Nothing to do here - this service is special and
                             // configured in `ensure_switch_zone_uplinks_configured`
                         }
-                        ServiceType::Mgd => {
+                        SwitchService::Mgd => {
                             info!(self.inner.log, "Setting up mgd service");
                             smfh.setprop("config/admin_host", "::")?;
                             smfh.refresh()?;
                         }
-                        ServiceType::MgDdm { mode } => {
+                        SwitchService::MgDdm { mode } => {
                             info!(self.inner.log, "Setting up mg-ddm service");
 
                             smfh.setprop("config/mode", &mode)?;
@@ -3059,16 +3057,16 @@ impl ServiceManager {
             SledMode::Auto
             | SledMode::Scrimlet { asic: DendriteAsic::TofinoAsic } => {
                 vec![
-                    ServiceType::Dendrite { asic: DendriteAsic::TofinoAsic },
-                    ServiceType::ManagementGatewayService,
-                    ServiceType::Tfport {
+                    SwitchService::Dendrite { asic: DendriteAsic::TofinoAsic },
+                    SwitchService::ManagementGatewayService,
+                    SwitchService::Tfport {
                         pkt_source: "tfpkt0".to_string(),
                         asic: DendriteAsic::TofinoAsic,
                     },
-                    ServiceType::Uplink,
-                    ServiceType::Wicketd { baseboard },
-                    ServiceType::Mgd,
-                    ServiceType::MgDdm { mode: "transit".to_string() },
+                    SwitchService::Uplink,
+                    SwitchService::Wicketd { baseboard },
+                    SwitchService::Mgd,
+                    SwitchService::MgDdm { mode: "transit".to_string() },
                 ]
             }
 
@@ -3077,17 +3075,17 @@ impl ServiceManager {
             } => {
                 data_links = vec!["vioif0".to_owned()];
                 vec![
-                    ServiceType::Dendrite { asic },
-                    ServiceType::ManagementGatewayService,
-                    ServiceType::Uplink,
-                    ServiceType::Wicketd { baseboard },
-                    ServiceType::Mgd,
-                    ServiceType::MgDdm { mode: "transit".to_string() },
-                    ServiceType::Tfport {
+                    SwitchService::Dendrite { asic },
+                    SwitchService::ManagementGatewayService,
+                    SwitchService::Uplink,
+                    SwitchService::Wicketd { baseboard },
+                    SwitchService::Mgd,
+                    SwitchService::MgDdm { mode: "transit".to_string() },
+                    SwitchService::Tfport {
                         pkt_source: "vioif0".to_string(),
                         asic,
                     },
-                    ServiceType::SpSim,
+                    SwitchService::SpSim,
                 ]
             }
 
@@ -3107,17 +3105,17 @@ impl ServiceManager {
                     data_links = Dladm::get_simulated_tfports()?;
                 }
                 vec![
-                    ServiceType::Dendrite { asic },
-                    ServiceType::ManagementGatewayService,
-                    ServiceType::Uplink,
-                    ServiceType::Wicketd { baseboard },
-                    ServiceType::Mgd,
-                    ServiceType::MgDdm { mode: "transit".to_string() },
-                    ServiceType::Tfport {
+                    SwitchService::Dendrite { asic },
+                    SwitchService::ManagementGatewayService,
+                    SwitchService::Uplink,
+                    SwitchService::Wicketd { baseboard },
+                    SwitchService::Mgd,
+                    SwitchService::MgDdm { mode: "transit".to_string() },
+                    SwitchService::Tfport {
                         pkt_source: "tfpkt0".to_string(),
                         asic,
                     },
-                    ServiceType::SpSim,
+                    SwitchService::SpSim,
                 ]
             }
         };
@@ -3197,7 +3195,7 @@ impl ServiceManager {
             }
         };
 
-        let smfh = SmfHelper::new(&zone, &ServiceType::Uplink);
+        let smfh = SmfHelper::new(&zone, &SwitchService::Uplink);
 
         // We want to delete all the properties in the `uplinks` group, but we
         // don't know their names, so instead we'll delete and recreate the
@@ -3338,7 +3336,7 @@ impl ServiceManager {
                     let smfh = SmfHelper::new(&zone, service);
 
                     match service {
-                        ServiceType::ManagementGatewayService => {
+                        SwitchService::ManagementGatewayService => {
                             // Remove any existing `config/address` values
                             // without deleting the property itself.
                             smfh.delpropvalue("config/address", "*")?;
@@ -3372,7 +3370,7 @@ impl ServiceManager {
 
                             smfh.refresh()?;
                         }
-                        ServiceType::Dendrite { .. } => {
+                        SwitchService::Dendrite { .. } => {
                             info!(self.inner.log, "configuring dendrite zone");
                             if let Some(info) = self.inner.sled_info.get() {
                                 smfh.setprop("config/rack_id", info.rack_id)?;
@@ -3408,7 +3406,7 @@ impl ServiceManager {
                             }
                             smfh.refresh()?;
                         }
-                        ServiceType::Wicketd { .. } => {
+                        SwitchService::Wicketd { .. } => {
                             if let Some(&address) = first_address {
                                 let rack_subnet =
                                     Ipv6Subnet::<AZ_PREFIX>::new(address);
@@ -3431,15 +3429,15 @@ impl ServiceManager {
                                 );
                             }
                         }
-                        ServiceType::Tfport { .. } => {
+                        SwitchService::Tfport { .. } => {
                             // Since tfport and dpd communicate using localhost,
                             // the tfport service shouldn't need to be restarted.
                         }
-                        ServiceType::Uplink { .. } => {
+                        SwitchService::Uplink { .. } => {
                             // Only configured in
                             // `ensure_switch_zone_uplinks_configured`
                         }
-                        ServiceType::MgDdm { mode } => {
+                        SwitchService::MgDdm { mode } => {
                             smfh.delpropvalue("config/mode", "*")?;
                             smfh.addpropvalue("config/mode", &mode)?;
                             smfh.refresh()?;
