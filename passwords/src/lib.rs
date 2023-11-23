@@ -34,7 +34,7 @@ use thiserror::Error;
 // output length.
 const ARGON2_ALGORITHM: argon2::Algorithm = argon2::Algorithm::Argon2id;
 const ARGON2_COST_M_KIB: u32 = 96 * 1024;
-const ARGON2_COST_T: u32 = 13;
+const ARGON2_COST_T: u32 = 23;
 const ARGON2_COST_P: u32 = 1;
 
 // Maximum password length, intended to prevent denial of service attacks.  See
@@ -58,7 +58,7 @@ pub const MAX_PASSWORD_LENGTH: usize = 512;
 // takes as long as we think it should on whatever machine the test suite is
 // running on.
 pub const MIN_EXPECTED_PASSWORD_VERIFY_TIME: std::time::Duration =
-    std::time::Duration::from_millis(500);
+    std::time::Duration::from_millis(650);
 
 /// Returns an [`Argon2`] context suitable for hashing passwords the same way
 /// we do for external authentication
