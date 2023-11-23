@@ -3818,45 +3818,87 @@ mod test {
         handle
     }
 
+    #[derive(Clone)]
+    struct LedgerTestHelper<'a> {
+        log: slog::Logger,
+        ddmd_client: DdmAdminClient,
+        storage_handle: StorageHandle,
+        zone_bundler: ZoneBundler,
+        test_config: &'a TestConfig,
+    }
+
+    impl<'a> LedgerTestHelper<'a> {
+        async fn new(
+            log: slog::Logger,
+            test_config: &'a TestConfig,
+        ) -> LedgerTestHelper {
+            let ddmd_client = DdmAdminClient::localhost(&log).unwrap();
+            let storage_handle = setup_storage().await;
+            let zone_bundler = ZoneBundler::new(
+                log.clone(),
+                storage_handle.clone(),
+                Default::default(),
+            );
+
+            LedgerTestHelper {
+                log,
+                ddmd_client,
+                storage_handle,
+                zone_bundler,
+                test_config,
+            }
+        }
+
+        fn new_service_manager(self) -> ServiceManager {
+            let log = &self.log;
+            let mgr = ServiceManager::new(
+                log,
+                self.ddmd_client,
+                make_bootstrap_networking_config(),
+                SledMode::Auto,
+                Some(true),
+                SidecarRevision::Physical("rev-test".to_string()),
+                vec![],
+                self.storage_handle,
+                self.zone_bundler,
+            );
+            self.test_config.override_paths(&mgr);
+            mgr
+        }
+
+        fn sled_agent_started(
+            log: &slog::Logger,
+            test_config: &TestConfig,
+            mgr: &ServiceManager,
+        ) {
+            let port_manager = PortManager::new(
+                log.new(o!("component" => "PortManager")),
+                Ipv6Addr::new(
+                    0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+                ),
+            );
+
+            mgr.sled_agent_started(
+                test_config.make_config(),
+                port_manager,
+                Ipv6Addr::LOCALHOST,
+                Uuid::new_v4(),
+                None,
+            )
+            .unwrap();
+        }
+    }
+
     #[tokio::test]
     #[serial_test::serial]
     async fn test_ensure_service() {
         let logctx =
             omicron_test_utils::dev::test_setup_log("test_ensure_service");
-        let log = logctx.log.clone();
         let test_config = TestConfig::new().await;
-
-        let storage_handle = setup_storage().await;
-        let zone_bundler = ZoneBundler::new(
-            log.clone(),
-            storage_handle.clone(),
-            Default::default(),
-        );
-        let mgr = ServiceManager::new(
-            &log,
-            DdmAdminClient::localhost(&log).unwrap(),
-            make_bootstrap_networking_config(),
-            SledMode::Auto,
-            Some(true),
-            SidecarRevision::Physical("rev-test".to_string()),
-            vec![],
-            storage_handle,
-            zone_bundler,
-        );
-        test_config.override_paths(&mgr);
-
-        let port_manager = PortManager::new(
-            logctx.log.new(o!("component" => "PortManager")),
-            Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
-        );
-        mgr.sled_agent_started(
-            test_config.make_config(),
-            port_manager,
-            Ipv6Addr::LOCALHOST,
-            Uuid::new_v4(),
-            None,
-        )
-        .unwrap();
+        let helper =
+            LedgerTestHelper::new(logctx.log.clone(), &test_config).await;
+        let mgr = helper.new_service_manager();
+        LedgerTestHelper::sled_agent_started(&logctx.log, &test_config, &mgr);
 
         let v1 = Generation::new();
         let found =
@@ -3885,40 +3927,11 @@ mod test {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_ensure_service_which_already_exists",
         );
-        let log = logctx.log.clone();
         let test_config = TestConfig::new().await;
-
-        let storage_handle = setup_storage().await;
-        let zone_bundler = ZoneBundler::new(
-            log.clone(),
-            storage_handle.clone(),
-            Default::default(),
-        );
-        let mgr = ServiceManager::new(
-            &log,
-            DdmAdminClient::localhost(&log).unwrap(),
-            make_bootstrap_networking_config(),
-            SledMode::Auto,
-            Some(true),
-            SidecarRevision::Physical("rev-test".to_string()),
-            vec![],
-            storage_handle,
-            zone_bundler,
-        );
-        test_config.override_paths(&mgr);
-
-        let port_manager = PortManager::new(
-            logctx.log.new(o!("component" => "PortManager")),
-            Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
-        );
-        mgr.sled_agent_started(
-            test_config.make_config(),
-            port_manager,
-            Ipv6Addr::LOCALHOST,
-            Uuid::new_v4(),
-            None,
-        )
-        .unwrap();
+        let helper =
+            LedgerTestHelper::new(logctx.log.clone(), &test_config).await;
+        let mgr = helper.new_service_manager();
+        LedgerTestHelper::sled_agent_started(&logctx.log, &test_config, &mgr);
 
         let v2 = Generation::new().next();
         let id = Uuid::new_v4();
@@ -3942,44 +3955,14 @@ mod test {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_services_are_recreated_on_reboot",
         );
-        let log = logctx.log.clone();
         let test_config = TestConfig::new().await;
-        let ddmd_client = DdmAdminClient::localhost(&log).unwrap();
-        let bootstrap_networking = make_bootstrap_networking_config();
+        let helper =
+            LedgerTestHelper::new(logctx.log.clone(), &test_config).await;
 
-        // First, spin up a ServiceManager, create a new service, and tear it
-        // down.
-        let storage_handle = setup_storage().await;
-        let zone_bundler = ZoneBundler::new(
-            log.clone(),
-            storage_handle.clone(),
-            Default::default(),
-        );
-        let mgr = ServiceManager::new(
-            &log,
-            ddmd_client.clone(),
-            bootstrap_networking.clone(),
-            SledMode::Auto,
-            Some(true),
-            SidecarRevision::Physical("rev-test".to_string()),
-            vec![],
-            storage_handle.clone(),
-            zone_bundler.clone(),
-        );
-        test_config.override_paths(&mgr);
-
-        let port_manager = PortManager::new(
-            log.new(o!("component" => "PortManager")),
-            Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
-        );
-        mgr.sled_agent_started(
-            test_config.make_config(),
-            port_manager,
-            Ipv6Addr::LOCALHOST,
-            Uuid::new_v4(),
-            None,
-        )
-        .unwrap();
+        // First, spin up a ServiceManager, create a new zone, and then tear
+        // down the ServiceManager.
+        let mgr = helper.clone().new_service_manager();
+        LedgerTestHelper::sled_agent_started(&logctx.log, &test_config, &mgr);
 
         let v2 = Generation::new().next();
         let id = Uuid::new_v4();
@@ -3989,31 +3972,8 @@ mod test {
         // Before we re-create the service manager - notably, using the same
         // config file! - expect that a service gets initialized.
         let _expectations = expect_new_service();
-        let mgr = ServiceManager::new(
-            &log,
-            ddmd_client,
-            bootstrap_networking,
-            SledMode::Auto,
-            Some(true),
-            SidecarRevision::Physical("rev-test".to_string()),
-            vec![],
-            storage_handle.clone(),
-            zone_bundler.clone(),
-        );
-        test_config.override_paths(&mgr);
-
-        let port_manager = PortManager::new(
-            log.new(o!("component" => "PortManager")),
-            Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
-        );
-        mgr.sled_agent_started(
-            test_config.make_config(),
-            port_manager,
-            Ipv6Addr::LOCALHOST,
-            Uuid::new_v4(),
-            None,
-        )
-        .unwrap();
+        let mgr = helper.new_service_manager();
+        LedgerTestHelper::sled_agent_started(&logctx.log, &test_config, &mgr);
 
         let found =
             mgr.omicron_zones_list().await.expect("failed to list zones");
@@ -4032,44 +3992,14 @@ mod test {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_services_do_not_persist_without_config",
         );
-        let log = logctx.log.clone();
         let test_config = TestConfig::new().await;
-        let ddmd_client = DdmAdminClient::localhost(&log).unwrap();
-        let bootstrap_networking = make_bootstrap_networking_config();
+        let helper =
+            LedgerTestHelper::new(logctx.log.clone(), &test_config).await;
 
         // First, spin up a ServiceManager, create a new zone, and then tear
         // down the ServiceManager.
-        let storage_handle = setup_storage().await;
-        let zone_bundler = ZoneBundler::new(
-            log.clone(),
-            storage_handle.clone(),
-            Default::default(),
-        );
-        let mgr = ServiceManager::new(
-            &log,
-            ddmd_client.clone(),
-            bootstrap_networking.clone(),
-            SledMode::Auto,
-            Some(true),
-            SidecarRevision::Physical("rev-test".to_string()),
-            vec![],
-            storage_handle.clone(),
-            zone_bundler.clone(),
-        );
-        test_config.override_paths(&mgr);
-
-        let port_manager = PortManager::new(
-            log.new(o!("component" => "PortManager")),
-            Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
-        );
-        mgr.sled_agent_started(
-            test_config.make_config(),
-            port_manager,
-            Ipv6Addr::LOCALHOST,
-            Uuid::new_v4(),
-            None,
-        )
-        .unwrap();
+        let mgr = helper.clone().new_service_manager();
+        LedgerTestHelper::sled_agent_started(&logctx.log, &test_config, &mgr);
 
         let v1 = Generation::new();
         let v2 = v1.next();
@@ -4085,31 +4015,8 @@ mod test {
         .unwrap();
 
         // Observe that the old service is not re-initialized.
-        let mgr = ServiceManager::new(
-            &log,
-            ddmd_client,
-            bootstrap_networking,
-            SledMode::Auto,
-            Some(true),
-            SidecarRevision::Physical("rev-test".to_string()),
-            vec![],
-            storage_handle,
-            zone_bundler.clone(),
-        );
-        test_config.override_paths(&mgr);
-
-        let port_manager = PortManager::new(
-            log.new(o!("component" => "PortManager")),
-            Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
-        );
-        mgr.sled_agent_started(
-            test_config.make_config(),
-            port_manager,
-            Ipv6Addr::LOCALHOST,
-            Uuid::new_v4(),
-            None,
-        )
-        .unwrap();
+        let mgr = helper.new_service_manager();
+        LedgerTestHelper::sled_agent_started(&logctx.log, &test_config, &mgr);
 
         let found =
             mgr.omicron_zones_list().await.expect("failed to list zones");
@@ -4127,40 +4034,11 @@ mod test {
         // Start like the normal tests.
         let logctx =
             omicron_test_utils::dev::test_setup_log("test_bad_versions");
-        let log = logctx.log.clone();
         let test_config = TestConfig::new().await;
-
-        let storage_handle = setup_storage().await;
-        let zone_bundler = ZoneBundler::new(
-            log.clone(),
-            storage_handle.clone(),
-            Default::default(),
-        );
-        let mgr = ServiceManager::new(
-            &log,
-            DdmAdminClient::localhost(&log).unwrap(),
-            make_bootstrap_networking_config(),
-            SledMode::Auto,
-            Some(true),
-            SidecarRevision::Physical("rev-test".to_string()),
-            vec![],
-            storage_handle,
-            zone_bundler,
-        );
-        test_config.override_paths(&mgr);
-
-        let port_manager = PortManager::new(
-            logctx.log.new(o!("component" => "PortManager")),
-            Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
-        );
-        mgr.sled_agent_started(
-            test_config.make_config(),
-            port_manager,
-            Ipv6Addr::LOCALHOST,
-            Uuid::new_v4(),
-            None,
-        )
-        .unwrap();
+        let helper =
+            LedgerTestHelper::new(logctx.log.clone(), &test_config).await;
+        let mgr = helper.new_service_manager();
+        LedgerTestHelper::sled_agent_started(&logctx.log, &test_config, &mgr);
 
         // Like the normal tests, set up a generation with one zone in it.
         let v1 = Generation::new();
@@ -4260,32 +4138,10 @@ mod test {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_old_ledger_migration",
         );
-        let log = logctx.log.clone();
         let test_config = TestConfig::new().await;
-        let ddmd_client = DdmAdminClient::localhost(&log).unwrap();
-        let bootstrap_networking = make_bootstrap_networking_config();
 
-        let storage_handle = setup_storage().await;
-        let zone_bundler = ZoneBundler::new(
-            log.clone(),
-            storage_handle.clone(),
-            Default::default(),
-        );
-        let mgr = ServiceManager::new(
-            &log,
-            ddmd_client.clone(),
-            bootstrap_networking.clone(),
-            SledMode::Auto,
-            Some(true),
-            SidecarRevision::Physical("rev-test".to_string()),
-            vec![],
-            storage_handle.clone(),
-            zone_bundler.clone(),
-        );
-        test_config.override_paths(&mgr);
-
-        // Before we start things, stuff one of our old-format service ledgers
-        // into place.
+        // Before we start the service manager, stuff one of our old-format
+        // service ledgers into place.
         let contents =
             include_str!("../tests/old-service-ledgers/rack2-sled10.json");
         std::fs::write(
@@ -4294,18 +4150,11 @@ mod test {
         )
         .expect("failed to copy example old-format services ledger into place");
 
-        let port_manager = PortManager::new(
-            log.new(o!("component" => "PortManager")),
-            Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
-        );
-        mgr.sled_agent_started(
-            test_config.make_config(),
-            port_manager,
-            Ipv6Addr::LOCALHOST,
-            Uuid::new_v4(),
-            None,
-        )
-        .unwrap();
+        // Now start the service manager.
+        let helper =
+            LedgerTestHelper::new(logctx.log.clone(), &test_config).await;
+        let mgr = helper.clone().new_service_manager();
+        LedgerTestHelper::sled_agent_started(&logctx.log, &test_config, &mgr);
 
         // Trigger the migration code.  (Yes, it's hokey that we create this
         // fake argument.)
@@ -4337,32 +4186,8 @@ mod test {
         // triggering migration again.  It should also report the same zones.
         drop_service_manager(mgr);
 
-        // XXX-dap comonize this copy/pasted block
-        let mgr = ServiceManager::new(
-            &log,
-            ddmd_client,
-            bootstrap_networking,
-            SledMode::Auto,
-            Some(true),
-            SidecarRevision::Physical("rev-test".to_string()),
-            vec![],
-            storage_handle.clone(),
-            zone_bundler.clone(),
-        );
-        test_config.override_paths(&mgr);
-
-        let port_manager = PortManager::new(
-            log.new(o!("component" => "PortManager")),
-            Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
-        );
-        mgr.sled_agent_started(
-            test_config.make_config(),
-            port_manager,
-            Ipv6Addr::LOCALHOST,
-            Uuid::new_v4(),
-            None,
-        )
-        .unwrap();
+        let mgr = helper.new_service_manager();
+        LedgerTestHelper::sled_agent_started(&logctx.log, &test_config, &mgr);
 
         let found =
             mgr.omicron_zones_list().await.expect("failed to list zones");
@@ -4378,52 +4203,24 @@ mod test {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_old_ledger_migration_bad",
         );
-        let log = logctx.log.clone();
         let test_config = TestConfig::new().await;
-        let ddmd_client = DdmAdminClient::localhost(&log).unwrap();
-        let bootstrap_networking = make_bootstrap_networking_config();
+        let helper =
+            LedgerTestHelper::new(logctx.log.clone(), &test_config).await;
 
-        let storage_handle = setup_storage().await;
-        let zone_bundler = ZoneBundler::new(
-            log.clone(),
-            storage_handle.clone(),
-            Default::default(),
-        );
-        let mgr = ServiceManager::new(
-            &log,
-            ddmd_client.clone(),
-            bootstrap_networking.clone(),
-            SledMode::Auto,
-            Some(true),
-            SidecarRevision::Physical("rev-test".to_string()),
-            vec![],
-            storage_handle.clone(),
-            zone_bundler.clone(),
-        );
-        test_config.override_paths(&mgr);
-
-        // Before we start things, stuff a broken ledger into place.
-        // For this to test what we want, it needs to be a valid ledger that we
-        // simply failed to convert.
+        // Before we start things, stuff a broken ledger into place.  For this
+        // to test what we want, it needs to be a valid ledger that we simply
+        // failed to convert.
         std::fs::write(
             test_config.config_dir.path().join(SERVICES_LEDGER_FILENAME),
             "{",
         )
         .expect("failed to copy example old-format services ledger into place");
 
-        let port_manager = PortManager::new(
-            log.new(o!("component" => "PortManager")),
-            Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
-        );
-        mgr.sled_agent_started(
-            test_config.make_config(),
-            port_manager,
-            Ipv6Addr::LOCALHOST,
-            Uuid::new_v4(),
-            None,
-        )
-        .unwrap();
+        // Start the service manager.
+        let mgr = helper.new_service_manager();
+        LedgerTestHelper::sled_agent_started(&logctx.log, &test_config, &mgr);
 
+        // Trigger the migration code.
         let unused = Mutex::new(BTreeMap::new());
         let error = mgr
             .load_ledgered_zones(&unused.lock().await)
@@ -4435,11 +4232,6 @@ mod test {
             format!("{:#}", error)
         );
 
-        // XXX-dap other test cases to add:
-        // - what if we change the current ledger after migration?  we should
-        //   see the change
-        // - I feel like there was some other case here but now I can't remember
-        //   it
         logctx.cleanup_successful();
     }
 
