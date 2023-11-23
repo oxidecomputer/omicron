@@ -903,7 +903,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ExternalIpResultsPage"
+                  "$ref": "#/components/schemas/FloatingIpResultsPage"
                 }
               }
             }
@@ -954,7 +954,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ExternalIp"
+                  "$ref": "#/components/schemas/FloatingIp"
                 }
               }
             }
@@ -1000,7 +1000,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ExternalIp"
+                  "$ref": "#/components/schemas/FloatingIp"
                 }
               }
             }
@@ -10545,6 +10545,64 @@
           "role_name"
         ]
       },
+      "FloatingIp": {
+        "description": "A Floating IP is a well-known IP address which can be attached and detached from instances.",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "instance_id": {
+            "nullable": true,
+            "description": "The ID of the instance that this Floating IP is attached to, if it is presently in use.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "ip": {
+            "description": "The IP address held by this resource.",
+            "type": "string",
+            "format": "ip"
+          },
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "project_id": {
+            "description": "The project this resource exists within.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "description",
+          "id",
+          "ip",
+          "name",
+          "project_id",
+          "time_created",
+          "time_modified"
+        ]
+      },
       "FloatingIpCreate": {
         "description": "Parameters for creating a new floating IP address for instances.",
         "type": "object",
@@ -10574,6 +10632,27 @@
         "required": [
           "description",
           "name"
+        ]
+      },
+      "FloatingIpResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FloatingIp"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
         ]
       },
       "Group": {

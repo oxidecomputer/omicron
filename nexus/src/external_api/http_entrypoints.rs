@@ -1534,7 +1534,7 @@ async fn ip_pool_service_range_remove(
 async fn floating_ip_list(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
-) -> Result<HttpResponseOk<ResultsPage<views::ExternalIp>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<views::FloatingIp>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
@@ -1568,7 +1568,7 @@ async fn floating_ip_create(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<params::ProjectSelector>,
     floating_params: TypedBody<params::FloatingIpCreate>,
-) -> Result<HttpResponseCreated<views::ExternalIp>, HttpError> {
+) -> Result<HttpResponseCreated<views::FloatingIp>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let floating_params = floating_params.into_inner();
@@ -1579,7 +1579,7 @@ async fn floating_ip_create(
         let ip = nexus
             .floating_ip_create(&opctx, &project_lookup, &floating_params)
             .await?;
-        Ok(HttpResponseCreated(views::ExternalIp::from(ip)))
+        Ok(HttpResponseCreated(ip))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1625,7 +1625,7 @@ async fn floating_ip_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::FloatingIpPath>,
     query_params: Query<params::OptionalProjectSelector>,
-) -> Result<HttpResponseOk<views::ExternalIp>, HttpError> {
+) -> Result<HttpResponseOk<views::FloatingIp>, HttpError> {
     todo!();
 
     // let apictx = rqctx.context();

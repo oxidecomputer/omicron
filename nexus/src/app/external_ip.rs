@@ -5,6 +5,7 @@
 //! External IP addresses for instances
 
 use crate::external_api::views::ExternalIp;
+use crate::external_api::views::FloatingIp;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::lookup;
@@ -46,6 +47,7 @@ impl super::Nexus {
         &'a self,
         opctx: &'a OpContext,
         fip_selector: params::FloatingIpSelector,
+        // XXX: need lookup typed for ExternalIp/FloatingIp
     ) -> LookupResult<lookup::Disk<'a>> {
         match fip_selector {
             params::FloatingIpSelector { floating_ip: NameOrId::Id(id), project: None } => {
@@ -81,7 +83,7 @@ impl super::Nexus {
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
         // pagparams: &PaginatedBy<'_>,
-    ) -> ListResultVec<ExternalIp> {
+    ) -> ListResultVec<FloatingIp> {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::Read).await?;
         Ok(self
@@ -98,7 +100,7 @@ impl super::Nexus {
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
         params: &params::FloatingIpCreate,
-    ) -> CreateResult<ExternalIp> {
+    ) -> CreateResult<FloatingIp> {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
 

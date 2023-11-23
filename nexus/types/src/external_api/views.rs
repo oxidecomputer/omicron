@@ -265,6 +265,22 @@ pub struct ExternalIp {
     pub kind: IpKind,
 }
 
+/// A Floating IP is a well-known IP address which can be attached
+/// and detached from instances.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct FloatingIp {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    /// The IP address held by this resource.
+    pub ip: IpAddr,
+    /// The project this resource exists within.
+    pub project_id: Uuid,
+    /// The ID of the instance that this Floating IP is attached to,
+    /// if it is presently in use.
+    pub instance_id: Option<Uuid>,
+}
+
 // RACKS
 
 /// View of an Rack

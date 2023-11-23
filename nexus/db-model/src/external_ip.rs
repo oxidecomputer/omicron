@@ -18,6 +18,7 @@ use nexus_types::external_api::shared;
 use nexus_types::external_api::views;
 use omicron_common::address::NUM_SOURCE_NAT_PORTS;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::IdentityMetadata;
 use std::convert::TryFrom;
 use std::net::IpAddr;
 use uuid::Uuid;
@@ -344,5 +345,47 @@ impl TryFrom<ExternalIp> for views::ExternalIp {
         }
         let kind = ip.kind.try_into()?;
         Ok(views::ExternalIp { kind, ip: ip.ip.ip() })
+    }
+}
+
+impl TryFrom<ExternalIp> for views::FloatingIp {
+    type Error = Error;
+
+    fn try_from(ip: ExternalIp) -> Result<Self, Self::Error> {
+        if ip.is_service {
+            return Err(Error::internal_error(
+                "Service IPs should not be exposed in the API",
+            ));
+        }
+
+        let project_id = ip.project_id.ok_or(Error::internal_error(
+            "database schema guarantees parent project for non-service FIP",
+        ))?;
+
+        let name = ip
+            .name
+            .ok_or(Error::internal_error(
+                "database schema guarantees ID metadata for non-service FIP",
+            ))?
+            .into();
+
+        let description = ip.description.ok_or(Error::internal_error(
+            "database schema guarantees ID metadata for non-service FIP",
+        ))?;
+
+        let identity = IdentityMetadata {
+            id: ip.id,
+            name,
+            description,
+            time_created: ip.time_created,
+            time_modified: ip.time_modified,
+        };
+
+        Ok(views::FloatingIp {
+            ip: ip.ip.ip(),
+            identity,
+            project_id,
+            instance_id: ip.parent_id,
+        })
     }
 }
