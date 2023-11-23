@@ -13,7 +13,6 @@ use gateway_client::types::SpType;
 use ipnetwork::{IpNetwork, Ipv6Network};
 use nexus_db_model::DnsGroup;
 use nexus_db_model::InitialDnsGroup;
-use nexus_db_model::SledUnderlaySubnetAllocation;
 use nexus_db_model::{SwitchLinkFec, SwitchLinkSpeed};
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
@@ -47,7 +46,6 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
-use omicron_common::bail_unless;
 use sled_agent_client::types::AddSledRequest;
 use sled_agent_client::types::EarlyNetworkConfigBody;
 use sled_agent_client::types::StartSledAgentRequest;
@@ -781,55 +779,18 @@ impl super::Nexus {
         let hw_baseboard_id =
             self.db_datastore.find_hw_baseboard_id(opctx, baseboard_id).await?;
 
-        // Fetch all the existing allocations via self.rack_id
-        let allocations = self
-            .db_datastore
-            .rack_subnet_allocations(opctx, sled.rack_id)
-            .await?;
-
-        // Calculate the allocation for the new sled by choosing the minimum
-        // octet. The returned allocations are ordered by octet, so we will know
-        // when we have a free one. However, if we already have an allocation
-        // for the given sled then reuse that one.
-        // TODO: This could all actually be done in SQL using a `next_item` query.
-        // See https://github.com/oxidecomputer/omicron/issues/4544
-        const MIN_SUBNET_OCTET: i16 = 33;
-        let mut new_allocation = SledUnderlaySubnetAllocation {
-            rack_id: sled.rack_id,
-            sled_id: Uuid::new_v4(),
-            subnet_octet: MIN_SUBNET_OCTET,
-            hw_baseboard_id,
-        };
         let subnet = self.db_datastore.rack_subnet(opctx, sled.rack_id).await?;
-        let mut allocation_already_exists = false;
-        for allocation in allocations {
-            if allocation.hw_baseboard_id == new_allocation.hw_baseboard_id {
-                // We already have an allocation for this sled.
-                new_allocation = allocation;
-                allocation_already_exists = true;
-                break;
-            }
-            if allocation.subnet_octet == new_allocation.subnet_octet {
-                bail_unless!(
-                    new_allocation.subnet_octet < 255,
-                    "Too many sled subnets allocated"
-                );
-                new_allocation.subnet_octet += 1;
-            }
-        }
         let rack_subnet =
             Ipv6Subnet::<RACK_PREFIX>::from(rack_subnet(Some(subnet))?);
 
-        // Write the new allocation row to CRDB. The UNIQUE constraint
-        // on `subnet_octet` will prevent dueling administrators reusing
-        // allocations when sleds are being added. We will need another
-        // mechanism ala generation numbers when we must interleave additions
-        // and removals of sleds.
-        if !allocation_already_exists {
-            self.db_datastore
-                .sled_subnet_allocation_insert(opctx, &new_allocation)
-                .await?;
-        }
+        let allocation = self
+            .db_datastore
+            .allocate_sled_underlay_subnet_octets(
+                opctx,
+                sled.rack_id,
+                hw_baseboard_id,
+            )
+            .await?;
 
         // Convert the baseboard as necessary
         let baseboard = sled_agent_client::types::Baseboard::Gimlet {
@@ -845,14 +806,14 @@ impl super::Nexus {
                 generation: 0,
                 schema_version: 1,
                 body: StartSledAgentRequestBody {
-                    id: new_allocation.sled_id,
-                    rack_id: new_allocation.rack_id,
+                    id: allocation.sled_id,
+                    rack_id: allocation.rack_id,
                     use_trust_quorum: true,
                     is_lrtq_learner: true,
                     subnet: sled_agent_client::types::Ipv6Subnet {
                         net: get_64_subnet(
                             rack_subnet,
-                            new_allocation.subnet_octet.try_into().unwrap(),
+                            allocation.subnet_octet.try_into().unwrap(),
                         )
                         .net()
                         .into(),
@@ -865,7 +826,7 @@ impl super::Nexus {
             Error::InternalError {
                 internal_message: format!(
                     "failed to add sled with baseboard {:?} to rack {}: {e}",
-                    sled.baseboard, new_allocation.rack_id
+                    sled.baseboard, allocation.rack_id
                 ),
             }
         })?;
