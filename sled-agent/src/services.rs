@@ -4199,6 +4199,84 @@ mod test {
 
     #[tokio::test]
     #[serial_test::serial]
+    async fn test_old_ledger_migration_continue() {
+        // This test is just like "test_old_ledger_migration", except that we
+        // deploy a new zone after migration and before shutting down the
+        // service manager.  This tests that new changes modify the new,
+        // migrated config.
+        let logctx = omicron_test_utils::dev::test_setup_log(
+            "test_old_ledger_migration_continue",
+        );
+        let test_config = TestConfig::new().await;
+
+        // Before we start the service manager, stuff one of our old-format
+        // service ledgers into place.
+        let contents =
+            include_str!("../tests/old-service-ledgers/rack2-sled10.json");
+        std::fs::write(
+            test_config.config_dir.path().join(SERVICES_LEDGER_FILENAME),
+            contents,
+        )
+        .expect("failed to copy example old-format services ledger into place");
+
+        // Now start the service manager.
+        let helper =
+            LedgerTestHelper::new(logctx.log.clone(), &test_config).await;
+        let mgr = helper.clone().new_service_manager();
+        LedgerTestHelper::sled_agent_started(&logctx.log, &test_config, &mgr);
+
+        // Trigger the migration code.
+        let unused = Mutex::new(BTreeMap::new());
+        let migrated_ledger = mgr
+            .load_ledgered_zones(&unused.lock().await)
+            .await
+            .expect("failed to load ledgered zones")
+            .unwrap();
+
+        // The other test verified that migration has happened normally so let's
+        // assume it has.  Now provision a new zone.
+        let vv = migrated_ledger.data().omicron_version.next();
+        let id = Uuid::new_v4();
+
+        let _expectations = expect_new_services();
+        let address =
+            SocketAddrV6::new(Ipv6Addr::LOCALHOST, OXIMETER_PORT, 0, 0);
+        let mut zones =
+            migrated_ledger.data().clone().to_omicron_zones_config().zones;
+        zones.push(OmicronZoneConfig {
+            id,
+            underlay_address: Ipv6Addr::LOCALHOST,
+            zone_type: OmicronZoneType::Oximeter { address },
+        });
+        mgr.ensure_all_omicron_zones_persistent(OmicronZonesConfig {
+            version: vv,
+            zones,
+        })
+        .await
+        .expect("failed to add new zone after migration");
+        let found =
+            mgr.omicron_zones_list().await.expect("failed to list zones");
+        assert_eq!(found.version, vv);
+        assert_eq!(found.zones.len(), migrated_ledger.data().zones.len() + 1);
+
+        // Just to be sure, shut down the manager and create a new one without
+        // triggering migration again.  It should now report one more zone than
+        // was migrated earlier.
+        drop_service_manager(mgr);
+
+        let mgr = helper.new_service_manager();
+        LedgerTestHelper::sled_agent_started(&logctx.log, &test_config, &mgr);
+        let found =
+            mgr.omicron_zones_list().await.expect("failed to list zones");
+        assert_eq!(found.version, vv);
+        assert_eq!(found.zones.len(), migrated_ledger.data().zones.len() + 1);
+
+        drop_service_manager(mgr);
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
     async fn test_old_ledger_migration_bad() {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_old_ledger_migration_bad",
