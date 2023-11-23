@@ -853,8 +853,9 @@ impl ServiceManager {
 
         let mut ports = vec![];
         for svc in &req.services {
+            // Non-SNAT IPs are floating IPs with `is_service` true.
             let external_ip;
-            let (nic, snat, external_ips) = match &svc.details {
+            let (nic, snat, floating_ips) = match &svc.details {
                 ServiceType::Nexus { external_ip, nic, .. } => {
                     (nic, None, std::slice::from_ref(external_ip))
                 }
@@ -874,16 +875,25 @@ impl ServiceManager {
             // config allows outbound access which is enough for
             // Boundary NTP which needs to come up before Nexus.
             let port = port_manager
-                .create_port(nic, snat, external_ips, &[], DhcpCfg::default())
+                .create_port(
+                    nic,
+                    snat,
+                    None,
+                    floating_ips,
+                    &[],
+                    DhcpCfg::default(),
+                )
                 .map_err(|err| Error::ServicePortCreation {
                     service: svc.details.to_string(),
                     err: Box::new(err),
                 })?;
 
             // We also need to update the switch with the NAT mappings
+            // XXX: need to revisit iff. any services get more than one
+            //      address.
             let (target_ip, first_port, last_port) = match snat {
                 Some(s) => (s.ip, s.first_port, s.last_port),
-                None => (external_ips[0], 0, u16::MAX),
+                None => (floating_ips[0], 0, u16::MAX),
             };
 
             for dpd_client in &dpd_clients {

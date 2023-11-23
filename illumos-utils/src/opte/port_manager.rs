@@ -100,7 +100,8 @@ impl PortManager {
         &self,
         nic: &NetworkInterface,
         source_nat: Option<SourceNatConfig>,
-        external_ips: &[IpAddr],
+        ephemeral_ip: Option<IpAddr>,
+        floating_ips: &[IpAddr],
         firewall_rules: &[VpcFirewallRule],
         dhcp_config: DhcpCfg,
     ) -> Result<(Port, PortTicket), Error> {
@@ -112,15 +113,6 @@ impl PortManager {
         let boundary_services = default_boundary_services();
 
         // Describe the external IP addresses for this port.
-        //
-        // Note that we're currently only taking the first address, which is all
-        // that OPTE supports. The array is guaranteed to be limited by Nexus.
-        // See https://github.com/oxidecomputer/omicron/issues/1467
-        // See https://github.com/oxidecomputer/opte/issues/196
-
-        // XXX: Need to take ephemeral vs floating as separate params.
-        let external_ip = external_ips.get(0);
-
         macro_rules! ip_cfg {
             ($ip:expr, $log_prefix:literal, $ip_t:path, $cidr_t:path,
              $ipcfg_e:path, $ipcfg_t:ident, $snat_t:ident) => {{
@@ -155,18 +147,33 @@ impl PortManager {
                     }
                     None => None,
                 };
-                let ephemeral_ip = match external_ip {
-                    Some($ip_t(ip)) => Some((*ip).into()),
+                let ephemeral_ip = match ephemeral_ip {
+                    Some($ip_t(ip)) => Some(ip.into()),
                     Some(_) => {
                         error!(
                             self.inner.log,
-                            concat!($log_prefix, " external IP");
-                            "external_ip" => ?external_ip,
+                            concat!($log_prefix, " ephemeral IP");
+                            "ephemeral_ip" => ?ephemeral_ip,
                         );
                         return Err(Error::InvalidPortIpConfig);
                     }
                     None => None,
                 };
+                let floating_ips: Vec<_> = floating_ips
+                    .iter()
+                    .copied()
+                    .map(|ip| match ip {
+                        $ip_t(ip) => Ok(ip.into()),
+                        _ => {
+                            error!(
+                                self.inner.log,
+                                concat!($log_prefix, " ephemeral IP");
+                                "ephemeral_ip" => ?ephemeral_ip,
+                            );
+                            Err(Error::InvalidPortIpConfig)
+                        }
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
 
                 $ipcfg_e($ipcfg_t {
                     vpc_subnet,
@@ -175,8 +182,7 @@ impl PortManager {
                     external_ips: ExternalIpCfg {
                         ephemeral_ip,
                         snat,
-                        // TODO: implement
-                        floating_ips: vec![],
+                        floating_ips,
                     },
                 })
             }}

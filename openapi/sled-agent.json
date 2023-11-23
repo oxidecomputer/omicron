@@ -4305,18 +4305,23 @@
               "$ref": "#/components/schemas/DiskRequest"
             }
           },
-          "external_ips": {
+          "ephemeral_ip": {
+            "nullable": true,
             "description": "Zero or more external IP addresses (either floating or ephemeral), provided to an instance to allow inbound connectivity.",
-            "type": "array",
-            "items": {
-              "type": "string",
-              "format": "ip"
-            }
+            "type": "string",
+            "format": "ip"
           },
           "firewall_rules": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/VpcFirewallRule"
+            }
+          },
+          "floating_ips": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "ip"
             }
           },
           "nics": {
@@ -4335,8 +4340,8 @@
         "required": [
           "dhcp_config",
           "disks",
-          "external_ips",
           "firewall_rules",
+          "floating_ips",
           "nics",
           "properties",
           "source_nat"

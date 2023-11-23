@@ -1625,7 +1625,7 @@ async fn floating_ip_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::FloatingIpPath>,
     query_params: Query<params::OptionalProjectSelector>,
-) -> Result<HttpResponseOk<Disk>, HttpError> {
+) -> Result<HttpResponseOk<views::ExternalIp>, HttpError> {
     todo!();
 
     // let apictx = rqctx.context();

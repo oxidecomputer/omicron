@@ -68,7 +68,8 @@ pub struct InstanceHardware {
     pub source_nat: SourceNatConfig,
     /// Zero or more external IP addresses (either floating or ephemeral),
     /// provided to an instance to allow inbound connectivity.
-    pub external_ips: Vec<IpAddr>,
+    pub ephemeral_ip: Option<IpAddr>,
+    pub floating_ips: Vec<IpAddr>,
     pub firewall_rules: Vec<VpcFirewallRule>,
     pub dhcp_config: DhcpConfig,
     // TODO: replace `propolis_client::*` with locally-modeled request type

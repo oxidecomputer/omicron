@@ -885,8 +885,6 @@ impl super::Nexus {
             .await?;
 
         // Collect the external IPs for the instance.
-        // TODO-correctness: Handle Floating IPs, see
-        //  https://github.com/oxidecomputer/omicron/issues/1334
         let (snat_ip, external_ips): (Vec<_>, Vec<_>) = self
             .db_datastore
             .instance_lookup_external_ips(&opctx, authz_instance.id())
@@ -906,8 +904,27 @@ impl super::Nexus {
                 .as_str(),
             ));
         }
-        let external_ips =
-            external_ips.into_iter().map(|model| model.ip.ip()).collect();
+
+        // Partition remaining external IPs by class: we can have at most
+        // one ephemeral ip.
+        let (ephemeral_ips, floating_ips): (Vec<_>, Vec<_>) = external_ips
+            .into_iter()
+            .partition(|ip| ip.kind == IpKind::Ephemeral);
+
+        if ephemeral_ips.len() > 1 {
+            return Err(Error::internal_error(
+                format!(
+                "Expected at most one ephemeral IP for an instance, found {}",
+                ephemeral_ips.len()
+            )
+                .as_str(),
+            ));
+        }
+
+        let ephemeral_ip = ephemeral_ips.get(0).map(|model| model.ip.ip());
+
+        let floating_ips =
+            floating_ips.into_iter().map(|model| model.ip.ip()).collect();
         if snat_ip.len() != 1 {
             return Err(Error::internal_error(
                 "Expected exactly one SNAT IP address for an instance",
@@ -983,7 +1000,8 @@ impl super::Nexus {
             },
             nics,
             source_nat,
-            external_ips,
+            ephemeral_ip,
+            floating_ips,
             firewall_rules,
             dhcp_config: sled_agent_client::types::DhcpConfig {
                 dns_servers: self.external_dns_servers.clone(),

@@ -208,7 +208,8 @@ struct InstanceInner {
     // Guest NIC and OPTE port information
     requested_nics: Vec<NetworkInterface>,
     source_nat: SourceNatConfig,
-    external_ips: Vec<IpAddr>,
+    ephemeral_ip: Option<IpAddr>,
+    floating_ips: Vec<IpAddr>,
     firewall_rules: Vec<VpcFirewallRule>,
     dhcp_config: DhcpCfg,
 
@@ -665,7 +666,8 @@ impl Instance {
             port_manager,
             requested_nics: hardware.nics,
             source_nat: hardware.source_nat,
-            external_ips: hardware.external_ips,
+            ephemeral_ip: hardware.ephemeral_ip,
+            floating_ips: hardware.floating_ips,
             firewall_rules: hardware.firewall_rules,
             dhcp_config,
             requested_disks: hardware.disks,
@@ -877,15 +879,20 @@ impl Instance {
         // Create OPTE ports for the instance
         let mut opte_ports = Vec::with_capacity(inner.requested_nics.len());
         for nic in inner.requested_nics.iter() {
-            let (snat, external_ips) = if nic.primary {
-                (Some(inner.source_nat), &inner.external_ips[..])
+            let (snat, ephemeral_ip, floating_ips) = if nic.primary {
+                (
+                    Some(inner.source_nat),
+                    inner.ephemeral_ip,
+                    &inner.floating_ips[..],
+                )
             } else {
-                (None, &[][..])
+                (None, None, &[][..])
             };
             let port = inner.port_manager.create_port(
                 nic,
                 snat,
-                external_ips,
+                ephemeral_ip,
+                floating_ips,
                 &inner.firewall_rules,
                 inner.dhcp_config.clone(),
             )?;
