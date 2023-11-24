@@ -751,7 +751,7 @@ pub enum ResourceType {
     Zpool,
     Vmm,
     Ipv4NatEntry,
-    // ExternalIp,
+    FloatingIp,
 }
 
 // IDENTITY METADATA

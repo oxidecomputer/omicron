@@ -1545,15 +1545,14 @@ async fn floating_ip_list(
         let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
         let project_lookup =
             nexus.project_lookup(&opctx, scan_params.selector.clone())?;
-        // XXX: impl relevant traits to make results_page work.
-        // let ips = nexus.list_floating_ips(&opctx, &project_lookup, &paginated_by).await?;
-        let ips = nexus.floating_ips_list(&opctx, &project_lookup).await?;
-        Ok(HttpResponseOk(ResultsPage { items: ips, next_page: None }))
-        // Ok(HttpResponseOk(ScanByNameOrId::results_page(
-        //     &query,
-        //     ips,
-        //     &marker_for_name_or_id,
-        // )?))
+        let ips = nexus
+            .floating_ips_list(&opctx, &project_lookup, &paginated_by)
+            .await?;
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
+            ips,
+            &marker_for_name_or_id,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1595,24 +1594,23 @@ async fn floating_ip_delete(
     path_params: Path<params::FloatingIpPath>,
     query_params: Query<params::OptionalProjectSelector>,
 ) -> Result<HttpResponseDeleted, HttpError> {
-    todo!();
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let floating_ip_selector = params::FloatingIpSelector {
+            floating_ip: path.floating_ip,
+            project: query.project,
+        };
+        let fip_lookup =
+            nexus.floating_ip_lookup(&opctx, floating_ip_selector)?;
 
-    // TODO: more work needed here to plug into authz, and pathlookup
-    //       etc.
-
-    // let apictx = rqctx.context();
-    // let handler = async {
-    //     let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-    //     let nexus = &apictx.nexus;
-    //     let path = path_params.into_inner();
-    //     let query = query_params.into_inner();
-    //     let disk_selector =
-    //         params::FloatingIpSelector { floating_ip: path.floating_ip, project: query.project };
-    //     let disk_lookup = nexus.disk_lookup(&opctx, disk_selector)?;
-    //     nexus.project_delete_disk(&opctx, &disk_lookup).await?;
-    //     Ok(HttpResponseDeleted())
-    // };
-    // apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+        nexus.floating_ip_delete(&opctx, fip_lookup).await?;
+        Ok(HttpResponseDeleted())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 /// Fetch a floating IP
@@ -1626,21 +1624,23 @@ async fn floating_ip_view(
     path_params: Path<params::FloatingIpPath>,
     query_params: Query<params::OptionalProjectSelector>,
 ) -> Result<HttpResponseOk<views::FloatingIp>, HttpError> {
-    todo!();
-
-    // let apictx = rqctx.context();
-    // let handler = async {
-    //     let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-    //     let nexus = &apictx.nexus;
-    //     let path = path_params.into_inner();
-    //     let query = query_params.into_inner();
-    //     let disk_selector =
-    //         params::FloatingIpSelector { floating_ip: path.floating_ip, project: query.project };
-    //     let (.., disk) =
-    //         nexus.disk_lookup(&opctx, disk_selector)?.fetch().await?;
-    //     Ok(HttpResponseOk(disk.into()))
-    // };
-    // apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let floating_ip_selector = params::FloatingIpSelector {
+            floating_ip: path.floating_ip,
+            project: query.project,
+        };
+        let (.., fip) = nexus
+            .floating_ip_lookup(&opctx, floating_ip_selector)?
+            .fetch()
+            .await?;
+        Ok(HttpResponseOk(fip.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 // Disks

@@ -539,6 +539,24 @@ table! {
 }
 
 table! {
+    floating_ip (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+
+        ip_pool_id -> Uuid,
+        ip_pool_range_id -> Uuid,
+        is_service -> Bool,
+        parent_id -> Nullable<Uuid>,
+        ip -> Inet,
+        project_id -> Uuid,
+    }
+}
+
+table! {
     silo (id) {
         id -> Uuid,
         name -> Text,

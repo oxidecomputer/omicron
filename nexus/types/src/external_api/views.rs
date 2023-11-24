@@ -267,7 +267,7 @@ pub struct ExternalIp {
 
 /// A Floating IP is a well-known IP address which can be attached
 /// and detached from instances.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(ObjectIdentity, Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct FloatingIp {
     #[serde(flatten)]

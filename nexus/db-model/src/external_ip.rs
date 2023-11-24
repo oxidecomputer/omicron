@@ -6,11 +6,12 @@
 //! services.
 
 use crate::impl_enum_type;
-use crate::schema::external_ip;
+use crate::schema::{external_ip, floating_ip};
 use crate::Name;
 use crate::SqlU16;
 use chrono::DateTime;
 use chrono::Utc;
+use db_macros::Resource;
 use diesel::Queryable;
 use diesel::Selectable;
 use ipnetwork::IpNetwork;
@@ -19,6 +20,7 @@ use nexus_types::external_api::views;
 use omicron_common::address::NUM_SOURCE_NAT_PORTS;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadata;
+use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
 use std::net::IpAddr;
 use uuid::Uuid;
@@ -72,6 +74,28 @@ pub struct ExternalIp {
     pub last_port: SqlU16,
     // Only Some(_) for instance Floating IPs
     pub project_id: Option<Uuid>,
+}
+
+/// A view type constructed from `ExternalIp` used to represent Floating IP
+/// objects in user-facing APIs.
+///
+/// This View type fills a similar niche to `ProjectImage` etc.: we need to
+/// represent identity as non-nullable (ditto for parent project) so as to
+/// play nicely with authz and resource APIs.
+#[derive(
+    Queryable, Selectable, Clone, Debug, Resource, Serialize, Deserialize,
+)]
+#[diesel(table_name = floating_ip)]
+pub struct FloatingIp {
+    #[diesel(embed)]
+    pub identity: FloatingIpIdentity,
+
+    pub ip_pool_id: Uuid,
+    pub ip_pool_range_id: Uuid,
+    pub is_service: bool,
+    pub parent_id: Option<Uuid>,
+    pub ip: IpNetwork,
+    pub project_id: Uuid,
 }
 
 impl From<ExternalIp> for sled_agent_client::types::SourceNatConfig {
@@ -352,6 +376,11 @@ impl TryFrom<ExternalIp> for views::FloatingIp {
     type Error = Error;
 
     fn try_from(ip: ExternalIp) -> Result<Self, Self::Error> {
+        if ip.kind != IpKind::Floating {
+            return Err(Error::internal_error(
+                "attempted to convert non-floating external IP to floating",
+            ));
+        }
         if ip.is_service {
             return Err(Error::internal_error(
                 "Service IPs should not be exposed in the API",
@@ -387,5 +416,24 @@ impl TryFrom<ExternalIp> for views::FloatingIp {
             project_id,
             instance_id: ip.parent_id,
         })
+    }
+}
+
+impl From<FloatingIp> for views::FloatingIp {
+    fn from(ip: FloatingIp) -> Self {
+        let identity = IdentityMetadata {
+            id: ip.identity.id,
+            name: ip.identity.name.into(),
+            description: ip.identity.description,
+            time_created: ip.identity.time_created,
+            time_modified: ip.identity.time_modified,
+        };
+
+        views::FloatingIp {
+            ip: ip.ip.ip(),
+            identity,
+            project_id: ip.project_id,
+            instance_id: ip.parent_id,
+        }
     }
 }
