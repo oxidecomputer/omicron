@@ -25,6 +25,7 @@ use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
@@ -32,6 +33,7 @@ use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use ref_cast::RefCast;
@@ -138,26 +140,37 @@ impl DataStore {
     pub async fn allocate_floating_ip(
         &self,
         opctx: &OpContext,
-        pool_id: Option<Uuid>,
         project_id: Uuid,
-        ip_id: Uuid,
-        name: &Name,
-        description: &str,
-        ip: Option<IpAddr>,
+        params: params::FloatingIpCreate,
     ) -> CreateResult<ExternalIp> {
+        let ip_id = Uuid::new_v4();
+
         // XXX: mux here to scan *all* project pools in
         //      current silo for convenience?
-        let pool_id = if let Some(id) = pool_id {
-            id
-        } else {
-            self.ip_pools_fetch_default(opctx).await?.id()
-        };
+        let pool_id = match params.pool {
+            Some(NameOrId::Name(name)) => {
+                LookupPath::new(opctx, self)
+                    .ip_pool_name(&Name(name))
+                    .fetch_for(authz::Action::Read)
+                    .await?
+                    .1
+            }
+            Some(NameOrId::Id(id)) => {
+                LookupPath::new(opctx, self)
+                    .ip_pool_id(id)
+                    .fetch_for(authz::Action::Read)
+                    .await?
+                    .1
+            }
+            None => self.ip_pools_fetch_default(opctx).await?,
+        }
+        .id();
 
-        let data = if let Some(ip) = ip {
+        let data = if let Some(ip) = params.address {
             IncompleteExternalIp::for_floating_explicit(
                 ip_id,
-                name,
-                description,
+                &Name(params.identity.name),
+                &params.identity.description,
                 project_id,
                 ip,
                 pool_id,
@@ -165,8 +178,8 @@ impl DataStore {
         } else {
             IncompleteExternalIp::for_floating(
                 ip_id,
-                name,
-                description,
+                &Name(params.identity.name),
+                &params.identity.description,
                 project_id,
                 pool_id,
             )

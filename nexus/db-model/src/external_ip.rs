@@ -391,12 +391,9 @@ impl TryFrom<ExternalIp> for FloatingIp {
             "database schema guarantees parent project for non-service FIP",
         ))?;
 
-        let name = ip
-            .name
-            .ok_or(Error::internal_error(
-                "database schema guarantees ID metadata for non-service FIP",
-            ))?
-            .into();
+        let name = ip.name.ok_or(Error::internal_error(
+            "database schema guarantees ID metadata for non-service FIP",
+        ))?;
 
         let description = ip.description.ok_or(Error::internal_error(
             "database schema guarantees ID metadata for non-service FIP",

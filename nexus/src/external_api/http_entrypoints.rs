@@ -1576,7 +1576,7 @@ async fn floating_ip_create(
         let project_lookup =
             nexus.project_lookup(&opctx, query_params.into_inner())?;
         let ip = nexus
-            .floating_ip_create(&opctx, &project_lookup, &floating_params)
+            .floating_ip_create(&opctx, &project_lookup, floating_params)
             .await?;
         Ok(HttpResponseCreated(ip))
     };

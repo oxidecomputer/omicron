@@ -19,7 +19,6 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
-use uuid::Uuid;
 
 impl super::Nexus {
     pub(crate) async fn instance_list_external_ips(
@@ -98,33 +97,14 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
-        params: &params::FloatingIpCreate,
+        params: params::FloatingIpCreate,
     ) -> CreateResult<FloatingIp> {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
 
-        // XXX: support pool by name here.
-        let pool_id = match &params.pool {
-            Some(NameOrId::Id(ref id)) => Some(*id),
-            Some(NameOrId::Name(ref _name)) => {
-                return Err(Error::internal_error(
-                    "pool ref by name not yet supported",
-                ))
-            }
-            None => None,
-        };
-
         Ok(self
             .db_datastore
-            .allocate_floating_ip(
-                opctx,
-                pool_id,
-                authz_project.id(),
-                Uuid::new_v4(),
-                &params.identity.name.clone().into(),
-                &params.identity.description,
-                params.address,
-            )
+            .allocate_floating_ip(opctx, authz_project.id(), params)
             .await?
             .try_into()
             .unwrap())
