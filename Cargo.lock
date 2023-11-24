@@ -4966,6 +4966,7 @@ dependencies = [
  "clap_builder",
  "console",
  "const-oid",
+ "crc32fast",
  "crossbeam-epoch",
  "crossbeam-utils",
  "crossterm",
