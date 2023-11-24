@@ -127,6 +127,11 @@ async fn sid_deallocate_external_ip(
         )
         .await
         .map_err(ActionError::action_failed)?;
+    osagactx
+        .datastore()
+        .detach_floating_ips_by_instance_id(&opctx, params.authz_instance.id())
+        .await
+        .map_err(ActionError::action_failed)?;
     Ok(())
 }
 

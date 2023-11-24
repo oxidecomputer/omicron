@@ -372,7 +372,7 @@ impl TryFrom<ExternalIp> for views::ExternalIp {
     }
 }
 
-impl TryFrom<ExternalIp> for views::FloatingIp {
+impl TryFrom<ExternalIp> for FloatingIp {
     type Error = Error;
 
     fn try_from(ip: ExternalIp) -> Result<Self, Self::Error> {
@@ -402,20 +402,32 @@ impl TryFrom<ExternalIp> for views::FloatingIp {
             "database schema guarantees ID metadata for non-service FIP",
         ))?;
 
-        let identity = IdentityMetadata {
+        let identity = FloatingIpIdentity {
             id: ip.id,
             name,
             description,
             time_created: ip.time_created,
             time_modified: ip.time_modified,
+            time_deleted: ip.time_deleted,
         };
 
-        Ok(views::FloatingIp {
-            ip: ip.ip.ip(),
+        Ok(FloatingIp {
+            ip: ip.ip,
             identity,
             project_id,
-            instance_id: ip.parent_id,
+            ip_pool_id: ip.ip_pool_id,
+            ip_pool_range_id: ip.ip_pool_range_id,
+            is_service: ip.is_service,
+            parent_id: ip.parent_id,
         })
+    }
+}
+
+impl TryFrom<ExternalIp> for views::FloatingIp {
+    type Error = Error;
+
+    fn try_from(ip: ExternalIp) -> Result<Self, Self::Error> {
+        FloatingIp::try_from(ip).map(Into::into)
     }
 }
 

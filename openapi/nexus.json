@@ -10447,8 +10447,8 @@
             "description": "An IP address providing both inbound and outbound access. The address is an existing Floating IP object assigned to the current project.\n\nThe floating IP must not be in use by another instance or service.",
             "type": "object",
             "properties": {
-              "floating_ip": {
-                "$ref": "#/components/schemas/NameOrId"
+              "floating_ip_name": {
+                "$ref": "#/components/schemas/Name"
               },
               "type": {
                 "type": "string",
@@ -10458,7 +10458,7 @@
               }
             },
             "required": [
-              "floating_ip",
+              "floating_ip_name",
               "type"
             ]
           }

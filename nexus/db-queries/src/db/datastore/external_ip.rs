@@ -32,7 +32,7 @@ use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
-use omicron_common::api::external::NameOrId;
+use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use ref_cast::RefCast;
 use std::net::IpAddr;
@@ -153,8 +153,6 @@ impl DataStore {
             self.ip_pools_fetch_default(opctx).await?.id()
         };
 
-        // XXX: Verify that chosen pool comes from my silo.
-
         let data = if let Some(ip) = ip {
             IncompleteExternalIp::for_floating_explicit(
                 ip_id,
@@ -174,61 +172,7 @@ impl DataStore {
             )
         };
 
-        // TODO: need to disambiguate no IP and/or IP taken
-        //       from resource name collision, and expose those in
-        //       a nice way.
         self.allocate_external_ip(opctx, data).await
-        //     .map_err(|e| {
-        //         public_error_from_diesel(
-        //             e,
-        //             ErrorHandler::Conflict(todo!(), name.as_str())
-        //         )
-        //     })
-    }
-
-    /// Allocates a floating IP address for instance usage.
-    pub async fn attach_floating_ip_to_instance(
-        &self,
-        opctx: &OpContext,
-        _instance_id: Uuid,
-        _ip_id: &NameOrId,
-        _project: &authz::Project,
-    ) -> UpdateResult<ExternalIp> {
-        // use db::schema::external_ip::dsl;
-        // TODO: scope by project
-        // opctx.authorize(authz::Action::CreateChild, authz_project).await?;
-        let _conn = self.pool_connection_authorized(opctx).await?;
-
-        // let ip_id = match ip_id {
-        //     NameOrId::Id(id) => *id,
-        //     NameOrId::Name(name) => {
-        //         diesel::select(dsl::external_ip)
-        //             .filter(dsl::time_deleted.is_null())
-        //             .filter(dsl::name.eq(&name))
-        //             .execute_and_check(&conn)
-        //             .await
-        //             .map(|m| m.)
-        //     }
-        // };
-
-        // opctx.authn.
-        // todo!()
-
-        // diesel::update(dsl::external_ip)
-        //     .filter(dsl::time_deleted.is_null())
-        //     .filter(dsl::id.eq(Some(ip_id)))
-        //     .filter(dsl::parent_id.is_null())
-        //     .set(dsl::parent_id.eq(instance_id))
-        //     .check_if_exists::<ExternalIp>(ip_id)
-        //     .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
-        //     .await
-        //     .map(|r| match r.status {
-        //         UpdateStatus::Updated => true,
-        //         UpdateStatus::NotUpdatedButExists => false,
-        //     })
-        //     .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-
-        todo!()
     }
 
     async fn allocate_external_ip(
@@ -246,8 +190,12 @@ impl DataStore {
         conn: &async_bb8_diesel::Connection<DbConnection>,
         data: IncompleteExternalIp,
     ) -> CreateResult<ExternalIp> {
+        // Name needs to be cloned out here (if present) to give users a
+        // sensible error message on name collision.
+        let name = data.name().clone();
         let explicit_ip = data.explicit_ip().is_some();
         NextExternalIp::new(data).get_result_async(conn).await.map_err(|e| {
+            use diesel::result::Error::DatabaseError;
             use diesel::result::Error::NotFound;
             match e {
                 NotFound => {
@@ -260,6 +208,17 @@ impl DataStore {
                             "No external IP addresses available",
                         )
                     }
+                }
+                DatabaseError(..) if name.is_some() => {
+                    public_error_from_diesel(
+                        e,
+                        ErrorHandler::Conflict(
+                            ResourceType::FloatingIp,
+                            name.as_ref()
+                                .map(|m| m.as_str())
+                                .unwrap_or_default(),
+                        ),
+                    )
                 }
                 _ => crate::db::queries::external_ip::from_diesel(e),
             }
@@ -475,5 +434,97 @@ impl DataStore {
             });
         }
         Ok(())
+    }
+
+    /// Attaches a Floating IP address to an instance.
+    pub async fn floating_ip_attach(
+        &self,
+        opctx: &OpContext,
+        authz_fip: &authz::FloatingIp,
+        db_fip: &FloatingIp,
+        instance_id: Uuid,
+    ) -> UpdateResult<FloatingIp> {
+        use db::schema::external_ip::dsl;
+
+        // Verify this FIP is not attached to any instances/services.
+        if db_fip.parent_id.is_some() {
+            return Err(Error::invalid_request(
+                "Floating IP cannot be attached to one instance while still attached to another",
+            ));
+        }
+
+        let (.., authz_instance, _db_instance) = LookupPath::new(&opctx, self)
+            .instance_id(instance_id)
+            .fetch_for(authz::Action::Modify)
+            .await?;
+
+        opctx.authorize(authz::Action::Modify, authz_fip).await?;
+        opctx.authorize(authz::Action::Modify, &authz_instance).await?;
+
+        diesel::update(dsl::external_ip)
+            .filter(dsl::id.eq(db_fip.id()))
+            .filter(dsl::kind.eq(IpKind::Floating))
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::parent_id.is_null())
+            .set((
+                dsl::parent_id.eq(Some(instance_id)),
+                dsl::time_modified.eq(Utc::now()),
+            ))
+            .returning(ExternalIp::as_returning())
+            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_fip),
+                )
+            })
+            .and_then(|r| FloatingIp::try_from(r))
+            .map_err(|e| Error::internal_error(&format!("{e}")))
+    }
+
+    /// Detaches a Floating IP address from an instance.
+    pub async fn floating_ip_detach(
+        &self,
+        opctx: &OpContext,
+        authz_fip: &authz::FloatingIp,
+        db_fip: &FloatingIp,
+    ) -> UpdateResult<FloatingIp> {
+        use db::schema::external_ip::dsl;
+
+        let Some(instance_id) = db_fip.parent_id else {
+            return Err(Error::invalid_request(
+                "Floating IP is not attached to an instance",
+            ));
+        };
+
+        let (.., authz_instance, _db_instance) = LookupPath::new(&opctx, self)
+            .instance_id(instance_id)
+            .fetch_for(authz::Action::Modify)
+            .await?;
+
+        opctx.authorize(authz::Action::Modify, authz_fip).await?;
+        opctx.authorize(authz::Action::Modify, &authz_instance).await?;
+
+        diesel::update(dsl::external_ip)
+            .filter(dsl::id.eq(db_fip.id()))
+            .filter(dsl::kind.eq(IpKind::Floating))
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::parent_id.eq(instance_id))
+            .set((
+                dsl::parent_id.eq(Option::<Uuid>::None),
+                dsl::time_modified.eq(Utc::now()),
+            ))
+            .returning(ExternalIp::as_returning())
+            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_fip),
+                )
+            })
+            .and_then(|r| FloatingIp::try_from(r))
+            .map_err(|e| Error::internal_error(&format!("{e}")))
     }
 }

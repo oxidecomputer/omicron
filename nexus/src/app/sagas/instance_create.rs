@@ -620,23 +620,35 @@ async fn sic_allocate_instance_external_ip(
     let ip_id = repeat_saga_params.new_id;
 
     // Collect the possible pool name for this IP address
-    let pool_name = match ip_params {
+    match ip_params {
         params::ExternalIpCreate::Ephemeral { ref pool_name } => {
-            pool_name.as_ref().map(|name| db::model::Name(name.clone()))
+            let pool_name =
+                pool_name.as_ref().map(|name| db::model::Name(name.clone()));
+            datastore
+                .allocate_instance_ephemeral_ip(
+                    &opctx,
+                    ip_id,
+                    instance_id,
+                    pool_name,
+                )
+                .await
+                .map_err(ActionError::action_failed)?;
         }
-        params::ExternalIpCreate::Floating { ref floating_ip } => {
-            // In floating case, need:
-            //  floating IP does not belong to another instance
-            //  floating IP belongs to the parent project.
-            return Err(ActionError::action_failed(format!(
-                "can't yet bind floating ip {floating_ip:?} to instance"
-            )));
+        params::ExternalIpCreate::Floating { ref floating_ip_name } => {
+            let floating_ip_name = db::model::Name(floating_ip_name.clone());
+            let (.., authz_fip, db_fip) = LookupPath::new(&opctx, &datastore)
+                .project_id(saga_params.project_id)
+                .floating_ip_name(&floating_ip_name)
+                .fetch_for(authz::Action::Modify)
+                .await
+                .map_err(ActionError::action_failed)?;
+
+            datastore
+                .floating_ip_attach(&opctx, &authz_fip, &db_fip, instance_id)
+                .await
+                .map_err(ActionError::action_failed)?;
         }
-    };
-    datastore
-        .allocate_instance_ephemeral_ip(&opctx, ip_id, instance_id, pool_name)
-        .await
-        .map_err(ActionError::action_failed)?;
+    }
     Ok(())
 }
 

@@ -851,7 +851,7 @@ pub enum ExternalIpCreate {
     /// an existing Floating IP object assigned to the current project.
     ///
     /// The floating IP must not be in use by another instance or service.
-    Floating { floating_ip: NameOrId },
+    Floating { floating_ip_name: Name },
 }
 
 /// Create-time parameters for an `Instance`
