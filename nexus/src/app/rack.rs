@@ -795,7 +795,7 @@ impl super::Nexus {
         // Convert the baseboard as necessary
         let baseboard = sled_agent_client::types::Baseboard::Gimlet {
             identifier: sled.baseboard.serial.clone(),
-            model: sled.baseboard.serial.clone(),
+            model: sled.baseboard.part.clone(),
             revision: sled.baseboard.revision,
         };
 
