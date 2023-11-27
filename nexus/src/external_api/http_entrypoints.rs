@@ -6,10 +6,11 @@
 
 use super::{
     console_api, device_auth, params,
+    shared::UninitializedSled,
     views::{
         self, Certificate, Group, IdentityProvider, Image, IpPool, IpPoolRange,
-        PhysicalDisk, Project, Rack, Role, Silo, Sled, Snapshot, SshKey,
-        UninitializedSled, User, UserBuiltin, Vpc, VpcRouter, VpcSubnet,
+        PhysicalDisk, Project, Rack, Role, Silo, Sled, Snapshot, SshKey, User,
+        UserBuiltin, Vpc, VpcRouter, VpcSubnet,
     },
 };
 use crate::external_api::shared;
@@ -223,6 +224,7 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(switch_list)?;
         api.register(switch_view)?;
         api.register(uninitialized_sled_list)?;
+        api.register(add_sled_to_initialized_rack)?;
 
         api.register(user_builtin_list)?;
         api.register(user_builtin_view)?;
@@ -4398,6 +4400,31 @@ async fn uninitialized_sled_list(
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let sleds = nexus.uninitialized_sled_list(&opctx).await?;
         Ok(HttpResponseOk(sleds))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Add a sled to an initialized rack
+//
+// TODO: In the future this should really be a PUT request, once we resolve
+// https://github.com/oxidecomputer/omicron/issues/4494. It should also
+// explicitly be tied to a rack via a `rack_id` path param. For now we assume
+// we are only operating on single rack systems.
+#[endpoint {
+    method = POST,
+    path = "/v1/system/hardware/sleds/",
+    tags = ["system/hardware"]
+}]
+async fn add_sled_to_initialized_rack(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    sled: TypedBody<UninitializedSled>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        nexus.add_sled_to_initialized_rack(&opctx, sled.into_inner()).await?;
+        Ok(HttpResponseUpdatedNoContent())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

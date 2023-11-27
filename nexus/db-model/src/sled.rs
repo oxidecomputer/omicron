@@ -8,7 +8,7 @@ use crate::ipv6;
 use crate::schema::{physical_disk, service, sled, zpool};
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
-use nexus_types::{external_api::views, identity::Asset};
+use nexus_types::{external_api::shared, external_api::views, identity::Asset};
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use uuid::Uuid;
@@ -88,7 +88,7 @@ impl From<Sled> for views::Sled {
         Self {
             identity: sled.identity(),
             rack_id: sled.rack_id,
-            baseboard: views::Baseboard {
+            baseboard: shared::Baseboard {
                 serial: sled.serial_number,
                 part: sled.part_number,
                 revision: sled.revision,

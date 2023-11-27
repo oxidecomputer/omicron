@@ -38,6 +38,9 @@ impl super::Nexus {
 
     // TODO-robustness we should have a limit on how many sled agents there can
     // be (for graceful degradation at large scale).
+    //
+    // TODO-multisled: This should not use the rack_id for the given nexus,
+    // unless the DNS lookups at sled-agent are only for rack-local nexuses.
     pub(crate) async fn upsert_sled(
         &self,
         opctx: &OpContext,
