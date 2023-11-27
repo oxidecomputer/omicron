@@ -2,14 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::switch_port_settings_apply::select_dendrite_client;
 use super::{NexusActionContext, NEXUS_DPD_TAG};
 use crate::app::sagas::retry_until_known_result;
 use crate::app::sagas::switch_port_settings_common::{
     api_to_dpd_port_settings, apply_bootstore_update, bootstore_update,
     ensure_switch_port_bgp_settings, ensure_switch_port_uplink,
-    read_bootstore_config, select_mg_client, switch_sled_agent,
-    write_bootstore_config,
+    read_bootstore_config, select_dendrite_client, select_mg_client,
+    switch_sled_agent, write_bootstore_config,
 };
 use crate::app::sagas::{
     declare_saga_actions, ActionRegistry, NexusSaga, SagaInitError,
@@ -147,11 +146,16 @@ async fn spa_clear_switch_port_settings(
 ) -> Result<(), ActionError> {
     let params = sagactx.saga_params::<Params>()?;
     let log = sagactx.user_data().log();
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let port_id: PortId = PortId::from_str(&params.port_name)
         .map_err(|e| ActionError::action_failed(e.to_string()))?;
 
-    let dpd_client = select_dendrite_client(&sagactx).await?;
+    let dpd_client =
+        select_dendrite_client(&sagactx, &opctx, params.switch_port_id).await?;
 
     retry_until_known_result(log, || async {
         dpd_client.port_settings_clear(&port_id, Some(NEXUS_DPD_TAG)).await
@@ -191,7 +195,8 @@ async fn spa_undo_clear_switch_port_settings(
         .await
         .map_err(ActionError::action_failed)?;
 
-    let dpd_client = select_dendrite_client(&sagactx).await?;
+    let dpd_client =
+        select_dendrite_client(&sagactx, &opctx, params.switch_port_id).await?;
 
     let dpd_port_settings = api_to_dpd_port_settings(&settings)
         .map_err(ActionError::action_failed)?;
