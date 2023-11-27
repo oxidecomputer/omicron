@@ -2,7 +2,7 @@ use super::Generation;
 use crate::schema::switch;
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
-use nexus_types::{external_api::views, identity::Asset};
+use nexus_types::{external_api::shared, external_api::views, identity::Asset};
 use uuid::Uuid;
 
 /// Baseboard information about a switch.
@@ -57,7 +57,7 @@ impl From<Switch> for views::Switch {
         Self {
             identity: switch.identity(),
             rack_id: switch.rack_id,
-            baseboard: views::Baseboard {
+            baseboard: shared::Baseboard {
                 serial: switch.serial_number,
                 part: switch.part_number,
                 revision: switch.revision,

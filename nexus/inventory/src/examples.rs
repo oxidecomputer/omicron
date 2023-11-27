@@ -13,6 +13,8 @@ use gateway_client::types::SpState;
 use gateway_client::types::SpType;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::CabooseWhich;
+use nexus_types::inventory::RotPage;
+use nexus_types::inventory::RotPageWhich;
 use std::sync::Arc;
 use strum::IntoEnumIterator;
 
@@ -164,7 +166,7 @@ pub fn representative() -> Representative {
     for bb in &common_caboose_baseboards {
         for which in CabooseWhich::iter() {
             assert!(!builder.found_caboose_already(bb, which));
-            let _ = builder
+            builder
                 .found_caboose(bb, which, "test suite", caboose("1"))
                 .unwrap();
             assert!(builder.found_caboose_already(bb, which));
@@ -174,7 +176,7 @@ pub fn representative() -> Representative {
     // For the PSC, use different cabooses for both slots of both the SP and
     // RoT, just to exercise that we correctly keep track of different
     // cabooses.
-    let _ = builder
+    builder
         .found_caboose(
             &psc_bb,
             CabooseWhich::SpSlot0,
@@ -182,7 +184,7 @@ pub fn representative() -> Representative {
             caboose("psc_sp_0"),
         )
         .unwrap();
-    let _ = builder
+    builder
         .found_caboose(
             &psc_bb,
             CabooseWhich::SpSlot1,
@@ -190,7 +192,7 @@ pub fn representative() -> Representative {
             caboose("psc_sp_1"),
         )
         .unwrap();
-    let _ = builder
+    builder
         .found_caboose(
             &psc_bb,
             CabooseWhich::RotSlotA,
@@ -198,7 +200,7 @@ pub fn representative() -> Representative {
             caboose("psc_rot_a"),
         )
         .unwrap();
-    let _ = builder
+    builder
         .found_caboose(
             &psc_bb,
             CabooseWhich::RotSlotB,
@@ -208,6 +210,59 @@ pub fn representative() -> Representative {
         .unwrap();
 
     // We deliberately provide no cabooses for sled3.
+
+    // Report some RoT pages.
+
+    // We'll use the same RoT pages for most of these components, although
+    // that's not possible in a real system. We deliberately construct a new
+    // value each time to make sure the builder correctly normalizes it.
+    let common_rot_page_baseboards = [&sled1_bb, &sled3_bb, &switch1_bb];
+    for bb in common_rot_page_baseboards {
+        for which in RotPageWhich::iter() {
+            assert!(!builder.found_rot_page_already(bb, which));
+            builder
+                .found_rot_page(bb, which, "test suite", rot_page("1"))
+                .unwrap();
+            assert!(builder.found_rot_page_already(bb, which));
+        }
+    }
+
+    // For the PSC, use different RoT page data for each kind of page, just to
+    // exercise that we correctly keep track of different data values.
+    builder
+        .found_rot_page(
+            &psc_bb,
+            RotPageWhich::Cmpa,
+            "test suite",
+            rot_page("psc cmpa"),
+        )
+        .unwrap();
+    builder
+        .found_rot_page(
+            &psc_bb,
+            RotPageWhich::CfpaActive,
+            "test suite",
+            rot_page("psc cfpa active"),
+        )
+        .unwrap();
+    builder
+        .found_rot_page(
+            &psc_bb,
+            RotPageWhich::CfpaInactive,
+            "test suite",
+            rot_page("psc cfpa inactive"),
+        )
+        .unwrap();
+    builder
+        .found_rot_page(
+            &psc_bb,
+            RotPageWhich::CfpaScratch,
+            "test suite",
+            rot_page("psc cfpa scratch"),
+        )
+        .unwrap();
+
+    // We deliberately provide no RoT pages for sled2.
 
     Representative {
         builder,
@@ -250,5 +305,12 @@ pub fn caboose(unique: &str) -> SpComponentCaboose {
         git_commit: format!("git_commit_{}", unique),
         name: format!("name_{}", unique),
         version: format!("version_{}", unique),
+    }
+}
+
+pub fn rot_page(unique: &str) -> RotPage {
+    use base64::Engine;
+    RotPage {
+        data_base64: base64::engine::general_purpose::STANDARD.encode(unique),
     }
 }

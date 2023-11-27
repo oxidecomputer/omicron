@@ -41,6 +41,7 @@ use nexus_db_model::InitialDnsGroup;
 use nexus_db_model::PasswordHashString;
 use nexus_db_model::SiloUser;
 use nexus_db_model::SiloUserPasswordHash;
+use nexus_db_model::SledUnderlaySubnetAllocation;
 use nexus_types::external_api::params as external_params;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::IdentityType;
@@ -55,6 +56,7 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
+use omicron_common::bail_unless;
 use std::net::IpAddr;
 use uuid::Uuid;
 
@@ -211,6 +213,126 @@ impl DataStore {
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
+        Ok(())
+    }
+
+    // Return the subnet for the rack
+    pub async fn rack_subnet(
+        &self,
+        opctx: &OpContext,
+        rack_id: Uuid,
+    ) -> Result<IpNetwork, Error> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        use db::schema::rack::dsl;
+        // It's safe to unwrap the returned `rack_subnet` because
+        // we filter on `rack_subnet.is_not_null()`
+        let subnet = dsl::rack
+            .filter(dsl::id.eq(rack_id))
+            .filter(dsl::rack_subnet.is_not_null())
+            .select(dsl::rack_subnet)
+            .first_async::<Option<IpNetwork>>(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        match subnet {
+            Some(subnet) => Ok(subnet),
+            None => Err(Error::internal_error(
+                "DB Error(bug): returned a null subnet for {rack_id}",
+            )),
+        }
+    }
+
+    /// Allocate a rack subnet octet to a given sled
+    ///
+    /// 1. Find the existing allocations
+    /// 2. Calculate the new allocation
+    /// 3. Save the new allocation, if there isn't one for the given
+    ///    `hw_baseboard_id`
+    /// 4. Return the new allocation
+    ///
+    // TODO: This could all actually be done in SQL using a `next_item` query.
+    // See https://github.com/oxidecomputer/omicron/issues/4544
+    pub async fn allocate_sled_underlay_subnet_octets(
+        &self,
+        opctx: &OpContext,
+        rack_id: Uuid,
+        hw_baseboard_id: Uuid,
+    ) -> Result<SledUnderlaySubnetAllocation, Error> {
+        // Fetch all the existing allocations via self.rack_id
+        let allocations = self.rack_subnet_allocations(opctx, rack_id).await?;
+
+        // Calculate the allocation for the new sled by choosing the minimum
+        // octet. The returned allocations are ordered by octet, so we will know
+        // when we have a free one. However, if we already have an allocation
+        // for the given sled then reuse that one.
+        const MIN_SUBNET_OCTET: i16 = 33;
+        let mut new_allocation = SledUnderlaySubnetAllocation {
+            rack_id,
+            sled_id: Uuid::new_v4(),
+            subnet_octet: MIN_SUBNET_OCTET,
+            hw_baseboard_id,
+        };
+        let mut allocation_already_exists = false;
+        for allocation in allocations {
+            if allocation.hw_baseboard_id == new_allocation.hw_baseboard_id {
+                // We already have an allocation for this sled.
+                new_allocation = allocation;
+                allocation_already_exists = true;
+                break;
+            }
+            if allocation.subnet_octet == new_allocation.subnet_octet {
+                bail_unless!(
+                    new_allocation.subnet_octet < 255,
+                    "Too many sled subnets allocated"
+                );
+                new_allocation.subnet_octet += 1;
+            }
+        }
+
+        // Write the new allocation row to CRDB. The UNIQUE constraint
+        // on `subnet_octet` will prevent dueling administrators reusing
+        // allocations when sleds are being added. We will need another
+        // mechanism ala generation numbers when we must interleave additions
+        // and removals of sleds.
+        if !allocation_already_exists {
+            self.sled_subnet_allocation_insert(opctx, &new_allocation).await?;
+        }
+
+        Ok(new_allocation)
+    }
+
+    /// Return all current underlay allocations for the rack.
+    ///
+    /// Order allocations by `subnet_octet`
+    pub async fn rack_subnet_allocations(
+        &self,
+        opctx: &OpContext,
+        rack_id: Uuid,
+    ) -> Result<Vec<SledUnderlaySubnetAllocation>, Error> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        use db::schema::sled_underlay_subnet_allocation::dsl as subnet_dsl;
+        subnet_dsl::sled_underlay_subnet_allocation
+            .filter(subnet_dsl::rack_id.eq(rack_id))
+            .select(SledUnderlaySubnetAllocation::as_select())
+            .order_by(subnet_dsl::subnet_octet.asc())
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Store a new sled subnet allocation in the database
+    pub async fn sled_subnet_allocation_insert(
+        &self,
+        opctx: &OpContext,
+        allocation: &SledUnderlaySubnetAllocation,
+    ) -> Result<(), Error> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        use db::schema::sled_underlay_subnet_allocation::dsl;
+        diesel::insert_into(dsl::sled_underlay_subnet_allocation)
+            .values(allocation.clone())
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
         Ok(())
     }
 
@@ -1514,6 +1636,138 @@ mod test {
         assert!(get_all_services(&datastore).await.is_empty());
         assert!(get_all_datasets(&datastore).await.is_empty());
         assert!(get_all_external_ips(&datastore).await.is_empty());
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn rack_sled_subnet_allocations() {
+        let logctx = dev::test_setup_log("rack_sled_subnet_allocations");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        let rack_id = Uuid::new_v4();
+
+        // Ensure we get an empty list when there are no allocations
+        let allocations =
+            datastore.rack_subnet_allocations(&opctx, rack_id).await.unwrap();
+        assert!(allocations.is_empty());
+
+        // Add 5 allocations
+        for i in 0..5i16 {
+            let allocation = SledUnderlaySubnetAllocation {
+                rack_id,
+                sled_id: Uuid::new_v4(),
+                subnet_octet: 33 + i,
+                hw_baseboard_id: Uuid::new_v4(),
+            };
+            datastore
+                .sled_subnet_allocation_insert(&opctx, &allocation)
+                .await
+                .unwrap();
+        }
+
+        // List all 5 allocations
+        let allocations =
+            datastore.rack_subnet_allocations(&opctx, rack_id).await.unwrap();
+
+        assert_eq!(5, allocations.len());
+
+        // Try to add another allocation for the same octet, but with a distinct
+        // sled_id. Ensure we get an error due to a unique constraint.
+        let mut should_fail_allocation = SledUnderlaySubnetAllocation {
+            rack_id,
+            sled_id: Uuid::new_v4(),
+            subnet_octet: 37,
+            hw_baseboard_id: Uuid::new_v4(),
+        };
+        let _err = datastore
+            .sled_subnet_allocation_insert(&opctx, &should_fail_allocation)
+            .await
+            .unwrap_err();
+
+        // Adding an allocation for the same {rack_id, sled_id} pair fails
+        // the second time, even with a distinct subnet_epoch
+        let mut allocation = should_fail_allocation.clone();
+        allocation.subnet_octet = 38;
+        datastore
+            .sled_subnet_allocation_insert(&opctx, &allocation)
+            .await
+            .unwrap();
+
+        should_fail_allocation.subnet_octet = 39;
+        should_fail_allocation.hw_baseboard_id = Uuid::new_v4();
+        let _err = datastore
+            .sled_subnet_allocation_insert(&opctx, &should_fail_allocation)
+            .await
+            .unwrap_err();
+
+        // Allocations outside our expected range fail
+        let mut should_fail_allocation = SledUnderlaySubnetAllocation {
+            rack_id,
+            sled_id: Uuid::new_v4(),
+            subnet_octet: 32,
+            hw_baseboard_id: Uuid::new_v4(),
+        };
+        let _err = datastore
+            .sled_subnet_allocation_insert(&opctx, &should_fail_allocation)
+            .await
+            .unwrap_err();
+        should_fail_allocation.subnet_octet = 256;
+        let _err = datastore
+            .sled_subnet_allocation_insert(&opctx, &should_fail_allocation)
+            .await
+            .unwrap_err();
+
+        // We should have 6 allocations
+        let allocations =
+            datastore.rack_subnet_allocations(&opctx, rack_id).await.unwrap();
+
+        assert_eq!(6, allocations.len());
+        assert_eq!(
+            vec![33, 34, 35, 36, 37, 38],
+            allocations.iter().map(|a| a.subnet_octet).collect::<Vec<_>>()
+        );
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn allocate_sled_underlay_subnet_octets() {
+        let logctx = dev::test_setup_log("rack_sled_subnet_allocations");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        let rack_id = Uuid::new_v4();
+
+        let mut allocated_octets = vec![];
+        for _ in 0..5 {
+            allocated_octets.push(
+                datastore
+                    .allocate_sled_underlay_subnet_octets(
+                        &opctx,
+                        rack_id,
+                        Uuid::new_v4(),
+                    )
+                    .await
+                    .unwrap()
+                    .subnet_octet,
+            );
+        }
+
+        let expected = vec![33, 34, 35, 36, 37];
+        assert_eq!(expected, allocated_octets);
+
+        // We should have 5 allocations in the DB, sorted appropriately
+        let allocations =
+            datastore.rack_subnet_allocations(&opctx, rack_id).await.unwrap();
+        assert_eq!(5, allocations.len());
+        assert_eq!(
+            expected,
+            allocations.iter().map(|a| a.subnet_octet).collect::<Vec<_>>()
+        );
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();

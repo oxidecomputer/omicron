@@ -25,6 +25,7 @@ mod projects;
 mod rack;
 mod role_assignments;
 mod roles_builtin;
+mod rot_updater;
 mod router_routes;
 mod saml;
 mod schema;

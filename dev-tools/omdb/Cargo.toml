@@ -37,6 +37,7 @@ strum.workspace = true
 tabled.workspace = true
 textwrap.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
+unicode-width.workspace = true
 uuid.workspace = true
 ipnetwork.workspace = true
 omicron-workspace-hack.workspace = true
