@@ -1671,17 +1671,13 @@ mod tests {
     use std::collections::HashSet;
 
     use anyhow::{bail, ensure, Context};
-    use futures::StreamExt;
     use indexmap::IndexSet;
     use omicron_test_utils::dev::test_setup_log;
     use serde::{de::IntoDeserializer, Deserialize};
-    use tokio::sync::mpsc;
-    use tokio_stream::wrappers::ReceiverStream;
 
     use crate::{
-        events::{ProgressCounter, ProgressUnits, StepProgress},
-        test_utils::TestSpec,
-        StepContext, StepSuccess, UpdateEngine,
+        events::ProgressCounter,
+        test_utils::{generate_test_events, GenerateTestEventsKind, TestSpec},
     };
 
     use super::*;
@@ -1689,108 +1685,11 @@ mod tests {
     #[tokio::test]
     async fn test_buffer() {
         let logctx = test_setup_log("test_buffer");
-        // The channel is big enough to contain all possible events.
-        let (sender, receiver) = mpsc::channel(512);
-        let engine: UpdateEngine<TestSpec> =
-            UpdateEngine::new(&logctx.log, sender);
-
-        engine
-            .new_step("foo".to_owned(), 1, "Step 1", move |_cx| async move {
-                StepSuccess::new(()).into()
-            })
-            .register();
-
-        engine
-            .new_step("bar".to_owned(), 2, "Step 2", move |cx| async move {
-                for _ in 0..20 {
-                    cx.send_progress(StepProgress::with_current_and_total(
-                        5,
-                        20,
-                        ProgressUnits::BYTES,
-                        Default::default(),
-                    ))
-                    .await;
-
-                    cx.send_progress(StepProgress::reset(
-                        Default::default(),
-                        "reset step 2",
-                    ))
-                    .await;
-
-                    cx.send_progress(StepProgress::retry("retry step 2")).await;
-                }
-                StepSuccess::new(()).into()
-            })
-            .register();
-
-        engine
-            .new_step(
-                "nested".to_owned(),
-                3,
-                "Step 3 (this is nested)",
-                move |parent_cx| async move {
-                    parent_cx
-                        .with_nested_engine(|engine| {
-                            define_nested_engine(&parent_cx, engine);
-                            Ok(())
-                        })
-                        .await
-                        .expect_err("this is expected to fail");
-
-                    StepSuccess::new(()).into()
-                },
-            )
-            .register();
-
-        let log = logctx.log.clone();
-        engine
-            .new_step(
-                "remote-nested".to_owned(),
-                20,
-                "Step 4 (remote nested)",
-                move |cx| async move {
-                    let (sender, mut receiver) = mpsc::channel(16);
-                    let mut engine = UpdateEngine::new(&log, sender);
-                    define_remote_nested_engine(&mut engine, 20);
-
-                    let mut buffer = EventBuffer::default();
-
-                    let mut execute_fut = std::pin::pin!(engine.execute());
-                    let mut execute_done = false;
-                    loop {
-                        tokio::select! {
-                            res = &mut execute_fut, if !execute_done => {
-                                res.expect("remote nested engine completed successfully");
-                                execute_done = true;
-                            }
-                            Some(event) = receiver.recv() => {
-                                // Generate complete reports to ensure deduping
-                                // happens within StepContexts.
-                                buffer.add_event(event);
-                                cx.send_nested_report(buffer.generate_report()).await?;
-                            }
-                            else => {
-                                break;
-                            }
-                        }
-                    }
-
-                    StepSuccess::new(()).into()
-                },
-            )
-            .register();
-
-        // The step index here (100) is large enough to be higher than all nested
-        // steps.
-        engine
-            .new_step("baz".to_owned(), 100, "Step 5", move |_cx| async move {
-                StepSuccess::new(()).into()
-            })
-            .register();
-
-        engine.execute().await.expect("execution successful");
-        let generated_events: Vec<_> =
-            ReceiverStream::new(receiver).collect().await;
+        let generated_events = generate_test_events(
+            &logctx.log,
+            GenerateTestEventsKind::Completed,
+        )
+        .await;
 
         let test_cx = BufferTestContext::new(generated_events);
 
@@ -2417,71 +2316,6 @@ mod tests {
         }
     }
 
-    fn define_nested_engine<'a>(
-        parent_cx: &'a StepContext<TestSpec>,
-        engine: &mut UpdateEngine<'a, TestSpec>,
-    ) {
-        engine
-            .new_step(
-                "nested-foo".to_owned(),
-                4,
-                "Nested step 1",
-                move |cx| async move {
-                    parent_cx
-                        .send_progress(StepProgress::with_current_and_total(
-                            1,
-                            3,
-                            "steps",
-                            Default::default(),
-                        ))
-                        .await;
-                    cx.send_progress(
-                        StepProgress::progress(Default::default()),
-                    )
-                    .await;
-                    StepSuccess::new(()).into()
-                },
-            )
-            .register();
-
-        engine
-            .new_step::<_, _, ()>(
-                "nested-bar".to_owned(),
-                5,
-                "Nested step 2 (fails)",
-                move |cx| async move {
-                    // This is used by NestedProgressCheck below.
-                    parent_cx
-                        .send_progress(StepProgress::with_current_and_total(
-                            2,
-                            3,
-                            "steps",
-                            Default::default(),
-                        ))
-                        .await;
-
-                    cx.send_progress(StepProgress::with_current(
-                        50,
-                        "units",
-                        Default::default(),
-                    ))
-                    .await;
-
-                    parent_cx
-                        .send_progress(StepProgress::with_current_and_total(
-                            3,
-                            3,
-                            "steps",
-                            Default::default(),
-                        ))
-                        .await;
-
-                    bail!("failing step")
-                },
-            )
-            .register();
-    }
-
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     enum NestedProgressCheck {
         Initial,
@@ -2529,43 +2363,5 @@ mod tests {
                 "assert_done: expected ThreeOutOfThreeSteps",
             );
         }
-    }
-
-    fn define_remote_nested_engine(
-        engine: &mut UpdateEngine<'_, TestSpec>,
-        start_id: usize,
-    ) {
-        engine
-            .new_step(
-                "nested-foo".to_owned(),
-                start_id + 1,
-                "Nested step 1",
-                move |cx| async move {
-                    cx.send_progress(
-                        StepProgress::progress(Default::default()),
-                    )
-                    .await;
-                    StepSuccess::new(()).into()
-                },
-            )
-            .register();
-
-        engine
-            .new_step::<_, _, ()>(
-                "nested-bar".to_owned(),
-                start_id + 2,
-                "Nested step 2",
-                move |cx| async move {
-                    cx.send_progress(StepProgress::with_current(
-                        20,
-                        "units",
-                        Default::default(),
-                    ))
-                    .await;
-
-                    StepSuccess::new(()).into()
-                },
-            )
-            .register();
     }
 }
