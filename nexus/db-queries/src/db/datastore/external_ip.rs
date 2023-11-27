@@ -203,6 +203,7 @@ impl DataStore {
         conn: &async_bb8_diesel::Connection<DbConnection>,
         data: IncompleteExternalIp,
     ) -> CreateResult<ExternalIp> {
+        use diesel::result::DatabaseErrorKind::UniqueViolation;
         // Name needs to be cloned out here (if present) to give users a
         // sensible error message on name collision.
         let name = data.name().clone();
@@ -222,7 +223,7 @@ impl DataStore {
                         )
                     }
                 }
-                DatabaseError(..) if name.is_some() => {
+                DatabaseError(UniqueViolation, ..) if name.is_some() => {
                     public_error_from_diesel(
                         e,
                         ErrorHandler::Conflict(

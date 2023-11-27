@@ -1625,13 +1625,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.external_ip (
         ((kind != 'floating' OR is_service = TRUE) AND project_id IS NULL)
     ),
 
-    /* Ephemeral/SNAT IPs must have a parent pool and range, while this
-     * is optional for floating IPs.
-     */
-    CONSTRAINT null_non_fip_pool_id CHECK (
-        kind = 'floating' OR (ip_pool_id IS NOT NULL AND ip_pool_range_id IS NOT NULL)
-    ),
-
     /*
      * Only nullable if this is a floating IP, which may exist not
      * attached to any instance or service yet.
