@@ -115,6 +115,7 @@ lazy_static! {
     pub static ref DEMO_PROJECT_URL_INSTANCES: String = format!("/v1/instances?project={}", *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_URL_SNAPSHOTS: String = format!("/v1/snapshots?project={}", *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_URL_VPCS: String = format!("/v1/vpcs?project={}", *DEMO_PROJECT_NAME);
+    pub static ref DEMO_PROJECT_URL_FIPS: String = format!("/v1/floating-ips?project={}", *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_CREATE: params::ProjectCreate =
         params::ProjectCreate {
             identity: IdentityMetadataCreateParams {
@@ -552,6 +553,22 @@ lazy_static! {
     pub static ref DEMO_SYSTEM_UPDATE_PARAMS: params::SystemUpdatePath = params::SystemUpdatePath {
         version: SemverVersion::new(1,0,0),
     };
+}
+
+lazy_static! {
+    // Project Floating IPs
+    pub static ref DEMO_FLOAT_IP_NAME: Name = "float-ip".parse().unwrap();
+    pub static ref DEMO_FLOAT_IP_URL: String =
+        format!("/v1/floating-ips/{}?project={}", *DEMO_FLOAT_IP_NAME, *DEMO_PROJECT_NAME);
+    pub static ref DEMO_FLOAT_IP_CREATE: params::FloatingIpCreate =
+        params::FloatingIpCreate {
+            identity: IdentityMetadataCreateParams {
+                name: DEMO_FLOAT_IP_NAME.clone(),
+                description: String::from("a new IP pool"),
+            },
+            address: Some(std::net::Ipv4Addr::new(10, 0, 0, 141).into()),
+            pool: None,
+        };
 }
 
 lazy_static! {
@@ -1960,6 +1977,29 @@ lazy_static! {
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::GetNonexistent,
+            ],
+        },
+
+        // Floating IPs
+        VerifyEndpoint {
+            url: &DEMO_PROJECT_URL_FIPS,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_FLOAT_IP_CREATE).unwrap(),
+                ),
+                AllowedMethod::Get,
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_FLOAT_IP_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Delete,
             ],
         }
     ];

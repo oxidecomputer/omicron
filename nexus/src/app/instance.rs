@@ -5,6 +5,7 @@
 //! Virtual Machine Instances
 
 use super::MAX_DISKS_PER_INSTANCE;
+use super::MAX_EPHEMERAL_IPS_PER_INSTANCE;
 use super::MAX_EXTERNAL_IPS_PER_INSTANCE;
 use super::MAX_MEMORY_BYTES_PER_INSTANCE;
 use super::MAX_NICS_PER_INSTANCE;
@@ -52,6 +53,7 @@ use sled_agent_client::types::InstanceProperties;
 use sled_agent_client::types::InstancePutMigrationIdsBody;
 use sled_agent_client::types::InstancePutStateBody;
 use sled_agent_client::types::SourceNatConfig;
+use std::matches;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -166,6 +168,18 @@ impl super::Nexus {
             return Err(Error::invalid_request(&format!(
                 "An instance may not have more than {} external IP addresses",
                 MAX_EXTERNAL_IPS_PER_INSTANCE,
+            )));
+        }
+        if params
+            .external_ips
+            .iter()
+            .filter(|v| matches!(v, params::ExternalIpCreate::Ephemeral { .. }))
+            .count()
+            > MAX_EPHEMERAL_IPS_PER_INSTANCE
+        {
+            return Err(Error::invalid_request(&format!(
+                "An instance may not have more than {} ephemeral IP address",
+                MAX_EPHEMERAL_IPS_PER_INSTANCE,
             )));
         }
         if let params::InstanceNetworkInterfaceAttachment::Create(ref ifaces) =

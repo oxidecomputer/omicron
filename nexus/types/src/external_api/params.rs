@@ -770,13 +770,11 @@ pub struct FloatingIpCreate {
     /// An IP address to reserve for use as a floating IP.  This field is
     /// optional if a pool is provided, in which case an address will
     /// be automatically chosen from there.
-    // TODO: draw from pool if needed.
     pub address: Option<IpAddr>,
 
     /// The parent IP pool that a floating IP is pulled from. If combined
     /// with an explicit address, then that address must be available in
     /// the pool.
-    // TODO: support tie-in to pools.
     pub pool: Option<NameOrId>,
 }
 
