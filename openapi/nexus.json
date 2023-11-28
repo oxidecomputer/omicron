@@ -7816,7 +7816,7 @@
           "switch"
         ]
       },
-      "BgpPeerConfig": {
+      "BgpPeer": {
         "description": "A BGP peer configuration for an interface. Includes the set of announcements that will be advertised to the peer identified by `addr`. The `bgp_config` parameter is a reference to global BGP parameters. The `interface_name` indicates what interface the peer should be contacted on.",
         "type": "object",
         "properties": {
@@ -7886,6 +7886,20 @@
           "idle_hold_time",
           "interface_name",
           "keepalive"
+        ]
+      },
+      "BgpPeerConfig": {
+        "type": "object",
+        "properties": {
+          "peers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BgpPeer"
+            }
+          }
+        },
+        "required": [
+          "peers"
         ]
       },
       "BgpPeerState": {

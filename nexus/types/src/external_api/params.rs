@@ -1511,12 +1511,17 @@ pub struct BgpConfigListSelector {
     pub name_or_id: Option<NameOrId>,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct BgpPeerConfig {
+    pub peers: Vec<BgpPeer>,
+}
+
 /// A BGP peer configuration for an interface. Includes the set of announcements
 /// that will be advertised to the peer identified by `addr`. The `bgp_config`
 /// parameter is a reference to global BGP parameters. The `interface_name`
 /// indicates what interface the peer should be contacted on.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct BgpPeerConfig {
+pub struct BgpPeer {
     /// The set of announcements advertised by the peer.
     pub bgp_announce_set: NameOrId,
 

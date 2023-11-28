@@ -10,7 +10,7 @@ use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params::{
     Address, AddressConfig, AddressLotBlockCreate, AddressLotCreate,
-    BgpAnnounceSetCreate, BgpAnnouncementCreate, BgpConfigCreate,
+    BgpAnnounceSetCreate, BgpAnnouncementCreate, BgpConfigCreate, BgpPeer,
     BgpPeerConfig, LinkConfig, LinkFec, LinkSpeed, LldpServiceConfig, Route,
     RouteConfig, SwitchInterfaceConfig, SwitchInterfaceKind,
     SwitchPortApplySettings, SwitchPortSettingsCreate,
@@ -253,15 +253,17 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     settings.bgp_peers.insert(
         "phy0".into(),
         BgpPeerConfig {
-            bgp_config: NameOrId::Name("as47".parse().unwrap()), //TODO
-            bgp_announce_set: NameOrId::Name("instances".parse().unwrap()), //TODO
-            interface_name: "phy0".to_string(),
-            addr: "1.2.3.4".parse().unwrap(),
-            hold_time: 6,
-            idle_hold_time: 6,
-            delay_open: 0,
-            connect_retry: 3,
-            keepalive: 2,
+            peers: vec![BgpPeer {
+                bgp_config: NameOrId::Name("as47".parse().unwrap()), //TODO
+                bgp_announce_set: NameOrId::Name("instances".parse().unwrap()), //TODO
+                interface_name: "phy0".to_string(),
+                addr: "1.2.3.4".parse().unwrap(),
+                hold_time: 6,
+                idle_hold_time: 6,
+                delay_open: 0,
+                connect_retry: 3,
+                keepalive: 2,
+            }],
         },
     );
     let _created: SwitchPortSettingsView = NexusRequest::objects_post(
