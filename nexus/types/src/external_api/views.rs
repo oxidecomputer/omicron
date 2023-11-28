@@ -5,7 +5,7 @@
 //! Views are response bodies, most of which are public lenses onto DB models.
 
 use crate::external_api::shared::{
-    self, IpKind, IpRange, ServiceUsingCertificate,
+    self, Baseboard, IpKind, IpRange, ServiceUsingCertificate,
 };
 use crate::identity::AssetIdentityMetadata;
 use api_identity::ObjectIdentity;
@@ -275,43 +275,7 @@ pub struct Rack {
     pub identity: AssetIdentityMetadata,
 }
 
-/// View of a sled that has not been added to an initialized rack yet
-#[derive(
-    Clone,
-    Debug,
-    Serialize,
-    Deserialize,
-    JsonSchema,
-    PartialOrd,
-    Ord,
-    PartialEq,
-    Eq,
-)]
-pub struct UninitializedSled {
-    pub baseboard: Baseboard,
-    pub rack_id: Uuid,
-    pub cubby: u16,
-}
-
 // FRUs
-
-/// Properties that uniquely identify an Oxide hardware component
-#[derive(
-    Clone,
-    Debug,
-    Serialize,
-    Deserialize,
-    JsonSchema,
-    PartialOrd,
-    Ord,
-    PartialEq,
-    Eq,
-)]
-pub struct Baseboard {
-    pub serial: String,
-    pub part: String,
-    pub revision: i64,
-}
 
 // SLEDS
 

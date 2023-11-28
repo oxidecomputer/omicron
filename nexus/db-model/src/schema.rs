@@ -757,6 +757,16 @@ table! {
 }
 
 table! {
+    sled_underlay_subnet_allocation (rack_id, sled_id) {
+        rack_id -> Uuid,
+        sled_id -> Uuid,
+        subnet_octet -> Int2,
+        hw_baseboard_id -> Uuid,
+    }
+}
+allow_tables_to_appear_in_same_query!(rack, sled_underlay_subnet_allocation);
+
+table! {
     switch (id) {
         id -> Uuid,
         time_created -> Timestamptz,
@@ -1290,7 +1300,7 @@ table! {
 ///
 /// This should be updated whenever the schema is changed. For more details,
 /// refer to: schema/crdb/README.adoc
-pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(13, 0, 0);
+pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(14, 0, 0);
 
 allow_tables_to_appear_in_same_query!(
     system_update,

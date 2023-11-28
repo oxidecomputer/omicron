@@ -11,16 +11,15 @@ use crate::db;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
-use crate::db::lookup;
 use crate::db::model::Sled;
 use crate::db::model::SledResource;
 use crate::db::model::SledUpdate;
 use crate::db::pagination::paginated;
+use crate::db::update_and_check::UpdateAndCheck;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
-use nexus_types::identity::Asset;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -234,31 +233,33 @@ impl DataStore {
     }
 
     /// Sets the provision state for this sled.
+    ///
+    /// Returns the previous state.
     pub async fn sled_set_provision_state(
         &self,
         opctx: &OpContext,
-        sled_lookup: &lookup::Sled<'_>,
+        authz_sled: &authz::Sled,
         state: db::model::SledProvisionState,
     ) -> Result<db::model::SledProvisionState, external::Error> {
-        // Ensure that opctx is authorized to modify this sled.
-        let (_, sled) = sled_lookup.fetch_for(authz::Action::Modify).await?;
-        let old_state = sled.provision_state();
-        if old_state == state {
-            return Ok(old_state);
-        }
-
         use db::schema::sled::dsl;
-        // XXX: Do we need transaction semantics here? Probably not because
-        // this is idempotent?
-        diesel::update(dsl::sled.filter(dsl::id.eq(sled.id())))
+
+        opctx.authorize(authz::Action::Modify, authz_sled).await?;
+
+        let sled_id = authz_sled.id();
+        let result = diesel::update(dsl::sled)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(sled_id))
+            .filter(dsl::provision_state.ne(state))
             .set((
                 dsl::provision_state.eq(state),
                 dsl::time_modified.eq(Utc::now()),
             ))
-            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .check_if_exists::<Sled>(sled_id)
+            .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-        Ok(old_state)
+
+        Ok(result.found.provision_state())
     }
 }
 
@@ -273,6 +274,7 @@ mod test {
     use crate::db::model::ByteCount;
     use crate::db::model::SqlU32;
     use nexus_test_utils::db::test_setup_database;
+    use nexus_types::identity::Asset;
     use omicron_common::api::external;
     use omicron_test_utils::dev;
     use std::net::{Ipv6Addr, SocketAddrV6};
@@ -348,15 +350,26 @@ mod test {
         let sled_update = test_new_sled_update();
         let non_provisionable_sled =
             datastore.sled_upsert(sled_update.clone()).await.unwrap();
-        datastore
+
+        let (authz_sled, _) = LookupPath::new(&opctx, &datastore)
+            .sled_id(non_provisionable_sled.id())
+            .fetch_for(authz::Action::Modify)
+            .await
+            .unwrap();
+
+        let old_state = datastore
             .sled_set_provision_state(
                 &opctx,
-                &LookupPath::new(&opctx, &datastore)
-                    .sled_id(non_provisionable_sled.id()),
+                &authz_sled,
                 db::model::SledProvisionState::NonProvisionable,
             )
             .await
             .unwrap();
+        assert_eq!(
+            old_state,
+            db::model::SledProvisionState::Provisionable,
+            "a newly created sled starts as provisionable"
+        );
 
         // This should be an error since there are no provisionable sleds.
         let resources = db::model::Resources::new(

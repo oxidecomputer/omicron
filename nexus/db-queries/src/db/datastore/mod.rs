@@ -616,11 +616,15 @@ mod test {
         opctx: &OpContext,
         sled_id: Uuid,
     ) {
-        let sled_lookup = LookupPath::new(opctx, datastore).sled_id(sled_id);
+        let (authz_sled, _) = LookupPath::new(opctx, datastore)
+            .sled_id(sled_id)
+            .fetch_for(authz::Action::Modify)
+            .await
+            .unwrap();
         let old_state = datastore
             .sled_set_provision_state(
                 &opctx,
-                &sled_lookup,
+                &authz_sled,
                 SledProvisionState::NonProvisionable,
             )
             .await

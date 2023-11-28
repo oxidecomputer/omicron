@@ -30,6 +30,7 @@ use super::{
 pub struct GroupDisplay<K, W, S: StepSpec> {
     // We don't need to add any buffering here because we already write data to
     // the writer in a line-buffered fashion (see Self::write_events).
+    log: slog::Logger,
     writer: W,
     max_width: usize,
     // This is set to the highest value of root_total_elapsed seen from any event reports.
@@ -45,6 +46,7 @@ impl<K: Eq + Ord, W: std::io::Write, S: StepSpec> GroupDisplay<K, W, S> {
     ///
     /// The function passed in is expected to create a writer.
     pub fn new<Str>(
+        log: &slog::Logger,
         keys_and_prefixes: impl IntoIterator<Item = (K, Str)>,
         writer: W,
     ) -> Self
@@ -70,6 +72,7 @@ impl<K: Eq + Ord, W: std::io::Write, S: StepSpec> GroupDisplay<K, W, S> {
 
         let not_started = single_states.len();
         Self {
+            log: log.new(slog::o!("component" => "GroupDisplay")),
             writer,
             max_width,
             // This creates the stopwatch in the stopped state with duration 0 -- i.e. a minimal
@@ -84,6 +87,7 @@ impl<K: Eq + Ord, W: std::io::Write, S: StepSpec> GroupDisplay<K, W, S> {
     /// Creates a new `GroupDisplay` with the provided report keys, using the
     /// `Display` impl to obtain the respective prefixes.
     pub fn new_with_display(
+        log: &slog::Logger,
         keys: impl IntoIterator<Item = K>,
         writer: W,
     ) -> Self
@@ -91,6 +95,7 @@ impl<K: Eq + Ord, W: std::io::Write, S: StepSpec> GroupDisplay<K, W, S> {
         K: fmt::Display,
     {
         Self::new(
+            log,
             keys.into_iter().map(|k| {
                 let prefix = k.to_string();
                 (k, prefix)
@@ -144,7 +149,30 @@ impl<K: Eq + Ord, W: std::io::Write, S: StepSpec> GroupDisplay<K, W, S> {
                         TokioSw::with_elapsed_started(root_total_elapsed);
                 }
             }
+
             self.stats.apply_result(result);
+
+            if result.before != result.after {
+                slog::info!(
+                    self.log,
+                    "add_event_report caused state transition";
+                    "prefix" => &state.prefix,
+                    "before" => %result.before,
+                    "after" => %result.after,
+                    "current_stats" => ?self.stats,
+                    "root_total_elapsed" => ?result.root_total_elapsed,
+                );
+            } else {
+                slog::trace!(
+                    self.log,
+                    "add_event_report called, state did not change";
+                    "prefix" => &state.prefix,
+                    "state" => %result.before,
+                    "current_stats" => ?self.stats,
+                    "root_total_elapsed" => ?result.root_total_elapsed,
+                );
+            }
+
             Ok(())
         } else {
             Err(UnknownReportKey {})
@@ -179,7 +207,7 @@ impl<K: Eq + Ord, W: std::io::Write, S: StepSpec> GroupDisplay<K, W, S> {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct GroupDisplayStats {
     /// The total number of reports.
     pub total: usize,
@@ -236,18 +264,9 @@ impl GroupDisplayStats {
     }
 
     fn apply_result(&mut self, result: AddEventReportResult) {
-        // Process result.after first to avoid integer underflow.
-        match result.after {
-            SingleStateTag::NotStarted => self.not_started += 1,
-            SingleStateTag::Running => self.running += 1,
-            SingleStateTag::Terminal(TerminalKind::Completed) => {
-                self.completed += 1
-            }
-            SingleStateTag::Terminal(TerminalKind::Failed) => self.failed += 1,
-            SingleStateTag::Terminal(TerminalKind::Aborted) => {
-                self.aborted += 1
-            }
-            SingleStateTag::Overwritten => self.overwritten += 1,
+        if result.before == result.after {
+            // Nothing to do.
+            return;
         }
 
         match result.before {
@@ -261,6 +280,19 @@ impl GroupDisplayStats {
                 self.aborted -= 1
             }
             SingleStateTag::Overwritten => self.overwritten -= 1,
+        }
+
+        match result.after {
+            SingleStateTag::NotStarted => self.not_started += 1,
+            SingleStateTag::Running => self.running += 1,
+            SingleStateTag::Terminal(TerminalKind::Completed) => {
+                self.completed += 1
+            }
+            SingleStateTag::Terminal(TerminalKind::Failed) => self.failed += 1,
+            SingleStateTag::Terminal(TerminalKind::Aborted) => {
+                self.aborted += 1
+            }
+            SingleStateTag::Overwritten => self.overwritten += 1,
         }
     }
 
@@ -336,71 +368,27 @@ impl<S: StepSpec> SingleState<S> {
         &mut self,
         event_report: EventReport<S>,
     ) -> AddEventReportResult {
-        let before = match &self.kind {
+        match &mut self.kind {
             SingleStateKind::NotStarted { .. } => {
-                self.kind = SingleStateKind::Running {
-                    event_buffer: EventBuffer::new(8),
-                };
-                SingleStateTag::NotStarted
-            }
-            SingleStateKind::Running { .. } => SingleStateTag::Running,
-
-            SingleStateKind::Terminal { info, .. } => {
-                // Once we've reached a terminal state, we don't record any more
-                // events.
-                return AddEventReportResult::unchanged(
-                    SingleStateTag::Terminal(info.kind),
-                    info.root_total_elapsed,
-                );
-            }
-            SingleStateKind::Overwritten { .. } => {
-                // This update has already completed -- assume that the event
-                // buffer is for a new update, which we don't show.
-                return AddEventReportResult::unchanged(
-                    SingleStateTag::Overwritten,
-                    None,
-                );
-            }
-        };
-
-        let SingleStateKind::Running { event_buffer } = &mut self.kind else {
-            unreachable!("other branches were handled above");
-        };
-
-        if let Some(root_execution_id) = event_buffer.root_execution_id() {
-            if event_report.root_execution_id != Some(root_execution_id) {
-                // The report is for a different execution ID -- assume that
-                // this event is completed and mark our current execution as
-                // completed.
-                self.kind = SingleStateKind::Overwritten { displayed: false };
-                return AddEventReportResult {
-                    before,
-                    after: SingleStateTag::Overwritten,
-                    root_total_elapsed: None,
-                };
-            }
-        }
-
-        event_buffer.add_event_report(event_report);
-        let (after, max_total_elapsed) =
-            match event_buffer.root_execution_summary() {
-                Some(summary) => {
-                    match summary.execution_status {
-                        ExecutionStatus::NotStarted => {
+                // We're starting a new update.
+                let before = SingleStateTag::NotStarted;
+                let mut event_buffer = EventBuffer::default();
+                let (after, root_total_elapsed) =
+                    match Self::apply_report(&mut event_buffer, event_report) {
+                        ApplyReportResult::NotStarted => {
+                            // This means that the event report was empty. Don't
+                            // update `self.kind`.
                             (SingleStateTag::NotStarted, None)
                         }
-                        ExecutionStatus::Running {
-                            root_total_elapsed: max_total_elapsed,
-                            ..
-                        } => (SingleStateTag::Running, Some(max_total_elapsed)),
-                        ExecutionStatus::Terminal(info) => {
-                            // Grab the event buffer to store it in the terminal state.
-                            let event_buffer = std::mem::replace(
-                                event_buffer,
-                                EventBuffer::new(0),
-                            );
+                        ApplyReportResult::Running(root_total_elapsed) => {
+                            self.kind =
+                                SingleStateKind::Running { event_buffer };
+                            (SingleStateTag::Running, Some(root_total_elapsed))
+                        }
+                        ApplyReportResult::Terminal(info) => {
                             let terminal_kind = info.kind;
                             let root_total_elapsed = info.root_total_elapsed;
+
                             self.kind = SingleStateKind::Terminal {
                                 info,
                                 pending_event_buffer: Some(event_buffer),
@@ -410,18 +398,109 @@ impl<S: StepSpec> SingleState<S> {
                                 root_total_elapsed,
                             )
                         }
-                    }
-                }
-                None => {
-                    // We don't have a summary yet.
-                    (SingleStateTag::NotStarted, None)
-                }
-            };
+                        ApplyReportResult::Overwritten => {
+                            self.kind = SingleStateKind::Overwritten {
+                                displayed: false,
+                            };
+                            (SingleStateTag::Overwritten, None)
+                        }
+                    };
 
-        AddEventReportResult {
-            before,
-            after,
-            root_total_elapsed: max_total_elapsed,
+                AddEventReportResult { before, after, root_total_elapsed }
+            }
+            SingleStateKind::Running { event_buffer } => {
+                // We're in the middle of an update.
+                let before = SingleStateTag::Running;
+                let (after, root_total_elapsed) = match Self::apply_report(
+                    event_buffer,
+                    event_report,
+                ) {
+                    ApplyReportResult::NotStarted => {
+                        // This is an illegal state transition: once a
+                        // non-empty event report has been received, the
+                        // event buffer never goes back to the NotStarted
+                        // state.
+                        unreachable!("illegal state transition from Running to NotStarted")
+                    }
+                    ApplyReportResult::Running(root_total_elapsed) => {
+                        (SingleStateTag::Running, Some(root_total_elapsed))
+                    }
+                    ApplyReportResult::Terminal(info) => {
+                        let terminal_kind = info.kind;
+                        let root_total_elapsed = info.root_total_elapsed;
+
+                        // Grab the event buffer so we can store it in the
+                        // Terminal state below.
+                        let event_buffer = std::mem::replace(
+                            event_buffer,
+                            EventBuffer::new(0),
+                        );
+
+                        self.kind = SingleStateKind::Terminal {
+                            info,
+                            pending_event_buffer: Some(event_buffer),
+                        };
+                        (
+                            SingleStateTag::Terminal(terminal_kind),
+                            root_total_elapsed,
+                        )
+                    }
+                    ApplyReportResult::Overwritten => {
+                        self.kind =
+                            SingleStateKind::Overwritten { displayed: false };
+                        (SingleStateTag::Overwritten, None)
+                    }
+                };
+                AddEventReportResult { before, after, root_total_elapsed }
+            }
+            SingleStateKind::Terminal { info, .. } => {
+                // Once we've reached a terminal state, we don't record any more
+                // events.
+                AddEventReportResult::unchanged(
+                    SingleStateTag::Terminal(info.kind),
+                    info.root_total_elapsed,
+                )
+            }
+            SingleStateKind::Overwritten { .. } => {
+                // This update has already completed -- assume that the event
+                // buffer is for a new update, which we don't show.
+                AddEventReportResult::unchanged(
+                    SingleStateTag::Overwritten,
+                    None,
+                )
+            }
+        }
+    }
+
+    /// The internal logic used by [`Self::add_event_report`].
+    fn apply_report(
+        event_buffer: &mut EventBuffer<S>,
+        event_report: EventReport<S>,
+    ) -> ApplyReportResult {
+        if let Some(root_execution_id) = event_buffer.root_execution_id() {
+            if event_report.root_execution_id != Some(root_execution_id) {
+                // The report is for a different execution ID -- assume that
+                // this event is completed and mark our current execution as
+                // completed.
+                return ApplyReportResult::Overwritten;
+            }
+        }
+
+        event_buffer.add_event_report(event_report);
+        match event_buffer.root_execution_summary() {
+            Some(summary) => match summary.execution_status {
+                ExecutionStatus::NotStarted => ApplyReportResult::NotStarted,
+                ExecutionStatus::Running { root_total_elapsed, .. } => {
+                    ApplyReportResult::Running(root_total_elapsed)
+                }
+                ExecutionStatus::Terminal(info) => {
+                    ApplyReportResult::Terminal(info)
+                }
+            },
+            None => {
+                // We don't have a summary yet.
+                ApplyReportResult::NotStarted
+            }
         }
     }
 
@@ -488,6 +567,7 @@ enum SingleStateKind<S: StepSpec> {
     },
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct AddEventReportResult {
     before: SingleStateTag,
     after: SingleStateTag,
@@ -503,10 +583,238 @@ impl AddEventReportResult {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 enum SingleStateTag {
     NotStarted,
     Running,
     Terminal(TerminalKind),
     Overwritten,
+}
+
+impl fmt::Display for SingleStateTag {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NotStarted => write!(f, "not started"),
+            Self::Running => write!(f, "running"),
+            Self::Terminal(kind) => write!(f, "{kind}"),
+            Self::Overwritten => write!(f, "overwritten"),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+enum ApplyReportResult {
+    NotStarted,
+    Running(Duration),
+    Terminal(ExecutionTerminalInfo),
+    Overwritten,
+}
+
+#[cfg(test)]
+mod tests {
+    use omicron_test_utils::dev::test_setup_log;
+
+    use super::*;
+
+    use crate::test_utils::{generate_test_events, GenerateTestEventsKind};
+
+    #[tokio::test]
+    async fn test_stats() {
+        let logctx = test_setup_log("test_stats");
+        // Generate three sets of events, one for each kind.
+        let generated_completed = generate_test_events(
+            &logctx.log,
+            GenerateTestEventsKind::Completed,
+        )
+        .await;
+        let generated_failed =
+            generate_test_events(&logctx.log, GenerateTestEventsKind::Failed)
+                .await;
+        let generated_aborted =
+            generate_test_events(&logctx.log, GenerateTestEventsKind::Aborted)
+                .await;
+
+        // Set up a `GroupDisplay` with three keys.
+        let mut group_display = GroupDisplay::new_with_display(
+            &logctx.log,
+            vec![
+                GroupDisplayKey::Completed,
+                GroupDisplayKey::Failed,
+                GroupDisplayKey::Aborted,
+                GroupDisplayKey::Overwritten,
+            ],
+            std::io::stdout(),
+        );
+
+        let mut expected_stats = GroupDisplayStats {
+            total: 4,
+            not_started: 4,
+            running: 0,
+            completed: 0,
+            failed: 0,
+            aborted: 0,
+            overwritten: 0,
+        };
+        assert_eq!(group_display.stats(), &expected_stats);
+        assert!(!expected_stats.is_terminal());
+        assert!(!expected_stats.has_failures());
+
+        // Pass in an empty EventReport -- ensure that this doesn't move it to
+        // a Running state.
+
+        group_display
+            .add_event_report(
+                &GroupDisplayKey::Completed,
+                EventReport::default(),
+            )
+            .unwrap();
+        assert_eq!(group_display.stats(), &expected_stats);
+
+        // Pass in events one by one -- ensure that we're always in the running
+        // state until we've completed.
+        {
+            expected_stats.not_started -= 1;
+            expected_stats.running += 1;
+
+            let n = generated_completed.len();
+
+            let mut buffer = EventBuffer::default();
+            let mut last_seen = None;
+
+            for (i, event) in
+                generated_completed.clone().into_iter().enumerate()
+            {
+                buffer.add_event(event);
+                let report = buffer.generate_report_since(&mut last_seen);
+                group_display
+                    .add_event_report(&GroupDisplayKey::Completed, report)
+                    .unwrap();
+                if i == n - 1 {
+                    // The last event should have moved us to the completed
+                    // state.
+                    expected_stats.running -= 1;
+                    expected_stats.completed += 1;
+                } else {
+                    // We should still be in the running state.
+                }
+                assert_eq!(group_display.stats(), &expected_stats);
+                assert!(!expected_stats.is_terminal());
+                assert!(!expected_stats.has_failures());
+            }
+        }
+
+        // Pass in failed events, this time using buffer.generate_report()
+        // rather than buffer.generate_report_since().
+        {
+            expected_stats.not_started -= 1;
+            expected_stats.running += 1;
+
+            let n = generated_failed.len();
+
+            let mut buffer = EventBuffer::default();
+            for (i, event) in generated_failed.clone().into_iter().enumerate() {
+                buffer.add_event(event);
+                let report = buffer.generate_report();
+                group_display
+                    .add_event_report(&GroupDisplayKey::Failed, report)
+                    .unwrap();
+                if i == n - 1 {
+                    // The last event should have moved us to the failed state.
+                    expected_stats.running -= 1;
+                    expected_stats.failed += 1;
+                    assert!(expected_stats.has_failures());
+                } else {
+                    // We should still be in the running state.
+                    assert!(!expected_stats.has_failures());
+                }
+                assert_eq!(group_display.stats(), &expected_stats);
+            }
+        }
+
+        // Pass in aborted events all at once.
+        {
+            expected_stats.not_started -= 1;
+            expected_stats.running += 1;
+
+            let mut buffer = EventBuffer::default();
+            for event in generated_aborted {
+                buffer.add_event(event);
+            }
+            let report = buffer.generate_report();
+            group_display
+                .add_event_report(&GroupDisplayKey::Aborted, report)
+                .unwrap();
+            // The aborted events should have moved us to the aborted state.
+            expected_stats.running -= 1;
+            expected_stats.aborted += 1;
+            assert_eq!(group_display.stats(), &expected_stats);
+
+            // Try passing in one of the events that, if we were running, would
+            // cause us to move to an overwritten state. Ensure that that does
+            // not happen (i.e. expected_stats stays the same)
+            let mut buffer = EventBuffer::default();
+            buffer.add_event(generated_failed.first().unwrap().clone());
+            let report = buffer.generate_report();
+            group_display
+                .add_event_report(&GroupDisplayKey::Aborted, report)
+                .unwrap();
+            assert_eq!(group_display.stats(), &expected_stats);
+        }
+
+        // For the overwritten state, pass in half of the completed events, and
+        // then pass in all of the failed events.
+
+        {
+            expected_stats.not_started -= 1;
+            expected_stats.running += 1;
+
+            let mut buffer = EventBuffer::default();
+            let n = generated_completed.len() / 2;
+            for event in generated_completed.into_iter().take(n) {
+                buffer.add_event(event);
+            }
+            let report = buffer.generate_report();
+            group_display
+                .add_event_report(&GroupDisplayKey::Overwritten, report)
+                .unwrap();
+            assert_eq!(group_display.stats(), &expected_stats);
+
+            // Now pass in a single failed event, which has a different
+            // execution ID.
+            let mut buffer = EventBuffer::default();
+            buffer.add_event(generated_failed.first().unwrap().clone());
+            let report = buffer.generate_report();
+            group_display
+                .add_event_report(&GroupDisplayKey::Overwritten, report)
+                .unwrap();
+            // The overwritten event should have moved us to the overwritten
+            // state.
+            expected_stats.running -= 1;
+            expected_stats.overwritten += 1;
+        }
+
+        assert!(expected_stats.has_failures());
+        assert!(expected_stats.is_terminal());
+
+        logctx.cleanup_successful();
+    }
+
+    #[derive(Debug, Eq, PartialEq, Ord, PartialOrd)]
+    enum GroupDisplayKey {
+        Completed,
+        Failed,
+        Aborted,
+        Overwritten,
+    }
+
+    impl fmt::Display for GroupDisplayKey {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            match self {
+                Self::Completed => write!(f, "completed"),
+                Self::Failed => write!(f, "failed"),
+                Self::Aborted => write!(f, "aborted"),
+                Self::Overwritten => write!(f, "overwritten"),
+            }
+        }
+    }
 }

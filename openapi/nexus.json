@@ -3610,6 +3610,34 @@
         "x-dropshot-pagination": {
           "required": []
         }
+      },
+      "post": {
+        "tags": [
+          "system/hardware"
+        ],
+        "summary": "Add a sled to an initialized rack",
+        "operationId": "add_sled_to_initialized_rack",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UninitializedSled"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/v1/system/hardware/sleds/{sled_id}": {
@@ -14098,7 +14126,7 @@
         ]
       },
       "UninitializedSled": {
-        "description": "View of a sled that has not been added to an initialized rack yet",
+        "description": "A sled that has not been added to an initialized rack yet",
         "type": "object",
         "properties": {
           "baseboard": {
