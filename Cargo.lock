@@ -3072,6 +3072,7 @@ dependencies = [
  "bhyve_api",
  "byteorder",
  "camino",
+ "camino-tempfile",
  "cfg-if 1.0.0",
  "crucible-smf",
  "futures",
