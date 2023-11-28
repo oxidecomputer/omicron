@@ -118,6 +118,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
             lldp: LldpServiceConfig { enabled: false, lldp_config: None },
             fec: LinkFec::None,
             speed: LinkSpeed::Speed100G,
+            autoneg: false,
         },
     );
     // interfaces

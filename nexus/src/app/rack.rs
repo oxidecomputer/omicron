@@ -513,15 +513,10 @@ impl super::Nexus {
                     },
                     fec: uplink_config.uplink_port_fec.into(),
                     speed: uplink_config.uplink_port_speed.into(),
+                    autoneg: uplink_config.autoneg,
                 };
 
                 port_settings_params.links.insert("phy".to_string(), link);
-
-                /*
-                port_settings_params
-                    .links
-                    .insert("phy0".to_string(), LinkConfig { links });
-                */
 
                 match self
                     .db_datastore
@@ -703,6 +698,11 @@ impl super::Nexus {
                     .map(|l| l.speed)
                     .unwrap_or(SwitchLinkSpeed::Speed100G)
                     .into(),
+                autoneg: info
+                    .links
+                    .get(0) //TODO breakout support
+                    .map(|l| l.autoneg)
+                    .unwrap_or(false),
             };
 
             ports.push(p);

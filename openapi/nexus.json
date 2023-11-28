@@ -11889,6 +11889,10 @@
         "description": "Switch link configuration.",
         "type": "object",
         "properties": {
+          "autoneg": {
+            "description": "Whether or not to set autonegotiation",
+            "type": "boolean"
+          },
           "fec": {
             "description": "The forward error correction mode of the link.",
             "allOf": [
@@ -11921,6 +11925,7 @@
           }
         },
         "required": [
+          "autoneg",
           "fec",
           "lldp",
           "mtu",

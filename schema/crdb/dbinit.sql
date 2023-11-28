@@ -2990,6 +2990,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.db_metadata (
     CHECK (singleton = true)
 );
 
+ALTER TABLE omicron.public.switch_port_settings_link_config ADD COLUMN IF NOT EXISTS autoneg BOOL NOT NULL DEFAULT false;
+
 INSERT INTO omicron.public.db_metadata (
     singleton,
     time_created,
@@ -2997,7 +2999,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '14.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '15.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

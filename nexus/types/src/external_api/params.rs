@@ -1421,6 +1421,9 @@ pub struct LinkConfig {
 
     /// The speed of the link.
     pub speed: LinkSpeed,
+
+    /// Whether or not to set autonegotiation
+    pub autoneg: bool,
 }
 
 /// The LLDP configuration associated with a port. LLDP may be either enabled or

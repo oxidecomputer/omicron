@@ -234,6 +234,7 @@ impl DataStore {
                     c.mtu,
                     c.fec.into(),
                     c.speed.into(),
+                    c.autoneg,
                 ));
             }
             result.link_lldp =
