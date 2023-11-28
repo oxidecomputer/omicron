@@ -36,15 +36,18 @@ const PROJECT_NAME: &str = "rootbeer-float";
 
 const FIP_NAMES: &[&str] = &["vanilla", "chocolate", "strawberry", "pistachio"];
 
-fn get_floating_ips_url(project_name: &str) -> String {
+pub fn get_floating_ips_url(project_name: &str) -> String {
     format!("/v1/floating-ips?project={project_name}")
 }
 
-fn get_floating_ip_by_name_url(fip_name: &str, project_name: &str) -> String {
+pub fn get_floating_ip_by_name_url(
+    fip_name: &str,
+    project_name: &str,
+) -> String {
     format!("/v1/floating-ips/{fip_name}?project={project_name}")
 }
 
-fn get_floating_ip_by_id_url(fip_id: &Uuid) -> String {
+pub fn get_floating_ip_by_id_url(fip_id: &Uuid) -> String {
     format!("/v1/floating-ips/{fip_id}")
 }
 
@@ -403,7 +406,7 @@ async fn test_floating_ip_attachment(cptestctx: &ControlPlaneTestContext) {
     .unwrap();
 }
 
-async fn floating_ip_get(
+pub async fn floating_ip_get(
     client: &ClientTestContext,
     fip_url: &str,
 ) -> FloatingIp {
