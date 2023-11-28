@@ -163,7 +163,7 @@ impl<K: Eq + Ord, W: std::io::Write, S: StepSpec> GroupDisplay<K, W, S> {
                     "root_total_elapsed" => ?result.root_total_elapsed,
                 );
             } else {
-                slog::debug!(
+                slog::trace!(
                     self.log,
                     "add_event_report called, state did not change";
                     "prefix" => &state.prefix,
