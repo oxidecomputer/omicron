@@ -149,20 +149,23 @@ impl<K: Eq + Ord, W: std::io::Write, S: StepSpec> GroupDisplay<K, W, S> {
                         TokioSw::with_elapsed_started(root_total_elapsed);
                 }
             }
-            self.log_result(&result);
+
             self.stats.apply_result(result);
+            self.log_result(&state.prefix, &result);
             Ok(())
         } else {
             Err(UnknownReportKey {})
         }
     }
 
-    fn log_result(&self, result: &AddEventReportResult) {
+    fn log_result(&self, prefix: &str, result: &AddEventReportResult) {
         slog::debug!(
             self.log,
             "add_event_report called";
+            "prefix" => prefix,
             "before" => %result.before,
             "after" => %result.after,
+            "stats" => ?self.stats,
             "root_total_elapsed" => ?result.root_total_elapsed,
         );
 
@@ -170,8 +173,10 @@ impl<K: Eq + Ord, W: std::io::Write, S: StepSpec> GroupDisplay<K, W, S> {
             slog::info!(
                 self.log,
                 "add_event_report caused state transition";
+                "prefix" => prefix,
                 "before" => %result.before,
                 "after" => %result.after,
+                "stats" => ?self.stats,
                 "root_total_elapsed" => ?result.root_total_elapsed,
             );
         }
@@ -565,6 +570,7 @@ enum SingleStateKind<S: StepSpec> {
     },
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct AddEventReportResult {
     before: SingleStateTag,
     after: SingleStateTag,
