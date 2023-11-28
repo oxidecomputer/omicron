@@ -1627,6 +1627,16 @@ pub enum TerminalKind {
     Aborted,
 }
 
+impl fmt::Display for TerminalKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Completed => write!(f, "completed"),
+            Self::Failed => write!(f, "failed"),
+            Self::Aborted => write!(f, "aborted"),
+        }
+    }
+}
+
 impl ExecutionStatus {
     /// Returns the terminal status and the total amount of time elapsed, or
     /// None if the execution has not reached a terminal state.

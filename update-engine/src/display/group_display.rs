@@ -30,6 +30,7 @@ use super::{
 pub struct GroupDisplay<K, W, S: StepSpec> {
     // We don't need to add any buffering here because we already write data to
     // the writer in a line-buffered fashion (see Self::write_events).
+    log: slog::Logger,
     writer: W,
     max_width: usize,
     // This is set to the highest value of root_total_elapsed seen from any event reports.
@@ -45,6 +46,7 @@ impl<K: Eq + Ord, W: std::io::Write, S: StepSpec> GroupDisplay<K, W, S> {
     ///
     /// The function passed in is expected to create a writer.
     pub fn new<Str>(
+        log: &slog::Logger,
         keys_and_prefixes: impl IntoIterator<Item = (K, Str)>,
         writer: W,
     ) -> Self
@@ -70,6 +72,7 @@ impl<K: Eq + Ord, W: std::io::Write, S: StepSpec> GroupDisplay<K, W, S> {
 
         let not_started = single_states.len();
         Self {
+            log: log.new(slog::o!("component" => "GroupDisplay")),
             writer,
             max_width,
             // This creates the stopwatch in the stopped state with duration 0 -- i.e. a minimal
@@ -84,6 +87,7 @@ impl<K: Eq + Ord, W: std::io::Write, S: StepSpec> GroupDisplay<K, W, S> {
     /// Creates a new `GroupDisplay` with the provided report keys, using the
     /// `Display` impl to obtain the respective prefixes.
     pub fn new_with_display(
+        log: &slog::Logger,
         keys: impl IntoIterator<Item = K>,
         writer: W,
     ) -> Self
@@ -91,6 +95,7 @@ impl<K: Eq + Ord, W: std::io::Write, S: StepSpec> GroupDisplay<K, W, S> {
         K: fmt::Display,
     {
         Self::new(
+            log,
             keys.into_iter().map(|k| {
                 let prefix = k.to_string();
                 (k, prefix)
@@ -144,10 +149,31 @@ impl<K: Eq + Ord, W: std::io::Write, S: StepSpec> GroupDisplay<K, W, S> {
                         TokioSw::with_elapsed_started(root_total_elapsed);
                 }
             }
+            self.log_result(&result);
             self.stats.apply_result(result);
             Ok(())
         } else {
             Err(UnknownReportKey {})
+        }
+    }
+
+    fn log_result(&self, result: &AddEventReportResult) {
+        slog::debug!(
+            self.log,
+            "add_event_report called";
+            "before" => %result.before,
+            "after" => %result.after,
+            "root_total_elapsed" => ?result.root_total_elapsed,
+        );
+
+        if result.before != result.after {
+            slog::info!(
+                self.log,
+                "add_event_report caused state transition";
+                "before" => %result.before,
+                "after" => %result.after,
+                "root_total_elapsed" => ?result.root_total_elapsed,
+            );
         }
     }
 
@@ -562,6 +588,17 @@ enum SingleStateTag {
     Overwritten,
 }
 
+impl fmt::Display for SingleStateTag {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NotStarted => write!(f, "not started"),
+            Self::Running => write!(f, "running"),
+            Self::Terminal(kind) => write!(f, "{kind}"),
+            Self::Overwritten => write!(f, "overwritten"),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 enum ApplyReportResult {
     NotStarted,
@@ -596,17 +633,19 @@ mod tests {
 
         // Set up a `GroupDisplay` with three keys.
         let mut group_display = GroupDisplay::new_with_display(
+            &logctx.log,
             vec![
                 GroupDisplayKey::Completed,
                 GroupDisplayKey::Failed,
                 GroupDisplayKey::Aborted,
+                GroupDisplayKey::Overwritten,
             ],
             std::io::stdout(),
         );
 
         let mut expected_stats = GroupDisplayStats {
-            total: 3,
-            not_started: 3,
+            total: 4,
+            not_started: 4,
             running: 0,
             completed: 0,
             failed: 0,
@@ -628,18 +667,20 @@ mod tests {
             .unwrap();
         assert_eq!(group_display.stats(), &expected_stats);
 
-        expected_stats.not_started -= 1;
-        expected_stats.running += 1;
-
         // Pass in events one by one -- ensure that we're always in the running
         // state until we've completed.
         {
+            expected_stats.not_started -= 1;
+            expected_stats.running += 1;
+
             let n = generated_completed.len();
 
             let mut buffer = EventBuffer::default();
             let mut last_seen = None;
 
-            for (i, event) in generated_completed.into_iter().enumerate() {
+            for (i, event) in
+                generated_completed.clone().into_iter().enumerate()
+            {
                 buffer.add_event(event);
                 let report = buffer.generate_report_since(&mut last_seen);
                 group_display
@@ -659,16 +700,16 @@ mod tests {
             }
         }
 
-        expected_stats.not_started -= 1;
-        expected_stats.running += 1;
-
         // Pass in failed events, this time using buffer.generate_report()
         // rather than buffer.generate_report_since().
         {
+            expected_stats.not_started -= 1;
+            expected_stats.running += 1;
+
             let n = generated_failed.len();
 
             let mut buffer = EventBuffer::default();
-            for (i, event) in generated_failed.into_iter().enumerate() {
+            for (i, event) in generated_failed.clone().into_iter().enumerate() {
                 buffer.add_event(event);
                 let report = buffer.generate_report();
                 group_display
@@ -688,10 +729,10 @@ mod tests {
         }
 
         // Pass in aborted events all at once.
-        expected_stats.not_started -= 1;
-        expected_stats.running += 1;
-
         {
+            expected_stats.not_started -= 1;
+            expected_stats.running += 1;
+
             let mut buffer = EventBuffer::default();
             for event in generated_aborted {
                 buffer.add_event(event);
@@ -704,6 +745,49 @@ mod tests {
             expected_stats.running -= 1;
             expected_stats.aborted += 1;
             assert_eq!(group_display.stats(), &expected_stats);
+
+            // Try passing in one of the events that, if we were running, would
+            // cause us to move to an overwritten state. Ensure that that does
+            // not happen (i.e. expected_stats stays the same)
+            let mut buffer = EventBuffer::default();
+            buffer.add_event(generated_failed.first().unwrap().clone());
+            let report = buffer.generate_report();
+            group_display
+                .add_event_report(&GroupDisplayKey::Aborted, report)
+                .unwrap();
+            assert_eq!(group_display.stats(), &expected_stats);
+        }
+
+        // For the overwritten state, pass in half of the completed events, and
+        // then pass in all of the failed events.
+
+        {
+            expected_stats.not_started -= 1;
+            expected_stats.running += 1;
+
+            let mut buffer = EventBuffer::default();
+            let n = generated_completed.len() / 2;
+            for event in generated_completed.into_iter().take(n) {
+                buffer.add_event(event);
+            }
+            let report = buffer.generate_report();
+            group_display
+                .add_event_report(&GroupDisplayKey::Overwritten, report)
+                .unwrap();
+            assert_eq!(group_display.stats(), &expected_stats);
+
+            // Now pass in a single failed event, which has a different
+            // execution ID.
+            let mut buffer = EventBuffer::default();
+            buffer.add_event(generated_failed.first().unwrap().clone());
+            let report = buffer.generate_report();
+            group_display
+                .add_event_report(&GroupDisplayKey::Overwritten, report)
+                .unwrap();
+            // The overwritten event should have moved us to the overwritten
+            // state.
+            expected_stats.running -= 1;
+            expected_stats.overwritten += 1;
         }
 
         assert!(expected_stats.has_failures());
@@ -715,6 +799,7 @@ mod tests {
         Completed,
         Failed,
         Aborted,
+        Overwritten,
     }
 
     impl fmt::Display for GroupDisplayKey {
@@ -723,6 +808,7 @@ mod tests {
                 Self::Completed => write!(f, "completed"),
                 Self::Failed => write!(f, "failed"),
                 Self::Aborted => write!(f, "aborted"),
+                Self::Overwritten => write!(f, "overwritten"),
             }
         }
     }
