@@ -4,9 +4,8 @@
 
 //! Tests basic instance support in the API
 
-use crate::integration_tests::external_ips::floating_ip_get;
-use crate::integration_tests::external_ips::get_floating_ip_by_id_url;
-
+use super::external_ips::floating_ip_get;
+use super::external_ips::get_floating_ip_by_id_url;
 use super::metrics::{get_latest_silo_metric, get_latest_system_metric};
 
 use camino::Utf8Path;

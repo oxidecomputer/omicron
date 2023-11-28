@@ -1747,7 +1747,9 @@ mod test {
                 };
                 db::model::Name(Name::try_from(name).unwrap())
             });
-            // We do name duplicate checking on the `Some` branch.
+
+            // We do name duplicate checking on the `Some` branch, don't steal the
+            // name intended for another floating IP.
             if parent_id.is_none() && modify_name {
                 continue;
             }
@@ -1794,21 +1796,20 @@ mod test {
 
                 seen_pairs.insert(key);
             } else if !valid_expression {
+                // Several permutations are invalid and we want to detect them all.
                 // NOTE: CHECK violation will supersede UNIQUE violation below.
-                // At least one is not valid, we expect a check violation
                 let err = res.expect_err(
                     "Expected a CHECK violation when inserting a \
-                     Floating IP record with NULL name and/or description",
+                     Floating IP record with NULL name and/or description, \
+                     and incorrect project parent relation",
                 );
                 assert!(
                     matches!(err, DatabaseError(CheckViolation, _)),
                     "Expected a CHECK violation when inserting a \
                      Floating IP record with NULL name and/or description, \
-                     and incorrect project parent relation \
-                     \nGOT: {err:?}",
+                     and incorrect project parent relation",
                 );
             } else {
-                // At least one is not valid, we expect a check violation
                 let err = res.expect_err(
                     "Expected a UNIQUE violation when inserting a \
                      Floating IP record with existing (name, project_id)",
@@ -1816,8 +1817,7 @@ mod test {
                 assert!(
                     matches!(err, DatabaseError(UniqueViolation, _)),
                     "Expected a UNIQUE violation when inserting a \
-                     Floating IP record with existing (name, project_id) \
-                     \nGOT: {err:?}",
+                     Floating IP record with existing (name, project_id)",
                 );
             }
         }

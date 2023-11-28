@@ -6,7 +6,8 @@
 //! services.
 
 use crate::impl_enum_type;
-use crate::schema::{external_ip, floating_ip};
+use crate::schema::external_ip;
+use crate::schema::floating_ip;
 use crate::Name;
 use crate::SqlU16;
 use chrono::DateTime;
@@ -20,7 +21,8 @@ use nexus_types::external_api::views;
 use omicron_common::address::NUM_SOURCE_NAT_PORTS;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadata;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use std::convert::TryFrom;
 use std::net::IpAddr;
 use uuid::Uuid;

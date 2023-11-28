@@ -145,8 +145,6 @@ impl DataStore {
     ) -> CreateResult<ExternalIp> {
         let ip_id = Uuid::new_v4();
 
-        // XXX: mux here to scan *all* project pools in
-        //      current silo for convenience?
         let pool_id = match params.pool {
             Some(NameOrId::Name(name)) => {
                 LookupPath::new(opctx, self)
@@ -343,8 +341,8 @@ impl DataStore {
 
     /// Detach an individual Floating IP address from its parent instance.
     ///
-    /// As in `deallocate_external_ip_by_instance_id`, This method returns the
-    /// number of records deleted, rather than the usual `DeleteResult`.
+    /// As in `deallocate_external_ip_by_instance_id`, this method returns the
+    /// number of records altered, rather than an `UpdateResult`.
     pub async fn detach_floating_ips_by_instance_id(
         &self,
         opctx: &OpContext,
@@ -386,9 +384,9 @@ impl DataStore {
         authz_project: &authz::Project,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<FloatingIp> {
-        opctx.authorize(authz::Action::ListChildren, authz_project).await?;
-
         use db::schema::floating_ip::dsl;
+        
+        opctx.authorize(authz::Action::ListChildren, authz_project).await?;
 
         match pagparams {
             PaginatedBy::Id(pagparams) => {

@@ -619,8 +619,8 @@ async fn sic_allocate_instance_external_ip(
     let instance_id = repeat_saga_params.instance_id;
     let ip_id = repeat_saga_params.new_id;
 
-    // Collect the possible pool name for this IP address
     match ip_params {
+        // Allocate a new IP address from the target, possibly default, pool
         params::ExternalIpCreate::Ephemeral { ref pool_name } => {
             let pool_name =
                 pool_name.as_ref().map(|name| db::model::Name(name.clone()));
@@ -634,6 +634,7 @@ async fn sic_allocate_instance_external_ip(
                 .await
                 .map_err(ActionError::action_failed)?;
         }
+        // Set the parent of an existing floating IP to the new instance's ID.
         params::ExternalIpCreate::Floating { ref floating_ip_name } => {
             let floating_ip_name = db::model::Name(floating_ip_name.clone());
             let (.., authz_fip, db_fip) = LookupPath::new(&opctx, &datastore)

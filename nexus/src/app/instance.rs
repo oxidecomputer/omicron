@@ -925,10 +925,11 @@ impl super::Nexus {
             .into_iter()
             .partition(|ip| ip.kind == IpKind::Ephemeral);
 
-        if ephemeral_ips.len() > 1 {
+        if ephemeral_ips.len() > MAX_EPHEMERAL_IPS_PER_INSTANCE {
             return Err(Error::internal_error(
                 format!(
-                "Expected at most one ephemeral IP for an instance, found {}",
+                "Expected at most {} ephemeral IP for an instance, found {}",
+                MAX_EPHEMERAL_IPS_PER_INSTANCE,
                 ephemeral_ips.len()
             )
                 .as_str(),
