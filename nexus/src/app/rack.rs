@@ -23,6 +23,8 @@ use nexus_db_queries::db::lookup::LookupPath;
 use nexus_types::external_api::params::Address;
 use nexus_types::external_api::params::AddressConfig;
 use nexus_types::external_api::params::AddressLotBlockCreate;
+use nexus_types::external_api::params::LinkConfig;
+use nexus_types::external_api::params::LldpServiceConfig;
 use nexus_types::external_api::params::RouteConfig;
 use nexus_types::external_api::params::SwitchPortConfig;
 use nexus_types::external_api::params::{
@@ -502,6 +504,24 @@ impl super::Nexus {
                 port_settings_params
                     .routes
                     .insert("phy0".to_string(), RouteConfig { routes });
+
+                let link = LinkConfig {
+                    mtu: 1500, //TODO as parameter
+                    lldp: LldpServiceConfig {
+                        enabled: false,
+                        lldp_config: None,
+                    },
+                    fec: uplink_config.uplink_port_fec.into(),
+                    speed: uplink_config.uplink_port_speed.into(),
+                };
+
+                port_settings_params.links.insert("phy".to_string(), link);
+
+                /*
+                port_settings_params
+                    .links
+                    .insert("phy0".to_string(), LinkConfig { links });
+                */
 
                 match self
                     .db_datastore

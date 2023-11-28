@@ -1337,6 +1337,18 @@ pub enum LinkFec {
     Rs,
 }
 
+impl From<omicron_common::api::internal::shared::PortFec> for LinkFec {
+    fn from(x: omicron_common::api::internal::shared::PortFec) -> LinkFec {
+        match x {
+            omicron_common::api::internal::shared::PortFec::Firecode => {
+                Self::Firecode
+            }
+            omicron_common::api::internal::shared::PortFec::None => Self::None,
+            omicron_common::api::internal::shared::PortFec::Rs => Self::Rs,
+        }
+    }
+}
+
 /// The speed of a link.
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -1359,6 +1371,40 @@ pub enum LinkSpeed {
     Speed200G,
     /// 400 gigabits per second.
     Speed400G,
+}
+
+impl From<omicron_common::api::internal::shared::PortSpeed> for LinkSpeed {
+    fn from(x: omicron_common::api::internal::shared::PortSpeed) -> Self {
+        match x {
+            omicron_common::api::internal::shared::PortSpeed::Speed0G => {
+                Self::Speed0G
+            }
+            omicron_common::api::internal::shared::PortSpeed::Speed1G => {
+                Self::Speed1G
+            }
+            omicron_common::api::internal::shared::PortSpeed::Speed10G => {
+                Self::Speed10G
+            }
+            omicron_common::api::internal::shared::PortSpeed::Speed25G => {
+                Self::Speed25G
+            }
+            omicron_common::api::internal::shared::PortSpeed::Speed40G => {
+                Self::Speed40G
+            }
+            omicron_common::api::internal::shared::PortSpeed::Speed50G => {
+                Self::Speed50G
+            }
+            omicron_common::api::internal::shared::PortSpeed::Speed100G => {
+                Self::Speed100G
+            }
+            omicron_common::api::internal::shared::PortSpeed::Speed200G => {
+                Self::Speed200G
+            }
+            omicron_common::api::internal::shared::PortSpeed::Speed400G => {
+                Self::Speed400G
+            }
+        }
+    }
 }
 
 /// Switch link configuration.
