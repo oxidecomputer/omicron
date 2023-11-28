@@ -214,7 +214,7 @@ mod zenter {
     // the contracts used for this come from templates that define becoming
     // empty as a critical event.
     pub fn contract_reaper(log: Logger) {
-        const EVENT_PATH: &[u8] = b"/system/contract/process/pbundle";
+        const EVENT_PATH: &'static [u8] = b"/system/contract/process/pbundle";
         const CT_PR_EV_EMPTY: u64 = 1;
 
         let cpath = CString::new(EVENT_PATH).unwrap();
@@ -327,7 +327,8 @@ mod zenter {
     }
 
     impl Template {
-        const TEMPLATE_PATH: &[u8] = b"/system/contract/process/template\0";
+        const TEMPLATE_PATH: &'static [u8] =
+            b"/system/contract/process/template\0";
 
         // Constants related to how the contract below is managed. See
         // `usr/src/uts/common/sys/contract/process.h` in the illumos sources
