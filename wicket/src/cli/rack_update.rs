@@ -174,6 +174,7 @@ async fn do_attach_to_updates(
     output: CommandOutput<'_>,
 ) -> Result<()> {
     let mut display = GroupDisplay::new_with_display(
+        &log,
         update_ids.iter().copied(),
         output.stderr,
     );
