@@ -385,7 +385,7 @@ impl DataStore {
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<FloatingIp> {
         use db::schema::floating_ip::dsl;
-        
+
         opctx.authorize(authz::Action::ListChildren, authz_project).await?;
 
         match pagparams {
