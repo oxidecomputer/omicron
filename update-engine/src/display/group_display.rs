@@ -795,6 +795,8 @@ mod tests {
 
         assert!(expected_stats.has_failures());
         assert!(expected_stats.is_terminal());
+
+        logctx.cleanup_successful();
     }
 
     #[derive(Debug, Eq, PartialEq, Ord, PartialOrd)]
