@@ -767,14 +767,13 @@ pub struct FloatingIpCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
 
-    /// An IP address to reserve for use as a floating IP.  This field is
-    /// optional if a pool is provided, in which case an address will
-    /// be automatically chosen from there.
+    /// An IP address to reserve for use as a floating IP. This field is
+    /// optional: when not set, an address will be automatically chosen from
+    /// `pool`. If set, then the IP must be available in the resolved `pool`.
     pub address: Option<IpAddr>,
 
-    /// The parent IP pool that a floating IP is pulled from. If combined
-    /// with an explicit address, then that address must be available in
-    /// the pool.
+    /// The parent IP pool that a floating IP is pulled from. If unset, the
+    /// default pool is selected.
     pub pool: Option<NameOrId>,
 }
 
