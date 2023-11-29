@@ -200,14 +200,6 @@ impl DataStore {
             .await
             .map_err(|e| match e {
                 TxnError::CustomError(SledReservationError::NotFound) => {
-                    // XXX: Should this be a different error? 503 Service
-                    // Unavailable is often for transient errors, and this
-                    // message isn't exposed to users (which seems wrong?)
-                    //
-                    // Maybe 409 Conflict as documented at
-                    // https://stackoverflow.com/a/11093566, since this request
-                    // if completed would put the system into an inconsistent
-                    // state.
                     external::Error::unavail(
                         "No sleds can fit the requested instance",
                     )
@@ -246,7 +238,7 @@ impl DataStore {
         opctx.authorize(authz::Action::Modify, authz_sled).await?;
 
         let sled_id = authz_sled.id();
-        let result = diesel::update(dsl::sled)
+        let query = diesel::update(dsl::sled)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(sled_id))
             .filter(dsl::provision_state.ne(state))
@@ -254,7 +246,11 @@ impl DataStore {
                 dsl::provision_state.eq(state),
                 dsl::time_modified.eq(Utc::now()),
             ))
-            .check_if_exists::<Sled>(sled_id)
+            .check_if_exists::<Sled>(sled_id);
+
+        println!("{}", diesel::debug_query::<diesel::pg::Pg, _>(&query));
+
+        let result = query
             .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;

@@ -86,7 +86,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.sled (
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
-    rcgen INT NOT NULL,
+    rcgen INT8 NOT NULL,
 
     /* FK into the Rack table */
     rack_id UUID NOT NULL,
@@ -223,7 +223,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch (
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
-    rcgen INT NOT NULL,
+    rcgen INT8 NOT NULL,
 
     /* FK into the Rack table */
     rack_id UUID NOT NULL,

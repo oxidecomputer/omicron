@@ -49,8 +49,6 @@ pub struct Sled {
     part_number: String,
     revision: i64,
 
-    provision_state: SledProvisionState,
-
     pub usable_hardware_threads: SqlU32,
     pub usable_physical_ram: ByteCount,
     pub reservoir_size: ByteCount,
@@ -61,15 +59,13 @@ pub struct Sled {
 
     /// The last IP address provided to an Oxide service on this sled
     pub last_used_address: ipv6::Ipv6Addr,
+
+    provision_state: SledProvisionState,
 }
 
 impl Sled {
     pub fn is_scrimlet(&self) -> bool {
         self.is_scrimlet
-    }
-
-    pub fn provision_state(&self) -> SledProvisionState {
-        self.provision_state
     }
 
     pub fn ip(&self) -> Ipv6Addr {
@@ -86,6 +82,10 @@ impl Sled {
 
     pub fn serial_number(&self) -> &str {
         &self.serial_number
+    }
+
+    pub fn provision_state(&self) -> SledProvisionState {
+        self.provision_state
     }
 }
 

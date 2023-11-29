@@ -11,10 +11,12 @@ use crate::opte::{Port, PortTicket};
 use crate::svc::wait_for_service;
 use crate::zone::{AddressRequest, IPADM, ZONE_PREFIX};
 use camino::{Utf8Path, Utf8PathBuf};
+use camino_tempfile::Utf8TempDir;
 use ipnetwork::IpNetwork;
 use omicron_common::backoff;
 use slog::{error, info, o, warn, Logger};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::sync::Arc;
 #[cfg(target_os = "illumos")]
 use std::sync::OnceLock;
 #[cfg(target_os = "illumos")]
@@ -1043,7 +1045,7 @@ pub struct ServiceProcess {
     pub log_file: Utf8PathBuf,
 }
 
-/// Errors returned from [`InstalledZone::install`].
+/// Errors returned from [`ZoneBuilder::install`].
 #[derive(thiserror::Error, Debug)]
 pub enum InstallZoneError {
     #[error("Cannot create '{zone}': failed to create control VNIC: {err}")]
@@ -1063,6 +1065,9 @@ pub enum InstallZoneError {
 
     #[error("Failed to find zone image '{image}' from {paths:?}")]
     ImageNotFound { image: String, paths: Vec<Utf8PathBuf> },
+
+    #[error("Attempted to call install() on underspecified ZoneBuilder")]
+    IncompleteBuilder,
 }
 
 pub struct InstalledZone {
@@ -1119,24 +1124,208 @@ impl InstalledZone {
         &self.zonepath
     }
 
-    // TODO: This would benefit from a "builder-pattern" interface.
-    #[allow(clippy::too_many_arguments)]
-    pub async fn install(
-        log: &Logger,
-        underlay_vnic_allocator: &VnicAllocator<Etherstub>,
-        zone_root_path: &Utf8Path,
-        zone_image_paths: &[Utf8PathBuf],
-        zone_type: &str,
-        unique_name: Option<Uuid>,
-        datasets: &[zone::Dataset],
-        filesystems: &[zone::Fs],
-        data_links: &[String],
-        devices: &[zone::Device],
-        opte_ports: Vec<(Port, PortTicket)>,
-        bootstrap_vnic: Option<Link>,
-        links: Vec<Link>,
-        limit_priv: Vec<String>,
-    ) -> Result<InstalledZone, InstallZoneError> {
+    pub fn site_profile_xml_path(&self) -> Utf8PathBuf {
+        let mut path: Utf8PathBuf = self.zonepath().into();
+        path.push("root/var/svc/profile/site.xml");
+        path
+    }
+}
+
+#[derive(Clone)]
+pub struct FakeZoneBuilderConfig {
+    temp_dir: Arc<Utf8TempDir>,
+}
+
+#[derive(Clone, Default)]
+pub struct ZoneBuilderFactory {
+    // Why this is part of this builder/factory and not some separate builder
+    // type: At time of writing, to the best of my knowledge:
+    // - If we want builder pattern, we need to return some type of `Self`.
+    // - If we have a trait that returns `Self` type, we can't turn it into a
+    //   trait object (i.e. Box<dyn ZoneBuilderFactoryInterface>).
+    // - Plumbing concrete types as generics through every other type that
+    //   needs to construct zones (and anything else with a lot of parameters)
+    //   seems like a worse idea.
+    fake_cfg: Option<FakeZoneBuilderConfig>,
+}
+
+impl ZoneBuilderFactory {
+    /// For use in unit tests that don't require actual zone creation to occur.
+    pub fn fake() -> Self {
+        Self {
+            fake_cfg: Some(FakeZoneBuilderConfig {
+                temp_dir: Arc::new(Utf8TempDir::new().unwrap()),
+            }),
+        }
+    }
+
+    /// Create a [ZoneBuilder] that inherits this factory's fakeness.
+    pub fn builder<'a>(&self) -> ZoneBuilder<'a> {
+        ZoneBuilder { fake_cfg: self.fake_cfg.clone(), ..Default::default() }
+    }
+}
+
+/// Builder-pattern construct for creating an [InstalledZone].
+/// Created by [ZoneBuilderFactory].
+#[derive(Default)]
+pub struct ZoneBuilder<'a> {
+    log: Option<Logger>,
+    underlay_vnic_allocator: Option<&'a VnicAllocator<Etherstub>>,
+    zone_root_path: Option<&'a Utf8Path>,
+    zone_image_paths: Option<&'a [Utf8PathBuf]>,
+    zone_type: Option<&'a str>,
+    unique_name: Option<Uuid>, // actually optional
+    datasets: Option<&'a [zone::Dataset]>,
+    filesystems: Option<&'a [zone::Fs]>,
+    data_links: Option<&'a [String]>,
+    devices: Option<&'a [zone::Device]>,
+    opte_ports: Option<Vec<(Port, PortTicket)>>,
+    bootstrap_vnic: Option<Link>, // actually optional
+    links: Option<Vec<Link>>,
+    limit_priv: Option<Vec<String>>,
+    fake_cfg: Option<FakeZoneBuilderConfig>,
+}
+
+impl<'a> ZoneBuilder<'a> {
+    pub fn with_log(mut self, log: Logger) -> Self {
+        self.log = Some(log);
+        self
+    }
+
+    pub fn with_underlay_vnic_allocator(
+        mut self,
+        vnic_allocator: &'a VnicAllocator<Etherstub>,
+    ) -> Self {
+        self.underlay_vnic_allocator = Some(vnic_allocator);
+        self
+    }
+
+    pub fn with_zone_root_path(mut self, root_path: &'a Utf8Path) -> Self {
+        self.zone_root_path = Some(root_path);
+        self
+    }
+
+    pub fn with_zone_image_paths(
+        mut self,
+        image_paths: &'a [Utf8PathBuf],
+    ) -> Self {
+        self.zone_image_paths = Some(image_paths);
+        self
+    }
+
+    pub fn with_zone_type(mut self, zone_type: &'a str) -> Self {
+        self.zone_type = Some(zone_type);
+        self
+    }
+
+    pub fn with_unique_name(mut self, uuid: Uuid) -> Self {
+        self.unique_name = Some(uuid);
+        self
+    }
+
+    pub fn with_datasets(mut self, datasets: &'a [zone::Dataset]) -> Self {
+        self.datasets = Some(datasets);
+        self
+    }
+
+    pub fn with_filesystems(mut self, filesystems: &'a [zone::Fs]) -> Self {
+        self.filesystems = Some(filesystems);
+        self
+    }
+
+    pub fn with_data_links(mut self, links: &'a [String]) -> Self {
+        self.data_links = Some(links);
+        self
+    }
+
+    pub fn with_devices(mut self, devices: &'a [zone::Device]) -> Self {
+        self.devices = Some(devices);
+        self
+    }
+
+    pub fn with_opte_ports(mut self, ports: Vec<(Port, PortTicket)>) -> Self {
+        self.opte_ports = Some(ports);
+        self
+    }
+
+    pub fn with_bootstrap_vnic(mut self, vnic: Link) -> Self {
+        self.bootstrap_vnic = Some(vnic);
+        self
+    }
+
+    pub fn with_links(mut self, links: Vec<Link>) -> Self {
+        self.links = Some(links);
+        self
+    }
+
+    pub fn with_limit_priv(mut self, limit_priv: Vec<String>) -> Self {
+        self.limit_priv = Some(limit_priv);
+        self
+    }
+
+    fn fake_install(self) -> Result<InstalledZone, InstallZoneError> {
+        let zone = self
+            .zone_type
+            .ok_or(InstallZoneError::IncompleteBuilder)?
+            .to_string();
+        let control_vnic = self
+            .underlay_vnic_allocator
+            .ok_or(InstallZoneError::IncompleteBuilder)?
+            .new_control(None)
+            .map_err(move |err| InstallZoneError::CreateVnic { zone, err })?;
+        let fake_cfg = self.fake_cfg.unwrap();
+        let temp_dir = fake_cfg.temp_dir.path().to_path_buf();
+        (|| {
+            let full_zone_name = InstalledZone::get_zone_name(
+                self.zone_type?,
+                self.unique_name,
+            );
+            let zonepath = temp_dir
+                .join(self.zone_root_path?.strip_prefix("/").unwrap())
+                .join(&full_zone_name);
+            let iz = InstalledZone {
+                log: self.log?,
+                zonepath,
+                name: full_zone_name,
+                control_vnic,
+                bootstrap_vnic: self.bootstrap_vnic,
+                opte_ports: self.opte_ports?,
+                links: self.links?,
+            };
+            let xml_path = iz.site_profile_xml_path().parent()?.to_path_buf();
+            std::fs::create_dir_all(&xml_path)
+                .unwrap_or_else(|_| panic!("ZoneBuilder::fake_install couldn't create site profile xml path {:?}", xml_path));
+            Some(iz)
+        })()
+        .ok_or(InstallZoneError::IncompleteBuilder)
+    }
+
+    pub async fn install(self) -> Result<InstalledZone, InstallZoneError> {
+        if self.fake_cfg.is_some() {
+            return self.fake_install();
+        }
+
+        let Self {
+            log: Some(log),
+            underlay_vnic_allocator: Some(underlay_vnic_allocator),
+            zone_root_path: Some(zone_root_path),
+            zone_image_paths: Some(zone_image_paths),
+            zone_type: Some(zone_type),
+            unique_name,
+            datasets: Some(datasets),
+            filesystems: Some(filesystems),
+            data_links: Some(data_links),
+            devices: Some(devices),
+            opte_ports: Some(opte_ports),
+            bootstrap_vnic,
+            links: Some(links),
+            limit_priv: Some(limit_priv),
+            ..
+        } = self
+        else {
+            return Err(InstallZoneError::IncompleteBuilder);
+        };
+
         let control_vnic =
             underlay_vnic_allocator.new_control(None).map_err(|err| {
                 InstallZoneError::CreateVnic {
@@ -1145,7 +1334,8 @@ impl InstalledZone {
                 }
             })?;
 
-        let full_zone_name = Self::get_zone_name(zone_type, unique_name);
+        let full_zone_name =
+            InstalledZone::get_zone_name(zone_type, unique_name);
 
         // Looks for the image within `zone_image_path`, in order.
         let image = format!("{}.tar.gz", zone_type);
@@ -1183,7 +1373,7 @@ impl InstalledZone {
         net_device_names.dedup();
 
         Zones::install_omicron_zone(
-            log,
+            &log,
             &zone_root_path,
             &full_zone_name,
             &zone_image_path,
@@ -1209,12 +1399,6 @@ impl InstalledZone {
             opte_ports,
             links,
         })
-    }
-
-    pub fn site_profile_xml_path(&self) -> Utf8PathBuf {
-        let mut path: Utf8PathBuf = self.zonepath().into();
-        path.push("root/var/svc/profile/site.xml");
-        path
     }
 }
 

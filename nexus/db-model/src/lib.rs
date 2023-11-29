@@ -289,10 +289,9 @@ macro_rules! impl_enum_type {
                         Ok($model_type::$enum_item)
                     }
                     )*
-                    _ => {
-                        Err(concat!("Unrecognized enum variant for ",
-                                stringify!{$model_type})
-                            .into())
+                    other => {
+                        let s = concat!("Unrecognized enum variant for ", stringify!{$model_type});
+                        Err(format!("{}: (raw bytes: {:?})", s, other).into())
                     }
                 }
             }

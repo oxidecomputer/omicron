@@ -730,7 +730,6 @@ table! {
 
         rack_id -> Uuid,
         is_scrimlet -> Bool,
-        provision_state -> crate::SledProvisionStateEnum,
         serial_number -> Text,
         part_number -> Text,
         revision -> Int8,
@@ -742,6 +741,7 @@ table! {
         ip -> Inet,
         port -> Int4,
         last_used_address -> Inet,
+        provision_state -> crate::SledProvisionStateEnum,
     }
 }
 
