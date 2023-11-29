@@ -1786,7 +1786,7 @@ dependencies = [
  "dns-service-client",
  "dropshot",
  "expectorate",
- "http",
+ "http 0.2.11",
  "omicron-test-utils",
  "omicron-workspace-hack",
  "openapi-lint",
@@ -1818,7 +1818,7 @@ name = "dns-service-client"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "http",
+ "http 0.2.11",
  "omicron-workspace-hack",
  "progenitor",
  "reqwest",
@@ -1856,7 +1856,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "futures",
- "http",
+ "http 0.2.11",
  "ipnetwork",
  "omicron-workspace-hack",
  "omicron-zone-package",
@@ -1891,7 +1891,7 @@ dependencies = [
  "form_urlencoded",
  "futures",
  "hostname",
- "http",
+ "http 0.2.11",
  "hyper",
  "indexmap 2.1.0",
  "multer",
@@ -2039,7 +2039,7 @@ dependencies = [
  "async-trait",
  "base64 0.21.5",
  "chrono",
- "http",
+ "http 0.2.11",
  "omicron-sled-agent",
  "omicron-test-utils",
  "omicron-workspace-hack",
@@ -2629,7 +2629,7 @@ dependencies = [
  "futures-core",
  "futures-sink",
  "futures-util",
- "http",
+ "http 0.2.11",
  "indexmap 1.9.3",
  "slab",
  "tokio",
@@ -2675,14 +2675,14 @@ checksum = "f93e7192158dbcda357bdec5fb5788eebf8bbac027f3f33e719d29135ae84156"
 
 [[package]]
 name = "headers"
-version = "0.3.9"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06683b93020a07e3dbcf5f8c0f6d40080d725bea7936fc01ad345c01b97dc270"
+checksum = "322106e6bd0cba2d5ead589ddb8150a13d7c4217cf80d7c4f682ca994ccc6aa9"
 dependencies = [
  "base64 0.21.5",
  "bytes",
  "headers-core",
- "http",
+ "http 1.0.0",
  "httpdate",
  "mime",
  "sha1",
@@ -2690,11 +2690,11 @@ dependencies = [
 
 [[package]]
 name = "headers-core"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e7f66481bfee273957b1f20485a4ff3362987f85b2c236580d81b4eb7a326429"
+checksum = "54b4a22553d4242c49fddb9ba998a99962b5cc6f22cb5a3482bec22522403ce4"
 dependencies = [
- "http",
+ "http 1.0.0",
 ]
 
 [[package]]
@@ -2811,13 +2811,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "http"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b32afd38673a8016f7c9ae69e5af41a58f81b1d31689040f2f1959594ce194ea"
+dependencies = [
+ "bytes",
+ "fnv",
+ "itoa",
+]
+
+[[package]]
 name = "http-body"
 version = "0.4.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d5f38f16d184e36f2408a55281cd658ecbd3ca05cce6d6510a176eca393e26d1"
 dependencies = [
  "bytes",
- "http",
+ "http 0.2.11",
  "pin-project-lite",
 ]
 
@@ -2850,7 +2861,7 @@ dependencies = [
  "crossbeam-channel",
  "form_urlencoded",
  "futures",
- "http",
+ "http 0.2.11",
  "hyper",
  "log",
  "once_cell",
@@ -2937,7 +2948,7 @@ dependencies = [
  "futures-core",
  "futures-util",
  "h2",
- "http",
+ "http 0.2.11",
  "http-body",
  "httparse",
  "httpdate",
@@ -2957,7 +2968,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec3efd23720e2049821a693cbc7e65ea87c72f1c58ff2f9522ff332b1491e590"
 dependencies = [
  "futures-util",
- "http",
+ "http 0.2.11",
  "hyper",
  "log",
  "rustls",
@@ -2973,7 +2984,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "318ca89e4827e7fe4ddd2824f52337239796ae8ecc761a663324407dc3d8d7e7"
 dependencies = [
  "futures-util",
- "http",
+ "http 0.2.11",
  "http-range",
  "httpdate",
  "hyper",
@@ -3182,7 +3193,7 @@ dependencies = [
  "futures",
  "hex",
  "hex-literal",
- "http",
+ "http 0.2.11",
  "illumos-utils",
  "installinator-artifact-client",
  "installinator-common",
@@ -3882,7 +3893,7 @@ dependencies = [
  "bytes",
  "encoding_rs",
  "futures-util",
- "http",
+ "http 0.2.11",
  "httparse",
  "log",
  "memchr",
@@ -4019,7 +4030,7 @@ dependencies = [
  "futures",
  "gateway-client",
  "headers",
- "http",
+ "http 0.2.11",
  "hyper",
  "hyper-rustls",
  "internal-dns",
@@ -4128,7 +4139,7 @@ dependencies = [
  "gateway-messages",
  "gateway-test-utils",
  "headers",
- "http",
+ "http 0.2.11",
  "hyper",
  "internal-dns",
  "nexus-db-queries",
@@ -4464,7 +4475,7 @@ dependencies = [
  "expectorate",
  "futures",
  "hex",
- "http",
+ "http 0.2.11",
  "ipnetwork",
  "lazy_static",
  "libc",
@@ -4554,7 +4565,7 @@ dependencies = [
  "gateway-sp-comms",
  "gateway-test-utils",
  "hex",
- "http",
+ "http 0.2.11",
  "hyper",
  "illumos-utils",
  "ipcc-key-value",
@@ -4611,7 +4622,7 @@ dependencies = [
  "gateway-test-utils",
  "headers",
  "hex",
- "http",
+ "http 0.2.11",
  "httptest",
  "hubtools",
  "hyper",
@@ -4821,7 +4832,7 @@ dependencies = [
  "futures",
  "gateway-client",
  "glob",
- "http",
+ "http 0.2.11",
  "hyper",
  "hyper-staticfile",
  "illumos-utils",
@@ -4890,7 +4901,7 @@ dependencies = [
  "filetime",
  "headers",
  "hex",
- "http",
+ "http 0.2.11",
  "libc",
  "omicron-common",
  "omicron-workspace-hack",
@@ -5228,7 +5239,7 @@ dependencies = [
  "base64 0.21.5",
  "chrono",
  "futures",
- "http",
+ "http 0.2.11",
  "hyper",
  "omicron-workspace-hack",
  "progenitor",
@@ -5375,7 +5386,7 @@ dependencies = [
  "chrono",
  "dropshot",
  "futures",
- "http",
+ "http 0.2.11",
  "kstat-rs",
  "omicron-workspace-hack",
  "oximeter",
@@ -6075,7 +6086,7 @@ source = "git+https://github.com/oxidecomputer/progenitor?branch=main#9339b57628
 dependencies = [
  "getopts",
  "heck 0.4.1",
- "http",
+ "http 0.2.11",
  "indexmap 2.1.0",
  "openapiv3 2.0.0-rc.1",
  "proc-macro2",
@@ -6573,7 +6584,7 @@ dependencies = [
  "futures-core",
  "futures-util",
  "h2",
- "http",
+ "http 0.2.11",
  "http-body",
  "hyper",
  "hyper-rustls",
@@ -8909,7 +8920,7 @@ dependencies = [
  "byteorder",
  "bytes",
  "data-encoding",
- "http",
+ "http 0.2.11",
  "httparse",
  "log",
  "rand 0.8.5",
@@ -9528,7 +9539,7 @@ dependencies = [
  "gateway-messages",
  "gateway-test-utils",
  "hex",
- "http",
+ "http 0.2.11",
  "hubtools",
  "hyper",
  "illumos-utils",
