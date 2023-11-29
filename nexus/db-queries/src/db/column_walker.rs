@@ -24,53 +24,51 @@ impl<T> ColumnWalker<T> {
 }
 
 macro_rules! impl_column_walker {
-    ( $($column:ident)+ ) => (
+    ( $len:literal $($column:ident)+ ) => (
         impl<$($column: Column),+> IntoIterator for ColumnWalker<($($column,)+)> {
             type Item = &'static str;
-            type IntoIter = std::vec::IntoIter<Self::Item>;
+            type IntoIter = std::array::IntoIter<Self::Item, $len>;
 
             fn into_iter(self) -> Self::IntoIter {
-                // TODO: don't convert to vec? You'll need to figure
-                // out how to state the type of IntoIter.
-                [$($column::NAME,)+].to_vec().into_iter()
+                [$($column::NAME,)+].into_iter()
             }
         }
     );
 }
 
 // implementations for 1 - 32 columns
-impl_column_walker! { A }
-impl_column_walker! { A B }
-impl_column_walker! { A B C }
-impl_column_walker! { A B C D }
-impl_column_walker! { A B C D E }
-impl_column_walker! { A B C D E F }
-impl_column_walker! { A B C D E F G }
-impl_column_walker! { A B C D E F G H }
-impl_column_walker! { A B C D E F G H I }
-impl_column_walker! { A B C D E F G H I J }
-impl_column_walker! { A B C D E F G H I J K }
-impl_column_walker! { A B C D E F G H I J K L }
-impl_column_walker! { A B C D E F G H I J K L M }
-impl_column_walker! { A B C D E F G H I J K L M N }
-impl_column_walker! { A B C D E F G H I J K L M N O }
-impl_column_walker! { A B C D E F G H I J K L M N O P }
-impl_column_walker! { A B C D E F G H I J K L M N O P Q }
-impl_column_walker! { A B C D E F G H I J K L M N O P Q R }
-impl_column_walker! { A B C D E F G H I J K L M N O P Q R S }
-impl_column_walker! { A B C D E F G H I J K L M N O P Q R S T }
-impl_column_walker! { A B C D E F G H I J K L M N O P Q R S T U }
-impl_column_walker! { A B C D E F G H I J K L M N O P Q R S T U V }
-impl_column_walker! { A B C D E F G H I J K L M N O P Q R S T U V W }
-impl_column_walker! { A B C D E F G H I J K L M N O P Q R S T U V W X }
-impl_column_walker! { A B C D E F G H I J K L M N O P Q R S T U V W X Y }
-impl_column_walker! { A B C D E F G H I J K L M N O P Q R S T U V W X Y Z }
-impl_column_walker! { A B C D E F G H I J K L M N O P Q R S T U V W X Y Z A1 }
-impl_column_walker! { A B C D E F G H I J K L M N O P Q R S T U V W X Y Z A1 B1 }
-impl_column_walker! { A B C D E F G H I J K L M N O P Q R S T U V W X Y Z A1 B1 C1 }
-impl_column_walker! { A B C D E F G H I J K L M N O P Q R S T U V W X Y Z A1 B1 C1 D1 }
-impl_column_walker! { A B C D E F G H I J K L M N O P Q R S T U V W X Y Z A1 B1 C1 D1 E1 }
-impl_column_walker! { A B C D E F G H I J K L M N O P Q R S T U V W X Y Z A1 B1 C1 D1 E1 F1 }
+impl_column_walker! { 1 A }
+impl_column_walker! { 2 A B }
+impl_column_walker! { 3 A B C }
+impl_column_walker! { 4 A B C D }
+impl_column_walker! { 5 A B C D E }
+impl_column_walker! { 6 A B C D E F }
+impl_column_walker! { 7 A B C D E F G }
+impl_column_walker! { 8 A B C D E F G H }
+impl_column_walker! { 9 A B C D E F G H I }
+impl_column_walker! { 10 A B C D E F G H I J }
+impl_column_walker! { 11 A B C D E F G H I J K }
+impl_column_walker! { 12 A B C D E F G H I J K L }
+impl_column_walker! { 13 A B C D E F G H I J K L M }
+impl_column_walker! { 14 A B C D E F G H I J K L M N }
+impl_column_walker! { 15 A B C D E F G H I J K L M N O }
+impl_column_walker! { 16 A B C D E F G H I J K L M N O P }
+impl_column_walker! { 17 A B C D E F G H I J K L M N O P Q }
+impl_column_walker! { 18 A B C D E F G H I J K L M N O P Q R }
+impl_column_walker! { 19 A B C D E F G H I J K L M N O P Q R S }
+impl_column_walker! { 20 A B C D E F G H I J K L M N O P Q R S T }
+impl_column_walker! { 21 A B C D E F G H I J K L M N O P Q R S T U }
+impl_column_walker! { 22 A B C D E F G H I J K L M N O P Q R S T U V }
+impl_column_walker! { 23 A B C D E F G H I J K L M N O P Q R S T U V W }
+impl_column_walker! { 24 A B C D E F G H I J K L M N O P Q R S T U V W X }
+impl_column_walker! { 25 A B C D E F G H I J K L M N O P Q R S T U V W X Y }
+impl_column_walker! { 26 A B C D E F G H I J K L M N O P Q R S T U V W X Y Z }
+impl_column_walker! { 27 A B C D E F G H I J K L M N O P Q R S T U V W X Y Z A1 }
+impl_column_walker! { 28 A B C D E F G H I J K L M N O P Q R S T U V W X Y Z A1 B1 }
+impl_column_walker! { 29 A B C D E F G H I J K L M N O P Q R S T U V W X Y Z A1 B1 C1 }
+impl_column_walker! { 30 A B C D E F G H I J K L M N O P Q R S T U V W X Y Z A1 B1 C1 D1 }
+impl_column_walker! { 31 A B C D E F G H I J K L M N O P Q R S T U V W X Y Z A1 B1 C1 D1 E1 }
+impl_column_walker! { 32 A B C D E F G H I J K L M N O P Q R S T U V W X Y Z A1 B1 C1 D1 E1 F1 }
 
 #[cfg(test)]
 mod test {
