@@ -202,6 +202,8 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(instance_network_interface_delete)?;
 
         api.register(instance_external_ip_list)?;
+        api.register(instance_external_ip_attach)?;
+        api.register(instance_external_ip_detach)?;
 
         api.register(vpc_router_list)?;
         api.register(vpc_router_view)?;
@@ -2478,6 +2480,8 @@ async fn instance_disk_detach(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+
+
 // Certificates
 
 /// List certificates for external endpoints
@@ -3639,6 +3643,68 @@ async fn instance_external_ip_list(
         let ips =
             nexus.instance_list_external_ips(&opctx, &instance_lookup).await?;
         Ok(HttpResponseOk(ResultsPage { items: ips, next_page: None }))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Attach an external IP to an instance
+#[endpoint {
+    method = POST,
+    path = "/v1/instances/{instance}/external-ips/attach",
+    tags = ["instances"],
+}]
+async fn instance_external_ip_attach(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::InstancePath>,
+    query_params: Query<params::OptionalProjectSelector>,
+    ip_to_detach: TypedBody<params::ExternalIpCreate>,
+) -> Result<HttpResponseAccepted<views::ExternalIp>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let instance_selector = params::InstanceSelector {
+            project: query.project,
+            instance: path.instance,
+        };
+        let instance_lookup =
+            nexus.instance_lookup(&opctx, instance_selector)?;
+        let disk =
+            nexus.instance_attach_external_ip(&opctx, &instance_lookup, &ip_to_detach.into_inner()).await?;
+        Ok(HttpResponseAccepted(disk.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Detach an external IP from an instance
+#[endpoint {
+    method = POST,
+    path = "/v1/instances/{instance}/external-ips/detach",
+    tags = ["instances"],
+}]
+async fn instance_external_ip_detach(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::InstancePath>,
+    query_params: Query<params::OptionalProjectSelector>,
+    ip_to_detach: TypedBody<params::ExternalIpDelete>,
+) -> Result<HttpResponseAccepted<views::ExternalIp>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let instance_selector = params::InstanceSelector {
+            project: query.project,
+            instance: path.instance,
+        };
+        let instance_lookup =
+            nexus.instance_lookup(&opctx, instance_selector)?;
+        let disk =
+            nexus.instance_detach_external_ip(&opctx, &instance_lookup, &ip_to_detach.into_inner()).await?;
+        Ok(HttpResponseAccepted(disk.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

@@ -825,3 +825,11 @@ pub struct CleanupContextUpdate {
     /// The new limit on the underlying dataset quota allowed for bundles.
     pub storage_limit: Option<u8>,
 }
+
+/// Used to dynamically update external IPs attached to an instance.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case", tag = "type", content = "value")]
+pub enum InstanceExternalIpBody {
+    Ephemeral(IpAddr),
+    Floating(IpAddr),
+}

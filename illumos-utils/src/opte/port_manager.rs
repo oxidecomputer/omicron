@@ -29,6 +29,7 @@ use oxide_vpc::api::MacAddr;
 use oxide_vpc::api::RouterTarget;
 use oxide_vpc::api::SNat4Cfg;
 use oxide_vpc::api::SNat6Cfg;
+use oxide_vpc::api::SetExternalIpsReq;
 use oxide_vpc::api::VpcCfg;
 use slog::debug;
 use slog::error;
@@ -399,6 +400,119 @@ impl PortManager {
             "port" => ?&port,
         );
         Ok((port, ticket))
+    }
+
+    /// Ensure external IPs for an OPTE port are up to date.
+    #[cfg_attr(not(target_os = "illumos"), allow(unused_variables))]
+    pub fn external_ips_ensure(
+        &self,
+        nic_id: Uuid,
+        nic_kind: NetworkInterfaceKind,
+        source_nat: Option<SourceNatConfig>,
+        ephemeral_ip: Option<IpAddr>,
+        floating_ips: &[IpAddr],
+    ) -> Result<(), Error> {
+        // TODO: new errors
+        let ports = self.inner.ports.lock().unwrap();
+        let port = ports
+            .get(&(nic_id, nic_kind))
+            .ok_or_else(|| Error::ReleaseMissingPort(nic_id, nic_kind))?;
+
+        // Describe the external IP addresses for this port.
+        macro_rules! ip_cfg {
+            ($ip:expr, $log_prefix:literal, $ip_t:path, $cidr_t:path,
+             $ipcfg_e:path, $ipcfg_t:ident, $snat_t:ident) => {{
+                let snat = match source_nat {
+                    Some(snat) => {
+                        let $ip_t(snat_ip) = snat.ip else {
+                            error!(
+                                self.inner.log,
+                                concat!($log_prefix, " SNAT config");
+                                "snat_ip" => ?snat.ip,
+                            );
+                            return Err(Error::InvalidPortIpConfig);
+                        };
+                        let ports = snat.first_port..=snat.last_port;
+                        Some($snat_t { external_ip: snat_ip.into(), ports })
+                    }
+                    None => None,
+                };
+                let ephemeral_ip = match ephemeral_ip {
+                    Some($ip_t(ip)) => Some(ip.into()),
+                    Some(_) => {
+                        error!(
+                            self.inner.log,
+                            concat!($log_prefix, " ephemeral IP");
+                            "ephemeral_ip" => ?ephemeral_ip,
+                        );
+                        return Err(Error::InvalidPortIpConfig);
+                    }
+                    None => None,
+                };
+                let floating_ips: Vec<_> = floating_ips
+                    .iter()
+                    .copied()
+                    .map(|ip| match ip {
+                        $ip_t(ip) => Ok(ip.into()),
+                        _ => {
+                            error!(
+                                self.inner.log,
+                                concat!($log_prefix, " ephemeral IP");
+                                "ephemeral_ip" => ?ephemeral_ip,
+                            );
+                            Err(Error::InvalidPortIpConfig)
+                        }
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                ExternalIpCfg {
+                    ephemeral_ip,
+                    snat,
+                    floating_ips,
+                }
+            }}
+        }
+
+        let mut v4_cfg = None;
+        let mut v6_cfg = None;
+        match port.gateway().ip {
+            IpAddr::V4(_) => {
+                v4_cfg = Some(ip_cfg!(
+                    ip,
+                    "Expected IPv4",
+                    IpAddr::V4,
+                    IpCidr::Ip4,
+                    IpCfg::Ipv4,
+                    Ipv4Cfg,
+                    SNat4Cfg
+                ))
+            }
+            IpAddr::V6(_) => {
+                v6_cfg = Some(ip_cfg!(
+                    ip,
+                    "Expected IPv6",
+                    IpAddr::V6,
+                    IpCidr::Ip6,
+                    IpCfg::Ipv6,
+                    Ipv6Cfg,
+                    SNat6Cfg
+                ))
+            }
+        }
+
+        let req = SetExternalIpsReq {
+            port_name: port.name().into(),
+            external_ips_v4: v4_cfg,
+            external_ips_v6: v6_cfg,
+        };
+
+        #[cfg(target_os = "illumos")]
+        let hdl = opte_ioctl::OpteHdl::open(opte_ioctl::OpteHdl::XDE_CTL)?;
+
+        #[cfg(target_os = "illumos")]
+        hdl.set_external_ips(&req)?;
+
+        Ok(())
     }
 
     #[cfg(target_os = "illumos")]

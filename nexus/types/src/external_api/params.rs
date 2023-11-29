@@ -922,6 +922,13 @@ pub enum ExternalIpCreate {
     Floating { floating_ip_name: Name },
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ExternalIpDelete {
+    Ephemeral,
+    Floating { floating_ip_name: Name },
+}
+
 /// Create-time parameters for an `Instance`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceCreate {

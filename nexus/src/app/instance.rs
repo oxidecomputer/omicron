@@ -26,6 +26,7 @@ use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::lookup::LookupPath;
+use nexus_types::external_api::views;
 use omicron_common::address::PROPOLIS_PORT;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::ByteCount;
@@ -1871,6 +1872,105 @@ impl super::Nexus {
         }
 
         Ok(())
+    }
+
+    /// Detach a disk from an instance.
+    pub(crate) async fn instance_attach_external_ip(
+        &self,
+        opctx: &OpContext,
+        instance_lookup: &lookup::Instance<'_>,
+        ext_ip: &params::ExternalIpCreate,
+    ) -> UpdateResult<views::ExternalIp> {
+        let (.., authz_project, authz_instance) =
+            instance_lookup.lookup_for(authz::Action::Modify).await?;
+
+        let (authz_fip, db_fip) = match ext_ip {
+            params::ExternalIpCreate::Ephemeral { pool_name } => Err(Error::internal_error("ephemeral IP attach/detach not yet supported"))?,
+            params::ExternalIpCreate::Floating { floating_ip_name } => {
+                let floating_ip_name = db::model::Name(floating_ip_name.clone());
+                let (.., authz_fip, db_fip) = LookupPath::new(&opctx, &self.datastore())
+                    .project_id(authz_project.id())
+                    .floating_ip_name(&floating_ip_name)
+                    .fetch_for(authz::Action::Modify)
+                    .await?;
+                (authz_fip, db_fip)
+            },
+        };
+
+        let (eip, sled_uuid) = self
+            .datastore()
+            .floating_ip_attach(opctx, &authz_fip, &db_fip, authz_instance.id())
+            .await?;
+
+        if let Some(uuid) = sled_uuid {
+            self.sled_client(&uuid)
+                .await?
+                .instance_put_external_ip(&authz_instance.id(), &sled_agent_client::types::InstanceExternalIpBody::Floating(db_fip.ip.ip()))
+                .await?;
+
+            let (.., sled) = self.sled_lookup(opctx, &uuid)?.fetch().await?;
+
+            let boundary_switches = self.boundary_switches(opctx)
+                .await?;
+
+            for switch in boundary_switches {
+                let dpd_client =
+                    self.dpd_clients.get(&switch).ok_or_else(|| {
+                        Error::internal_error(&format!(
+                            "unable to find client for switch {switch}"
+                        ))
+                    })?;
+
+                self.instance_ensure_dpd_config(
+                    &opctx,
+                    authz_instance.id(),
+                    &sled.address(),
+                    None,
+                    dpd_client,
+                )
+                .await?;
+            }
+        }
+
+        Ok(views::ExternalIp::from(views::FloatingIp::from(eip)))
+    }
+
+    /// Detach a disk from an instance.
+    pub(crate) async fn instance_detach_external_ip(
+        &self,
+        opctx: &OpContext,
+        instance_lookup: &lookup::Instance<'_>,
+        ext_ip: &params::ExternalIpDelete,
+    ) -> UpdateResult<views::ExternalIp> {
+        let (.., authz_project, authz_instance) =
+            instance_lookup.lookup_for(authz::Action::Modify).await?;
+
+        let (authz_fip, db_fip) = match ext_ip {
+            params::ExternalIpDelete::Ephemeral => Err(Error::internal_error("ephemeral IP attach/detach not yet supported"))?,
+            params::ExternalIpDelete::Floating { floating_ip_name } => {
+                let floating_ip_name = db::model::Name(floating_ip_name.clone());
+                let (.., authz_fip, db_fip) = LookupPath::new(&opctx, &self.datastore())
+                    .project_id(authz_project.id())
+                    .floating_ip_name(&floating_ip_name)
+                    .fetch_for(authz::Action::Modify)
+                    .await?;
+                (authz_fip, db_fip)
+            },
+        };
+
+        let (eip, sled_uuid) = self
+            .datastore()
+            .floating_ip_detach(opctx, &authz_fip, &db_fip, Some(authz_instance.id()))
+            .await?;
+
+        if let Some(uuid) = sled_uuid {
+            self.sled_client(&uuid)
+                .await?
+                .instance_delete_external_ip(&authz_instance.id(), &sled_agent_client::types::InstanceExternalIpBody::Floating(db_fip.ip.ip()))
+                .await?;
+        }
+
+        Ok(views::ExternalIp::from(views::FloatingIp::from(eip)))
     }
 }
 

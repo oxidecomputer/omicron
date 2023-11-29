@@ -10,8 +10,8 @@ use crate::common::instance::{
 };
 use crate::instance_manager::{InstanceManagerServices, InstanceTicket};
 use crate::nexus::NexusClientWithResolver;
-use crate::params::ZoneBundleCause;
 use crate::params::ZoneBundleMetadata;
+use crate::params::{InstanceExternalIpBody, ZoneBundleCause};
 use crate::params::{
     InstanceHardware, InstanceMigrationSourceParams,
     InstanceMigrationTargetParams, InstanceStateRequested, VpcFirewallRule,
@@ -1093,5 +1093,100 @@ impl Instance {
         } else {
             Err(Error::InstanceNotRunning(inner.properties.id))
         }
+    }
+
+    pub async fn add_external_ip(
+        &self,
+        ip: &InstanceExternalIpBody,
+    ) -> Result<(), Error> {
+        let mut inner = self.inner.lock().await;
+
+        // TODO: not enforcing v4 + v6 very well here.
+        // TODO: reset state on fail.
+        // TODO: error handling is garbage
+        match ip {
+            InstanceExternalIpBody::Ephemeral(_)
+                if inner.ephemeral_ip.is_some() =>
+            {
+                return Err(Error::Timeout(
+                    "Ephemeral IP already attached".into(),
+                ));
+            }
+            InstanceExternalIpBody::Ephemeral(ip) => {
+                inner.ephemeral_ip = Some(*ip);
+            }
+            InstanceExternalIpBody::Floating(ip)
+                if inner.floating_ips.contains(ip) =>
+            {
+                return Err(Error::Timeout(
+                    "Floating IP currently attached to self".into(),
+                ));
+            }
+            InstanceExternalIpBody::Floating(ip) => {
+                inner.floating_ips.push(*ip);
+            }
+        }
+
+        // TODO: actually care about multiple NICs in a sane way.
+        let nic_id = inner.requested_nics[0].id;
+        let nic_kind = inner.requested_nics[0].kind;
+
+        inner.port_manager.external_ips_ensure(
+            nic_id,
+            nic_kind,
+            Some(inner.source_nat),
+            inner.ephemeral_ip,
+            &inner.floating_ips,
+        )?;
+
+        Ok(())
+    }
+
+    pub async fn delete_external_ip(
+        &self,
+        ip: &InstanceExternalIpBody,
+    ) -> Result<(), Error> {
+        let mut inner = self.inner.lock().await;
+
+        // TODO: not enforcing v4 + v6 very well here.
+        // TODO: error handling is garbage
+        // TODO: reset state on fail.
+        match ip {
+            InstanceExternalIpBody::Ephemeral(ip)
+                if inner.ephemeral_ip != Some(*ip) =>
+            {
+                return Err(Error::Timeout(
+                    "Couldn't detach intended Ephemeral IP: mismatch".into(),
+                ));
+            }
+            InstanceExternalIpBody::Ephemeral(_) => {
+                inner.ephemeral_ip = None;
+            }
+            InstanceExternalIpBody::Floating(ip) => {
+                let floating_index =
+                    inner.floating_ips.iter().position(|v| v == ip);
+                if let Some(pos) = floating_index {
+                    inner.floating_ips.swap_remove(pos);
+                } else {
+                    return Err(Error::Timeout(
+                        "Target Floating IP not attached to self".into(),
+                    ));
+                }
+            }
+        }
+
+        // TODO: actually care about multiple NICs in a sane way.
+        let nic_id = inner.requested_nics[0].id;
+        let nic_kind = inner.requested_nics[0].kind;
+
+        inner.port_manager.external_ips_ensure(
+            nic_id,
+            nic_kind,
+            Some(inner.source_nat),
+            inner.ephemeral_ip,
+            &inner.floating_ips,
+        )?;
+
+        Ok(())
     }
 }

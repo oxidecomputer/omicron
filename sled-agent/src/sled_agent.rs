@@ -16,9 +16,9 @@ use crate::long_running_tasks::LongRunningTaskHandles;
 use crate::metrics::MetricsManager;
 use crate::nexus::{ConvertInto, NexusClientWithResolver, NexusRequestQueue};
 use crate::params::{
-    DiskStateRequested, InstanceHardware, InstanceMigrationSourceParams,
+    DiskStateRequested, InstanceExternalIpBody, InstanceHardware, InstanceMigrationSourceParams,
     InstancePutStateResponse, InstanceStateRequested,
-    InstanceUnregisterResponse, OmicronZonesConfig, SledRole, TimeSync,
+    InstanceUnregisterResponse, ServiceEnsureBody, SledRole, TimeSync,
     VpcFirewallRule, ZoneBundleMetadata, Zpool,
 };
 use crate::services::{self, ServiceManager};
@@ -946,6 +946,30 @@ impl SledAgent {
         self.inner
             .instances
             .put_migration_ids(instance_id, old_runtime, migration_ids)
+            .await
+            .map_err(|e| Error::Instance(e))
+    }
+
+    pub async fn instance_put_external_ip(
+        &self,
+        instance_id: Uuid,
+        external_ip: &InstanceExternalIpBody,
+    ) -> Result<(), Error> {
+        self.inner
+            .instances
+            .add_external_ip(instance_id, external_ip)
+            .await
+            .map_err(|e| Error::Instance(e))
+    }
+
+    pub async fn instance_delete_external_ip(
+        &self,
+        instance_id: Uuid,
+        external_ip: &InstanceExternalIpBody,
+    ) -> Result<(), Error> {
+        self.inner
+            .instances
+            .delete_external_ip(instance_id, external_ip)
             .await
             .map_err(|e| Error::Instance(e))
     }

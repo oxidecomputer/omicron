@@ -286,6 +286,12 @@ pub struct FloatingIp {
     pub instance_id: Option<Uuid>,
 }
 
+impl From<FloatingIp> for ExternalIp {
+    fn from(value: FloatingIp) -> Self {
+        ExternalIp { ip: value.ip, kind: IpKind::Floating }
+    }
+}
+
 // RACKS
 
 /// View of an Rack
