@@ -8,6 +8,7 @@ use crate::internal_api::params::{
     PhysicalDiskDeleteRequest, PhysicalDiskPutRequest, SledAgentStartupInfo,
     SledRole, ZpoolPutRequest,
 };
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::lookup;
@@ -149,8 +150,10 @@ impl super::Nexus {
         sled_lookup: &lookup::Sled<'_>,
         state: db::model::SledProvisionState,
     ) -> Result<db::model::SledProvisionState, Error> {
+        let (authz_sled,) =
+            sled_lookup.lookup_for(authz::Action::Modify).await?;
         self.db_datastore
-            .sled_set_provision_state(opctx, sled_lookup, state)
+            .sled_set_provision_state(opctx, &authz_sled, state)
             .await
     }
 
