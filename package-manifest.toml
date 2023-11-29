@@ -386,7 +386,7 @@ source.type = "prebuilt"
 source.repo = "crucible"
 source.commit = "945f040d259ca8013d3fb26f510453da7cd7b1a6"
 # The SHA256 digest is automatically posted to:
-# https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/rbuild/<commit>/crucible.sha256.txt
+# https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible.sha256.txt
 source.sha256 = "f8c23cbf89fd0bbd928d8e3db1357bbea6e6b50560e221f873da5b56ed9d7527"
 output.type = "zone"
 
@@ -397,7 +397,7 @@ source.type = "prebuilt"
 source.repo = "crucible"
 source.commit = "945f040d259ca8013d3fb26f510453da7cd7b1a6"
 # The SHA256 digest is automatically posted to:
-# https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/rbuild/<commit>/crucible-pantry.sha256.txt
+# https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible-pantry.sha256.txt
 source.sha256 = "a25b31c81798eb65564dbe259858fdd9715784d212d3508791b1ef0cf6d17da6"
 output.type = "zone"
 
