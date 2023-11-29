@@ -1671,9 +1671,9 @@ dependencies = [
 
 [[package]]
 name = "diesel_derives"
-version = "2.1.1"
+version = "2.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e054665eaf6d97d1e7125512bb2d35d07c73ac86cc6920174cb42d1ab697a554"
+checksum = "ef8337737574f55a468005a83499da720f20c65586241ffea339db9ecdfd2b44"
 dependencies = [
  "diesel_table_macro_syntax",
  "proc-macro2",
@@ -3993,6 +3993,7 @@ dependencies = [
  "sled-agent-client",
  "steno",
  "strum",
+ "thiserror",
  "uuid",
 ]
 
@@ -4178,6 +4179,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "serde_with",
  "steno",
  "strum",
  "uuid",

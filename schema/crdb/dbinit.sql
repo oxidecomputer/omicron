@@ -73,6 +73,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.rack (
  * Sleds
  */
 
+CREATE TYPE IF NOT EXISTS omicron.public.sled_provision_state AS ENUM (
+    -- New resources can be provisioned onto the sled
+    'provisionable',
+    -- New resources must not be provisioned onto the sled
+    'non_provisionable'
+);
+
 CREATE TABLE IF NOT EXISTS omicron.public.sled (
     /* Identity metadata (asset) */
     id UUID PRIMARY KEY,
@@ -103,6 +110,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.sled (
 
     /* The last address allocated to an Oxide service on this sled. */
     last_used_address INET NOT NULL,
+
+    /* The state of whether resources should be provisioned onto the sled */
+    provision_state omicron.public.sled_provision_state NOT NULL,
 
     -- This constraint should be upheld, even for deleted disks
     -- in the fleet.
@@ -2997,7 +3007,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '14.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '15.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

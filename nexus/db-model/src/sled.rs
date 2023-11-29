@@ -4,8 +4,8 @@
 
 use super::{ByteCount, Generation, SqlU16, SqlU32};
 use crate::collection::DatastoreCollectionConfig;
-use crate::ipv6;
 use crate::schema::{physical_disk, service, sled, zpool};
+use crate::{ipv6, SledProvisionState};
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
 use nexus_types::{external_api::shared, external_api::views, identity::Asset};
@@ -59,6 +59,8 @@ pub struct Sled {
 
     /// The last IP address provided to an Oxide service on this sled
     pub last_used_address: ipv6::Ipv6Addr,
+
+    provision_state: SledProvisionState,
 }
 
 impl Sled {
@@ -81,6 +83,10 @@ impl Sled {
     pub fn serial_number(&self) -> &str {
         &self.serial_number
     }
+
+    pub fn provision_state(&self) -> SledProvisionState {
+        self.provision_state
+    }
 }
 
 impl From<Sled> for views::Sled {
@@ -93,6 +99,7 @@ impl From<Sled> for views::Sled {
                 part: sled.part_number,
                 revision: sled.revision,
             },
+            provision_state: sled.provision_state.into(),
             usable_hardware_threads: sled.usable_hardware_threads.0,
             usable_physical_ram: *sled.usable_physical_ram,
         }
@@ -188,6 +195,8 @@ impl SledUpdate {
             serial_number: self.serial_number,
             part_number: self.part_number,
             revision: self.revision,
+            // By default, sleds start as provisionable.
+            provision_state: SledProvisionState::Provisionable,
             usable_hardware_threads: self.usable_hardware_threads,
             usable_physical_ram: self.usable_physical_ram,
             reservoir_size: self.reservoir_size,
