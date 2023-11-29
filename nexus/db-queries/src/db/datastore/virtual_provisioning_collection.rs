@@ -103,14 +103,17 @@ impl DataStore {
         id: Uuid,
     ) -> DeleteResult {
         let conn = self.pool_connection_authorized(opctx).await?;
-        self.virtual_provisioning_collection_delete_on_connection(&conn, id)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+        self.virtual_provisioning_collection_delete_on_connection(
+            &opctx.log, &conn, id,
+        )
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Delete a [`VirtualProvisioningCollection`] object.
     pub(crate) async fn virtual_provisioning_collection_delete_on_connection(
         &self,
+        log: &slog::Logger,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         id: Uuid,
     ) -> Result<(), DieselError> {
@@ -124,10 +127,11 @@ impl DataStore {
             .returning(VirtualProvisioningCollection::as_select())
             .get_result_async(conn)
             .await?;
-        assert!(
-            collection.is_empty(),
-            "Collection deleted while non-empty: {collection:?}"
-        );
+
+        if !collection.is_empty() {
+            warn!(log, "Collection deleted while non-empty: {collection:?}");
+            return Err(DieselError::RollbackTransaction);
+        }
         Ok(())
     }
 

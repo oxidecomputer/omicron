@@ -648,6 +648,7 @@ mod tests {
     use hyper::Response;
     use hyper::Server;
     use hyper::StatusCode;
+    use omicron_common::api::internal::nexus::ProducerKind;
     use omicron_test_utils::dev::test_setup_log;
     use std::convert::Infallible;
     use std::net::Ipv6Addr;
@@ -657,6 +658,24 @@ mod tests {
     use tokio::sync::oneshot;
     use tokio::time::Instant;
     use uuid::Uuid;
+
+    // Interval on which oximeter collects from producers in these tests.
+    const COLLECTION_INTERVAL: Duration = Duration::from_secs(1);
+
+    // Interval in calls to `tokio::time::advance`. This must be sufficiently
+    // small relative to `COLLECTION_INTERVAL` to ensure all ticks of internal
+    // timers complete as expected.
+    const TICK_INTERVAL: Duration = Duration::from_millis(10);
+
+    // Total number of collection attempts.
+    const N_COLLECTIONS: u64 = 5;
+
+    // Period these tests wait using `tokio::time::advance()` before checking
+    // their test conditions.
+    const TEST_WAIT_PERIOD: Duration = Duration::from_millis(
+        COLLECTION_INTERVAL.as_millis() as u64 * N_COLLECTIONS
+            + COLLECTION_INTERVAL.as_millis() as u64 / 2,
+    );
 
     // Test that we count successful collections from a target correctly.
     #[tokio::test]
@@ -691,12 +710,12 @@ mod tests {
         let _task = tokio::task::spawn(server);
 
         // Register the dummy producer.
-        let interval = Duration::from_secs(1);
         let endpoint = ProducerEndpoint {
             id: Uuid::new_v4(),
+            kind: Some(ProducerKind::Service),
             address,
             base_route: String::from("/"),
-            interval,
+            interval: COLLECTION_INTERVAL,
         };
         collector
             .register_producer(endpoint)
@@ -706,10 +725,8 @@ mod tests {
         // Step time until there has been exactly `N_COLLECTIONS` collections.
         tokio::time::pause();
         let now = Instant::now();
-        const N_COLLECTIONS: usize = 5;
-        let wait_for = interval * N_COLLECTIONS as u32 + interval / 2;
-        while now.elapsed() < wait_for {
-            tokio::time::advance(interval / 10).await;
+        while now.elapsed() < TEST_WAIT_PERIOD {
+            tokio::time::advance(TICK_INTERVAL).await;
         }
 
         // Request the statistics from the task itself.
@@ -727,7 +744,7 @@ mod tests {
             .await
             .expect("failed to request statistics from task");
         let stats = rx.await.expect("failed to receive statistics from task");
-        assert_eq!(stats.collections.datum.value(), N_COLLECTIONS as u64);
+        assert_eq!(stats.collections.datum.value(), N_COLLECTIONS);
         assert!(stats.failed_collections.is_empty());
         logctx.cleanup_successful();
     }
@@ -749,9 +766,9 @@ mod tests {
 
         // Register a bogus producer, which is equivalent to a producer that is
         // unreachable.
-        let interval = Duration::from_secs(1);
         let endpoint = ProducerEndpoint {
             id: Uuid::new_v4(),
+            kind: Some(ProducerKind::Service),
             address: SocketAddr::V6(SocketAddrV6::new(
                 Ipv6Addr::LOCALHOST,
                 0,
@@ -759,7 +776,7 @@ mod tests {
                 0,
             )),
             base_route: String::from("/"),
-            interval,
+            interval: COLLECTION_INTERVAL,
         };
         collector
             .register_producer(endpoint)
@@ -769,10 +786,8 @@ mod tests {
         // Step time until there has been exactly `N_COLLECTIONS` collections.
         tokio::time::pause();
         let now = Instant::now();
-        const N_COLLECTIONS: usize = 5;
-        let wait_for = interval * N_COLLECTIONS as u32 + interval / 2;
-        while now.elapsed() < wait_for {
-            tokio::time::advance(interval / 10).await;
+        while now.elapsed() < TEST_WAIT_PERIOD {
+            tokio::time::advance(TICK_INTERVAL).await;
         }
 
         // Request the statistics from the task itself.
@@ -798,7 +813,7 @@ mod tests {
                 .unwrap()
                 .datum
                 .value(),
-            N_COLLECTIONS as u64
+            N_COLLECTIONS,
         );
         assert_eq!(stats.failed_collections.len(), 1);
         logctx.cleanup_successful();
@@ -837,12 +852,12 @@ mod tests {
         let _task = tokio::task::spawn(server);
 
         // Register the rather flaky producer.
-        let interval = Duration::from_secs(1);
         let endpoint = ProducerEndpoint {
             id: Uuid::new_v4(),
+            kind: Some(ProducerKind::Service),
             address,
             base_route: String::from("/"),
-            interval,
+            interval: COLLECTION_INTERVAL,
         };
         collector
             .register_producer(endpoint)
@@ -852,10 +867,8 @@ mod tests {
         // Step time until there has been exactly `N_COLLECTIONS` collections.
         tokio::time::pause();
         let now = Instant::now();
-        const N_COLLECTIONS: usize = 5;
-        let wait_for = interval * N_COLLECTIONS as u32 + interval / 2;
-        while now.elapsed() < wait_for {
-            tokio::time::advance(interval / 10).await;
+        while now.elapsed() < TEST_WAIT_PERIOD {
+            tokio::time::advance(TICK_INTERVAL).await;
         }
 
         // Request the statistics from the task itself.
@@ -881,7 +894,7 @@ mod tests {
                 .unwrap()
                 .datum
                 .value(),
-            N_COLLECTIONS as u64
+            N_COLLECTIONS,
         );
         assert_eq!(stats.failed_collections.len(), 1);
         logctx.cleanup_successful();

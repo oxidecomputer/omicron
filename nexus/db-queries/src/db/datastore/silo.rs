@@ -380,7 +380,7 @@ impl DataStore {
             }
 
             self.virtual_provisioning_collection_delete_on_connection(
-                &conn, id,
+                &opctx.log, &conn, id,
             )
             .await?;
 

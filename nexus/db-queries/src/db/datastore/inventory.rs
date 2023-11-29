@@ -7,11 +7,10 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::error::public_error_from_diesel;
+use crate::db::error::public_error_from_diesel_lookup;
 use crate::db::error::ErrorHandler;
 use crate::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
 use crate::db::TransactionError;
-use anyhow::anyhow;
-use anyhow::bail;
 use anyhow::Context;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -23,6 +22,7 @@ use diesel::ExpressionMethods;
 use diesel::IntoSql;
 use diesel::JoinOnDsl;
 use diesel::NullableExpressionMethods;
+use diesel::OptionalExtension;
 use diesel::QueryDsl;
 use diesel::Table;
 use futures::future::BoxFuture;
@@ -37,13 +37,20 @@ use nexus_db_model::InvCaboose;
 use nexus_db_model::InvCollection;
 use nexus_db_model::InvCollectionError;
 use nexus_db_model::InvRootOfTrust;
+use nexus_db_model::InvRotPage;
 use nexus_db_model::InvServiceProcessor;
+use nexus_db_model::RotPageWhichEnum;
 use nexus_db_model::SpType;
 use nexus_db_model::SpTypeEnum;
 use nexus_db_model::SwCaboose;
+use nexus_db_model::SwRotPage;
+use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
+use omicron_common::api::external::LookupType;
+use omicron_common::api::external::ResourceType;
+use omicron_common::bail_unless;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::num::NonZeroU32;
@@ -76,6 +83,11 @@ impl DataStore {
             .cabooses
             .iter()
             .map(|s| SwCaboose::from((**s).clone()))
+            .collect::<Vec<_>>();
+        let rot_pages = collection
+            .rot_pages
+            .iter()
+            .map(|p| SwRotPage::from((**p).clone()))
             .collect::<Vec<_>>();
         let error_values = collection
             .errors
@@ -136,6 +148,19 @@ impl DataStore {
                 use db::schema::sw_caboose::dsl;
                 let _ = diesel::insert_into(dsl::sw_caboose)
                     .values(cabooses)
+                    .on_conflict_do_nothing()
+                    .execute_async(&conn)
+                    .await?;
+            }
+
+            // Insert records (and generate ids) for each distinct RoT page that
+            // we've found.  Like baseboards, these might already be present and
+            // rows in this table are not scoped to a particular collection
+            // because they only map (immutable) identifiers to UUIDs.
+            {
+                use db::schema::sw_root_of_trust_page::dsl;
+                let _ = diesel::insert_into(dsl::sw_root_of_trust_page)
+                    .values(rot_pages)
                     .on_conflict_do_nothing()
                     .execute_async(&conn)
                     .await?;
@@ -469,6 +494,85 @@ impl DataStore {
                 }
             }
 
+            // Insert rows for the root of trust pages that we found. This is
+            // almost identical to inserting cabooses above, and just like for
+            // cabooses, we do this using INSERT INTO ... SELECT. We have these
+            // three tables:
+            //
+            // - `hw_baseboard` with an "id" primary key and lookup columns
+            //   "part_number" and "serial_number"
+            // - `sw_root_of_trust_page` with an "id" primary key and lookup
+            //   column "data_base64"
+            // - `inv_root_of_trust_page` with foreign keys "hw_baseboard_id",
+            //   "sw_root_of_trust_page_id", and various other columns
+            //
+            // and generate an INSERT INTO query that is structurally the same
+            // as the caboose query described above.
+            for (which, tree) in &collection.rot_pages_found {
+                use db::schema::hw_baseboard_id::dsl as dsl_baseboard_id;
+                use db::schema::inv_root_of_trust_page::dsl as dsl_inv_rot_page;
+                use db::schema::sw_root_of_trust_page::dsl as dsl_sw_rot_page;
+                let db_which = nexus_db_model::RotPageWhich::from(*which);
+                for (baseboard_id, found_rot_page) in tree {
+                    let selection = db::schema::hw_baseboard_id::table
+                        .inner_join(
+                            db::schema::sw_root_of_trust_page::table.on(
+                                dsl_baseboard_id::part_number
+                                    .eq(baseboard_id.part_number.clone())
+                                    .and(
+                                        dsl_baseboard_id::serial_number.eq(
+                                            baseboard_id.serial_number.clone(),
+                                        ),
+                                    )
+                                    .and(dsl_sw_rot_page::data_base64.eq(
+                                        found_rot_page.page.data_base64.clone(),
+                                    )),
+                            ),
+                        )
+                        .select((
+                            dsl_baseboard_id::id,
+                            dsl_sw_rot_page::id,
+                            collection_id.into_sql::<diesel::sql_types::Uuid>(),
+                            found_rot_page
+                                .time_collected
+                                .into_sql::<diesel::sql_types::Timestamptz>(),
+                            found_rot_page
+                                .source
+                                .clone()
+                                .into_sql::<diesel::sql_types::Text>(),
+                            db_which.into_sql::<RotPageWhichEnum>(),
+                        ));
+
+                    let _ = diesel::insert_into(
+                        db::schema::inv_root_of_trust_page::table,
+                    )
+                    .values(selection)
+                    .into_columns((
+                        dsl_inv_rot_page::hw_baseboard_id,
+                        dsl_inv_rot_page::sw_root_of_trust_page_id,
+                        dsl_inv_rot_page::inv_collection_id,
+                        dsl_inv_rot_page::time_collected,
+                        dsl_inv_rot_page::source,
+                        dsl_inv_rot_page::which,
+                    ))
+                    .execute_async(&conn)
+                    .await?;
+
+                    // See the comments above.  The same applies here.  If you
+                    // update the statement below because the schema for
+                    // `inv_root_of_trust_page` has changed, be sure to update
+                    // the code above, too!
+                    let (
+                        _hw_baseboard_id,
+                        _sw_root_of_trust_page_id,
+                        _inv_collection_id,
+                        _time_collected,
+                        _source,
+                        _which,
+                    ) = dsl_inv_rot_page::inv_root_of_trust_page::all_columns();
+                }
+            }
+
             // Finally, insert the list of errors.
             {
                 use db::schema::inv_collection_error::dsl as errors_dsl;
@@ -721,7 +825,7 @@ impl DataStore {
         // start removing it and we'd also need to make sure we didn't leak a
         // collection if we crash while deleting it.
         let conn = self.pool_connection_authorized(opctx).await?;
-        let (ncollections, nsps, nrots, ncabooses, nerrors) = conn
+        let (ncollections, nsps, nrots, ncabooses, nrot_pages, nerrors) = conn
             .transaction_async(|conn| async move {
                 // Remove the record describing the collection itself.
                 let ncollections = {
@@ -730,7 +834,7 @@ impl DataStore {
                         dsl::inv_collection.filter(dsl::id.eq(collection_id)),
                     )
                     .execute_async(&conn)
-                    .await?;
+                    .await?
                 };
 
                 // Remove rows for service processors.
@@ -741,7 +845,7 @@ impl DataStore {
                             .filter(dsl::inv_collection_id.eq(collection_id)),
                     )
                     .execute_async(&conn)
-                    .await?;
+                    .await?
                 };
 
                 // Remove rows for roots of trust.
@@ -752,7 +856,7 @@ impl DataStore {
                             .filter(dsl::inv_collection_id.eq(collection_id)),
                     )
                     .execute_async(&conn)
-                    .await?;
+                    .await?
                 };
 
                 // Remove rows for cabooses found.
@@ -763,7 +867,18 @@ impl DataStore {
                             .filter(dsl::inv_collection_id.eq(collection_id)),
                     )
                     .execute_async(&conn)
-                    .await?;
+                    .await?
+                };
+
+                // Remove rows for root of trust pages found.
+                let nrot_pages = {
+                    use db::schema::inv_root_of_trust_page::dsl;
+                    diesel::delete(
+                        dsl::inv_root_of_trust_page
+                            .filter(dsl::inv_collection_id.eq(collection_id)),
+                    )
+                    .execute_async(&conn)
+                    .await?
                 };
 
                 // Remove rows for errors encountered.
@@ -774,10 +889,10 @@ impl DataStore {
                             .filter(dsl::inv_collection_id.eq(collection_id)),
                     )
                     .execute_async(&conn)
-                    .await?;
+                    .await?
                 };
 
-                Ok((ncollections, nsps, nrots, ncabooses, nerrors))
+                Ok((ncollections, nsps, nrots, ncabooses, nrot_pages, nerrors))
             })
             .await
             .map_err(|error| match error {
@@ -793,10 +908,414 @@ impl DataStore {
             "nsps" => nsps,
             "nrots" => nrots,
             "ncabooses" => ncabooses,
+            "nrot_pages" => nrot_pages,
             "nerrors" => nerrors,
         );
 
         Ok(())
+    }
+
+    // Find the primary key for `hw_baseboard_id` given a `BaseboardId`
+    pub async fn find_hw_baseboard_id(
+        &self,
+        opctx: &OpContext,
+        baseboard_id: BaseboardId,
+    ) -> Result<Uuid, Error> {
+        opctx.authorize(authz::Action::Read, &authz::INVENTORY).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        use db::schema::hw_baseboard_id::dsl;
+        dsl::hw_baseboard_id
+            .filter(dsl::serial_number.eq(baseboard_id.serial_number.clone()))
+            .filter(dsl::part_number.eq(baseboard_id.part_number.clone()))
+            .select(dsl::id)
+            .first_async::<Uuid>(&*conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_lookup(
+                    e,
+                    ResourceType::Sled,
+                    &LookupType::ByCompositeId(format!("{baseboard_id:?}")),
+                )
+            })
+    }
+
+    /// Attempt to read the latest collection while limiting queries to `limit`
+    /// records
+    ///
+    /// If there aren't any collections, return `Ok(None)`.
+    pub async fn inventory_get_latest_collection(
+        &self,
+        opctx: &OpContext,
+        limit: NonZeroU32,
+    ) -> Result<Option<Collection>, Error> {
+        opctx.authorize(authz::Action::Read, &authz::INVENTORY).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        use db::schema::inv_collection::dsl;
+        let collection_id = dsl::inv_collection
+            .select(dsl::id)
+            .order_by(dsl::time_started.desc())
+            .first_async::<Uuid>(&*conn)
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        let Some(collection_id) = collection_id else {
+            return Ok(None);
+        };
+
+        Ok(Some(
+            self.inventory_collection_read_all_or_nothing(
+                opctx,
+                collection_id,
+                limit,
+            )
+            .await?,
+        ))
+    }
+
+    /// Attempt to read the given collection while limiting queries to `limit`
+    /// records and returning nothing if `limit` is not large enough.
+    async fn inventory_collection_read_all_or_nothing(
+        &self,
+        opctx: &OpContext,
+        id: Uuid,
+        limit: NonZeroU32,
+    ) -> Result<Collection, Error> {
+        let (collection, limit_reached) = self
+            .inventory_collection_read_best_effort(opctx, id, limit)
+            .await?;
+        bail_unless!(
+            !limit_reached,
+            "hit limit of {} records while loading collection",
+            limit
+        );
+        Ok(collection)
+    }
+
+    /// Make a best effort to read the given collection while limiting queries
+    /// to `limit` results. Returns as much as it was able to get. The
+    /// returned bool indicates whether the returned collection might be
+    /// incomplete because the limit was reached.
+    pub async fn inventory_collection_read_best_effort(
+        &self,
+        opctx: &OpContext,
+        id: Uuid,
+        limit: NonZeroU32,
+    ) -> Result<(Collection, bool), Error> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let sql_limit = i64::from(u32::from(limit));
+        let usize_limit = usize::try_from(u32::from(limit)).unwrap();
+        let mut limit_reached = false;
+        let (time_started, time_done, collector) = {
+            use db::schema::inv_collection::dsl;
+
+            let collections = dsl::inv_collection
+                .filter(dsl::id.eq(id))
+                .limit(2)
+                .select(InvCollection::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+            bail_unless!(collections.len() == 1);
+            let collection = collections.into_iter().next().unwrap();
+            (
+                collection.time_started,
+                collection.time_done,
+                collection.collector,
+            )
+        };
+
+        let errors: Vec<String> = {
+            use db::schema::inv_collection_error::dsl;
+            dsl::inv_collection_error
+                .filter(dsl::inv_collection_id.eq(id))
+                .order_by(dsl::idx)
+                .limit(sql_limit)
+                .select(InvCollectionError::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
+                .into_iter()
+                .map(|e| e.message)
+                .collect()
+        };
+        limit_reached = limit_reached || errors.len() == usize_limit;
+
+        let sps: BTreeMap<_, _> = {
+            use db::schema::inv_service_processor::dsl;
+            dsl::inv_service_processor
+                .filter(dsl::inv_collection_id.eq(id))
+                .limit(sql_limit)
+                .select(InvServiceProcessor::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
+                .into_iter()
+                .map(|sp_row| {
+                    let baseboard_id = sp_row.hw_baseboard_id;
+                    (
+                        baseboard_id,
+                        nexus_types::inventory::ServiceProcessor::from(sp_row),
+                    )
+                })
+                .collect()
+        };
+        limit_reached = limit_reached || sps.len() == usize_limit;
+
+        let rots: BTreeMap<_, _> = {
+            use db::schema::inv_root_of_trust::dsl;
+            dsl::inv_root_of_trust
+                .filter(dsl::inv_collection_id.eq(id))
+                .limit(sql_limit)
+                .select(InvRootOfTrust::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
+                .into_iter()
+                .map(|rot_row| {
+                    let baseboard_id = rot_row.hw_baseboard_id;
+                    (
+                        baseboard_id,
+                        nexus_types::inventory::RotState::from(rot_row),
+                    )
+                })
+                .collect()
+        };
+        limit_reached = limit_reached || rots.len() == usize_limit;
+
+        // Collect the unique baseboard ids referenced by SPs and RoTs.
+        let baseboard_id_ids: BTreeSet<_> =
+            sps.keys().chain(rots.keys()).cloned().collect();
+        // Fetch the corresponding baseboard records.
+        let baseboards_by_id: BTreeMap<_, _> = {
+            use db::schema::hw_baseboard_id::dsl;
+            dsl::hw_baseboard_id
+                .filter(dsl::id.eq_any(baseboard_id_ids))
+                .limit(sql_limit)
+                .select(HwBaseboardId::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
+                .into_iter()
+                .map(|bb| {
+                    (
+                        bb.id,
+                        Arc::new(nexus_types::inventory::BaseboardId::from(bb)),
+                    )
+                })
+                .collect()
+        };
+        limit_reached = limit_reached || baseboards_by_id.len() == usize_limit;
+
+        // Having those, we can replace the keys in the maps above with
+        // references to the actual baseboard rather than the uuid.
+        let sps = sps
+            .into_iter()
+            .map(|(id, sp)| {
+                baseboards_by_id.get(&id).map(|bb| (bb.clone(), sp)).ok_or_else(
+                    || {
+                        Error::internal_error(
+                            "missing baseboard that we should have fetched",
+                        )
+                    },
+                )
+            })
+            .collect::<Result<BTreeMap<_, _>, _>>()?;
+        let rots = rots
+            .into_iter()
+            .map(|(id, rot)| {
+                baseboards_by_id
+                    .get(&id)
+                    .map(|bb| (bb.clone(), rot))
+                    .ok_or_else(|| {
+                        Error::internal_error(
+                            "missing baseboard that we should have fetched",
+                        )
+                    })
+            })
+            .collect::<Result<BTreeMap<_, _>, _>>()?;
+
+        // Fetch records of cabooses found.
+        let inv_caboose_rows = {
+            use db::schema::inv_caboose::dsl;
+            dsl::inv_caboose
+                .filter(dsl::inv_collection_id.eq(id))
+                .limit(sql_limit)
+                .select(InvCaboose::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?
+        };
+        limit_reached = limit_reached || inv_caboose_rows.len() == usize_limit;
+
+        // Collect the unique sw_caboose_ids for those cabooses.
+        let sw_caboose_ids: BTreeSet<_> = inv_caboose_rows
+            .iter()
+            .map(|inv_caboose| inv_caboose.sw_caboose_id)
+            .collect();
+        // Fetch the corresponing records.
+        let cabooses_by_id: BTreeMap<_, _> = {
+            use db::schema::sw_caboose::dsl;
+            dsl::sw_caboose
+                .filter(dsl::id.eq_any(sw_caboose_ids))
+                .limit(sql_limit)
+                .select(SwCaboose::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
+                .into_iter()
+                .map(|sw_caboose_row| {
+                    (
+                        sw_caboose_row.id,
+                        Arc::new(nexus_types::inventory::Caboose::from(
+                            sw_caboose_row,
+                        )),
+                    )
+                })
+                .collect()
+        };
+        limit_reached = limit_reached || cabooses_by_id.len() == usize_limit;
+
+        // Assemble the lists of cabooses found.
+        let mut cabooses_found = BTreeMap::new();
+        for c in inv_caboose_rows {
+            let by_baseboard = cabooses_found
+                .entry(nexus_types::inventory::CabooseWhich::from(c.which))
+                .or_insert_with(BTreeMap::new);
+            let Some(bb) = baseboards_by_id.get(&c.hw_baseboard_id) else {
+                let msg = format!(
+                    "unknown baseboard found in inv_caboose: {}",
+                    c.hw_baseboard_id
+                );
+                return Err(Error::internal_error(&msg));
+            };
+            let Some(sw_caboose) = cabooses_by_id.get(&c.sw_caboose_id) else {
+                let msg = format!(
+                    "unknown caboose found in inv_caboose: {}",
+                    c.sw_caboose_id
+                );
+                return Err(Error::internal_error(&msg));
+            };
+
+            let previous = by_baseboard.insert(
+                bb.clone(),
+                nexus_types::inventory::CabooseFound {
+                    time_collected: c.time_collected,
+                    source: c.source,
+                    caboose: sw_caboose.clone(),
+                },
+            );
+            bail_unless!(
+                previous.is_none(),
+                "duplicate caboose found: {:?} baseboard {:?}",
+                c.which,
+                c.hw_baseboard_id
+            );
+        }
+
+        // Fetch records of RoT pages found.
+        let inv_rot_page_rows = {
+            use db::schema::inv_root_of_trust_page::dsl;
+            dsl::inv_root_of_trust_page
+                .filter(dsl::inv_collection_id.eq(id))
+                .limit(sql_limit)
+                .select(InvRotPage::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?
+        };
+        limit_reached = limit_reached || inv_rot_page_rows.len() == usize_limit;
+
+        // Collect the unique sw_rot_page_ids for those pages.
+        let sw_rot_page_ids: BTreeSet<_> = inv_rot_page_rows
+            .iter()
+            .map(|inv_rot_page| inv_rot_page.sw_root_of_trust_page_id)
+            .collect();
+        // Fetch the corresponing records.
+        let rot_pages_by_id: BTreeMap<_, _> = {
+            use db::schema::sw_root_of_trust_page::dsl;
+            dsl::sw_root_of_trust_page
+                .filter(dsl::id.eq_any(sw_rot_page_ids))
+                .limit(sql_limit)
+                .select(SwRotPage::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
+                .into_iter()
+                .map(|sw_rot_page_row| {
+                    (
+                        sw_rot_page_row.id,
+                        Arc::new(nexus_types::inventory::RotPage::from(
+                            sw_rot_page_row,
+                        )),
+                    )
+                })
+                .collect()
+        };
+        limit_reached = limit_reached || rot_pages_by_id.len() == usize_limit;
+
+        // Assemble the lists of rot pages found.
+        let mut rot_pages_found = BTreeMap::new();
+        for p in inv_rot_page_rows {
+            let by_baseboard = rot_pages_found
+                .entry(nexus_types::inventory::RotPageWhich::from(p.which))
+                .or_insert_with(BTreeMap::new);
+            let Some(bb) = baseboards_by_id.get(&p.hw_baseboard_id) else {
+                let msg = format!(
+                    "unknown baseboard found in inv_root_of_trust_page: {}",
+                    p.hw_baseboard_id
+                );
+                return Err(Error::internal_error(&msg));
+            };
+            let Some(sw_rot_page) =
+                rot_pages_by_id.get(&p.sw_root_of_trust_page_id)
+            else {
+                let msg = format!(
+                    "unknown rot page found in inv_root_of_trust_page: {}",
+                    p.sw_root_of_trust_page_id
+                );
+                return Err(Error::internal_error(&msg));
+            };
+
+            let previous = by_baseboard.insert(
+                bb.clone(),
+                nexus_types::inventory::RotPageFound {
+                    time_collected: p.time_collected,
+                    source: p.source,
+                    page: sw_rot_page.clone(),
+                },
+            );
+            bail_unless!(
+                previous.is_none(),
+                "duplicate rot page found: {:?} baseboard {:?}",
+                p.which,
+                p.hw_baseboard_id
+            );
+        }
+
+        Ok((
+            Collection {
+                id,
+                errors,
+                time_started,
+                time_done,
+                collector,
+                baseboards: baseboards_by_id.values().cloned().collect(),
+                cabooses: cabooses_by_id.values().cloned().collect(),
+                rot_pages: rot_pages_by_id.values().cloned().collect(),
+                sps,
+                rots,
+                cabooses_found,
+                rot_pages_found,
+            },
+            limit_reached,
+        ))
     }
 }
 
@@ -807,36 +1326,6 @@ pub trait DataStoreInventoryTest: Send + Sync {
     ///
     /// This does not paginate.
     fn inventory_collections(&self) -> BoxFuture<anyhow::Result<Vec<Uuid>>>;
-
-    /// Make a best effort to read the given collection while limiting queries
-    /// to `limit` results.  Returns as much as it was able to get.  The
-    /// returned bool indicates whether the returned collection might be
-    /// incomplete because the limit was reached.
-    fn inventory_collection_read_best_effort(
-        &self,
-        id: Uuid,
-        limit: NonZeroU32,
-    ) -> BoxFuture<anyhow::Result<(Collection, bool)>>;
-
-    /// Attempt to read the given collection while limiting queries to `limit`
-    /// records
-    fn inventory_collection_read_all_or_nothing(
-        &self,
-        id: Uuid,
-        limit: NonZeroU32,
-    ) -> BoxFuture<anyhow::Result<Collection>> {
-        async move {
-            let (collection, limit_reached) =
-                self.inventory_collection_read_best_effort(id, limit).await?;
-            anyhow::ensure!(
-                !limit_reached,
-                "hit limit of {} records while loading collection",
-                limit
-            );
-            Ok(collection)
-        }
-        .boxed()
-    }
 }
 
 impl DataStoreInventoryTest for DataStore {
@@ -845,7 +1334,7 @@ impl DataStoreInventoryTest for DataStore {
             let conn = self
                 .pool_connection_for_tests()
                 .await
-                .context("getting connectoin")?;
+                .context("getting connection")?;
             conn.transaction_async(|conn| async move {
                 conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL)
                     .await
@@ -863,257 +1352,11 @@ impl DataStoreInventoryTest for DataStore {
         }
         .boxed()
     }
-
-    // This function could move into the datastore if it proves helpful.  We'd
-    // need to work out how to report the usual type of Error.  For now we don't
-    // need it so we limit its scope to the test suite.
-    fn inventory_collection_read_best_effort(
-        &self,
-        id: Uuid,
-        limit: NonZeroU32,
-    ) -> BoxFuture<anyhow::Result<(Collection, bool)>> {
-        async move {
-            let conn = &self
-                .pool_connection_for_tests()
-                .await
-                .context("getting connection")?;
-            let sql_limit = i64::from(u32::from(limit));
-            let usize_limit = usize::try_from(u32::from(limit)).unwrap();
-            let mut limit_reached = false;
-            let (time_started, time_done, collector) = {
-                use db::schema::inv_collection::dsl;
-
-                let collections = dsl::inv_collection
-                    .filter(dsl::id.eq(id))
-                    .limit(2)
-                    .select(InvCollection::as_select())
-                    .load_async(&**conn)
-                    .await
-                    .context("loading collection")?;
-                anyhow::ensure!(collections.len() == 1);
-                let collection = collections.into_iter().next().unwrap();
-                (
-                    collection.time_started,
-                    collection.time_done,
-                    collection.collector,
-                )
-            };
-
-            let errors: Vec<String> = {
-                use db::schema::inv_collection_error::dsl;
-                dsl::inv_collection_error
-                    .filter(dsl::inv_collection_id.eq(id))
-                    .order_by(dsl::idx)
-                    .limit(sql_limit)
-                    .select(InvCollectionError::as_select())
-                    .load_async(&**conn)
-                    .await
-                    .context("loading collection errors")?
-                    .into_iter()
-                    .map(|e| e.message)
-                    .collect()
-            };
-            limit_reached = limit_reached || errors.len() == usize_limit;
-
-            let sps: BTreeMap<_, _> = {
-                use db::schema::inv_service_processor::dsl;
-                dsl::inv_service_processor
-                    .filter(dsl::inv_collection_id.eq(id))
-                    .limit(sql_limit)
-                    .select(InvServiceProcessor::as_select())
-                    .load_async(&**conn)
-                    .await
-                    .context("loading service processors")?
-                    .into_iter()
-                    .map(|sp_row| {
-                        let baseboard_id = sp_row.hw_baseboard_id;
-                        (
-                            baseboard_id,
-                            nexus_types::inventory::ServiceProcessor::from(
-                                sp_row,
-                            ),
-                        )
-                    })
-                    .collect()
-            };
-            limit_reached = limit_reached || sps.len() == usize_limit;
-
-            let rots: BTreeMap<_, _> = {
-                use db::schema::inv_root_of_trust::dsl;
-                dsl::inv_root_of_trust
-                    .filter(dsl::inv_collection_id.eq(id))
-                    .limit(sql_limit)
-                    .select(InvRootOfTrust::as_select())
-                    .load_async(&**conn)
-                    .await
-                    .context("loading roots of trust")?
-                    .into_iter()
-                    .map(|rot_row| {
-                        let baseboard_id = rot_row.hw_baseboard_id;
-                        (
-                            baseboard_id,
-                            nexus_types::inventory::RotState::from(rot_row),
-                        )
-                    })
-                    .collect()
-            };
-            limit_reached = limit_reached || rots.len() == usize_limit;
-
-            // Collect the unique baseboard ids referenced by SPs and RoTs.
-            let baseboard_id_ids: BTreeSet<_> =
-                sps.keys().chain(rots.keys()).cloned().collect();
-            // Fetch the corresponding baseboard records.
-            let baseboards_by_id: BTreeMap<_, _> = {
-                use db::schema::hw_baseboard_id::dsl;
-                dsl::hw_baseboard_id
-                    .filter(dsl::id.eq_any(baseboard_id_ids))
-                    .limit(sql_limit)
-                    .select(HwBaseboardId::as_select())
-                    .load_async(&**conn)
-                    .await
-                    .context("loading baseboards")?
-                    .into_iter()
-                    .map(|bb| {
-                        (
-                            bb.id,
-                            Arc::new(
-                                nexus_types::inventory::BaseboardId::from(bb),
-                            ),
-                        )
-                    })
-                    .collect()
-            };
-            limit_reached =
-                limit_reached || baseboards_by_id.len() == usize_limit;
-
-            // Having those, we can replace the keys in the maps above with
-            // references to the actual baseboard rather than the uuid.
-            let sps = sps
-                .into_iter()
-                .map(|(id, sp)| {
-                    baseboards_by_id
-                        .get(&id)
-                        .map(|bb| (bb.clone(), sp))
-                        .ok_or_else(|| {
-                            anyhow!(
-                                "missing baseboard that we should have fetched"
-                            )
-                        })
-                })
-                .collect::<Result<BTreeMap<_, _>, _>>()?;
-            let rots =
-                rots.into_iter()
-                    .map(|(id, rot)| {
-                        baseboards_by_id
-                    .get(&id)
-                    .map(|bb| (bb.clone(), rot))
-                    .ok_or_else(|| {
-                        anyhow!("missing baseboard that we should have fetched")
-                    })
-                    })
-                    .collect::<Result<BTreeMap<_, _>, _>>()?;
-
-            // Fetch records of cabooses found.
-            let inv_caboose_rows = {
-                use db::schema::inv_caboose::dsl;
-                dsl::inv_caboose
-                    .filter(dsl::inv_collection_id.eq(id))
-                    .limit(sql_limit)
-                    .select(InvCaboose::as_select())
-                    .load_async(&**conn)
-                    .await
-                    .context("loading inv_cabooses")?
-            };
-            limit_reached =
-                limit_reached || inv_caboose_rows.len() == usize_limit;
-
-            // Collect the unique sw_caboose_ids for those cabooses.
-            let sw_caboose_ids: BTreeSet<_> = inv_caboose_rows
-                .iter()
-                .map(|inv_caboose| inv_caboose.sw_caboose_id)
-                .collect();
-            // Fetch the corresponing records.
-            let cabooses_by_id: BTreeMap<_, _> = {
-                use db::schema::sw_caboose::dsl;
-                dsl::sw_caboose
-                    .filter(dsl::id.eq_any(sw_caboose_ids))
-                    .limit(sql_limit)
-                    .select(SwCaboose::as_select())
-                    .load_async(&**conn)
-                    .await
-                    .context("loading sw_cabooses")?
-                    .into_iter()
-                    .map(|sw_caboose_row| {
-                        (
-                            sw_caboose_row.id,
-                            Arc::new(nexus_types::inventory::Caboose::from(
-                                sw_caboose_row,
-                            )),
-                        )
-                    })
-                    .collect()
-            };
-            limit_reached =
-                limit_reached || cabooses_by_id.len() == usize_limit;
-
-            // Assemble the lists of cabooses found.
-            let mut cabooses_found = BTreeMap::new();
-            for c in inv_caboose_rows {
-                let by_baseboard = cabooses_found
-                    .entry(nexus_types::inventory::CabooseWhich::from(c.which))
-                    .or_insert_with(BTreeMap::new);
-                let Some(bb) = baseboards_by_id.get(&c.hw_baseboard_id) else {
-                    bail!(
-                        "unknown baseboard found in inv_caboose: {}",
-                        c.hw_baseboard_id
-                    );
-                };
-                let Some(sw_caboose) = cabooses_by_id.get(&c.sw_caboose_id)
-                else {
-                    bail!(
-                        "unknown caboose found in inv_caboose: {}",
-                        c.sw_caboose_id
-                    );
-                };
-
-                let previous = by_baseboard.insert(
-                    bb.clone(),
-                    nexus_types::inventory::CabooseFound {
-                        time_collected: c.time_collected,
-                        source: c.source,
-                        caboose: sw_caboose.clone(),
-                    },
-                );
-                anyhow::ensure!(
-                    previous.is_none(),
-                    "duplicate caboose found: {:?} baseboard {:?}",
-                    c.which,
-                    c.hw_baseboard_id
-                );
-            }
-
-            Ok((
-                Collection {
-                    id,
-                    errors,
-                    time_started,
-                    time_done,
-                    collector,
-                    baseboards: baseboards_by_id.values().cloned().collect(),
-                    cabooses: cabooses_by_id.values().cloned().collect(),
-                    sps,
-                    rots,
-                    cabooses_found,
-                },
-                limit_reached,
-            ))
-        }
-        .boxed()
-    }
 }
 
 #[cfg(test)]
 mod test {
+    use crate::context::OpContext;
     use crate::db::datastore::datastore_test;
     use crate::db::datastore::inventory::DataStoreInventoryTest;
     use crate::db::datastore::DataStore;
@@ -1129,42 +1372,82 @@ mod test {
     use nexus_inventory::examples::Representative;
     use nexus_test_utils::db::test_setup_database;
     use nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL;
+    use nexus_types::inventory::BaseboardId;
     use nexus_types::inventory::CabooseWhich;
     use nexus_types::inventory::Collection;
+    use nexus_types::inventory::RotPageWhich;
+    use omicron_common::api::external::Error;
     use omicron_test_utils::dev;
     use std::num::NonZeroU32;
     use uuid::Uuid;
 
     async fn read_collection(
+        opctx: &OpContext,
         datastore: &DataStore,
         id: Uuid,
     ) -> anyhow::Result<Collection> {
         let limit = NonZeroU32::new(1000).unwrap();
-        datastore.inventory_collection_read_all_or_nothing(id, limit).await
+        Ok(datastore
+            .inventory_collection_read_all_or_nothing(opctx, id, limit)
+            .await?)
     }
 
-    async fn count_baseboards_cabooses(
-        conn: &DataStoreConnection<'_>,
-    ) -> anyhow::Result<(usize, usize)> {
-        conn.transaction_async(|conn| async move {
-            conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await.unwrap();
-            let bb_count = schema::hw_baseboard_id::dsl::hw_baseboard_id
-                .select(diesel::dsl::count_star())
-                .first_async::<i64>(&conn)
-                .await
-                .context("failed to count baseboards")?;
-            let caboose_count = schema::sw_caboose::dsl::sw_caboose
-                .select(diesel::dsl::count_star())
-                .first_async::<i64>(&conn)
-                .await
-                .context("failed to count cabooses")?;
-            let bb_count_usize = usize::try_from(bb_count)
-                .context("failed to convert baseboard count to usize")?;
-            let caboose_count_usize = usize::try_from(caboose_count)
-                .context("failed to convert caboose count to usize")?;
-            Ok((bb_count_usize, caboose_count_usize))
-        })
-        .await
+    struct CollectionCounts {
+        baseboards: usize,
+        cabooses: usize,
+        rot_pages: usize,
+    }
+
+    impl CollectionCounts {
+        async fn new(conn: &DataStoreConnection<'_>) -> anyhow::Result<Self> {
+            conn.transaction_async(|conn| async move {
+                conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL)
+                    .await
+                    .unwrap();
+                let bb_count = schema::hw_baseboard_id::dsl::hw_baseboard_id
+                    .select(diesel::dsl::count_star())
+                    .first_async::<i64>(&conn)
+                    .await
+                    .context("failed to count baseboards")?;
+                let caboose_count = schema::sw_caboose::dsl::sw_caboose
+                    .select(diesel::dsl::count_star())
+                    .first_async::<i64>(&conn)
+                    .await
+                    .context("failed to count cabooses")?;
+                let rot_page_count =
+                    schema::sw_root_of_trust_page::dsl::sw_root_of_trust_page
+                        .select(diesel::dsl::count_star())
+                        .first_async::<i64>(&conn)
+                        .await
+                        .context("failed to count rot pages")?;
+                let baseboards = usize::try_from(bb_count)
+                    .context("failed to convert baseboard count to usize")?;
+                let cabooses = usize::try_from(caboose_count)
+                    .context("failed to convert caboose count to usize")?;
+                let rot_pages = usize::try_from(rot_page_count)
+                    .context("failed to convert rot page count to usize")?;
+                Ok(Self { baseboards, cabooses, rot_pages })
+            })
+            .await
+        }
+    }
+
+    #[tokio::test]
+    async fn test_find_hw_baseboard_id_missing_returns_not_found() {
+        let logctx = dev::test_setup_log("inventory_insert");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let baseboard_id = BaseboardId {
+            serial_number: "some-serial".into(),
+            part_number: "some-part".into(),
+        };
+        let err = datastore
+            .find_hw_baseboard_id(&opctx, baseboard_id)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, Error::ObjectNotFound { .. }));
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
     }
 
     /// Tests inserting several collections, reading them back, and making sure
@@ -1186,19 +1469,21 @@ mod test {
 
         // Read it back.
         let conn = datastore.pool_connection_for_tests().await.unwrap();
-        let collection_read = read_collection(&datastore, collection1.id)
-            .await
-            .expect("failed to read collection back");
+        let collection_read =
+            read_collection(&opctx, &datastore, collection1.id)
+                .await
+                .expect("failed to read collection back");
         assert_eq!(collection1, collection_read);
 
-        // There ought to be no baseboards or cabooses in the databases from
-        // that collection.
+        // There ought to be no baseboards, cabooses, or RoT pages in the
+        // databases from that collection.
         assert_eq!(collection1.baseboards.len(), 0);
         assert_eq!(collection1.cabooses.len(), 0);
-        let (nbaseboards, ncabooses) =
-            count_baseboards_cabooses(&conn).await.unwrap();
-        assert_eq!(collection1.baseboards.len(), nbaseboards);
-        assert_eq!(collection1.cabooses.len(), ncabooses);
+        assert_eq!(collection1.rot_pages.len(), 0);
+        let coll_counts = CollectionCounts::new(&conn).await.unwrap();
+        assert_eq!(collection1.baseboards.len(), coll_counts.baseboards);
+        assert_eq!(collection1.cabooses.len(), coll_counts.cabooses);
+        assert_eq!(collection1.rot_pages.len(), coll_counts.rot_pages);
 
         // Now insert a more complex collection, write it to the database, and
         // read it back.
@@ -1208,45 +1493,62 @@ mod test {
             .inventory_insert_collection(&opctx, &collection2)
             .await
             .expect("failed to insert collection");
-        let collection_read = read_collection(&datastore, collection2.id)
-            .await
-            .expect("failed to read collection back");
+        let collection_read =
+            read_collection(&opctx, &datastore, collection2.id)
+                .await
+                .expect("failed to read collection back");
         assert_eq!(collection2, collection_read);
-        // Verify that we have exactly the set of cabooses and baseboards in the
-        // databases that came from this first non-empty collection.
+        // Verify that we have exactly the set of cabooses, baseboards, and RoT
+        // pages in the databases that came from this first non-empty
+        // collection.
         assert_ne!(collection2.baseboards.len(), collection1.baseboards.len());
         assert_ne!(collection2.cabooses.len(), collection1.cabooses.len());
-        let (nbaseboards, ncabooses) =
-            count_baseboards_cabooses(&conn).await.unwrap();
-        assert_eq!(collection2.baseboards.len(), nbaseboards);
-        assert_eq!(collection2.cabooses.len(), ncabooses);
+        assert_ne!(collection2.rot_pages.len(), collection1.rot_pages.len());
+        let coll_counts = CollectionCounts::new(&conn).await.unwrap();
+        assert_eq!(collection2.baseboards.len(), coll_counts.baseboards);
+        assert_eq!(collection2.cabooses.len(), coll_counts.cabooses);
+        assert_eq!(collection2.rot_pages.len(), coll_counts.rot_pages);
+
+        // Check that we get an error on the limit being reached for
+        // `read_all_or_nothing`
+        let limit = NonZeroU32::new(1).unwrap();
+        assert!(datastore
+            .inventory_collection_read_all_or_nothing(
+                &opctx,
+                collection2.id,
+                limit
+            )
+            .await
+            .is_err());
 
         // Now insert an equivalent collection again.  Verify the distinct
-        // baseboards and cabooses again.  This is important: the insertion
-        // process should re-use the baseboards and cabooses from the previous
-        // collection.
+        // baseboards, cabooses, and RoT pages again.  This is important: the
+        // insertion process should re-use the baseboards, cabooses, and RoT
+        // pages from the previous collection.
         let Representative { builder, .. } = representative();
         let collection3 = builder.build();
         datastore
             .inventory_insert_collection(&opctx, &collection3)
             .await
             .expect("failed to insert collection");
-        let collection_read = read_collection(&datastore, collection3.id)
-            .await
-            .expect("failed to read collection back");
+        let collection_read =
+            read_collection(&opctx, &datastore, collection3.id)
+                .await
+                .expect("failed to read collection back");
         assert_eq!(collection3, collection_read);
-        // Verify that we have the same number of cabooses and baseboards, since
-        // those didn't change.
+        // Verify that we have the same number of cabooses, baseboards, and RoT
+        // pages, since those didn't change.
         assert_eq!(collection3.baseboards.len(), collection2.baseboards.len());
         assert_eq!(collection3.cabooses.len(), collection2.cabooses.len());
-        let (nbaseboards, ncabooses) =
-            count_baseboards_cabooses(&conn).await.unwrap();
-        assert_eq!(collection3.baseboards.len(), nbaseboards);
-        assert_eq!(collection3.cabooses.len(), ncabooses);
+        assert_eq!(collection3.rot_pages.len(), collection2.rot_pages.len());
+        let coll_counts = CollectionCounts::new(&conn).await.unwrap();
+        assert_eq!(collection3.baseboards.len(), coll_counts.baseboards);
+        assert_eq!(collection3.cabooses.len(), coll_counts.cabooses);
+        assert_eq!(collection3.rot_pages.len(), coll_counts.rot_pages);
 
         // Now insert a collection that's almost equivalent, but has an extra
-        // couple of baseboards and caboose.  Verify that we re-use the existing
-        // ones, but still insert the new ones.
+        // couple of baseboards, one caboose, and one RoT page.  Verify that we
+        // re-use the existing ones, but still insert the new ones.
         let Representative { mut builder, .. } = representative();
         builder.found_sp_state(
             "test suite",
@@ -1270,28 +1572,38 @@ mod test {
                 nexus_inventory::examples::caboose("dummy"),
             )
             .unwrap();
+        builder
+            .found_rot_page(
+                &bb,
+                RotPageWhich::Cmpa,
+                "dummy",
+                nexus_inventory::examples::rot_page("dummy"),
+            )
+            .unwrap();
         let collection4 = builder.build();
         datastore
             .inventory_insert_collection(&opctx, &collection4)
             .await
             .expect("failed to insert collection");
-        let collection_read = read_collection(&datastore, collection4.id)
-            .await
-            .expect("failed to read collection back");
+        let collection_read =
+            read_collection(&opctx, &datastore, collection4.id)
+                .await
+                .expect("failed to read collection back");
         assert_eq!(collection4, collection_read);
         // Verify the number of baseboards and collections again.
         assert_eq!(
             collection4.baseboards.len(),
             collection3.baseboards.len() + 2
         );
+        assert_eq!(collection4.cabooses.len(), collection3.cabooses.len() + 1);
         assert_eq!(
-            collection4.cabooses.len(),
-            collection3.baseboards.len() + 1
+            collection4.rot_pages.len(),
+            collection3.rot_pages.len() + 1
         );
-        let (nbaseboards, ncabooses) =
-            count_baseboards_cabooses(&conn).await.unwrap();
-        assert_eq!(collection4.baseboards.len(), nbaseboards);
-        assert_eq!(collection4.cabooses.len(), ncabooses);
+        let coll_counts = CollectionCounts::new(&conn).await.unwrap();
+        assert_eq!(collection4.baseboards.len(), coll_counts.baseboards);
+        assert_eq!(collection4.cabooses.len(), coll_counts.cabooses);
+        assert_eq!(collection4.rot_pages.len(), coll_counts.rot_pages);
 
         // This time, go back to our earlier collection.  This logically removes
         // some baseboards.  They should still be present in the database, but
@@ -1302,18 +1614,21 @@ mod test {
             .inventory_insert_collection(&opctx, &collection5)
             .await
             .expect("failed to insert collection");
-        let collection_read = read_collection(&datastore, collection5.id)
-            .await
-            .expect("failed to read collection back");
+        let collection_read =
+            read_collection(&opctx, &datastore, collection5.id)
+                .await
+                .expect("failed to read collection back");
         assert_eq!(collection5, collection_read);
         assert_eq!(collection5.baseboards.len(), collection3.baseboards.len());
         assert_eq!(collection5.cabooses.len(), collection3.cabooses.len());
+        assert_eq!(collection5.rot_pages.len(), collection3.rot_pages.len());
         assert_ne!(collection5.baseboards.len(), collection4.baseboards.len());
         assert_ne!(collection5.cabooses.len(), collection4.cabooses.len());
-        let (nbaseboards, ncabooses) =
-            count_baseboards_cabooses(&conn).await.unwrap();
-        assert_eq!(collection4.baseboards.len(), nbaseboards);
-        assert_eq!(collection4.cabooses.len(), ncabooses);
+        assert_ne!(collection5.rot_pages.len(), collection4.rot_pages.len());
+        let coll_counts = CollectionCounts::new(&conn).await.unwrap();
+        assert_eq!(collection4.baseboards.len(), coll_counts.baseboards);
+        assert_eq!(collection4.cabooses.len(), coll_counts.cabooses);
+        assert_eq!(collection4.rot_pages.len(), coll_counts.rot_pages);
 
         // Try to insert the same collection again and make sure it fails.
         let error = datastore
@@ -1433,19 +1748,19 @@ mod test {
         );
 
         // If we try to fetch a pruned collection, we should get nothing.
-        let _ = read_collection(&datastore, collection4.id)
+        let _ = read_collection(&opctx, &datastore, collection4.id)
             .await
             .expect_err("unexpectedly read pruned collection");
 
         // But we should still be able to fetch the collections that do exist.
         let collection_read =
-            read_collection(&datastore, collection5.id).await.unwrap();
+            read_collection(&opctx, &datastore, collection5.id).await.unwrap();
         assert_eq!(collection5, collection_read);
         let collection_read =
-            read_collection(&datastore, collection6.id).await.unwrap();
+            read_collection(&opctx, &datastore, collection6.id).await.unwrap();
         assert_eq!(collection6, collection_read);
         let collection_read =
-            read_collection(&datastore, collection7.id).await.unwrap();
+            read_collection(&opctx, &datastore, collection7.id).await.unwrap();
         assert_eq!(collection7, collection_read);
 
         // We should prune more than one collection, if needed.  We'll wind up
@@ -1506,10 +1821,10 @@ mod test {
         .expect("failed to check that tables were empty");
 
         // We currently keep the baseboard ids and sw_cabooses around.
-        let (nbaseboards, ncabooses) =
-            count_baseboards_cabooses(&conn).await.unwrap();
-        assert_ne!(nbaseboards, 0);
-        assert_ne!(ncabooses, 0);
+        let coll_counts = CollectionCounts::new(&conn).await.unwrap();
+        assert_ne!(coll_counts.baseboards, 0);
+        assert_ne!(coll_counts.cabooses, 0);
+        assert_ne!(coll_counts.rot_pages, 0);
 
         // Clean up.
         db.cleanup().await.unwrap();

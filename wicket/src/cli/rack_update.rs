@@ -22,6 +22,7 @@ use update_engine::{
 };
 use wicket_common::{
     rack_update::ClearUpdateStateResponse, update_events::EventReport,
+    WICKETD_TIMEOUT,
 };
 use wicketd_client::types::{ClearUpdateStateParams, StartUpdateParams};
 
@@ -31,7 +32,7 @@ use crate::{
         parse_event_report_map, ComponentId, CreateClearUpdateStateOptions,
         CreateStartUpdateOptions,
     },
-    wicketd::{create_wicketd_client, WICKETD_TIMEOUT},
+    wicketd::create_wicketd_client,
 };
 
 use super::command::CommandOutput;
@@ -173,6 +174,7 @@ async fn do_attach_to_updates(
     output: CommandOutput<'_>,
 ) -> Result<()> {
     let mut display = GroupDisplay::new_with_display(
+        &log,
         update_ids.iter().copied(),
         output.stderr,
     );

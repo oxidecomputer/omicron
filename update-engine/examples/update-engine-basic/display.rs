@@ -88,6 +88,7 @@ async fn display_group(
     slog::info!(log, "setting up display");
 
     let mut display = GroupDisplay::new(
+        log,
         [
             (GroupDisplayKey::Example, "example"),
             (GroupDisplayKey::Other, "other"),

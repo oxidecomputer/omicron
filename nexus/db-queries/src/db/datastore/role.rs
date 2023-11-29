@@ -127,7 +127,8 @@ impl DataStore {
         resource_type: ResourceType,
         resource_id: Uuid,
     ) -> Result<Vec<RoleAssignment>, Error> {
-        use db::schema::role_assignment::dsl;
+        use db::schema::role_assignment::dsl as role_dsl;
+        use db::schema::silo_group_membership::dsl as group_dsl;
 
         // There is no resource-specific authorization check because all
         // authenticated users need to be able to list their own roles --
@@ -140,41 +141,39 @@ impl DataStore {
         // into some hurt by assigning loads of roles to someone and having that
         // person attempt to access anything.
 
-        self.pool_connection_authorized(opctx).await?
-            .transaction_async(|conn| async move {
-                let mut role_assignments = dsl::role_assignment
-                    .filter(dsl::identity_type.eq(identity_type.clone()))
-                    .filter(dsl::identity_id.eq(identity_id))
-                    .filter(dsl::resource_type.eq(resource_type.to_string()))
-                    .filter(dsl::resource_id.eq(resource_id))
-                    .select(RoleAssignment::as_select())
-                    .load_async::<RoleAssignment>(&conn)
-                    .await?;
+        let direct_roles_query = role_dsl::role_assignment
+            .filter(role_dsl::identity_type.eq(identity_type.clone()))
+            .filter(role_dsl::identity_id.eq(identity_id))
+            .filter(role_dsl::resource_type.eq(resource_type.to_string()))
+            .filter(role_dsl::resource_id.eq(resource_id))
+            .select(RoleAssignment::as_select());
 
-                // Return the roles that a silo user has from their group memberships
-                if identity_type == IdentityType::SiloUser {
-                    use db::schema::silo_group_membership;
+        let roles_from_groups_query = role_dsl::role_assignment
+            .filter(role_dsl::identity_type.eq(IdentityType::SiloGroup))
+            .filter(
+                role_dsl::identity_id.eq_any(
+                    group_dsl::silo_group_membership
+                        .filter(group_dsl::silo_user_id.eq(identity_id))
+                        .select(group_dsl::silo_group_id),
+                ),
+            )
+            .filter(role_dsl::resource_type.eq(resource_type.to_string()))
+            .filter(role_dsl::resource_id.eq(resource_id))
+            .select(RoleAssignment::as_select());
 
-                    let mut group_role_assignments = dsl::role_assignment
-                        .filter(dsl::identity_type.eq(IdentityType::SiloGroup))
-                        .filter(dsl::identity_id.eq_any(
-                            silo_group_membership::dsl::silo_group_membership
-                                .filter(silo_group_membership::dsl::silo_user_id.eq(identity_id))
-                                .select(silo_group_membership::dsl::silo_group_id)
-                        ))
-                        .filter(dsl::resource_type.eq(resource_type.to_string()))
-                        .filter(dsl::resource_id.eq(resource_id))
-                        .select(RoleAssignment::as_select())
-                        .load_async::<RoleAssignment>(&conn)
-                        .await?;
-
-                    role_assignments.append(&mut group_role_assignments);
-                }
-
-                Ok(role_assignments)
-            })
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+        let conn = self.pool_connection_authorized(opctx).await?;
+        if identity_type == IdentityType::SiloUser {
+            direct_roles_query
+                .union(roles_from_groups_query)
+                .load_async::<RoleAssignment>(&*conn)
+                .await
+                .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+        } else {
+            direct_roles_query
+                .load_async::<RoleAssignment>(&*conn)
+                .await
+                .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+        }
     }
 
     /// Fetches all of the externally-visible role assignments for the specified

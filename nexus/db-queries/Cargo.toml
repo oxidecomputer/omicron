@@ -59,6 +59,7 @@ omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 assert_matches.workspace = true
+camino-tempfile.workspace = true
 expectorate.workspace = true
 hyper-rustls.workspace = true
 gateway-client.workspace = true
@@ -76,5 +77,4 @@ regex.workspace = true
 rustls.workspace = true
 strum.workspace = true
 subprocess.workspace = true
-tempfile.workspace = true
 term.workspace = true

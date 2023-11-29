@@ -43,6 +43,7 @@ use omicron_common::address::{
 };
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
+use omicron_common::api::internal::nexus::ProducerKind;
 use omicron_common::api::internal::nexus::{
     SledInstanceState, VmmRuntimeState,
 };
@@ -67,6 +68,7 @@ use std::sync::Arc;
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
+use illumos_utils::running_zone::ZoneBuilderFactory;
 #[cfg(not(test))]
 use illumos_utils::{dladm::Dladm, zone::Zones};
 #[cfg(test)]
@@ -381,6 +383,7 @@ impl SledAgent {
             port_manager.clone(),
             storage_manager.clone(),
             long_running_task_handles.zone_bundler.clone(),
+            ZoneBuilderFactory::default(),
         )?;
 
         // Configure the VMM reservoir as either a percentage of DRAM or as an
@@ -504,6 +507,7 @@ impl SledAgent {
         // Nexus. This should not block progress here.
         let endpoint = ProducerEndpoint {
             id: request.body.id,
+            kind: Some(ProducerKind::SledAgent),
             address: sled_address.into(),
             base_route: String::from("/metrics/collect"),
             interval: crate::metrics::METRIC_COLLECTION_INTERVAL,

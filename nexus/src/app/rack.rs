@@ -9,7 +9,8 @@ use crate::external_api::params;
 use crate::external_api::params::CertificateCreate;
 use crate::external_api::shared::ServiceUsingCertificate;
 use crate::internal_api::params::RackInitializationRequest;
-use ipnetwork::IpNetwork;
+use gateway_client::types::SpType;
+use ipnetwork::{IpNetwork, Ipv6Network};
 use nexus_db_model::DnsGroup;
 use nexus_db_model::InitialDnsGroup;
 use nexus_db_model::{SwitchLinkFec, SwitchLinkSpeed};
@@ -28,10 +29,14 @@ use nexus_types::external_api::params::{
     AddressLotCreate, LoopbackAddressCreate, Route, SiloCreate,
     SwitchPortSettingsCreate,
 };
+use nexus_types::external_api::shared::Baseboard;
 use nexus_types::external_api::shared::FleetRole;
 use nexus_types::external_api::shared::SiloIdentityMode;
 use nexus_types::external_api::shared::SiloRole;
+use nexus_types::external_api::shared::UninitializedSled;
+use nexus_types::external_api::views;
 use nexus_types::internal_api::params::DnsRecord;
+use omicron_common::address::{get_64_subnet, Ipv6Subnet, RACK_PREFIX};
 use omicron_common::api::external::AddressLotKind;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -41,7 +46,10 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
+use sled_agent_client::types::AddSledRequest;
 use sled_agent_client::types::EarlyNetworkConfigBody;
+use sled_agent_client::types::StartSledAgentRequest;
+use sled_agent_client::types::StartSledAgentRequestBody;
 use sled_agent_client::types::{
     BgpConfig, BgpPeerConfig, EarlyNetworkConfig, PortConfigV1,
     RackNetworkConfigV1, RouteConfig as SledRouteConfig,
@@ -51,6 +59,7 @@ use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
+use std::num::NonZeroU32;
 use std::str::FromStr;
 use uuid::Uuid;
 
@@ -579,20 +588,7 @@ impl super::Nexus {
         if rack.rack_subnet.is_some() {
             return Ok(());
         }
-        let addr = self
-            .sled_list(opctx, &DataPageParams::max_page())
-            .await?
-            .get(0)
-            .ok_or(Error::InternalError {
-                internal_message: "no sleds at time of bootstore sync".into(),
-            })?
-            .address();
-
-        let sa = sled_agent_client::Client::new(
-            &format!("http://{}", addr),
-            self.log.clone(),
-        );
-
+        let sa = self.get_any_sled_agent(opctx).await?;
         let result = sa
             .read_network_bootstore_config_cache()
             .await
@@ -614,20 +610,7 @@ impl super::Nexus {
         opctx: &OpContext,
     ) -> Result<EarlyNetworkConfig, Error> {
         let rack = self.rack_lookup(opctx, &self.rack_id).await?;
-
-        let subnet = match rack.rack_subnet {
-            Some(IpNetwork::V6(subnet)) => subnet,
-            Some(IpNetwork::V4(_)) => {
-                return Err(Error::InternalError {
-                    internal_message: "rack subnet not IPv6".into(),
-                })
-            }
-            None => {
-                return Err(Error::InternalError {
-                    internal_message: "rack subnet not set".into(),
-                })
-            }
-        };
+        let subnet = rack_subnet(rack.rack_subnet)?;
 
         let db_ports = self.active_port_settings(opctx).await?;
         let mut ports = Vec::new();
@@ -723,5 +706,168 @@ impl super::Nexus {
         };
 
         Ok(result)
+    }
+
+    /// Return the list of sleds that are inserted into an initialized rack
+    /// but not yet initialized as part of a rack.
+    //
+    // TODO-multirack: We currently limit sleds to a single rack and we also
+    // retrieve the `rack_uuid` from the Nexus instance used.
+    pub(crate) async fn uninitialized_sled_list(
+        &self,
+        opctx: &OpContext,
+    ) -> ListResultVec<UninitializedSled> {
+        debug!(self.log, "Getting latest collection");
+        // Grab the SPs from the last collection
+        let limit = NonZeroU32::new(50).unwrap();
+        let collection = self
+            .db_datastore
+            .inventory_get_latest_collection(opctx, limit)
+            .await?;
+
+        // There can't be any uninitialized sleds we know about
+        // if there is no inventory.
+        let Some(collection) = collection else {
+            return Ok(vec![]);
+        };
+
+        let pagparams = DataPageParams {
+            marker: None,
+            direction: dropshot::PaginationOrder::Descending,
+            // TODO: This limit is only suitable for a single sled cluster
+            limit: NonZeroU32::new(32).unwrap(),
+        };
+
+        debug!(self.log, "Listing sleds");
+        let sleds = self.db_datastore.sled_list(opctx, &pagparams).await?;
+
+        let mut uninitialized_sleds: Vec<UninitializedSled> = collection
+            .sps
+            .into_iter()
+            .filter_map(|(k, v)| {
+                if v.sp_type == SpType::Sled {
+                    Some(UninitializedSled {
+                        baseboard: Baseboard {
+                            serial: k.serial_number.clone(),
+                            part: k.part_number.clone(),
+                            revision: v.baseboard_revision.into(),
+                        },
+                        rack_id: self.rack_id,
+                        cubby: v.sp_slot,
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let sled_baseboards: BTreeSet<Baseboard> =
+            sleds.into_iter().map(|s| views::Sled::from(s).baseboard).collect();
+
+        // Retain all sleds that exist but are not in the sled table
+        uninitialized_sleds.retain(|s| !sled_baseboards.contains(&s.baseboard));
+        Ok(uninitialized_sleds)
+    }
+
+    /// Add a sled to an intialized rack
+    pub(crate) async fn add_sled_to_initialized_rack(
+        &self,
+        opctx: &OpContext,
+        sled: UninitializedSled,
+    ) -> Result<(), Error> {
+        let baseboard_id = sled.baseboard.clone().into();
+        let hw_baseboard_id =
+            self.db_datastore.find_hw_baseboard_id(opctx, baseboard_id).await?;
+
+        let subnet = self.db_datastore.rack_subnet(opctx, sled.rack_id).await?;
+        let rack_subnet =
+            Ipv6Subnet::<RACK_PREFIX>::from(rack_subnet(Some(subnet))?);
+
+        let allocation = self
+            .db_datastore
+            .allocate_sled_underlay_subnet_octets(
+                opctx,
+                sled.rack_id,
+                hw_baseboard_id,
+            )
+            .await?;
+
+        // Convert the baseboard as necessary
+        let baseboard = sled_agent_client::types::Baseboard::Gimlet {
+            identifier: sled.baseboard.serial.clone(),
+            model: sled.baseboard.part.clone(),
+            revision: sled.baseboard.revision,
+        };
+
+        // Make the call to sled-agent
+        let req = AddSledRequest {
+            sled_id: baseboard,
+            start_request: StartSledAgentRequest {
+                generation: 0,
+                schema_version: 1,
+                body: StartSledAgentRequestBody {
+                    id: allocation.sled_id,
+                    rack_id: allocation.rack_id,
+                    use_trust_quorum: true,
+                    is_lrtq_learner: true,
+                    subnet: sled_agent_client::types::Ipv6Subnet {
+                        net: get_64_subnet(
+                            rack_subnet,
+                            allocation.subnet_octet.try_into().unwrap(),
+                        )
+                        .net()
+                        .into(),
+                    },
+                },
+            },
+        };
+        let sa = self.get_any_sled_agent(opctx).await?;
+        sa.add_sled_to_initialized_rack(&req).await.map_err(|e| {
+            Error::InternalError {
+                internal_message: format!(
+                    "failed to add sled with baseboard {:?} to rack {}: {e}",
+                    sled.baseboard, allocation.rack_id
+                ),
+            }
+        })?;
+
+        Ok(())
+    }
+
+    async fn get_any_sled_agent(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<sled_agent_client::Client, Error> {
+        let addr = self
+            .sled_list(opctx, &DataPageParams::max_page())
+            .await?
+            .get(0)
+            .ok_or(Error::InternalError {
+                internal_message: "no sled agents available".into(),
+            })?
+            .address();
+
+        Ok(sled_agent_client::Client::new(
+            &format!("http://{}", addr),
+            self.log.clone(),
+        ))
+    }
+}
+
+pub fn rack_subnet(
+    rack_subnet: Option<IpNetwork>,
+) -> Result<Ipv6Network, Error> {
+    match rack_subnet {
+        Some(IpNetwork::V6(subnet)) => Ok(subnet),
+        Some(IpNetwork::V4(_)) => {
+            return Err(Error::InternalError {
+                internal_message: "rack subnet not IPv6".into(),
+            })
+        }
+        None => {
+            return Err(Error::InternalError {
+                internal_message: "rack subnet not set".into(),
+            })
+        }
     }
 }

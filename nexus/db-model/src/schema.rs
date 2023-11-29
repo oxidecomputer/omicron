@@ -399,6 +399,7 @@ table! {
         id -> Uuid,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
+        kind -> Nullable<crate::ProducerKindEnum>,
         ip -> Inet,
         port -> Int4,
         interval -> Float8,
@@ -486,6 +487,32 @@ table! {
         last_address -> Inet,
         ip_pool_id -> Uuid,
         rcgen -> Int8,
+    }
+}
+
+table! {
+    ipv4_nat_entry (id) {
+        id -> Uuid,
+        external_address -> Inet,
+        first_port -> Int4,
+        last_port -> Int4,
+        sled_address -> Inet,
+        vni -> Int4,
+        mac -> Int8,
+        version_added -> Int8,
+        version_removed -> Nullable<Int8>,
+        time_created -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+    }
+}
+
+// This is the sequence used for the version number
+// in ipv4_nat_entry.
+table! {
+    ipv4_nat_version (last_value) {
+        last_value -> Int8,
+        log_cnt -> Int8,
+        is_called -> Bool,
     }
 }
 
@@ -714,6 +741,7 @@ table! {
         ip -> Inet,
         port -> Int4,
         last_used_address -> Inet,
+        provision_state -> crate::SledProvisionStateEnum,
     }
 }
 
@@ -727,6 +755,16 @@ table! {
         reservoir_ram -> Int8,
     }
 }
+
+table! {
+    sled_underlay_subnet_allocation (rack_id, sled_id) {
+        rack_id -> Uuid,
+        sled_id -> Uuid,
+        subnet_octet -> Int2,
+        hw_baseboard_id -> Uuid,
+    }
+}
+allow_tables_to_appear_in_same_query!(rack, sled_underlay_subnet_allocation);
 
 table! {
     switch (id) {
@@ -1161,6 +1199,13 @@ table! {
 }
 
 table! {
+    sw_root_of_trust_page (id) {
+        id -> Uuid,
+        data_base64 -> Text,
+    }
+}
+
+table! {
     inv_collection (id) {
         id -> Uuid,
         time_started -> Timestamptz,
@@ -1222,6 +1267,18 @@ table! {
 }
 
 table! {
+    inv_root_of_trust_page (inv_collection_id, hw_baseboard_id, which) {
+        inv_collection_id -> Uuid,
+        hw_baseboard_id -> Uuid,
+        time_collected -> Timestamptz,
+        source -> Text,
+
+        which -> crate::RotPageWhichEnum,
+        sw_root_of_trust_page_id -> Uuid,
+    }
+}
+
+table! {
     bootstore_keys (key, generation) {
         key -> Text,
         generation -> Int8,
@@ -1243,7 +1300,7 @@ table! {
 ///
 /// This should be updated whenever the schema is changed. For more details,
 /// refer to: schema/crdb/README.adoc
-pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(10, 0, 0);
+pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(15, 0, 0);
 
 allow_tables_to_appear_in_same_query!(
     system_update,
@@ -1258,6 +1315,11 @@ joinable!(ip_pool_range -> ip_pool (ip_pool_id));
 allow_tables_to_appear_in_same_query!(inv_collection, inv_collection_error);
 joinable!(inv_collection_error -> inv_collection (inv_collection_id));
 allow_tables_to_appear_in_same_query!(hw_baseboard_id, sw_caboose, inv_caboose);
+allow_tables_to_appear_in_same_query!(
+    hw_baseboard_id,
+    sw_root_of_trust_page,
+    inv_root_of_trust_page
+);
 
 allow_tables_to_appear_in_same_query!(
     dataset,
@@ -1301,4 +1363,9 @@ allow_tables_to_appear_in_same_query!(external_ip, service);
 allow_tables_to_appear_in_same_query!(
     switch_port,
     switch_port_settings_route_config
+);
+
+allow_tables_to_appear_in_same_query!(
+    switch_port,
+    switch_port_settings_bgp_peer_config
 );

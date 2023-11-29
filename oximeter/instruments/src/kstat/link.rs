@@ -268,8 +268,8 @@ mod tests {
     }
 
     impl TestEtherstub {
-        const PFEXEC: &str = "/usr/bin/pfexec";
-        const DLADM: &str = "/usr/sbin/dladm";
+        const PFEXEC: &'static str = "/usr/bin/pfexec";
+        const DLADM: &'static str = "/usr/sbin/dladm";
         fn new() -> Self {
             let name = format!(
                 "kstest{}0",

@@ -21,8 +21,10 @@ use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils::SWITCH_UUID;
 use nexus_types::external_api::params;
 use nexus_types::external_api::shared;
+use nexus_types::external_api::shared::Baseboard;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::shared::Ipv4Range;
+use nexus_types::external_api::shared::UninitializedSled;
 use omicron_common::api::external::AddressLotKind;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -39,12 +41,21 @@ use omicron_test_utils::certificates::CertificateChain;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::str::FromStr;
+use uuid::Uuid;
 
 lazy_static! {
     pub static ref HARDWARE_RACK_URL: String =
         format!("/v1/system/hardware/racks/{}", RACK_UUID);
+    pub static ref HARDWARE_UNINITIALIZED_SLEDS: String =
+        format!("/v1/system/hardware/uninitialized-sleds");
     pub static ref HARDWARE_SLED_URL: String =
         format!("/v1/system/hardware/sleds/{}", SLED_AGENT_UUID);
+    pub static ref HARDWARE_SLED_PROVISION_STATE_URL: String =
+        format!("/v1/system/hardware/sleds/{}/provision-state", SLED_AGENT_UUID);
+    pub static ref DEMO_SLED_PROVISION_STATE: params::SledProvisionStateParams =
+        params::SledProvisionStateParams {
+            state: nexus_types::external_api::views::SledProvisionState::NonProvisionable,
+        };
     pub static ref HARDWARE_SWITCH_URL: String =
         format!("/v1/system/hardware/switches/{}", SWITCH_UUID);
     pub static ref HARDWARE_DISK_URL: String =
@@ -54,6 +65,16 @@ lazy_static! {
 
     pub static ref SLED_INSTANCES_URL: String =
         format!("/v1/system/hardware/sleds/{}/instances", SLED_AGENT_UUID);
+
+    pub static ref DEMO_UNINITIALIZED_SLED: UninitializedSled = UninitializedSled {
+        baseboard: Baseboard {
+            serial: "demo-serial".to_string(),
+            part: "demo-part".to_string(),
+            revision: 6
+        },
+        rack_id: Uuid::new_v4(),
+        cubby: 1
+    };
 
     // Global policy
     pub static ref SYSTEM_POLICY_URL: &'static str = "/v1/system/policy";
@@ -1565,10 +1586,19 @@ lazy_static! {
         },
 
         VerifyEndpoint {
-            url: "/v1/system/hardware/sleds",
+            url: &HARDWARE_UNINITIALIZED_SLEDS,
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Get],
+        },
+
+        VerifyEndpoint {
+            url: "/v1/system/hardware/sleds",
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![AllowedMethod::Get, AllowedMethod::Post(
+                serde_json::to_value(&*DEMO_UNINITIALIZED_SLED).unwrap()
+            )],
         },
 
         VerifyEndpoint {
@@ -1583,6 +1613,15 @@ lazy_static! {
             visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Get],
+        },
+
+        VerifyEndpoint {
+            url: &HARDWARE_SLED_PROVISION_STATE_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![AllowedMethod::Put(
+                serde_json::to_value(&*DEMO_SLED_PROVISION_STATE).unwrap()
+            )],
         },
 
         VerifyEndpoint {

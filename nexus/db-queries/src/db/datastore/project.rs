@@ -291,6 +291,7 @@ impl DataStore {
                     }
 
                     self.virtual_provisioning_collection_delete_on_connection(
+                        &opctx.log,
                         &conn,
                         db_project.id(),
                     )
