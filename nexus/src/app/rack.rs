@@ -616,10 +616,10 @@ impl super::Nexus {
                     .iter()
                     .map(|r| BgpPeer {
                         bgp_announce_set: NameOrId::Name(
-                            format!("as{}-announce", r.asn).parse().unwrap(), //TODO unwrap
+                            format!("as{}-announce", r.asn).parse().unwrap(),
                         ),
                         bgp_config: NameOrId::Name(
-                            format!("as{}", r.asn).parse().unwrap(), //TODO unwrap
+                            format!("as{}", r.asn).parse().unwrap(),
                         ),
                         interface_name: "phy0".into(),
                         addr: r.addr.into(),
@@ -636,7 +636,7 @@ impl super::Nexus {
                     .insert("phy0".to_string(), BgpPeerConfig { peers });
 
                 let link = LinkConfig {
-                    mtu: 1500, //TODO as parameter
+                    mtu: 1500, //TODO https://github.com/oxidecomputer/omicron/issues/2274
                     lldp: LldpServiceConfig {
                         enabled: false,
                         lldp_config: None,
@@ -818,13 +818,13 @@ impl super::Nexus {
                 port: port.port_name.clone(),
                 uplink_port_fec: info
                     .links
-                    .get(0) //TODO breakout support
+                    .get(0) //TODO https://github.com/oxidecomputer/omicron/issues/3062
                     .map(|l| l.fec)
                     .unwrap_or(SwitchLinkFec::None)
                     .into(),
                 uplink_port_speed: info
                     .links
-                    .get(0) //TODO breakout support
+                    .get(0) //TODO https://github.com/oxidecomputer/omicron/issues/3062
                     .map(|l| l.speed)
                     .unwrap_or(SwitchLinkSpeed::Speed100G)
                     .into(),
