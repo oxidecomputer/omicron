@@ -268,6 +268,16 @@ impl ServiceInner {
         ServiceInner { log }
     }
 
+    /// Requests that the specified sled configure zones as described by
+    /// `zones_config`
+    ///
+    /// This function succeeds even if the sled fails to apply the configuration
+    /// if the reason is that the sled is already running a newer configuration.
+    /// This might sound oddly specific but it's what our sole caller wants.
+    /// In particular, the caller is going to call this function a few times
+    /// with successive generation numbers.  If we crash and go through the
+    /// process again, we might run into this case, and it's simplest to just
+    /// ignore it and proceed.
     async fn initialize_zones_on_sled(
         &self,
         sled_address: SocketAddrV6,
@@ -278,15 +288,16 @@ impl ServiceInner {
             .connect_timeout(dur)
             .build()
             .map_err(SetupServiceError::HttpClient)?;
+        let log = self.log.new(o!("sled_address" => sled_address.to_string()));
         let client = SledAgentClient::new_with_client(
             &format!("http://{}", sled_address),
             client,
-            self.log.new(o!("SledAgentClient" => sled_address.to_string())),
+            log.clone(),
         );
 
         let services_put = || async {
             info!(
-                self.log,
+                log,
                 "attempting to set up sled's Omicron zones: {:?}", zones_config
             );
             let result =
@@ -301,7 +312,7 @@ impl ServiceInner {
             if let sled_agent_client::Error::ErrorResponse(response) = &error {
                 if response.status() == http::StatusCode::CONFLICT {
                     warn!(
-                        self.log,
+                        log,
                         "ignoring attempt to initialize zones because \
                         the server seems to be newer";
                         "attempted_version" => i64::from(&zones_config.version),
@@ -309,16 +320,21 @@ impl ServiceInner {
                         "server_message" => &response.message,
                     );
 
+                    // If we attempt to initialize zones at version X, and the
+                    // server refuses because it's at some generation newer than
+                    // X, then we treat that as success.  See the doc comment on
+                    // this function.
                     return Ok(());
                 }
             }
 
-            // TODO Many other codes here should not be retried.
+            // TODO Many other codes here should not be retried.  See
+            // omicron#4578.
             return Err(BackoffError::transient(error));
         };
         let log_failure = |error, delay| {
             warn!(
-                self.log,
+                log,
                 "failed to initialize Omicron zones";
                 "error" => ?error,
                 "retry_after" => ?delay,
@@ -348,16 +364,12 @@ impl ServiceInner {
         &self,
         configs: &HashMap<SocketAddrV6, OmicronZonesConfig>,
     ) -> Result<(), SetupServiceError> {
-        futures::future::join_all(configs.iter().map(
+        cancel_safe_futures::future::join_all_then_try(configs.iter().map(
             |(sled_address, zones_config)| async move {
-                self.initialize_zones_on_sled(*sled_address, zones_config)
-                    .await?;
-                Ok(())
+                self.initialize_zones_on_sled(*sled_address, zones_config).await
             },
         ))
-        .await
-        .into_iter()
-        .collect::<Result<_, SetupServiceError>>()?;
+        .await?;
         Ok(())
     }
 
@@ -563,7 +575,7 @@ impl ServiceInner {
                 .expect("Sled address in service plan, but not sled plan");
 
             for zone in &sled_config.zones {
-                services.push(zone.into_nexus_service_req(sled_id));
+                services.push(zone.to_nexus_service_req(sled_id));
             }
 
             for zone in &sled_config.zones {
@@ -986,8 +998,8 @@ impl ServiceInner {
         // one they're currently running.  Thus, the version number is a piece
         // of global, distributed state.
         //
-        // For now, we hardcode the three requests we make to use these three
-        // version numbers (1, 2, and 3).
+        // For now, we hardcode the requests we make to use specific version
+        // numbers.
         let version1_nothing =
             Generation::from(OMICRON_ZONES_CONFIG_INITIAL_VERSION);
         let version2_dns_only = version1_nothing.next();
@@ -1026,7 +1038,7 @@ impl ServiceInner {
                 )
             },
         );
-        self.ensure_zone_config_at_least(&v3generator.sled_configs()).await?;
+        self.ensure_zone_config_at_least(v3generator.sled_configs()).await?;
 
         // Wait until time is synchronized on all sleds before proceeding.
         self.wait_for_timesync(&sled_addresses).await?;
@@ -1040,7 +1052,7 @@ impl ServiceInner {
                 matches!(zone_type, OmicronZoneType::CockroachDb { .. })
             },
         );
-        self.ensure_zone_config_at_least(&v4generator.sled_configs()).await?;
+        self.ensure_zone_config_at_least(v4generator.sled_configs()).await?;
 
         // Now that datasets and zones have started for CockroachDB,
         // perform one-time initialization of the cluster.
@@ -1049,7 +1061,7 @@ impl ServiceInner {
         // Issue the rest of the zone initialization requests.
         let v5generator =
             v4generator.new_version_with(version5_everything, &|_| true);
-        self.ensure_zone_config_at_least(&v5generator.sled_configs()).await?;
+        self.ensure_zone_config_at_least(v5generator.sled_configs()).await?;
 
         info!(self.log, "Finished setting up services");
 

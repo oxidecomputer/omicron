@@ -178,13 +178,12 @@ impl Plan {
     async fn has_v1(
         storage_manager: &StorageHandle,
     ) -> Result<bool, std::io::Error> {
-        let paths: Vec<Utf8PathBuf> = storage_manager
+        let paths = storage_manager
             .get_latest_resources()
             .await
             .all_m2_mountpoints(CONFIG_DATASET)
             .into_iter()
-            .map(|p| p.join(RSS_SERVICE_PLAN_V1_FILENAME))
-            .collect();
+            .map(|p| p.join(RSS_SERVICE_PLAN_V1_FILENAME));
 
         for p in paths {
             if p.try_exists()? {
@@ -375,8 +374,8 @@ impl Plan {
                     dataset: OmicronZoneDataset {
                         pool_name: dataset_name.pool().clone(),
                     },
-                    http_address: http_address,
-                    dns_address: dns_address,
+                    http_address,
+                    dns_address,
                     gz_address: dns_subnet.gz_address().ip(),
                     gz_address_index: i.try_into().expect("Giant indices?"),
                 },

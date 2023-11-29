@@ -267,8 +267,12 @@ impl TryFrom<ServiceZoneRequest> for OmicronZoneConfig {
         }
 
         // If there's a dataset, its id must match the overall request id.
-        let has_dataset = input.dataset.is_some();
-        if let Some(dataset) = &input.dataset {
+        let dataset_request = input
+            .dataset
+            .ok_or_else(|| anyhow!("missing dataset"))
+            .with_context(error_context);
+        let has_dataset = dataset_request.is_ok();
+        if let Ok(dataset) = &dataset_request {
             if dataset.id != input.id {
                 return Err(anyhow!(
                     "expected dataset id ({}) to match id ({})",
@@ -278,11 +282,6 @@ impl TryFrom<ServiceZoneRequest> for OmicronZoneConfig {
                 .with_context(error_context);
             }
         }
-
-        let dataset_request = input
-            .dataset
-            .ok_or_else(|| anyhow!("missing dataset"))
-            .with_context(error_context);
 
         let zone_type = match service.details {
             ServiceType::Nexus {
@@ -369,7 +368,7 @@ impl TryFrom<ServiceZoneRequest> for OmicronZoneConfig {
                 OmicronZoneType::ClickhouseKeeper {
                     address,
                     dataset: dataset_request?.to_omicron_zone_dataset(
-                        DatasetKind::Clickhouse,
+                        DatasetKind::ClickhouseKeeper,
                         address,
                     )?,
                 }

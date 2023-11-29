@@ -347,7 +347,7 @@ impl OmicronZoneConfig {
 
     /// Returns the structure that describes this zone to Nexus during rack
     /// initialization
-    pub fn into_nexus_service_req(
+    pub fn to_nexus_service_req(
         &self,
         sled_id: Uuid,
     ) -> nexus_client::types::ServicePutRequest {

@@ -94,7 +94,9 @@ use sled_hardware::underlay;
 use sled_hardware::underlay::BOOTSTRAP_PREFIX;
 use sled_hardware::Baseboard;
 use sled_hardware::SledMode;
-use sled_storage::dataset::{CONFIG_DATASET, INSTALL_DATASET, ZONE_DATASET};
+use sled_storage::dataset::{
+    DatasetKind, DatasetName, CONFIG_DATASET, INSTALL_DATASET, ZONE_DATASET,
+};
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::collections::BTreeMap;
@@ -220,8 +222,10 @@ pub enum Error {
     #[error("Error querying simnet devices")]
     Simnet(#[from] GetSimnetError),
 
-    #[error("Requested version ({0}) is older than current ({1})")]
-    RequestedConfigOutdated(Generation, Generation),
+    #[error(
+        "Requested version ({requested}) is older than current ({current})"
+    )]
+    RequestedConfigOutdated { requested: Generation, current: Generation },
 
     #[error("Requested version {0} with different zones than before")]
     RequestedConfigConflicts(Generation),
@@ -243,16 +247,12 @@ impl From<Error> for omicron_common::api::external::Error {
     fn from(err: Error) -> Self {
         match err {
             err @ Error::RequestedConfigConflicts(_) => {
-                omicron_common::api::external::Error::invalid_request(&format!(
-                    "{:#}",
-                    err
-                ))
+                omicron_common::api::external::Error::invalid_request(
+                    &err.to_string(),
+                )
             }
-            err @ Error::RequestedConfigOutdated(_, _) => {
-                omicron_common::api::external::Error::conflict(&format!(
-                    "{:#}",
-                    err
-                ))
+            err @ Error::RequestedConfigOutdated { .. } => {
+                omicron_common::api::external::Error::conflict(&err.to_string())
             }
             _ => omicron_common::api::external::Error::InternalError {
                 internal_message: err.to_string(),
@@ -337,6 +337,15 @@ impl Ledgerable for OmicronZonesConfigLocal {
 }
 
 impl OmicronZonesConfigLocal {
+    /// Returns the initial configuration for generation 1, which has no zones
+    pub fn initial() -> OmicronZonesConfigLocal {
+        OmicronZonesConfigLocal {
+            omicron_version: Generation::new(),
+            ledger_version: Generation::new(),
+            zones: vec![],
+        }
+    }
+
     pub fn to_omicron_zones_config(self) -> OmicronZonesConfig {
         OmicronZonesConfig {
             version: self.omicron_version,
@@ -420,7 +429,7 @@ struct SwitchZoneConfigLocal {
 /// functions that operate on either one or the other
 enum ZoneArgs<'a> {
     Omicron(&'a OmicronZoneConfigLocal),
-    SledLocal(&'a SwitchZoneConfigLocal),
+    Switch(&'a SwitchZoneConfigLocal),
 }
 
 impl<'a> ZoneArgs<'a> {
@@ -428,7 +437,7 @@ impl<'a> ZoneArgs<'a> {
     pub fn omicron_type(&self) -> Option<&'a OmicronZoneType> {
         match self {
             ZoneArgs::Omicron(zone_config) => Some(&zone_config.zone.zone_type),
-            ZoneArgs::SledLocal(_) => None,
+            ZoneArgs::Switch(_) => None,
         }
     }
 
@@ -439,9 +448,7 @@ impl<'a> ZoneArgs<'a> {
     ) -> Box<dyn Iterator<Item = &'a SwitchService> + 'a> {
         match self {
             ZoneArgs::Omicron(_) => Box::new(std::iter::empty()),
-            ZoneArgs::SledLocal(request) => {
-                Box::new(request.zone.services.iter())
-            }
+            ZoneArgs::Switch(request) => Box::new(request.zone.services.iter()),
         }
     }
 
@@ -449,7 +456,7 @@ impl<'a> ZoneArgs<'a> {
     pub fn root(&self) -> &Utf8Path {
         match self {
             ZoneArgs::Omicron(zone_config) => &zone_config.root,
-            ZoneArgs::SledLocal(zone_request) => &zone_request.root,
+            ZoneArgs::Switch(zone_request) => &zone_request.root,
         }
     }
 }
@@ -1009,7 +1016,7 @@ impl ServiceManager {
         &self,
         zone_args: &ZoneArgs<'_>,
     ) -> Result<Option<(Link, Ipv6Addr)>, Error> {
-        if let ZoneArgs::SledLocal(_) = zone_args {
+        if let ZoneArgs::Switch(_) = zone_args {
             let link = self
                 .inner
                 .bootstrap_vnic_allocator
@@ -1191,7 +1198,7 @@ impl ServiceManager {
                     nic, snat_cfg, ..
                 },
             ) => (zone_type.zone_type_str(), nic, Some(*snat_cfg), &[][..]),
-            _ => panic!("unexpected zone type"),
+            _ => unreachable!("unexpected zone type"),
         };
 
         // Create the OPTE port for the service.
@@ -1404,7 +1411,7 @@ impl ServiceManager {
         // so we can create multiple zones of this type without collision.
         let unique_name = match &request {
             ZoneArgs::Omicron(zone_config) => Some(zone_config.zone.id),
-            ZoneArgs::SledLocal(_) => None,
+            ZoneArgs::Switch(_) => None,
         };
         let datasets: Vec<_> = match &request {
             ZoneArgs::Omicron(zone_config) => zone_config
@@ -1413,7 +1420,7 @@ impl ServiceManager {
                 .map(|n| zone::Dataset { name: n.full() })
                 .into_iter()
                 .collect(),
-            ZoneArgs::SledLocal(_) => vec![],
+            ZoneArgs::Switch(_) => vec![],
         };
 
         let devices: Vec<zone::Device> = device_names
@@ -1441,7 +1448,7 @@ impl ServiceManager {
             ZoneArgs::Omicron(zone_config) => {
                 zone_config.zone.zone_type.zone_type_str()
             }
-            ZoneArgs::SledLocal(_) => "switch".to_string(),
+            ZoneArgs::Switch(_) => "switch".to_string(),
         };
 
         let mut zone_builder = ZoneBuilderFactory::default().builder();
@@ -1614,8 +1621,8 @@ impl ServiceManager {
 
             ZoneArgs::Omicron(OmicronZoneConfigLocal {
                 zone:
-                    zone @ OmicronZoneConfig {
-                        zone_type: OmicronZoneType::Crucible { .. },
+                    OmicronZoneConfig {
+                        zone_type: OmicronZoneType::Crucible { dataset, .. },
                         underlay_address,
                         ..
                     },
@@ -1629,7 +1636,11 @@ impl ServiceManager {
                 let listen_addr = &underlay_address.to_string();
                 let listen_port = &CRUCIBLE_PORT.to_string();
 
-                let dataset_name = zone.dataset_name().unwrap().full();
+                let dataset_name = DatasetName::new(
+                    dataset.pool_name.clone(),
+                    DatasetKind::Crucible,
+                )
+                .full();
                 let uuid = &Uuid::new_v4().to_string();
                 let config = PropertyGroupBuilder::new("config")
                     .add_property("datalink", "astring", datalink)
@@ -1748,10 +1759,10 @@ impl ServiceManager {
             ZoneArgs::Omicron(OmicronZoneConfigLocal {
                 zone: OmicronZoneConfig { underlay_address, .. },
                 ..
-            }) => vec![*underlay_address],
-            ZoneArgs::SledLocal(req) => req.zone.addresses.clone(),
+            }) => std::slice::from_ref(underlay_address),
+            ZoneArgs::Switch(req) => &req.zone.addresses,
         };
-        for addr in &addresses {
+        for addr in addresses {
             if *addr == Ipv6Addr::LOCALHOST {
                 continue;
             }
@@ -2129,7 +2140,7 @@ impl ServiceManager {
                 debug!(self.inner.log, "enabling service");
                 smfh.enable()?;
             }
-            ZoneArgs::SledLocal(request) => {
+            ZoneArgs::Switch(request) => {
                 for service in &request.zone.services {
                     // TODO: Related to
                     // https://github.com/oxidecomputer/omicron/pull/1124 , should we
@@ -2184,10 +2195,11 @@ impl ServiceManager {
 
                             // If we're launching the switch zone, we'll have a
                             // bootstrap_address based on our call to
-                            // `self.bootstrap_address_needed` (which always gives us an
-                            // address for the switch zone. If we _don't_ have a
-                            // bootstrap address, someone has requested wicketd in a
-                            // non-switch zone; return an error.
+                            // `self.bootstrap_address_needed` (which always
+                            // gives us an address for the switch zone. If we
+                            // _don't_ have a bootstrap address, someone has
+                            // requested wicketd in a non-switch zone; return an
+                            // error.
                             let Some((_, bootstrap_address)) =
                                 bootstrap_name_and_address
                             else {
@@ -2204,8 +2216,8 @@ impl ServiceManager {
                             smfh.setprop(
                                 "config/artifact-address",
                                 &format!(
-                            "[{bootstrap_address}]:{BOOTSTRAP_ARTIFACT_PORT}"
-                        ),
+                                    "[{bootstrap_address}]:{BOOTSTRAP_ARTIFACT_PORT}"
+                                ),
                             )?;
 
                             smfh.setprop(
@@ -2213,10 +2225,11 @@ impl ServiceManager {
                                 &format!("[::1]:{MGS_PORT}"),
                             )?;
 
-                            // We intentionally bind `nexus-proxy-address` to `::` so
-                            // wicketd will serve this on all interfaces, particularly
-                            // the tech port interfaces, allowing external clients to
-                            // connect to this Nexus proxy.
+                            // We intentionally bind `nexus-proxy-address` to
+                            // `::` so wicketd will serve this on all
+                            // interfaces, particularly the tech port
+                            // interfaces, allowing external clients to connect
+                            // to this Nexus proxy.
                             smfh.setprop(
                                 "config/nexus-proxy-address",
                                 &format!("[::]:{WICKETD_NEXUS_PROXY_PORT}"),
@@ -2298,81 +2311,84 @@ impl ServiceManager {
                                 }
                             }
                             match asic {
-                        DendriteAsic::TofinoAsic => {
-                            // There should be exactly one device_name
-                            // associated with this zone: the /dev path for
-                            // the tofino ASIC.
-                            let dev_cnt = device_names.len();
-                            if dev_cnt == 1 {
-                                smfh.setprop(
-                                    "config/dev_path",
-                                    device_names[0].clone(),
-                                )?;
-                            } else {
-                                return Err(Error::SledLocalZone(
-                                    anyhow::anyhow!(
-                                    "{dev_cnt} devices needed for tofino asic"
-                                ),
-                                ));
-                            }
-                            smfh.setprop(
-                                "config/port_config",
-                                "/opt/oxide/dendrite/misc/sidecar_config.toml",
-                            )?;
-                            let sidecar_revision =
-                                match self.inner.sidecar_revision {
-                                    SidecarRevision::Physical(ref rev) => rev,
-                                    _ => {
-                                        return Err(Error::SidecarRevision(
+                                DendriteAsic::TofinoAsic => {
+                                    // There should be exactly one device_name
+                                    // associated with this zone: the /dev path
+                                    // for the tofino ASIC.
+                                    let dev_cnt = device_names.len();
+                                    if dev_cnt == 1 {
+                                        smfh.setprop(
+                                            "config/dev_path",
+                                            device_names[0].clone(),
+                                        )?;
+                                    } else {
+                                        return Err(Error::SledLocalZone(
                                             anyhow::anyhow!(
-                                            "expected physical sidecar revision"
-                                        ),
-                                        ))
+                                                "{dev_cnt} devices needed \
+                                                for tofino asic"
+                                            ),
+                                        ));
                                     }
-                                };
-                            smfh.setprop("config/board_rev", sidecar_revision)?;
-                        }
-                        DendriteAsic::TofinoStub => smfh.setprop(
-                            "config/port_config",
-                            "/opt/oxide/dendrite/misc/model_config.toml",
-                        )?,
-                        asic @ (DendriteAsic::SoftNpuZone
-                        | DendriteAsic::SoftNpuPropolisDevice) => {
-                            if asic == &DendriteAsic::SoftNpuZone {
-                                smfh.setprop("config/mgmt", "uds")?;
-                                smfh.setprop(
-                                    "config/uds_path",
-                                    "/opt/softnpu/stuff",
-                                )?;
-                            }
-                            if asic == &DendriteAsic::SoftNpuPropolisDevice {
-                                smfh.setprop("config/mgmt", "uart")?;
-                            }
-                            let s = match self.inner.sidecar_revision {
-                                SidecarRevision::SoftZone(ref s) => s,
-                                SidecarRevision::SoftPropolis(ref s) => s,
-                                _ => {
-                                    return Err(Error::SidecarRevision(
-                                        anyhow::anyhow!(
-                                            "expected soft sidecar revision"
-                                        ),
-                                    ))
+                                    smfh.setprop(
+                                        "config/port_config",
+                                        "/opt/oxide/dendrite/misc/sidecar_config.toml",
+                                    )?;
+                                    let sidecar_revision =
+                                        match self.inner.sidecar_revision {
+                                            SidecarRevision::Physical(ref rev) => rev,
+                                            _ => {
+                                                return Err(Error::SidecarRevision(
+                                                    anyhow::anyhow!(
+                                                        "expected physical \
+                                                        sidecar revision"
+                                                    ),
+                                                ))
+                                            }
+                                        };
+                                    smfh.setprop("config/board_rev", sidecar_revision)?;
+                                }
+                                DendriteAsic::TofinoStub => smfh.setprop(
+                                    "config/port_config",
+                                    "/opt/oxide/dendrite/misc/model_config.toml",
+                                )?,
+                                asic @ (DendriteAsic::SoftNpuZone
+                                | DendriteAsic::SoftNpuPropolisDevice) => {
+                                    if asic == &DendriteAsic::SoftNpuZone {
+                                        smfh.setprop("config/mgmt", "uds")?;
+                                        smfh.setprop(
+                                            "config/uds_path",
+                                            "/opt/softnpu/stuff",
+                                        )?;
+                                    }
+                                    if asic == &DendriteAsic::SoftNpuPropolisDevice {
+                                        smfh.setprop("config/mgmt", "uart")?;
+                                    }
+                                    let s = match self.inner.sidecar_revision {
+                                        SidecarRevision::SoftZone(ref s) => s,
+                                        SidecarRevision::SoftPropolis(ref s) => s,
+                                        _ => {
+                                            return Err(Error::SidecarRevision(
+                                                anyhow::anyhow!(
+                                                    "expected soft sidecar \
+                                                    revision"
+                                                ),
+                                            ))
+                                        }
+                                    };
+                                    smfh.setprop(
+                                        "config/front_ports",
+                                        &s.front_port_count.to_string(),
+                                    )?;
+                                    smfh.setprop(
+                                        "config/rear_ports",
+                                        &s.rear_port_count.to_string(),
+                                    )?;
+                                    smfh.setprop(
+                                        "config/port_config",
+                                        "/opt/oxide/dendrite/misc/softnpu_single_sled_config.toml",
+                                    )?
                                 }
                             };
-                            smfh.setprop(
-                                "config/front_ports",
-                                &s.front_port_count.to_string(),
-                            )?;
-                            smfh.setprop(
-                                "config/rear_ports",
-                                &s.rear_port_count.to_string(),
-                            )?;
-                            smfh.setprop(
-                                "config/port_config",
-                                "/opt/oxide/dendrite/misc/softnpu_single_sled_config.toml",
-                            )?
-                        }
-                    };
                             smfh.refresh()?;
                         }
                         SwitchService::Tfport { pkt_source, asic } => {
@@ -2386,25 +2402,27 @@ impl ServiceManager {
 
                             if is_gimlet {
                                 // Collect the prefixes for each techport.
-                                let techport_prefixes = match bootstrap_name_and_address
-                            .as_ref()
-                        {
-                            Some((_, addr)) => {
-                                Self::bootstrap_addr_to_techport_prefixes(addr)
-                            }
-                            None => {
-                                return Err(Error::BadServiceRequest {
-                                    service: "tfport".into(),
-                                    message: "bootstrap addr missing".into(),
-                                });
-                            }
-                        };
+                                let nameaddr =
+                                    bootstrap_name_and_address.as_ref();
+                                let techport_prefixes = match nameaddr {
+                                    Some((_, addr)) => {
+                                        Self::bootstrap_addr_to_techport_prefixes(addr)
+                                    }
+                                    None => {
+                                        return Err(Error::BadServiceRequest {
+                                            service: "tfport".into(),
+                                            message: "bootstrap addr missing"
+                                                .into(),
+                                        });
+                                    }
+                                };
 
                                 for (i, prefix) in
                                     techport_prefixes.into_iter().enumerate()
                                 {
-                                    // Each `prefix` is an `Ipv6Subnet` including a netmask.
-                                    // Stringify just the network address, without the mask.
+                                    // Each `prefix` is an `Ipv6Subnet`
+                                    // including a netmask.  Stringify just the
+                                    // network address, without the mask.
                                     smfh.setprop(
                                         format!("config/techport{i}_prefix"),
                                         prefix.net().network().to_string(),
@@ -2431,7 +2449,8 @@ impl ServiceManager {
                         }
                         SwitchService::Uplink => {
                             // Nothing to do here - this service is special and
-                            // configured in `ensure_switch_zone_uplinks_configured`
+                            // configured in
+                            // `ensure_switch_zone_uplinks_configured`
                         }
                         SwitchService::Mgd => {
                             info!(self.inner.log, "Setting up mgd service");
@@ -2454,16 +2473,18 @@ impl ServiceManager {
                                 if is_gimlet {
                                     (0..32)
                                         .map(|i| {
-                                            // See the `tfport_name` function for how
-                                            // tfportd names the addrconf it creates.
-                                            // Right now, that's `tfportrear[0-31]_0`
-                                            // for all rear ports, which is what we're
-                                            // directing ddmd to listen for
-                                            // advertisements on.
+                                            // See the `tfport_name` function
+                                            // for how tfportd names the
+                                            // addrconf it creates.  Right now,
+                                            // that's `tfportrear[0-31]_0` for
+                                            // all rear ports, which is what
+                                            // we're directing ddmd to listen
+                                            // for advertisements on.
                                             //
-                                            // This may grow in a multi-rack future to
-                                            // include a subset of "front" ports too,
-                                            // when racks are cabled together.
+                                            // This may grow in a multi-rack
+                                            // future to include a subset of
+                                            // "front" ports too, when racks are
+                                            // cabled together.
                                             AddrObject::new(
                                                 &format!("tfportrear{}_0", i),
                                                 IPV6_LINK_LOCAL_NAME,
@@ -2487,12 +2508,12 @@ impl ServiceManager {
 
                             smfh.setprop(
                                 "config/interfaces",
-                                // `svccfg setprop` requires a list of values to be
-                                // enclosed in `()`, and each string value to be
-                                // enclosed in `""`. Note that we do _not_ need to
-                                // escape the parentheses, since this is not passed
-                                // through a shell, but directly to `exec(2)` in the
-                                // zone.
+                                // `svccfg setprop` requires a list of values to
+                                // be enclosed in `()`, and each string value to
+                                // be enclosed in `""`. Note that we do _not_
+                                // need to escape the parentheses, since this is
+                                // not passed through a shell, but directly to
+                                // `exec(2)` in the zone.
                                 format!(
                                     "({})",
                                     maghemite_interfaces
@@ -2506,8 +2527,8 @@ impl ServiceManager {
                             )?;
 
                             if is_gimlet {
-                                // Ddm for a scrimlet needs to be configured to talk to
-                                // dendrite
+                                // Ddm for a scrimlet needs to be configured to
+                                // talk to dendrite
                                 smfh.setprop("config/dpd_host", "[::1]")?;
                                 smfh.setprop("config/dpd_port", DENDRITE_PORT)?;
                             }
@@ -2617,25 +2638,17 @@ impl ServiceManager {
 
         // Read the existing set of services from the ledger.
         let zone_ledger_paths = self.all_omicron_zone_ledgers().await;
-        let ledger = match Ledger::<OmicronZonesConfigLocal>::new(
+        let ledger_data = match Ledger::<OmicronZonesConfigLocal>::new(
             log,
             zone_ledger_paths.clone(),
         )
         .await
         {
-            Some(ledger) => ledger,
-            None => Ledger::<OmicronZonesConfigLocal>::new_with(
-                log,
-                zone_ledger_paths.clone(),
-                OmicronZonesConfigLocal {
-                    omicron_version: Generation::new(),
-                    ledger_version: Generation::new(),
-                    zones: vec![],
-                },
-            ),
+            Some(ledger) => ledger.data().clone(),
+            None => OmicronZonesConfigLocal::initial(),
         };
 
-        Ok(ledger.data().clone().to_omicron_zones_config())
+        Ok(ledger_data.to_omicron_zones_config())
     }
 
     /// Ensures that particular Omicron zones are running
@@ -2663,11 +2676,7 @@ impl ServiceManager {
             None => Ledger::<OmicronZonesConfigLocal>::new_with(
                 log,
                 zone_ledger_paths.clone(),
-                OmicronZonesConfigLocal {
-                    omicron_version: Generation::new(),
-                    ledger_version: Generation::new(),
-                    zones: vec![],
-                },
+                OmicronZonesConfigLocal::initial(),
             ),
         };
 
@@ -2679,10 +2688,10 @@ impl ServiceManager {
 
         // Absolutely refuse to downgrade the configuration.
         if ledger_zone_config.omicron_version > request.version {
-            return Err(Error::RequestedConfigOutdated(
-                request.version,
-                ledger_zone_config.omicron_version,
-            ));
+            return Err(Error::RequestedConfigOutdated {
+                requested: request.version,
+                current: ledger_zone_config.omicron_version,
+            });
         }
 
         // If the version is the same as what we're running, but the contents
@@ -3495,7 +3504,7 @@ impl ServiceManager {
         let root = Utf8PathBuf::from(ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT);
         let zone_request =
             SwitchZoneConfigLocal { root, zone: request.clone() };
-        let zone_args = ZoneArgs::SledLocal(&zone_request);
+        let zone_args = ZoneArgs::Switch(&zone_request);
         let zone =
             self.initialize_zone(zone_args, filesystems, data_links).await?;
         *sled_zone = SledLocalZone::Running { request: request.clone(), zone };
@@ -4090,7 +4099,8 @@ mod test {
             .expect_err("unexpectedly went backwards in zones version");
         assert!(matches!(
             error,
-            Error::RequestedConfigOutdated(vr, vc) if vr == v1 && vc == v2
+            Error::RequestedConfigOutdated { requested, current }
+            if requested == v1 && current == v2
         ));
         let found2 =
             mgr.omicron_zones_list().await.expect("failed to list zones");
