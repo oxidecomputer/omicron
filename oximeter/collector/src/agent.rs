@@ -712,7 +712,7 @@ mod tests {
         // Register the dummy producer.
         let endpoint = ProducerEndpoint {
             id: Uuid::new_v4(),
-            kind: Some(ProducerKind::Service),
+            kind: ProducerKind::Service,
             address,
             base_route: String::from("/"),
             interval: COLLECTION_INTERVAL,
@@ -768,7 +768,7 @@ mod tests {
         // unreachable.
         let endpoint = ProducerEndpoint {
             id: Uuid::new_v4(),
-            kind: Some(ProducerKind::Service),
+            kind: ProducerKind::Service,
             address: SocketAddr::V6(SocketAddrV6::new(
                 Ipv6Addr::LOCALHOST,
                 0,
@@ -854,7 +854,7 @@ mod tests {
         // Register the rather flaky producer.
         let endpoint = ProducerEndpoint {
             id: Uuid::new_v4(),
-            kind: Some(ProducerKind::Service),
+            kind: ProducerKind::Service,
             address,
             base_route: String::from("/"),
             interval: COLLECTION_INTERVAL,

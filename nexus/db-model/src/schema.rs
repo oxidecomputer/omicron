@@ -399,7 +399,7 @@ table! {
         id -> Uuid,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
-        kind -> Nullable<crate::ProducerKindEnum>,
+        kind -> crate::ProducerKindEnum,
         ip -> Inet,
         port -> Int4,
         interval -> Float8,

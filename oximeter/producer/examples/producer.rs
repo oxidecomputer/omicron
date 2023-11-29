@@ -125,7 +125,7 @@ async fn main() -> anyhow::Result<()> {
     registry.register_producer(producer).unwrap();
     let server_info = ProducerEndpoint {
         id: registry.producer_id(),
-        kind: Some(ProducerKind::Service),
+        kind: ProducerKind::Service,
         address: args.address,
         base_route: "/collect".to_string(),
         interval: Duration::from_secs(10),
