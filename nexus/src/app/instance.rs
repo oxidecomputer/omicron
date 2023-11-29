@@ -362,7 +362,9 @@ impl super::Nexus {
         }
 
         if instance.runtime().migration_id.is_some() {
-            return Err(Error::unavail("instance is already migrating"));
+            return Err(Error::unavail_external(
+                "instance is already migrating",
+            ));
         }
 
         // Kick off the migration saga
@@ -1583,28 +1585,26 @@ impl super::Nexus {
                 | InstanceState::Starting
                 | InstanceState::Stopping
                 | InstanceState::Stopped
-                | InstanceState::Failed => Err(Error::ServiceUnavailable {
-                    internal_message: format!(
-                        "cannot connect to serial console of instance in state \
-                            {:?}",
-                        vmm.runtime.state.0
-                    ),
-                }),
-                InstanceState::Destroyed => Err(Error::ServiceUnavailable {
-                    internal_message: format!(
+                | InstanceState::Failed => {
+                    Err(Error::unavail_external(format!(
+                    "cannot connect to serial console of instance in state \
+                        {:?}",
+                    vmm.runtime.state.0
+                )))
+                }
+                InstanceState::Destroyed => {
+                    Err(Error::unavail_external(format!(
                         "cannot connect to serial console of instance in state \
                         {:?}",
-                        InstanceState::Stopped),
-                }),
+                    InstanceState::Stopped)))
+                }
             }
         } else {
-            Err(Error::ServiceUnavailable {
-                internal_message: format!(
-                    "instance is in state {:?} and has no active serial console \
+            Err(Error::unavail_external(format!(
+                "instance is in state {:?} and has no active serial console \
                     server",
-                    instance.runtime().nexus_state
-                )
-            })
+                instance.runtime().nexus_state
+            )))
         }
     }
 

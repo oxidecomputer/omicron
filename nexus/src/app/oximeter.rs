@@ -390,8 +390,8 @@ impl super::Nexus {
             limit: std::num::NonZeroU32::new(1).unwrap(),
         };
         let oxs = self.db_datastore.oximeter_list(&page_params).await?;
-        let info = oxs.first().ok_or_else(|| Error::ServiceUnavailable {
-            internal_message: String::from("no oximeter collectors available"),
+        let info = oxs.first().ok_or_else(|| {
+            Error::unavail_external("no oximeter collectors available")
         })?;
         let address =
             SocketAddr::from((info.ip.ip(), info.port.try_into().unwrap()));
@@ -403,7 +403,8 @@ impl super::Nexus {
 fn map_oximeter_err(error: oximeter_db::Error) -> Error {
     match error {
         oximeter_db::Error::DatabaseUnavailable(_) => {
-            Error::ServiceUnavailable { internal_message: error.to_string() }
+            // XXX: should this be unavail_external?
+            Error::unavail_internal(error.to_string())
         }
         _ => Error::InternalError { internal_message: error.to_string() },
     }

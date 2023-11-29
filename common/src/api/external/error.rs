@@ -53,8 +53,11 @@ pub enum Error {
     #[error("Internal Error: {internal_message}")]
     InternalError { internal_message: String },
     /// The system (or part of it) is unavailable.
-    #[error("Service Unavailable: {internal_message}")]
-    ServiceUnavailable { internal_message: String },
+    #[error(
+        "Service Unavailable {}",
+        message.display_internal()
+    )]
+    ServiceUnavailable { message: MessageVariant },
     /// Method Not Allowed
     #[error("Method Not Allowed: {internal_message}")]
     MethodNotAllowed { internal_message: String },
@@ -64,6 +67,88 @@ pub enum Error {
 
     #[error("Conflict: {internal_message}")]
     Conflict { internal_message: String },
+}
+
+/// Represents either a message that is internal to the system or a message that
+/// is intended to be returned to the client.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub enum MessageVariant {
+    Internal(String),
+    External {
+        message: String,
+        /// Internal context, or an empty string if there's no context yet.
+        internal_context: String,
+    },
+}
+
+impl MessageVariant {
+    fn internal(message: String) -> Self {
+        MessageVariant::Internal(message)
+    }
+
+    fn external(message: String) -> Self {
+        MessageVariant::External {
+            message: message,
+            internal_context: String::new(),
+        }
+    }
+
+    fn internal_context<C>(self, context: C) -> Self
+    where
+        C: Display + Send + Sync + 'static,
+    {
+        match self {
+            MessageVariant::Internal(msg) => {
+                MessageVariant::Internal(format!("{}: {}", context, msg))
+            }
+            MessageVariant::External { message, internal_context } => {
+                let internal_context = if internal_context.is_empty() {
+                    context.to_string()
+                } else {
+                    format!("{}: {}", context, internal_context)
+                };
+                MessageVariant::External { message, internal_context }
+            }
+        }
+    }
+
+    fn into_internal_external(self) -> (String, Option<String>) {
+        match self {
+            MessageVariant::Internal(msg) => (msg, None),
+            MessageVariant::External { message, internal_context } => {
+                let internal = if internal_context.is_empty() {
+                    message.clone()
+                } else {
+                    format!("{}: {}", message, internal_context)
+                };
+                (internal, Some(message))
+            }
+        }
+    }
+
+    // Do not implement `fmt::Display` for this enum because we don't want users to
+    // accidentally display the internal message to the client. Instead, use a
+    // private formatter.
+    fn display_internal(&self) -> MessageVariantDisplay<'_> {
+        MessageVariantDisplay(self)
+    }
+}
+
+struct MessageVariantDisplay<'a>(&'a MessageVariant);
+
+impl<'a> Display for MessageVariantDisplay<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.0 {
+            MessageVariant::Internal(msg) => write!(f, "(internal: {})", msg),
+            MessageVariant::External { message, internal_context } => {
+                write!(f, ": {message}")?;
+                if !internal_context.is_empty() {
+                    write!(f, " (with internal context: {internal_context})")?;
+                }
+                Ok(())
+            }
+        }
+    }
 }
 
 /// Indicates how an object was looked up (for an `ObjectNotFound` error)
@@ -155,15 +240,28 @@ impl Error {
         Error::InvalidRequest { message: message.to_owned() }
     }
 
-    /// Generates an [`Error::ServiceUnavailable`] error with the specific
-    /// message
+    /// Generates an [`Error::ServiceUnavailable`] error with a specific
+    /// message that is sent back to the client.
     ///
     /// This should be used for transient failures where the caller might be
     /// expected to retry.  Logic errors or other problems indicating that a
     /// retry would not work should probably be an InternalError (if it's a
     /// server problem) or InvalidRequest (if it's a client problem) instead.
-    pub fn unavail(message: &str) -> Error {
-        Error::ServiceUnavailable { internal_message: message.to_owned() }
+    pub fn unavail_external(external_message: impl Into<String>) -> Error {
+        Error::ServiceUnavailable {
+            message: MessageVariant::external(external_message.into()),
+        }
+    }
+
+    /// Generates an [`Error::ServiceUnavailable`] error with a specific
+    /// internal-only message.
+    ///
+    /// This should be used for transient failures where the caller might be
+    /// expected to retry.
+    pub fn unavail_internal(internal_message: impl Into<String>) -> Error {
+        Error::ServiceUnavailable {
+            message: MessageVariant::internal(internal_message.into()),
+        }
     }
 
     /// Generates an [`Error::TypeVersionMismatch`] with a specific message.
@@ -215,12 +313,9 @@ impl Error {
             Error::InternalError { internal_message } => Error::InternalError {
                 internal_message: format!("{}: {}", context, internal_message),
             },
-            Error::ServiceUnavailable { internal_message } => {
+            Error::ServiceUnavailable { message } => {
                 Error::ServiceUnavailable {
-                    internal_message: format!(
-                        "{}: {}",
-                        context, internal_message
-                    ),
+                    message: message.internal_context(context),
                 }
             }
             Error::MethodNotAllowed { internal_message } => {
@@ -326,11 +421,16 @@ impl From<Error> for HttpError {
                 HttpError::for_internal_error(internal_message)
             }
 
-            Error::ServiceUnavailable { internal_message } => {
-                HttpError::for_unavail(
-                    Some(String::from("ServiceNotAvailable")),
+            Error::ServiceUnavailable { message } => {
+                let (internal_message, external) =
+                    message.into_internal_external();
+                HttpError {
+                    status_code: http::StatusCode::SERVICE_UNAVAILABLE,
+                    error_code: Some(String::from("ServiceNotAvailable")),
+                    external_message: external
+                        .unwrap_or_else(|| "Service Unavailable".to_owned()),
                     internal_message,
-                )
+                }
             }
 
             Error::TypeVersionMismatch { internal_message } => {
@@ -381,7 +481,10 @@ impl<T: ClientError> From<progenitor::progenitor_client::Error<T>> for Error {
 
                 match rv.status() {
                     http::StatusCode::SERVICE_UNAVAILABLE => {
-                        Error::unavail(&message)
+                        // TODO: Out of an abundance of caution we treat this
+                        // message as internal, though it's possible some such
+                        // messages should be displayed.
+                        Error::unavail_internal(&message)
                     }
                     status if status.is_client_error() => {
                         Error::invalid_request(&message)
@@ -493,6 +596,8 @@ impl<T> InternalContext<T> for Result<T, Error> {
 
 #[cfg(test)]
 mod test {
+    use crate::api::external::error::MessageVariant;
+
     use super::Error;
     use super::InternalContext;
 
@@ -553,11 +658,29 @@ mod test {
         };
 
         // test `with_internal_context()` and (separately) `ServiceUnavailable`
-        // variant
-        let error: Result<(), Error> = Err(Error::unavail("boom"));
+        // internal variant
+        let error: Result<(), Error> = Err(Error::unavail_internal("boom"));
         match error.with_internal_context(|| format!("uh-oh (#{:2})", 2)) {
-            Err(Error::ServiceUnavailable { internal_message }) => {
-                assert_eq!(internal_message, "uh-oh (# 2): boom");
+            Err(Error::ServiceUnavailable { message }) => {
+                assert_eq!(
+                    message,
+                    MessageVariant::internal("uh-oh (# 2): boom".to_owned())
+                );
+            }
+            _ => panic!("returned wrong type"),
+        };
+
+        // test `ServiceUnavailable` external variant
+        let error: Result<(), Error> = Err(Error::unavail_external("boom"));
+        match error.with_internal_context(|| format!("uh-oh (#{:2})", 2)) {
+            Err(Error::ServiceUnavailable { message }) => {
+                assert_eq!(
+                    message,
+                    MessageVariant::External {
+                        message: "boom".to_owned(),
+                        internal_context: "uh-oh (# 2)".to_owned(),
+                    }
+                );
             }
             _ => panic!("returned wrong type"),
         };

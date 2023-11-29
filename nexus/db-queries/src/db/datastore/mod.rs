@@ -220,7 +220,9 @@ impl DataStore {
         opctx.authorize(authz::Action::Query, &authz::DATABASE).await?;
         let pool = self.pool.pool();
         let connection = pool.get().await.map_err(|err| {
-            Error::unavail(&format!("Failed to access DB connection: {err}"))
+            Error::unavail_internal(format!(
+                "Failed to access DB connection: {err}"
+            ))
         })?;
         Ok(connection)
     }
@@ -234,7 +236,9 @@ impl DataStore {
         &self,
     ) -> Result<DataStoreConnection, Error> {
         let connection = self.pool.pool().get().await.map_err(|err| {
-            Error::unavail(&format!("Failed to access DB connection: {err}"))
+            Error::unavail_internal(format!(
+                "Failed to access DB connection: {err}"
+            ))
         })?;
         Ok(connection)
     }

@@ -651,7 +651,10 @@ impl SledAgent {
             &dropshot_log,
         )
         .map_err(|error| {
-            Error::unavail(&format!("initializing propolis-server: {}", error))
+            Error::unavail_external(format!(
+                "initializing propolis-server: {}",
+                error
+            ))
         })?
         .start();
         let client = propolis_client::Client::new(&format!(

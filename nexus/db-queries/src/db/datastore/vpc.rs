@@ -340,7 +340,7 @@ impl DataStore {
             opctx.log,
             "failed to find a VNI after searching entire range";
         );
-        Err(Error::unavail("Failed to find a free VNI for this VPC"))
+        Err(Error::unavail_external("Failed to find a free VNI for this VPC"))
     }
 
     // Internal implementation for creating a VPC.

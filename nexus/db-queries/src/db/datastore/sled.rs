@@ -194,7 +194,7 @@ impl DataStore {
             .await
             .map_err(|e| match e {
                 TxnError::CustomError(SledReservationError::NotFound) => {
-                    external::Error::unavail(
+                    external::Error::unavail_external(
                         "No sleds can fit the requested instance",
                     )
                 }
