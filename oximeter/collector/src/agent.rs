@@ -659,6 +659,23 @@ mod tests {
     use tokio::time::Instant;
     use uuid::Uuid;
 
+    // Interval on which oximeter collects from producers in these tests.
+    const COLLECTION_INTERVAL: Duration = Duration::from_secs(1);
+
+    // Interval in calls to `tokio::time::advance`. This must be sufficiently
+    // small relative to `COLLECTION_INTERVAL` to ensure all ticks of internal
+    // timers complete as expected.
+    const TICK_INTERVAL: Duration = Duration::from_millis(10);
+
+    // Total number of collection attempts.
+    const N_COLLECTIONS: usize = 5;
+
+    // Period these tests wait using `tokio::time::advance()` before checking
+    // their test conditions.
+    fn test_wait_period() -> Duration {
+        COLLECTION_INTERVAL * N_COLLECTIONS as u32 + COLLECTION_INTERVAL / 2
+    }
+
     // Test that we count successful collections from a target correctly.
     #[tokio::test]
     async fn test_self_stat_collection_count() {
@@ -692,13 +709,12 @@ mod tests {
         let _task = tokio::task::spawn(server);
 
         // Register the dummy producer.
-        let interval = Duration::from_secs(1);
         let endpoint = ProducerEndpoint {
             id: Uuid::new_v4(),
             kind: Some(ProducerKind::Service),
             address,
             base_route: String::from("/"),
-            interval,
+            interval: COLLECTION_INTERVAL,
         };
         collector
             .register_producer(endpoint)
@@ -708,10 +724,9 @@ mod tests {
         // Step time until there has been exactly `N_COLLECTIONS` collections.
         tokio::time::pause();
         let now = Instant::now();
-        const N_COLLECTIONS: usize = 5;
-        let wait_for = interval * N_COLLECTIONS as u32 + interval / 2;
+        let wait_for = test_wait_period();
         while now.elapsed() < wait_for {
-            tokio::time::advance(interval / 10).await;
+            tokio::time::advance(TICK_INTERVAL).await;
         }
 
         // Request the statistics from the task itself.
@@ -751,7 +766,6 @@ mod tests {
 
         // Register a bogus producer, which is equivalent to a producer that is
         // unreachable.
-        let interval = Duration::from_secs(1);
         let endpoint = ProducerEndpoint {
             id: Uuid::new_v4(),
             kind: Some(ProducerKind::Service),
@@ -762,7 +776,7 @@ mod tests {
                 0,
             )),
             base_route: String::from("/"),
-            interval,
+            interval: COLLECTION_INTERVAL,
         };
         collector
             .register_producer(endpoint)
@@ -772,10 +786,9 @@ mod tests {
         // Step time until there has been exactly `N_COLLECTIONS` collections.
         tokio::time::pause();
         let now = Instant::now();
-        const N_COLLECTIONS: usize = 5;
-        let wait_for = interval * N_COLLECTIONS as u32 + interval / 2;
+        let wait_for = test_wait_period();
         while now.elapsed() < wait_for {
-            tokio::time::advance(interval / 10).await;
+            tokio::time::advance(TICK_INTERVAL).await;
         }
 
         // Request the statistics from the task itself.
@@ -840,13 +853,12 @@ mod tests {
         let _task = tokio::task::spawn(server);
 
         // Register the rather flaky producer.
-        let interval = Duration::from_secs(1);
         let endpoint = ProducerEndpoint {
             id: Uuid::new_v4(),
             kind: Some(ProducerKind::Service),
             address,
             base_route: String::from("/"),
-            interval,
+            interval: COLLECTION_INTERVAL,
         };
         collector
             .register_producer(endpoint)
@@ -856,10 +868,9 @@ mod tests {
         // Step time until there has been exactly `N_COLLECTIONS` collections.
         tokio::time::pause();
         let now = Instant::now();
-        const N_COLLECTIONS: usize = 5;
-        let wait_for = interval * N_COLLECTIONS as u32 + interval / 2;
+        let wait_for = test_wait_period();
         while now.elapsed() < wait_for {
-            tokio::time::advance(interval / 10).await;
+            tokio::time::advance(TICK_INTERVAL).await;
         }
 
         // Request the statistics from the task itself.
