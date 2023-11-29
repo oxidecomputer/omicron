@@ -247,9 +247,6 @@ impl DataStore {
                 dsl::time_modified.eq(Utc::now()),
             ))
             .check_if_exists::<Sled>(sled_id);
-
-        println!("{}", diesel::debug_query::<diesel::pg::Pg, _>(&query));
-
         let result = query
             .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
             .await

@@ -634,8 +634,11 @@ impl InformationSchema {
             other.statistics,
             "Statistics did not match. This often means that in dbinit.sql, a new \
             column was added into the middle of a table rather than to the end. \
-            If that is the case, change dbinit.sql to add the column to the end \
-            of the table."
+            If that is the case:\n\n \
+            \
+            * Change dbinit.sql to add the column to the end of the table.\n\
+            * Update nexus/db-model/src/schema.rs and the corresponding \
+            Queryable/Insertable struct with the new column ordering."
         );
         similar_asserts::assert_eq!(self.sequences, other.sequences);
         similar_asserts::assert_eq!(self.pg_indexes, other.pg_indexes);
