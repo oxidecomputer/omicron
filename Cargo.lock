@@ -1791,7 +1791,7 @@ dependencies = [
  "omicron-workspace-hack",
  "openapi-lint",
  "openapiv3 1.0.3",
- "pretty-hex 0.3.0",
+ "pretty-hex 0.4.0",
  "schemars",
  "serde",
  "serde_json",
@@ -5978,9 +5978,9 @@ checksum = "bc5c99d529f0d30937f6f4b8a86d988047327bb88d04d2c4afc356de74722131"
 
 [[package]]
 name = "pretty-hex"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c6fa0831dd7cc608c38a5e323422a0077678fa5744aa2be4ad91c4ece8eec8d5"
+checksum = "23c6b968ed37d62e35b4febaba13bfa231b0b7929d68b8a94e65445a17e2d35f"
 
 [[package]]
 name = "pretty_assertions"
