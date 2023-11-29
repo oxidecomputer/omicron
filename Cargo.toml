@@ -389,7 +389,7 @@ walkdir = "2.4"
 wicket = { path = "wicket" }
 wicket-common = { path = "wicket-common" }
 wicketd-client = { path = "clients/wicketd-client" }
-zeroize = { version = "1.6.0", features = ["zeroize_derive", "std"] }
+zeroize = { version = "1.7.0", features = ["zeroize_derive", "std"] }
 zip = { version = "0.6.6", default-features = false, features = ["deflate","bzip2"] }
 zone = { version = "0.3", default-features = false, features = ["async"] }
 
