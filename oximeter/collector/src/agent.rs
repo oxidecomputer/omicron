@@ -668,13 +668,14 @@ mod tests {
     const TICK_INTERVAL: Duration = Duration::from_millis(10);
 
     // Total number of collection attempts.
-    const N_COLLECTIONS: usize = 5;
+    const N_COLLECTIONS: u64 = 5;
 
     // Period these tests wait using `tokio::time::advance()` before checking
     // their test conditions.
-    fn test_wait_period() -> Duration {
-        COLLECTION_INTERVAL * N_COLLECTIONS as u32 + COLLECTION_INTERVAL / 2
-    }
+    const TEST_WAIT_PERIOD: Duration = Duration::from_millis(
+        COLLECTION_INTERVAL.as_millis() as u64 * N_COLLECTIONS
+            + COLLECTION_INTERVAL.as_millis() as u64 / 2,
+    );
 
     // Test that we count successful collections from a target correctly.
     #[tokio::test]
@@ -724,8 +725,7 @@ mod tests {
         // Step time until there has been exactly `N_COLLECTIONS` collections.
         tokio::time::pause();
         let now = Instant::now();
-        let wait_for = test_wait_period();
-        while now.elapsed() < wait_for {
+        while now.elapsed() < TEST_WAIT_PERIOD {
             tokio::time::advance(TICK_INTERVAL).await;
         }
 
@@ -744,7 +744,7 @@ mod tests {
             .await
             .expect("failed to request statistics from task");
         let stats = rx.await.expect("failed to receive statistics from task");
-        assert_eq!(stats.collections.datum.value(), N_COLLECTIONS as u64);
+        assert_eq!(stats.collections.datum.value(), N_COLLECTIONS);
         assert!(stats.failed_collections.is_empty());
         logctx.cleanup_successful();
     }
@@ -786,8 +786,7 @@ mod tests {
         // Step time until there has been exactly `N_COLLECTIONS` collections.
         tokio::time::pause();
         let now = Instant::now();
-        let wait_for = test_wait_period();
-        while now.elapsed() < wait_for {
+        while now.elapsed() < TEST_WAIT_PERIOD {
             tokio::time::advance(TICK_INTERVAL).await;
         }
 
@@ -814,7 +813,7 @@ mod tests {
                 .unwrap()
                 .datum
                 .value(),
-            N_COLLECTIONS as u64
+            N_COLLECTIONS,
         );
         assert_eq!(stats.failed_collections.len(), 1);
         logctx.cleanup_successful();
@@ -868,8 +867,7 @@ mod tests {
         // Step time until there has been exactly `N_COLLECTIONS` collections.
         tokio::time::pause();
         let now = Instant::now();
-        let wait_for = test_wait_period();
-        while now.elapsed() < wait_for {
+        while now.elapsed() < TEST_WAIT_PERIOD {
             tokio::time::advance(TICK_INTERVAL).await;
         }
 
@@ -896,7 +894,7 @@ mod tests {
                 .unwrap()
                 .datum
                 .value(),
-            N_COLLECTIONS as u64
+            N_COLLECTIONS,
         );
         assert_eq!(stats.failed_collections.len(), 1);
         logctx.cleanup_successful();
