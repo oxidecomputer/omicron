@@ -598,14 +598,9 @@ impl ServiceInner {
                                 .collect(),
                             addresses: config.addresses.clone(),
                             switch: config.switch.into(),
-                            uplink_port_speed: config
-                                .uplink_port_speed
-                                .clone()
-                                .into(),
-                            uplink_port_fec: config
-                                .uplink_port_fec
-                                .clone()
-                                .into(),
+                            uplink_port_speed: config.uplink_port_speed.into(),
+                            uplink_port_fec: config.uplink_port_fec.into(),
+                            autoneg: config.autoneg,
                             bgp_peers: config
                                 .bgp_peers
                                 .iter()
