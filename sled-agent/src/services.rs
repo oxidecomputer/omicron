@@ -53,7 +53,7 @@ use illumos_utils::dladm::{
 use illumos_utils::link::{Link, VnicAllocator};
 use illumos_utils::opte::{DhcpCfg, Port, PortManager, PortTicket};
 use illumos_utils::running_zone::{
-    InstalledZone, RunCommandError, RunningZone,
+    InstalledZone, RunCommandError, RunningZone, ZoneBuilderFactory,
 };
 use illumos_utils::zfs::ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT;
 use illumos_utils::zone::AddressRequest;
@@ -1443,23 +1443,29 @@ impl ServiceManager {
             }
             ZoneArgs::SledLocal(_) => "switch".to_string(),
         };
-        let installed_zone = InstalledZone::install(
-            &self.inner.log,
-            &self.inner.underlay_vnic_allocator,
-            &request.root(),
-            zone_image_paths.as_slice(),
-            &zone_type_str,
-            unique_name,
-            datasets.as_slice(),
-            &filesystems,
-            &data_links,
-            &devices,
-            opte_ports,
-            bootstrap_vnic,
-            links,
-            limit_priv,
-        )
-        .await?;
+
+        let mut zone_builder = ZoneBuilderFactory::default().builder();
+        if let Some(uuid) = unique_name {
+            zone_builder = zone_builder.with_unique_name(uuid);
+        }
+        if let Some(vnic) = bootstrap_vnic {
+            zone_builder = zone_builder.with_bootstrap_vnic(vnic);
+        }
+        let installed_zone = zone_builder
+            .with_log(self.inner.log.clone())
+            .with_underlay_vnic_allocator(&self.inner.underlay_vnic_allocator)
+            .with_zone_root_path(&request.root())
+            .with_zone_image_paths(zone_image_paths.as_slice())
+            .with_zone_type(&zone_type_str)
+            .with_datasets(datasets.as_slice())
+            .with_filesystems(&filesystems)
+            .with_data_links(&data_links)
+            .with_devices(&devices)
+            .with_opte_ports(opte_ports)
+            .with_links(links)
+            .with_limit_priv(limit_priv)
+            .install()
+            .await?;
 
         // TODO(https://github.com/oxidecomputer/omicron/issues/1898):
         //
