@@ -70,6 +70,7 @@ mod silo_user;
 mod silo_user_password_hash;
 mod sled;
 mod sled_instance;
+mod sled_provision_state;
 mod sled_resource;
 mod sled_resource_kind;
 mod sled_underlay_subnet_allocation;
@@ -152,6 +153,7 @@ pub use silo_user::*;
 pub use silo_user_password_hash::*;
 pub use sled::*;
 pub use sled_instance::*;
+pub use sled_provision_state::*;
 pub use sled_resource::*;
 pub use sled_resource_kind::*;
 pub use sled_underlay_subnet_allocation::*;
@@ -287,10 +289,9 @@ macro_rules! impl_enum_type {
                         Ok($model_type::$enum_item)
                     }
                     )*
-                    _ => {
-                        Err(concat!("Unrecognized enum variant for ",
-                                stringify!{$model_type})
-                            .into())
+                    other => {
+                        let s = concat!("Unrecognized enum variant for ", stringify!{$model_type});
+                        Err(format!("{}: (raw bytes: {:?})", s, other).into())
                     }
                 }
             }
