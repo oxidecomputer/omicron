@@ -223,11 +223,11 @@ pub enum Error {
     Simnet(#[from] GetSimnetError),
 
     #[error(
-        "Requested version ({requested}) is older than current ({current})"
+        "Requested generation ({requested}) is older than current ({current})"
     )]
     RequestedConfigOutdated { requested: Generation, current: Generation },
 
-    #[error("Requested version {0} with different zones than before")]
+    #[error("Requested generation {0} with different zones than before")]
     RequestedConfigConflicts(Generation),
 
     #[error("Error migrating old-format services ledger: {0:#}")]
@@ -301,38 +301,39 @@ const ZONES_LEDGER_FILENAME: &str = "omicron_zones.json";
     Clone, Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
 pub struct OmicronZonesConfigLocal {
-    /// version of the Omicron-provided part of the configuration
+    /// generation of the Omicron-provided part of the configuration
     ///
-    /// This version number is outside of Sled Agent's control.  We store
+    /// This generation number is outside of Sled Agent's control.  We store
     /// exactly what we were given and use this number to decide when to
     /// fail requests to establish an outdated configuration.
     ///
-    /// You can think of this as a major version number, with `ledger_version`
-    /// being a minor version number.  See `is_newer_than()`.
-    pub omicron_version: Generation,
+    /// You can think of this as a major version number, with
+    /// `ledger_generation` being a minor version number.  See
+    /// `is_newer_than()`.
+    pub omicron_generation: Generation,
 
-    /// ledger-managed version
+    /// ledger-managed generation number
     ///
-    /// This version is managed by the ledger facility itself.  It's bumped
+    /// This generation is managed by the ledger facility itself.  It's bumped
     /// whenever we write a new ledger.  In practice, we don't currently have
-    /// any reason to bump this _for a given Omicron version_ so it's somewhat
-    /// redundant.  In principle, if we needed to modify the ledgered
+    /// any reason to bump this _for a given Omicron generation_ so it's
+    /// somewhat redundant.  In principle, if we needed to modify the ledgered
     /// configuration due to some event that doesn't change the Omicron config
     /// (e.g., if we wanted to move the root filesystem to a different path), we
-    /// could do that by bumping this version.
-    pub ledger_version: Generation,
+    /// could do that by bumping this generation.
+    pub ledger_generation: Generation,
     pub zones: Vec<OmicronZoneConfigLocal>,
 }
 
 impl Ledgerable for OmicronZonesConfigLocal {
     fn is_newer_than(&self, other: &OmicronZonesConfigLocal) -> bool {
-        self.omicron_version > other.omicron_version
-            || (self.omicron_version == other.omicron_version
-                && self.ledger_version >= other.ledger_version)
+        self.omicron_generation > other.omicron_generation
+            || (self.omicron_generation == other.omicron_generation
+                && self.ledger_generation >= other.ledger_generation)
     }
 
     fn generation_bump(&mut self) {
-        self.ledger_version = self.ledger_version.next();
+        self.ledger_generation = self.ledger_generation.next();
     }
 }
 
@@ -340,15 +341,15 @@ impl OmicronZonesConfigLocal {
     /// Returns the initial configuration for generation 1, which has no zones
     pub fn initial() -> OmicronZonesConfigLocal {
         OmicronZonesConfigLocal {
-            omicron_version: Generation::new(),
-            ledger_version: Generation::new(),
+            omicron_generation: Generation::new(),
+            ledger_generation: Generation::new(),
             zones: vec![],
         }
     }
 
     pub fn to_omicron_zones_config(self) -> OmicronZonesConfig {
         OmicronZonesConfig {
-            version: self.omicron_version,
+            generation: self.omicron_generation,
             zones: self.zones.into_iter().map(|z| z.zone).collect(),
         }
     }
@@ -1060,9 +1061,9 @@ impl ServiceManager {
         for svc_details in zone_args.sled_local_services() {
             match &svc_details {
                 SwitchService::Tfport { pkt_source, asic: _ } => {
-                    // The tfport service requires a MAC device to/from which sidecar
-                    // packets may be multiplexed.  If the link isn't present, don't
-                    // bother trying to start the zone.
+                    // The tfport service requires a MAC device to/from which
+                    // sidecar packets may be multiplexed.  If the link isn't
+                    // present, don't bother trying to start the zone.
                     match Dladm::verify_link(pkt_source) {
                         Ok(link) => {
                             // It's important that tfpkt does **not** receive a
@@ -1109,7 +1110,8 @@ impl ServiceManager {
     }
 
     // Check the services intended to run in the zone to determine whether any
-    // OPTE ports need to be created and mapped into the zone when it is created.
+    // OPTE ports need to be created and mapped into the zone when it is
+    // created.
     async fn opte_ports_needed(
         &self,
         zone_args: &ZoneArgs<'_>,
@@ -1845,16 +1847,17 @@ impl ServiceManager {
                             .get()
                             .ok_or(Error::SledAgentNotReady)?;
 
-                        // While Nexus will be reachable via `external_ip`, it communicates
-                        // atop an OPTE port which operates on a VPC private IP. OPTE will
-                        // map the private IP to the external IP automatically.
+                        // While Nexus will be reachable via `external_ip`, it
+                        // communicates atop an OPTE port which operates on a
+                        // VPC private IP. OPTE will map the private IP to the
+                        // external IP automatically.
                         let port_ip = running_zone
                             .ensure_address_for_port("public", 0)
                             .await?
                             .ip();
 
-                        // Nexus takes a separate config file for parameters which
-                        // cannot be known at packaging time.
+                        // Nexus takes a separate config file for parameters
+                        // which cannot be known at packaging time.
                         let nexus_port = if *external_tls { 443 } else { 80 };
                         let deployment_config = NexusDeploymentConfig {
                             id: zone_config.zone.id,
@@ -1879,8 +1882,8 @@ impl ServiceManager {
                                 bind_address: (*internal_address).into(),
                                 // This has to be large enough to support, among
                                 // other things, the initial list of TLS
-                                // certificates provided by the customer during rack
-                                // setup.
+                                // certificates provided by the customer during
+                                // rack setup.
                                 request_body_max_bytes: 10 * 1024 * 1024,
                                 default_handler_task_mode:
                                     HandlerTaskMode::Detached,
@@ -1895,17 +1898,19 @@ impl ServiceManager {
                             external_dns_servers: external_dns_servers.clone(),
                         };
 
-                        // Copy the partial config file to the expected location.
+                        // Copy the partial config file to the expected
+                        // location.
                         let config_dir = Utf8PathBuf::from(format!(
                             "{}/var/svc/manifest/site/nexus",
                             running_zone.root()
                         ));
-                        // The filename of a half-completed config, in need of parameters supplied at
-                        // runtime.
+                        // The filename of a half-completed config, in need of
+                        // parameters supplied at runtime.
                         const PARTIAL_LEDGER_FILENAME: &str =
                             "config-partial.toml";
-                        // The filename of a completed config, merging the partial config with
-                        // additional appended parameters known at runtime.
+                        // The filename of a completed config, merging the
+                        // partial config with additional appended parameters
+                        // known at runtime.
                         const COMPLETE_LEDGER_FILENAME: &str = "config.toml";
                         let partial_config_path =
                             config_dir.join(PARTIAL_LEDGER_FILENAME);
@@ -1915,7 +1920,8 @@ impl ServiceManager {
                             .await
                             .map_err(|err| Error::io_path(&config_path, err))?;
 
-                        // Serialize the configuration and append it into the file.
+                        // Serialize the configuration and append it into the
+                        // file.
                         let serialized_cfg =
                             toml::Value::try_from(&deployment_config)
                                 .expect("Cannot serialize config");
@@ -1975,9 +1981,9 @@ impl ServiceManager {
                             dns_address.to_string(),
                         )?;
 
-                        // Refresh the manifest with the new properties we set, so
-                        // they become "effective" properties when the service is
-                        // enabled.
+                        // Refresh the manifest with the new properties we set,
+                        // so they become "effective" properties when the
+                        // service is enabled.
                         smfh.refresh()?;
                     }
 
@@ -1993,19 +1999,19 @@ impl ServiceManager {
                             "Setting up internal-dns service"
                         );
 
-                        // Internal DNS zones require a special route through the
-                        // global zone, since they are not on the same part of the
-                        // underlay as most other services on this sled (the sled's
-                        // subnet).
+                        // Internal DNS zones require a special route through
+                        // the global zone, since they are not on the same part
+                        // of the underlay as most other services on this sled
+                        // (the sled's subnet).
                         //
-                        // We create an IP address in the dedicated portion of the
-                        // underlay used for internal DNS servers, but we *also*
-                        // add a number ("which DNS server is this") to ensure
-                        // these addresses are given unique names. In the unlikely
-                        // case that two internal DNS servers end up on the same
-                        // machine (which is effectively a developer-only
-                        // environment -- we wouldn't want this in prod!), they need
-                        // to be given distinct names.
+                        // We create an IP address in the dedicated portion of
+                        // the underlay used for internal DNS servers, but we
+                        // *also* add a number ("which DNS server is this") to
+                        // ensure these addresses are given unique names. In the
+                        // unlikely case that two internal DNS servers end up on
+                        // the same machine (which is effectively a
+                        // developer-only environment -- we wouldn't want this
+                        // in prod!), they need to be given distinct names.
                         let addr_name =
                             format!("internaldns{gz_address_index}");
                         Zones::ensure_has_global_zone_v6_address(
@@ -2022,8 +2028,8 @@ impl ServiceManager {
                                 err,
                             }
                         })?;
-                        // If this address is in a new ipv6 prefix, notify maghemite so
-                        // it can advertise it to other sleds.
+                        // If this address is in a new ipv6 prefix, notify
+                        // maghemite so it can advertise it to other sleds.
                         self.advertise_prefix_of_address(*gz_address).await;
 
                         running_zone.add_default_route(*gz_address).map_err(
@@ -2050,9 +2056,9 @@ impl ServiceManager {
                             ),
                         )?;
 
-                        // Refresh the manifest with the new properties we set, so
-                        // they become "effective" properties when the service is
-                        // enabled.
+                        // Refresh the manifest with the new properties we set,
+                        // so they become "effective" properties when the
+                        // service is enabled.
                         smfh.refresh()?;
                     }
 
@@ -2155,8 +2161,9 @@ impl ServiceManager {
                             info!(self.inner.log, "Setting up MGS service");
                             smfh.setprop("config/id", request.zone.id)?;
 
-                            // Always tell MGS to listen on localhost so wicketd can
-                            // contact it even before we have an underlay network.
+                            // Always tell MGS to listen on localhost so wicketd
+                            // can contact it even before we have an underlay
+                            // network.
                             smfh.addpropvalue(
                                 "config/address",
                                 &format!("[::1]:{MGS_PORT}"),
@@ -2682,25 +2689,26 @@ impl ServiceManager {
 
         let ledger_zone_config = ledger.data_mut();
         debug!(log, "ensure_all_omicron_zones_persistent";
-            "request_version" => request.version.to_string(),
-            "ledger_version" => ledger_zone_config.omicron_version.to_string(),
+            "request_generation" => request.generation.to_string(),
+            "ledger_generation" =>
+                ledger_zone_config.omicron_generation.to_string(),
         );
 
         // Absolutely refuse to downgrade the configuration.
-        if ledger_zone_config.omicron_version > request.version {
+        if ledger_zone_config.omicron_generation > request.generation {
             return Err(Error::RequestedConfigOutdated {
-                requested: request.version,
-                current: ledger_zone_config.omicron_version,
+                requested: request.generation,
+                current: ledger_zone_config.omicron_generation,
             });
         }
 
-        // If the version is the same as what we're running, but the contents
+        // If the generation is the same as what we're running, but the contents
         // aren't, that's a problem, too.
-        if ledger_zone_config.omicron_version == request.version
+        if ledger_zone_config.omicron_generation == request.generation
             && ledger_zone_config.clone().to_omicron_zones_config().zones
                 != request.zones
         {
-            return Err(Error::RequestedConfigConflicts(request.version));
+            return Err(Error::RequestedConfigConflicts(request.generation));
         }
 
         let new_config = self
@@ -2850,9 +2858,9 @@ impl ServiceManager {
         }
 
         Ok(OmicronZonesConfigLocal {
-            omicron_version: new_request.version,
-            ledger_version: old_config
-                .map(|c| c.ledger_version)
+            omicron_generation: new_request.generation,
+            ledger_generation: old_config
+                .map(|c| c.ledger_generation)
                 .unwrap_or_else(Generation::new),
             zones: new_zones,
         })
@@ -3061,7 +3069,8 @@ impl ServiceManager {
         let mut data_links: Vec<String> = vec![];
 
         let services = match self.inner.sled_mode {
-            // A pure gimlet sled should not be trying to activate a switch zone.
+            // A pure gimlet sled should not be trying to activate a switch
+            // zone.
             SledMode::Gimlet => {
                 return Err(Error::SledLocalZone(anyhow::anyhow!(
                     "attempted to activate switch zone on non-scrimlet sled"
@@ -3369,8 +3378,9 @@ impl ServiceManager {
                                 &format!("[{address}]:{MGS_PORT}"),
                             )?;
 
-                            // It should be impossible for the `sled_info` not to be set here,
-                            // as the underlay is set at the same time.
+                            // It should be impossible for the `sled_info` not
+                            // to be set here, as the underlay is set at the
+                            // same time.
                             if let Some(info) = self.inner.sled_info.get() {
                                 smfh.setprop("config/rack_id", info.rack_id)?;
                             } else {
@@ -3446,7 +3456,8 @@ impl ServiceManager {
                         }
                         SwitchService::Tfport { .. } => {
                             // Since tfport and dpd communicate using localhost,
-                            // the tfport service shouldn't need to be restarted.
+                            // the tfport service shouldn't need to be
+                            // restarted.
                         }
                         SwitchService::Uplink { .. } => {
                             // Only configured in
@@ -3724,13 +3735,13 @@ mod test {
     async fn ensure_new_service(
         mgr: &ServiceManager,
         id: Uuid,
-        version: Generation,
+        generation: Generation,
     ) {
         let _expectations = expect_new_service();
         let address =
             SocketAddrV6::new(Ipv6Addr::LOCALHOST, OXIMETER_PORT, 0, 0);
         mgr.ensure_all_omicron_zones_persistent(OmicronZonesConfig {
-            version,
+            generation,
             zones: vec![OmicronZoneConfig {
                 id,
                 underlay_address: Ipv6Addr::LOCALHOST,
@@ -3746,12 +3757,12 @@ mod test {
     async fn ensure_existing_service(
         mgr: &ServiceManager,
         id: Uuid,
-        version: Generation,
+        generation: Generation,
     ) {
         let address =
             SocketAddrV6::new(Ipv6Addr::LOCALHOST, OXIMETER_PORT, 0, 0);
         mgr.ensure_all_omicron_zones_persistent(OmicronZonesConfig {
-            version,
+            generation,
             zones: vec![OmicronZoneConfig {
                 id,
                 underlay_address: Ipv6Addr::LOCALHOST,
@@ -3916,7 +3927,7 @@ mod test {
         let v1 = Generation::new();
         let found =
             mgr.omicron_zones_list().await.expect("failed to list zones");
-        assert_eq!(found.version, v1);
+        assert_eq!(found.generation, v1);
         assert!(found.zones.is_empty());
 
         let v2 = v1.next();
@@ -3925,7 +3936,7 @@ mod test {
 
         let found =
             mgr.omicron_zones_list().await.expect("failed to list zones");
-        assert_eq!(found.version, v2);
+        assert_eq!(found.generation, v2);
         assert_eq!(found.zones.len(), 1);
         assert_eq!(found.zones[0].id, id);
 
@@ -3953,7 +3964,7 @@ mod test {
         ensure_existing_service(&mgr, id, v3).await;
         let found =
             mgr.omicron_zones_list().await.expect("failed to list zones");
-        assert_eq!(found.version, v3);
+        assert_eq!(found.generation, v3);
         assert_eq!(found.zones.len(), 1);
         assert_eq!(found.zones[0].id, id);
 
@@ -3990,7 +4001,7 @@ mod test {
 
         let found =
             mgr.omicron_zones_list().await.expect("failed to list zones");
-        assert_eq!(found.version, v2);
+        assert_eq!(found.generation, v2);
         assert_eq!(found.zones.len(), 1);
         assert_eq!(found.zones[0].id, id);
 
@@ -4033,7 +4044,7 @@ mod test {
 
         let found =
             mgr.omicron_zones_list().await.expect("failed to list zones");
-        assert_eq!(found.version, v1);
+        assert_eq!(found.generation, v1);
         assert!(found.zones.is_empty());
 
         drop_service_manager(mgr);
@@ -4043,10 +4054,10 @@ mod test {
 
     #[tokio::test]
     #[serial_test::serial]
-    async fn test_bad_versions() {
+    async fn test_bad_generations() {
         // Start like the normal tests.
         let logctx =
-            omicron_test_utils::dev::test_setup_log("test_bad_versions");
+            omicron_test_utils::dev::test_setup_log("test_bad_generations");
         let test_config = TestConfig::new().await;
         let helper =
             LedgerTestHelper::new(logctx.log.clone(), &test_config).await;
@@ -4067,7 +4078,7 @@ mod test {
             zone_type: OmicronZoneType::Oximeter { address },
         }];
         mgr.ensure_all_omicron_zones_persistent(OmicronZonesConfig {
-            version: v2,
+            generation: v2,
             zones: zones.clone(),
         })
         .await
@@ -4075,7 +4086,7 @@ mod test {
 
         let found =
             mgr.omicron_zones_list().await.expect("failed to list zones");
-        assert_eq!(found.version, v2);
+        assert_eq!(found.generation, v2);
         assert_eq!(found.zones.len(), 1);
         assert_eq!(found.zones[0].id, id1);
 
@@ -4088,15 +4099,15 @@ mod test {
             zone_type: OmicronZoneType::Oximeter { address },
         });
 
-        // Now try to apply that list with an older version number.  This
+        // Now try to apply that list with an older generation number.  This
         // shouldn't work and the reported state should be unchanged.
         let error = mgr
             .ensure_all_omicron_zones_persistent(OmicronZonesConfig {
-                version: v1,
+                generation: v1,
                 zones: zones.clone(),
             })
             .await
-            .expect_err("unexpectedly went backwards in zones version");
+            .expect_err("unexpectedly went backwards in zones generation");
         assert!(matches!(
             error,
             Error::RequestedConfigOutdated { requested, current }
@@ -4106,15 +4117,15 @@ mod test {
             mgr.omicron_zones_list().await.expect("failed to list zones");
         assert_eq!(found, found2);
 
-        // Now try to apply that list with the same version number that we used
-        // before.  This shouldn't work either.
+        // Now try to apply that list with the same generation number that we
+        // used before.  This shouldn't work either.
         let error = mgr
             .ensure_all_omicron_zones_persistent(OmicronZonesConfig {
-                version: v2,
+                generation: v2,
                 zones: zones.clone(),
             })
             .await
-            .expect_err("unexpectedly changed a single zone version");
+            .expect_err("unexpectedly changed a single zone generation");
         assert!(matches!(
             error,
             Error::RequestedConfigConflicts(vr) if vr == v2
@@ -4124,17 +4135,17 @@ mod test {
         assert_eq!(found, found3);
 
         // But we should be able to apply this new list of zones as long as we
-        // advance the version number.
+        // advance the generation number.
         let v3 = v2.next();
         mgr.ensure_all_omicron_zones_persistent(OmicronZonesConfig {
-            version: v3,
+            generation: v3,
             zones: zones.clone(),
         })
         .await
-        .expect("failed to remove all zones in a new version");
+        .expect("failed to remove all zones in a new generation");
         let found4 =
             mgr.omicron_zones_list().await.expect("failed to list zones");
-        assert_eq!(found4.version, v3);
+        assert_eq!(found4.generation, v3);
         let mut our_zones = zones;
         our_zones.sort_by(|a, b| a.id.cmp(&b.id));
         let mut found_zones = found4.zones;
@@ -4249,7 +4260,7 @@ mod test {
 
         // The other test verified that migration has happened normally so let's
         // assume it has.  Now provision a new zone.
-        let vv = migrated_ledger.data().omicron_version.next();
+        let vv = migrated_ledger.data().omicron_generation.next();
         let id = Uuid::new_v4();
 
         let _expectations = expect_new_services();
@@ -4263,14 +4274,14 @@ mod test {
             zone_type: OmicronZoneType::Oximeter { address },
         });
         mgr.ensure_all_omicron_zones_persistent(OmicronZonesConfig {
-            version: vv,
+            generation: vv,
             zones,
         })
         .await
         .expect("failed to add new zone after migration");
         let found =
             mgr.omicron_zones_list().await.expect("failed to list zones");
-        assert_eq!(found.version, vv);
+        assert_eq!(found.generation, vv);
         assert_eq!(found.zones.len(), migrated_ledger.data().zones.len() + 1);
 
         // Just to be sure, shut down the manager and create a new one without
@@ -4282,7 +4293,7 @@ mod test {
         LedgerTestHelper::sled_agent_started(&logctx.log, &test_config, &mgr);
         let found =
             mgr.omicron_zones_list().await.expect("failed to list zones");
-        assert_eq!(found.version, vv);
+        assert_eq!(found.generation, vv);
         assert_eq!(found.zones.len(), migrated_ledger.data().zones.len() + 1);
 
         drop_service_manager(mgr);

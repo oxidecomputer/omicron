@@ -5306,8 +5306,8 @@
         "description": "Describes the set of Omicron-managed zones running on a sled",
         "type": "object",
         "properties": {
-          "version": {
-            "description": "version number of this configuration\n\nThis version number is owned by the control plane (i.e., RSS or Nexus, depending on whether RSS-to-Nexus handoff has happened).  It should not be bumped within Sled Agent.\n\nSled Agent rejects attempts to set the configuration to a version older than the one it's currently running.",
+          "generation": {
+            "description": "generation number of this configuration\n\nThis generation number is owned by the control plane (i.e., RSS or Nexus, depending on whether RSS-to-Nexus handoff has happened).  It should not be bumped within Sled Agent.\n\nSled Agent rejects attempts to set the configuration to a generation older than the one it's currently running.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Generation"
@@ -5323,7 +5323,7 @@
           }
         },
         "required": [
-          "version",
+          "generation",
           "zones"
         ]
       },

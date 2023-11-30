@@ -76,7 +76,7 @@ use crate::bootstrap::rss_handle::BootstrapAgentHandle;
 use crate::nexus::{d2n_params, ConvertInto};
 use crate::params::{
     OmicronZoneType, OmicronZonesConfig, TimeSync,
-    OMICRON_ZONES_CONFIG_INITIAL_VERSION,
+    OMICRON_ZONES_CONFIG_INITIAL_GENERATION,
 };
 use crate::rack_setup::plan::service::{
     Plan as ServicePlan, PlanError as ServicePlanError,
@@ -315,15 +315,16 @@ impl ServiceInner {
                         log,
                         "ignoring attempt to initialize zones because \
                         the server seems to be newer";
-                        "attempted_version" => i64::from(&zones_config.version),
+                        "attempted_generation" =>
+                            i64::from(&zones_config.generation),
                         "req_id" => &response.request_id,
                         "server_message" => &response.message,
                     );
 
-                    // If we attempt to initialize zones at version X, and the
-                    // server refuses because it's at some generation newer than
-                    // X, then we treat that as success.  See the doc comment on
-                    // this function.
+                    // If we attempt to initialize zones at generation X, and
+                    // the server refuses because it's at some generation newer
+                    // than X, then we treat that as success.  See the doc
+                    // comment on this function.
                     return Ok(());
                 }
             }
@@ -1001,7 +1002,7 @@ impl ServiceInner {
         // For now, we hardcode the requests we make to use specific version
         // numbers.
         let version1_nothing =
-            Generation::from(OMICRON_ZONES_CONFIG_INITIAL_VERSION);
+            Generation::from(OMICRON_ZONES_CONFIG_INITIAL_GENERATION);
         let version2_dns_only = version1_nothing.next();
         let version3_dns_and_ntp = version2_dns_only.next();
         let version4_cockroachdb = version3_dns_and_ntp.next();
@@ -1125,7 +1126,7 @@ impl<'a> OmicronZonesConfigGenerator<'a> {
                 (
                     *sled_address,
                     OmicronZonesConfig {
-                        version: initial_version,
+                        generation: initial_version,
                         zones: vec![],
                     },
                 )
@@ -1158,7 +1159,7 @@ impl<'a> OmicronZonesConfigGenerator<'a> {
             .map(|(sled_address, sled_config)| {
                 let mut zones = match self.last_configs.get(sled_address) {
                     Some(config) => {
-                        assert!(version > config.version);
+                        assert!(version > config.generation);
                         config.zones.clone()
                     }
                     None => Vec::new(),
@@ -1177,7 +1178,7 @@ impl<'a> OmicronZonesConfigGenerator<'a> {
                         .cloned(),
                 );
 
-                let config = OmicronZonesConfig { version, zones };
+                let config = OmicronZonesConfig { generation: version, zones };
                 (*sled_address, config)
             })
             .collect();
@@ -1265,7 +1266,7 @@ mod test {
             v1.sled_configs().keys().len()
         );
         for (_, configs) in v1.sled_configs() {
-            assert_eq!(configs.version, g1);
+            assert_eq!(configs.generation, g1);
             assert!(configs.zones.is_empty());
         }
 
@@ -1276,7 +1277,7 @@ mod test {
         });
         let mut v2_nfound = 0;
         for (_, config) in v2.sled_configs() {
-            assert_eq!(config.version, g2);
+            assert_eq!(config.generation, g2);
             v2_nfound += config.zones.len();
             for z in &config.zones {
                 // The only zones we should find are the Internal DNS ones.
@@ -1296,7 +1297,7 @@ mod test {
         });
         let mut v3_nfound = 0;
         for (_, config) in v3.sled_configs() {
-            assert_eq!(config.version, g3);
+            assert_eq!(config.generation, g3);
             v3_nfound += config.zones.len();
             for z in &config.zones {
                 // The only zones we should find are the Internal DNS ones.
@@ -1317,7 +1318,7 @@ mod test {
         let mut v4_nfound_dns = 0;
         let mut v4_nfound = 0;
         for (_, config) in v4.sled_configs() {
-            assert_eq!(config.version, g4);
+            assert_eq!(config.generation, g4);
             v4_nfound += config.zones.len();
             for z in &config.zones {
                 match &z.zone_type {
@@ -1336,7 +1337,7 @@ mod test {
         let v5 = v4.new_version_with(g5, &|_| false);
         let mut v5_nfound = 0;
         for (_, config) in v5.sled_configs() {
-            assert_eq!(config.version, g5);
+            assert_eq!(config.generation, g5);
             v5_nfound += config.zones.len();
             for z in &config.zones {
                 assert!(matches!(
@@ -1353,7 +1354,7 @@ mod test {
         let v6 = v5.new_version_with(g6, &|_| true);
         let mut v6_nfound = 0;
         for (sled_address, config) in v6.sled_configs() {
-            assert_eq!(config.version, g6);
+            assert_eq!(config.generation, g6);
             v6_nfound += config.zones.len();
             assert_eq!(
                 config.zones.len(),

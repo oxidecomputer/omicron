@@ -1,6 +1,6 @@
 {
-  "omicron_version": 2,
-  "ledger_version": 5,
+  "omicron_generation": 2,
+  "ledger_generation": 5,
   "zones": [
     {
       "zone": {

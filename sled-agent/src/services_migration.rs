@@ -25,7 +25,7 @@
 
 use crate::params::{
     OmicronZoneConfig, OmicronZoneDataset, OmicronZoneType, ZoneType,
-    OMICRON_ZONES_CONFIG_INITIAL_VERSION,
+    OMICRON_ZONES_CONFIG_INITIAL_GENERATION,
 };
 use crate::services::{OmicronZoneConfigLocal, OmicronZonesConfigLocal};
 use anyhow::{anyhow, ensure, Context};
@@ -74,40 +74,41 @@ impl TryFrom<AllZoneRequests> for OmicronZonesConfigLocal {
     type Error = anyhow::Error;
 
     fn try_from(input: AllZoneRequests) -> Result<Self, Self::Error> {
-        // The Omicron version number that we choose here (2) deserves some
+        // The Omicron generation number that we choose here (2) deserves some
         // explanation.
         //
-        // This is supposed to be the control-plane-issued version number for
+        // This is supposed to be the control-plane-issued generation number for
         // this configuration.  But any configuration that we're converting here
-        // predates the point where the control plane issued version numbers at
-        // all.  So what should we assign it?  Well, what are the constraints?
+        // predates the point where the control plane issued generation numbers
+        // at all.  So what should we assign it?  Well, what are the
+        // constraints?
         //
-        // - It must be newer than version 1 because version 1 canonically
+        // - It must be newer than generation 1 because generation 1 canonically
         //   represents the initial state of having no zones deployed.  If we
-        //   used version 1 here, any code could ignore this configuration on
+        //   used generation 1 here, any code could ignore this configuration on
         //   the grounds that it's no newer than what it already has.  (The
-        //   contents of a given version are supposed to be immutable.)
+        //   contents of a given generation are supposed to be immutable.)
         //
         // - It should be older than anything else that the control plane might
         //   try to send us so that if the control plane wants to change
         //   anything, we won't ignore its request because we think this
         //   configuration is newer.  But really this has to be the control
         //   plane's responsibility, not ours.  That is: Nexus needs to ask us
-        //   what our version number is and subsequent configurations should use
-        //   newer version numbers.  It's not a great plan for it to assume
-        //   anything about the version numbers deployed on sleds whose
-        //   configurations it's never seen.  (In practice, newly deployed
+        //   what our generation number is and subsequent configurations should
+        //   use newer generation numbers.  It's not a great plan for it to
+        //   assume anything about the generation numbers deployed on sleds
+        //   whose configurations it's never seen.  (In practice, newly deployed
         //   systems currently wind up with generation 5, so it _could_ choose
         //   something like 6 to start with -- or some larger number to leave
         //   some buffer.)
         //
         // In summary, 2 seems fine.
-        let omicron_version =
-            Generation::from(OMICRON_ZONES_CONFIG_INITIAL_VERSION).next();
+        let omicron_generation =
+            Generation::from(OMICRON_ZONES_CONFIG_INITIAL_GENERATION).next();
 
-        // The ledger version doesn't really matter.  In case it's useful, we
-        // pick the version from the ledger that we loaded.
-        let ledger_version = input.generation;
+        // The ledger generation doesn't really matter.  In case it's useful, we
+        // pick the generation from the ledger that we loaded.
+        let ledger_generation = input.generation;
 
         let ndatasets_input =
             input.requests.iter().filter(|r| r.zone.dataset.is_some()).count();
@@ -121,8 +122,8 @@ impl TryFrom<AllZoneRequests> for OmicronZonesConfigLocal {
                 "mapping `AllZoneRequests` to `OmicronZonesConfigLocal`",
             )?;
 
-        // As a quick check, the number of datasets in the old and new versions
-        // ought to be the same.
+        // As a quick check, the number of datasets in the old and new
+        // generations ought to be the same.
         let ndatasets_output =
             zones.iter().filter(|r| r.zone.dataset_name().is_some()).count();
         ensure!(
@@ -130,7 +131,11 @@ impl TryFrom<AllZoneRequests> for OmicronZonesConfigLocal {
             "conversion produced a different number of datasets"
         );
 
-        Ok(OmicronZonesConfigLocal { omicron_version, ledger_version, zones })
+        Ok(OmicronZonesConfigLocal {
+            omicron_generation,
+            ledger_generation,
+            zones,
+        })
     }
 }
 

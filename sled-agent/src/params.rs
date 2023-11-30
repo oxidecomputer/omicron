@@ -270,23 +270,23 @@ impl std::fmt::Display for ZoneType {
     }
 }
 
-/// Version 1 of `OmicronZonesConfig` is always the set of no zones.
-pub const OMICRON_ZONES_CONFIG_INITIAL_VERSION: u32 = 1;
+/// Generation 1 of `OmicronZonesConfig` is always the set of no zones.
+pub const OMICRON_ZONES_CONFIG_INITIAL_GENERATION: u32 = 1;
 
 /// Describes the set of Omicron-managed zones running on a sled
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
 )]
 pub struct OmicronZonesConfig {
-    /// version number of this configuration
+    /// generation number of this configuration
     ///
-    /// This version number is owned by the control plane (i.e., RSS or
+    /// This generation number is owned by the control plane (i.e., RSS or
     /// Nexus, depending on whether RSS-to-Nexus handoff has happened).  It
     /// should not be bumped within Sled Agent.
     ///
-    /// Sled Agent rejects attempts to set the configuration to a version
+    /// Sled Agent rejects attempts to set the configuration to a generation
     /// older than the one it's currently running.
-    pub version: Generation,
+    pub generation: Generation,
 
     /// list of running zones
     pub zones: Vec<OmicronZoneConfig>,
@@ -295,7 +295,7 @@ pub struct OmicronZonesConfig {
 impl From<OmicronZonesConfig> for sled_agent_client::types::OmicronZonesConfig {
     fn from(local: OmicronZonesConfig) -> Self {
         Self {
-            version: local.version.into(),
+            generation: local.generation.into(),
             zones: local.zones.into_iter().map(|s| s.into()).collect(),
         }
     }
