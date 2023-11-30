@@ -49,6 +49,7 @@ source "$TOP/tools/include/force-git-over-https.sh"
 HELIOSDIR=/work/helios
 git clone https://github.com/oxidecomputer/helios.git "$HELIOSDIR"
 cd "$HELIOSDIR"
+git checkout bump-gimlet-zfs-size
 # Record the branch and commit in the output
 git status --branch --porcelain=2
 # Setting BUILD_OS to no makes setup skip repositories we don't need for

@@ -70,6 +70,7 @@ mod ipv4_nat_entry;
 mod network_interface;
 mod oximeter;
 mod physical_disk;
+mod probe;
 mod project;
 mod quota;
 mod rack;
@@ -106,6 +107,7 @@ pub use db_metadata::{
 pub use dns::DnsVersionUpdateBuilder;
 pub use instance::InstanceAndActiveVmm;
 pub use inventory::DataStoreInventoryTest;
+pub use probe::ProbeInfo;
 pub use rack::RackInit;
 pub use silo::Discoverability;
 pub use switch_port::SwitchPortSettingsCombinedResult;
@@ -1681,6 +1683,7 @@ mod test {
                 first_port: crate::db::model::SqlU16(0),
                 last_port: crate::db::model::SqlU16(10),
                 state: nexus_db_model::IpAttachState::Attached,
+                is_probe: false,
             })
             .collect::<Vec<_>>();
         diesel::insert_into(dsl::external_ip)
@@ -1743,6 +1746,7 @@ mod test {
             first_port: crate::db::model::SqlU16(0),
             last_port: crate::db::model::SqlU16(10),
             state: nexus_db_model::IpAttachState::Attached,
+            is_probe: false,
         };
         diesel::insert_into(dsl::external_ip)
             .values(ip.clone())
@@ -1814,6 +1818,7 @@ mod test {
             first_port: crate::db::model::SqlU16(0),
             last_port: crate::db::model::SqlU16(10),
             state: nexus_db_model::IpAttachState::Attached,
+            is_probe: false,
         };
 
         // Combinations of NULL and non-NULL for:

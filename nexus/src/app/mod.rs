@@ -55,6 +55,7 @@ mod ip_pool;
 mod metrics;
 mod network_interface;
 mod oximeter;
+mod probe;
 mod project;
 mod quota;
 mod rack;

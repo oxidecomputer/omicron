@@ -626,6 +626,15 @@ output.type = "zone"
 output.intermediate_only = true
 setup_hint = "Run `./tools/ci_download_transceiver_control` to download the necessary binaries"
 
+[package.thundermuffin]
+service_name = "thundermuffin"
+source.type = "prebuilt"
+source.repo = "thundermuffin"
+source.commit = "a4a6108d7c9aac2464a0b6898e88132a8f701a13"
+source.sha256 = "dc55a2accd33a347df4cbdc0026cbaccea2c004940c3fec8cadcdd633d440dfa"
+output.type = "zone"
+output.intermediate_only = true
+
 # To package and install the asic variant of the switch, do:
 #
 # $ cargo run --release --bin omicron-package -- -t default target create -i standard -m gimlet -s asic
@@ -740,3 +749,11 @@ source.type = "local"
 source.rust.binary_names = ["oxlog"]
 source.rust.release = true
 output.type = "tarball"
+
+[package.probe]
+service_name = "probe"
+source.type = "composite"
+source.packages = [
+  "thundermuffin.tar.gz",
+]
+output.type = "zone"

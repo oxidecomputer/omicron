@@ -26,6 +26,10 @@ device_access_token                      POST     /device/token
 device_auth_confirm                      POST     /device/confirm
 device_auth_request                      POST     /device/auth
 logout                                   POST     /v1/logout
+probe_create                             POST     /experimental/v1/probes
+probe_delete                             DELETE   /experimental/v1/probes/{probe}
+probe_list                               GET      /experimental/v1/probes
+probe_view                               GET      /experimental/v1/probes/{probe}
 
 API operations found with tag "images"
 OPERATION ID                             METHOD   URL PATH
