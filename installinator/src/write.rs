@@ -6,7 +6,6 @@ use std::{
     collections::{btree_map::Entry, BTreeMap, BTreeSet},
     fmt,
     io::{self, Read},
-    os::fd::AsRawFd,
     time::Duration,
 };
 
@@ -15,12 +14,9 @@ use async_trait::async_trait;
 use buf_list::BufList;
 use bytes::Buf;
 use camino::{Utf8Path, Utf8PathBuf};
-use illumos_utils::{
-    dkio::{self, MediaInfoExtended},
-    zpool::{Zpool, ZpoolName},
-};
+use illumos_utils::zpool::{Zpool, ZpoolName};
 use installinator_common::{
-    BlockSizeBufWriter, ControlPlaneZonesSpec, ControlPlaneZonesStepId, M2Slot,
+    ControlPlaneZonesSpec, ControlPlaneZonesStepId, M2Slot, RawDiskWriter,
     StepContext, StepProgress, StepResult, StepSuccess, UpdateEngine,
     WriteComponent, WriteError, WriteOutput, WriteSpec, WriteStepId,
 };
@@ -751,28 +747,13 @@ impl WriteTransportWriter for AsyncNamedTempFile {
 }
 
 #[async_trait]
-impl WriteTransportWriter for BlockSizeBufWriter<tokio::fs::File> {
+impl WriteTransportWriter for RawDiskWriter {
     fn block_size(&self) -> Option<usize> {
-        Some(BlockSizeBufWriter::block_size(self))
+        Some(RawDiskWriter::block_size(self))
     }
 
     async fn finalize(self) -> io::Result<()> {
-        let f = self.into_inner();
-        f.sync_all().await?;
-
-        // We only create `BlockSizeBufWriter` for the raw block device storing
-        // the OS ramdisk. After `fsync`'ing, also flush the write cache.
-        tokio::task::spawn_blocking(move || {
-            match dkio::flush_write_cache(f.as_raw_fd()) {
-                Ok(()) => Ok(()),
-                // Some drives don't support `flush_write_cache`; we don't want
-                // to fail in this case.
-                Err(err) if err.raw_os_error() == Some(libc::ENOTSUP) => Ok(()),
-                Err(err) => Err(err),
-            }
-        })
-        .await
-        .unwrap()
+        RawDiskWriter::finalize(self).await
     }
 }
 
@@ -807,7 +788,7 @@ struct BlockDeviceTransport;
 
 #[async_trait]
 impl WriteTransport for BlockDeviceTransport {
-    type W = BlockSizeBufWriter<tokio::fs::File>;
+    type W = RawDiskWriter;
 
     async fn make_writer(
         &mut self,
@@ -816,12 +797,7 @@ impl WriteTransport for BlockDeviceTransport {
         destination: &Utf8Path,
         total_bytes: u64,
     ) -> Result<Self::W, WriteError> {
-        let f = tokio::fs::OpenOptions::new()
-            .create(false)
-            .write(true)
-            .truncate(false)
-            .custom_flags(libc::O_SYNC)
-            .open(destination)
+        let writer = RawDiskWriter::open(destination.as_std_path())
             .await
             .map_err(|error| WriteError::WriteError {
                 component,
@@ -831,18 +807,7 @@ impl WriteTransport for BlockDeviceTransport {
                 error,
             })?;
 
-        let media_info =
-            MediaInfoExtended::from_fd(f.as_raw_fd()).map_err(|error| {
-                WriteError::WriteError {
-                    component,
-                    slot,
-                    written_bytes: 0,
-                    total_bytes,
-                    error,
-                }
-            })?;
-
-        let block_size = u64::from(media_info.logical_block_size);
+        let block_size = writer.block_size() as u64;
 
         // When writing to a block device, we must write a multiple of the block
         // size. We can assume the image we're given should be
@@ -855,12 +820,15 @@ impl WriteTransport for BlockDeviceTransport {
                 total_bytes,
                 error: io::Error::new(
                     io::ErrorKind::InvalidData,
-                    format!("file size ({total_bytes}) is not a multiple of target device block size ({block_size})")
+                    format!(
+                        "file size ({total_bytes}) is not a multiple of \
+                         target device block size ({block_size})"
+                    ),
                 ),
             });
         }
 
-        Ok(BlockSizeBufWriter::with_block_size(block_size as usize, f))
+        Ok(writer)
     }
 }
 

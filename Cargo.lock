@@ -3261,6 +3261,7 @@ dependencies = [
  "anyhow",
  "camino",
  "illumos-utils",
+ "libc",
  "omicron-workspace-hack",
  "schemars",
  "serde",
