@@ -169,7 +169,7 @@ impl SimDisk {
         let producer_address = SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 0);
         let server_info = ProducerEndpoint {
             id,
-            kind: Some(ProducerKind::SledAgent),
+            kind: ProducerKind::SledAgent,
             address: producer_address,
             base_route: "/collect".to_string(),
             interval: Duration::from_millis(200),

@@ -4240,6 +4240,10 @@
               "$ref": "#/components/schemas/IpNetwork"
             }
           },
+          "autoneg": {
+            "description": "Whether or not to set autonegotiation",
+            "type": "boolean"
+          },
           "bgp_peers": {
             "description": "BGP peers on this port",
             "type": "array",
@@ -4285,6 +4289,7 @@
         },
         "required": [
           "addresses",
+          "autoneg",
           "bgp_peers",
           "port",
           "routes",
@@ -4343,7 +4348,6 @@
             ]
           },
           "kind": {
-            "nullable": true,
             "description": "The kind of producer.",
             "allOf": [
               {
@@ -4356,7 +4360,8 @@
           "address",
           "base_route",
           "id",
-          "interval"
+          "interval",
+          "kind"
         ]
       },
       "ProducerKind": {

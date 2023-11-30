@@ -103,7 +103,7 @@ pub struct ProducerEndpoint {
     /// A unique ID for this producer.
     pub id: Uuid,
     /// The kind of producer.
-    pub kind: Option<ProducerKind>,
+    pub kind: ProducerKind,
     /// The IP address and port at which `oximeter` can collect metrics from the
     /// producer.
     pub address: SocketAddr,

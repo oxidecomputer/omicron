@@ -212,7 +212,6 @@
             ]
           },
           "kind": {
-            "nullable": true,
             "description": "The kind of producer.",
             "allOf": [
               {
@@ -225,7 +224,8 @@
           "address",
           "base_route",
           "id",
-          "interval"
+          "interval",
+          "kind"
         ]
       },
       "ProducerEndpointResultsPage": {
