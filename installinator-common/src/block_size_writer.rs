@@ -11,31 +11,37 @@ use tokio::io::AsyncWrite;
 
 /// `BlockSizeBufWriter` is analogous to a tokio's `BufWriter`, except it
 /// guarantees that writes made to the underlying writer are always
-/// _exactly_ the requested block size, with two exceptions: explicitly
-/// calling (1) `flush()` or (2) `shutdown()` will write any
-/// buffered-but-not-yet-written data to the underlying buffer regardless of
-/// its length.
+/// _exactly_ the requested block size, with three exceptions:
+///
+/// 1. Calling `flush()` will write any currently-buffered data to the
+///    underlying writer, regardless of its length.
+/// 2. Similarily, calling `shutdown()` will flush any currently-buffered data
+///    to the underlying writer.
+/// 3. When `BlockSizeBufWriter` attempts to write a block-length amount of data
+///    to the underlying writer, if that writer only accepts a portion of that
+///    data, `BlockSizeBufWriter` will continue attempting to write the
+///    remainder of the block.
 ///
 /// When `BlockSizeBufWriter` is dropped, any buffered data it's holding
 /// will be discarded. It is critical to manually call
 /// `BlockSizeBufWriter:flush()` or `BlockSizeBufWriter::shutdown()` prior
 /// to dropping to avoid data loss.
-pub(crate) struct BlockSizeBufWriter<W> {
+pub struct BlockSizeBufWriter<W> {
     inner: W,
     buf: Vec<u8>,
     block_size: usize,
 }
 
 impl<W: AsyncWrite + Unpin> BlockSizeBufWriter<W> {
-    pub(crate) fn with_block_size(block_size: usize, inner: W) -> Self {
+    pub fn with_block_size(block_size: usize, inner: W) -> Self {
         Self { inner, buf: Vec::with_capacity(block_size), block_size }
     }
 
-    pub(crate) fn into_inner(self) -> W {
+    pub fn into_inner(self) -> W {
         self.inner
     }
 
-    pub(crate) fn block_size(&self) -> usize {
+    pub fn block_size(&self) -> usize {
         self.block_size
     }
 
@@ -46,6 +52,13 @@ impl<W: AsyncWrite + Unpin> BlockSizeBufWriter<W> {
     fn flush_buf(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         let mut written = 0;
         let mut ret = Ok(());
+
+        // We expect this loop to execute exactly one time: we try to write the
+        // entirety of `self.buf` to `self.inner`, and presumably it is a type
+        // that expects to receive a block of data at once, so we'll immediately
+        // jump to `written == self.buf.len()`. If it returns `Ok(n)` for some
+        // `n < self.buf.len()`, we'll loop and try to write the rest of the
+        // data in less-than-block-sized chunks.
         while written < self.buf.len() {
             match ready!(
                 Pin::new(&mut self.inner).poll_write(cx, &self.buf[written..])

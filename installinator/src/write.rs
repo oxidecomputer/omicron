@@ -20,9 +20,9 @@ use illumos_utils::{
     zpool::{Zpool, ZpoolName},
 };
 use installinator_common::{
-    ControlPlaneZonesSpec, ControlPlaneZonesStepId, M2Slot, StepContext,
-    StepProgress, StepResult, StepSuccess, UpdateEngine, WriteComponent,
-    WriteError, WriteOutput, WriteSpec, WriteStepId,
+    BlockSizeBufWriter, ControlPlaneZonesSpec, ControlPlaneZonesStepId, M2Slot,
+    StepContext, StepProgress, StepResult, StepSuccess, UpdateEngine,
+    WriteComponent, WriteError, WriteOutput, WriteSpec, WriteStepId,
 };
 use omicron_common::update::{ArtifactHash, ArtifactHashId};
 use sha2::{Digest, Sha256};
@@ -36,10 +36,7 @@ use update_engine::{
     errors::NestedEngineError, events::ProgressUnits, StepSpec,
 };
 
-use crate::{
-    async_temp_file::AsyncNamedTempFile, block_size_writer::BlockSizeBufWriter,
-    hardware::Hardware,
-};
+use crate::{async_temp_file::AsyncNamedTempFile, hardware::Hardware};
 
 #[derive(Clone, Debug)]
 struct ArtifactDestination {
