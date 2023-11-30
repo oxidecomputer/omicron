@@ -7538,6 +7538,7 @@ dependencies = [
  "progenitor",
  "regress",
  "reqwest",
+ "schemars",
  "serde",
  "sled-storage",
  "slog",
