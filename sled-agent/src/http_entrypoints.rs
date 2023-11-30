@@ -21,11 +21,13 @@ use camino::Utf8PathBuf;
 use dropshot::{
     endpoint, ApiDescription, FreeformBody, HttpError, HttpResponseCreated,
     HttpResponseDeleted, HttpResponseHeaders, HttpResponseOk,
-    HttpResponseUpdatedNoContent, Path, Query, RequestContext, TypedBody,
+    HttpResponseUpdatedNoContent, Path, Query, RequestContext, StreamingBody,
+    TypedBody,
 };
 use illumos_utils::opte::params::{
     DeleteVirtualNetworkInterfaceHost, SetVirtualNetworkInterfaceHost,
 };
+use installinator_common::M2Slot;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::{
     DiskRuntimeState, SledInstanceState, UpdateArtifactId,
@@ -75,6 +77,8 @@ pub fn api() -> SledApiDescription {
         api.register(write_network_bootstore_config)?;
         api.register(add_sled_to_initialized_rack)?;
         api.register(metrics_collect)?;
+        api.register(host_os_write_start)?;
+        api.register(host_os_write_status)?;
 
         Ok(())
     }
@@ -751,4 +755,75 @@ async fn metrics_collect(
     let sa = request_context.context();
     let producer_id = path_params.into_inner().producer_id;
     collect(&sa.metrics_registry(), producer_id).await
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct BootDiskPathParams {
+    pub boot_disk: M2Slot,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct BootDiskWriteStartQueryParams {
+    pub update_id: Uuid,
+    // TODO do we already have sha2-256 hashes of the OS images, and if so
+    // should we use that instead? Another option is to use the external API
+    // `Digest` type, although it predates `serde_human_bytes` so just stores
+    // the hash as a `String`.
+    #[serde(with = "serde_human_bytes::hex_array")]
+    #[schemars(schema_with = "omicron_common::hex_schema::<32>")]
+    pub sha3_256_digest: [u8; 32],
+}
+
+/// Write a new host OS image to the specified boot disk
+#[endpoint {
+    method = POST,
+    path = "/boot-disk/{boot_disk}/os/write",
+}]
+async fn host_os_write_start(
+    request_context: RequestContext<SledAgent>,
+    path_params: Path<BootDiskPathParams>,
+    query_params: Query<BootDiskWriteStartQueryParams>,
+    body: StreamingBody,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let sa = request_context.context();
+    let boot_disk = path_params.into_inner().boot_disk;
+    let BootDiskWriteStartQueryParams { update_id, sha3_256_digest } =
+        query_params.into_inner();
+    sa.boot_disk_os_writer()
+        .start_update(boot_disk, update_id, sha3_256_digest, body.into_stream())
+        .await
+        .map_err(|err| HttpError::from(&*err))?;
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema, Serialize,
+)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum BootDiskOsWriteProgress {
+    ReceivingUploadedImage { bytes_received: usize },
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum BootDiskOsWriteStatus {
+    NoUpdateRunning,
+    InProgress { update_id: Uuid, progress: BootDiskOsWriteProgress },
+    Complete { update_id: Uuid },
+    Failed { update_id: Uuid, message: String },
+}
+
+/// Get the status of writing a new host OS
+#[endpoint {
+    method = GET,
+    path = "/boot-disk/{boot_disk}/os/write/status",
+}]
+async fn host_os_write_status(
+    request_context: RequestContext<SledAgent>,
+    path_params: Path<BootDiskPathParams>,
+) -> Result<HttpResponseOk<BootDiskOsWriteStatus>, HttpError> {
+    let sa = request_context.context();
+    let boot_disk = path_params.into_inner().boot_disk;
+    let status = sa.boot_disk_os_writer().status(boot_disk);
+    Ok(HttpResponseOk(status))
 }

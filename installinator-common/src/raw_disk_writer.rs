@@ -8,7 +8,6 @@
 use crate::BlockSizeBufWriter;
 use illumos_utils::dkio;
 use illumos_utils::dkio::MediaInfoExtended;
-use tokio::io::AsyncWriteExt;
 use std::io;
 use std::os::fd::AsRawFd;
 use std::path::Path;
@@ -17,6 +16,7 @@ use std::task::Context;
 use std::task::Poll;
 use tokio::fs::File;
 use tokio::io::AsyncWrite;
+use tokio::io::AsyncWriteExt;
 
 /// Writer for illumos raw disks.
 ///
