@@ -847,10 +847,7 @@ impl ServiceManager {
                 None,
                 omicron_zones_config.clone(),
                 |z: &OmicronZoneConfig| {
-                    matches!(
-                        z.zone_type,
-                        OmicronZoneType::InternalDns { .. }
-                    )
+                    matches!(z.zone_type, OmicronZoneType::InternalDns { .. })
                 },
             )
             .await?;
