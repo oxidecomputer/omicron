@@ -124,10 +124,12 @@ impl DataStore {
             .get_result_async(conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-        assert!(
-            collection.is_empty(),
-            "Collection deleted while non-empty: {collection:?}"
-        );
+
+        if !collection.is_empty() {
+            return Err(Error::internal_error(&format!(
+                "Collection deleted while non-empty: {collection:?}"
+            )));
+        }
         Ok(())
     }
 

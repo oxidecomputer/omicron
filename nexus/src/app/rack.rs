@@ -23,10 +23,16 @@ use nexus_db_queries::db::lookup::LookupPath;
 use nexus_types::external_api::params::Address;
 use nexus_types::external_api::params::AddressConfig;
 use nexus_types::external_api::params::AddressLotBlockCreate;
+use nexus_types::external_api::params::BgpAnnounceSetCreate;
+use nexus_types::external_api::params::BgpAnnouncementCreate;
+use nexus_types::external_api::params::BgpConfigCreate;
+use nexus_types::external_api::params::BgpPeer;
+use nexus_types::external_api::params::LinkConfig;
+use nexus_types::external_api::params::LldpServiceConfig;
 use nexus_types::external_api::params::RouteConfig;
 use nexus_types::external_api::params::SwitchPortConfig;
 use nexus_types::external_api::params::{
-    AddressLotCreate, LoopbackAddressCreate, Route, SiloCreate,
+    AddressLotCreate, BgpPeerConfig, LoopbackAddressCreate, Route, SiloCreate,
     SwitchPortSettingsCreate,
 };
 use nexus_types::external_api::shared::Baseboard;
@@ -51,8 +57,8 @@ use sled_agent_client::types::EarlyNetworkConfigBody;
 use sled_agent_client::types::StartSledAgentRequest;
 use sled_agent_client::types::StartSledAgentRequestBody;
 use sled_agent_client::types::{
-    BgpConfig, BgpPeerConfig, EarlyNetworkConfig, PortConfigV1,
-    RackNetworkConfigV1, RouteConfig as SledRouteConfig,
+    BgpConfig, BgpPeerConfig as SledBgpPeerConfig, EarlyNetworkConfig,
+    PortConfigV1, RackNetworkConfigV1, RouteConfig as SledRouteConfig,
 };
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -406,6 +412,108 @@ impl super::Nexus {
                     Error::internal_error(&format!("unable to retrieve authz_address_lot for infra address_lot: {e}"))
                 })?;
 
+            let mut bgp_configs = HashMap::new();
+
+            for bgp_config in &rack_network_config.bgp {
+                bgp_configs.insert(bgp_config.asn, bgp_config.clone());
+
+                let bgp_config_name: Name =
+                    format!("as{}", bgp_config.asn).parse().unwrap();
+
+                let announce_set_name: Name =
+                    format!("as{}-announce", bgp_config.asn).parse().unwrap();
+
+                let address_lot_name: Name =
+                    format!("as{}-lot", bgp_config.asn).parse().unwrap();
+
+                self.db_datastore
+                    .address_lot_create(
+                        &opctx,
+                        &AddressLotCreate {
+                            identity: IdentityMetadataCreateParams {
+                                name: address_lot_name,
+                                description: format!(
+                                    "Address lot for announce set in as {}",
+                                    bgp_config.asn
+                                ),
+                            },
+                            kind: AddressLotKind::Infra,
+                            blocks: bgp_config
+                                .originate
+                                .iter()
+                                .map(|o| AddressLotBlockCreate {
+                                    first_address: o.network().into(),
+                                    last_address: o.broadcast().into(),
+                                })
+                                .collect(),
+                        },
+                    )
+                    .await
+                    .map_err(|e| {
+                        Error::internal_error(&format!(
+                            "unable to create address lot for BGP as {}: {}",
+                            bgp_config.asn, e
+                        ))
+                    })?;
+
+                self.db_datastore
+                    .bgp_create_announce_set(
+                        &opctx,
+                        &BgpAnnounceSetCreate {
+                            identity: IdentityMetadataCreateParams {
+                                name: announce_set_name.clone(),
+                                description: format!(
+                                    "Announce set for AS {}",
+                                    bgp_config.asn
+                                ),
+                            },
+                            announcement: bgp_config
+                                .originate
+                                .iter()
+                                .map(|x| BgpAnnouncementCreate {
+                                    address_lot_block: NameOrId::Name(
+                                        format!("as{}", bgp_config.asn)
+                                            .parse()
+                                            .unwrap(),
+                                    ),
+                                    network: IpNetwork::from(*x).into(),
+                                })
+                                .collect(),
+                        },
+                    )
+                    .await
+                    .map_err(|e| {
+                        Error::internal_error(&format!(
+                            "unable to create bgp announce set for as {}: {}",
+                            bgp_config.asn, e
+                        ))
+                    })?;
+
+                self.db_datastore
+                    .bgp_config_set(
+                        &opctx,
+                        &BgpConfigCreate {
+                            identity: IdentityMetadataCreateParams {
+                                name: bgp_config_name,
+                                description: format!(
+                                    "BGP config for AS {}",
+                                    bgp_config.asn
+                                ),
+                            },
+                            asn: bgp_config.asn,
+                            bgp_announce_set_id: announce_set_name.into(),
+                            vrf: None,
+                        },
+                    )
+                    .await
+                    .map_err(|e| {
+                        Error::internal_error(&format!(
+                            "unable to set bgp config for as {}: {}",
+                            bgp_config.asn, e
+                        ))
+                    })?;
+            }
+
             for (idx, uplink_config) in
                 rack_network_config.ports.iter().enumerate()
             {
@@ -502,6 +610,43 @@ impl super::Nexus {
                 port_settings_params
                     .routes
                     .insert("phy0".to_string(), RouteConfig { routes });
+
+                let peers: Vec<BgpPeer> = uplink_config
+                    .bgp_peers
+                    .iter()
+                    .map(|r| BgpPeer {
+                        bgp_announce_set: NameOrId::Name(
+                            format!("as{}-announce", r.asn).parse().unwrap(),
+                        ),
+                        bgp_config: NameOrId::Name(
+                            format!("as{}", r.asn).parse().unwrap(),
+                        ),
+                        interface_name: "phy0".into(),
+                        addr: r.addr.into(),
+                        hold_time: r.hold_time.unwrap_or(6) as u32,
+                        idle_hold_time: r.idle_hold_time.unwrap_or(3) as u32,
+                        delay_open: r.delay_open.unwrap_or(0) as u32,
+                        connect_retry: r.connect_retry.unwrap_or(3) as u32,
+                        keepalive: r.keepalive.unwrap_or(2) as u32,
+                    })
+                    .collect();
+
+                port_settings_params
+                    .bgp_peers
+                    .insert("phy0".to_string(), BgpPeerConfig { peers });
+
+                let link = LinkConfig {
+                    mtu: 1500, //TODO https://github.com/oxidecomputer/omicron/issues/2274
+                    lldp: LldpServiceConfig {
+                        enabled: false,
+                        lldp_config: None,
+                    },
+                    fec: uplink_config.uplink_port_fec.into(),
+                    speed: uplink_config.uplink_port_speed.into(),
+                    autoneg: uplink_config.autoneg,
+                };
+
+                port_settings_params.links.insert("phy".to_string(), link);
 
                 match self
                     .db_datastore
@@ -658,7 +803,7 @@ impl super::Nexus {
                 addresses: info.addresses.iter().map(|a| a.address).collect(),
                 bgp_peers: peer_info
                     .iter()
-                    .map(|(p, asn, addr)| BgpPeerConfig {
+                    .map(|(p, asn, addr)| SledBgpPeerConfig {
                         addr: *addr,
                         asn: *asn,
                         port: port.port_name.clone(),
@@ -673,16 +818,21 @@ impl super::Nexus {
                 port: port.port_name.clone(),
                 uplink_port_fec: info
                     .links
-                    .get(0) //TODO breakout support
+                    .get(0) //TODO https://github.com/oxidecomputer/omicron/issues/3062
                     .map(|l| l.fec)
                     .unwrap_or(SwitchLinkFec::None)
                     .into(),
                 uplink_port_speed: info
                     .links
-                    .get(0) //TODO breakout support
+                    .get(0) //TODO https://github.com/oxidecomputer/omicron/issues/3062
                     .map(|l| l.speed)
                     .unwrap_or(SwitchLinkSpeed::Speed100G)
                     .into(),
+                autoneg: info
+                    .links
+                    .get(0) //TODO breakout support
+                    .map(|l| l.autoneg)
+                    .unwrap_or(false),
             };
 
             ports.push(p);

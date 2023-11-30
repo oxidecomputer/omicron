@@ -234,6 +234,7 @@ impl DataStore {
                     c.mtu,
                     c.fec.into(),
                     c.speed.into(),
+                    c.autoneg,
                 ));
             }
             result.link_lldp =
@@ -304,39 +305,41 @@ impl DataStore {
                 .await?;
 
             let mut bgp_peer_config = Vec::new();
-            for (interface_name, p) in &params.bgp_peers {
-                use db::schema::bgp_config;
-                let bgp_config_id = match &p.bgp_config {
-                    NameOrId::Id(id) => *id,
-                    NameOrId::Name(name) => {
-                        let name = name.to_string();
-                        bgp_config_dsl::bgp_config
-                            .filter(bgp_config::time_deleted.is_null())
-                            .filter(bgp_config::name.eq(name))
-                            .select(bgp_config::id)
-                            .limit(1)
-                            .first_async::<Uuid>(&conn)
-                            .await
-                            .map_err(|_|
-                                TxnError::CustomError(
-                                    SwitchPortSettingsCreateError::BgpConfigNotFound,
-                                )
-                            )?
-                    }
-                };
+            for (interface_name, peer_config) in &params.bgp_peers {
+                for p in &peer_config.peers {
+                    use db::schema::bgp_config;
+                    let bgp_config_id = match &p.bgp_config {
+                        NameOrId::Id(id) => *id,
+                        NameOrId::Name(name) => {
+                            let name = name.to_string();
+                            bgp_config_dsl::bgp_config
+                                .filter(bgp_config::time_deleted.is_null())
+                                .filter(bgp_config::name.eq(name))
+                                .select(bgp_config::id)
+                                .limit(1)
+                                .first_async::<Uuid>(&conn)
+                                .await
+                                .map_err(|_|
+                                    TxnError::CustomError(
+                                        SwitchPortSettingsCreateError::BgpConfigNotFound,
+                                    )
+                                )?
+                        }
+                    };
 
-                bgp_peer_config.push(SwitchPortBgpPeerConfig::new(
-                    psid,
-                    bgp_config_id,
-                    interface_name.clone(),
-                    p.addr.into(),
-                    p.hold_time.into(),
-                    p.idle_hold_time.into(),
-                    p.delay_open.into(),
-                    p.connect_retry.into(),
-                    p.keepalive.into(),
-                ));
+                    bgp_peer_config.push(SwitchPortBgpPeerConfig::new(
+                        psid,
+                        bgp_config_id,
+                        interface_name.clone(),
+                        p.addr.into(),
+                        p.hold_time.into(),
+                        p.idle_hold_time.into(),
+                        p.delay_open.into(),
+                        p.connect_retry.into(),
+                        p.keepalive.into(),
+                    ));
 
+                }
             }
             result.bgp_peers =
                 diesel::insert_into(
@@ -1152,8 +1155,8 @@ mod test {
     use crate::db::datastore::{datastore_test, UpdatePrecondition};
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::external_api::params::{
-        BgpAnnounceSetCreate, BgpConfigCreate, BgpPeerConfig, SwitchPortConfig,
-        SwitchPortGeometry, SwitchPortSettingsCreate,
+        BgpAnnounceSetCreate, BgpConfigCreate, BgpPeer, BgpPeerConfig,
+        SwitchPortConfig, SwitchPortGeometry, SwitchPortSettingsCreate,
     };
     use omicron_common::api::external::{
         IdentityMetadataCreateParams, Name, NameOrId,
@@ -1217,19 +1220,21 @@ mod test {
             bgp_peers: HashMap::from([(
                 "phy0".into(),
                 BgpPeerConfig {
-                    bgp_announce_set: NameOrId::Name(
-                        "test-announce-set".parse().unwrap(),
-                    ),
-                    bgp_config: NameOrId::Name(
-                        "test-bgp-config".parse().unwrap(),
-                    ),
-                    interface_name: "qsfp0".into(),
-                    addr: "192.168.1.1".parse().unwrap(),
-                    hold_time: 0,
-                    idle_hold_time: 0,
-                    delay_open: 0,
-                    connect_retry: 0,
-                    keepalive: 0,
+                    peers: vec![BgpPeer {
+                        bgp_announce_set: NameOrId::Name(
+                            "test-announce-set".parse().unwrap(),
+                        ),
+                        bgp_config: NameOrId::Name(
+                            "test-bgp-config".parse().unwrap(),
+                        ),
+                        interface_name: "qsfp0".into(),
+                        addr: "192.168.1.1".parse().unwrap(),
+                        hold_time: 0,
+                        idle_hold_time: 0,
+                        delay_open: 0,
+                        connect_retry: 0,
+                        keepalive: 0,
+                    }],
                 },
             )]),
             addresses: HashMap::new(),

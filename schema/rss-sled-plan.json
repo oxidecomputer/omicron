@@ -366,6 +366,7 @@
       "type": "object",
       "required": [
         "addresses",
+        "autoneg",
         "bgp_peers",
         "port",
         "routes",
@@ -380,6 +381,10 @@
           "items": {
             "$ref": "#/definitions/IpNetwork"
           }
+        },
+        "autoneg": {
+          "description": "Whether or not to set autonegotiation",
+          "type": "boolean"
         },
         "bgp_peers": {
           "description": "BGP peers on this port",

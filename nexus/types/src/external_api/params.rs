@@ -1354,6 +1354,18 @@ pub enum LinkFec {
     Rs,
 }
 
+impl From<omicron_common::api::internal::shared::PortFec> for LinkFec {
+    fn from(x: omicron_common::api::internal::shared::PortFec) -> LinkFec {
+        match x {
+            omicron_common::api::internal::shared::PortFec::Firecode => {
+                Self::Firecode
+            }
+            omicron_common::api::internal::shared::PortFec::None => Self::None,
+            omicron_common::api::internal::shared::PortFec::Rs => Self::Rs,
+        }
+    }
+}
+
 /// The speed of a link.
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -1378,6 +1390,40 @@ pub enum LinkSpeed {
     Speed400G,
 }
 
+impl From<omicron_common::api::internal::shared::PortSpeed> for LinkSpeed {
+    fn from(x: omicron_common::api::internal::shared::PortSpeed) -> Self {
+        match x {
+            omicron_common::api::internal::shared::PortSpeed::Speed0G => {
+                Self::Speed0G
+            }
+            omicron_common::api::internal::shared::PortSpeed::Speed1G => {
+                Self::Speed1G
+            }
+            omicron_common::api::internal::shared::PortSpeed::Speed10G => {
+                Self::Speed10G
+            }
+            omicron_common::api::internal::shared::PortSpeed::Speed25G => {
+                Self::Speed25G
+            }
+            omicron_common::api::internal::shared::PortSpeed::Speed40G => {
+                Self::Speed40G
+            }
+            omicron_common::api::internal::shared::PortSpeed::Speed50G => {
+                Self::Speed50G
+            }
+            omicron_common::api::internal::shared::PortSpeed::Speed100G => {
+                Self::Speed100G
+            }
+            omicron_common::api::internal::shared::PortSpeed::Speed200G => {
+                Self::Speed200G
+            }
+            omicron_common::api::internal::shared::PortSpeed::Speed400G => {
+                Self::Speed400G
+            }
+        }
+    }
+}
+
 /// Switch link configuration.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct LinkConfig {
@@ -1392,6 +1438,9 @@ pub struct LinkConfig {
 
     /// The speed of the link.
     pub speed: LinkSpeed,
+
+    /// Whether or not to set autonegotiation
+    pub autoneg: bool,
 }
 
 /// The LLDP configuration associated with a port. LLDP may be either enabled or
@@ -1479,12 +1528,17 @@ pub struct BgpConfigListSelector {
     pub name_or_id: Option<NameOrId>,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct BgpPeerConfig {
+    pub peers: Vec<BgpPeer>,
+}
+
 /// A BGP peer configuration for an interface. Includes the set of announcements
 /// that will be advertised to the peer identified by `addr`. The `bgp_config`
 /// parameter is a reference to global BGP parameters. The `interface_name`
 /// indicates what interface the peer should be contacted on.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct BgpPeerConfig {
+pub struct BgpPeer {
     /// The set of announcements advertised by the peer.
     pub bgp_announce_set: NameOrId,
 

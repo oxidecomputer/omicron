@@ -65,6 +65,9 @@ uplink_port_speed = ""
 # `none`, `firecode`, or `rs`
 uplink_port_fec = ""
 
+# `true` or `false`
+autoneg = ""
+
 # A list of bgp peers
 # { addr = "1.7.0.1", asn = 47, port = "qsfp0" }
 bgp_peers = []
