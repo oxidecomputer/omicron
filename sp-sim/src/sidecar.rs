@@ -134,6 +134,14 @@ impl SimulatedSp for Sidecar {
         handler.update_state.last_rot_update_data()
     }
 
+    async fn last_host_phase1_update_data(
+        &self,
+        _slot: u16,
+    ) -> Option<Box<[u8]>> {
+        // sidecars do not have attached hosts
+        None
+    }
+
     async fn current_update_status(&self) -> gateway_messages::UpdateStatus {
         let Some(handler) = self.handler.as_ref() else {
             return gateway_messages::UpdateStatus::None;

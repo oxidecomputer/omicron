@@ -2,19 +2,17 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Tests `SpUpdater`'s delivery of updates to SPs via MGS
+//! Tests `HostPhase1Updater`'s delivery of updates to host phase 1 flash via
+//! MGS to SP.
 
 use gateway_client::types::SpType;
 use gateway_messages::{SpPort, UpdateInProgressStatus, UpdateStatus};
 use gateway_test_utils::setup as mgs_setup;
-use hubtools::RawHubrisArchive;
-use hubtools::{CabooseBuilder, HubrisArchiveBuilder};
 use omicron_nexus::app::test_interfaces::{
-    MgsClients, SpUpdater, UpdateProgress,
+    HostPhase1Updater, MgsClients, UpdateProgress,
 };
+use rand::RngCore;
 use sp_sim::SimulatedSp;
-use sp_sim::SIM_GIMLET_BOARD;
-use sp_sim::SIM_SIDECAR_BOARD;
 use std::mem;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -25,123 +23,74 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-fn make_fake_sp_image(board: &str) -> Vec<u8> {
-    let caboose = CabooseBuilder::default()
-        .git_commit("fake-git-commit")
-        .board(board)
-        .version("0.0.0")
-        .name("fake-name")
-        .build();
-
-    let mut builder = HubrisArchiveBuilder::with_fake_image();
-    builder.write_caboose(caboose.as_slice()).unwrap();
-    builder.build_to_vec().unwrap()
+fn make_fake_host_phase1_image() -> Vec<u8> {
+    let mut image = vec![0; 128];
+    rand::thread_rng().fill_bytes(&mut image);
+    image
 }
 
 #[tokio::test]
-async fn test_sp_updater_updates_sled() {
-    // Start MGS + Sim SP.
-    let mgstestctx =
-        mgs_setup::test_setup("test_sp_updater_updates_sled", SpPort::One)
-            .await;
-
-    // Configure an MGS client.
-    let mut mgs_clients =
-        MgsClients::from_clients([gateway_client::Client::new(
-            &mgstestctx.client.url("/").to_string(),
-            mgstestctx.logctx.log.new(slog::o!("component" => "MgsClient")),
-        )]);
-
-    // Configure and instantiate an `SpUpdater`.
-    let sp_type = SpType::Sled;
-    let sp_slot = 0;
-    let update_id = Uuid::new_v4();
-    let hubris_archive = make_fake_sp_image(SIM_GIMLET_BOARD);
-
-    let sp_updater = SpUpdater::new(
-        sp_type,
-        sp_slot,
-        update_id,
-        hubris_archive.clone(),
-        &mgstestctx.logctx.log,
-    );
-
-    // Run the update.
-    sp_updater.update(&mut mgs_clients).await.expect("update failed");
-
-    // Ensure the SP received the complete update.
-    let last_update_image = mgstestctx.simrack.gimlets[sp_slot as usize]
-        .last_sp_update_data()
-        .await
-        .expect("simulated SP did not receive an update");
-
-    let hubris_archive = RawHubrisArchive::from_vec(hubris_archive).unwrap();
-
-    assert_eq!(
-        hubris_archive.image.data.as_slice(),
-        &*last_update_image,
-        "simulated SP update contents (len {}) \
-         do not match test generated fake image (len {})",
-        last_update_image.len(),
-        hubris_archive.image.data.len()
-    );
-
-    mgstestctx.teardown().await;
-}
-
-#[tokio::test]
-async fn test_sp_updater_updates_switch() {
-    // Start MGS + Sim SP.
-    let mgstestctx =
-        mgs_setup::test_setup("test_sp_updater_updates_switch", SpPort::One)
-            .await;
-
-    // Configure an MGS client.
-    let mut mgs_clients =
-        MgsClients::from_clients([gateway_client::Client::new(
-            &mgstestctx.client.url("/").to_string(),
-            mgstestctx.logctx.log.new(slog::o!("component" => "MgsClient")),
-        )]);
-
-    let sp_type = SpType::Switch;
-    let sp_slot = 0;
-    let update_id = Uuid::new_v4();
-    let hubris_archive = make_fake_sp_image(SIM_SIDECAR_BOARD);
-
-    let sp_updater = SpUpdater::new(
-        sp_type,
-        sp_slot,
-        update_id,
-        hubris_archive.clone(),
-        &mgstestctx.logctx.log,
-    );
-
-    sp_updater.update(&mut mgs_clients).await.expect("update failed");
-
-    let last_update_image = mgstestctx.simrack.sidecars[sp_slot as usize]
-        .last_sp_update_data()
-        .await
-        .expect("simulated SP did not receive an update");
-
-    let hubris_archive = RawHubrisArchive::from_vec(hubris_archive).unwrap();
-
-    assert_eq!(
-        hubris_archive.image.data.as_slice(),
-        &*last_update_image,
-        "simulated SP update contents (len {}) \
-         do not match test generated fake image (len {})",
-        last_update_image.len(),
-        hubris_archive.image.data.len()
-    );
-
-    mgstestctx.teardown().await;
-}
-
-#[tokio::test]
-async fn test_sp_updater_remembers_successful_mgs_instance() {
+async fn test_host_phase1_updater_updates_sled() {
     // Start MGS + Sim SP.
     let mgstestctx = mgs_setup::test_setup(
-        "test_sp_updater_remembers_successful_mgs_instance",
+        "test_host_phase1_updater_updates_sled",
+        SpPort::One,
+    )
+    .await;
+
+    // Configure an MGS client.
+    let mut mgs_clients =
+        MgsClients::from_clients([gateway_client::Client::new(
+            &mgstestctx.client.url("/").to_string(),
+            mgstestctx.logctx.log.new(slog::o!("component" => "MgsClient")),
+        )]);
+
+    for target_host_slot in [0, 1] {
+        // Configure and instantiate an `HostPhase1Updater`.
+        let sp_type = SpType::Sled;
+        let sp_slot = 0;
+        let update_id = Uuid::new_v4();
+        let phase1_data = make_fake_host_phase1_image();
+
+        let host_phase1_updater = HostPhase1Updater::new(
+            sp_type,
+            sp_slot,
+            target_host_slot,
+            update_id,
+            phase1_data.clone(),
+            &mgstestctx.logctx.log,
+        );
+
+        // Run the update.
+        host_phase1_updater
+            .update(&mut mgs_clients)
+            .await
+            .expect("update failed");
+
+        // Ensure the SP received the complete update.
+        let last_update_image = mgstestctx.simrack.gimlets[sp_slot as usize]
+            .last_host_phase1_update_data(target_host_slot)
+            .await
+            .expect("simulated host phase1 did not receive an update");
+
+        assert_eq!(
+            phase1_data.as_slice(),
+            &*last_update_image,
+            "simulated host phase1 update contents (len {}) \
+         do not match test generated fake image (len {})",
+            last_update_image.len(),
+            phase1_data.len(),
+        );
+    }
+
+    mgstestctx.teardown().await;
+}
+
+#[tokio::test]
+async fn test_host_phase1_updater_remembers_successful_mgs_instance() {
+    // Start MGS + Sim SP.
+    let mgstestctx = mgs_setup::test_setup(
+        "test_host_phase1_updater_remembers_successful_mgs_instance",
         SpPort::One,
     )
     .await;
@@ -149,7 +98,8 @@ async fn test_sp_updater_remembers_successful_mgs_instance() {
     // Also start a local TCP server that we will claim is an MGS instance, but
     // it will close connections immediately after accepting them. This will
     // allow us to count how many connections it receives, while simultaneously
-    // causing errors in the SpUpdater when it attempts to use this "MGS".
+    // causing errors in the HostPhase1Updater when it attempts to use this
+    // "MGS".
     let (failing_mgs_task, failing_mgs_addr, failing_mgs_conn_counter) = {
         let socket = TcpListener::bind("[::1]:0").await.unwrap();
         let addr = socket.local_addr().unwrap();
@@ -170,12 +120,12 @@ async fn test_sp_updater_remembers_successful_mgs_instance() {
     };
 
     // Order the MGS clients such that the bogus MGS that immediately closes
-    // connections comes first. `SpUpdater` should remember that the second MGS
-    // instance succeeds, and only send subsequent requests to it: we should
-    // only see a single attempted connection to the bogus MGS, even though
-    // delivering an update requires a bare minimum of three requests (start the
-    // update, query the status, reset the SP) and often more (if repeated
-    // queries are required to wait for completion).
+    // connections comes first. `HostPhase1Updater` should remember that the
+    // second MGS instance succeeds, and only send subsequent requests to it: we
+    // should only see a single attempted connection to the bogus MGS, even
+    // though delivering an update requires a bare minimum of three requests
+    // (start the update, query the status, reset the SP) and often more (if
+    // repeated queries are required to wait for completion).
     let mut mgs_clients = MgsClients::from_clients([
         gateway_client::Client::new(
             &format!("http://{failing_mgs_addr}"),
@@ -189,38 +139,38 @@ async fn test_sp_updater_remembers_successful_mgs_instance() {
 
     let sp_type = SpType::Sled;
     let sp_slot = 0;
+    let target_host_slot = 0;
     let update_id = Uuid::new_v4();
-    let hubris_archive = make_fake_sp_image(SIM_GIMLET_BOARD);
+    let phase1_data = make_fake_host_phase1_image();
 
-    let sp_updater = SpUpdater::new(
+    let host_phase1_updater = HostPhase1Updater::new(
         sp_type,
         sp_slot,
+        target_host_slot,
         update_id,
-        hubris_archive.clone(),
+        phase1_data.clone(),
         &mgstestctx.logctx.log,
     );
 
-    sp_updater.update(&mut mgs_clients).await.expect("update failed");
+    host_phase1_updater.update(&mut mgs_clients).await.expect("update failed");
 
     let last_update_image = mgstestctx.simrack.gimlets[sp_slot as usize]
-        .last_sp_update_data()
+        .last_host_phase1_update_data(target_host_slot)
         .await
-        .expect("simulated SP did not receive an update");
-
-    let hubris_archive = RawHubrisArchive::from_vec(hubris_archive).unwrap();
+        .expect("simulated host phase1 did not receive an update");
 
     assert_eq!(
-        hubris_archive.image.data.as_slice(),
+        phase1_data.as_slice(),
         &*last_update_image,
-        "simulated SP update contents (len {}) \
+        "simulated host phase1 update contents (len {}) \
          do not match test generated fake image (len {})",
         last_update_image.len(),
-        hubris_archive.image.data.len()
+        phase1_data.len(),
     );
 
     // Check that our bogus MGS only received a single connection attempt.
-    // (After SpUpdater failed to talk to this instance, it should have fallen
-    // back to the valid one for all further requests.)
+    // (After HostPhase1Updater failed to talk to this instance, it should have
+    // fallen back to the valid one for all further requests.)
     assert_eq!(
         failing_mgs_conn_counter.load(Ordering::SeqCst),
         1,
@@ -232,7 +182,7 @@ async fn test_sp_updater_remembers_successful_mgs_instance() {
 }
 
 #[tokio::test]
-async fn test_sp_updater_switches_mgs_instances_on_failure() {
+async fn test_host_phase1_updater_switches_mgs_instances_on_failure() {
     enum MgsProxy {
         One(TcpStream),
         Two(TcpStream),
@@ -240,7 +190,7 @@ async fn test_sp_updater_switches_mgs_instances_on_failure() {
 
     // Start MGS + Sim SP.
     let mgstestctx = mgs_setup::test_setup(
-        "test_sp_updater_switches_mgs_instances_on_failure",
+        "test_host_phase1_updater_switches_mgs_instances_on_failure",
         SpPort::One,
     )
     .await;
@@ -307,20 +257,23 @@ async fn test_sp_updater_switches_mgs_instances_on_failure() {
 
     let sp_type = SpType::Sled;
     let sp_slot = 0;
+    let target_host_slot = 0;
     let update_id = Uuid::new_v4();
-    let hubris_archive = make_fake_sp_image(SIM_GIMLET_BOARD);
+    let phase1_data = make_fake_host_phase1_image();
 
-    let sp_updater = SpUpdater::new(
+    let host_phase1_updater = HostPhase1Updater::new(
         sp_type,
         sp_slot,
+        target_host_slot,
         update_id,
-        hubris_archive.clone(),
+        phase1_data.clone(),
         &mgstestctx.logctx.log,
     );
 
     // Spawn the actual update task.
-    let mut update_task =
-        tokio::spawn(async move { sp_updater.update(&mut mgs_clients).await });
+    let mut update_task = tokio::spawn(async move {
+        host_phase1_updater.update(&mut mgs_clients).await
+    });
 
     // Loop over incoming requests. We expect this sequence:
     //
@@ -357,10 +310,10 @@ async fn test_sp_updater_switches_mgs_instances_on_failure() {
                     }
                 };
 
-                // Should we trigger `SpUpdater` to swap to the other MGS
-                // (proxy)? If so, do that by dropping this connection (which
-                // will cause a client failure) and note that we expect the next
-                // incoming request to come on the other proxy.
+                // Should we trigger `HostPhase1Updater` to swap to the other
+                // MGS (proxy)? If so, do that by dropping this connection
+                // (which will cause a client failure) and note that we expect
+                // the next incoming request to come on the other proxy.
                 if should_swap {
                     mem::drop(stream);
                     expected_proxy ^= 1;
@@ -387,12 +340,12 @@ async fn test_sp_updater_switches_mgs_instances_on_failure() {
         }
     }
 
-    // An SP update requires a minimum of 3 requests to MGS: post the update,
-    // check the status, and post an SP reset. There may be more requests if the
-    // update is not yet complete when the status is checked, but we can just
-    // check that each of our proxies received at least 2 incoming requests;
-    // based on our outline above, if we got the minimum of 3 requests, it would
-    // look like this:
+    // A host flash update requires a minimum of 3 requests to MGS: set the
+    // active flash slot, post the update, and check the status. There may be
+    // more requests if the update is not yet complete when the status is
+    // checked, but we can just check that each of our proxies received at least
+    // 2 incoming requests; based on our outline above, if we got the minimum of
+    // 3 requests, it would look like this:
     //
     // 1. POST update -> first proxy (success)
     // 2. GET status -> first proxy (fail)
@@ -413,30 +366,30 @@ async fn test_sp_updater_switches_mgs_instances_on_failure() {
     );
 
     let last_update_image = mgstestctx.simrack.gimlets[sp_slot as usize]
-        .last_sp_update_data()
+        .last_host_phase1_update_data(target_host_slot)
         .await
-        .expect("simulated SP did not receive an update");
-
-    let hubris_archive = RawHubrisArchive::from_vec(hubris_archive).unwrap();
+        .expect("simulated host phase1 did not receive an update");
 
     assert_eq!(
-        hubris_archive.image.data.as_slice(),
+        phase1_data.as_slice(),
         &*last_update_image,
-        "simulated SP update contents (len {}) \
+        "simulated host phase1 update contents (len {}) \
          do not match test generated fake image (len {})",
         last_update_image.len(),
-        hubris_archive.image.data.len()
+        phase1_data.len(),
     );
 
     mgstestctx.teardown().await;
 }
 
 #[tokio::test]
-async fn test_sp_updater_delivers_progress() {
+async fn test_host_phase1_updater_delivers_progress() {
     // Start MGS + Sim SP.
-    let mgstestctx =
-        mgs_setup::test_setup("test_sp_updater_delivers_progress", SpPort::One)
-            .await;
+    let mgstestctx = mgs_setup::test_setup(
+        "test_host_phase1_updater_delivers_progress",
+        SpPort::One,
+    )
+    .await;
 
     // Configure an MGS client.
     let mut mgs_clients =
@@ -447,23 +400,24 @@ async fn test_sp_updater_delivers_progress() {
 
     let sp_type = SpType::Sled;
     let sp_slot = 0;
+    let target_host_slot = 0;
     let update_id = Uuid::new_v4();
-    let hubris_archive = make_fake_sp_image(SIM_GIMLET_BOARD);
+    let phase1_data = make_fake_host_phase1_image();
 
-    let sp_updater = SpUpdater::new(
+    let host_phase1_updater = HostPhase1Updater::new(
         sp_type,
         sp_slot,
+        target_host_slot,
         update_id,
-        hubris_archive.clone(),
+        phase1_data.clone(),
         &mgstestctx.logctx.log,
     );
 
-    let hubris_archive = RawHubrisArchive::from_vec(hubris_archive).unwrap();
-    let sp_image_len = hubris_archive.image.data.len() as u32;
+    let phase1_data_len = phase1_data.len() as u32;
 
     // Subscribe to update progress, and check that there is no status yet; we
     // haven't started the update.
-    let mut progress = sp_updater.progress_watcher();
+    let mut progress = host_phase1_updater.progress_watcher();
     assert_eq!(*progress.borrow_and_update(), None);
 
     // Install a semaphore on the requests our target SP will receive so we can
@@ -474,12 +428,13 @@ async fn test_sp_updater_delivers_progress() {
 
     // Spawn the update on a background task so we can watch `progress` as it is
     // applied.
-    let do_update_task =
-        tokio::spawn(async move { sp_updater.update(&mut mgs_clients).await });
+    let do_update_task = tokio::spawn(async move {
+        host_phase1_updater.update(&mut mgs_clients).await
+    });
 
-    // Allow the SP to respond to 2 messages: the caboose check and the "prepare
-    // update" messages that triggers the start of an update, then ensure we see
-    // the "started" progress.
+    // Allow the SP to respond to 2 messages: the message to activate the target
+    // flash slot and the "prepare update" messages that triggers the start of an
+    // update, then ensure we see the "started" progress.
     sp_accept_sema.send(2).unwrap();
     progress.changed().await.unwrap();
     assert_eq!(*progress.borrow_and_update(), Some(UpdateProgress::Started));
@@ -491,7 +446,7 @@ async fn test_sp_updater_delivers_progress() {
         UpdateStatus::InProgress(UpdateInProgressStatus {
             id: update_id.into(),
             bytes_received: 0,
-            total_size: sp_image_len,
+            total_size: phase1_data_len,
         })
     );
 
@@ -504,21 +459,22 @@ async fn test_sp_updater_delivers_progress() {
     // simulated SP:
     //
     // 1. MGS is trying to deliver the update
-    // 2. `sp_updater` is trying to poll (via MGS) for update status
+    // 2. `host_phase1_updater` is trying to poll (via MGS) for update status
     //
     // and we want to ensure that we see any relevant progress reports from
-    // `sp_updater`. We'll let one MGS -> SP message through at a time (waiting
-    // until our SP has responded by waiting for a change to `sp_responses`)
-    // then check its update state: if it changed, the packet we let through was
-    // data from MGS; otherwise, it was a status request from `sp_updater`.
+    // `host_phase1_updater`. We'll let one MGS -> SP message through at a time
+    // (waiting until our SP has responded by waiting for a change to
+    // `sp_responses`) then check its update state: if it changed, the packet we
+    // let through was data from MGS; otherwise, it was a status request from
+    // `host_phase1_updater`.
     //
     // This loop will continue until either:
     //
     // 1. We see an `UpdateStatus::InProgress` message indicating 100% delivery,
     //    at which point we break out of the loop
     // 2. We time out waiting for the previous step (by timing out for either
-    //    the SP to process a request or `sp_updater` to realize there's been
-    //    progress), at which point we panic and fail this test.
+    //    the SP to process a request or `host_phase1_updater` to realize
+    //    there's been progress), at which point we panic and fail this test.
     let mut prev_bytes_received = 0;
     let mut expect_progress_change = false;
     loop {
@@ -536,7 +492,7 @@ async fn test_sp_updater_delivers_progress() {
 
         // Inspec the SP's in-memory update state; we expect only `InProgress`
         // or `Complete`, and in either case we note whether we expect to see
-        // status changes from `sp_updater`.
+        // status changes from `host_phase1_updater`.
         match target_sp.current_update_status().await {
             UpdateStatus::InProgress(sp_progress) => {
                 if sp_progress.bytes_received > prev_bytes_received {
@@ -546,8 +502,8 @@ async fn test_sp_updater_delivers_progress() {
                 }
             }
             UpdateStatus::Complete(_) => {
-                if prev_bytes_received < sp_image_len {
-                    prev_bytes_received = sp_image_len;
+                if prev_bytes_received < phase1_data_len {
+                    break;
                 }
             }
             status @ (UpdateStatus::None
@@ -561,10 +517,10 @@ async fn test_sp_updater_delivers_progress() {
         }
 
         // If we get here, the most recent packet did _not_ change the SP's
-        // internal update state, so it was a status request from `sp_updater`.
-        // If we expect the updater to see new progress, wait for that change
-        // here.
-        if expect_progress_change || prev_bytes_received == sp_image_len {
+        // internal update state, so it was a status request from
+        // `host_phase1_updater`. If we expect the updater to see new progress,
+        // wait for that change here.
+        if expect_progress_change {
             // Safety rail that we haven't screwed up our untangle-the-race
             // logic: if we don't see a new progress after several seconds, our
             // test is broken, so fail.
@@ -575,25 +531,35 @@ async fn test_sp_updater_delivers_progress() {
             let status = progress.borrow_and_update().clone().unwrap();
             expect_progress_change = false;
 
-            // We're done if we've observed the final progress message.
-            if let UpdateProgress::InProgress { progress: Some(value) } = status
-            {
-                if value == 1.0 {
-                    break;
-                }
-            } else {
-                panic!("unexpected progerss status {status:?}");
-            }
+            assert!(
+                matches!(status, UpdateProgress::InProgress { .. }),
+                "unexpected progress status {status:?}"
+            );
         }
     }
 
-    // The update has been fully delivered to the SP, but we don't see an
-    // `UpdateStatus::Complete` message until the SP is reset. Release the SP
-    // semaphore since we're no longer racing to observe intermediate progress,
-    // and wait for the completion message.
+    // We know the SP has received a complete update, but `HostPhase1Updater`
+    // may still need to request status to realize that; release the socket
+    // semaphore so the SP can respond.
     sp_accept_sema.send(usize::MAX).unwrap();
-    progress.changed().await.unwrap();
-    assert_eq!(*progress.borrow_and_update(), Some(UpdateProgress::Complete));
+
+    // Unlike the SP and RoT cases, there are no MGS/SP steps in between the
+    // update completing and `HostPhase1Updater` sending
+    // `UpdateProgress::Complete`. Therefore, it's a race whether we'll see
+    // some number of `InProgress` status before `Complete`, but we should
+    // quickly move to `Complete`.
+    loop {
+        tokio::time::timeout(Duration::from_secs(10), progress.changed())
+            .await
+            .expect("progress timeout")
+            .expect("progress watch sender dropped");
+        let status = progress.borrow_and_update().clone().unwrap();
+        match status {
+            UpdateProgress::Complete => break,
+            UpdateProgress::InProgress { .. } => continue,
+            _ => panic!("unexpected progress status {status:?}"),
+        }
+    }
 
     // drop our progress receiver so `do_update_task` can complete
     mem::drop(progress);
@@ -601,17 +567,17 @@ async fn test_sp_updater_delivers_progress() {
     do_update_task.await.expect("update task panicked").expect("update failed");
 
     let last_update_image = target_sp
-        .last_sp_update_data()
+        .last_host_phase1_update_data(target_host_slot)
         .await
-        .expect("simulated SP did not receive an update");
+        .expect("simulated host phase1 did not receive an update");
 
     assert_eq!(
-        hubris_archive.image.data.as_slice(),
+        phase1_data.as_slice(),
         &*last_update_image,
-        "simulated SP update contents (len {}) \
+        "simulated host phase1 update contents (len {}) \
          do not match test generated fake image (len {})",
         last_update_image.len(),
-        hubris_archive.image.data.len()
+        phase1_data.len(),
     );
 
     mgstestctx.teardown().await;
