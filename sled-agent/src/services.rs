@@ -292,7 +292,7 @@ impl Config {
 }
 
 // The filename of the ledger, within the provided directory.
-const ZONES_LEDGER_FILENAME: &str = "omicron_zones.json";
+const ZONES_LEDGER_FILENAME: &str = "omicron-zones.json";
 
 /// Combines the Nexus-provided `OmicronZonesConfig` (which describes what Nexus
 /// wants for all of its zones) with the locally-determined configuration for
