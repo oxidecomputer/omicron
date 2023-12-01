@@ -13,8 +13,9 @@ use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::error::public_error_from_diesel;
+use crate::db::error::retryable;
 use crate::db::error::ErrorHandler;
-use crate::db::error::TransactionError;
+use crate::db::error::MaybeRetryable::*;
 use crate::db::fixed_data::silo::INTERNAL_SILO_ID;
 use crate::db::fixed_data::vpc_subnet::DNS_VPC_SUBNET;
 use crate::db::fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
@@ -90,8 +91,23 @@ enum RackInitError {
     DnsSerialization(Error),
     Silo(Error),
     RoleAssignment(Error),
+    // Retryable database error
+    Retryable(DieselError),
+    // Other non-retryable database error
+    Database(DieselError),
 }
-type TxnError = TransactionError<RackInitError>;
+
+// Catch-all for Diesel error conversion into RackInitError, which
+// can also label errors as retryable.
+impl From<DieselError> for RackInitError {
+    fn from(e: DieselError) -> Self {
+        if retryable(&e) {
+            Self::Retryable(e)
+        } else {
+            Self::Database(e)
+        }
+    }
+}
 
 impl From<RackInitError> for Error {
     fn from(e: RackInitError) -> Self {
@@ -129,6 +145,14 @@ impl From<RackInitError> for Error {
             RackInitError::RoleAssignment(err) => Error::internal_error(
                 &format!("failed to assign role to initial user: {:#}", err),
             ),
+            RackInitError::Retryable(err) => Error::internal_error(&format!(
+                "failed operation due to database contention: {:#}",
+                err
+            )),
+            RackInitError::Database(err) => Error::internal_error(&format!(
+                "failed operation due to database error: {:#}",
+                err
+            )),
         }
     }
 }
@@ -320,9 +344,6 @@ impl DataStore {
         Ok(())
     }
 
-    // The following methods which return a `TxnError` take a `conn` parameter
-    // which comes from the transaction created in `rack_set_initialized`.
-
     #[allow(clippy::too_many_arguments)]
     async fn rack_create_recovery_silo(
         &self,
@@ -334,7 +355,7 @@ impl DataStore {
         recovery_user_id: external_params::UserId,
         recovery_user_password_hash: omicron_passwords::PasswordHashString,
         dns_update: DnsVersionUpdateBuilder,
-    ) -> Result<(), TxnError> {
+    ) -> Result<(), RackInitError> {
         let db_silo = self
             .silo_create_conn(
                 conn,
@@ -345,8 +366,10 @@ impl DataStore {
                 dns_update,
             )
             .await
-            .map_err(RackInitError::Silo)
-            .map_err(TxnError::CustomError)?;
+            .map_err(|err| match err.retryable() {
+                NotRetryable(err) => RackInitError::Silo(err.into()),
+                Retryable(err) => RackInitError::Retryable(err),
+            })?;
         info!(log, "Created recovery silo");
 
         // Create the first user in the initial Recovery Silo
@@ -400,8 +423,7 @@ impl DataStore {
             }],
         )
         .await
-        .map_err(RackInitError::RoleAssignment)
-        .map_err(TxnError::CustomError)?;
+        .map_err(RackInitError::RoleAssignment)?;
         debug!(log, "Generated role assignment queries");
 
         q1.execute_async(conn).await?;
@@ -427,9 +449,12 @@ impl DataStore {
             service.address,
             service.kind.clone().into(),
         );
-        self.service_upsert_conn(conn, service_db)
-            .await
-            .map_err(|e| RackInitError::ServiceInsert(e))?;
+        self.service_upsert_conn(conn, service_db).await.map_err(
+            |e| match e.retryable() {
+                Retryable(e) => RackInitError::Retryable(e),
+                NotRetryable(e) => RackInitError::ServiceInsert(e.into()),
+            },
+        )?;
 
         // For services with external connectivity, we record their
         // explicit IP allocation and create a service NIC as well.
@@ -497,7 +522,10 @@ impl DataStore {
                         IP address for {}",
                         service.kind,
                     );
-                    RackInitError::AddingIp(err)
+                    match err.retryable() {
+                        Retryable(e) => RackInitError::Retryable(e),
+                        NotRetryable(e) => RackInitError::AddingIp(e.into()),
+                    }
                 })?;
 
             self.create_network_interface_raw_conn(conn, db_nic)
@@ -510,6 +538,9 @@ impl DataStore {
                             _,
                             db::model::NetworkInterfaceKind::Service,
                         ) => Ok(()),
+                        InsertError::Retryable(err) => {
+                            Err(RackInitError::Retryable(err))
+                        }
                         _ => Err(RackInitError::AddingNic(e.into_external())),
                     }
                 })?;
@@ -676,11 +707,11 @@ impl DataStore {
                     )
                     .await
                     .map_err(|e| match e {
-                        TransactionError::CustomError(rack_init_err) => {
-                            err.set(rack_init_err).unwrap();
+                        RackInitError::Retryable(e) => e,
+                        _ => {
+                            err.set(e).unwrap();
                             DieselError::RollbackTransaction
                         },
-                        TransactionError::Database(e) => e,
                     })?;
 
                     let rack = diesel::update(rack_dsl::rack)
@@ -693,6 +724,9 @@ impl DataStore {
                         .get_result_async::<Rack>(&conn)
                         .await
                         .map_err(|e| {
+                            if retryable(&e) {
+                                return e;
+                            }
                             err.set(RackInitError::RackUpdate {
                                 err: e,
                                 rack_id,
@@ -805,12 +839,12 @@ impl DataStore {
                                 DnsGroup::External,
                             )
                             .await
-                            .map_err(|e| match e.take_retryable() {
-                                Ok(e) => return e,
-                                Err(e) => {
-                                    err.set(e).unwrap();
+                            .map_err(|e| match e.retryable() {
+                                NotRetryable(not_retryable_err) => {
+                                    err.set(not_retryable_err).unwrap();
                                     DieselError::RollbackTransaction
                                 }
+                                Retryable(retryable_err) => retryable_err,
                             })?;
 
                         Ok((ips, dns_zones))

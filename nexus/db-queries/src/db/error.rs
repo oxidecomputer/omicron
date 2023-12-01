@@ -17,7 +17,7 @@ pub enum TransactionError<T> {
     /// The customizable error type.
     ///
     /// This error should be used for all non-Diesel transaction failures.
-    #[error("Custom transaction error; {0}")]
+    #[error("Custom transaction error: {0}")]
     CustomError(T),
 
     /// The Diesel error type.
@@ -43,21 +43,29 @@ pub fn retryable(error: &DieselError) -> bool {
     }
 }
 
-impl TransactionError<PublicError> {
-    /// If this error is a retryable DieselError, unpack it as Ok(err).
+/// Identifies if the error is retryable or not.
+pub enum MaybeRetryable<T> {
+    /// The error isn't retryable.
+    NotRetryable(T),
+    /// The error is retryable.
+    Retryable(DieselError),
+}
+
+impl<T> TransactionError<T> {
+    /// Identifies that the error could be returned from a Diesel transaction.
     ///
-    /// Otherwise, return Self as an error, so the error still can be used
-    /// in other cases.
-    pub fn take_retryable(self) -> Result<DieselError, Self> {
+    /// Allows callers to propagate arbitrary errors out of transaction contexts
+    /// without losing information that might be valuable to the calling context,
+    /// such as "does this particular error indicate that the entire transaction
+    /// should retry?".
+    pub fn retryable(self) -> MaybeRetryable<Self> {
+        use MaybeRetryable::*;
+
         match self {
-            TransactionError::CustomError(_) => Err(self),
-            TransactionError::Database(err) => {
-                if retryable(&err) {
-                    Ok(err)
-                } else {
-                    Err(TransactionError::Database(err))
-                }
+            TransactionError::Database(err) if retryable(&err) => {
+                Retryable(err)
             }
+            _ => NotRetryable(self),
         }
     }
 }

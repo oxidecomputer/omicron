@@ -107,12 +107,14 @@ impl DataStore {
         opctx: &OpContext,
         dns_group: DnsGroup,
     ) -> LookupResult<DnsVersion> {
-        self.dns_group_latest_version_conn(
-            opctx,
-            &*self.pool_connection_authorized(opctx).await?,
-            dns_group,
-        )
-        .await
+        let version = self
+            .dns_group_latest_version_conn(
+                opctx,
+                &*self.pool_connection_authorized(opctx).await?,
+                dns_group,
+            )
+            .await?;
+        Ok(version)
     }
 
     pub async fn dns_group_latest_version_conn(
@@ -120,7 +122,7 @@ impl DataStore {
         opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         dns_group: DnsGroup,
-    ) -> LookupResult<DnsVersion> {
+    ) -> Result<DnsVersion, TransactionError<Error>> {
         opctx.authorize(authz::Action::Read, &authz::DNS_CONFIG).await?;
         use db::schema::dns_version::dsl;
         let versions = dsl::dns_version
@@ -129,8 +131,7 @@ impl DataStore {
             .limit(1)
             .select(DnsVersion::as_select())
             .load_async(conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+            .await?;
 
         bail_unless!(
             versions.len() == 1,
@@ -378,28 +379,17 @@ impl DataStore {
         opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         update: DnsVersionUpdateBuilder,
-    ) -> Result<(), Error> {
+    ) -> Result<(), TransactionError<Error>> {
         opctx.authorize(authz::Action::Modify, &authz::DNS_CONFIG).await?;
 
         let zones = self
             .dns_zones_list_all_on_connection(opctx, conn, update.dns_group)
             .await?;
 
-        let result = conn
-            .transaction_async(|c| async move {
-                self.dns_update_internal(opctx, &c, update, zones)
-                    .await
-                    .map_err(TransactionError::CustomError)
-            })
-            .await;
-
-        match result {
-            Ok(()) => Ok(()),
-            Err(TransactionError::CustomError(e)) => Err(e),
-            Err(TransactionError::Database(e)) => {
-                Err(public_error_from_diesel(e, ErrorHandler::Server))
-            }
-        }
+        conn.transaction_async(|c| async move {
+            self.dns_update_internal(opctx, &c, update, zones).await
+        })
+        .await
     }
 
     // This must only be used inside a transaction.  Otherwise, it may make
@@ -410,7 +400,7 @@ impl DataStore {
         conn: &async_bb8_diesel::Connection<DbConnection>,
         update: DnsVersionUpdateBuilder,
         zones: Vec<DnsZone>,
-    ) -> Result<(), Error> {
+    ) -> Result<(), TransactionError<Error>> {
         // TODO-scalability TODO-performance This would be much better as a CTE
         // for all the usual reasons described in RFD 192.  Using an interactive
         // transaction here means that either we wind up holding database locks
@@ -456,10 +446,7 @@ impl DataStore {
             diesel::insert_into(dsl::dns_version)
                 .values(new_version)
                 .execute_async(conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .await?;
         }
 
         {
@@ -481,8 +468,7 @@ impl DataStore {
             )
             .set(dsl::version_removed.eq(new_version_num))
             .execute_async(conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+            .await?;
 
             bail_unless!(
                 nremoved == ntoremove,
@@ -496,10 +482,7 @@ impl DataStore {
             let nadded = diesel::insert_into(dsl::dns_name)
                 .values(new_names)
                 .execute_async(conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .await?;
 
             bail_unless!(
                 nadded == ntoadd,

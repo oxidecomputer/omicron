@@ -10,7 +10,9 @@ use crate::authz::ApiResource;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::error::public_error_from_diesel;
+use crate::db::error::retryable;
 use crate::db::error::ErrorHandler;
+use crate::db::error::TransactionError;
 use crate::db::lookup::LookupPath;
 use crate::db::model::ExternalIp;
 use crate::db::model::IncompleteExternalIp;
@@ -132,7 +134,8 @@ impl DataStore {
         data: IncompleteExternalIp,
     ) -> CreateResult<ExternalIp> {
         let conn = self.pool_connection_authorized(opctx).await?;
-        Self::allocate_external_ip_on_connection(&conn, data).await
+        let ip = Self::allocate_external_ip_on_connection(&conn, data).await?;
+        Ok(ip)
     }
 
     /// Variant of [Self::allocate_external_ip] which may be called from a
@@ -140,23 +143,30 @@ impl DataStore {
     pub(crate) async fn allocate_external_ip_on_connection(
         conn: &async_bb8_diesel::Connection<DbConnection>,
         data: IncompleteExternalIp,
-    ) -> CreateResult<ExternalIp> {
+    ) -> Result<ExternalIp, TransactionError<Error>> {
         let explicit_ip = data.explicit_ip().is_some();
         NextExternalIp::new(data).get_result_async(conn).await.map_err(|e| {
             use diesel::result::Error::NotFound;
             match e {
                 NotFound => {
                     if explicit_ip {
-                        Error::invalid_request(
+                        TransactionError::CustomError(Error::invalid_request(
                             "Requested external IP address not available",
-                        )
+                        ))
                     } else {
-                        Error::invalid_request(
+                        TransactionError::CustomError(Error::invalid_request(
                             "No external IP addresses available",
-                        )
+                        ))
                     }
                 }
-                _ => crate::db::queries::external_ip::from_diesel(e),
+                _ => {
+                    if retryable(&e) {
+                        return TransactionError::Database(e);
+                    }
+                    TransactionError::CustomError(
+                        crate::db::queries::external_ip::from_diesel(e),
+                    )
+                }
             }
         })
     }
