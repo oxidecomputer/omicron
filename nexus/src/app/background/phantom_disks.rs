@@ -8,12 +8,15 @@
 //! unwound: before a fix for customer-support#58, this would leave disks
 //! deleted but would also leave a `virtual_provisioning_resource` record for
 //! that disk. There would be no way to re-trigger the disk delete saga as the
-//! disk was deleted, so the project that disk was in could not be deleted.
+//! disk was deleted, so the project that disk was in could not be deleted
+//! because associated virtual provisioning resources were still being consumed.
 //!
-//! This background task detects that case and sets the disk to "faulted". The
-//! fix for customer-support#58 is similar: it changes the disk delete saga's
-//! unwind to also un-delete the disk and set it to faulted. This enables it to
-//! be deleted again.
+//! The fix for customer-support#58 changes the disk delete saga's unwind to
+//! also un-delete the disk and set it to faulted. This enables it to be deleted
+//! again. Correcting the disk delete saga's unwind means that phantom disks
+//! will not be created in the future when the disk delete saga unwinds, but
+//! this background task is required to apply the same fix for disks that are
+//! already in this phantom state.
 
 use super::common::BackgroundTask;
 use futures::future::BoxFuture;
