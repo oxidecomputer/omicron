@@ -8,9 +8,7 @@ use super::DataStore;
 use crate::db;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
-use async_bb8_diesel::{
-    AsyncConnection, AsyncRunQueryDsl, AsyncSimpleConnection,
-};
+use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::Utc;
 use diesel::prelude::*;
@@ -414,23 +412,26 @@ impl DataStore {
         target: &SemverVersion,
         sql: &String,
     ) -> Result<(), Error> {
-        let result = self.pool_connection_unauthorized().await?.transaction_async_with_retry(|conn| async move {
-            if target.to_string() != EARLIEST_SUPPORTED_VERSION {
-                let validate_version_query = format!("SELECT CAST(\
-                        IF(\
-                            (\
-                                SELECT version = '{current}' and target_version = '{target}'\
-                                FROM omicron.public.db_metadata WHERE singleton = true\
-                            ),\
-                            'true',\
-                            'Invalid starting version for schema change'\
-                        ) AS BOOL\
-                    );");
-                conn.batch_execute_async(&validate_version_query).await?;
-            }
-            conn.batch_execute_async(&sql).await?;
-            Ok(())
-        }, || async move { true }).await;
+        let conn = self.pool_connection_unauthorized().await?;
+
+        let result = self.transaction_retry_wrapper("apply_schema_update")
+            .transaction(&conn, |conn| async move {
+                if target.to_string() != EARLIEST_SUPPORTED_VERSION {
+                    let validate_version_query = format!("SELECT CAST(\
+                            IF(\
+                                (\
+                                    SELECT version = '{current}' and target_version = '{target}'\
+                                    FROM omicron.public.db_metadata WHERE singleton = true\
+                                ),\
+                                'true',\
+                                'Invalid starting version for schema change'\
+                            ) AS BOOL\
+                        );");
+                    conn.batch_execute_async(&validate_version_query).await?;
+                }
+                conn.batch_execute_async(&sql).await?;
+                Ok(())
+            }).await;
 
         match result {
             Ok(()) => Ok(()),
