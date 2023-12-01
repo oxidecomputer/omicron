@@ -1168,92 +1168,8 @@ impl ServiceManager {
             })
             .collect();
 
-<<<<<<< HEAD
-        let mut ports = vec![];
-        for svc in &req.services {
-            // Non-SNAT IPs are floating IPs with `is_service` true.
-            let external_ip;
-            let (nic, snat, floating_ips) = match &svc.details {
-                ServiceType::Nexus { external_ip, nic, .. } => {
-                    (nic, None, std::slice::from_ref(external_ip))
-                }
-                ServiceType::ExternalDns { dns_address, nic, .. } => {
-                    external_ip = dns_address.ip();
-                    (nic, None, std::slice::from_ref(&external_ip))
-                }
-                ServiceType::BoundaryNtp { nic, snat_cfg, .. } => {
-                    (nic, Some(*snat_cfg), &[][..])
-                }
-                _ => continue,
-            };
-
-            // Create the OPTE port for the service.
-            // Note we don't plumb any firewall rules at this point,
-            // Nexus will plumb them down later but the default OPTE
-            // config allows outbound access which is enough for
-            // Boundary NTP which needs to come up before Nexus.
-            let port = port_manager
-                .create_port(
-                    nic,
-                    snat,
-                    None,
-                    floating_ips,
-                    &[],
-                    DhcpCfg::default(),
-                )
-                .map_err(|err| Error::ServicePortCreation {
-                    service: svc.details.to_string(),
-                    err: Box::new(err),
-                })?;
-
-            // We also need to update the switch with the NAT mappings
-            // XXX: need to revisit iff. any services get more than one
-            //      address.
-            let (target_ip, first_port, last_port) = match snat {
-                Some(s) => (s.ip, s.first_port, s.last_port),
-                None => (floating_ips[0], 0, u16::MAX),
-            };
-
-            for dpd_client in &dpd_clients {
-                // TODO-correctness(#2933): If we fail part-way we need to
-                // clean up previous entries instead of leaking them.
-                let nat_create = || async {
-                    info!(
-                        self.inner.log, "creating NAT entry for service";
-                        "service" => ?svc,
-                    );
-
-                    dpd_client
-                        .ensure_nat_entry(
-                            &self.inner.log,
-                            target_ip.into(),
-                            dpd_client::types::MacAddr {
-                                a: port.0.mac().into_array(),
-                            },
-                            first_port,
-                            last_port,
-                            port.0.vni().as_u32(),
-                            underlay_address,
-                        )
-                        .await
-                        .map_err(BackoffError::transient)?;
-
-                    Ok::<(), BackoffError<DpdError<DpdTypes::Error>>>(())
-                };
-                let log_failure = |error, _| {
-                    warn!(
-                        self.inner.log, "failed to create NAT entry for service";
-                        "error" => ?error,
-                        "service" => ?svc,
-                    );
-                };
-                retry_notify(
-                    retry_policy_internal_service_aggressive(),
-                    nat_create,
-                    log_failure,
-=======
         let external_ip;
-        let (zone_type_str, nic, snat, external_ips) = match &zone_args
+        let (zone_type_str, nic, snat, floating_ips) = match &zone_args
             .omicron_type()
         {
             Some(
@@ -1277,7 +1193,6 @@ impl ServiceManager {
                     nic,
                     None,
                     std::slice::from_ref(&external_ip),
->>>>>>> main
                 )
             }
             Some(
@@ -1294,16 +1209,18 @@ impl ServiceManager {
         // config allows outbound access which is enough for
         // Boundary NTP which needs to come up before Nexus.
         let port = port_manager
-            .create_port(nic, snat, external_ips, &[], DhcpCfg::default())
+            .create_port(nic, snat, None, floating_ips, &[], DhcpCfg::default())
             .map_err(|err| Error::ServicePortCreation {
                 service: zone_type_str.clone(),
                 err: Box::new(err),
             })?;
 
         // We also need to update the switch with the NAT mappings
+        // XXX: need to revisit iff. any services get more than one
+        //      address.
         let (target_ip, first_port, last_port) = match snat {
             Some(s) => (s.ip, s.first_port, s.last_port),
-            None => (external_ips[0], 0, u16::MAX),
+            None => (floating_ips[0], 0, u16::MAX),
         };
 
         for dpd_client in &dpd_clients {
