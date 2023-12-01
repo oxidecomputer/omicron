@@ -229,6 +229,12 @@ fn populate_network_table(
                         );
                         _last_key = Some(property);
                     }
+                    uplink.insert(
+                        "autoneg",
+                        Item::Value(Value::Boolean(Formatted::new(
+                            cfg.autoneg,
+                        ))),
+                    );
 
                     let mut routes = Array::new();
                     for r in &cfg.routes {
@@ -449,6 +455,7 @@ mod tests {
                             PortFec::None => InternalPortFec::None,
                             PortFec::Rs => InternalPortFec::Rs,
                         },
+                        autoneg: config.autoneg,
                         switch: match config.switch {
                             SwitchLocation::Switch0 => {
                                 InternalSwitchLocation::Switch0
@@ -529,6 +536,7 @@ mod tests {
                     }],
                     uplink_port_speed: PortSpeed::Speed400G,
                     uplink_port_fec: PortFec::Firecode,
+                    autoneg: true,
                     port: "port0".into(),
                     switch: SwitchLocation::Switch0,
                 }],

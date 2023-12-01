@@ -361,7 +361,7 @@ async fn test_oximeter_collector_reregistration_gets_all_assignments() {
         ids.insert(id);
         let info = ProducerEndpoint {
             id,
-            kind: Some(ProducerKind::Service),
+            kind: ProducerKind::Service,
             address: SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 12345),
             base_route: String::from("/collect"),
             interval: Duration::from_secs(1),
