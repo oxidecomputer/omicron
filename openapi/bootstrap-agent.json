@@ -512,6 +512,7 @@
           },
           "autoneg": {
             "description": "Whether or not to set autonegotiation",
+            "default": false,
             "type": "boolean"
           },
           "bgp_peers": {
@@ -559,7 +560,6 @@
         },
         "required": [
           "addresses",
-          "autoneg",
           "bgp_peers",
           "port",
           "routes",
