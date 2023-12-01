@@ -12,6 +12,7 @@ mod commands;
 mod console_api;
 mod device_auth;
 mod disks;
+mod host_phase1_updater;
 mod images;
 mod initialization;
 mod instances;

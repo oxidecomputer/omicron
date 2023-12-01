@@ -55,7 +55,7 @@ pub(crate) fn api_to_dpd_port_settings(
             link_id.to_string(),
             LinkSettings {
                 params: LinkCreate {
-                    autoneg: false,
+                    autoneg: l.autoneg,
                     lane: Some(LinkId(0)),
                     kr: false,
                     fec: match l.fec {
@@ -251,6 +251,7 @@ pub(crate) async fn bootstore_update(
                 .map(|l| l.speed)
                 .unwrap_or(SwitchLinkSpeed::Speed100G)
                 .into(),
+            autoneg: settings.links.get(0).map(|l| l.autoneg).unwrap_or(false),
             bgp_peers: peer_info
                 .iter()
                 .filter_map(|(p, asn)| {

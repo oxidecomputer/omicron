@@ -1182,7 +1182,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.metric_producer (
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
-    kind omicron.public.producer_kind,
+    kind omicron.public.producer_kind NOT NULL,
     ip INET NOT NULL,
     port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL,
     interval FLOAT NOT NULL,
@@ -3000,6 +3000,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.db_metadata (
     CHECK (singleton = true)
 );
 
+ALTER TABLE omicron.public.switch_port_settings_link_config ADD COLUMN IF NOT EXISTS autoneg BOOL NOT NULL DEFAULT false;
+
 INSERT INTO omicron.public.db_metadata (
     singleton,
     time_created,
@@ -3007,7 +3009,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '15.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '17.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
