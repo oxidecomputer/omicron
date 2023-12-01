@@ -875,7 +875,7 @@ mod tests {
             .await
             .unwrap();
 
-        let db_disk = db_datastore
+        db_datastore
             .project_delete_disk_no_auth(
                 &authz_disk.id(),
                 &[external::DiskState::Detached],
