@@ -171,9 +171,9 @@ cookie = "0.18"
 criterion = { version = "0.5.1", features = [ "async_tokio" ] }
 crossbeam = "0.8"
 crossterm = { version = "0.27.0", features = ["event-stream"] }
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "51a3121c8318fc7ac97d74f917ce1d37962e785f" }
-crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "51a3121c8318fc7ac97d74f917ce1d37962e785f" }
-crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "51a3121c8318fc7ac97d74f917ce1d37962e785f" }
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "945f040d259ca8013d3fb26f510453da7cd7b1a6" }
+crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "945f040d259ca8013d3fb26f510453da7cd7b1a6" }
+crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "945f040d259ca8013d3fb26f510453da7cd7b1a6" }
 curve25519-dalek = "4"
 datatest-stable = "0.2.3"
 display-error-chain = "0.2.0"
