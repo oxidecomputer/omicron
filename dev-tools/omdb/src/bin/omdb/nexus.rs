@@ -519,7 +519,7 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         #[derive(Deserialize)]
         struct TaskSuccess {
             /// how many phantom disks were found
-            ok: usize,
+            disk_count: usize,
         }
 
         match serde_json::from_value::<TaskSuccess>(details.clone()) {
@@ -528,7 +528,7 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 error, details
             ),
             Ok(success) => {
-                println!("    phantom disks found: {}", success.ok);
+                println!("    number of phantom disks found: {}", success.disk_count);
             }
         };
     } else {
