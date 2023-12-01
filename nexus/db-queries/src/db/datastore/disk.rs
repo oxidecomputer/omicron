@@ -567,7 +567,7 @@ impl DataStore {
 
     /// Updates a disk record to indicate it has been deleted.
     ///
-    /// Returns the volume ID of associated with the deleted disk.
+    /// Returns the disk before any modifications are made by this function.
     ///
     /// Does not attempt to modify any resources (e.g. regions) which may
     /// belong to the disk.
@@ -793,5 +793,147 @@ impl DataStore {
             })
             .map(|(disk, _, _)| disk)
             .collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::db::datastore::datastore_test;
+    use nexus_test_utils::db::test_setup_database;
+    use nexus_types::external_api::params;
+    use omicron_common::api::external;
+    use omicron_test_utils::dev;
+
+    #[tokio::test]
+    async fn test_undelete_disk_set_faulted_idempotent() {
+        let logctx =
+            dev::test_setup_log("test_undelete_disk_set_faulted_idempotent");
+        let log = logctx.log.new(o!());
+        let db = test_setup_database(&log).await;
+        let (opctx, db_datastore) = datastore_test(&logctx, &db).await;
+
+        let silo_id = opctx.authn.actor().unwrap().silo_id().unwrap();
+
+        let (authz_project, _db_project) = db_datastore
+            .project_create(
+                &opctx,
+                Project::new(
+                    silo_id,
+                    params::ProjectCreate {
+                        identity: external::IdentityMetadataCreateParams {
+                            name: "testpost".parse().unwrap(),
+                            description: "please ignore".to_string(),
+                        },
+                    },
+                ),
+            )
+            .await
+            .unwrap();
+
+        let disk = db_datastore
+            .project_create_disk(
+                &opctx,
+                &authz_project,
+                Disk::new(
+                    Uuid::new_v4(),
+                    authz_project.id(),
+                    Uuid::new_v4(),
+                    params::DiskCreate {
+                        identity: external::IdentityMetadataCreateParams {
+                            name: "first-post".parse().unwrap(),
+                            description: "just trying things out".to_string(),
+                        },
+                        disk_source: params::DiskSource::Blank {
+                            block_size: params::BlockSize::try_from(512)
+                                .unwrap(),
+                        },
+                        size: external::ByteCount::from(2147483648),
+                    },
+                    db::model::BlockSize::Traditional,
+                    DiskRuntimeState::new(),
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let (.., authz_disk, db_disk) = LookupPath::new(&opctx, &db_datastore)
+            .disk_id(disk.id())
+            .fetch()
+            .await
+            .unwrap();
+
+        db_datastore
+            .disk_update_runtime(
+                &opctx,
+                &authz_disk,
+                &db_disk.runtime().detach(),
+            )
+            .await
+            .unwrap();
+
+        let db_disk = db_datastore
+            .project_delete_disk_no_auth(
+                &authz_disk.id(),
+                &[external::DiskState::Detached],
+            )
+            .await
+            .unwrap();
+
+        // Assert initial state - deleting the Disk will make LookupPath::fetch
+        // not work.
+        {
+            LookupPath::new(&opctx, &db_datastore)
+                .disk_id(disk.id())
+                .fetch()
+                .await
+                .unwrap_err();
+        }
+
+        // Function under test: call this twice to ensure it's idempotent
+
+        db_datastore
+            .project_undelete_disk_set_faulted_no_auth(&authz_disk.id())
+            .await
+            .unwrap();
+
+        // Assert state change
+
+        {
+            let (.., db_disk) = LookupPath::new(&opctx, &db_datastore)
+                .disk_id(disk.id())
+                .fetch()
+                .await
+                .unwrap();
+
+            assert!(db_disk.time_deleted().is_none());
+            assert_eq!(
+                db_disk.runtime().disk_state,
+                external::DiskState::Faulted.label().to_string()
+            );
+        }
+
+        db_datastore
+            .project_undelete_disk_set_faulted_no_auth(&authz_disk.id())
+            .await
+            .unwrap();
+
+        // Assert state is the same after the second call
+
+        {
+            let (.., db_disk) = LookupPath::new(&opctx, &db_datastore)
+                .disk_id(disk.id())
+                .fetch()
+                .await
+                .unwrap();
+
+            assert!(db_disk.time_deleted().is_none());
+            assert_eq!(
+                db_disk.runtime().disk_state,
+                external::DiskState::Faulted.label().to_string()
+            );
+        }
     }
 }
