@@ -47,52 +47,42 @@ impl DataStore {
         use db::schema::address_lot::dsl as lot_dsl;
         use db::schema::address_lot_block::dsl as block_dsl;
 
-        let retry_helper = RetryHelper::new(
-            &self.transaction_retry_producer,
-            "address_lot_create",
-        );
-        self.pool_connection_authorized(opctx)
-            .await?
-            // TODO https://github.com/oxidecomputer/omicron/issues/2811
-            // Audit external networking database transaction usage
-            .transaction_async_with_retry(
-                |conn| async move {
-                    let lot =
-                        AddressLot::new(&params.identity, params.kind.into());
+        let conn = self.pool_connection_authorized(opctx).await?;
 
-                    let db_lot: AddressLot =
-                        diesel::insert_into(lot_dsl::address_lot)
-                            .values(lot)
-                            .returning(AddressLot::as_returning())
-                            .get_result_async(&conn)
-                            .await?;
+        // TODO https://github.com/oxidecomputer/omicron/issues/2811
+        // Audit external networking database transaction usage
+        self.transaction_retry_wrapper("address_lot_create")
+            .transaction(&conn, |conn| async move {
+                let lot = AddressLot::new(&params.identity, params.kind.into());
 
-                    let blocks: Vec<AddressLotBlock> = params
-                        .blocks
-                        .iter()
-                        .map(|b| {
-                            AddressLotBlock::new(
-                                db_lot.id(),
-                                b.first_address.into(),
-                                b.last_address.into(),
-                            )
-                        })
-                        .collect();
+                let db_lot: AddressLot =
+                    diesel::insert_into(lot_dsl::address_lot)
+                        .values(lot)
+                        .returning(AddressLot::as_returning())
+                        .get_result_async(&conn)
+                        .await?;
 
-                    let db_blocks =
-                        diesel::insert_into(block_dsl::address_lot_block)
-                            .values(blocks)
-                            .returning(AddressLotBlock::as_returning())
-                            .get_results_async(&conn)
-                            .await?;
-
-                    Ok(AddressLotCreateResult {
-                        lot: db_lot,
-                        blocks: db_blocks,
+                let blocks: Vec<AddressLotBlock> = params
+                    .blocks
+                    .iter()
+                    .map(|b| {
+                        AddressLotBlock::new(
+                            db_lot.id(),
+                            b.first_address.into(),
+                            b.last_address.into(),
+                        )
                     })
-                },
-                retry_helper.as_callback(),
-            )
+                    .collect();
+
+                let db_blocks =
+                    diesel::insert_into(block_dsl::address_lot_block)
+                        .values(blocks)
+                        .returning(AddressLotBlock::as_returning())
+                        .get_results_async(&conn)
+                        .await?;
+
+                Ok(AddressLotCreateResult { lot: db_lot, blocks: db_blocks })
+            })
             .await
             .map_err(|e| {
                 public_error_from_diesel(

@@ -4,7 +4,9 @@
 
 //! Helper types for performing automatic transaction retries
 
+use async_bb8_diesel::AsyncConnection;
 use chrono::Utc;
+use diesel::result::Error as DieselError;
 use oximeter::{types::Sample, Metric, MetricsError, Target};
 use rand::{thread_rng, Rng};
 use std::sync::{Arc, Mutex};
@@ -92,6 +94,22 @@ impl RetryHelper {
         }
     }
 
+    /// Calls the function "f" in an asynchronous, retryable transaction.
+    pub(crate) async fn transaction<R, Func, Fut>(
+        self,
+        conn: &async_bb8_diesel::Connection<crate::db::DbConnection>,
+        f: Func,
+    ) -> Result<R, DieselError>
+    where
+        R: Send + 'static,
+        Fut: std::future::Future<Output = Result<R, DieselError>> + Send,
+        Func: Fn(async_bb8_diesel::Connection<crate::db::DbConnection>) -> Fut
+            + Send
+            + Sync,
+    {
+        conn.transaction_async_with_retry(f, self.as_callback()).await
+    }
+
     // Called upon retryable transaction failure.
     //
     // This function:
@@ -152,6 +170,69 @@ impl oximeter::Producer for Producer {
     ) -> Result<Box<dyn Iterator<Item = Sample> + 'static>, MetricsError> {
         let samples = std::mem::take(&mut *self.samples.lock().unwrap());
         Ok(Box::new(samples.into_iter()))
+    }
+}
+
+/// Helper utility for passing non-retryable errors out-of-band from
+/// transactions.
+///
+/// Transactions prefer to act on the `diesel::result::Error` type,
+/// but transaction users may want more meaningful error types.
+/// This utility helps callers safely propagate back Diesel errors while
+/// retaining auxiliary error info.
+pub struct OptionalError<E>(Arc<Mutex<Option<E>>>);
+
+impl<E> Clone for OptionalError<E> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+impl<E: std::fmt::Debug> OptionalError<E> {
+    pub fn new() -> Self {
+        Self(Arc::new(Mutex::new(None)))
+    }
+
+    /// Sets "Self" to the value of `error` and returns `DieselError::RollbackTransaction`.
+    pub fn bail(&self, err: E) -> DieselError {
+        (*self.0.lock().unwrap()).replace(err);
+        DieselError::RollbackTransaction
+    }
+
+    /// If `diesel_error` is retryable, returns it without setting Self.
+    ///
+    /// Otherwise, sets "Self" to the value of `err`, and returns
+    /// `DieselError::RollbackTransaction`.
+    pub fn bail_retryable_or(
+        &self,
+        diesel_error: DieselError,
+        err: E,
+    ) -> DieselError {
+        self.bail_retryable_or_else(diesel_error, |_diesel_error| err)
+    }
+
+    /// If `diesel_error` is retryable, returns it without setting Self.
+    ///
+    /// Otherwise, sets "Self" to the value of `f` applied to `diesel_err`, and
+    /// returns `DieselError::RollbackTransaction`.
+    pub fn bail_retryable_or_else<F>(
+        &self,
+        diesel_error: DieselError,
+        f: F,
+    ) -> DieselError
+    where
+        F: FnOnce(DieselError) -> E,
+    {
+        if crate::db::error::retryable(&diesel_error) {
+            return diesel_error;
+        } else {
+            self.bail(f(diesel_error))
+        }
+    }
+
+    /// If "Self" was previously set to a non-retryable error, return it.
+    pub fn take(self) -> Option<E> {
+        (*self.0.lock().unwrap()).take()
     }
 }
 
