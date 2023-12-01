@@ -518,8 +518,11 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
     } else if name == "phantom_disks" {
         #[derive(Deserialize)]
         struct TaskSuccess {
-            /// how many phantom disks were found
-            disk_count: usize,
+            /// how many phantom disks were deleted ok
+            phantom_disk_deleted_ok: usize,
+
+            /// how many phantom disks could not be deleted
+            phantom_disk_deleted_err: usize,
         }
 
         match serde_json::from_value::<TaskSuccess>(details.clone()) {
@@ -529,8 +532,12 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
             ),
             Ok(success) => {
                 println!(
-                    "    number of phantom disks found: {}",
-                    success.disk_count
+                    "    number of phantom disks deleted: {}",
+                    success.phantom_disk_deleted_ok
+                );
+                println!(
+                    "    number of phantom disk delete errors: {}",
+                    success.phantom_disk_deleted_err
                 );
             }
         };

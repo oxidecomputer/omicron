@@ -47,11 +47,13 @@ impl BackgroundTask for PhantomDiskDetector {
     {
         async {
             let log = &opctx.log;
+            warn!(&log, "phantom disk task started");
 
             let phantom_disks = match self.datastore.find_phantom_disks().await
             {
                 Ok(phantom_disks) => phantom_disks,
                 Err(e) => {
+                    warn!(&log, "error from find_phantom_disks: {:?}", e);
                     return json!({
                     "error":
                         format!("failed find_phantom_disks: {:#}", e)
@@ -59,10 +61,11 @@ impl BackgroundTask for PhantomDiskDetector {
                 }
             };
 
-            let rv = phantom_disks.len();
+            let mut phantom_disk_deleted_ok = 0;
+            let mut phantom_disk_deleted_err = 0;
 
             for disk in phantom_disks {
-                warn!(&log, "phantom disk {} found!", disk.id(),);
+                warn!(&log, "phantom disk {} found!", disk.id());
 
                 // If a phantom disk is found, then un-delete it and set it to
                 // faulted: this will allow a user to request deleting it again.
@@ -75,12 +78,26 @@ impl BackgroundTask for PhantomDiskDetector {
                 if let Err(e) = result {
                     error!(
                         &log,
-                        "error undeleting disk and setting to faulted: {:#}", e
+                        "error un-deleting disk {} and setting to faulted: {:#}",
+                        disk.id(),
+                        e,
                     );
+                    phantom_disk_deleted_err += 1;
+                } else {
+                    info!(
+                        &log,
+                        "phandom disk {} un-deleted andset to faulted ok",
+                        disk.id(),
+                    );
+                    phantom_disk_deleted_ok += 1;
                 }
             }
 
-            json!({ "ok": rv })
+            warn!(&log, "phantom disk task done");
+            json!({
+                "phantom_disk_deleted_ok": phantom_disk_deleted_ok,
+                "phantom_disk_deleted_err": phantom_disk_deleted_err,
+            })
         }
         .boxed()
     }
