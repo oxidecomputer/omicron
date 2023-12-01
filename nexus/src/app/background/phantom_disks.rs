@@ -11,7 +11,7 @@
 //! disk was deleted, so the project that disk was in could not be deleted.
 //!
 //! This background task detects that case and sets the disk to "faulted". The
-//! fix for custoemr-support#58 is similar: it changes the disk delete saga's
+//! fix for customer-support#58 is similar: it changes the disk delete saga's
 //! unwind to also un-delete the disk and set it to faulted. This enables it to
 //! be deleted again.
 
