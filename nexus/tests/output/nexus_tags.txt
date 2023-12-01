@@ -127,6 +127,7 @@ rack_view                                GET      /v1/system/hardware/racks/{rac
 sled_instance_list                       GET      /v1/system/hardware/sleds/{sled_id}/instances
 sled_list                                GET      /v1/system/hardware/sleds
 sled_physical_disk_list                  GET      /v1/system/hardware/sleds/{sled_id}/disks
+sled_set_provision_state                 PUT      /v1/system/hardware/sleds/{sled_id}/provision-state
 sled_view                                GET      /v1/system/hardware/sleds/{sled_id}
 switch_list                              GET      /v1/system/hardware/switches
 switch_view                              GET      /v1/system/hardware/switches/{switch_id}

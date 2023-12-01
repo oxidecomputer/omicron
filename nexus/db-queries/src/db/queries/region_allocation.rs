@@ -290,6 +290,7 @@ impl CandidateZpools {
         seed: u128,
         distinct_sleds: bool,
     ) -> Self {
+        use schema::sled::dsl as sled_dsl;
         use schema::zpool::dsl as zpool_dsl;
 
         // Why are we using raw `diesel::dsl::sql` here?
@@ -310,13 +311,20 @@ impl CandidateZpools {
             + diesel::dsl::sql(&zpool_size_delta.to_string()))
         .le(diesel::dsl::sql(zpool_dsl::total_size::NAME));
 
+        // We need to join on the sled table to access provision_state.
+        let with_sled = sled_dsl::sled.on(zpool_dsl::sled_id.eq(sled_dsl::id));
         let with_zpool = zpool_dsl::zpool
-            .on(zpool_dsl::id.eq(old_zpool_usage::dsl::pool_id));
+            .on(zpool_dsl::id.eq(old_zpool_usage::dsl::pool_id))
+            .inner_join(with_sled);
+
+        let sled_is_provisionable = sled_dsl::provision_state
+            .eq(crate::db::model::SledProvisionState::Provisionable);
 
         let base_query = old_zpool_usage
             .query_source()
             .inner_join(with_zpool)
             .filter(it_will_fit)
+            .filter(sled_is_provisionable)
             .select((old_zpool_usage::dsl::pool_id,));
 
         let query = if distinct_sleds {

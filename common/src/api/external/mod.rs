@@ -622,6 +622,7 @@ impl From<ByteCount> for i64 {
     Debug,
     Deserialize,
     Eq,
+    Hash,
     JsonSchema,
     Ord,
     PartialEq,

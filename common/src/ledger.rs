@@ -54,6 +54,7 @@ impl From<Error> for crate::api::external::Error {
 ///
 /// This structure is intended to help with serialization and deserialization
 /// of configuration information to both M.2s.
+#[derive(Debug)]
 pub struct Ledger<T> {
     log: Logger,
     ledger: T,

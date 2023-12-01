@@ -4015,6 +4015,55 @@
         }
       }
     },
+    "/v1/system/hardware/sleds/{sled_id}/provision-state": {
+      "put": {
+        "tags": [
+          "system/hardware"
+        ],
+        "summary": "Set the sled's provision state.",
+        "operationId": "sled_set_provision_state",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sled_id",
+            "description": "ID of the sled",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SledProvisionStateParams"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SledProvisionStateResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/hardware/switch-port": {
       "get": {
         "tags": [
@@ -8014,7 +8063,7 @@
           "switch"
         ]
       },
-      "BgpPeerConfig": {
+      "BgpPeer": {
         "description": "A BGP peer configuration for an interface. Includes the set of announcements that will be advertised to the peer identified by `addr`. The `bgp_config` parameter is a reference to global BGP parameters. The `interface_name` indicates what interface the peer should be contacted on.",
         "type": "object",
         "properties": {
@@ -8084,6 +8133,20 @@
           "idle_hold_time",
           "interface_name",
           "keepalive"
+        ]
+      },
+      "BgpPeerConfig": {
+        "type": "object",
+        "properties": {
+          "peers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BgpPeer"
+            }
+          }
+        },
+        "required": [
+          "peers"
         ]
       },
       "BgpPeerState": {
@@ -12216,6 +12279,10 @@
         "description": "Switch link configuration.",
         "type": "object",
         "properties": {
+          "autoneg": {
+            "description": "Whether or not to set autonegotiation",
+            "type": "boolean"
+          },
           "fec": {
             "description": "The forward error correction mode of the link.",
             "allOf": [
@@ -12248,6 +12315,7 @@
           }
         },
         "required": [
+          "autoneg",
           "fec",
           "lldp",
           "mtu",
@@ -13303,6 +13371,14 @@
             "type": "string",
             "format": "uuid"
           },
+          "provision_state": {
+            "description": "The provision state of the sled.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SledProvisionState"
+              }
+            ]
+          },
           "rack_id": {
             "description": "The rack to which this Sled is currently attached",
             "type": "string",
@@ -13336,6 +13412,7 @@
         "required": [
           "baseboard",
           "id",
+          "provision_state",
           "rack_id",
           "time_created",
           "time_modified",
@@ -13424,6 +13501,75 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "SledProvisionState": {
+        "description": "The provision state of a sled.\n\nThis controls whether new resources are going to be provisioned on this sled.",
+        "oneOf": [
+          {
+            "description": "New resources will be provisioned on this sled.",
+            "type": "string",
+            "enum": [
+              "provisionable"
+            ]
+          },
+          {
+            "description": "New resources will not be provisioned on this sled. However, existing resources will continue to be on this sled unless manually migrated off.",
+            "type": "string",
+            "enum": [
+              "non_provisionable"
+            ]
+          },
+          {
+            "description": "This is a state that isn't known yet.\n\nThis is defined to avoid API breakage.",
+            "type": "string",
+            "enum": [
+              "unknown"
+            ]
+          }
+        ]
+      },
+      "SledProvisionStateParams": {
+        "description": "Parameters for `sled_set_provision_state`.",
+        "type": "object",
+        "properties": {
+          "state": {
+            "description": "The provision state.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SledProvisionState"
+              }
+            ]
+          }
+        },
+        "required": [
+          "state"
+        ]
+      },
+      "SledProvisionStateResponse": {
+        "description": "Response to `sled_set_provision_state`.",
+        "type": "object",
+        "properties": {
+          "new_state": {
+            "description": "The new provision state.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SledProvisionState"
+              }
+            ]
+          },
+          "old_state": {
+            "description": "The old provision state.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SledProvisionState"
+              }
+            ]
+          }
+        },
+        "required": [
+          "new_state",
+          "old_state"
         ]
       },
       "SledResultsPage": {

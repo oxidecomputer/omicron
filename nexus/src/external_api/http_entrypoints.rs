@@ -223,6 +223,7 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(rack_view)?;
         api.register(sled_list)?;
         api.register(sled_view)?;
+        api.register(sled_set_provision_state)?;
         api.register(sled_instance_list)?;
         api.register(sled_physical_disk_list)?;
         api.register(physical_disk_list)?;
@@ -4604,6 +4605,47 @@ async fn sled_view(
         let (.., sled) =
             nexus.sled_lookup(&opctx, &path.sled_id)?.fetch().await?;
         Ok(HttpResponseOk(sled.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Set the sled's provision state.
+#[endpoint {
+    method = PUT,
+    path = "/v1/system/hardware/sleds/{sled_id}/provision-state",
+    tags = ["system/hardware"],
+}]
+async fn sled_set_provision_state(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::SledPath>,
+    new_provision_state: TypedBody<params::SledProvisionStateParams>,
+) -> Result<HttpResponseOk<params::SledProvisionStateResponse>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+
+        let path = path_params.into_inner();
+        let provision_state = new_provision_state.into_inner().state;
+
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        // Convert the external `SledProvisionState` into our internal data model.
+        let new_state =
+            db::model::SledProvisionState::try_from(provision_state).map_err(
+                |error| HttpError::for_bad_request(None, format!("{error}")),
+            )?;
+
+        let sled_lookup = nexus.sled_lookup(&opctx, &path.sled_id)?;
+
+        let old_state = nexus
+            .sled_set_provision_state(&opctx, &sled_lookup, new_state)
+            .await?;
+
+        let response = params::SledProvisionStateResponse {
+            old_state: old_state.into(),
+            new_state: new_state.into(),
+        };
+
+        Ok(HttpResponseOk(response))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

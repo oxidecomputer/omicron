@@ -146,6 +146,7 @@ table! {
         mtu -> Int4,
         fec -> crate::SwitchLinkFecEnum,
         speed -> crate::SwitchLinkSpeedEnum,
+        autoneg -> Bool,
     }
 }
 
@@ -399,7 +400,7 @@ table! {
         id -> Uuid,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
-        kind -> Nullable<crate::ProducerKindEnum>,
+        kind -> crate::ProducerKindEnum,
         ip -> Inet,
         port -> Int4,
         interval -> Float8,
@@ -762,6 +763,7 @@ table! {
         ip -> Inet,
         port -> Int4,
         last_used_address -> Inet,
+        provision_state -> crate::SledProvisionStateEnum,
     }
 }
 
@@ -1320,7 +1322,7 @@ table! {
 ///
 /// This should be updated whenever the schema is changed. For more details,
 /// refer to: schema/crdb/README.adoc
-pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(15, 0, 0);
+pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(18, 0, 0);
 
 allow_tables_to_appear_in_same_query!(
     system_update,

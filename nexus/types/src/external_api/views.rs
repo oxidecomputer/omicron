@@ -17,6 +17,7 @@ use omicron_common::api::external::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use serde_with::rust::deserialize_ignore_any;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::net::IpAddr;
@@ -302,10 +303,36 @@ pub struct Sled {
     pub baseboard: Baseboard,
     /// The rack to which this Sled is currently attached
     pub rack_id: Uuid,
+    /// The provision state of the sled.
+    pub provision_state: SledProvisionState,
     /// The number of hardware threads which can execute on this sled
     pub usable_hardware_threads: u32,
     /// Amount of RAM which may be used by the Sled's OS
     pub usable_physical_ram: ByteCount,
+}
+
+/// The provision state of a sled.
+///
+/// This controls whether new resources are going to be provisioned on this
+/// sled.
+#[derive(
+    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum SledProvisionState {
+    /// New resources will be provisioned on this sled.
+    Provisionable,
+
+    /// New resources will not be provisioned on this sled. However, existing
+    /// resources will continue to be on this sled unless manually migrated
+    /// off.
+    NonProvisionable,
+
+    /// This is a state that isn't known yet.
+    ///
+    /// This is defined to avoid API breakage.
+    #[serde(other, deserialize_with = "deserialize_ignore_any")]
+    Unknown,
 }
 
 /// An operator's view of an instance running on a given sled

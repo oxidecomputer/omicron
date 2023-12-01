@@ -548,23 +548,20 @@ impl<'a> EarlyNetworkSetup<'a> {
 
         let mut addrs = Vec::new();
         for a in &port_config.addresses {
+            // TODO We're discarding the `uplink_cidr.prefix()` here and only using
+            // the IP address; at some point we probably need to give the full CIDR
+            // to dendrite?
             addrs.push(a.ip());
         }
 
-        // TODO We're discarding the `uplink_cidr.prefix()` here and only using
-        // the IP address; at some point we probably need to give the full CIDR
-        // to dendrite?
         let link_settings = LinkSettings {
-            // TODO Allow user to configure link properties
-            // https://github.com/oxidecomputer/omicron/issues/3061
             params: LinkCreate {
-                autoneg: false,
-                kr: false,
+                autoneg: port_config.autoneg,
+                kr: false, //NOTE: kr does not apply to user configurable links.
                 fec: convert_fec(&port_config.uplink_port_fec),
                 speed: convert_speed(&port_config.uplink_port_speed),
                 lane: Some(LinkId(0)),
             },
-            //addrs: vec![addr],
             addrs,
         };
         dpd_port_settings.links.insert(link_id.to_string(), link_settings);
@@ -866,6 +863,7 @@ mod tests {
                         port: uplink.uplink_port,
                         uplink_port_speed: uplink.uplink_port_speed,
                         uplink_port_fec: uplink.uplink_port_fec,
+                        autoneg: false,
                         bgp_peers: vec![],
                     }],
                     bgp: vec![],

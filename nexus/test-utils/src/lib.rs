@@ -1093,7 +1093,7 @@ pub async fn start_producer_server(
     let producer_address = SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 0);
     let server_info = ProducerEndpoint {
         id,
-        kind: Some(ProducerKind::Service),
+        kind: ProducerKind::Service,
         address: producer_address,
         base_route: "/collect".to_string(),
         interval: Duration::from_secs(1),
