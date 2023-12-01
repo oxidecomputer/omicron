@@ -7,7 +7,6 @@
 use super::DataStore;
 use crate::db;
 use crate::db::error::public_error_from_diesel;
-use crate::db::error::retryable;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Asset;
 use crate::db::model::Dataset;
@@ -15,12 +14,10 @@ use crate::db::model::Region;
 use crate::db::model::RegionSnapshot;
 use crate::db::model::Volume;
 use crate::db::queries::volume::DecreaseCrucibleResourceCountAndSoftDeleteVolume;
-use crate::transaction_retry::RetryHelper;
+use crate::transaction_retry::OptionalError;
 use anyhow::bail;
-use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
-use diesel::result::Error as DieselError;
 use diesel::OptionalExtension;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
@@ -32,7 +29,6 @@ use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
 use sled_agent_client::types::VolumeConstructionRequest;
-use std::sync::{Arc, OnceLock};
 use uuid::Uuid;
 
 impl DataStore {
@@ -68,47 +64,42 @@ impl DataStore {
             crucible_targets
         };
 
-        let err = Arc::new(OnceLock::new());
-        let retry_helper =
-            RetryHelper::new(&self.transaction_retry_producer, "volume_create");
-        self.pool_connection_unauthorized()
-            .await?
-            .transaction_async_with_retry(
-                |conn| {
-                    let err = err.clone();
-                    let crucible_targets = crucible_targets.clone();
-                    let volume = volume.clone();
-                    async move {
-                        let maybe_volume: Option<Volume> = dsl::volume
-                            .filter(dsl::id.eq(volume.id()))
-                            .select(Volume::as_select())
-                            .first_async(&conn)
-                            .await
-                            .optional()?;
+        let err = OptionalError::new();
+        let conn = self.pool_connection_unauthorized().await?;
+        self.transaction_retry_wrapper("volume_create")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                let crucible_targets = crucible_targets.clone();
+                let volume = volume.clone();
+                async move {
+                    let maybe_volume: Option<Volume> = dsl::volume
+                        .filter(dsl::id.eq(volume.id()))
+                        .select(Volume::as_select())
+                        .first_async(&conn)
+                        .await
+                        .optional()?;
 
-                        // If the volume existed already, return it and do not increase
-                        // usage counts.
-                        if let Some(volume) = maybe_volume {
-                            return Ok(volume);
-                        }
+                    // If the volume existed already, return it and do not increase
+                    // usage counts.
+                    if let Some(volume) = maybe_volume {
+                        return Ok(volume);
+                    }
 
-                        // TODO do we need on_conflict do_nothing here? if the transaction
-                        // model is read-committed, the SELECT above could return nothing,
-                        // and the INSERT here could still result in a conflict.
-                        //
-                        // See also https://github.com/oxidecomputer/omicron/issues/1168
-                        let volume: Volume = diesel::insert_into(dsl::volume)
-                            .values(volume.clone())
-                            .on_conflict(dsl::id)
-                            .do_nothing()
-                            .returning(Volume::as_returning())
-                            .get_result_async(&conn)
-                            .await
-                            .map_err(|e| {
-                                if retryable(&e) {
-                                    return e;
-                                }
-                                err.set(VolumeCreationError::Public(
+                    // TODO do we need on_conflict do_nothing here? if the transaction
+                    // model is read-committed, the SELECT above could return nothing,
+                    // and the INSERT here could still result in a conflict.
+                    //
+                    // See also https://github.com/oxidecomputer/omicron/issues/1168
+                    let volume: Volume = diesel::insert_into(dsl::volume)
+                        .values(volume.clone())
+                        .on_conflict(dsl::id)
+                        .do_nothing()
+                        .returning(Volume::as_returning())
+                        .get_result_async(&conn)
+                        .await
+                        .map_err(|e| {
+                            err.bail_retryable_or_else(e, |e| {
+                                VolumeCreationError::Public(
                                     public_error_from_diesel(
                                         e,
                                         ErrorHandler::Conflict(
@@ -116,41 +107,37 @@ impl DataStore {
                                             volume.id().to_string().as_str(),
                                         ),
                                     ),
-                                ))
-                                .unwrap();
-                                DieselError::RollbackTransaction
-                            })?;
-
-                        // Increase the usage count for Crucible resources according to the
-                        // contents of the volume.
-
-                        // Increase the number of uses for each referenced region snapshot.
-                        use db::schema::region_snapshot::dsl as rs_dsl;
-                        for read_only_target in
-                            &crucible_targets.read_only_targets
-                        {
-                            diesel::update(rs_dsl::region_snapshot)
-                                .filter(
-                                    rs_dsl::snapshot_addr
-                                        .eq(read_only_target.clone()),
                                 )
-                                .filter(rs_dsl::deleting.eq(false))
-                                .set(
-                                    rs_dsl::volume_references
-                                        .eq(rs_dsl::volume_references + 1),
-                                )
-                                .execute_async(&conn)
-                                .await?;
-                        }
+                            })
+                        })?;
 
-                        Ok(volume)
+                    // Increase the usage count for Crucible resources according to the
+                    // contents of the volume.
+
+                    // Increase the number of uses for each referenced region snapshot.
+                    use db::schema::region_snapshot::dsl as rs_dsl;
+                    for read_only_target in &crucible_targets.read_only_targets
+                    {
+                        diesel::update(rs_dsl::region_snapshot)
+                            .filter(
+                                rs_dsl::snapshot_addr
+                                    .eq(read_only_target.clone()),
+                            )
+                            .filter(rs_dsl::deleting.eq(false))
+                            .set(
+                                rs_dsl::volume_references
+                                    .eq(rs_dsl::volume_references + 1),
+                            )
+                            .execute_async(&conn)
+                            .await?;
                     }
-                },
-                retry_helper.as_callback(),
-            )
+
+                    Ok(volume)
+                }
+            })
             .await
             .map_err(|e| {
-                if let Some(err) = Arc::try_unwrap(err).unwrap().take() {
+                if let Some(err) = err.take() {
                     match err {
                         VolumeCreationError::Public(err) => err,
                         VolumeCreationError::SerdeError(err) => {
@@ -221,14 +208,11 @@ impl DataStore {
         // types that require it).  The generation number (along with the
         // rest of the volume data) that was in the database is what is
         // returned to the caller.
-        let err = Arc::new(OnceLock::new());
-        let retry_helper = RetryHelper::new(
-            &self.transaction_retry_producer,
-            "volume_checkout",
-        );
-        self.pool_connection_unauthorized()
-            .await?
-            .transaction_async_with_retry(|conn| {
+        let err = OptionalError::new();
+        let conn = self.pool_connection_unauthorized().await?;
+
+        self.transaction_retry_wrapper("volume_checkout")
+            .transaction(&conn, |conn| {
                 let err = err.clone();
                 async move {
                     // Grab the volume in question.
@@ -241,8 +225,7 @@ impl DataStore {
                     // Turn the volume.data into the VolumeConstructionRequest
                     let vcr: VolumeConstructionRequest =
                         serde_json::from_str(volume.data()).map_err(|e| {
-                            err.set(VolumeGetError::SerdeError(e)).unwrap();
-                            DieselError::RollbackTransaction
+                            err.bail(VolumeGetError::SerdeError(e))
                         })?;
 
                     // Look to see if the VCR is a Volume type, and if so, look at
@@ -302,8 +285,7 @@ impl DataStore {
                                     &new_vcr,
                                 )
                                 .map_err(|e| {
-                                    err.set(VolumeGetError::SerdeError(e)).unwrap();
-                                    DieselError::RollbackTransaction
+                                    err.bail(VolumeGetError::SerdeError(e))
                                 })?;
 
                                 // Update the original volume_id with the new
@@ -320,13 +302,12 @@ impl DataStore {
                                 // not, then something is terribly wrong in the
                                 // database.
                                 if num_updated != 1 {
-                                    err.set(
+                                    return Err(err.bail(
                                         VolumeGetError::UnexpectedDatabaseUpdate(
                                             num_updated,
                                             1,
                                         ),
-                                    ).unwrap();
-                                    return Err(DieselError::RollbackTransaction);
+                                    ));
                                 }
                             }
                         }
@@ -355,10 +336,10 @@ impl DataStore {
                     }
                     Ok(volume)
                 }
-            }, retry_helper.as_callback())
+            })
             .await
             .map_err(|e| {
-                if let Some(err) = err.get() {
+                if let Some(err) = err.take() {
                     return Error::internal_error(&format!("Transaction error: {}", err));
                 }
                 public_error_from_diesel(e, ErrorHandler::Server)
@@ -677,14 +658,10 @@ impl DataStore {
         //   data from original volume_id.
         // - Put the new temp VCR into the temp volume.data, update the
         //   temp_volume in the database.
-        let err = Arc::new(OnceLock::new());
-        let retry_helper = RetryHelper::new(
-            &self.transaction_retry_producer,
-            "volume_remove_rop",
-        );
-        self.pool_connection_unauthorized()
-            .await?
-            .transaction_async_with_retry(|conn| {
+        let err = OptionalError::new();
+        let conn = self.pool_connection_unauthorized().await?;
+        self.transaction_retry_wrapper("volume_remove_rop")
+            .transaction(&conn, |conn| {
                 let err = err.clone();
                 async move {
                     // Grab the volume in question. If the volume record was already
@@ -724,12 +701,11 @@ impl DataStore {
                             volume.data()
                         )
                         .map_err(|e| {
-                            err.set(
+                            err.bail(
                                 RemoveReadOnlyParentError::SerdeError(
                                     e,
                                 )
-                            ).unwrap();
-                            DieselError::RollbackTransaction
+                            )
                         })?;
 
                     match vcr {
@@ -757,10 +733,9 @@ impl DataStore {
                                         &new_vcr
                                     )
                                     .map_err(|e| {
-                                        err.set(RemoveReadOnlyParentError::SerdeError(
+                                        err.bail(RemoveReadOnlyParentError::SerdeError(
                                             e,
-                                        )).unwrap();
-                                        DieselError::RollbackTransaction
+                                        ))
                                     })?;
 
                                 // Update the original volume_id with the new
@@ -776,8 +751,7 @@ impl DataStore {
                                 // not, then something is terribly wrong in the
                                 // database.
                                 if num_updated != 1 {
-                                    err.set(RemoveReadOnlyParentError::UnexpectedDatabaseUpdate(num_updated, 1)).unwrap();
-                                    return Err(DieselError::RollbackTransaction);
+                                    return Err(err.bail(RemoveReadOnlyParentError::UnexpectedDatabaseUpdate(num_updated, 1)));
                                 }
 
                                 // Make a new VCR, with the information from
@@ -794,10 +768,9 @@ impl DataStore {
                                         &rop_vcr
                                     )
                                     .map_err(|e| {
-                                        err.set(RemoveReadOnlyParentError::SerdeError(
+                                        err.bail(RemoveReadOnlyParentError::SerdeError(
                                             e,
-                                        )).unwrap();
-                                        DieselError::RollbackTransaction
+                                        ))
                                     })?;
                                 // Update the temp_volume_id with the volume
                                 // data that contains the read_only_parent.
@@ -809,8 +782,7 @@ impl DataStore {
                                         .execute_async(&conn)
                                         .await?;
                                 if num_updated != 1 {
-                                    err.set(RemoveReadOnlyParentError::UnexpectedDatabaseUpdate(num_updated, 1)).unwrap();
-                                    return Err(DieselError::RollbackTransaction);
+                                    return Err(err.bail(RemoveReadOnlyParentError::UnexpectedDatabaseUpdate(num_updated, 1)));
                                 }
                                 Ok(true)
                             }
@@ -828,10 +800,10 @@ impl DataStore {
                         }
                     }
                 }
-            }, retry_helper.as_callback())
+            })
             .await
             .map_err(|e| {
-                if let Some(err) = err.get() {
+                if let Some(err) = err.take() {
                     return Error::internal_error(&format!("Transaction error: {}", err));
                 }
                 public_error_from_diesel(e, ErrorHandler::Server)

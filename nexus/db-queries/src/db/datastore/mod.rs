@@ -231,7 +231,6 @@ impl DataStore {
         )
     }
 
-    // TODO: Do we need this anymore...
     #[cfg(test)]
     pub(crate) fn transaction_retry_producer(
         &self,

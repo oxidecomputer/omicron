@@ -241,7 +241,6 @@ mod test {
     use super::*;
 
     use crate::db::datastore::datastore_test;
-    use async_bb8_diesel::AsyncConnection;
     use nexus_test_utils::db::test_setup_database;
     use omicron_test_utils::dev;
     use oximeter::types::FieldValue;
@@ -259,18 +258,15 @@ mod test {
 
         let conn = datastore.pool_connection_for_tests().await.unwrap();
 
-        let retry_helper = RetryHelper::new(
-            datastore.transaction_retry_producer(),
-            "test_transaction_rollback_produces_no_samples",
-        );
-        conn.transaction_async_with_retry(
-            |_conn| async move {
+        datastore
+            .transaction_retry_wrapper(
+                "test_transaction_rollback_produces_no_samples",
+            )
+            .transaction(&conn, |_conn| async move {
                 Err::<(), _>(diesel::result::Error::RollbackTransaction)
-            },
-            retry_helper.as_callback(),
-        )
-        .await
-        .expect_err("Should have failed");
+            })
+            .await
+            .expect_err("Should have failed");
 
         let samples = datastore
             .transaction_retry_producer()
@@ -294,22 +290,18 @@ mod test {
         let (_opctx, datastore) = datastore_test(&logctx, &db).await;
 
         let conn = datastore.pool_connection_for_tests().await.unwrap();
-
-        let retry_helper = RetryHelper::new(
-            datastore.transaction_retry_producer(),
-            "test_transaction_retry_produces_samples",
-        );
-        conn.transaction_async_with_retry(
-            |_conn| async move {
+        datastore
+            .transaction_retry_wrapper(
+                "test_transaction_retry_produces_samples",
+            )
+            .transaction(&conn, |_conn| async move {
                 Err::<(), _>(diesel::result::Error::DatabaseError(
                     diesel::result::DatabaseErrorKind::SerializationFailure,
                     Box::new("restart transaction: Retry forever!".to_string()),
                 ))
-            },
-            retry_helper.as_callback(),
-        )
-        .await
-        .expect_err("Should have failed");
+            })
+            .await
+            .expect_err("Should have failed");
 
         let samples = datastore
             .transaction_retry_producer()

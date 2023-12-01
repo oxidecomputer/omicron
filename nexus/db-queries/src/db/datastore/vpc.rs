@@ -36,8 +36,7 @@ use crate::db::queries::vpc::InsertVpcQuery;
 use crate::db::queries::vpc::VniSearchIter;
 use crate::db::queries::vpc_subnet::FilterConflictingVpcSubnetRangesQuery;
 use crate::db::queries::vpc_subnet::SubnetError;
-use crate::transaction_retry::RetryHelper;
-use async_bb8_diesel::AsyncConnection;
+use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
@@ -61,7 +60,6 @@ use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::Vni as ExternalVni;
 use ref_cast::RefCast;
 use std::collections::BTreeMap;
-use std::sync::{Arc, OnceLock};
 use uuid::Uuid;
 
 impl DataStore {
@@ -586,56 +584,46 @@ impl DataStore {
             CollectionNotFound,
         }
 
-        let err = Arc::new(OnceLock::new());
-        let retry_helper = RetryHelper::new(
-            &self.transaction_retry_producer,
-            "vpc_update_firewall_rules",
-        );
+        let err = OptionalError::new();
 
         // TODO-scalability: Ideally this would be a CTE so we don't need to
         // hold a transaction open across multiple roundtrips from the database,
         // but for now we're using a transaction due to the severely decreased
         // legibility of CTEs via diesel right now.
-        self.pool_connection_authorized(opctx)
-            .await?
-            .transaction_async_with_retry(
-                |conn| {
-                    let err = err.clone();
-                    let delete_old_query = delete_old_query.clone();
-                    let rules = rules.clone();
-                    async move {
-                        delete_old_query.execute_async(&conn).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
 
-                        // The generation count update on the vpc table row will take a
-                        // write lock on the row, ensuring that the vpc was not deleted
-                        // concurently.
-                        if rules_is_empty {
-                            return Ok(vec![]);
-                        }
-                        Vpc::insert_resource(
-                            authz_vpc.id(),
-                            diesel::insert_into(dsl::vpc_firewall_rule)
-                                .values(rules),
-                        )
-                        .insert_and_get_results_async(&conn)
-                        .await
-                        .map_err(|e| match e {
-                            AsyncInsertError::CollectionNotFound => {
-                                err.set(
-                                    FirewallUpdateError::CollectionNotFound,
-                                )
-                                .unwrap();
-                                return DieselError::RollbackTransaction;
-                            }
-                            AsyncInsertError::DatabaseError(e) => e,
-                        })
+        self.transaction_retry_wrapper("vpc_update_firewall_rules")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                let delete_old_query = delete_old_query.clone();
+                let rules = rules.clone();
+                async move {
+                    delete_old_query.execute_async(&conn).await?;
+
+                    // The generation count update on the vpc table row will take a
+                    // write lock on the row, ensuring that the vpc was not deleted
+                    // concurently.
+                    if rules_is_empty {
+                        return Ok(vec![]);
                     }
-                },
-                retry_helper.as_callback(),
-            )
+                    Vpc::insert_resource(
+                        authz_vpc.id(),
+                        diesel::insert_into(dsl::vpc_firewall_rule)
+                            .values(rules),
+                    )
+                    .insert_and_get_results_async(&conn)
+                    .await
+                    .map_err(|e| match e {
+                        AsyncInsertError::CollectionNotFound => {
+                            err.bail(FirewallUpdateError::CollectionNotFound)
+                        }
+                        AsyncInsertError::DatabaseError(e) => e,
+                    })
+                }
+            })
             .await
             .map_err(|e| {
-                if let Some(err) = err.get() {
+                if let Some(err) = err.take() {
                     match err {
                         FirewallUpdateError::CollectionNotFound => {
                             Error::not_found_by_id(

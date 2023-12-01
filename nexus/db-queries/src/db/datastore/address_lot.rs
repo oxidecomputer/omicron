@@ -13,10 +13,9 @@ use crate::db::error::TransactionError;
 use crate::db::model::Name;
 use crate::db::model::{AddressLot, AddressLotBlock, AddressLotReservedBlock};
 use crate::db::pagination::paginated;
-use crate::transaction_retry::RetryHelper;
-use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl, Connection};
+use crate::transaction_retry::OptionalError;
+use async_bb8_diesel::{AsyncRunQueryDsl, Connection};
 use chrono::Utc;
-use diesel::result::Error as DieselError;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use diesel_dtrace::DTraceConnection;
 use ipnetwork::IpNetwork;
@@ -29,7 +28,6 @@ use omicron_common::api::external::{
 };
 use ref_cast::RefCast;
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, OnceLock};
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -115,16 +113,12 @@ impl DataStore {
             LotInUse,
         }
 
-        let err = Arc::new(OnceLock::new());
-        let retry_helper = RetryHelper::new(
-            &self.transaction_retry_producer,
-            "address_lot_delete",
-        );
+        let err = OptionalError::new();
 
         // TODO https://github.com/oxidecomputer/omicron/issues/2811
         // Audit external networking database transaction usage
-        conn.transaction_async_with_retry(
-            |conn| {
+        self.transaction_retry_wrapper("address_lot_delete")
+            .transaction(&conn, |conn| {
                 let err = err.clone();
                 async move {
                     let rsvd: Vec<AddressLotReservedBlock> =
@@ -136,8 +130,7 @@ impl DataStore {
                             .await?;
 
                     if !rsvd.is_empty() {
-                        err.set(AddressLotDeleteError::LotInUse).unwrap();
-                        return Err(DieselError::RollbackTransaction);
+                        return Err(err.bail(AddressLotDeleteError::LotInUse));
                     }
 
                     let now = Utc::now();
@@ -155,21 +148,19 @@ impl DataStore {
 
                     Ok(())
                 }
-            },
-            retry_helper.as_callback(),
-        )
-        .await
-        .map_err(|e| {
-            if let Some(err) = err.get() {
-                match err {
-                    AddressLotDeleteError::LotInUse => {
-                        Error::invalid_request("lot is in use")
+            })
+            .await
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    match err {
+                        AddressLotDeleteError::LotInUse => {
+                            Error::invalid_request("lot is in use")
+                        }
                     }
+                } else {
+                    public_error_from_diesel(e, ErrorHandler::Server)
                 }
-            } else {
-                public_error_from_diesel(e, ErrorHandler::Server)
-            }
-        })
+            })
     }
 
     pub async fn address_lot_list(

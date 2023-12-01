@@ -12,7 +12,6 @@ use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::error::public_error_from_diesel;
-use crate::db::error::retryable;
 use crate::db::error::ErrorHandler;
 use crate::db::fixed_data::project::SERVICES_PROJECT;
 use crate::db::fixed_data::silo::INTERNAL_SILO_ID;
@@ -24,11 +23,10 @@ use crate::db::model::ProjectUpdate;
 use crate::db::model::Silo;
 use crate::db::model::VirtualProvisioningCollection;
 use crate::db::pagination::paginated;
-use crate::transaction_retry::RetryHelper;
-use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl};
+use crate::transaction_retry::OptionalError;
+use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
-use diesel::result::Error as DieselError;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
@@ -39,7 +37,6 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use ref_cast::RefCast;
-use std::sync::{Arc, OnceLock};
 
 // Generates internal functions used for validation during project deletion.
 // Used simply to reduce boilerplate.
@@ -154,16 +151,13 @@ impl DataStore {
 
         use db::schema::project::dsl;
 
-        let err = Arc::new(OnceLock::new());
-        let retry_helper = RetryHelper::new(
-            &self.transaction_retry_producer,
-            "project_create_in_silo",
-        );
+        let err = OptionalError::new();
         let name = project.name().as_str().to_string();
+        let conn = self.pool_connection_authorized(opctx).await?;
+
         let db_project = self
-            .pool_connection_authorized(opctx)
-            .await?
-            .transaction_async_with_retry(|conn| {
+            .transaction_retry_wrapper("project_create_in_silo")
+            .transaction(&conn, |conn| {
                 let err = err.clone();
 
                 let authz_silo_inner = authz_silo_inner.clone();
@@ -178,22 +172,21 @@ impl DataStore {
                     .await
                     .map_err(|e| match e {
                         AsyncInsertError::CollectionNotFound => {
-                            err.set(authz_silo_inner.not_found()).unwrap();
-                            return DieselError::RollbackTransaction;
+                            err.bail(authz_silo_inner.not_found())
                         }
-                        AsyncInsertError::DatabaseError(e) => {
-                            if retryable(&e) {
-                                return e;
-                            }
-                            err.set(public_error_from_diesel(
-                                e,
-                                ErrorHandler::Conflict(
-                                    ResourceType::Project,
-                                    &name,
-                                ),
-                            )).unwrap();
-                            return DieselError::RollbackTransaction;
-                        }
+                        AsyncInsertError::DatabaseError(diesel_error) => err
+                            .bail_retryable_or_else(
+                                diesel_error,
+                                |diesel_error| {
+                                    public_error_from_diesel(
+                                        diesel_error,
+                                        ErrorHandler::Conflict(
+                                            ResourceType::Project,
+                                            &name,
+                                        ),
+                                    )
+                                },
+                            ),
                     })?;
 
                     // Create resource provisioning for the project.
@@ -207,13 +200,11 @@ impl DataStore {
                     .await?;
                     Ok(project)
                 }
-            },
-            retry_helper.as_callback(),
-            )
+            })
             .await
             .map_err(|e| {
-                if let Some(err) = err.get() {
-                    return err.clone();
+                if let Some(err) = err.take() {
+                    return err;
                 }
                 public_error_from_diesel(e, ErrorHandler::Server)
             })?;
@@ -252,17 +243,15 @@ impl DataStore {
 
         use db::schema::project::dsl;
 
-        let err = Arc::new(OnceLock::new());
-        let retry_helper = RetryHelper::new(
-            &self.transaction_retry_producer,
-            "project_delete",
-        );
-        self.pool_connection_authorized(opctx)
-            .await?
-            .transaction_async_with_retry(|conn| {
+        let err = OptionalError::new();
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        self.transaction_retry_wrapper("project_delete")
+            .transaction(&conn, |conn| {
                 let err = err.clone();
                 async move {
-                    let now = Utc::now(); let updated_rows = diesel::update(dsl::project)
+                    let now = Utc::now();
+                    let updated_rows = diesel::update(dsl::project)
                         .filter(dsl::time_deleted.is_null())
                         .filter(dsl::id.eq(authz_project.id()))
                         .filter(dsl::rcgen.eq(db_project.rcgen))
@@ -271,23 +260,22 @@ impl DataStore {
                         .execute_async(&conn)
                         .await
                         .map_err(|e| {
-                            if retryable(&e) {
-                                return e;
-                            }
-                            err.set(public_error_from_diesel(
-                                e,
-                                ErrorHandler::NotFoundByResource(authz_project),
-                            )).unwrap();
-                            DieselError::RollbackTransaction
+                            err.bail_retryable_or_else(e, |e| {
+                                public_error_from_diesel(
+                                    e,
+                                    ErrorHandler::NotFoundByResource(
+                                        authz_project,
+                                    ),
+                                )
+                            })
                         })?;
 
                     if updated_rows == 0 {
-                        err.set(Error::InvalidRequest {
+                        return Err(err.bail(Error::InvalidRequest {
                             message:
                                 "deletion failed due to concurrent modification"
                                     .to_string(),
-                        }).unwrap();
-                        return Err(DieselError::RollbackTransaction);
+                        }));
                     }
 
                     self.virtual_provisioning_collection_delete_on_connection(
@@ -298,11 +286,11 @@ impl DataStore {
                     .await?;
                     Ok(())
                 }
-            }, retry_helper.as_callback())
+            })
             .await
             .map_err(|e| {
-                if let Some(err) = err.get() {
-                    return err.clone();
+                if let Some(err) = err.take() {
+                    return err;
                 }
                 public_error_from_diesel(e, ErrorHandler::Server)
             })?;

@@ -12,7 +12,6 @@ use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::cte_utils::BoxedQuery;
 use crate::db::error::public_error_from_diesel;
-use crate::db::error::retryable;
 use crate::db::error::ErrorHandler;
 use crate::db::model::IncompleteNetworkInterface;
 use crate::db::model::Instance;
@@ -25,8 +24,7 @@ use crate::db::model::VpcSubnet;
 use crate::db::pagination::paginated;
 use crate::db::pool::DbConnection;
 use crate::db::queries::network_interface;
-use crate::transaction_retry::RetryHelper;
-use async_bb8_diesel::AsyncConnection;
+use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
@@ -41,7 +39,6 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use ref_cast::RefCast;
 use sled_agent_client::types as sled_client_types;
-use std::sync::{Arc, OnceLock};
 use uuid::Uuid;
 
 /// OPTE requires information that's currently split across the network
@@ -469,88 +466,78 @@ impl DataStore {
             FailedToUnsetPrimary(DieselError),
         }
 
-        let err = Arc::new(OnceLock::new());
-        let retry_helper = RetryHelper::new(
-            &self.transaction_retry_producer,
-            "instance_update_network_interface",
-        );
+        let err = OptionalError::new();
 
         let conn = self.pool_connection_authorized(opctx).await?;
         if primary {
-            conn.transaction_async_with_retry(|conn| {
-                let err = err.clone();
-                let stopped = stopped.clone();
-                let update_target_query = update_target_query.clone();
-                async move {
-                    let instance_runtime =
-                        instance_query.get_result_async(&conn).await?.runtime_state;
-                    if instance_runtime.propolis_id.is_some()
-                        || instance_runtime.nexus_state != stopped
-                    {
-                        err.set(NetworkInterfaceUpdateError::InstanceNotStopped).unwrap();
-                        return Err(diesel::result::Error::RollbackTransaction);
-                    }
-
-                    // First, get the primary interface
-                    let primary_interface =
-                        find_primary_query.get_result_async(&conn).await?;
-                    // If the target and primary are different, we need to toggle
-                    // the primary into a secondary.
-                    if primary_interface.identity.id != interface_id {
-                        use crate::db::schema::network_interface::dsl;
-                        if let Err(e) = diesel::update(dsl::network_interface)
-                            .filter(dsl::id.eq(primary_interface.identity.id))
-                            .filter(dsl::kind.eq(NetworkInterfaceKind::Instance))
-                            .filter(dsl::time_deleted.is_null())
-                            .set(dsl::is_primary.eq(false))
-                            .execute_async(&conn)
-                            .await
+            self.transaction_retry_wrapper("instance_update_network_interface")
+                .transaction(&conn, |conn| {
+                    let err = err.clone();
+                    let stopped = stopped.clone();
+                    let update_target_query = update_target_query.clone();
+                    async move {
+                        let instance_runtime =
+                            instance_query.get_result_async(&conn).await?.runtime_state;
+                        if instance_runtime.propolis_id.is_some()
+                            || instance_runtime.nexus_state != stopped
                         {
-                            if retryable(&e) {
-                                return Err(e);
-                            }
-                            err.set(NetworkInterfaceUpdateError::FailedToUnsetPrimary(e)).unwrap();
-                            return Err(diesel::result::Error::RollbackTransaction);
+                            return Err(err.bail(NetworkInterfaceUpdateError::InstanceNotStopped));
                         }
-                    }
 
-                    // In any case, update the actual target
-                    update_target_query.get_result_async(&conn).await
-                }
-            },
-            retry_helper.as_callback()
-            )
+                        // First, get the primary interface
+                        let primary_interface =
+                            find_primary_query.get_result_async(&conn).await?;
+                        // If the target and primary are different, we need to toggle
+                        // the primary into a secondary.
+                        if primary_interface.identity.id != interface_id {
+                            use crate::db::schema::network_interface::dsl;
+                            if let Err(e) = diesel::update(dsl::network_interface)
+                                .filter(dsl::id.eq(primary_interface.identity.id))
+                                .filter(dsl::kind.eq(NetworkInterfaceKind::Instance))
+                                .filter(dsl::time_deleted.is_null())
+                                .set(dsl::is_primary.eq(false))
+                                .execute_async(&conn)
+                                .await
+                            {
+                                return Err(err.bail_retryable_or_else(
+                                    e,
+                                    |e| NetworkInterfaceUpdateError::FailedToUnsetPrimary(e)
+                                ));
+                            }
+                        }
+
+                        // In any case, update the actual target
+                        update_target_query.get_result_async(&conn).await
+                    }
+                }).await
         } else {
             // In this case, we can just directly apply the updates. By
             // construction, `updates.primary` is `None`, so nothing will
             // be done there. The other columns always need to be updated, and
             // we're only hitting a single row. Note that we still need to
             // verify the instance is stopped.
-            conn.transaction_async_with_retry(|conn| {
-                let err = err.clone();
-                let stopped = stopped.clone();
-                let update_target_query = update_target_query.clone();
-                async move {
-                    let instance_state =
-                        instance_query.get_result_async(&conn).await?.runtime_state;
-                    if instance_state.propolis_id.is_some()
-                        || instance_state.nexus_state != stopped
-                    {
-                        err.set(NetworkInterfaceUpdateError::InstanceNotStopped).unwrap();
-                        return Err(diesel::result::Error::RollbackTransaction);
+            self.transaction_retry_wrapper("instance_update_network_interface")
+                .transaction(&conn, |conn| {
+                    let err = err.clone();
+                    let stopped = stopped.clone();
+                    let update_target_query = update_target_query.clone();
+                    async move {
+                        let instance_state =
+                            instance_query.get_result_async(&conn).await?.runtime_state;
+                        if instance_state.propolis_id.is_some()
+                            || instance_state.nexus_state != stopped
+                        {
+                            return Err(err.bail(NetworkInterfaceUpdateError::InstanceNotStopped));
+                        }
+                        update_target_query.get_result_async(&conn).await
                     }
-                    update_target_query.get_result_async(&conn).await
-                }
-                },
-                retry_helper.as_callback()
-            )
+                }).await
         }
-        .await
         // Convert to `InstanceNetworkInterface` before returning, we know
         // this is valid as we've filtered appropriately above.
         .map(NetworkInterface::as_instance)
         .map_err(|e| {
-            if let Some(err) = Arc::try_unwrap(err).unwrap().take() {
+            if let Some(err) = err.take() {
                 match err {
                     NetworkInterfaceUpdateError::InstanceNotStopped => {
                         return Error::invalid_request(

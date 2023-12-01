@@ -13,8 +13,7 @@ use crate::db::error::ErrorHandler;
 use crate::db::lookup::LookupPath;
 use crate::db::model::Dataset;
 use crate::db::model::Region;
-use crate::transaction_retry::RetryHelper;
-use async_bb8_diesel::AsyncConnection;
+use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use nexus_types::external_api::params;
@@ -23,7 +22,6 @@ use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::nexus_config::RegionAllocationStrategy;
 use slog::Logger;
-use std::sync::{Arc, OnceLock};
 use uuid::Uuid;
 
 impl DataStore {
@@ -164,16 +162,10 @@ impl DataStore {
             #[error("Numeric error: {0}")]
             NumericError(String),
         }
-        let err = Arc::new(OnceLock::new());
-
-        let retry_helper = RetryHelper::new(
-            &self.transaction_retry_producer,
-            "regions_hard_delete",
-        );
-
-        self.pool_connection_unauthorized()
-            .await?
-            .transaction_async_with_retry(|conn| {
+        let err = OptionalError::new();
+        let conn = self.pool_connection_unauthorized().await?;
+        self.transaction_retry_wrapper("regions_hard_delete")
+            .transaction(&conn, |conn| {
                 let err = err.clone();
                 let region_ids = region_ids.clone();
                 async move {
@@ -208,10 +200,9 @@ impl DataStore {
                             let dataset_total_occupied_size: db::model::ByteCount =
                                 dataset_total_occupied_size.try_into().map_err(
                                     |e: anyhow::Error| {
-                                        err.set(RegionDeleteError::NumericError(
+                                        err.bail(RegionDeleteError::NumericError(
                                             e.to_string(),
-                                        )).unwrap();
-                                        diesel::result::Error::RollbackTransaction
+                                        ))
                                     },
                                 )?;
 
@@ -230,12 +221,10 @@ impl DataStore {
                     }
                     Ok(())
                 }
-            },
-            retry_helper.as_callback(),
-            )
+            })
             .await
             .map_err(|e| {
-                if let Some(err) = err.get() {
+                if let Some(err) = err.take() {
                     match err {
                         RegionDeleteError::NumericError(err) => {
                             return Error::internal_error(

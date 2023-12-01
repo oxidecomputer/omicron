@@ -15,7 +15,6 @@ use crate::db::error::TransactionError;
 use crate::db::model::SiloGroup;
 use crate::db::model::SiloGroupMembership;
 use crate::db::pagination::paginated;
-use crate::transaction_retry::RetryHelper;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
@@ -146,47 +145,40 @@ impl DataStore {
     ) -> UpdateResult<()> {
         opctx.authorize(authz::Action::Modify, authz_silo_user).await?;
 
-        let retry_helper = RetryHelper::new(
-            &self.transaction_retry_producer,
-            "silo_group_membership_replace_for_user",
-        );
+        let conn = self.pool_connection_authorized(opctx).await?;
 
-        self.pool_connection_authorized(opctx)
-            .await?
-            .transaction_async_with_retry(
-                |conn| {
-                    let silo_group_ids = silo_group_ids.clone();
-                    async move {
-                        use db::schema::silo_group_membership::dsl;
+        self.transaction_retry_wrapper("silo_group_membership_replace_for_user")
+            .transaction(&conn, |conn| {
+                let silo_group_ids = silo_group_ids.clone();
+                async move {
+                    use db::schema::silo_group_membership::dsl;
 
-                        // Delete existing memberships for user
-                        let silo_user_id = authz_silo_user.id();
-                        diesel::delete(dsl::silo_group_membership)
-                            .filter(dsl::silo_user_id.eq(silo_user_id))
-                            .execute_async(&conn)
-                            .await?;
+                    // Delete existing memberships for user
+                    let silo_user_id = authz_silo_user.id();
+                    diesel::delete(dsl::silo_group_membership)
+                        .filter(dsl::silo_user_id.eq(silo_user_id))
+                        .execute_async(&conn)
+                        .await?;
 
-                        // Create new memberships for user
-                        let silo_group_memberships: Vec<
-                            db::model::SiloGroupMembership,
-                        > = silo_group_ids
-                            .iter()
-                            .map(|group_id| db::model::SiloGroupMembership {
-                                silo_group_id: *group_id,
-                                silo_user_id,
-                            })
-                            .collect();
+                    // Create new memberships for user
+                    let silo_group_memberships: Vec<
+                        db::model::SiloGroupMembership,
+                    > = silo_group_ids
+                        .iter()
+                        .map(|group_id| db::model::SiloGroupMembership {
+                            silo_group_id: *group_id,
+                            silo_user_id,
+                        })
+                        .collect();
 
-                        diesel::insert_into(dsl::silo_group_membership)
-                            .values(silo_group_memberships)
-                            .execute_async(&conn)
-                            .await?;
+                    diesel::insert_into(dsl::silo_group_membership)
+                        .values(silo_group_memberships)
+                        .execute_async(&conn)
+                        .await?;
 
-                        Ok(())
-                    }
-                },
-                retry_helper.as_callback(),
-            )
+                    Ok(())
+                }
+            })
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
