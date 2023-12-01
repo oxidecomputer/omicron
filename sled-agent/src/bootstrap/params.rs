@@ -348,6 +348,17 @@ pub(super) mod version {
 }
 
 #[cfg(test)]
+pub fn test_config() -> RackInitializeRequest {
+    let manifest = std::env::var("CARGO_MANIFEST_DIR")
+        .expect("Cannot access manifest directory");
+    let manifest = camino::Utf8PathBuf::from(manifest);
+    let path = manifest.join("../smf/sled-agent/non-gimlet/config-rss.toml");
+    let contents = std::fs::read_to_string(&path).unwrap();
+    toml::from_str(&contents)
+        .unwrap_or_else(|e| panic!("failed to parse {:?}: {}", &path, e))
+}
+
+#[cfg(test)]
 mod tests {
     use std::net::Ipv6Addr;
 

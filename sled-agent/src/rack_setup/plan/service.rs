@@ -5,10 +5,7 @@
 //! Plan generation for "where should services be initialized".
 
 use crate::bootstrap::params::StartSledAgentRequest;
-use crate::params::{
-    DatasetRequest, ServiceType, ServiceZoneRequest, ServiceZoneService,
-    ZoneType,
-};
+use crate::params::{OmicronZoneConfig, OmicronZoneDataset, OmicronZoneType};
 use crate::rack_setup::config::SetupServiceConfig as Config;
 use camino::Utf8PathBuf;
 use dns_service_client::types::DnsConfigParams;
@@ -97,20 +94,20 @@ pub enum PlanError {
 
     #[error("Ran out of sleds / U2 storage pools")]
     NotEnoughSleds,
+
+    #[error("Found only v1 service plan")]
+    FoundV1,
 }
 
-#[derive(
-    Clone, Debug, Default, Deserialize, Serialize, PartialEq, JsonSchema,
-)]
-pub struct SledRequest {
-    /// Services to be instantiated.
-    #[serde(default, rename = "service")]
-    pub services: Vec<ServiceZoneRequest>,
+#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
+pub struct SledConfig {
+    /// zones configured for this sled
+    pub zones: Vec<OmicronZoneConfig>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct Plan {
-    pub services: HashMap<SocketAddrV6, SledRequest>,
+    pub services: HashMap<SocketAddrV6, SledConfig>,
     pub dns_config: DnsConfigParams,
 }
 
@@ -120,7 +117,8 @@ impl Ledgerable for Plan {
     }
     fn generation_bump(&mut self) {}
 }
-const RSS_SERVICE_PLAN_FILENAME: &str = "rss-service-plan.json";
+const RSS_SERVICE_PLAN_V1_FILENAME: &str = "rss-service-plan.json";
+const RSS_SERVICE_PLAN_FILENAME: &str = "rss-service-plan-v2.json";
 
 impl Plan {
     pub async fn load(
@@ -142,9 +140,58 @@ impl Plan {
         if let Some(ledger) = ledger {
             info!(log, "RSS plan already created, loading from file");
             Ok(Some(ledger.data().clone()))
+        } else if Self::has_v1(storage_manager).await.map_err(|err| {
+            PlanError::Io {
+                message: String::from("looking for v1 RSS plan"),
+                err,
+            }
+        })? {
+            // If we found no current-version service plan, but we _do_ find
+            // a v1 plan present, bail out.  We do not expect to ever see this
+            // in practice because that would indicate that:
+            //
+            // - We ran RSS previously on this same system using an older
+            //   version of the software that generates v1 service plans and it
+            //   got far enough through RSS to have written the v1 service plan.
+            // - That means it must have finished initializing all sled agents,
+            //   including itself, causing it to record a
+            //   `StartSledAgentRequest`s in its ledger -- while still running
+            //   the older RSS.
+            // - But we're currently running software that knows about v2
+            //   service plans.  Thus, this process started some time after that
+            //   ledger was written.
+            // - But the bootstrap agent refuses to execute RSS if it has a
+            //   local `StartSledAgentRequest` ledgered.  So we shouldn't get
+            //   here if all of the above happened.
+            //
+            // This sounds like a complicated set of assumptions.  If we got
+            // this wrong, we'll fail spuriously here and we'll have to figure
+            // out what happened.  But the alternative is doing extra work to
+            // support a condition that we do not believe can ever happen in any
+            // system.
+            Err(PlanError::FoundV1)
         } else {
             Ok(None)
         }
+    }
+
+    async fn has_v1(
+        storage_manager: &StorageHandle,
+    ) -> Result<bool, std::io::Error> {
+        let paths = storage_manager
+            .get_latest_resources()
+            .await
+            .all_m2_mountpoints(CONFIG_DATASET)
+            .into_iter()
+            .map(|p| p.join(RSS_SERVICE_PLAN_V1_FILENAME));
+
+        for p in paths {
+            if p.try_exists()? {
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
     }
 
     async fn is_sled_scrimlet(
@@ -235,40 +282,12 @@ impl Plan {
         Ok(u2_zpools)
     }
 
-    pub async fn create(
-        log: &Logger,
+    pub fn create_transient(
         config: &Config,
-        storage_manager: &StorageHandle,
-        sleds: &HashMap<SocketAddrV6, StartSledAgentRequest>,
+        mut sled_info: Vec<SledInfo>,
     ) -> Result<Self, PlanError> {
         let mut dns_builder = internal_dns::DnsConfigBuilder::new();
         let mut svc_port_builder = ServicePortBuilder::new(config);
-
-        // Load the information we need about each Sled to be able to allocate
-        // components on it.
-        let mut sled_info = {
-            let result: Result<Vec<SledInfo>, PlanError> =
-                futures::future::try_join_all(sleds.values().map(
-                    |sled_request| async {
-                        let subnet = sled_request.body.subnet;
-                        let sled_address = get_sled_address(subnet);
-                        let u2_zpools =
-                            Self::get_u2_zpools_from_sled(log, sled_address)
-                                .await?;
-                        let is_scrimlet =
-                            Self::is_sled_scrimlet(log, sled_address).await?;
-                        Ok(SledInfo::new(
-                            sled_request.body.id,
-                            subnet,
-                            sled_address,
-                            u2_zpools,
-                            is_scrimlet,
-                        ))
-                    },
-                ))
-                .await;
-            result?
-        };
 
         // Scrimlets get DNS records for running Dendrite.
         let scrimlets: Vec<_> =
@@ -348,24 +367,18 @@ impl Plan {
             let dataset_name =
                 sled.alloc_from_u2_zpool(DatasetKind::InternalDns)?;
 
-            sled.request.services.push(ServiceZoneRequest {
+            sled.request.zones.push(OmicronZoneConfig {
                 id,
-                zone_type: ZoneType::InternalDns,
-                addresses: vec![ip],
-                dataset: Some(DatasetRequest {
-                    id,
-                    name: dataset_name,
-                    service_address: http_address,
-                }),
-                services: vec![ServiceZoneService {
-                    id,
-                    details: ServiceType::InternalDns {
-                        http_address,
-                        dns_address,
-                        gz_address: dns_subnet.gz_address().ip(),
-                        gz_address_index: i.try_into().expect("Giant indices?"),
+                underlay_address: ip,
+                zone_type: OmicronZoneType::InternalDns {
+                    dataset: OmicronZoneDataset {
+                        pool_name: dataset_name.pool().clone(),
                     },
-                }],
+                    http_address,
+                    dns_address,
+                    gz_address: dns_subnet.gz_address().ip(),
+                    gz_address_index: i.try_into().expect("Giant indices?"),
+                },
             });
         }
 
@@ -386,19 +399,15 @@ impl Plan {
                 .unwrap();
             let dataset_name =
                 sled.alloc_from_u2_zpool(DatasetKind::CockroachDb)?;
-            sled.request.services.push(ServiceZoneRequest {
+            sled.request.zones.push(OmicronZoneConfig {
                 id,
-                zone_type: ZoneType::CockroachDb,
-                addresses: vec![ip],
-                dataset: Some(DatasetRequest {
-                    id,
-                    name: dataset_name,
-                    service_address: address,
-                }),
-                services: vec![ServiceZoneService {
-                    id,
-                    details: ServiceType::CockroachDb { address },
-                }],
+                underlay_address: ip,
+                zone_type: OmicronZoneType::CockroachDb {
+                    dataset: OmicronZoneDataset {
+                        pool_name: dataset_name.pool().clone(),
+                    },
+                    address,
+                },
             });
         }
 
@@ -433,23 +442,17 @@ impl Plan {
             let dataset_kind = DatasetKind::ExternalDns;
             let dataset_name = sled.alloc_from_u2_zpool(dataset_kind)?;
 
-            sled.request.services.push(ServiceZoneRequest {
+            sled.request.zones.push(OmicronZoneConfig {
                 id,
-                zone_type: ZoneType::ExternalDns,
-                addresses: vec![*http_address.ip()],
-                dataset: Some(DatasetRequest {
-                    id,
-                    name: dataset_name,
-                    service_address: http_address,
-                }),
-                services: vec![ServiceZoneService {
-                    id,
-                    details: ServiceType::ExternalDns {
-                        http_address,
-                        dns_address,
-                        nic,
+                underlay_address: *http_address.ip(),
+                zone_type: OmicronZoneType::ExternalDns {
+                    dataset: OmicronZoneDataset {
+                        pool_name: dataset_name.pool().clone(),
                     },
-                }],
+                    http_address,
+                    dns_address,
+                    nic,
+                },
             });
         }
 
@@ -471,33 +474,28 @@ impl Plan {
                 )
                 .unwrap();
             let (nic, external_ip) = svc_port_builder.next_nexus(id)?;
-            sled.request.services.push(ServiceZoneRequest {
+            sled.request.zones.push(OmicronZoneConfig {
                 id,
-                zone_type: ZoneType::Nexus,
-                addresses: vec![address],
-                dataset: None,
-                services: vec![ServiceZoneService {
-                    id,
-                    details: ServiceType::Nexus {
-                        internal_address: SocketAddrV6::new(
-                            address,
-                            omicron_common::address::NEXUS_INTERNAL_PORT,
-                            0,
-                            0,
-                        ),
-                        external_ip,
-                        nic,
-                        // Tell Nexus to use TLS if and only if the caller
-                        // provided TLS certificates.  This effectively
-                        // determines the status of TLS for the lifetime of
-                        // the rack.  In production-like deployments, we'd
-                        // always expect TLS to be enabled.  It's only in
-                        // development that it might not be.
-                        external_tls: !config.external_certificates.is_empty(),
-                        external_dns_servers: config.dns_servers.clone(),
-                    },
-                }],
-            })
+                underlay_address: address,
+                zone_type: OmicronZoneType::Nexus {
+                    internal_address: SocketAddrV6::new(
+                        address,
+                        omicron_common::address::NEXUS_INTERNAL_PORT,
+                        0,
+                        0,
+                    ),
+                    external_ip,
+                    nic,
+                    // Tell Nexus to use TLS if and only if the caller
+                    // provided TLS certificates.  This effectively
+                    // determines the status of TLS for the lifetime of
+                    // the rack.  In production-like deployments, we'd
+                    // always expect TLS to be enabled.  It's only in
+                    // development that it might not be.
+                    external_tls: !config.external_certificates.is_empty(),
+                    external_dns_servers: config.dns_servers.clone(),
+                },
+            });
         }
 
         // Provision Oximeter zones, continuing to stripe across sleds.
@@ -518,22 +516,17 @@ impl Plan {
                     omicron_common::address::OXIMETER_PORT,
                 )
                 .unwrap();
-            sled.request.services.push(ServiceZoneRequest {
+            sled.request.zones.push(OmicronZoneConfig {
                 id,
-                zone_type: ZoneType::Oximeter,
-                addresses: vec![address],
-                dataset: None,
-                services: vec![ServiceZoneService {
-                    id,
-                    details: ServiceType::Oximeter {
-                        address: SocketAddrV6::new(
-                            address,
-                            omicron_common::address::OXIMETER_PORT,
-                            0,
-                            0,
-                        ),
-                    },
-                }],
+                underlay_address: address,
+                zone_type: OmicronZoneType::Oximeter {
+                    address: SocketAddrV6::new(
+                        address,
+                        omicron_common::address::OXIMETER_PORT,
+                        0,
+                        0,
+                    ),
+                },
             })
         }
 
@@ -555,19 +548,15 @@ impl Plan {
                 .unwrap();
             let dataset_name =
                 sled.alloc_from_u2_zpool(DatasetKind::Clickhouse)?;
-            sled.request.services.push(ServiceZoneRequest {
+            sled.request.zones.push(OmicronZoneConfig {
                 id,
-                zone_type: ZoneType::Clickhouse,
-                addresses: vec![ip],
-                dataset: Some(DatasetRequest {
-                    id,
-                    name: dataset_name,
-                    service_address: address,
-                }),
-                services: vec![ServiceZoneService {
-                    id,
-                    details: ServiceType::Clickhouse { address },
-                }],
+                underlay_address: ip,
+                zone_type: OmicronZoneType::Clickhouse {
+                    address,
+                    dataset: OmicronZoneDataset {
+                        pool_name: dataset_name.pool().clone(),
+                    },
+                },
             });
         }
 
@@ -595,19 +584,15 @@ impl Plan {
                 .unwrap();
             let dataset_name =
                 sled.alloc_from_u2_zpool(DatasetKind::ClickhouseKeeper)?;
-            sled.request.services.push(ServiceZoneRequest {
+            sled.request.zones.push(OmicronZoneConfig {
                 id,
-                zone_type: ZoneType::ClickhouseKeeper,
-                addresses: vec![ip],
-                dataset: Some(DatasetRequest {
-                    id,
-                    name: dataset_name,
-                    service_address: address,
-                }),
-                services: vec![ServiceZoneService {
-                    id,
-                    details: ServiceType::ClickhouseKeeper { address },
-                }],
+                underlay_address: ip,
+                zone_type: OmicronZoneType::ClickhouseKeeper {
+                    address,
+                    dataset: OmicronZoneDataset {
+                        pool_name: dataset_name.pool().clone(),
+                    },
+                },
             });
         }
 
@@ -626,18 +611,13 @@ impl Plan {
             dns_builder
                 .service_backend_zone(ServiceName::CruciblePantry, &zone, port)
                 .unwrap();
-            sled.request.services.push(ServiceZoneRequest {
+            sled.request.zones.push(OmicronZoneConfig {
                 id,
-                zone_type: ZoneType::CruciblePantry,
-                addresses: vec![address],
-                dataset: None,
-                services: vec![ServiceZoneService {
-                    id,
-                    details: ServiceType::CruciblePantry {
-                        address: SocketAddrV6::new(address, port, 0, 0),
-                    },
-                }],
-            })
+                underlay_address: address,
+                zone_type: OmicronZoneType::CruciblePantry {
+                    address: SocketAddrV6::new(address, port, 0, 0),
+                },
+            });
         }
 
         // Provision a Crucible zone on every zpool on every Sled.
@@ -657,22 +637,13 @@ impl Plan {
                     )
                     .unwrap();
 
-                sled.request.services.push(ServiceZoneRequest {
+                sled.request.zones.push(OmicronZoneConfig {
                     id,
-                    zone_type: ZoneType::Crucible,
-                    addresses: vec![ip],
-                    dataset: Some(DatasetRequest {
-                        id,
-                        name: DatasetName::new(
-                            pool.clone(),
-                            DatasetKind::Crucible,
-                        ),
-                        service_address: address,
-                    }),
-                    services: vec![ServiceZoneService {
-                        id,
-                        details: ServiceType::Crucible { address },
-                    }],
+                    underlay_address: ip,
+                    zone_type: OmicronZoneType::Crucible {
+                        address,
+                        dataset: OmicronZoneDataset { pool_name: pool.clone() },
+                    },
                 });
             }
         }
@@ -685,47 +656,40 @@ impl Plan {
             let id = Uuid::new_v4();
             let address = sled.addr_alloc.next().expect("Not enough addrs");
             let zone = dns_builder.host_zone(id, address).unwrap();
+            let ntp_address = SocketAddrV6::new(address, NTP_PORT, 0, 0);
 
-            let (services, svcname) = if idx < BOUNDARY_NTP_COUNT {
+            let (zone_type, svcname) = if idx < BOUNDARY_NTP_COUNT {
                 boundary_ntp_servers.push(format!("{}.host.{}", id, DNS_ZONE));
                 let (nic, snat_cfg) = svc_port_builder.next_snat(id)?;
                 (
-                    vec![ServiceZoneService {
-                        id,
-                        details: ServiceType::BoundaryNtp {
-                            address: SocketAddrV6::new(address, NTP_PORT, 0, 0),
-                            ntp_servers: config.ntp_servers.clone(),
-                            dns_servers: config.dns_servers.clone(),
-                            domain: None,
-                            nic,
-                            snat_cfg,
-                        },
-                    }],
+                    OmicronZoneType::BoundaryNtp {
+                        address: ntp_address,
+                        ntp_servers: config.ntp_servers.clone(),
+                        dns_servers: config.dns_servers.clone(),
+                        domain: None,
+                        nic,
+                        snat_cfg,
+                    },
                     ServiceName::BoundaryNtp,
                 )
             } else {
                 (
-                    vec![ServiceZoneService {
-                        id,
-                        details: ServiceType::InternalNtp {
-                            address: SocketAddrV6::new(address, NTP_PORT, 0, 0),
-                            ntp_servers: boundary_ntp_servers.clone(),
-                            dns_servers: rack_dns_servers.clone(),
-                            domain: None,
-                        },
-                    }],
+                    OmicronZoneType::InternalNtp {
+                        address: ntp_address,
+                        ntp_servers: boundary_ntp_servers.clone(),
+                        dns_servers: rack_dns_servers.clone(),
+                        domain: None,
+                    },
                     ServiceName::InternalNtp,
                 )
             };
 
             dns_builder.service_backend_zone(svcname, &zone, NTP_PORT).unwrap();
 
-            sled.request.services.push(ServiceZoneRequest {
+            sled.request.zones.push(OmicronZoneConfig {
                 id,
-                zone_type: ZoneType::Ntp,
-                addresses: vec![address],
-                dataset: None,
-                services,
+                underlay_address: address,
+                zone_type,
             });
         }
 
@@ -735,7 +699,42 @@ impl Plan {
             .collect();
 
         let dns_config = dns_builder.build();
-        let plan = Self { services, dns_config };
+        Ok(Self { services, dns_config })
+    }
+
+    pub async fn create(
+        log: &Logger,
+        config: &Config,
+        storage_manager: &StorageHandle,
+        sleds: &HashMap<SocketAddrV6, StartSledAgentRequest>,
+    ) -> Result<Self, PlanError> {
+        // Load the information we need about each Sled to be able to allocate
+        // components on it.
+        let sled_info = {
+            let result: Result<Vec<SledInfo>, PlanError> =
+                futures::future::try_join_all(sleds.values().map(
+                    |sled_request| async {
+                        let subnet = sled_request.body.subnet;
+                        let sled_address = get_sled_address(subnet);
+                        let u2_zpools =
+                            Self::get_u2_zpools_from_sled(log, sled_address)
+                                .await?;
+                        let is_scrimlet =
+                            Self::is_sled_scrimlet(log, sled_address).await?;
+                        Ok(SledInfo::new(
+                            sled_request.body.id,
+                            subnet,
+                            sled_address,
+                            u2_zpools,
+                            is_scrimlet,
+                        ))
+                    },
+                ))
+                .await;
+            result?
+        };
+
+        let plan = Self::create_transient(config, sled_info)?;
 
         // Once we've constructed a plan, write it down to durable storage.
         let paths: Vec<Utf8PathBuf> = storage_manager
@@ -773,13 +772,13 @@ impl AddressBumpAllocator {
 }
 
 /// Wraps up the information used to allocate components to a Sled
-struct SledInfo {
+pub struct SledInfo {
     /// unique id for the sled agent
-    sled_id: Uuid,
+    pub sled_id: Uuid,
     /// the sled's unique IPv6 subnet
     subnet: Ipv6Subnet<SLED_PREFIX>,
     /// the address of the Sled Agent on the sled's subnet
-    sled_address: SocketAddrV6,
+    pub sled_address: SocketAddrV6,
     /// the list of zpools on the Sled
     u2_zpools: Vec<ZpoolName>,
     /// spreads components across a Sled's zpools
@@ -789,12 +788,12 @@ struct SledInfo {
     is_scrimlet: bool,
     /// allocator for addresses in this Sled's subnet
     addr_alloc: AddressBumpAllocator,
-    /// under-construction list of services being deployed to a Sled
-    request: SledRequest,
+    /// under-construction list of Omicron zones being deployed to a Sled
+    request: SledConfig,
 }
 
 impl SledInfo {
-    fn new(
+    pub fn new(
         sled_id: Uuid,
         subnet: Ipv6Subnet<SLED_PREFIX>,
         sled_address: SocketAddrV6,
@@ -1209,10 +1208,10 @@ mod tests {
     }
 
     #[test]
-    fn test_rss_service_plan_schema() {
+    fn test_rss_service_plan_v2_schema() {
         let schema = schemars::schema_for!(Plan);
         expectorate::assert_contents(
-            "../schema/rss-service-plan.json",
+            "../schema/rss-service-plan-v2.json",
             &serde_json::to_string_pretty(&schema).unwrap(),
         );
     }
