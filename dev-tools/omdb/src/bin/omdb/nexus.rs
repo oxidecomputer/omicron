@@ -528,7 +528,10 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 error, details
             ),
             Ok(success) => {
-                println!("    number of phantom disks found: {}", success.disk_count);
+                println!(
+                    "    number of phantom disks found: {}",
+                    success.disk_count
+                );
             }
         };
     } else {
