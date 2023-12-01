@@ -105,6 +105,12 @@ HOST_OS=$(uname -s)
 
 function install_packages {
   if [[ "${HOST_OS}" == "Linux" ]]; then
+    if ! grep -q -e 'ID=debian' -e 'ID_LIKE=.*debian.*' /etc/os-release; then
+      echo "This script doesn't yet support $(grep ^ID /etc/os-release)"
+      echo "We assume you know what you're doing!"
+      return
+    fi
+
     packages=(
       'libpq-dev'
       'pkg-config'
@@ -162,7 +168,7 @@ function install_packages {
     confirm "Install (or update) [${packages[*]}]?" && brew install "${packages[@]}"
   else
     echo "Unsupported OS: ${HOST_OS}"
-    exit 1
+    echo "We assume you know what you're doing!"
   fi
 }
 
