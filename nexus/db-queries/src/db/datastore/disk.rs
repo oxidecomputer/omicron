@@ -770,12 +770,13 @@ impl DataStore {
             .into_iter()
             .filter(|(disk, resource, volume)| {
                 if let Some(volume) = volume {
-                    // In this branch, the volume record was soft-deleted. The
-                    // saga unwound before the volume record could be hard
-                    // deleted. This won't conflict with a running disk delete
-                    // saga, because the resource record should be None if the
-                    // disk and volume were already soft deleted (if there is
-                    // one, the saga will be at or past step 3).
+                    // In this branch, the volume record exists. Because it was
+                    // returned by the query above, if it is soft-deleted we
+                    // then know the saga unwound before the volume record could
+                    // be hard deleted. This won't conflict with a running disk
+                    // delete saga, because the resource record should be None
+                    // if the disk and volume were already soft deleted (if
+                    // there is one, the saga will be at or past step 3).
                     disk.time_deleted().is_some()
                         && volume.time_deleted.is_some()
                         && resource.is_some()
