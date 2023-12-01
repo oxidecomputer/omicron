@@ -141,6 +141,7 @@ pub struct PortConfigV1 {
     /// BGP peers on this port
     pub bgp_peers: Vec<BgpPeerConfig>,
     /// Whether or not to set autonegotiation
+    #[serde(default)]
     pub autoneg: bool,
 }
 
