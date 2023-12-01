@@ -366,7 +366,8 @@ task: "phantom_disks"
   currently executing: no
   last completed activation: iter 2, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    phantom disks found: 0
+    number of phantom disks deleted: 0
+    number of phantom disk delete errors: 0
 
 ---------------------------------------------
 stderr:
