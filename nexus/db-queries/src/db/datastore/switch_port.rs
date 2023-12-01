@@ -10,7 +10,6 @@ use crate::db::datastore::address_lot::{
 };
 use crate::db::datastore::UpdatePrecondition;
 use crate::db::error::public_error_from_diesel;
-use crate::db::error::retryable;
 use crate::db::error::ErrorHandler;
 use crate::db::model::{
     LldpServiceConfig, Name, SwitchInterfaceConfig, SwitchPort,
@@ -22,7 +21,6 @@ use crate::db::model::{
 use crate::db::pagination::paginated;
 use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
-use diesel::result::Error as DieselError;
 use diesel::{
     CombineDsl, ExpressionMethods, JoinOnDsl, NullableExpressionMethods,
     QueryDsl, SelectableHelper,
@@ -35,7 +33,6 @@ use omicron_common::api::external::{
 };
 use ref_cast::RefCast;
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, OnceLock};
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -863,7 +860,7 @@ impl DataStore {
             RackNotFound,
         }
 
-        let err = Arc::new(OnceLock::new());
+        let err = OptionalError::new();
 
         let conn = self.pool_connection_authorized(opctx).await?;
         let switch_port = SwitchPort::new(
@@ -888,19 +885,10 @@ impl DataStore {
                         .first_async::<Uuid>(&conn)
                         .await
                         .map_err(|e| {
-                            // TODO:
-                            // IF retryable
-                            //      e
-                            // OTHERWISE
-                            //      set a custom error
-                            //      e: RollbackTransaction
-
-                            if retryable(&e) {
-                                return e;
-                            }
-                            err.set(SwitchPortCreateError::RackNotFound)
-                                .unwrap();
-                            DieselError::RollbackTransaction
+                            err.bail_retryable_or(
+                                e,
+                                SwitchPortCreateError::RackNotFound,
+                            )
                         })?;
 
                     // insert switch port
@@ -917,7 +905,7 @@ impl DataStore {
             })
             .await
             .map_err(|e| {
-                if let Some(err) = err.get() {
+                if let Some(err) = err.take() {
                     match err {
                         SwitchPortCreateError::RackNotFound => {
                             Error::invalid_request("rack not found")
