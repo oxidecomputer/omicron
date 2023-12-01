@@ -857,9 +857,11 @@ impl Client {
             Err(Error::Database(err))
                 // Case 1: The database has not been created.
                 if err.contains("Database oximeter doesn't exist") ||
+                    err.contains("Database oximeter does not exist") ||
                 // Case 2: The database has been created, but it's old (exists
                 // prior to the version table).
-                    err.contains("Table oximeter.version doesn't exist") =>
+                    err.contains("Table oximeter.version doesn't exist") ||
+                    err.contains("Table oximeter.version does not exist") =>
             {
                 warn!(self.log, "oximeter database does not exist, or is out-of-date");
                 0
