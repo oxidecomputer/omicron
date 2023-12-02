@@ -143,7 +143,10 @@ $ svcadm enable ipfilter
 
 Other network configurations are possible but beyond the scope of this doc.
 
-When making this choice, note that **in order to use the system once it's set up, you will need to be able to access it from a web browser.**  If you go with option 2 here, you may need to use an ssh tunnel or the like to do this.
+When making this choice, note that **in order to use the system once it's set
+up, you will need to be able to access it from a web browser.**  If you go with
+option 2 here, you may need to use an SSH tunnel (see:
+<<setting-up-an-ssh-tunnel-for-console-access>>) or the like to do this.
 
 === Picking a "machine" type
 
@@ -433,7 +436,32 @@ Where did 192.168.1.20 come from?  That's the external address of the external
 DNS server.  We knew that because it's listed in the `external_dns_ips` entry of
 the `config-rss.toml` file we're using.
 
-Having looked this up, the easiest thing will be to use `http://192.168.1.21` for your URL (replacing with `https` if you used a certificate, and replacing that IP if needed).  If you've set up networking right, you should be able to reach this from your web browser.  You may have to instruct the browser to accept a self-signed TLS certificate.  See also <<_connecting_securely_with_tls_using_the_cli>>.
+Having looked this up, the easiest thing will be to use `http://192.168.1.21` for your URL (replacing with `https` if you used a certificate, and replacing that IP if needed).  If you've set up networking right, you should be able to reach this from your web browser.  You may have to instruct the browser to accept a self-signed TLS certificate.  See also <<connecting-securely-with-tls-using-the-cli>>.
+
+=== Setting up an SSH tunnel for console access
+
+If you set up a fake external network (method 2 in <<external-networking>>), one
+way to be able to access the console of your deployment is by setting up an SSH
+tunnel. Console access is required to use the CLI for device authentication.
+The following is an example of how to access the console with an SSH tunnel.
+
+Nexus serves the console, so first get a nexus IP from the instructions above.
+
+In this example, Omicron is running on the lab machine `dunkin`. Usually, you'll
+want to set up the tunnel from the machine where you run a browser, to the
+machine running Omicron. In this example, one would run this on the machine
+running the browser:
+
+```
+$ ssh -L 1234:192.168.1.22:80 dunkin.eng.oxide.computer
+```
+
+The above command configures `ssh` to bind to the TCP port `1234` on the machine
+running the browser, forward packets through the ssh connection, and redirect
+them to 192.168.1.22 port 80 *as seen from the other side of the connection*.
+
+Now you should be able to access the console from the browser on this machine,
+via something like: `127.0.0.1:1234`, using the port from the `ssh` command.
 
 === Using the CLI
 

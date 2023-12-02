@@ -283,7 +283,7 @@ dependencies = [
  "anstyle",
  "bstr 1.6.0",
  "doc-comment",
- "predicates 3.0.3",
+ "predicates 3.0.4",
  "predicates-core",
  "predicates-tree",
  "wait-timeout",
@@ -364,6 +364,17 @@ name = "atomic-waker"
 version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1181e1e0d1fce796a03db1ae795d67167da795f9cf4a39c37589e85ef57f26d3"
+
+[[package]]
+name = "atomicwrites"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c1163d9d7c51de51a2b79d6df5e8888d11e9df17c752ce4a285fb6ca1580734e"
+dependencies = [
+ "rustix 0.37.23",
+ "tempfile",
+ "windows-sys 0.48.0",
+]
 
 [[package]]
 name = "atty"
@@ -484,7 +495,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=42c878b71a58d430dfc306126af5d40ca816d70f#42c878b71a58d430dfc306126af5d40ca816d70f"
+source = "git+https://github.com/oxidecomputer/propolis?rev=901b710b6e5bd05a94a323693c2b971e7e7b240e#901b710b6e5bd05a94a323693c2b971e7e7b240e"
 dependencies = [
  "bhyve_api_sys",
  "libc",
@@ -494,7 +505,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=42c878b71a58d430dfc306126af5d40ca816d70f#42c878b71a58d430dfc306126af5d40ca816d70f"
+source = "git+https://github.com/oxidecomputer/propolis?rev=901b710b6e5bd05a94a323693c2b971e7e7b240e#901b710b6e5bd05a94a323693c2b971e7e7b240e"
 dependencies = [
  "libc",
  "strum",
@@ -1224,7 +1235,7 @@ dependencies = [
 [[package]]
 name = "cpuid_profile_config"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=42c878b71a58d430dfc306126af5d40ca816d70f#42c878b71a58d430dfc306126af5d40ca816d70f"
+source = "git+https://github.com/oxidecomputer/propolis?rev=901b710b6e5bd05a94a323693c2b971e7e7b240e#901b710b6e5bd05a94a323693c2b971e7e7b240e"
 dependencies = [
  "propolis",
  "serde",
@@ -1267,13 +1278,10 @@ dependencies = [
 name = "crdb-seed"
 version = "0.1.0"
 dependencies = [
- "camino",
- "camino-tempfile",
+ "anyhow",
  "dropshot",
- "hex",
  "omicron-test-utils",
  "omicron-workspace-hack",
- "ring",
  "slog",
  "tokio",
 ]
@@ -2015,7 +2023,7 @@ checksum = "7e1a8646b2c125eeb9a84ef0faa6d2d102ea0d5da60b824ade2743263117b848"
 [[package]]
 name = "dladm"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=42c878b71a58d430dfc306126af5d40ca816d70f#42c878b71a58d430dfc306126af5d40ca816d70f"
+source = "git+https://github.com/oxidecomputer/propolis?rev=901b710b6e5bd05a94a323693c2b971e7e7b240e#901b710b6e5bd05a94a323693c2b971e7e7b240e"
 dependencies = [
  "libc",
  "strum",
@@ -3389,7 +3397,7 @@ dependencies = [
 [[package]]
 name = "illumos-sys-hdrs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=98d33125413f01722947e322f82caf9d22209434#98d33125413f01722947e322f82caf9d22209434"
+source = "git+https://github.com/oxidecomputer/opte?rev=631c2017f19cafb1535f621e9e5aa9198ccad869#631c2017f19cafb1535f621e9e5aa9198ccad869"
 
 [[package]]
 name = "illumos-utils"
@@ -3810,7 +3818,7 @@ dependencies = [
 [[package]]
 name = "kstat-macro"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=98d33125413f01722947e322f82caf9d22209434#98d33125413f01722947e322f82caf9d22209434"
+source = "git+https://github.com/oxidecomputer/opte?rev=631c2017f19cafb1535f621e9e5aa9198ccad869#631c2017f19cafb1535f621e9e5aa9198ccad869"
 dependencies = [
  "quote",
  "syn 1.0.109",
@@ -4950,6 +4958,8 @@ dependencies = [
  "dropshot",
  "expectorate",
  "futures",
+ "gateway-messages",
+ "gateway-test-utils",
  "libc",
  "nexus-test-interface",
  "nexus-test-utils",
@@ -5139,6 +5149,9 @@ dependencies = [
  "dropshot",
  "expectorate",
  "futures",
+ "gateway-client",
+ "gateway-messages",
+ "gateway-test-utils",
  "humantime",
  "internal-dns 0.1.0",
  "ipnetwork",
@@ -5332,11 +5345,15 @@ name = "omicron-test-utils"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "atomicwrites",
  "camino",
+ "camino-tempfile",
  "dropshot",
  "expectorate",
+ "filetime",
  "futures",
  "headers",
+ "hex",
  "http",
  "libc",
  "omicron-common 0.1.0",
@@ -5345,9 +5362,11 @@ dependencies = [
  "rcgen",
  "regex",
  "reqwest",
+ "ring",
  "rustls",
  "slog",
  "subprocess",
+ "tar",
  "tempfile",
  "thiserror",
  "tokio",
@@ -5422,7 +5441,7 @@ dependencies = [
  "phf_shared 0.11.2",
  "postgres-types",
  "ppv-lite86",
- "predicates 3.0.3",
+ "predicates 3.0.4",
  "rand 0.8.5",
  "rand_chacha 0.3.1",
  "regex",
@@ -5430,6 +5449,7 @@ dependencies = [
  "regex-syntax 0.7.5",
  "reqwest",
  "ring",
+ "rustix 0.37.23",
  "rustix 0.38.9",
  "schemars",
  "semver 1.0.18",
@@ -5577,7 +5597,7 @@ dependencies = [
 [[package]]
 name = "opte"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=98d33125413f01722947e322f82caf9d22209434#98d33125413f01722947e322f82caf9d22209434"
+source = "git+https://github.com/oxidecomputer/opte?rev=631c2017f19cafb1535f621e9e5aa9198ccad869#631c2017f19cafb1535f621e9e5aa9198ccad869"
 dependencies = [
  "cfg-if 0.1.10",
  "dyn-clone",
@@ -5594,7 +5614,7 @@ dependencies = [
 [[package]]
 name = "opte-api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=98d33125413f01722947e322f82caf9d22209434#98d33125413f01722947e322f82caf9d22209434"
+source = "git+https://github.com/oxidecomputer/opte?rev=631c2017f19cafb1535f621e9e5aa9198ccad869#631c2017f19cafb1535f621e9e5aa9198ccad869"
 dependencies = [
  "cfg-if 0.1.10",
  "illumos-sys-hdrs",
@@ -5607,7 +5627,7 @@ dependencies = [
 [[package]]
 name = "opte-ioctl"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=98d33125413f01722947e322f82caf9d22209434#98d33125413f01722947e322f82caf9d22209434"
+source = "git+https://github.com/oxidecomputer/opte?rev=631c2017f19cafb1535f621e9e5aa9198ccad869#631c2017f19cafb1535f621e9e5aa9198ccad869"
 dependencies = [
  "libc",
  "libnet",
@@ -5687,7 +5707,7 @@ dependencies = [
 [[package]]
 name = "oxide-vpc"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=98d33125413f01722947e322f82caf9d22209434#98d33125413f01722947e322f82caf9d22209434"
+source = "git+https://github.com/oxidecomputer/opte?rev=631c2017f19cafb1535f621e9e5aa9198ccad869#631c2017f19cafb1535f621e9e5aa9198ccad869"
 dependencies = [
  "cfg-if 0.1.10",
  "illumos-sys-hdrs",
@@ -6416,14 +6436,14 @@ dependencies = [
 
 [[package]]
 name = "predicates"
-version = "3.0.3"
+version = "3.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09963355b9f467184c04017ced4a2ba2d75cbcb4e7462690d388233253d4b1a9"
+checksum = "6dfc28575c2e3f19cb3c73b93af36460ae898d426eba6fc15b9bd2a5220758a0"
 dependencies = [
  "anstyle",
  "difflib",
  "float-cmp",
- "itertools 0.10.5",
+ "itertools 0.11.0",
  "normalize-line-endings",
  "predicates-core",
  "regex",
@@ -6587,7 +6607,7 @@ dependencies = [
 [[package]]
 name = "propolis"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=42c878b71a58d430dfc306126af5d40ca816d70f#42c878b71a58d430dfc306126af5d40ca816d70f"
+source = "git+https://github.com/oxidecomputer/propolis?rev=901b710b6e5bd05a94a323693c2b971e7e7b240e#901b710b6e5bd05a94a323693c2b971e7e7b240e"
 dependencies = [
  "anyhow",
  "bhyve_api",
@@ -6620,7 +6640,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=42c878b71a58d430dfc306126af5d40ca816d70f#42c878b71a58d430dfc306126af5d40ca816d70f"
+source = "git+https://github.com/oxidecomputer/propolis?rev=901b710b6e5bd05a94a323693c2b971e7e7b240e#901b710b6e5bd05a94a323693c2b971e7e7b240e"
 dependencies = [
  "async-trait",
  "base64 0.21.4",
@@ -6644,7 +6664,7 @@ dependencies = [
 [[package]]
 name = "propolis-server"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=42c878b71a58d430dfc306126af5d40ca816d70f#42c878b71a58d430dfc306126af5d40ca816d70f"
+source = "git+https://github.com/oxidecomputer/propolis?rev=901b710b6e5bd05a94a323693c2b971e7e7b240e#901b710b6e5bd05a94a323693c2b971e7e7b240e"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6696,7 +6716,7 @@ dependencies = [
 [[package]]
 name = "propolis-server-config"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=42c878b71a58d430dfc306126af5d40ca816d70f#42c878b71a58d430dfc306126af5d40ca816d70f"
+source = "git+https://github.com/oxidecomputer/propolis?rev=901b710b6e5bd05a94a323693c2b971e7e7b240e#901b710b6e5bd05a94a323693c2b971e7e7b240e"
 dependencies = [
  "cpuid_profile_config",
  "serde",
@@ -6708,7 +6728,7 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=42c878b71a58d430dfc306126af5d40ca816d70f#42c878b71a58d430dfc306126af5d40ca816d70f"
+source = "git+https://github.com/oxidecomputer/propolis?rev=901b710b6e5bd05a94a323693c2b971e7e7b240e#901b710b6e5bd05a94a323693c2b971e7e7b240e"
 dependencies = [
  "schemars",
  "serde",
@@ -6716,19 +6736,19 @@ dependencies = [
 
 [[package]]
 name = "proptest"
-version = "1.2.0"
+version = "1.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4e35c06b98bf36aba164cc17cb25f7e232f5c4aeea73baa14b8a9f0d92dbfa65"
+checksum = "7c003ac8c77cb07bb74f5f198bce836a689bcd5a42574612bf14d17bfd08c20e"
 dependencies = [
  "bit-set",
- "bitflags 1.3.2",
- "byteorder",
+ "bit-vec",
+ "bitflags 2.4.0",
  "lazy_static",
  "num-traits",
  "rand 0.8.5",
  "rand_chacha 0.3.1",
  "rand_xorshift",
- "regex-syntax 0.6.29",
+ "regex-syntax 0.7.5",
  "rusty-fork",
  "tempfile",
  "unarray",
@@ -9353,7 +9373,7 @@ dependencies = [
  "omicron-common 0.1.0",
  "omicron-test-utils",
  "omicron-workspace-hack",
- "predicates 3.0.3",
+ "predicates 3.0.4",
  "slog",
  "slog-async",
  "slog-envlogger",
@@ -9450,8 +9470,8 @@ version = "1.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97fee6b57c6a41524a810daee9286c02d7752c4253064d0b05472833a438f675"
 dependencies = [
- "cfg-if 0.1.10",
- "rand 0.4.6",
+ "cfg-if 1.0.0",
+ "rand 0.8.5",
  "static_assertions",
 ]
 
@@ -9755,7 +9775,7 @@ checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
 [[package]]
 name = "viona_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=42c878b71a58d430dfc306126af5d40ca816d70f#42c878b71a58d430dfc306126af5d40ca816d70f"
+source = "git+https://github.com/oxidecomputer/propolis?rev=901b710b6e5bd05a94a323693c2b971e7e7b240e#901b710b6e5bd05a94a323693c2b971e7e7b240e"
 dependencies = [
  "libc",
  "viona_api_sys",
@@ -9764,7 +9784,7 @@ dependencies = [
 [[package]]
 name = "viona_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=42c878b71a58d430dfc306126af5d40ca816d70f#42c878b71a58d430dfc306126af5d40ca816d70f"
+source = "git+https://github.com/oxidecomputer/propolis?rev=901b710b6e5bd05a94a323693c2b971e7e7b240e#901b710b6e5bd05a94a323693c2b971e7e7b240e"
 dependencies = [
  "libc",
 ]

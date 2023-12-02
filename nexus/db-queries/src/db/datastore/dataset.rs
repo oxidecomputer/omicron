@@ -13,15 +13,31 @@ use crate::db::error::ErrorHandler;
 use crate::db::identity::Asset;
 use crate::db::model::Dataset;
 use crate::db::model::Zpool;
+use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::upsert::excluded;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
+use uuid::Uuid;
 
 impl DataStore {
+    pub async fn dataset_get(&self, dataset_id: Uuid) -> LookupResult<Dataset> {
+        use db::schema::dataset::dsl;
+
+        dsl::dataset
+            .filter(dsl::id.eq(dataset_id))
+            .select(Dataset::as_select())
+            .first_async::<Dataset>(
+                &*self.pool_connection_unauthorized().await?,
+            )
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
     /// Stores a new dataset in the database.
     pub async fn dataset_upsert(
         &self,

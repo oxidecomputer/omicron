@@ -13,6 +13,7 @@ use omicron_test_utils::dev::test_cmds::path_to_executable;
 use omicron_test_utils::dev::test_cmds::run_command;
 use omicron_test_utils::dev::test_cmds::EXIT_SUCCESS;
 use omicron_test_utils::dev::test_cmds::EXIT_USAGE;
+use omicron_test_utils::dev::CRDB_SEED_TAR_ENV;
 use oxide_client::ClientHiddenExt;
 use std::io::BufRead;
 use std::path::Path;
@@ -389,6 +390,16 @@ async fn test_db_run() {
 // This mirrors the `test_db_run()` test.
 #[tokio::test]
 async fn test_run_all() {
+    // Ensure that the CRDB_SEED_TAR environment variable is not set. We want to
+    // simulate a user running omicron-dev without the test environment.
+    // Check if CRDB_SEED_TAR_ENV is set and panic if it is
+    if let Ok(val) = std::env::var(CRDB_SEED_TAR_ENV) {
+        panic!(
+            "CRDB_SEED_TAR_ENV should not be set here, but is set to {}",
+            val
+        );
+    }
+
     let cmd_path = path_to_omicron_dev();
 
     let cmdstr = format!(

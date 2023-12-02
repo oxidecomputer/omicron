@@ -61,6 +61,9 @@ enum EnsureFilesystemErrorRaw {
 
     #[error("Failed to mount encrypted filesystem: {0}")]
     MountEncryptedFsFailed(crate::ExecutionError),
+
+    #[error("Failed to mount overlay filesystem: {0}")]
+    MountOverlayFsFailed(crate::ExecutionError),
 }
 
 /// Error returned by [`Zfs::ensure_filesystem`].
@@ -202,6 +205,7 @@ impl Zfs {
     /// Creates a new ZFS filesystem named `name`, unless one already exists.
     ///
     /// Applies an optional quota, provided _in bytes_.
+    #[allow(clippy::too_many_arguments)]
     pub fn ensure_filesystem(
         name: &str,
         mountpoint: Mountpoint,
@@ -209,6 +213,7 @@ impl Zfs {
         do_format: bool,
         encryption_details: Option<EncryptionDetails>,
         size_details: Option<SizeDetails>,
+        additional_options: Option<Vec<String>>,
     ) -> Result<(), EnsureFilesystemError> {
         let (exists, mounted) = Self::dataset_exists(name, &mountpoint)?;
         if exists {
@@ -261,7 +266,14 @@ impl Zfs {
             ]);
         }
 
+        if let Some(opts) = additional_options {
+            for o in &opts {
+                cmd.args(&["-o", &o]);
+            }
+        }
+
         cmd.args(&["-o", &format!("mountpoint={}", mountpoint), name]);
+
         execute(cmd).map_err(|err| EnsureFilesystemError {
             name: name.to_string(),
             mountpoint: mountpoint.clone(),
@@ -318,6 +330,20 @@ impl Zfs {
             name: name.to_string(),
             mountpoint: mountpoint.clone(),
             err: EnsureFilesystemErrorRaw::MountEncryptedFsFailed(err),
+        })?;
+        Ok(())
+    }
+
+    pub fn mount_overlay_dataset(
+        name: &str,
+        mountpoint: &Mountpoint,
+    ) -> Result<(), EnsureFilesystemError> {
+        let mut command = std::process::Command::new(PFEXEC);
+        let cmd = command.args(&[ZFS, "mount", "-O", name]);
+        execute(cmd).map_err(|err| EnsureFilesystemError {
+            name: name.to_string(),
+            mountpoint: mountpoint.clone(),
+            err: EnsureFilesystemErrorRaw::MountOverlayFsFailed(err),
         })?;
         Ok(())
     }
@@ -385,7 +411,7 @@ impl Zfs {
         Zfs::get_value(filesystem_name, &format!("oxide:{}", name))
     }
 
-    fn get_value(
+    pub fn get_value(
         filesystem_name: &str,
         name: &str,
     ) -> Result<String, GetValueError> {
@@ -422,13 +448,12 @@ pub fn get_all_omicron_datasets_for_delete() -> anyhow::Result<Vec<String>> {
         let internal = pool.kind() == crate::zpool::ZpoolKind::Internal;
         let pool = pool.to_string();
         for dataset in &Zfs::list_datasets(&pool)? {
-            // Avoid erasing crashdump datasets on internal pools
-            if dataset == "crash" && internal {
-                continue;
-            }
-
-            // The swap device might be in use, so don't assert that it can be deleted.
-            if dataset == "swap" && internal {
+            // Avoid erasing crashdump, backing data and swap datasets on
+            // internal pools. The swap device may be in use.
+            if internal
+                && (["crash", "backing", "swap"].contains(&dataset.as_str())
+                    || dataset.starts_with("backing/"))
+            {
                 continue;
             }
 

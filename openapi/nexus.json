@@ -2816,6 +2816,34 @@
         }
       }
     },
+    "/v1/ping": {
+      "get": {
+        "tags": [
+          "system/status"
+        ],
+        "summary": "Ping API",
+        "description": "Always responds with Ok if it responds at all.",
+        "operationId": "ping",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ping"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/policy": {
       "get": {
         "tags": [
@@ -9615,6 +9643,7 @@
           },
           "image_id": {
             "nullable": true,
+            "description": "ID of image from which disk was created, if any",
             "type": "string",
             "format": "uuid"
           },
@@ -9635,6 +9664,7 @@
           },
           "snapshot_id": {
             "nullable": true,
+            "description": "ID of snapshot from which disk was created, if any",
             "type": "string",
             "format": "uuid"
           },
@@ -12027,6 +12057,28 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "Ping": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "description": "Whether the external API is reachable. Will always be Ok if the endpoint returns anything at all.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PingStatus"
+              }
+            ]
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "PingStatus": {
+        "type": "string",
+        "enum": [
+          "ok"
         ]
       },
       "Project": {
@@ -15273,6 +15325,13 @@
       "description": "Silos represent a logical partition of users and resources.",
       "externalDocs": {
         "url": "http://docs.oxide.computer/api/system-silos"
+      }
+    },
+    {
+      "name": "system/status",
+      "description": "Endpoints related to system health",
+      "externalDocs": {
+        "url": "http://docs.oxide.computer/api/system-status"
       }
     },
     {

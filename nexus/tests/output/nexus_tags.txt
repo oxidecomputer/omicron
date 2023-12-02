@@ -172,6 +172,10 @@ silo_view                                GET      /v1/system/silos/{silo}
 user_builtin_list                        GET      /v1/system/users-builtin
 user_builtin_view                        GET      /v1/system/users-builtin/{user}
 
+API operations found with tag "system/status"
+OPERATION ID                             METHOD   URL PATH
+ping                                     GET      /v1/ping
+
 API operations found with tag "vpcs"
 OPERATION ID                             METHOD   URL PATH
 vpc_create                               POST     /v1/vpcs

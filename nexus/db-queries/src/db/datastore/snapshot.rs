@@ -24,7 +24,7 @@ use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
-use diesel::result::Error as DieselError;
+use diesel::OptionalExtension;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
@@ -100,7 +100,7 @@ impl DataStore {
                 // does not match, but a project and name that does, return
                 // ObjectAlreadyExists here.
 
-                let existing_snapshot_id: Option<Uuid> = match dsl::snapshot
+                let existing_snapshot_id: Option<Uuid> = dsl::snapshot
                     .filter(dsl::time_deleted.is_null())
                     .filter(dsl::name.eq(snapshot.name().to_string()))
                     .filter(dsl::project_id.eq(snapshot.project_id))
@@ -108,11 +108,7 @@ impl DataStore {
                     .limit(1)
                     .first_async(&conn)
                     .await
-                {
-                    Ok(v) => Ok(Some(v)),
-                    Err(DieselError::NotFound) => Ok(None),
-                    Err(e) => Err(e),
-                }?;
+                    .optional()?;
 
                 if let Some(existing_snapshot_id) = existing_snapshot_id {
                     if existing_snapshot_id != snapshot.id() {

@@ -777,7 +777,7 @@ fn build_port_settings(
         DPD_DEFAULT_IPV4_CIDR.parse().unwrap(),
         RouteSettingsV4 {
             link_id: link_id.0,
-            nexthop: Some(uplink.gateway_ip),
+            nexthop: uplink.gateway_ip,
             vid: uplink.uplink_vid,
         },
     );
