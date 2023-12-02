@@ -772,6 +772,15 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_ssh_key_by_silo_user ON omicron.public.
 ) WHERE
     time_deleted IS NULL;
 
+CREATE TABLE IF NOT EXISTS omicron.public.silo_quotas (
+    silo_id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    cpus INT8 NOT NULL,
+    memory INT8 NOT NULL,
+    storage INT8 NOT NULL,
+)
+
 /*
  * Projects
  */

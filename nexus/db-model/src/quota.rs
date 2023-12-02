@@ -1,29 +1,29 @@
-use db_macros::Asset;
+use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-#[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
-#[diesel(table_name = quota)]
-pub struct Quota {
-    #[diesel(embed)]
-    identity: QuotaIdentity,
+use crate::schema::silo_quotas;
 
+#[derive(Queryable, Insertable, Debug, Clone, Selectable)]
+#[diesel(table_name = silo_quotas)]
+pub struct SiloQuotas {
     pub silo_id: Uuid,
+    pub time_created: DateTime<Utc>,
+    pub time_modified: DateTime<Utc>,
 
-    pub resource_type: QuotaResourceKind,
-    pub limit: i64,
+    pub cpus: i64,
+    pub memory: i64,
+    pub storage: i64,
 }
 
-impl Quota {
-    pub fn new(
-        silo_id: Uuid,
-        resource_type: QuotaResourceKind,
-        limit: i64,
-    ) -> Self {
+impl SiloQuotas {
+    pub fn new(silo_id: Uuid, cpus: i64, memory: i64, storage: i64) -> Self {
         Self {
-            identity: QuotaIdentity::new(Uuid::new_v4()),
             silo_id,
-            resource_type,
-            limit,
+            time_created: Utc::now(),
+            time_modified: Utc::now(),
+            cpus,
+            memory,
+            storage,
         }
     }
 }

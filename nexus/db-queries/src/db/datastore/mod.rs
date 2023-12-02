@@ -68,6 +68,7 @@ mod network_interface;
 mod oximeter;
 mod physical_disk;
 mod project;
+mod quota;
 mod rack;
 mod region;
 mod region_snapshot;

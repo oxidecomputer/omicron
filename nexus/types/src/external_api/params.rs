@@ -271,6 +271,13 @@ pub struct SiloCreate {
         BTreeMap<shared::SiloRole, BTreeSet<shared::FleetRole>>,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SiloQuotasCreate {
+    pub cpus: i64,
+    pub memory: i64,
+    pub storage: i64,
+}
+
 /// Create-time parameters for a `User`
 #[derive(Clone, Deserialize, Serialize, JsonSchema)]
 pub struct UserCreate {

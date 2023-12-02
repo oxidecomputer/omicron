@@ -409,6 +409,17 @@ table! {
 }
 
 table! {
+    silo_quotas(silo_id) {
+        silo_id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        cpus -> Int8,
+        memory -> Int8,
+        storage -> Int8,
+    }
+}
+
+table! {
     network_interface (id) {
         id -> Uuid,
         name -> Text,

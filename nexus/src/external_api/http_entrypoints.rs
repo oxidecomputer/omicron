@@ -44,7 +44,7 @@ use nexus_db_queries::db::model::Name;
 use nexus_db_queries::{
     authz::ApiResource, db::fixed_data::silo::INTERNAL_SILO_ID,
 };
-use nexus_types::external_api::params::ProjectSelector;
+use nexus_types::external_api::{params::ProjectSelector, views::SiloQuotas};
 use nexus_types::{
     external_api::views::{SledInstance, Switch},
     identity::AssetIdentityMetadata,
@@ -553,7 +553,7 @@ async fn quota_list(
 async fn system_quota_list(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByNameOrId>,
-) -> Result<HttpResponseOk<ResultsPage<Quota>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<SiloQuotas>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
@@ -588,7 +588,7 @@ async fn system_quota_list(
 async fn silo_quota_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::SiloPath>,
-) -> Result<HttpResponseOk<Quota>, HttpError> {
+) -> Result<HttpResponseOk<SiloQuotas>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;

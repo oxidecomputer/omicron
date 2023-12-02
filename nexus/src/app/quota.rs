@@ -4,23 +4,30 @@
 
 //! Resource limits and system quotas
 
-use diesel::pg::TypeOidLookup;
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
+use nexus_db_queries::db::lookup;
+use nexus_types::external_api::params;
+use omicron_common::api::external::http_pagination::PaginatedBy;
+use omicron_common::api::external::CreateResult;
+use omicron_common::api::external::Error;
+use omicron_common::api::external::ListResultVec;
 
 impl super::Nexus {
     pub async fn quotas_list(
         &self,
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
-    ) -> ListResultVec<db::model::Quota> {
-        self.db_datastore.quota_list(opctx, pagparams).await
+    ) -> Result<db::model::SiloQuotas, Error> {
+        self.db_datastore.quotas_list(opctx, pagparams).await
     }
 
     pub(crate) async fn fleet_list_quotas(
         &self,
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
-    ) -> ListResultVec<db::model::SystemQuota> {
+    ) -> ListResultVec<db::model::SiloQuotas> {
         self.db_datastore.fleet_list_quotas(opctx, pagparams).await
     }
 
@@ -28,21 +35,21 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
-    ) -> Result<db::model::Quota> {
+    ) -> Result<db::model::SiloQuotas, Error> {
         let (.., authz_silo) =
             silo_lookup.lookup_for(authz::Action::Read).await?;
         self.db_datastore.silo_fetch_quota(opctx, authz_silo).await
     }
 
-    pub(crate) async fn silo_create_quota(
+    pub(crate) async fn silo_create_quotas(
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
-        quota: &db::model::Quota,
-    ) -> Result<db::model::Quota> {
+        quotas: &params::SiloQuotasCreate,
+    ) -> CreateResult<db::model::SiloQuotas> {
         let (.., authz_silo) =
             silo_lookup.lookup_for(authz::Action::Modify).await?;
-        self.db_datastore.silo_create_quota(opctx, authz_silo, quota).await
+        self.db_datastore.silo_create_quota(opctx, authz_silo, quotas).await
     }
 
     pub(crate) async fn silo_update_quota(
