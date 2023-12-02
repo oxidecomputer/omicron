@@ -1668,6 +1668,10 @@ mod test {
             let conn = datastore.pool_connection_for_tests().await.unwrap();
             let error =
                 datastore.dns_update(&opctx, &conn, update).await.unwrap_err();
+            let error = match error {
+                TransactionError::CustomError(err) => err,
+                _ => panic!("Unexpected error: {:?}", error),
+            };
             assert_eq!(
                 error.to_string(),
                 "Internal Error: updated wrong number of dns_name \
@@ -1691,11 +1695,15 @@ mod test {
             update.add_name(String::from("n2"), records1.clone()).unwrap();
 
             let conn = datastore.pool_connection_for_tests().await.unwrap();
-            let error =
-                datastore.dns_update(&opctx, &conn, update).await.unwrap_err();
+            let error = Error::from(
+                datastore.dns_update(&opctx, &conn, update).await.unwrap_err(),
+            );
             let msg = error.to_string();
-            assert!(msg.starts_with("Internal Error: "));
-            assert!(msg.contains("violates unique constraint"));
+            assert!(msg.starts_with("Internal Error: "), "Message: {msg:}");
+            assert!(
+                msg.contains("violates unique constraint"),
+                "Message: {msg:}"
+            );
         }
 
         let dns_config = datastore
