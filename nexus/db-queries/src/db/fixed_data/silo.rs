@@ -55,7 +55,7 @@ lazy_static! {
                     name: "oxide-internal".parse().unwrap(),
                     description: "Built-in internal Silo.".to_string(),
                 },
-                // TODO: Should the internal silo have a quota? If so, what should the defaults be?
+                // The internal silo contains no virtual resources, so it has no allotted capacity.
                 quotas: params::SiloQuotasCreate {
                     cpus: 0,
                     memory: 0,
