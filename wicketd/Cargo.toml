@@ -58,6 +58,7 @@ sled-hardware.workspace = true
 tufaceous-lib.workspace = true
 update-engine.workspace = true
 wicket-common.workspace = true
+wicketd-client.workspace = true
 omicron-workspace-hack.workspace = true
 
 [[bin]]

@@ -32,7 +32,7 @@
     it expected https).
   -->
   <exec_method type='method' name='refresh'
-      exec='curl -X POST http://%{config/address}/reload-config'
+      exec='/opt/oxide/wicketd/bin/wicketd refresh-config /var/svc/manifest/site/wicketd/config.toml --address %{config/address}'
       timeout_seconds='0' />
 
   <property_group name='startd' type='framework'>

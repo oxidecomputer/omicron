@@ -26,7 +26,7 @@ enum Args {
         #[clap(name = "CONFIG_FILE_PATH", action)]
         config_file_path: PathBuf,
 
-        /// The address for the technician port
+        /// The address on which the main wicketd dropshot server should listen
         #[clap(short, long, action)]
         address: SocketAddrV6,
 
@@ -56,6 +56,19 @@ enum Args {
         /// via `--read-smf-config` or an SMF refresh
         #[clap(long, action, conflicts_with("read_smf_config"))]
         rack_subnet: Option<Ipv6Addr>,
+    },
+
+    /// Instruct a running wicketd server to refresh its config
+    ///
+    /// Mechanically, this hits a specific endpoint served by wicketd's dropshot
+    /// server
+    RefreshConfig {
+        #[clap(name = "CONFIG_FILE_PATH", action)]
+        config_file_path: PathBuf,
+
+        /// The address of the server to refresh
+        #[clap(short, long, action)]
+        address: SocketAddrV6,
     },
 }
 
@@ -139,6 +152,23 @@ async fn do_run() -> Result<(), CmdError> {
                 .wait_for_finish()
                 .await
                 .map_err(|err| CmdError::Failure(anyhow!(err)))
+        }
+        Args::RefreshConfig { config_file_path, address } => {
+            let config = Config::from_file(&config_file_path)
+                .with_context(|| {
+                    format!("failed to parse {}", config_file_path.display())
+                })
+                .map_err(CmdError::Failure)?;
+
+            let log = config
+                .log
+                .to_logger("wicketd")
+                .context("failed to initialize logger")
+                .map_err(CmdError::Failure)?;
+
+            Server::refresh_config(log, address)
+                .await
+                .map_err(CmdError::Failure)
         }
     }
 }
