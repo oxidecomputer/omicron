@@ -605,25 +605,22 @@ async fn sic_allocate_instance_external_ip(
     let repeat_saga_params = sagactx.saga_params::<NetParams>()?;
     let saga_params = repeat_saga_params.saga_params;
     let ip_index = repeat_saga_params.which;
-    let ip_params = saga_params.create_params.external_ips.get(ip_index);
-    let ip_params = match ip_params {
-        None => {
-            return Ok(());
-        }
-        Some(ref prs) => prs,
+    let Some(ip_params) = saga_params.create_params.external_ips.get(ip_index)
+    else {
+        return Ok(());
     };
     let opctx = crate::context::op_context_for_saga_action(
         &sagactx,
         &saga_params.serialized_authn,
     );
     let instance_id = repeat_saga_params.instance_id;
-    let ip_id = repeat_saga_params.new_id;
 
     match ip_params {
         // Allocate a new IP address from the target, possibly default, pool
         params::ExternalIpCreate::Ephemeral { ref pool_name } => {
             let pool_name =
                 pool_name.as_ref().map(|name| db::model::Name(name.clone()));
+            let ip_id = repeat_saga_params.new_id;
             datastore
                 .allocate_instance_ephemeral_ip(
                     &opctx,
@@ -661,16 +658,31 @@ async fn sic_allocate_instance_external_ip_undo(
     let repeat_saga_params = sagactx.saga_params::<NetParams>()?;
     let saga_params = repeat_saga_params.saga_params;
     let ip_index = repeat_saga_params.which;
-    if ip_index >= saga_params.create_params.external_ips.len() {
-        return Ok(());
-    }
-
     let opctx = crate::context::op_context_for_saga_action(
         &sagactx,
         &saga_params.serialized_authn,
     );
-    let ip_id = repeat_saga_params.new_id;
-    datastore.deallocate_external_ip(&opctx, ip_id).await?;
+    let Some(ip_params) = saga_params.create_params.external_ips.get(ip_index)
+    else {
+        return Ok(());
+    };
+
+    match ip_params {
+        params::ExternalIpCreate::Ephemeral { .. } => {
+            let ip_id = repeat_saga_params.new_id;
+            datastore.deallocate_external_ip(&opctx, ip_id).await?;
+        }
+        params::ExternalIpCreate::Floating { floating_ip_name } => {
+            let floating_ip_name = db::model::Name(floating_ip_name.clone());
+            let (.., authz_fip, db_fip) = LookupPath::new(&opctx, &datastore)
+                .project_id(saga_params.project_id)
+                .floating_ip_name(&floating_ip_name)
+                .fetch_for(authz::Action::Modify)
+                .await?;
+
+            datastore.floating_ip_detach(&opctx, &authz_fip, &db_fip).await?;
+        }
+    }
     Ok(())
 }
 
