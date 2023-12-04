@@ -1250,7 +1250,7 @@ table! {
 ///
 /// This should be updated whenever the schema is changed. For more details,
 /// refer to: schema/crdb/README.adoc
-pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(11, 0, 1);
+pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(19, 0, 1);
 
 allow_tables_to_appear_in_same_query!(
     system_update,
