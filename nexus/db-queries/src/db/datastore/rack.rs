@@ -1076,14 +1076,16 @@ mod test {
                 async fn [<get_all_ $table s>](db: &DataStore) -> Vec<$model> {
                     use crate::db::schema::$table::dsl;
                     use nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL;
-                    db.pool_connection_for_tests()
+                    let conn = db.pool_connection_for_tests()
                         .await
-                        .unwrap()
-                        .transaction_async(|conn| async move {
+                        .unwrap();
+
+                    db.transaction_retry_wrapper(concat!("fn_to_get_all_", stringify!($table)))
+                        .transaction(&conn, |conn| async move {
                             conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL)
                                 .await
                                 .unwrap();
-                            Ok::<_, crate::db::TransactionError<()>>(
+                            Ok(
                                 dsl::$table
                                     .select($model::as_select())
                                     .get_results_async(&conn)

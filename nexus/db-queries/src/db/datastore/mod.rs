@@ -221,7 +221,7 @@ impl DataStore {
     /// Constructs a transaction retry helper
     ///
     /// Automatically wraps the underlying producer
-    pub(crate) fn transaction_retry_wrapper(
+    pub fn transaction_retry_wrapper(
         &self,
         name: &'static str,
     ) -> crate::transaction_retry::RetryHelper {

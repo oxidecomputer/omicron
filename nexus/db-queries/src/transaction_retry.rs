@@ -73,7 +73,7 @@ impl RetryHelperInner {
 
 /// Helper utility for tracking retry attempts and latency.
 /// Intended to be used from within "transaction_async_with_retry".
-pub(crate) struct RetryHelper {
+pub struct RetryHelper {
     producer: Producer,
     name: &'static str,
     inner: Mutex<RetryHelperInner>,
@@ -95,7 +95,7 @@ impl RetryHelper {
     }
 
     /// Calls the function "f" in an asynchronous, retryable transaction.
-    pub(crate) async fn transaction<R, Func, Fut>(
+    pub async fn transaction<R, Func, Fut>(
         self,
         conn: &async_bb8_diesel::Connection<crate::db::DbConnection>,
         f: Func,
