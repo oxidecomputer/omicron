@@ -9,7 +9,9 @@ use gateway_messages::{SpPort, UpdateInProgressStatus, UpdateStatus};
 use gateway_test_utils::setup as mgs_setup;
 use hubtools::RawHubrisArchive;
 use hubtools::{CabooseBuilder, HubrisArchiveBuilder};
-use omicron_nexus::app::test_interfaces::{SpUpdater, UpdateProgress};
+use omicron_nexus::app::test_interfaces::{
+    MgsClients, SpUpdater, UpdateProgress,
+};
 use sp_sim::SimulatedSp;
 use sp_sim::SIM_GIMLET_BOARD;
 use sp_sim::SIM_SIDECAR_BOARD;
@@ -44,10 +46,11 @@ async fn test_sp_updater_updates_sled() {
             .await;
 
     // Configure an MGS client.
-    let mgs_client = Arc::new(gateway_client::Client::new(
-        &mgstestctx.client.url("/").to_string(),
-        mgstestctx.logctx.log.new(slog::o!("component" => "MgsClient")),
-    ));
+    let mut mgs_clients =
+        MgsClients::from_clients([gateway_client::Client::new(
+            &mgstestctx.client.url("/").to_string(),
+            mgstestctx.logctx.log.new(slog::o!("component" => "MgsClient")),
+        )]);
 
     // Configure and instantiate an `SpUpdater`.
     let sp_type = SpType::Sled;
@@ -64,11 +67,11 @@ async fn test_sp_updater_updates_sled() {
     );
 
     // Run the update.
-    sp_updater.update([mgs_client]).await.expect("update failed");
+    sp_updater.update(&mut mgs_clients).await.expect("update failed");
 
     // Ensure the SP received the complete update.
     let last_update_image = mgstestctx.simrack.gimlets[sp_slot as usize]
-        .last_update_data()
+        .last_sp_update_data()
         .await
         .expect("simulated SP did not receive an update");
 
@@ -94,10 +97,11 @@ async fn test_sp_updater_updates_switch() {
             .await;
 
     // Configure an MGS client.
-    let mgs_client = Arc::new(gateway_client::Client::new(
-        &mgstestctx.client.url("/").to_string(),
-        mgstestctx.logctx.log.new(slog::o!("component" => "MgsClient")),
-    ));
+    let mut mgs_clients =
+        MgsClients::from_clients([gateway_client::Client::new(
+            &mgstestctx.client.url("/").to_string(),
+            mgstestctx.logctx.log.new(slog::o!("component" => "MgsClient")),
+        )]);
 
     let sp_type = SpType::Switch;
     let sp_slot = 0;
@@ -112,10 +116,10 @@ async fn test_sp_updater_updates_switch() {
         &mgstestctx.logctx.log,
     );
 
-    sp_updater.update([mgs_client]).await.expect("update failed");
+    sp_updater.update(&mut mgs_clients).await.expect("update failed");
 
     let last_update_image = mgstestctx.simrack.sidecars[sp_slot as usize]
-        .last_update_data()
+        .last_sp_update_data()
         .await
         .expect("simulated SP did not receive an update");
 
@@ -172,16 +176,16 @@ async fn test_sp_updater_remembers_successful_mgs_instance() {
     // delivering an update requires a bare minimum of three requests (start the
     // update, query the status, reset the SP) and often more (if repeated
     // queries are required to wait for completion).
-    let mgs_clients = [
-        Arc::new(gateway_client::Client::new(
+    let mut mgs_clients = MgsClients::from_clients([
+        gateway_client::Client::new(
             &format!("http://{failing_mgs_addr}"),
             mgstestctx.logctx.log.new(slog::o!("component" => "MgsClient1")),
-        )),
-        Arc::new(gateway_client::Client::new(
+        ),
+        gateway_client::Client::new(
             &mgstestctx.client.url("/").to_string(),
             mgstestctx.logctx.log.new(slog::o!("component" => "MgsClient")),
-        )),
-    ];
+        ),
+    ]);
 
     let sp_type = SpType::Sled;
     let sp_slot = 0;
@@ -196,10 +200,10 @@ async fn test_sp_updater_remembers_successful_mgs_instance() {
         &mgstestctx.logctx.log,
     );
 
-    sp_updater.update(mgs_clients).await.expect("update failed");
+    sp_updater.update(&mut mgs_clients).await.expect("update failed");
 
     let last_update_image = mgstestctx.simrack.gimlets[sp_slot as usize]
-        .last_update_data()
+        .last_sp_update_data()
         .await
         .expect("simulated SP did not receive an update");
 
@@ -288,18 +292,18 @@ async fn test_sp_updater_switches_mgs_instances_on_failure() {
         reqwest::Client::builder().pool_max_idle_per_host(0).build().unwrap();
 
     // Configure two MGS clients pointed at our two proxy tasks.
-    let mgs_clients = [
-        Arc::new(gateway_client::Client::new_with_client(
+    let mut mgs_clients = MgsClients::from_clients([
+        gateway_client::Client::new_with_client(
             &format!("http://{mgs_proxy_one_addr}"),
             client.clone(),
             mgstestctx.logctx.log.new(slog::o!("component" => "MgsClient1")),
-        )),
-        Arc::new(gateway_client::Client::new_with_client(
+        ),
+        gateway_client::Client::new_with_client(
             &format!("http://{mgs_proxy_two_addr}"),
             client,
             mgstestctx.logctx.log.new(slog::o!("component" => "MgsClient2")),
-        )),
-    ];
+        ),
+    ]);
 
     let sp_type = SpType::Sled;
     let sp_slot = 0;
@@ -315,7 +319,8 @@ async fn test_sp_updater_switches_mgs_instances_on_failure() {
     );
 
     // Spawn the actual update task.
-    let mut update_task = tokio::spawn(sp_updater.update(mgs_clients));
+    let mut update_task =
+        tokio::spawn(async move { sp_updater.update(&mut mgs_clients).await });
 
     // Loop over incoming requests. We expect this sequence:
     //
@@ -408,7 +413,7 @@ async fn test_sp_updater_switches_mgs_instances_on_failure() {
     );
 
     let last_update_image = mgstestctx.simrack.gimlets[sp_slot as usize]
-        .last_update_data()
+        .last_sp_update_data()
         .await
         .expect("simulated SP did not receive an update");
 
@@ -434,10 +439,11 @@ async fn test_sp_updater_delivers_progress() {
             .await;
 
     // Configure an MGS client.
-    let mgs_client = Arc::new(gateway_client::Client::new(
-        &mgstestctx.client.url("/").to_string(),
-        mgstestctx.logctx.log.new(slog::o!("component" => "MgsClient")),
-    ));
+    let mut mgs_clients =
+        MgsClients::from_clients([gateway_client::Client::new(
+            &mgstestctx.client.url("/").to_string(),
+            mgstestctx.logctx.log.new(slog::o!("component" => "MgsClient")),
+        )]);
 
     let sp_type = SpType::Sled;
     let sp_slot = 0;
@@ -468,10 +474,11 @@ async fn test_sp_updater_delivers_progress() {
 
     // Spawn the update on a background task so we can watch `progress` as it is
     // applied.
-    let do_update_task = tokio::spawn(sp_updater.update([mgs_client]));
+    let do_update_task =
+        tokio::spawn(async move { sp_updater.update(&mut mgs_clients).await });
 
     // Allow the SP to respond to 2 messages: the caboose check and the "prepare
-    // update" messages that trigger the start of an update, then ensure we see
+    // update" messages that triggers the start of an update, then ensure we see
     // the "started" progress.
     sp_accept_sema.send(2).unwrap();
     progress.changed().await.unwrap();
@@ -541,7 +548,6 @@ async fn test_sp_updater_delivers_progress() {
             UpdateStatus::Complete(_) => {
                 if prev_bytes_received < sp_image_len {
                     prev_bytes_received = sp_image_len;
-                    continue;
                 }
             }
             status @ (UpdateStatus::None
@@ -589,10 +595,13 @@ async fn test_sp_updater_delivers_progress() {
     progress.changed().await.unwrap();
     assert_eq!(*progress.borrow_and_update(), Some(UpdateProgress::Complete));
 
+    // drop our progress receiver so `do_update_task` can complete
+    mem::drop(progress);
+
     do_update_task.await.expect("update task panicked").expect("update failed");
 
     let last_update_image = target_sp
-        .last_update_data()
+        .last_sp_update_data()
         .await
         .expect("simulated SP did not receive an update");
 

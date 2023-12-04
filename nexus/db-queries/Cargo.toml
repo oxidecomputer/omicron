@@ -21,25 +21,18 @@ diesel-dtrace.workspace = true
 dropshot.workspace = true
 futures.workspace = true
 headers.workspace = true
-hex.workspace = true
 http.workspace = true
 hyper.workspace = true
 ipnetwork.workspace = true
 lazy_static.workspace = true
 macaddr.workspace = true
 newtype_derive.workspace = true
-once_cell.workspace = true
 openssl.workspace = true
-openssl-sys.workspace = true
-openssl-probe.workspace = true
 oso.workspace = true
 paste.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
-rand.workspace = true
 ref-cast.workspace = true
-reqwest = { workspace = true, features = [ "json" ] }
-ring.workspace = true
 samael.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -51,14 +44,11 @@ static_assertions.workspace = true
 steno.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
-tokio-postgres = { workspace = true, features = [ "with-serde_json-1" ] }
-toml.workspace = true
 uuid.workspace = true
 usdt.workspace = true
 
 authz-macros.workspace = true
 db-macros.workspace = true
-nexus-defaults.workspace = true
 nexus-db-model.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
@@ -68,6 +58,7 @@ omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 assert_matches.workspace = true
+camino-tempfile.workspace = true
 expectorate.workspace = true
 hyper-rustls.workspace = true
 gateway-client.workspace = true
@@ -85,5 +76,4 @@ regex.workspace = true
 rustls.workspace = true
 strum.workspace = true
 subprocess.workspace = true
-tempfile.workspace = true
 term.workspace = true

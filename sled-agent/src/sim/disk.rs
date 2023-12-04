@@ -17,9 +17,10 @@ use omicron_common::api::external::Generation;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
+use omicron_common::api::internal::nexus::ProducerKind;
 use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
-use propolis_client::api::DiskAttachmentState as PropolisDiskState;
+use propolis_client::types::DiskAttachmentState as PropolisDiskState;
 use std::net::{Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
@@ -168,6 +169,7 @@ impl SimDisk {
         let producer_address = SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 0);
         let server_info = ProducerEndpoint {
             id,
+            kind: ProducerKind::SledAgent,
             address: producer_address,
             base_route: "/collect".to_string(),
             interval: Duration::from_millis(200),

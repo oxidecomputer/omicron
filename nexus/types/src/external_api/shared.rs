@@ -252,6 +252,42 @@ pub enum IpPoolResourceType {
     Silo,
 }
 
+/// Properties that uniquely identify an Oxide hardware component
+#[derive(
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    PartialOrd,
+    Ord,
+    PartialEq,
+    Eq,
+)]
+pub struct Baseboard {
+    pub serial: String,
+    pub part: String,
+    pub revision: i64,
+}
+
+/// A sled that has not been added to an initialized rack yet
+#[derive(
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    PartialOrd,
+    Ord,
+    PartialEq,
+    Eq,
+)]
+pub struct UninitializedSled {
+    pub baseboard: Baseboard,
+    pub rack_id: Uuid,
+    pub cubby: u16,
+}
+
 #[cfg(test)]
 mod test {
     use super::Policy;

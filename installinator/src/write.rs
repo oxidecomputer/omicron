@@ -122,8 +122,9 @@ impl WriteDestination {
                     );
 
                     let zpool_name = disk.zpool_name().clone();
-                    let control_plane_dir = zpool_name
-                        .dataset_mountpoint(sled_hardware::INSTALL_DATASET);
+                    let control_plane_dir = zpool_name.dataset_mountpoint(
+                        sled_storage::dataset::INSTALL_DATASET,
+                    );
 
                     match drives.entry(slot) {
                         Entry::Vacant(entry) => {

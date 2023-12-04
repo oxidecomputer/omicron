@@ -84,13 +84,34 @@ pub struct SledInstanceState {
 
 // Oximeter producer/collector objects.
 
+/// The kind of metric producer this is.
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProducerKind {
+    /// The producer is a sled-agent.
+    SledAgent,
+    /// The producer is an Omicron-managed service.
+    Service,
+    /// The producer is a Propolis VMM managing a guest instance.
+    Instance,
+}
+
 /// Information announced by a metric server, used so that clients can contact it and collect
 /// available metric data from it.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
 pub struct ProducerEndpoint {
+    /// A unique ID for this producer.
     pub id: Uuid,
+    /// The kind of producer.
+    pub kind: ProducerKind,
+    /// The IP address and port at which `oximeter` can collect metrics from the
+    /// producer.
     pub address: SocketAddr,
+    /// The API base route from which `oximeter` can collect metrics.
+    ///
+    /// The full route is `{base_route}/{id}`.
     pub base_route: String,
+    /// The interval on which `oximeter` should collect metrics.
     pub interval: Duration,
 }
 

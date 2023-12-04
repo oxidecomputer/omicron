@@ -457,7 +457,7 @@ impl DataStore {
     /// snapshots.
     pub async fn find_deleted_volume_regions(
         &self,
-    ) -> ListResultVec<(Dataset, Region, Volume)> {
+    ) -> ListResultVec<(Dataset, Region, Option<RegionSnapshot>, Volume)> {
         use db::schema::dataset::dsl as dataset_dsl;
         use db::schema::region::dsl as region_dsl;
         use db::schema::region_snapshot::dsl;
@@ -494,6 +494,7 @@ impl DataStore {
             .select((
                 Dataset::as_select(),
                 Region::as_select(),
+                Option::<RegionSnapshot>::as_select(),
                 Volume::as_select(),
             ))
             .load_async(&*self.pool_connection_unauthorized().await?)
@@ -1024,7 +1025,7 @@ impl DataStore {
 /// Return the targets from a VolumeConstructionRequest.
 ///
 /// The targets of a volume construction request map to resources.
-fn read_only_resources_associated_with_volume(
+pub fn read_only_resources_associated_with_volume(
     vcr: &VolumeConstructionRequest,
     crucible_targets: &mut CrucibleTargets,
 ) {

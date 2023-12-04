@@ -26,9 +26,26 @@ use std::path::Path;
 use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
+mod common_sp_update;
+mod host_phase1_updater;
+mod mgs_clients;
+mod rot_updater;
 mod sp_updater;
 
-pub use sp_updater::{SpUpdateError, SpUpdater, UpdateProgress};
+pub use common_sp_update::SpComponentUpdateError;
+pub use host_phase1_updater::HostPhase1Updater;
+pub use mgs_clients::MgsClients;
+pub use rot_updater::RotUpdater;
+pub use sp_updater::SpUpdater;
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum UpdateProgress {
+    Started,
+    Preparing { progress: Option<f64> },
+    InProgress { progress: Option<f64> },
+    Complete,
+    Failed(String),
+}
 
 static BASE_ARTIFACT_DIR: &str = "/var/tmp/oxide_artifacts";
 
@@ -69,14 +86,14 @@ impl super::Nexus {
                 ),
             })?;
 
-        let artifacts = tokio::task::spawn_blocking(move || {
-            crate::updates::read_artifacts(&trusted_root, base_url)
-        })
-        .await
-        .unwrap()
-        .map_err(|e| Error::InternalError {
-            internal_message: format!("error trying to refresh updates: {}", e),
-        })?;
+        let artifacts = crate::updates::read_artifacts(&trusted_root, base_url)
+            .await
+            .map_err(|e| Error::InternalError {
+                internal_message: format!(
+                    "error trying to refresh updates: {}",
+                    e
+                ),
+            })?;
 
         // FIXME: if we hit an error in any of these database calls, the
         // available artifact table will be out of sync with the current

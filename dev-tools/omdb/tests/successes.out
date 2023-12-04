@@ -255,6 +255,11 @@ task: "inventory_collection"
     collects hardware and software inventory data from the whole system
 
 
+task: "nat_v4_garbage_collector"
+    prunes soft-deleted IPV4 NAT entries from ipv4_nat_entry table based on a
+    predetermined retention policy
+
+
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
@@ -318,6 +323,13 @@ task: "dns_propagation_external"
       DNS_SERVER_ADDR LAST_RESULT 
       [::1]:REDACTED_PORT     success     
 
+
+task: "nat_v4_garbage_collector"
+  configured period: every 30s
+  currently executing: no
+  last completed activation: iter 2, triggered by an explicit signal
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+warning: unknown background task: "nat_v4_garbage_collector" (don't know how to interpret details: Null)
 
 task: "external_endpoints"
   configured period: every 1m

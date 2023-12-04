@@ -12,17 +12,18 @@ use crate::params::{
     InstanceHardware, InstanceMigrationSourceParams, InstancePutStateResponse,
     InstanceStateRequested, InstanceUnregisterResponse,
 };
-use crate::storage_manager::StorageResources;
 use crate::zone_bundle::BundleError;
 use crate::zone_bundle::ZoneBundler;
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::PortManager;
+use illumos_utils::running_zone::ZoneBuilderFactory;
 use illumos_utils::vmm_reservoir;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::nexus::SledInstanceState;
 use omicron_common::api::internal::nexus::VmmRuntimeState;
+use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
@@ -74,16 +75,18 @@ struct InstanceManagerInternal {
 
     vnic_allocator: VnicAllocator<Etherstub>,
     port_manager: PortManager,
-    storage: StorageResources,
+    storage: StorageHandle,
     zone_bundler: ZoneBundler,
+    zone_builder_factory: ZoneBuilderFactory,
 }
 
 pub(crate) struct InstanceManagerServices {
     pub nexus_client: NexusClientWithResolver,
     pub vnic_allocator: VnicAllocator<Etherstub>,
     pub port_manager: PortManager,
-    pub storage: StorageResources,
+    pub storage: StorageHandle,
     pub zone_bundler: ZoneBundler,
+    pub zone_builder_factory: ZoneBuilderFactory,
 }
 
 /// All instances currently running on the sled.
@@ -98,8 +101,9 @@ impl InstanceManager {
         nexus_client: NexusClientWithResolver,
         etherstub: Etherstub,
         port_manager: PortManager,
-        storage: StorageResources,
+        storage: StorageHandle,
         zone_bundler: ZoneBundler,
+        zone_builder_factory: ZoneBuilderFactory,
     ) -> Result<InstanceManager, Error> {
         Ok(InstanceManager {
             inner: Arc::new(InstanceManagerInternal {
@@ -113,6 +117,7 @@ impl InstanceManager {
                 port_manager,
                 storage,
                 zone_bundler,
+                zone_builder_factory,
             }),
         })
     }
@@ -266,6 +271,10 @@ impl InstanceManager {
                     port_manager: self.inner.port_manager.clone(),
                     storage: self.inner.storage.clone(),
                     zone_bundler: self.inner.zone_bundler.clone(),
+                    zone_builder_factory: self
+                        .inner
+                        .zone_builder_factory
+                        .clone(),
                 };
 
                 let state = crate::instance::InstanceInitialState {

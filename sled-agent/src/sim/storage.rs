@@ -16,13 +16,13 @@ use chrono::prelude::*;
 use crucible_agent_client::types::{
     CreateRegion, Region, RegionId, RunningSnapshot, Snapshot, State,
 };
-use crucible_client_types::VolumeConstructionRequest;
 use dropshot::HandlerTaskMode;
 use dropshot::HttpError;
 use futures::lock::Mutex;
 use nexus_client::types::{
     ByteCount, PhysicalDiskKind, PhysicalDiskPutRequest, ZpoolPutRequest,
 };
+use propolis_client::types::VolumeConstructionRequest;
 use slog::Logger;
 use std::collections::HashMap;
 use std::collections::HashSet;

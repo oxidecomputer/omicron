@@ -6,6 +6,7 @@
 
 use super::{
     console_api, device_auth, params,
+    shared::UninitializedSled,
     views::{
         self, Certificate, Group, IdentityProvider, Image, IpPool, IpPoolRange,
         PhysicalDisk, Project, Rack, Role, Silo, Sled, Snapshot, SshKey, User,
@@ -217,11 +218,14 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(rack_view)?;
         api.register(sled_list)?;
         api.register(sled_view)?;
+        api.register(sled_set_provision_state)?;
         api.register(sled_instance_list)?;
         api.register(sled_physical_disk_list)?;
         api.register(physical_disk_list)?;
         api.register(switch_list)?;
         api.register(switch_view)?;
+        api.register(uninitialized_sled_list)?;
+        api.register(add_sled_to_initialized_rack)?;
 
         api.register(user_builtin_list)?;
         api.register(user_builtin_view)?;
@@ -4101,6 +4105,7 @@ async fn vpc_firewall_rules_update(
     method = GET,
     path = "/v1/vpc-routers",
     tags = ["vpcs"],
+    unpublished = true,
 }]
 async fn vpc_router_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4136,6 +4141,7 @@ async fn vpc_router_list(
     method = GET,
     path = "/v1/vpc-routers/{router}",
     tags = ["vpcs"],
+    unpublished = true,
 }]
 async fn vpc_router_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4165,6 +4171,7 @@ async fn vpc_router_view(
     method = POST,
     path = "/v1/vpc-routers",
     tags = ["vpcs"],
+    unpublished = true,
 }]
 async fn vpc_router_create(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4196,6 +4203,7 @@ async fn vpc_router_create(
     method = DELETE,
     path = "/v1/vpc-routers/{router}",
     tags = ["vpcs"],
+    unpublished = true,
 }]
 async fn vpc_router_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4225,6 +4233,7 @@ async fn vpc_router_delete(
     method = PUT,
     path = "/v1/vpc-routers/{router}",
     tags = ["vpcs"],
+    unpublished = true,
 }]
 async fn vpc_router_update(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4260,6 +4269,7 @@ async fn vpc_router_update(
     method = GET,
     path = "/v1/vpc-router-routes",
     tags = ["vpcs"],
+    unpublished = true,
 }]
 async fn vpc_router_route_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4297,6 +4307,7 @@ async fn vpc_router_route_list(
     method = GET,
     path = "/v1/vpc-router-routes/{route}",
     tags = ["vpcs"],
+    unpublished = true,
 }]
 async fn vpc_router_route_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4329,6 +4340,7 @@ async fn vpc_router_route_view(
     method = POST,
     path = "/v1/vpc-router-routes",
     tags = ["vpcs"],
+    unpublished = true,
 }]
 async fn vpc_router_route_create(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4360,6 +4372,7 @@ async fn vpc_router_route_create(
     method = DELETE,
     path = "/v1/vpc-router-routes/{route}",
     tags = ["vpcs"],
+    unpublished = true,
 }]
 async fn vpc_router_route_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4391,6 +4404,7 @@ async fn vpc_router_route_delete(
     method = PUT,
     path = "/v1/vpc-router-routes/{route}",
     tags = ["vpcs"],
+    unpublished = true,
 }]
 async fn vpc_router_route_update(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4481,6 +4495,50 @@ async fn rack_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// List uninitialized sleds in a given rack
+#[endpoint {
+    method = GET,
+    path = "/v1/system/hardware/uninitialized-sleds",
+    tags = ["system/hardware"]
+}]
+async fn uninitialized_sled_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+) -> Result<HttpResponseOk<Vec<UninitializedSled>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let sleds = nexus.uninitialized_sled_list(&opctx).await?;
+        Ok(HttpResponseOk(sleds))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Add a sled to an initialized rack
+//
+// TODO: In the future this should really be a PUT request, once we resolve
+// https://github.com/oxidecomputer/omicron/issues/4494. It should also
+// explicitly be tied to a rack via a `rack_id` path param. For now we assume
+// we are only operating on single rack systems.
+#[endpoint {
+    method = POST,
+    path = "/v1/system/hardware/sleds/",
+    tags = ["system/hardware"]
+}]
+async fn add_sled_to_initialized_rack(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    sled: TypedBody<UninitializedSled>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        nexus.add_sled_to_initialized_rack(&opctx, sled.into_inner()).await?;
+        Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 // Sleds
 
 /// List sleds
@@ -4531,6 +4589,47 @@ async fn sled_view(
         let (.., sled) =
             nexus.sled_lookup(&opctx, &path.sled_id)?.fetch().await?;
         Ok(HttpResponseOk(sled.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Set the sled's provision state.
+#[endpoint {
+    method = PUT,
+    path = "/v1/system/hardware/sleds/{sled_id}/provision-state",
+    tags = ["system/hardware"],
+}]
+async fn sled_set_provision_state(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::SledPath>,
+    new_provision_state: TypedBody<params::SledProvisionStateParams>,
+) -> Result<HttpResponseOk<params::SledProvisionStateResponse>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+
+        let path = path_params.into_inner();
+        let provision_state = new_provision_state.into_inner().state;
+
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        // Convert the external `SledProvisionState` into our internal data model.
+        let new_state =
+            db::model::SledProvisionState::try_from(provision_state).map_err(
+                |error| HttpError::for_bad_request(None, format!("{error}")),
+            )?;
+
+        let sled_lookup = nexus.sled_lookup(&opctx, &path.sled_id)?;
+
+        let old_state = nexus
+            .sled_set_provision_state(&opctx, &sled_lookup, new_state)
+            .await?;
+
+        let response = params::SledProvisionStateResponse {
+            old_state: old_state.into(),
+            new_state: new_state.into(),
+        };
+
+        Ok(HttpResponseOk(response))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

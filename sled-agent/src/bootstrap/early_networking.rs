@@ -17,7 +17,9 @@ use gateway_client::Client as MgsClient;
 use internal_dns::resolver::{ResolveError, Resolver as DnsResolver};
 use internal_dns::ServiceName;
 use ipnetwork::{IpNetwork, Ipv6Network};
-use omicron_common::address::{Ipv6Subnet, MGS_PORT};
+use mg_admin_client::types::{ApplyRequest, BgpPeerConfig, Prefix4};
+use mg_admin_client::Client as MgdClient;
+use omicron_common::address::{Ipv6Subnet, MGD_PORT, MGS_PORT};
 use omicron_common::address::{DDMD_PORT, DENDRITE_PORT};
 use omicron_common::api::internal::shared::{
     PortConfigV1, PortFec, PortSpeed, RackNetworkConfig, RackNetworkConfigV1,
@@ -37,6 +39,7 @@ use std::time::{Duration, Instant};
 use thiserror::Error;
 
 static BOUNDARY_SERVICES_ADDR: &str = "fd00:99::1";
+const BGP_SESSION_RESOLUTION: u64 = 100;
 
 /// Errors that can occur during early network setup
 #[derive(Error, Debug)]
@@ -55,6 +58,12 @@ pub enum EarlyNetworkSetupError {
 
     #[error("Error during DNS lookup: {0}")]
     DnsResolver(#[from] ResolveError),
+
+    #[error("BGP configuration error: {0}")]
+    BgpConfigurationError(String),
+
+    #[error("MGD error: {0}")]
+    MgdError(String),
 }
 
 enum LookupSwitchZoneAddrsResult {
@@ -453,6 +462,67 @@ impl<'a> EarlyNetworkSetup<'a> {
             ddmd_client.advertise_prefix(Ipv6Subnet::new(ipv6_entry.addr));
         }
 
+        let mgd = MgdClient::new(
+            &self.log,
+            SocketAddrV6::new(switch_zone_underlay_ip, MGD_PORT, 0, 0).into(),
+        )
+        .map_err(|e| {
+            EarlyNetworkSetupError::MgdError(format!(
+                "initialize mgd client: {e}"
+            ))
+        })?;
+
+        // Iterate through ports and apply BGP config.
+        for port in &our_ports {
+            let mut bgp_peer_configs = Vec::new();
+            for peer in &port.bgp_peers {
+                let config = rack_network_config
+                    .bgp
+                    .iter()
+                    .find(|x| x.asn == peer.asn)
+                    .ok_or(EarlyNetworkSetupError::BgpConfigurationError(
+                        format!(
+                            "asn {} referenced by peer undefined",
+                            peer.asn
+                        ),
+                    ))?;
+
+                let bpc = BgpPeerConfig {
+                    asn: peer.asn,
+                    name: format!("{}", peer.addr),
+                    host: format!("{}:179", peer.addr),
+                    hold_time: peer.hold_time.unwrap_or(6),
+                    idle_hold_time: peer.idle_hold_time.unwrap_or(3),
+                    delay_open: peer.delay_open.unwrap_or(0),
+                    connect_retry: peer.connect_retry.unwrap_or(3),
+                    keepalive: peer.keepalive.unwrap_or(2),
+                    resolution: BGP_SESSION_RESOLUTION,
+                    originate: config
+                        .originate
+                        .iter()
+                        .map(|x| Prefix4 { length: x.prefix(), value: x.ip() })
+                        .collect(),
+                };
+                bgp_peer_configs.push(bpc);
+            }
+
+            if bgp_peer_configs.is_empty() {
+                continue;
+            }
+
+            mgd.inner
+                .bgp_apply(&ApplyRequest {
+                    peer_group: port.port.clone(),
+                    peers: bgp_peer_configs,
+                })
+                .await
+                .map_err(|e| {
+                    EarlyNetworkSetupError::BgpConfigurationError(format!(
+                        "BGP peer configuration failed: {e}",
+                    ))
+                })?;
+        }
+
         Ok(our_ports)
     }
 
@@ -478,23 +548,20 @@ impl<'a> EarlyNetworkSetup<'a> {
 
         let mut addrs = Vec::new();
         for a in &port_config.addresses {
+            // TODO We're discarding the `uplink_cidr.prefix()` here and only using
+            // the IP address; at some point we probably need to give the full CIDR
+            // to dendrite?
             addrs.push(a.ip());
         }
 
-        // TODO We're discarding the `uplink_cidr.prefix()` here and only using
-        // the IP address; at some point we probably need to give the full CIDR
-        // to dendrite?
         let link_settings = LinkSettings {
-            // TODO Allow user to configure link properties
-            // https://github.com/oxidecomputer/omicron/issues/3061
             params: LinkCreate {
-                autoneg: false,
-                kr: false,
+                autoneg: port_config.autoneg,
+                kr: false, //NOTE: kr does not apply to user configurable links.
                 fec: convert_fec(&port_config.uplink_port_fec),
                 speed: convert_speed(&port_config.uplink_port_speed),
                 lane: Some(LinkId(0)),
             },
-            //addrs: vec![addr],
             addrs,
         };
         dpd_port_settings.links.insert(link_id.to_string(), link_settings);
@@ -796,6 +863,7 @@ mod tests {
                         port: uplink.uplink_port,
                         uplink_port_speed: uplink.uplink_port_speed,
                         uplink_port_fec: uplink.uplink_port_fec,
+                        autoneg: false,
                         bgp_peers: vec![],
                     }],
                     bgp: vec![],

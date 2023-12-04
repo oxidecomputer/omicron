@@ -73,6 +73,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.rack (
  * Sleds
  */
 
+CREATE TYPE IF NOT EXISTS omicron.public.sled_provision_state AS ENUM (
+    -- New resources can be provisioned onto the sled
+    'provisionable',
+    -- New resources must not be provisioned onto the sled
+    'non_provisionable'
+);
+
 CREATE TABLE IF NOT EXISTS omicron.public.sled (
     /* Identity metadata (asset) */
     id UUID PRIMARY KEY,
@@ -103,6 +110,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.sled (
 
     /* The last address allocated to an Oxide service on this sled. */
     last_used_address INET NOT NULL,
+
+    /* The state of whether resources should be provisioned onto the sled */
+    provision_state omicron.public.sled_provision_state NOT NULL,
 
     -- This constraint should be upheld, even for deleted disks
     -- in the fleet.
@@ -156,6 +166,51 @@ CREATE TABLE IF NOT EXISTS omicron.public.sled_resource (
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_resource_by_sled ON omicron.public.sled_resource (
     sled_id,
     id
+);
+
+
+-- Table of all sled subnets allocated for sleds added to an already initialized
+-- rack. The sleds in this table and their allocated subnets are created before
+-- a sled is added to the `sled` table. Addition to the `sled` table occurs
+-- after the sled is initialized and notifies Nexus about itself.
+--
+-- For simplicity and space savings, this table doesn't actually contain the
+-- full subnets for a given sled, but only the octet that extends a /56 rack
+-- subnet to a /64 sled subnet. The rack subnet is maintained in the `rack`
+-- table.
+--
+-- This table does not include subnet octets allocated during RSS and therefore
+-- all of the octets start at 33. This makes the data in this table purely additive
+-- post-RSS, which also implies that we cannot re-use subnet octets if an original
+-- sled that was part of RSS was removed from the cluster.
+CREATE TABLE IF NOT EXISTS omicron.public.sled_underlay_subnet_allocation (
+    -- The physical identity of the sled
+    -- (foreign key into `hw_baseboard_id` table)
+    hw_baseboard_id UUID PRIMARY KEY,
+
+    -- The rack to which a sled is being added
+    -- (foreign key into `rack` table)
+    --
+    -- We require this because the sled is not yet part of the sled table when
+    -- we first allocate a subnet for it.
+    rack_id UUID NOT NULL,
+
+    -- The sled to which a subnet is being allocated
+    --
+    -- Eventually will be a foreign key into the `sled` table when the sled notifies nexus
+    -- about itself after initialization.
+    sled_id UUID NOT NULL,
+
+    -- The octet that extends a /56 rack subnet to a /64 sled subnet
+    --
+    -- Always between 33 and 255 inclusive
+    subnet_octet INT2 NOT NULL UNIQUE CHECK (subnet_octet BETWEEN 33 AND 255)
+);
+
+-- Add an index which allows pagination by {rack_id, sled_id} pairs. 
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_subnet_allocation_by_rack_and_sled ON omicron.public.sled_underlay_subnet_allocation (
+    rack_id,
+    sled_id
 );
 
 /*
@@ -1109,12 +1164,25 @@ CREATE TABLE IF NOT EXISTS omicron.public.oximeter (
 );
 
 /*
+ * The kind of metric producer each record corresponds to.
+ */
+CREATE TYPE IF NOT EXISTS omicron.public.producer_kind AS ENUM (
+    -- A sled agent for an entry in the sled table.
+    'sled_agent',
+    -- A service in the omicron.public.service table
+    'service',
+    -- A Propolis VMM for an instance in the omicron.public.instance table
+    'instance'
+);
+
+/*
  * Information about registered metric producers.
  */
 CREATE TABLE IF NOT EXISTS omicron.public.metric_producer (
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
+    kind omicron.public.producer_kind NOT NULL,
     ip INET NOT NULL,
     port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL,
     interval FLOAT NOT NULL,
@@ -2622,12 +2690,19 @@ CREATE TABLE IF NOT EXISTS omicron.public.sw_caboose (
     board TEXT NOT NULL,
     git_commit TEXT NOT NULL,
     name TEXT NOT NULL,
-    -- The MGS response that provides this field indicates that it can be NULL.
-    -- But that's only to support old software that we no longer support.
     version TEXT NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS caboose_properties
     on omicron.public.sw_caboose (board, git_commit, name, version);
+
+/* root of trust pages: this table assigns unique ids to distinct RoT CMPA
+   and CFPA page contents, each of which is a 512-byte blob */
+CREATE TABLE IF NOT EXISTS omicron.public.sw_root_of_trust_page (
+    id UUID PRIMARY KEY,
+    data_base64 TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS root_of_trust_page_properties
+    on omicron.public.sw_root_of_trust_page (data_base64);
 
 /* Inventory Collections */
 
@@ -2736,6 +2811,32 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_caboose (
     PRIMARY KEY (inv_collection_id, hw_baseboard_id, which)
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.root_of_trust_page_which AS ENUM (
+    'cmpa',
+    'cfpa_active',
+    'cfpa_inactive',
+    'cfpa_scratch'
+);
+
+-- root of trust key signing pages found
+CREATE TABLE IF NOT EXISTS omicron.public.inv_root_of_trust_page (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+    -- which system this SP reports it is part of
+    -- (foreign key into `hw_baseboard_id` table)
+    hw_baseboard_id UUID NOT NULL,
+    -- when this observation was made
+    time_collected TIMESTAMPTZ NOT NULL,
+    -- which MGS instance reported this data
+    source TEXT NOT NULL,
+
+    which omicron.public.root_of_trust_page_which NOT NULL,
+    sw_root_of_trust_page_id UUID NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, hw_baseboard_id, which)
+);
+
 /*******************************************************************/
 
 /*
@@ -2746,12 +2847,24 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_caboose (
 COMMIT;
 BEGIN;
 
-/*******************************************************************/
+CREATE TABLE IF NOT EXISTS omicron.public.db_metadata (
+    -- There should only be one row of this table for the whole DB.
+    -- It's a little goofy, but filter on "singleton = true" before querying
+    -- or applying updates, and you'll access the singleton row.
+    --
+    -- We also add a constraint on this table to ensure it's not possible to
+    -- access the version of this table with "singleton = false".
+    singleton BOOL NOT NULL PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    -- Semver representation of the DB version
+    version STRING(64) NOT NULL,
 
-/*
- * Metadata for the schema itself. This version number isn't great, as there's
- * nothing to ensure it gets bumped when it should be, but it's a start.
- */
+    -- (Optional) Semver representation of the DB version to which we're upgrading
+    target_version STRING(64),
+
+    CHECK (singleton = true)
+);
 
 -- Per-VMM state.
 CREATE TABLE IF NOT EXISTS omicron.public.vmm (
@@ -2820,6 +2933,62 @@ CREATE TYPE IF NOT EXISTS omicron.public.switch_link_speed AS ENUM (
 ALTER TABLE omicron.public.switch_port_settings_link_config ADD COLUMN IF NOT EXISTS fec omicron.public.switch_link_fec;
 ALTER TABLE omicron.public.switch_port_settings_link_config ADD COLUMN IF NOT EXISTS speed omicron.public.switch_link_speed;
 
+CREATE SEQUENCE IF NOT EXISTS omicron.public.ipv4_nat_version START 1 INCREMENT 1;
+
+CREATE TABLE IF NOT EXISTS omicron.public.ipv4_nat_entry (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    external_address INET NOT NULL,
+    first_port INT4 NOT NULL,
+    last_port INT4 NOT NULL,
+    sled_address INET NOT NULL,
+    vni INT4 NOT NULL,
+    mac INT8 NOT NULL,
+    version_added INT8 NOT NULL DEFAULT nextval('omicron.public.ipv4_nat_version'),
+    version_removed INT8,
+    time_created TIMESTAMPTZ NOT NULL DEFAULT now(),
+    time_deleted TIMESTAMPTZ
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ipv4_nat_version_added ON omicron.public.ipv4_nat_entry (
+    version_added
+)
+STORING (
+    external_address,
+    first_port,
+    last_port,
+    sled_address,
+    vni,
+    mac,
+    time_created,
+    time_deleted
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS overlapping_ipv4_nat_entry ON omicron.public.ipv4_nat_entry (
+    external_address,
+    first_port,
+    last_port
+) WHERE time_deleted IS NULL;
+
+CREATE INDEX IF NOT EXISTS ipv4_nat_lookup ON omicron.public.ipv4_nat_entry (external_address, first_port, last_port, sled_address, vni, mac);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ipv4_nat_version_removed ON omicron.public.ipv4_nat_entry (
+    version_removed
+)
+STORING (
+    external_address,
+    first_port,
+    last_port,
+    sled_address,
+    vni,
+    mac,
+    time_created,
+    time_deleted
+);
+
+/*
+ * Metadata for the schema itself. This version number isn't great, as there's
+ * nothing to ensure it gets bumped when it should be, but it's a start.
+ */
 CREATE TABLE IF NOT EXISTS omicron.public.db_metadata (
     -- There should only be one row of this table for the whole DB.
     -- It's a little goofy, but filter on "singleton = true" before querying
@@ -2838,6 +3007,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.db_metadata (
 
     CHECK (singleton = true)
 );
+
+ALTER TABLE omicron.public.switch_port_settings_link_config ADD COLUMN IF NOT EXISTS autoneg BOOL NOT NULL DEFAULT false;
 
 INSERT INTO omicron.public.db_metadata (
     singleton,
