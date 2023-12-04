@@ -27,6 +27,7 @@ use chrono::Utc;
 use diesel::prelude::*;
 use nexus_db_model::Certificate;
 use nexus_db_model::ServiceKind;
+use nexus_db_model::SiloQuotas;
 use nexus_types::external_api::params;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::SiloRole;
@@ -254,6 +255,19 @@ impl DataStore {
             }
 
             self.dns_update(nexus_opctx, &conn, dns_update).await?;
+
+            self.silo_quotas_create(
+                opctx,
+                &conn,
+                &authz_silo,
+                SiloQuotas::new(
+                    authz_silo.id(),
+                    new_silo_params.quotas.cpus,
+                    new_silo_params.quotas.memory,
+                    new_silo_params.quotas.storage,
+                ),
+            )
+            .await?;
 
             Ok(silo)
         })

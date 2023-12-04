@@ -5,12 +5,13 @@ use crate::db;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::pagination::paginated;
+use crate::db::pool::DbConnection;
+use crate::db::TransactionError;
+use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
-use chrono::Utc;
 use diesel::prelude::*;
 use nexus_db_model::SiloQuotas;
-use nexus_types::external_api::params;
-use omicron_common::api::external::CreateResult;
+use nexus_db_model::SiloQuotasUpdate;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
@@ -24,46 +25,54 @@ impl DataStore {
     pub async fn silo_quotas_create(
         &self,
         opctx: &OpContext,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
         authz_silo: &authz::Silo,
         quotas: SiloQuotas,
-    ) -> CreateResult<SiloQuotas> {
+    ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, authz_silo).await?;
         let silo_id = authz_silo.id();
         use db::schema::silo_quotas::dsl;
 
-        diesel::insert_into(dsl::silo_quotas)
-            .values(quotas)
-            .returning(SiloQuotas::as_returning())
-            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel(
+        let result = conn
+            .transaction_async(|c| async move {
+                diesel::insert_into(dsl::silo_quotas)
+                    .values(quotas)
+                    .execute_async(&c)
+                    .await
+                    .map_err(TransactionError::CustomError)
+            })
+            .await;
+
+        match result {
+            Ok(_) => Ok(()),
+            Err(TransactionError::CustomError(e)) => {
+                // TODO: Is this the right error handler?
+                Err(public_error_from_diesel(e, ErrorHandler::Server))
+            }
+            Err(TransactionError::Database(e)) => {
+                Err(public_error_from_diesel(
                     e,
                     ErrorHandler::Conflict(
                         ResourceType::SiloQuotas,
                         &silo_id.to_string(),
                     ),
-                )
-            })
+                ))
+            }
+        }
     }
 
     pub async fn silo_update_quota(
         &self,
         opctx: &OpContext,
         authz_silo: &authz::Silo,
-        updates: params::SiloQuotasUpdate,
+        updates: SiloQuotasUpdate,
     ) -> UpdateResult<SiloQuotas> {
         opctx.authorize(authz::Action::Modify, authz_silo).await?;
         use db::schema::silo_quotas::dsl;
         let silo_id = authz_silo.id();
         diesel::update(dsl::silo_quotas)
             .filter(dsl::silo_id.eq(silo_id))
-            .set((
-                dsl::time_modified.eq(Utc::now()),
-                dsl::cpus.eq(updates.cpus),
-                dsl::memory.eq(updates.memory),
-                dsl::storage.eq(updates.storage),
-            ))
+            .set(updates)
             .returning(SiloQuotas::as_returning())
             .get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await

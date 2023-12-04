@@ -1,11 +1,18 @@
 use crate::schema::silo_quotas;
 use chrono::{DateTime, Utc};
-use nexus_types::external_api::views;
+use nexus_types::external_api::{params, views};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(
-    Queryable, Insertable, Debug, Clone, Selectable, Serialize, Deserialize,
+    Queryable,
+    Insertable,
+    Debug,
+    Clone,
+    Selectable,
+    Serialize,
+    Deserialize,
+    AsChangeset,
 )]
 #[diesel(table_name = silo_quotas)]
 pub struct SiloQuotas {
@@ -51,6 +58,27 @@ impl From<views::SiloQuotas> for SiloQuotas {
             cpus: silo_quotas.cpus,
             memory: silo_quotas.memory,
             storage: silo_quotas.storage,
+        }
+    }
+}
+
+// Describes a set of updates for the [`SiloQuotas`] model.
+#[derive(AsChangeset)]
+#[diesel(table_name = silo_quotas)]
+pub struct SiloQuotasUpdate {
+    pub cpus: Option<i64>,
+    pub memory: Option<i64>,
+    pub storage: Option<i64>,
+    pub time_modified: DateTime<Utc>,
+}
+
+impl From<params::SiloQuotasUpdate> for SiloQuotasUpdate {
+    fn from(params: params::SiloQuotasUpdate) -> Self {
+        Self {
+            cpus: params.cpus,
+            memory: params.memory,
+            storage: params.storage,
+            time_modified: Utc::now(),
         }
     }
 }

@@ -24,6 +24,12 @@ lazy_static! {
                     name: "default-silo".parse().unwrap(),
                     description: "default silo".to_string(),
                 },
+                // TODO: Should the default silo have a quota? If so, what should the defaults be?
+                quotas: params::SiloQuotasCreate {
+                    cpus: 0,
+                    memory: 0,
+                    storage: 0,
+                },
                 discoverable: false,
                 identity_mode: shared::SiloIdentityMode::LocalOnly,
                 admin_group_name: None,
@@ -48,6 +54,12 @@ lazy_static! {
                 identity: IdentityMetadataCreateParams {
                     name: "oxide-internal".parse().unwrap(),
                     description: "Built-in internal Silo.".to_string(),
+                },
+                // TODO: Should the internal silo have a quota? If so, what should the defaults be?
+                quotas: params::SiloQuotasCreate {
+                    cpus: 0,
+                    memory: 0,
+                    storage: 0,
                 },
                 discoverable: false,
                 identity_mode: shared::SiloIdentityMode::LocalOnly,

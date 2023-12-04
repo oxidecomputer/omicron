@@ -262,6 +262,9 @@ pub struct SiloCreate {
     /// endpoints.  These should be valid for the Silo's DNS name(s).
     pub tls_certificates: Vec<CertificateCreate>,
 
+    /// Initial quotas for the new Silo
+    pub quotas: SiloQuotasCreate,
+
     /// Mapping of which Fleet roles are conferred by each Silo role
     ///
     /// The default is that no Fleet roles are conferred by any Silo roles
@@ -272,10 +275,17 @@ pub struct SiloCreate {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct SiloQuotasUpdate {
+pub struct SiloQuotasCreate {
     pub cpus: i64,
     pub memory: i64,
     pub storage: i64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SiloQuotasUpdate {
+    pub cpus: Option<i64>,
+    pub memory: Option<i64>,
+    pub storage: Option<i64>,
 }
 
 /// Create-time parameters for a `User`
