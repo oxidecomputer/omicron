@@ -330,23 +330,6 @@ impl DatumType {
                 | DatumType::HistogramF64
         )
     }
-
-    /// Return `true` if this datum type is a histogram.
-    pub fn is_histogram(&self) -> bool {
-        matches!(
-            self,
-            DatumType::HistogramI8
-                | DatumType::HistogramU8
-                | DatumType::HistogramI16
-                | DatumType::HistogramU16
-                | DatumType::HistogramI32
-                | DatumType::HistogramU32
-                | DatumType::HistogramI64
-                | DatumType::HistogramU64
-                | DatumType::HistogramF32
-                | DatumType::HistogramF64
-        )
-    }
 }
 
 impl std::fmt::Display for DatumType {
@@ -1151,12 +1134,5 @@ mod tests {
             Sample::verify_field_names(&fields, &fields),
             Err(MetricsError::DuplicateFieldName { .. })
         ));
-    }
-
-    #[test]
-    fn test_foo() {
-        // Datum
-        let s = r#"{"type": "cumulative_u64", "datum": { "start_time": "2023-11-17T22:42:17.299717021Z", "value": 0 } }"#;
-        println!("{:#?}", serde_json::from_str::<Datum>(s).unwrap());
     }
 }
