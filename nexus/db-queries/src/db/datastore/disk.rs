@@ -812,7 +812,7 @@ mod tests {
         let logctx =
             dev::test_setup_log("test_undelete_disk_set_faulted_idempotent");
         let log = logctx.log.new(o!());
-        let db = test_setup_database(&log).await;
+        let mut db = test_setup_database(&log).await;
         let (opctx, db_datastore) = datastore_test(&logctx, &db).await;
 
         let silo_id = opctx.authn.actor().unwrap().silo_id().unwrap();
@@ -937,6 +937,7 @@ mod tests {
             );
         }
 
+        db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
 }
