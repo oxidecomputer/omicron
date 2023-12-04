@@ -72,7 +72,6 @@ pub struct SmfConfigValues {
 impl SmfConfigValues {
     #[cfg(target_os = "illumos")]
     pub fn read_current() -> Result<Self> {
-        use anyhow::Context;
         use illumos_utils::scf::ScfHandle;
 
         const CONFIG_PG: &str = "config";
