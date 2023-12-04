@@ -9,67 +9,41 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::lookup;
 use nexus_types::external_api::params;
-use omicron_common::api::external::http_pagination::PaginatedBy;
-use omicron_common::api::external::CreateResult;
+use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
+use omicron_common::api::external::UpdateResult;
+use uuid::Uuid;
 
 impl super::Nexus {
-    pub async fn quotas_list(
-        &self,
-        opctx: &OpContext,
-        pagparams: &PaginatedBy<'_>,
-    ) -> Result<db::model::SiloQuotas, Error> {
-        self.db_datastore.quotas_list(opctx, pagparams).await
-    }
-
-    pub(crate) async fn fleet_list_quotas(
-        &self,
-        opctx: &OpContext,
-        pagparams: &PaginatedBy<'_>,
-    ) -> ListResultVec<db::model::SiloQuotas> {
-        self.db_datastore.fleet_list_quotas(opctx, pagparams).await
-    }
-
-    pub(crate) async fn silo_fetch_quota(
+    pub async fn silo_quotas_view(
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
     ) -> Result<db::model::SiloQuotas, Error> {
         let (.., authz_silo) =
             silo_lookup.lookup_for(authz::Action::Read).await?;
-        self.db_datastore.silo_fetch_quota(opctx, authz_silo).await
+        self.db_datastore.silo_quotas_view(opctx, &authz_silo).await
     }
 
-    pub(crate) async fn silo_create_quotas(
+    pub(crate) async fn fleet_list_quotas(
         &self,
         opctx: &OpContext,
-        silo_lookup: &lookup::Silo<'_>,
-        quotas: &params::SiloQuotasCreate,
-    ) -> CreateResult<db::model::SiloQuotas> {
-        let (.., authz_silo) =
-            silo_lookup.lookup_for(authz::Action::Modify).await?;
-        self.db_datastore.silo_create_quota(opctx, authz_silo, quotas).await
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<db::model::SiloQuotas> {
+        self.db_datastore.fleet_list_quotas(opctx, pagparams).await
     }
 
     pub(crate) async fn silo_update_quota(
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
-        updates: &params::QuotaUpdate,
-    ) -> Result<db::model::Quota> {
+        updates: &params::SiloQuotasUpdate,
+    ) -> UpdateResult<db::model::SiloQuotas> {
         let (.., authz_silo) =
             silo_lookup.lookup_for(authz::Action::Modify).await?;
-        self.db_datastore.silo_update_quota(opctx, authz_silo, updates).await
-    }
-
-    pub(crate) async fn silo_quota_delete(
-        &self,
-        opctx: &OpContext,
-        silo_lookup: &lookup::Silo<'_>,
-    ) -> Result<db::model::Quota> {
-        let (.., authz_silo) =
-            silo_lookup.lookup_for(authz::Action::Delete).await?;
-        self.db_datastore.silo_quota_delete(opctx, authz_silo).await
+        self.db_datastore
+            .silo_update_quota(opctx, &authz_silo, updates.clone())
+            .await
     }
 }

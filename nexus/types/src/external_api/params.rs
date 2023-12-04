@@ -272,7 +272,7 @@ pub struct SiloCreate {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct SiloQuotasCreate {
+pub struct SiloQuotasUpdate {
     pub cpus: i64,
     pub memory: i64,
     pub storage: i64,

@@ -98,6 +98,12 @@
         "url": "http://docs.oxide.computer/api/system-metrics"
       }
     },
+    "system/quotas": {
+      "description": "Quotas set resource allocation limits for a silo allowing operators to control the amount of resources a silo can consume.",
+      "external_docs": {
+        "url": "http://docs.oxide.computer/api/system-quotas"
+      }
+    },
     "system/networking": {
       "description": "This provides rack-level network configuration.",
       "external_docs": {

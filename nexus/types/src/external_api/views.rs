@@ -51,8 +51,6 @@ pub struct Silo {
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SiloQuotas {
-    #[serde(flatten)]
-    pub identity: AssetIdentityMetadata,
     pub silo_id: Uuid,
     pub cpus: i64,
     pub memory: i64,

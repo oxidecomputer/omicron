@@ -778,8 +778,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.silo_quotas (
     time_modified TIMESTAMPTZ NOT NULL,
     cpus INT8 NOT NULL,
     memory INT8 NOT NULL,
-    storage INT8 NOT NULL,
-)
+    storage INT8 NOT NULL
+);
 
 /*
  * Projects

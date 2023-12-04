@@ -265,7 +265,7 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(networking_bgp_announce_set_list)?;
         api.register(networking_bgp_announce_set_delete)?;
 
-        api.register(quota_list)?;
+        api.register(quotas_view)?;
 
         // Fleet-wide API operations
         api.register(silo_list)?;
@@ -275,10 +275,10 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(silo_policy_view)?;
         api.register(silo_policy_update)?;
 
-        api.register(system_quota_list)?;
+        api.register(system_quotas_list)?;
 
-        api.register(silo_quota_view)?;
-        api.register(silo_quota_update)?;
+        api.register(silo_quotas_view)?;
+        api.register(silo_quotas_update)?;
 
         api.register(silo_identity_provider_list)?;
 
@@ -510,82 +510,70 @@ async fn policy_update(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// View the resource quotas of the user's current silo
 #[endpoint {
     method = GET,
     path = "/v1/quotas",
-    tags = ["quotas"],
+    tags = ["silos"],
 }]
-async fn quota_list(
+async fn quotas_view(
     rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedByNameOrId>,
-) -> Result<HttpResponseOk<ResultsPage<Quota>>, HttpError> {
+) -> Result<HttpResponseOk<SiloQuotas>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
-
-        let query = query_params.into_inner();
-        let pag_params = data_page_params_for(&rqctx, &query)?;
-        let scan_params = ScanByNameOrId::from_query(&query)?;
-        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
-
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let quotas = nexus
-            .quotas_list(&opctx, &paginated_by)
-            .await?
-            .into_iter()
-            .map(|p| p.try_into())
-            .collect::<Result<Vec<_>, Error>>()?;
+        let authz_silo =
+            opctx.authn.silo_required().internal_context("listing quotas")?;
+        let silo_lookup = nexus.silo_lookup(&opctx, authz_silo.id().into())?;
+        let quotas = nexus.silo_quotas_view(&opctx, &silo_lookup).await?;
 
-        Ok(HttpResponseOk(ScanByNameOrId::results_page(
-            &query,
-            quotas,
-            &marker_for_name_or_id,
-        )?))
+        Ok(HttpResponseOk(quotas.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Lists resource quotas for all silos
 #[endpoint {
     method = GET,
     path = "/v1/system/quotas",
     tags = ["system/quotas"],
 }]
-async fn system_quota_list(
+async fn system_quotas_list(
     rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedByNameOrId>,
+    query_params: Query<PaginatedById>,
 ) -> Result<HttpResponseOk<ResultsPage<SiloQuotas>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
 
         let query = query_params.into_inner();
-        let pag_params = data_page_params_for(&rqctx, &query)?;
-        let scan_params = ScanByNameOrId::from_query(&query)?;
-        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+        let pagparams = data_page_params_for(&rqctx, &query)?;
 
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let quotas = nexus
-            .fleet_list_quotas(&opctx, &paginated_by)
+            .fleet_list_quotas(&opctx, &pagparams)
             .await?
             .into_iter()
-            .map(|p| p.try_into())
-            .collect::<Result<Vec<_>, Error>>()?;
+            .map(|p| p.into())
+            .collect();
 
-        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+        Ok(HttpResponseOk(ScanById::results_page(
             &query,
             quotas,
-            &marker_for_name_or_id,
+            &|_, quota: &SiloQuotas| quota.silo_id,
         )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// View the resource quotas of a given silo
 #[endpoint {
     method = GET,
     path = "/v1/system/silos/{silo}/quotas",
     tags = ["system/quotas"],
 }]
-async fn silo_quota_view(
+async fn silo_quotas_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::SiloPath>,
 ) -> Result<HttpResponseOk<SiloQuotas>, HttpError> {
@@ -596,23 +584,23 @@ async fn silo_quota_view(
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let silo_lookup =
             nexus.silo_lookup(&opctx, path_params.into_inner().silo)?;
-        let quota =
-            nexus.silo_fetch_quota(&opctx, &silo_lookup).await?.try_into()?;
-        Ok(HttpResponseOk(quota))
+        let quota = nexus.silo_quotas_view(&opctx, &silo_lookup).await?;
+        Ok(HttpResponseOk(quota.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Update the resource quotas of a given silo
 #[endpoint {
     method = PUT,
     path = "/v1/system/silos/{silo}/quotas",
     tags = ["system/quotas"],
 }]
-async fn silo_quota_update(
+async fn silo_quotas_update(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::SiloPath>,
-    new_quota: TypedBody<Quota>,
-) -> Result<HttpResponseOk<Quota>, HttpError> {
+    new_quota: TypedBody<params::SiloQuotasUpdate>,
+) -> Result<HttpResponseOk<SiloQuotas>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
@@ -621,10 +609,9 @@ async fn silo_quota_update(
         let silo_lookup =
             nexus.silo_lookup(&opctx, path_params.into_inner().silo)?;
         let quota = nexus
-            .silo_update_quota(&opctx, &silo_lookup, new_quota.into_inner())
-            .await?
-            .try_into()?;
-        Ok(HttpResponseOk(quota))
+            .silo_update_quota(&opctx, &silo_lookup, &new_quota.into_inner())
+            .await?;
+        Ok(HttpResponseOk(quota.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

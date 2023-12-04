@@ -1,9 +1,12 @@
+use crate::schema::silo_quotas;
 use chrono::{DateTime, Utc};
+use nexus_types::external_api::views;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::schema::silo_quotas;
-
-#[derive(Queryable, Insertable, Debug, Clone, Selectable)]
+#[derive(
+    Queryable, Insertable, Debug, Clone, Selectable, Serialize, Deserialize,
+)]
 #[diesel(table_name = silo_quotas)]
 pub struct SiloQuotas {
     pub silo_id: Uuid,
@@ -24,6 +27,30 @@ impl SiloQuotas {
             cpus,
             memory,
             storage,
+        }
+    }
+}
+
+impl From<SiloQuotas> for views::SiloQuotas {
+    fn from(silo_quotas: SiloQuotas) -> Self {
+        Self {
+            silo_id: silo_quotas.silo_id,
+            cpus: silo_quotas.cpus,
+            memory: silo_quotas.memory,
+            storage: silo_quotas.storage,
+        }
+    }
+}
+
+impl From<views::SiloQuotas> for SiloQuotas {
+    fn from(silo_quotas: views::SiloQuotas) -> Self {
+        Self {
+            silo_id: silo_quotas.silo_id,
+            time_created: Utc::now(),
+            time_modified: Utc::now(),
+            cpus: silo_quotas.cpus,
+            memory: silo_quotas.memory,
+            storage: silo_quotas.storage,
         }
     }
 }
