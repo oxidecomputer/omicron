@@ -13192,13 +13192,6 @@
             "enum": [
               "non_provisionable"
             ]
-          },
-          {
-            "description": "This is a state that isn't known yet.\n\nThis is defined to avoid API breakage.",
-            "type": "string",
-            "enum": [
-              "unknown"
-            ]
           }
         ]
       },

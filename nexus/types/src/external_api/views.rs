@@ -17,7 +17,6 @@ use omicron_common::api::external::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_with::rust::deserialize_ignore_any;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::net::IpAddr;
@@ -311,12 +310,6 @@ pub enum SledProvisionState {
     /// resources will continue to be on this sled unless manually migrated
     /// off.
     NonProvisionable,
-
-    /// This is a state that isn't known yet.
-    ///
-    /// This is defined to avoid API breakage.
-    #[serde(other, deserialize_with = "deserialize_ignore_any")]
-    Unknown,
 }
 
 /// An operator's view of an instance running on a given sled
