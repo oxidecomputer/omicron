@@ -5261,6 +5261,7 @@ dependencies = [
  "rstest",
  "schemars",
  "serde",
+ "serde_json",
  "strum",
  "thiserror",
  "trybuild",
