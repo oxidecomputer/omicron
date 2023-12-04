@@ -47,16 +47,6 @@ impl DataStore {
         let gen = snapshot.gen;
         opctx.authorize(authz::Action::CreateChild, authz_project).await?;
 
-        #[derive(Debug, thiserror::Error)]
-        pub enum CustomError {
-            #[error("Resource already exists")]
-            ResourceAlreadyExists,
-
-            #[error("saw AsyncInsertError")]
-            InsertError(Error),
-        }
-
-        let snapshot_name = snapshot.name().to_string();
         let project_id = snapshot.project_id;
 
         let err = OptionalError::new();
@@ -67,6 +57,7 @@ impl DataStore {
             .transaction(&conn, |conn| {
                 let err = err.clone();
                 let snapshot = snapshot.clone();
+                let snapshot_name = snapshot.name().to_string();
                 async move {
                     use db::schema::snapshot::dsl;
 
@@ -115,9 +106,10 @@ impl DataStore {
 
                     if let Some(existing_snapshot_id) = existing_snapshot_id {
                         if existing_snapshot_id != snapshot.id() {
-                            return Err(
-                                err.bail(CustomError::ResourceAlreadyExists)
-                            );
+                            return Err(err.bail(Error::ObjectAlreadyExists {
+                                type_name: ResourceType::Snapshot,
+                                object_name: snapshot_name,
+                            }));
                         }
                     }
 
@@ -133,12 +125,12 @@ impl DataStore {
                     .insert_and_get_result_async(&conn)
                     .await
                     .map_err(|e| match e {
-                        AsyncInsertError::CollectionNotFound => err.bail(
-                            CustomError::InsertError(Error::ObjectNotFound {
+                        AsyncInsertError::CollectionNotFound => {
+                            err.bail(Error::ObjectNotFound {
                                 type_name: ResourceType::Project,
                                 lookup_type: LookupType::ById(project_id),
-                            }),
-                        ),
+                            })
+                        }
                         AsyncInsertError::DatabaseError(e) => e,
                     })
                 }
@@ -146,15 +138,7 @@ impl DataStore {
             .await
             .map_err(|e| {
                 if let Some(err) = err.take() {
-                    match err {
-                        CustomError::ResourceAlreadyExists => {
-                            Error::ObjectAlreadyExists {
-                                type_name: ResourceType::Snapshot,
-                                object_name: snapshot_name,
-                            }
-                        }
-                        CustomError::InsertError(e) => e,
-                    }
+                    err
                 } else {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 }
