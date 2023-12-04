@@ -936,5 +936,7 @@ mod tests {
                 external::DiskState::Faulted.label().to_string()
             );
         }
+
+        logctx.cleanup_successful();
     }
 }
