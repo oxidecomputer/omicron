@@ -84,4 +84,3 @@ tar.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 tufaceous.workspace = true
 wicket.workspace = true
-wicketd-client.workspace = true
