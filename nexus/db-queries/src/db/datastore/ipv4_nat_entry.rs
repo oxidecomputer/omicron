@@ -36,6 +36,7 @@ impl DataStore {
             .filter(dsl::sled_address.eq(nat_entry.sled_address))
             .filter(dsl::vni.eq(nat_entry.vni))
             .filter(dsl::mac.eq(nat_entry.mac))
+            .filter(dsl::version_removed.is_null())
             .select((
                 dsl::external_address,
                 dsl::first_port,
