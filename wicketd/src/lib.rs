@@ -16,11 +16,12 @@ mod preflight_check;
 mod rss_config;
 mod update_tracker;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use artifacts::{WicketdArtifactServer, WicketdArtifactStore};
 use bootstrap_addrs::BootstrapPeers;
 pub use config::Config;
 pub(crate) use context::ServerContext;
+use display_error_chain::DisplayErrorChain;
 use dropshot::{ConfigDropshot, HandlerTaskMode, HttpServer};
 pub use installinator_progress::{IprUpdateTracker, RunningUpdateState};
 use internal_dns::resolver::Resolver;
@@ -34,6 +35,7 @@ use preflight_check::PreflightCheckerHandler;
 use sled_hardware::Baseboard;
 use slog::{debug, error, o, Drain};
 use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
 use std::{
     net::{SocketAddr, SocketAddrV6},
     sync::Arc,
@@ -70,7 +72,6 @@ pub struct SmfConfigValues {
 impl SmfConfigValues {
     #[cfg(target_os = "illumos")]
     pub fn read_current() -> Result<Self> {
-        use anyhow::Context;
         use illumos_utils::scf::ScfHandle;
 
         const CONFIG_PG: &str = "config";
@@ -259,10 +260,69 @@ impl Server {
             res = self.artifact_server => {
                 match res {
                     Ok(()) => Err("artifact server exited unexpectedly".to_owned()),
-                    // The artifact server returns an anyhow::Error, which has a `Debug` impl that
-                    // prints out the chain of errors.
+                    // The artifact server returns an anyhow::Error, which has a
+                    // `Debug` impl that prints out the chain of errors.
                     Err(err) => Err(format!("running artifact server: {err:?}")),
                 }
+            }
+        }
+    }
+
+    /// Instruct a running server at the specified address to reload its config
+    /// parameters
+    pub async fn refresh_config(
+        log: slog::Logger,
+        address: SocketAddrV6,
+    ) -> Result<()> {
+        // It's possible we're being told to refresh a server's config before
+        // it's ready to receive such a request, so we'll give it a healthy
+        // amount of time before we give up: we'll set a client timeout and also
+        // retry a few times. See
+        // https://github.com/oxidecomputer/omicron/issues/4604.
+        const CLIENT_TIMEOUT: Duration = Duration::from_secs(5);
+        const SLEEP_BETWEEN_RETRIES: Duration = Duration::from_secs(10);
+        const NUM_RETRIES: usize = 3;
+
+        let client = reqwest::Client::builder()
+            .connect_timeout(CLIENT_TIMEOUT)
+            .timeout(CLIENT_TIMEOUT)
+            .build()
+            .context("failed to construct reqwest Client")?;
+
+        let client = wicketd_client::Client::new_with_client(
+            &format!("http://{address}"),
+            client,
+            log,
+        );
+        let log = client.inner();
+
+        let mut attempt = 0;
+        loop {
+            attempt += 1;
+
+            // If we succeed, we're done.
+            let Err(err) = client.post_reload_config().await else {
+                return Ok(());
+            };
+
+            // If we failed, either warn+sleep and try again, or fail.
+            if attempt < NUM_RETRIES {
+                slog::warn!(
+                    log,
+                    "failed to refresh wicketd config \
+                     (attempt {attempt} of {NUM_RETRIES}); \
+                     will retry after {CLIENT_TIMEOUT:?}";
+                    "err" => %DisplayErrorChain::new(&err),
+                );
+                tokio::time::sleep(SLEEP_BETWEEN_RETRIES).await;
+            } else {
+                slog::error!(
+                    log,
+                    "failed to refresh wicketd config \
+                     (tried {NUM_RETRIES} times)";
+                    "err" => %DisplayErrorChain::new(&err),
+                );
+                return Err(err).context("failed to contact wicketd");
             }
         }
     }
