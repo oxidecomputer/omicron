@@ -5,6 +5,7 @@
 //! Executable for wicketd: technician port based management service
 
 use anyhow::{anyhow, Context};
+use camino::Utf8PathBuf;
 use clap::Parser;
 use omicron_common::{
     address::Ipv6Subnet,
@@ -24,7 +25,7 @@ enum Args {
     /// Start a wicketd server
     Run {
         #[clap(name = "CONFIG_FILE_PATH", action)]
-        config_file_path: PathBuf,
+        config_file_path: Utf8PathBuf,
 
         /// The address on which the main wicketd dropshot server should listen
         #[clap(short, long, action)]
@@ -64,7 +65,7 @@ enum Args {
     /// server
     RefreshConfig {
         #[clap(name = "CONFIG_FILE_PATH", action)]
-        config_file_path: PathBuf,
+        config_file_path: Utf8PathBuf,
 
         /// The address of the server to refresh
         #[clap(short, long, action)]
@@ -117,9 +118,7 @@ async fn do_run() -> Result<(), CmdError> {
             };
 
             let config = Config::from_file(&config_file_path)
-                .with_context(|| {
-                    format!("failed to parse {}", config_file_path.display())
-                })
+                .with_context(|| format!("failed to parse {config_file_path}"))
                 .map_err(CmdError::Failure)?;
 
             let rack_subnet = match rack_subnet {
@@ -155,9 +154,7 @@ async fn do_run() -> Result<(), CmdError> {
         }
         Args::RefreshConfig { config_file_path, address } => {
             let config = Config::from_file(&config_file_path)
-                .with_context(|| {
-                    format!("failed to parse {}", config_file_path.display())
-                })
+                .with_context(|| format!("failed to parse {config_file_path}"))
                 .map_err(CmdError::Failure)?;
 
             let log = config
