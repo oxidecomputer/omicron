@@ -163,6 +163,10 @@ async fn do_run() -> Result<(), CmdError> {
                 .context("failed to initialize logger")
                 .map_err(CmdError::Failure)?;
 
+            // When run via `svcadm refresh ...`, we need to respect the special
+            // [SMF exit codes](https://illumos.org/man/7/smf_method). Returning
+            // an error from main exits with code 1 (from libc::EXIT_FAILURE),
+            // which does not collide with any special SMF codes.
             Server::refresh_config(log, address)
                 .await
                 .map_err(CmdError::Failure)
