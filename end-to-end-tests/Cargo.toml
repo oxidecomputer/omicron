@@ -16,7 +16,7 @@ oxide-client.workspace = true
 rand.workspace = true
 reqwest.workspace = true
 russh = "0.39.0"
-russh-keys = "0.38.0"
+russh-keys = "0.40.0"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 toml.workspace = true
 trust-dns-resolver.workspace = true
