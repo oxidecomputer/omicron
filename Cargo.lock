@@ -458,7 +458,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=54398875a2125227d13827d4236dce943c019b1c#54398875a2125227d13827d4236dce943c019b1c"
+source = "git+https://github.com/oxidecomputer/propolis?rev=3e1d129151c3621d28ead5c6e5760693ba6e7fec#3e1d129151c3621d28ead5c6e5760693ba6e7fec"
 dependencies = [
  "bhyve_api_sys",
  "libc",
@@ -468,7 +468,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=54398875a2125227d13827d4236dce943c019b1c#54398875a2125227d13827d4236dce943c019b1c"
+source = "git+https://github.com/oxidecomputer/propolis?rev=3e1d129151c3621d28ead5c6e5760693ba6e7fec#3e1d129151c3621d28ead5c6e5760693ba6e7fec"
 dependencies = [
  "libc",
  "strum",
@@ -1281,7 +1281,7 @@ dependencies = [
 [[package]]
 name = "crucible-agent-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=51a3121c8318fc7ac97d74f917ce1d37962e785f#51a3121c8318fc7ac97d74f917ce1d37962e785f"
+source = "git+https://github.com/oxidecomputer/crucible?rev=945f040d259ca8013d3fb26f510453da7cd7b1a6#945f040d259ca8013d3fb26f510453da7cd7b1a6"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1297,7 +1297,7 @@ dependencies = [
 [[package]]
 name = "crucible-pantry-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=51a3121c8318fc7ac97d74f917ce1d37962e785f#51a3121c8318fc7ac97d74f917ce1d37962e785f"
+source = "git+https://github.com/oxidecomputer/crucible?rev=945f040d259ca8013d3fb26f510453da7cd7b1a6#945f040d259ca8013d3fb26f510453da7cd7b1a6"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1314,7 +1314,7 @@ dependencies = [
 [[package]]
 name = "crucible-smf"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=51a3121c8318fc7ac97d74f917ce1d37962e785f#51a3121c8318fc7ac97d74f917ce1d37962e785f"
+source = "git+https://github.com/oxidecomputer/crucible?rev=945f040d259ca8013d3fb26f510453da7cd7b1a6#945f040d259ca8013d3fb26f510453da7cd7b1a6"
 dependencies = [
  "crucible-workspace-hack",
  "libc",
@@ -1671,9 +1671,9 @@ dependencies = [
 
 [[package]]
 name = "diesel_derives"
-version = "2.1.1"
+version = "2.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e054665eaf6d97d1e7125512bb2d35d07c73ac86cc6920174cb42d1ab697a554"
+checksum = "ef8337737574f55a468005a83499da720f20c65586241ffea339db9ecdfd2b44"
 dependencies = [
  "diesel_table_macro_syntax",
  "proc-macro2",
@@ -1790,8 +1790,8 @@ dependencies = [
  "omicron-test-utils",
  "omicron-workspace-hack",
  "openapi-lint",
- "openapiv3 1.0.3",
- "pretty-hex 0.3.0",
+ "openapiv3",
+ "pretty-hex 0.4.0",
  "schemars",
  "serde",
  "serde_json",
@@ -1895,7 +1895,7 @@ dependencies = [
  "hyper",
  "indexmap 2.1.0",
  "multer",
- "openapiv3 2.0.0-rc.1",
+ "openapiv3",
  "paste",
  "percent-encoding",
  "proc-macro2",
@@ -2276,9 +2276,9 @@ checksum = "aa9a19cbb55df58761df49b23516a86d432839add4af60fc256da840f66ed35b"
 
 [[package]]
 name = "form_urlencoded"
-version = "1.2.0"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a62bc1cf6f830c2ec14a513a9fb124d0a213a629668a4186f329db21fe045652"
+checksum = "e13624c2627564efccf4934284bdd98cbaa14e79b0b5a141218e507b3a823456"
 dependencies = [
  "percent-encoding",
 ]
@@ -3040,9 +3040,9 @@ dependencies = [
 
 [[package]]
 name = "idna"
-version = "0.4.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d20d6b07bfbc108882d88ed8e37d39636dcc260e15e30c45e6ba089610b917c"
+checksum = "634d9b1461af396cad843f47fdba5597a4f9e6ddd4bfb6ff5d85028c25cb12f6"
 dependencies = [
  "unicode-bidi",
  "unicode-normalization",
@@ -3245,7 +3245,7 @@ dependencies = [
  "omicron-test-utils",
  "omicron-workspace-hack",
  "openapi-lint",
- "openapiv3 1.0.3",
+ "openapiv3",
  "schemars",
  "serde",
  "serde_json",
@@ -3993,6 +3993,7 @@ dependencies = [
  "sled-agent-client",
  "steno",
  "strum",
+ "thiserror",
  "uuid",
 ]
 
@@ -4038,7 +4039,7 @@ dependencies = [
  "omicron-sled-agent",
  "omicron-test-utils",
  "omicron-workspace-hack",
- "openapiv3 1.0.3",
+ "openapiv3",
  "openssl",
  "oso",
  "oximeter",
@@ -4178,6 +4179,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "serde_with",
  "steno",
  "strum",
  "uuid",
@@ -4563,7 +4565,7 @@ dependencies = [
  "omicron-workspace-hack",
  "once_cell",
  "openapi-lint",
- "openapiv3 1.0.3",
+ "openapiv3",
  "schemars",
  "serde",
  "serde_json",
@@ -4640,7 +4642,7 @@ dependencies = [
  "omicron-workspace-hack",
  "once_cell",
  "openapi-lint",
- "openapiv3 1.0.3",
+ "openapiv3",
  "openssl",
  "oxide-client",
  "oximeter",
@@ -4838,7 +4840,7 @@ dependencies = [
  "omicron-workspace-hack",
  "once_cell",
  "openapi-lint",
- "openapiv3 1.0.3",
+ "openapiv3",
  "opte-ioctl",
  "oximeter",
  "oximeter-instruments",
@@ -4968,7 +4970,7 @@ dependencies = [
  "num-iter",
  "num-traits",
  "once_cell",
- "openapiv3 2.0.0-rc.1",
+ "openapiv3",
  "petgraph",
  "postgres-types",
  "ppv-lite86",
@@ -5064,24 +5066,13 @@ checksum = "624a8340c38c1b80fd549087862da4ba43e08858af025b236e509b6649fc13d5"
 [[package]]
 name = "openapi-lint"
 version = "0.4.0"
-source = "git+https://github.com/oxidecomputer/openapi-lint?branch=main#bb69a3a4a184d966bac2a0df2be5c9038d9867d0"
+source = "git+https://github.com/oxidecomputer/openapi-lint?branch=main#ef442ee4343e97b6d9c217d3e7533962fe7d7236"
 dependencies = [
  "heck 0.4.1",
  "indexmap 2.1.0",
  "lazy_static",
- "openapiv3 1.0.3",
+ "openapiv3",
  "regex",
-]
-
-[[package]]
-name = "openapiv3"
-version = "1.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "75e56d5c441965b6425165b7e3223cc933ca469834f4a8b4786817a1f9dc4f13"
-dependencies = [
- "indexmap 2.1.0",
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -5097,9 +5088,9 @@ dependencies = [
 
 [[package]]
 name = "openssl"
-version = "0.10.57"
+version = "0.10.60"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bac25ee399abb46215765b1cb35bc0212377e58a061560d8b29b024fd0430e7c"
+checksum = "79a4c6c3a2b158f7f8f2a2fc5a969fa3a068df6fc9dbb4a43845436e3af7c800"
 dependencies = [
  "bitflags 2.4.0",
  "cfg-if 1.0.0",
@@ -5129,9 +5120,9 @@ checksum = "ff011a302c396a5197692431fc1948019154afc178baf7d8e37367442a4601cf"
 
 [[package]]
 name = "openssl-sys"
-version = "0.9.93"
+version = "0.9.96"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db4d56a4c0478783083cfafcc42493dd4a981d41669da64b4572a2a089b51b1d"
+checksum = "3812c071ba60da8b5677cc12bcb1d42989a65553772897a7e0355545a819838f"
 dependencies = [
  "cc",
  "libc",
@@ -5270,6 +5261,7 @@ dependencies = [
  "rstest",
  "schemars",
  "serde",
+ "serde_json",
  "strum",
  "thiserror",
  "trybuild",
@@ -5310,7 +5302,7 @@ dependencies = [
  "omicron-test-utils",
  "omicron-workspace-hack",
  "openapi-lint",
- "openapiv3 1.0.3",
+ "openapiv3",
  "oximeter",
  "oximeter-client",
  "oximeter-db",
@@ -5629,9 +5621,9 @@ dependencies = [
 
 [[package]]
 name = "percent-encoding"
-version = "2.3.0"
+version = "2.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9b2a4787296e9989611394c33f193f676704af1686e70b8f8033ab5ba9a35a94"
+checksum = "e3148f5046208a5d56bcfc03053e3ca6334e51da8dfb19b6cdc8b306fae3283e"
 
 [[package]]
 name = "pest"
@@ -5976,9 +5968,9 @@ checksum = "bc5c99d529f0d30937f6f4b8a86d988047327bb88d04d2c4afc356de74722131"
 
 [[package]]
 name = "pretty-hex"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c6fa0831dd7cc608c38a5e323422a0077678fa5744aa2be4ad91c4ece8eec8d5"
+checksum = "23c6b968ed37d62e35b4febaba13bfa231b0b7929d68b8a94e65445a17e2d35f"
 
 [[package]]
 name = "pretty_assertions"
@@ -6077,7 +6069,7 @@ dependencies = [
  "heck 0.4.1",
  "http",
  "indexmap 2.1.0",
- "openapiv3 2.0.0-rc.1",
+ "openapiv3",
  "proc-macro2",
  "quote",
  "regex",
@@ -6095,7 +6087,7 @@ name = "progenitor-macro"
 version = "0.4.0"
 source = "git+https://github.com/oxidecomputer/progenitor?branch=main#9339b57628e1e76b1d7131ef93a6c0db2ab0a762"
 dependencies = [
- "openapiv3 2.0.0-rc.1",
+ "openapiv3",
  "proc-macro2",
  "progenitor-impl",
  "quote",
@@ -6110,7 +6102,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=54398875a2125227d13827d4236dce943c019b1c#54398875a2125227d13827d4236dce943c019b1c"
+source = "git+https://github.com/oxidecomputer/propolis?rev=3e1d129151c3621d28ead5c6e5760693ba6e7fec#3e1d129151c3621d28ead5c6e5760693ba6e7fec"
 dependencies = [
  "async-trait",
  "base64 0.21.5",
@@ -6131,7 +6123,7 @@ dependencies = [
 [[package]]
 name = "propolis-mock-server"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=54398875a2125227d13827d4236dce943c019b1c#54398875a2125227d13827d4236dce943c019b1c"
+source = "git+https://github.com/oxidecomputer/propolis?rev=3e1d129151c3621d28ead5c6e5760693ba6e7fec#3e1d129151c3621d28ead5c6e5760693ba6e7fec"
 dependencies = [
  "anyhow",
  "atty",
@@ -6161,7 +6153,7 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=54398875a2125227d13827d4236dce943c019b1c#54398875a2125227d13827d4236dce943c019b1c"
+source = "git+https://github.com/oxidecomputer/propolis?rev=3e1d129151c3621d28ead5c6e5760693ba6e7fec#3e1d129151c3621d28ead5c6e5760693ba6e7fec"
 dependencies = [
  "schemars",
  "serde",
@@ -7536,6 +7528,7 @@ dependencies = [
  "progenitor",
  "regress",
  "reqwest",
+ "schemars",
  "serde",
  "sled-storage",
  "slog",
@@ -9104,12 +9097,12 @@ dependencies = [
 
 [[package]]
 name = "url"
-version = "2.4.1"
+version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "143b538f18257fac9cad154828a57c6bf5157e1aa604d4816b5995bf6de87ae5"
+checksum = "31e6302e3bb753d46e83516cae55ae196fc0c309407cf11ab35cc51a4c2a4633"
 dependencies = [
  "form_urlencoded",
- "idna 0.4.0",
+ "idna 0.5.0",
  "percent-encoding",
 ]
 
@@ -9546,7 +9539,7 @@ dependencies = [
  "omicron-test-utils",
  "omicron-workspace-hack",
  "openapi-lint",
- "openapiv3 1.0.3",
+ "openapiv3",
  "rand 0.8.5",
  "reqwest",
  "schemars",
@@ -9893,9 +9886,9 @@ dependencies = [
 
 [[package]]
 name = "zeroize"
-version = "1.6.0"
+version = "1.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2a0956f1ba7c7909bfb66c2e9e4124ab6f6482560f6628b5aaeba39207c9aad9"
+checksum = "525b4ec142c6b68a2d10f01f7bbf6755599ca3f81ea53b8431b7dd348f5fdb2d"
 dependencies = [
  "zeroize_derive",
 ]

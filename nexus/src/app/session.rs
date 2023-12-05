@@ -154,6 +154,7 @@ impl super::Nexus {
                 | Error::Forbidden
                 | Error::InternalError { .. }
                 | Error::ServiceUnavailable { .. }
+                | Error::InsufficientCapacity { .. }
                 | Error::MethodNotAllowed { .. }
                 | Error::TypeVersionMismatch { .. }
                 | Error::Conflict { .. } => {

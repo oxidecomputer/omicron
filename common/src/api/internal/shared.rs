@@ -140,6 +140,9 @@ pub struct PortConfigV1 {
     pub uplink_port_fec: PortFec,
     /// BGP peers on this port
     pub bgp_peers: Vec<BgpPeerConfig>,
+    /// Whether or not to set autonegotiation
+    #[serde(default)]
+    pub autoneg: bool,
 }
 
 impl From<UplinkConfig> for PortConfigV1 {
@@ -155,6 +158,7 @@ impl From<UplinkConfig> for PortConfigV1 {
             uplink_port_speed: value.uplink_port_speed,
             uplink_port_fec: value.uplink_port_fec,
             bgp_peers: vec![],
+            autoneg: false,
         }
     }
 }
@@ -260,7 +264,7 @@ pub enum ExternalPortDiscovery {
 }
 
 /// Switchport Speed options
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PortSpeed {
     #[serde(alias = "0G")]
@@ -284,7 +288,7 @@ pub enum PortSpeed {
 }
 
 /// Switchport FEC options
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PortFec {
     Firecode,

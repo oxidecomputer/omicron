@@ -123,6 +123,15 @@ impl SimulatedSp for Gimlet {
         handler.update_state.last_rot_update_data()
     }
 
+    async fn last_host_phase1_update_data(
+        &self,
+        slot: u16,
+    ) -> Option<Box<[u8]>> {
+        let handler = self.handler.as_ref()?;
+        let handler = handler.lock().await;
+        handler.update_state.last_host_phase1_update_data(slot)
+    }
+
     async fn current_update_status(&self) -> gateway_messages::UpdateStatus {
         let Some(handler) = self.handler.as_ref() else {
             return gateway_messages::UpdateStatus::None;
@@ -1188,7 +1197,7 @@ impl SpHandler for Handler {
         port: SpPort,
         component: SpComponent,
     ) -> Result<u16, SpError> {
-        warn!(
+        debug!(
             &self.log, "asked for component active slot";
             "sender" => %sender,
             "port" => ?port,
@@ -1211,7 +1220,7 @@ impl SpHandler for Handler {
         slot: u16,
         persist: bool,
     ) -> Result<(), SpError> {
-        warn!(
+        debug!(
             &self.log, "asked to set component active slot";
             "sender" => %sender,
             "port" => ?port,
@@ -1222,9 +1231,12 @@ impl SpHandler for Handler {
         if component == SpComponent::ROT {
             self.rot_active_slot = rot_slot_id_from_u16(slot)?;
             Ok(())
+        } else if component == SpComponent::HOST_CPU_BOOT_FLASH {
+            self.update_state.set_active_host_slot(slot);
+            Ok(())
         } else {
             // The real SP returns `RequestUnsupportedForComponent` for anything
-            // other than the RoT, including SP_ITSELF.
+            // other than the RoT and host boot flash, including SP_ITSELF.
             Err(SpError::RequestUnsupportedForComponent)
         }
     }

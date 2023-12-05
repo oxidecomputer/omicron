@@ -861,13 +861,11 @@ impl Instance {
             }
 
             return Err(Error::Transition(
-                omicron_common::api::external::Error::Conflict {
-                    internal_message: format!(
-                        "wrong instance state generation: expected {}, got {}",
-                        inner.state.instance().gen,
-                        old_runtime.gen
-                    ),
-                },
+                omicron_common::api::external::Error::conflict(format!(
+                    "wrong instance state generation: expected {}, got {}",
+                    inner.state.instance().gen,
+                    old_runtime.gen
+                )),
             ));
         }
 

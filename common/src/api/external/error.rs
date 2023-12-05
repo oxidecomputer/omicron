@@ -35,16 +35,16 @@ pub enum Error {
     ObjectAlreadyExists { type_name: ResourceType, object_name: String },
     /// The request was well-formed, but the operation cannot be completed given
     /// the current state of the system.
-    #[error("Invalid Request: {message}")]
-    InvalidRequest { message: String },
+    #[error("Invalid Request: {}", .message.display_internal())]
+    InvalidRequest { message: MessagePair },
     /// Authentication credentials were required but either missing or invalid.
     /// The HTTP status code is called "Unauthorized", but it's more accurate to
     /// call it "Unauthenticated".
     #[error("Missing or invalid credentials")]
     Unauthenticated { internal_message: String },
     /// The specified input field is not valid.
-    #[error("Invalid Value: {label}, {message}")]
-    InvalidValue { label: String, message: String },
+    #[error("Invalid Value: {label}, {}", .message.display_internal())]
+    InvalidValue { label: String, message: MessagePair },
     /// The request is not authorized to perform the requested operation.
     #[error("Forbidden")]
     Forbidden,
@@ -53,101 +53,91 @@ pub enum Error {
     #[error("Internal Error: {internal_message}")]
     InternalError { internal_message: String },
     /// The system (or part of it) is unavailable.
-    #[error(
-        "Service Unavailable {}",
-        message.display_internal()
-    )]
-    ServiceUnavailable { message: MessageVariant },
+    #[error("Service Unavailable: {internal_message}")]
+    ServiceUnavailable { internal_message: String },
+
+    /// There is insufficient capacity to perform the requested operation.
+    ///
+    /// This variant is translated to 503 Service Unavailable, and it carries
+    /// both an external and an internal message. The external message is
+    /// intended for operator consumption and is intended to not leak any
+    /// implementation details.
+    #[error("Insufficient Capacity: {}", .message.display_internal())]
+    InsufficientCapacity { message: MessagePair },
+
     /// Method Not Allowed
-    #[error("Method Not Allowed: {internal_message}")]
-    MethodNotAllowed { internal_message: String },
+    #[error("Method Not Allowed: {}", .message.display_internal())]
+    MethodNotAllowed { message: MessagePair },
 
     #[error("Type version mismatch! {internal_message}")]
     TypeVersionMismatch { internal_message: String },
 
-    #[error("Conflict: {internal_message}")]
-    Conflict { internal_message: String },
+    #[error("Conflict: {}", .message.display_internal())]
+    Conflict { message: MessagePair },
 }
 
-/// Represents either a message that is internal to the system or a message that
-/// is intended to be returned to the client.
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub enum MessageVariant {
-    Internal(String),
-    External {
-        message: String,
-        /// Internal context, or an empty string if there's no context yet.
+/// Represents an error message which has an external component, along with
+/// some internal context possibly attached to it.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+pub struct MessagePair {
+    external_message: String,
+    internal_context: String,
+}
+
+impl MessagePair {
+    pub fn new(external_message: String) -> Self {
+        Self { external_message, internal_context: String::new() }
+    }
+
+    pub fn new_full(
+        external_message: String,
         internal_context: String,
-    },
-}
-
-impl MessageVariant {
-    fn internal(message: String) -> Self {
-        MessageVariant::Internal(message)
+    ) -> Self {
+        Self { external_message, internal_context }
     }
 
-    fn external(message: String) -> Self {
-        MessageVariant::External {
-            message: message,
-            internal_context: String::new(),
-        }
+    pub fn external_message(&self) -> &str {
+        &self.external_message
     }
 
-    fn internal_context<C>(self, context: C) -> Self
+    pub fn internal_context(&self) -> &str {
+        &self.internal_context
+    }
+
+    fn with_internal_context<C>(self, context: C) -> Self
     where
         C: Display + Send + Sync + 'static,
     {
-        match self {
-            MessageVariant::Internal(msg) => {
-                MessageVariant::Internal(format!("{}: {}", context, msg))
-            }
-            MessageVariant::External { message, internal_context } => {
-                let internal_context = if internal_context.is_empty() {
-                    context.to_string()
-                } else {
-                    format!("{}: {}", context, internal_context)
-                };
-                MessageVariant::External { message, internal_context }
-            }
-        }
+        let internal_context = if self.internal_context.is_empty() {
+            context.to_string()
+        } else {
+            format!("{}: {}", context, self.internal_context)
+        };
+        Self { external_message: self.external_message, internal_context }
     }
 
-    fn into_internal_external(self) -> (String, Option<String>) {
-        match self {
-            MessageVariant::Internal(msg) => (msg, None),
-            MessageVariant::External { message, internal_context } => {
-                let internal = if internal_context.is_empty() {
-                    message.clone()
-                } else {
-                    format!("{}: {}", message, internal_context)
-                };
-                (internal, Some(message))
-            }
-        }
+    pub fn into_internal_external(self) -> (String, String) {
+        let internal = self.display_internal().to_string();
+        (internal, self.external_message)
     }
 
     // Do not implement `fmt::Display` for this enum because we don't want users to
     // accidentally display the internal message to the client. Instead, use a
     // private formatter.
-    fn display_internal(&self) -> MessageVariantDisplay<'_> {
-        MessageVariantDisplay(self)
+    fn display_internal(&self) -> MessagePairDisplayInternal<'_> {
+        MessagePairDisplayInternal(self)
     }
 }
 
-struct MessageVariantDisplay<'a>(&'a MessageVariant);
+struct MessagePairDisplayInternal<'a>(&'a MessagePair);
 
-impl<'a> Display for MessageVariantDisplay<'a> {
+impl<'a> Display for MessagePairDisplayInternal<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.0 {
-            MessageVariant::Internal(msg) => write!(f, "(internal: {})", msg),
-            MessageVariant::External { message, internal_context } => {
-                write!(f, ": {message}")?;
-                if !internal_context.is_empty() {
-                    write!(f, " (with internal context: {internal_context})")?;
-                }
-                Ok(())
-            }
+        write!(f, "{}", self.0.external_message)?;
+        if !self.0.internal_context.is_empty() {
+            write!(f, " (with internal context: {})", self.0.internal_context)?;
         }
+        Ok(())
     }
 }
 
@@ -205,6 +195,7 @@ impl Error {
             | Error::InvalidValue { .. }
             | Error::Forbidden
             | Error::MethodNotAllowed { .. }
+            | Error::InsufficientCapacity { .. }
             | Error::InternalError { .. }
             | Error::TypeVersionMismatch { .. }
             | Error::Conflict { .. } => false,
@@ -236,32 +227,57 @@ impl Error {
     ///
     /// This should be used for failures due possibly to invalid client input
     /// or malformed requests.
-    pub fn invalid_request(message: &str) -> Error {
-        Error::InvalidRequest { message: message.to_owned() }
+    pub fn invalid_request(message: impl Into<String>) -> Error {
+        Error::InvalidRequest { message: MessagePair::new(message.into()) }
     }
 
-    /// Generates an [`Error::ServiceUnavailable`] error with a specific
-    /// message that is sent back to the client.
+    /// Generates an [`Error::InvalidValue`] error with the specific label and
+    /// message.
+    pub fn invalid_value(
+        label: impl Into<String>,
+        message: impl Into<String>,
+    ) -> Error {
+        Error::InvalidValue {
+            label: label.into(),
+            message: MessagePair::new(message.into()),
+        }
+    }
+
+    /// Generates an [`Error::ServiceUnavailable`] error with the specific
+    /// message
     ///
     /// This should be used for transient failures where the caller might be
     /// expected to retry.  Logic errors or other problems indicating that a
     /// retry would not work should probably be an InternalError (if it's a
     /// server problem) or InvalidRequest (if it's a client problem) instead.
-    pub fn unavail_external(external_message: impl Into<String>) -> Error {
-        Error::ServiceUnavailable {
-            message: MessageVariant::external(external_message.into()),
+    pub fn unavail(message: &str) -> Error {
+        Error::ServiceUnavailable { internal_message: message.to_owned() }
+    }
+
+    /// Generates an [`Error::InsufficientCapacity`] error with external and
+    /// and internal messages.
+    ///
+    /// This should be used for failures where there is insufficient capacity,
+    /// and where the caller must either take action or wait until capacity is
+    /// freed.
+    ///
+    /// In the future, we may want to provide more help here: e.g. a link to a
+    /// status or support page.
+    pub fn insufficient_capacity(
+        external_message: impl Into<String>,
+        internal_message: impl Into<String>,
+    ) -> Error {
+        Error::InsufficientCapacity {
+            message: MessagePair::new_full(
+                external_message.into(),
+                internal_message.into(),
+            ),
         }
     }
 
-    /// Generates an [`Error::ServiceUnavailable`] error with a specific
-    /// internal-only message.
-    ///
-    /// This should be used for transient failures where the caller might be
-    /// expected to retry.
-    pub fn unavail_internal(internal_message: impl Into<String>) -> Error {
-        Error::ServiceUnavailable {
-            message: MessageVariant::internal(internal_message.into()),
-        }
+    /// Generates an [`Error::MethodNotAllowed`] error with an external message.
+    pub fn method_not_allowed(message: impl Into<String>) -> Error {
+        Error::MethodNotAllowed { message: MessagePair::new(message.into()) }
     }
 
     /// Generates an [`Error::TypeVersionMismatch`] with a specific message.
@@ -284,8 +300,8 @@ impl Error {
     /// retried. The internal message should provide more information about the
     /// source of the conflict and possible actions the caller can take to
     /// resolve it (if any).
-    pub fn conflict(message: &str) -> Error {
-        Error::Conflict { internal_message: message.to_owned() }
+    pub fn conflict(message: impl Into<String>) -> Error {
+        Error::Conflict { message: MessagePair::new(message.into()) }
     }
 
     /// Given an [`Error`] with an internal message, return the same error with
@@ -299,9 +315,14 @@ impl Error {
         match self {
             Error::ObjectNotFound { .. }
             | Error::ObjectAlreadyExists { .. }
-            | Error::InvalidRequest { .. }
-            | Error::InvalidValue { .. }
             | Error::Forbidden => self,
+            Error::InvalidRequest { message } => Error::InvalidRequest {
+                message: message.with_internal_context(context),
+            },
+            Error::InvalidValue { label, message } => Error::InvalidValue {
+                label,
+                message: message.with_internal_context(context),
+            },
             Error::Unauthenticated { internal_message } => {
                 Error::Unauthenticated {
                     internal_message: format!(
@@ -313,19 +334,22 @@ impl Error {
             Error::InternalError { internal_message } => Error::InternalError {
                 internal_message: format!("{}: {}", context, internal_message),
             },
-            Error::ServiceUnavailable { message } => {
+            Error::ServiceUnavailable { internal_message } => {
                 Error::ServiceUnavailable {
-                    message: message.internal_context(context),
-                }
-            }
-            Error::MethodNotAllowed { internal_message } => {
-                Error::MethodNotAllowed {
                     internal_message: format!(
                         "{}: {}",
                         context, internal_message
                     ),
                 }
             }
+            Error::InsufficientCapacity { message } => {
+                Error::InsufficientCapacity {
+                    message: message.with_internal_context(context),
+                }
+            }
+            Error::MethodNotAllowed { message } => Error::MethodNotAllowed {
+                message: message.with_internal_context(context),
+            },
             Error::TypeVersionMismatch { internal_message } => {
                 Error::TypeVersionMismatch {
                     internal_message: format!(
@@ -334,8 +358,8 @@ impl Error {
                     ),
                 }
             }
-            Error::Conflict { internal_message } => Error::Conflict {
-                internal_message: format!("{}: {}", context, internal_message),
+            Error::Conflict { message } => Error::Conflict {
+                message: message.with_internal_context(context),
             },
         }
     }
@@ -387,28 +411,42 @@ impl From<Error> for HttpError {
                 internal_message,
             },
 
-            Error::InvalidRequest { message } => HttpError::for_bad_request(
-                Some(String::from("InvalidRequest")),
-                message,
-            ),
+            Error::InvalidRequest { message } => {
+                let (internal_message, external_message) =
+                    message.into_internal_external();
+                HttpError {
+                    status_code: http::StatusCode::BAD_REQUEST,
+                    error_code: Some(String::from("InvalidRequest")),
+                    external_message,
+                    internal_message,
+                }
+            }
 
             Error::InvalidValue { label, message } => {
-                let message =
-                    format!("unsupported value for \"{}\": {}", label, message);
-                HttpError::for_bad_request(
-                    Some(String::from("InvalidValue")),
-                    message,
-                )
+                let (internal_message, external_message) =
+                    message.into_internal_external();
+                HttpError {
+                    status_code: http::StatusCode::BAD_REQUEST,
+                    error_code: Some(String::from("InvalidValue")),
+                    external_message: format!(
+                        "unsupported value for \"{}\": {}",
+                        label, external_message
+                    ),
+                    internal_message,
+                }
             }
 
             // TODO: RFC-7231 requires that 405s generate an Accept header to describe
             // what methods are available in the response
-            Error::MethodNotAllowed { internal_message } => {
-                HttpError::for_client_error(
-                    Some(String::from("MethodNotAllowed")),
-                    http::StatusCode::METHOD_NOT_ALLOWED,
+            Error::MethodNotAllowed { message } => {
+                let (internal_message, external_message) =
+                    message.into_internal_external();
+                HttpError {
+                    status_code: http::StatusCode::METHOD_NOT_ALLOWED,
+                    error_code: Some(String::from("MethodNotAllowed")),
+                    external_message,
                     internal_message,
-                )
+                }
             }
 
             Error::Forbidden => HttpError::for_client_error(
@@ -421,14 +459,25 @@ impl From<Error> for HttpError {
                 HttpError::for_internal_error(internal_message)
             }
 
-            Error::ServiceUnavailable { message } => {
-                let (internal_message, external) =
+            Error::ServiceUnavailable { internal_message } => {
+                HttpError::for_unavail(
+                    Some(String::from("ServiceNotAvailable")),
+                    internal_message,
+                )
+            }
+
+            Error::InsufficientCapacity { message } => {
+                // Must create an HttpError explicitly to provide an external
+                // message for 503.
+                let (internal_message, external_message) =
                     message.into_internal_external();
                 HttpError {
                     status_code: http::StatusCode::SERVICE_UNAVAILABLE,
-                    error_code: Some(String::from("ServiceNotAvailable")),
-                    external_message: external
-                        .unwrap_or_else(|| "Service Unavailable".to_owned()),
+                    error_code: Some(String::from("InsufficientCapacity")),
+                    external_message: format!(
+                        "Insufficient capacity: {}",
+                        external_message
+                    ),
                     internal_message,
                 }
             }
@@ -437,12 +486,15 @@ impl From<Error> for HttpError {
                 HttpError::for_internal_error(internal_message)
             }
 
-            Error::Conflict { internal_message } => {
-                HttpError::for_client_error(
-                    Some(String::from("Conflict")),
-                    http::StatusCode::CONFLICT,
+            Error::Conflict { message } => {
+                let (internal_message, external_message) =
+                    message.into_internal_external();
+                HttpError {
+                    status_code: http::StatusCode::CONFLICT,
+                    error_code: Some(String::from("Conflict")),
+                    external_message,
                     internal_message,
-                )
+                }
             }
         }
     }
@@ -481,10 +533,7 @@ impl<T: ClientError> From<progenitor::progenitor_client::Error<T>> for Error {
 
                 match rv.status() {
                     http::StatusCode::SERVICE_UNAVAILABLE => {
-                        // TODO: Out of an abundance of caution we treat this
-                        // message as internal, though it's possible some such
-                        // messages should be displayed.
-                        Error::unavail_internal(&message)
+                        Error::unavail(&message)
                     }
                     status if status.is_client_error() => {
                         Error::invalid_request(&message)
@@ -596,8 +645,6 @@ impl<T> InternalContext<T> for Result<T, Error> {
 
 #[cfg(test)]
 mod test {
-    use crate::api::external::error::MessageVariant;
-
     use super::Error;
     use super::InternalContext;
 
@@ -658,29 +705,11 @@ mod test {
         };
 
         // test `with_internal_context()` and (separately) `ServiceUnavailable`
-        // internal variant
-        let error: Result<(), Error> = Err(Error::unavail_internal("boom"));
+        // variant
+        let error: Result<(), Error> = Err(Error::unavail("boom"));
         match error.with_internal_context(|| format!("uh-oh (#{:2})", 2)) {
-            Err(Error::ServiceUnavailable { message }) => {
-                assert_eq!(
-                    message,
-                    MessageVariant::internal("uh-oh (# 2): boom".to_owned())
-                );
-            }
-            _ => panic!("returned wrong type"),
-        };
-
-        // test `ServiceUnavailable` external variant
-        let error: Result<(), Error> = Err(Error::unavail_external("boom"));
-        match error.with_internal_context(|| format!("uh-oh (#{:2})", 2)) {
-            Err(Error::ServiceUnavailable { message }) => {
-                assert_eq!(
-                    message,
-                    MessageVariant::External {
-                        message: "boom".to_owned(),
-                        internal_context: "uh-oh (# 2)".to_owned(),
-                    }
-                );
+            Err(Error::ServiceUnavailable { internal_message }) => {
+                assert_eq!(internal_message, "uh-oh (# 2): boom");
             }
             _ => panic!("returned wrong type"),
         };

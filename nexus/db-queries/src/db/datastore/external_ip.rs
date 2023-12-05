@@ -151,6 +151,7 @@ impl DataStore {
                             "Requested external IP address not available",
                         )
                     } else {
+                        // XXX Should this be insufficient_capacity?
                         Error::invalid_request(
                             "No external IP addresses available",
                         )

@@ -548,6 +548,7 @@ fn validate_rack_network_config(
                     PortFec::None => BaPortFec::None,
                     PortFec::Rs => BaPortFec::Rs,
                 },
+                autoneg: config.autoneg,
             })
             .collect(),
         bgp: config

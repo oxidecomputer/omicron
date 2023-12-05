@@ -98,9 +98,8 @@ impl super::Nexus {
         let new_image = match &params.source {
             params::ImageSource::Url { url, block_size } => {
                 let db_block_size = db::model::BlockSize::try_from(*block_size)
-                    .map_err(|e| Error::InvalidValue {
-                        label: String::from("block_size"),
-                        message: format!("block_size is invalid: {}", e),
+                    .map_err(|e| {
+                        Error::invalid_value("block_size", e.to_string())
                     })?;
 
                 let image_id = Uuid::new_v4();
@@ -129,20 +128,17 @@ impl super::Nexus {
                     })?;
 
                 let response = client.head(url).send().await.map_err(|e| {
-                    Error::InvalidValue {
-                        label: String::from("url"),
-                        message: format!("error querying url: {}", e),
-                    }
+                    Error::invalid_value(
+                        "url",
+                        format!("error querying url: {e}"),
+                    )
                 })?;
 
                 if !response.status().is_success() {
-                    return Err(Error::InvalidValue {
-                        label: String::from("url"),
-                        message: format!(
-                            "querying url returned: {}",
-                            response.status()
-                        ),
-                    });
+                    return Err(Error::invalid_value(
+                        "url",
+                        format!("querying url returned: {}", response.status()),
+                    ));
                 }
 
                 // grab total size from content length
@@ -150,43 +146,47 @@ impl super::Nexus {
                     .headers()
                     .get(reqwest::header::CONTENT_LENGTH)
                     .ok_or("no content length!")
-                    .map_err(|e| Error::InvalidValue {
-                        label: String::from("url"),
-                        message: format!("error querying url: {}", e),
+                    .map_err(|e| {
+                        Error::invalid_value(
+                            "url",
+                            format!("error querying url: {e}",),
+                        )
                     })?;
 
                 let total_size =
                     u64::from_str(content_length.to_str().map_err(|e| {
-                        Error::InvalidValue {
-                            label: String::from("url"),
-                            message: format!("content length invalid: {}", e),
-                        }
+                        Error::invalid_value(
+                            "url",
+                            format!("content length invalid: {e}",),
+                        )
                     })?)
                     .map_err(|e| {
-                        Error::InvalidValue {
-                            label: String::from("url"),
-                            message: format!("content length invalid: {}", e),
-                        }
+                        Error::invalid_value(
+                            "url",
+                            format!("content length invalid: {e}"),
+                        )
                     })?;
 
                 let size: external::ByteCount = total_size.try_into().map_err(
-                    |e: external::ByteCountRangeError| Error::InvalidValue {
-                        label: String::from("size"),
-                        message: format!("total size is invalid: {}", e),
+                    |e: external::ByteCountRangeError| {
+                        Error::invalid_value(
+                            "size",
+                            format!("total size is invalid: {}", e),
+                        )
                     },
                 )?;
 
                 // validate total size is divisible by block size
                 let block_size: u64 = (*block_size).into();
                 if (size.to_bytes() % block_size) != 0 {
-                    return Err(Error::InvalidValue {
-                        label: String::from("size"),
-                        message: format!(
+                    return Err(Error::invalid_value(
+                        "size",
+                        format!(
                             "total size {} must be divisible by block size {}",
                             size.to_bytes(),
                             block_size
                         ),
-                    });
+                    ));
                 }
 
                 let new_image_volume =
@@ -284,9 +284,11 @@ impl super::Nexus {
                 // disk created from this image has to be larger than it.
                 let size: u64 = 100 * 1024 * 1024;
                 let size: external::ByteCount =
-                    size.try_into().map_err(|e| Error::InvalidValue {
-                        label: String::from("size"),
-                        message: format!("size is invalid: {}", e),
+                    size.try_into().map_err(|e| {
+                        Error::invalid_value(
+                            "size",
+                            format!("size is invalid: {}", e),
+                        )
                     })?;
 
                 let new_image_volume =
@@ -409,9 +411,9 @@ impl super::Nexus {
                     )
                     .await
             }
-            ImageLookup::SiloImage(_) => Err(Error::InvalidRequest {
-                message: "Cannot promote a silo image".to_string(),
-            }),
+            ImageLookup::SiloImage(_) => {
+                Err(Error::invalid_request("Cannot promote a silo image"))
+            }
         }
     }
 
@@ -437,9 +439,9 @@ impl super::Nexus {
                     )
                     .await
             }
-            ImageLookup::ProjectImage(_) => Err(Error::InvalidRequest {
-                message: "Cannot demote a project image".to_string(),
-            }),
+            ImageLookup::ProjectImage(_) => {
+                Err(Error::invalid_request("Cannot demote a project image"))
+            }
         }
     }
 }

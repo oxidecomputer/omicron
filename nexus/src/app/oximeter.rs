@@ -127,9 +127,7 @@ impl super::Nexus {
             for producer in producers.into_iter() {
                 let producer_info = oximeter_client::types::ProducerEndpoint {
                     id: producer.id(),
-                    kind: producer
-                        .kind
-                        .map(|kind| nexus::ProducerKind::from(kind).into()),
+                    kind: nexus::ProducerKind::from(producer.kind).into(),
                     address: SocketAddr::new(
                         producer.ip.ip(),
                         producer.port.try_into().unwrap(),
@@ -152,7 +150,7 @@ impl super::Nexus {
     pub(crate) async fn register_as_producer(&self, address: SocketAddr) {
         let producer_endpoint = nexus::ProducerEndpoint {
             id: self.id,
-            kind: Some(nexus::ProducerKind::Service),
+            kind: nexus::ProducerKind::Service,
             address,
             base_route: String::from("/metrics/collect"),
             interval: Duration::from_secs(10),
@@ -390,8 +388,8 @@ impl super::Nexus {
             limit: std::num::NonZeroU32::new(1).unwrap(),
         };
         let oxs = self.db_datastore.oximeter_list(&page_params).await?;
-        let info = oxs.first().ok_or_else(|| {
-            Error::unavail_external("no oximeter collectors available")
+        let info = oxs.first().ok_or_else(|| Error::ServiceUnavailable {
+            internal_message: String::from("no oximeter collectors available"),
         })?;
         let address =
             SocketAddr::from((info.ip.ip(), info.port.try_into().unwrap()));
@@ -403,8 +401,7 @@ impl super::Nexus {
 fn map_oximeter_err(error: oximeter_db::Error) -> Error {
     match error {
         oximeter_db::Error::DatabaseUnavailable(_) => {
-            // XXX: should this be unavail_external?
-            Error::unavail_internal(error.to_string())
+            Error::ServiceUnavailable { internal_message: error.to_string() }
         }
         _ => Error::InternalError { internal_message: error.to_string() },
     }

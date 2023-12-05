@@ -340,7 +340,10 @@ impl DataStore {
             opctx.log,
             "failed to find a VNI after searching entire range";
         );
-        Err(Error::unavail_external("Failed to find a free VNI for this VPC"))
+        Err(Error::insufficient_capacity(
+            "No free virtual network was found",
+            "Failed to find a free VNI for this VPC",
+        ))
     }
 
     // Internal implementation for creating a VPC.
@@ -470,11 +473,9 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
             .is_some()
         {
-            return Err(Error::InvalidRequest {
-                message: String::from(
-                    "VPC cannot be deleted while VPC Subnets exist",
-                ),
-            });
+            return Err(Error::invalid_request(
+                "VPC cannot be deleted while VPC Subnets exist",
+            ));
         }
 
         // Delete the VPC, conditional on the subnet_gen not having changed.
@@ -493,11 +494,9 @@ impl DataStore {
                 )
             })?;
         if updated_rows == 0 {
-            Err(Error::InvalidRequest {
-                message: String::from(
-                    "deletion failed to to concurrent modification",
-                ),
-            })
+            Err(Error::invalid_request(
+                "deletion failed due to concurrent modification",
+            ))
         } else {
             Ok(())
         }
@@ -783,12 +782,10 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
             .is_some()
         {
-            return Err(Error::InvalidRequest {
-                message: String::from(
-                    "VPC Subnet cannot be deleted while \
-                    network interfaces in the subnet exist",
-                ),
-            });
+            return Err(Error::invalid_request(
+                "VPC Subnet cannot be deleted while network interfaces in the \
+                subnet exist",
+            ));
         }
 
         // Delete the subnet, conditional on the rcgen not having changed.
@@ -807,11 +804,9 @@ impl DataStore {
                 )
             })?;
         if updated_rows == 0 {
-            return Err(Error::InvalidRequest {
-                message: String::from(
-                    "deletion failed to to concurrent modification",
-                ),
-            });
+            return Err(Error::invalid_request(
+                "deletion failed due to concurrent modification",
+            ));
         } else {
             Ok(())
         }

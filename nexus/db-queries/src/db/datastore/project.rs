@@ -78,9 +78,9 @@ macro_rules! generate_fn_to_ensure_none_in_project {
                         "a"
                     };
 
-                    return Err(Error::InvalidRequest {
-                        message: format!("project to be deleted contains {article} {object}: {label}"),
-                    });
+                    return Err(Error::invalid_request(
+                        format!("project to be deleted contains {article} {object}: {label}")
+                    ));
                 }
 
                 Ok(())
@@ -251,11 +251,9 @@ impl DataStore {
                     })?;
 
                 if updated_rows == 0 {
-                    return Err(TxnError::CustomError(Error::InvalidRequest {
-                        message:
-                            "deletion failed due to concurrent modification"
-                                .to_string(),
-                    }));
+                    return Err(TxnError::CustomError(Error::invalid_request(
+                        "deletion failed due to concurrent modification",
+                    )));
                 }
 
                 self.virtual_provisioning_collection_delete_on_connection(

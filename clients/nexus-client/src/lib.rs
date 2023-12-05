@@ -225,7 +225,7 @@ impl From<&omicron_common::api::internal::nexus::ProducerEndpoint>
             address: s.address.to_string(),
             base_route: s.base_route.clone(),
             id: s.id,
-            kind: s.kind.map(Into::into),
+            kind: s.kind.into(),
             interval: s.interval.into(),
         }
     }

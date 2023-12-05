@@ -1,0 +1,1 @@
+ALTER TABLE oximeter.measurements_u16_local MODIFY COLUMN datum Nullable(UInt16)

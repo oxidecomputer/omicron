@@ -348,9 +348,9 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         if project_found.is_some() {
-            return Err(Error::InvalidRequest {
-                message: "silo to be deleted contains a project".to_string(),
-            });
+            return Err(Error::invalid_request(
+                "silo to be deleted contains a project",
+            ));
         }
 
         let now = Utc::now();
@@ -372,11 +372,9 @@ impl DataStore {
                 })?;
 
             if updated_rows == 0 {
-                return Err(TxnError::CustomError(Error::InvalidRequest {
-                    message:
-                        "silo deletion failed due to concurrent modification"
-                            .to_string(),
-                }));
+                return Err(TxnError::CustomError(Error::invalid_request(
+                    "silo deletion failed due to concurrent modification",
+                )));
             }
 
             self.virtual_provisioning_collection_delete_on_connection(

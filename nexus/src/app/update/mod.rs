@@ -26,13 +26,17 @@ use std::path::Path;
 use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
+mod common_sp_update;
+mod host_phase1_updater;
 mod mgs_clients;
 mod rot_updater;
 mod sp_updater;
 
-pub use mgs_clients::{MgsClients, UpdateStatusError};
-pub use rot_updater::{RotUpdateError, RotUpdater};
-pub use sp_updater::{SpUpdateError, SpUpdater};
+pub use common_sp_update::SpComponentUpdateError;
+pub use host_phase1_updater::HostPhase1Updater;
+pub use mgs_clients::MgsClients;
+pub use rot_updater::RotUpdater;
+pub use sp_updater::SpUpdater;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum UpdateProgress {
@@ -64,14 +68,10 @@ impl super::Nexus {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
         let updates_config = self.updates_config.as_ref().ok_or_else(|| {
-            Error::InvalidRequest {
-                message: "updates system not configured".into(),
-            }
+            Error::invalid_request("updates system not configured")
         })?;
         let base_url = self.tuf_base_url(opctx).await?.ok_or_else(|| {
-            Error::InvalidRequest {
-                message: "updates system not configured".into(),
-            }
+            Error::invalid_request("updates system not configured")
         })?;
         let trusted_root = tokio::fs::read(&updates_config.trusted_root)
             .await
@@ -154,9 +154,7 @@ impl super::Nexus {
     ) -> Result<Vec<u8>, Error> {
         let mut base_url =
             self.tuf_base_url(opctx).await?.ok_or_else(|| {
-                Error::InvalidRequest {
-                    message: "updates system not configured".into(),
-                }
+                Error::invalid_request("updates system not configured")
             })?;
         if !base_url.ends_with('/') {
             base_url.push('/');

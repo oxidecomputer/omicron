@@ -129,9 +129,9 @@ impl super::Nexus {
         // router kind cannot be changed, but it might be able to save us a
         // database round-trip.
         if db_router.kind == VpcRouterKind::System {
-            return Err(Error::MethodNotAllowed {
-                internal_message: "Cannot delete system router".to_string(),
-            });
+            return Err(Error::method_not_allowed(
+                "Cannot delete system router",
+            ));
         }
         self.db_datastore.vpc_delete_router(opctx, &authz_router).await
     }
@@ -229,14 +229,12 @@ impl super::Nexus {
         match db_route.kind.0 {
             RouterRouteKind::Custom | RouterRouteKind::Default => (),
             _ => {
-                return Err(Error::MethodNotAllowed {
-                    internal_message: format!(
-                        "routes of type {} from the system table of VPC {:?} \
+                return Err(Error::invalid_request(format!(
+                    "routes of type {} from the system table of VPC {:?} \
                         are not modifiable",
-                        db_route.kind.0,
-                        vpc.id()
-                    ),
-                })
+                    db_route.kind.0,
+                    vpc.id()
+                )));
             }
         }
         self.db_datastore
@@ -255,10 +253,9 @@ impl super::Nexus {
         // Only custom routes can be deleted
         // TODO Shouldn't this constraint be checked by the database query?
         if db_route.kind.0 != RouterRouteKind::Custom {
-            return Err(Error::MethodNotAllowed {
-                internal_message: "DELETE not allowed on system routes"
-                    .to_string(),
-            });
+            return Err(Error::method_not_allowed(
+                "DELETE not allowed on system routes",
+            ));
         }
         self.db_datastore.router_delete_route(opctx, &authz_route).await
     }

@@ -316,10 +316,7 @@ impl Name {
     /// `Name::try_from(String)` that marshals any error into an appropriate
     /// `Error`.
     pub fn from_param(value: String, label: &str) -> Result<Name, Error> {
-        value.parse().map_err(|e| Error::InvalidValue {
-            label: String::from(label),
-            message: e,
-        })
+        value.parse().map_err(|e| Error::invalid_value(label, e))
     }
 
     /// Return the `&str` representing the actual name.
@@ -622,6 +619,7 @@ impl From<ByteCount> for i64 {
     Debug,
     Deserialize,
     Eq,
+    Hash,
     JsonSchema,
     Ord,
     PartialEq,
@@ -2826,10 +2824,10 @@ mod test {
         assert!(result.is_err());
         assert_eq!(
             result,
-            Err(Error::InvalidValue {
-                label: "the_name".to_string(),
-                message: "name requires at least one character".to_string()
-            })
+            Err(Error::invalid_value(
+                "the_name",
+                "name requires at least one character"
+            ))
         );
     }
 

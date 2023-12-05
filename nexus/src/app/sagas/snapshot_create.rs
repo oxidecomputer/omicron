@@ -840,9 +840,14 @@ async fn ssc_attach_disk_to_pantry(
 
         _ => {
             // Return a 503 indicating that the user should retry
-            return Err(ActionError::action_failed(Error::unavail_external(
-                format!("disk is in state {:?}", db_disk.state()),
-            )));
+            return Err(ActionError::action_failed(
+                Error::ServiceUnavailable {
+                    internal_message: format!(
+                        "disk is in state {:?}",
+                        db_disk.state(),
+                    ),
+                },
+            ));
         }
     }
 

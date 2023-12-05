@@ -220,9 +220,7 @@ impl DataStore {
         opctx.authorize(authz::Action::Query, &authz::DATABASE).await?;
         let pool = self.pool.pool();
         let connection = pool.get().await.map_err(|err| {
-            Error::unavail_internal(format!(
-                "Failed to access DB connection: {err}"
-            ))
+            Error::unavail(&format!("Failed to access DB connection: {err}"))
         })?;
         Ok(connection)
     }
@@ -236,9 +234,7 @@ impl DataStore {
         &self,
     ) -> Result<DataStoreConnection, Error> {
         let connection = self.pool.pool().get().await.map_err(|err| {
-            Error::unavail_internal(format!(
-                "Failed to access DB connection: {err}"
-            ))
+            Error::unavail(&format!("Failed to access DB connection: {err}"))
         })?;
         Ok(connection)
     }
@@ -376,8 +372,8 @@ mod test {
         BlockSize, ComponentUpdate, ComponentUpdateIdentity, ConsoleSession,
         Dataset, DatasetKind, ExternalIp, PhysicalDisk, PhysicalDiskKind,
         Project, Rack, Region, Service, ServiceKind, SiloUser, SledBaseboard,
-        SledSystemHardware, SledUpdate, SshKey, SystemUpdate,
-        UpdateableComponentType, VpcSubnet, Zpool,
+        SledProvisionState, SledSystemHardware, SledUpdate, SshKey,
+        SystemUpdate, UpdateableComponentType, VpcSubnet, Zpool,
     };
     use crate::db::queries::vpc_subnet::FilterConflictingVpcSubnetRangesQuery;
     use assert_matches::assert_matches;
@@ -614,6 +610,35 @@ mod test {
         sled_id
     }
 
+    // Marks a sled as non-provisionable.
+    async fn mark_sled_non_provisionable(
+        datastore: &DataStore,
+        opctx: &OpContext,
+        sled_id: Uuid,
+    ) {
+        let (authz_sled, sled) = LookupPath::new(opctx, datastore)
+            .sled_id(sled_id)
+            .fetch_for(authz::Action::Modify)
+            .await
+            .unwrap();
+        println!("sled: {:?}", sled);
+        let old_state = datastore
+            .sled_set_provision_state(
+                &opctx,
+                &authz_sled,
+                SledProvisionState::NonProvisionable,
+            )
+            .await
+            .unwrap_or_else(|error| {
+                panic!(
+                    "error marking sled {sled_id} as non-provisionable: {error}"
+                )
+            });
+        // The old state should always be provisionable since that's where we
+        // start.
+        assert_eq!(old_state, SledProvisionState::Provisionable);
+    }
+
     fn test_zpool_size() -> ByteCount {
         ByteCount::from_gibibytes_u32(100)
     }
@@ -774,10 +799,21 @@ mod test {
         let logctx = dev::test_setup_log("test_region_allocation_strat_random");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
-        create_test_datasets_for_region_allocation(
+        let test_datasets = create_test_datasets_for_region_allocation(
             &opctx,
             datastore.clone(),
+            // Even though we're going to mark one sled as non-provisionable to
+            // test that logic, we aren't forcing the datasets to be on
+            // distinct sleds, so REGION_REDUNDANCY_THRESHOLD is enough.
             REGION_REDUNDANCY_THRESHOLD,
+        )
+        .await;
+
+        let non_provisionable_dataset_id = test_datasets[0].dataset_id;
+        mark_sled_non_provisionable(
+            &datastore,
+            &opctx,
+            test_datasets[0].sled_id,
         )
         .await;
 
@@ -813,6 +849,9 @@ mod test {
                 // Must be 3 unique datasets
                 assert!(disk_datasets.insert(dataset.id()));
 
+                // Dataset must not be non-provisionable.
+                assert_ne!(dataset.id(), non_provisionable_dataset_id);
+
                 // Must be 3 unique zpools
                 assert!(disk_zpools.insert(dataset.pool_id));
 
@@ -841,12 +880,23 @@ mod test {
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
-        // Create a rack without enough sleds for a successful allocation when
-        // we require 3 distinct sleds.
+        // Create a rack with enough sleds for a successful allocation when we
+        // require 3 distinct provisionable sleds.
         let test_datasets = create_test_datasets_for_region_allocation(
             &opctx,
             datastore.clone(),
-            REGION_REDUNDANCY_THRESHOLD,
+            // We're going to mark one sled as non-provisionable to test that
+            // logic, and we *are* forcing the datasets to be on distinct
+            // sleds: hence threshold + 1.
+            REGION_REDUNDANCY_THRESHOLD + 1,
+        )
+        .await;
+
+        let non_provisionable_dataset_id = test_datasets[0].dataset_id;
+        mark_sled_non_provisionable(
+            &datastore,
+            &opctx,
+            test_datasets[0].sled_id,
         )
         .await;
 
@@ -888,6 +938,9 @@ mod test {
                 // Must be 3 unique datasets
                 assert!(disk_datasets.insert(dataset.id()));
 
+                // Dataset must not be non-provisionable.
+                assert_ne!(dataset.id(), non_provisionable_dataset_id);
+
                 // Must be 3 unique zpools
                 assert!(disk_zpools.insert(dataset.pool_id));
 
@@ -920,11 +973,22 @@ mod test {
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
         // Create a rack without enough sleds for a successful allocation when
-        // we require 3 distinct sleds.
-        create_test_datasets_for_region_allocation(
+        // we require 3 distinct provisionable sleds.
+        let test_datasets = create_test_datasets_for_region_allocation(
             &opctx,
             datastore.clone(),
-            REGION_REDUNDANCY_THRESHOLD - 1,
+            // Here, we need to have REGION_REDUNDANCY_THRESHOLD - 1
+            // provisionable sleds to test this failure condition. We're going
+            // to mark one sled as non-provisionable to test that logic, so we
+            // need to add 1 to that number.
+            REGION_REDUNDANCY_THRESHOLD,
+        )
+        .await;
+
+        mark_sled_non_provisionable(
+            &datastore,
+            &opctx,
+            test_datasets[0].sled_id,
         )
         .await;
 
@@ -956,7 +1020,7 @@ mod test {
                 "Saw error: \'{err}\', but expected \'{expected}\'"
             );
 
-            assert!(matches!(err, Error::ServiceUnavailable { .. }));
+            assert!(matches!(err, Error::InsufficientCapacity { .. }));
         }
 
         let _ = db.cleanup().await;
@@ -1101,7 +1165,7 @@ mod test {
             "Saw error: \'{err}\', but expected \'{expected}\'"
         );
 
-        assert!(matches!(err, Error::ServiceUnavailable { .. }));
+        assert!(matches!(err, Error::InsufficientCapacity { .. }));
 
         let _ = db.cleanup().await;
         logctx.cleanup_successful();

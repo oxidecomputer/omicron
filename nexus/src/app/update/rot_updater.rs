@@ -4,39 +4,20 @@
 
 //! Module containing types for updating RoTs via MGS.
 
-use super::mgs_clients::PollUpdateStatusError;
+use super::common_sp_update::deliver_update;
+use super::common_sp_update::SpComponentUpdater;
 use super::MgsClients;
+use super::SpComponentUpdateError;
 use super::UpdateProgress;
-use super::UpdateStatusError;
-use crate::app::update::mgs_clients::PollUpdateStatus;
 use gateway_client::types::RotSlot;
 use gateway_client::types::SpComponentFirmwareSlot;
 use gateway_client::types::SpType;
 use gateway_client::SpComponent;
 use slog::Logger;
-use std::time::Duration;
 use tokio::sync::watch;
 use uuid::Uuid;
 
 type GatewayClientError = gateway_client::Error<gateway_client::types::Error>;
-
-#[derive(Debug, thiserror::Error)]
-pub enum RotUpdateError {
-    #[error("error communicating with MGS")]
-    MgsCommunication(#[from] GatewayClientError),
-
-    #[error("failed checking update status: {0}")]
-    PollUpdateStatus(#[from] UpdateStatusError),
-}
-
-impl From<PollUpdateStatusError> for RotUpdateError {
-    fn from(err: PollUpdateStatusError) -> Self {
-        match err {
-            PollUpdateStatusError::StatusError(err) => err.into(),
-            PollUpdateStatusError::ClientError(err) => err.into(),
-        }
-    }
-}
 
 pub struct RotUpdater {
     log: Logger,
@@ -89,9 +70,14 @@ impl RotUpdater {
     /// error occurs communicating with one instance, `RotUpdater` will try the
     /// remaining instances before failing.
     pub async fn update(
-        self,
-        mut mgs_clients: MgsClients,
-    ) -> Result<(), RotUpdateError> {
+        mut self,
+        mgs_clients: &mut MgsClients,
+    ) -> Result<(), SpComponentUpdateError> {
+        // Deliver and drive the update to "completion" (which isn't really
+        // complete for the RoT, since we still have to do the steps below after
+        // the delivery of the update completes).
+        deliver_update(&mut self, mgs_clients).await?;
+
         // The async blocks below want `&self` references, but we take `self`
         // for API clarity (to start a new update, the caller should construct a
         // new updater). Create a `&self` ref that we use through the remainder
@@ -100,23 +86,13 @@ impl RotUpdater {
 
         mgs_clients
             .try_all_serially(&self.log, |client| async move {
-                me.start_update_one_mgs(&client).await
-            })
-            .await?;
-
-        // `wait_for_update_completion` uses `try_all_mgs_clients` internally,
-        // so we don't wrap it here.
-        me.wait_for_update_completion(&mut mgs_clients).await?;
-
-        mgs_clients
-            .try_all_serially(&self.log, |client| async move {
-                me.mark_target_slot_active_one_mgs(&client).await
+                me.mark_target_slot_active(&client).await
             })
             .await?;
 
         mgs_clients
             .try_all_serially(&self.log, |client| async move {
-                me.finalize_update_via_reset_one_mgs(&client).await
+                me.finalize_update_via_reset(&client).await
             })
             .await?;
 
@@ -128,82 +104,7 @@ impl RotUpdater {
         Ok(())
     }
 
-    async fn start_update_one_mgs(
-        &self,
-        client: &gateway_client::Client,
-    ) -> Result<(), GatewayClientError> {
-        let firmware_slot = self.target_rot_slot.as_u16();
-
-        // Start the update.
-        client
-            .sp_component_update(
-                self.sp_type,
-                self.sp_slot,
-                SpComponent::ROT.const_as_str(),
-                firmware_slot,
-                &self.update_id,
-                reqwest::Body::from(self.rot_hubris_archive.clone()),
-            )
-            .await?;
-
-        self.progress.send_replace(Some(UpdateProgress::Started));
-
-        info!(
-            self.log, "RoT update started";
-            "mgs_addr" => client.baseurl(),
-        );
-
-        Ok(())
-    }
-
-    async fn wait_for_update_completion(
-        &self,
-        mgs_clients: &mut MgsClients,
-    ) -> Result<(), RotUpdateError> {
-        // How frequently do we poll MGS for the update progress?
-        const STATUS_POLL_INTERVAL: Duration = Duration::from_secs(3);
-
-        loop {
-            let status = mgs_clients
-                .poll_update_status(
-                    self.sp_type,
-                    self.sp_slot,
-                    SpComponent::ROT.const_as_str(),
-                    self.update_id,
-                    &self.log,
-                )
-                .await?;
-
-            // For `Preparing` and `InProgress`, we could check the progress
-            // information returned by these steps and try to check that
-            // we're still _making_ progress, but every Nexus instance needs
-            // to do that anyway in case we (or the MGS instance delivering
-            // the update) crash, so we'll omit that check here. Instead, we
-            // just sleep and we'll poll again shortly.
-            match status {
-                PollUpdateStatus::Preparing { progress } => {
-                    self.progress.send_replace(Some(
-                        UpdateProgress::Preparing { progress },
-                    ));
-                }
-                PollUpdateStatus::InProgress { progress } => {
-                    self.progress.send_replace(Some(
-                        UpdateProgress::InProgress { progress },
-                    ));
-                }
-                PollUpdateStatus::Complete => {
-                    self.progress.send_replace(Some(
-                        UpdateProgress::InProgress { progress: Some(1.0) },
-                    ));
-                    return Ok(());
-                }
-            }
-
-            tokio::time::sleep(STATUS_POLL_INTERVAL).await;
-        }
-    }
-
-    async fn mark_target_slot_active_one_mgs(
+    async fn mark_target_slot_active(
         &self,
         client: &gateway_client::Client,
     ) -> Result<(), GatewayClientError> {
@@ -211,13 +112,13 @@ impl RotUpdater {
         // tell it to persist our choice.
         let persist = true;
 
-        let slot = self.target_rot_slot.as_u16();
+        let slot = self.firmware_slot();
 
         client
             .sp_component_active_slot_set(
                 self.sp_type,
                 self.sp_slot,
-                SpComponent::ROT.const_as_str(),
+                self.component(),
                 persist,
                 &SpComponentFirmwareSlot { slot },
             )
@@ -236,16 +137,12 @@ impl RotUpdater {
         Ok(())
     }
 
-    async fn finalize_update_via_reset_one_mgs(
+    async fn finalize_update_via_reset(
         &self,
         client: &gateway_client::Client,
     ) -> Result<(), GatewayClientError> {
         client
-            .sp_component_reset(
-                self.sp_type,
-                self.sp_slot,
-                SpComponent::ROT.const_as_str(),
-            )
+            .sp_component_reset(self.sp_type, self.sp_slot, self.component())
             .await?;
 
         self.progress.send_replace(Some(UpdateProgress::Complete));
@@ -258,15 +155,39 @@ impl RotUpdater {
     }
 }
 
-trait RotSlotAsU16 {
-    fn as_u16(&self) -> u16;
-}
+impl SpComponentUpdater for RotUpdater {
+    fn component(&self) -> &'static str {
+        SpComponent::ROT.const_as_str()
+    }
 
-impl RotSlotAsU16 for RotSlot {
-    fn as_u16(&self) -> u16 {
-        match self {
+    fn target_sp_type(&self) -> SpType {
+        self.sp_type
+    }
+
+    fn target_sp_slot(&self) -> u32 {
+        self.sp_slot
+    }
+
+    fn firmware_slot(&self) -> u16 {
+        match self.target_rot_slot {
             RotSlot::A => 0,
             RotSlot::B => 1,
         }
+    }
+
+    fn update_id(&self) -> Uuid {
+        self.update_id
+    }
+
+    fn update_data(&self) -> Vec<u8> {
+        self.rot_hubris_archive.clone()
+    }
+
+    fn progress(&self) -> &watch::Sender<Option<UpdateProgress>> {
+        &self.progress
+    }
+
+    fn logger(&self) -> &Logger {
+        &self.log
     }
 }

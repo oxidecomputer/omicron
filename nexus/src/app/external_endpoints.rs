@@ -737,7 +737,7 @@ fn endpoint_for_authority(
     let endpoint_config = config_rx.borrow();
     let endpoints = endpoint_config.as_ref().ok_or_else(|| {
         error!(&log, "received request with no endpoints loaded");
-        Error::unavail_external("endpoints not loaded")
+        Error::unavail("endpoints not loaded")
     })?;
 
     // See if there's an endpoint for the requested name.  If so, use it.
@@ -810,7 +810,6 @@ mod test {
     use nexus_types::identity::Resource;
     use omicron_common::api::external::Error;
     use omicron_common::api::external::IdentityMetadataCreateParams;
-    use omicron_common::api::external::MessageVariant;
     use schemars::JsonSchema;
     use serde::Deserialize;
     use serde::Serialize;
@@ -1533,20 +1532,14 @@ mod test {
                 let result =
                     endpoint_for_authority(&log, &authority, rx_channel);
                 match result {
-                    Err(Error::ServiceUnavailable { message }) => {
+                    Err(Error::ServiceUnavailable { internal_message }) => {
                         assert_eq!(rx_label, "none");
-                        assert_eq!(
-                            message,
-                            MessageVariant::External {
-                                message: "endpoints not loaded".to_owned(),
-                                internal_context: String::new(),
-                            }
-                        );
+                        assert_eq!(internal_message, "endpoints not loaded");
                     }
                     Err(Error::InvalidRequest { message }) => {
                         assert_eq!(rx_label, "empty");
                         assert_eq!(
-                            message,
+                            message.external_message(),
                             format!(
                                 "HTTP request for unknown server name {:?}",
                                 authority.host()
