@@ -758,26 +758,13 @@ pub struct IpPoolUpdate {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct IpPoolAssociateSilo {
+pub struct IpPoolSiloLink {
     pub silo: NameOrId,
     pub is_default: bool,
 }
 
-/// Parameters for associating an IP pool with a silo
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(tag = "resource_type", rename_all = "snake_case")]
-pub enum IpPoolAssociationCreate {
-    Silo(IpPoolAssociateSilo),
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct IpPoolAssociationDelete {
-    pub silo: NameOrId,
-}
-
-// technically these are not params, but they are used with params
-#[derive(Clone, Debug)]
-pub struct IpPoolSiloAssociationDelete {
+pub struct IpPoolSiloUnlink {
     pub silo: NameOrId,
 }
 

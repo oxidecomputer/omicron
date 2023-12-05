@@ -522,12 +522,12 @@ lazy_static! {
                 description: Some(String::from("a new IP pool")),
             },
         };
-    pub static ref DEMO_IP_POOL_ASSOC_URL: String = format!("{}/associations", *DEMO_IP_POOL_URL);
-    pub static ref DEMO_IP_POOL_ASSOC_BODY: params::IpPoolAssociationCreate =
-        params::IpPoolAssociationCreate::Silo(params::IpPoolAssociateSilo {
+    pub static ref DEMO_IP_POOL_ASSOC_URL: String = format!("{}/silos", *DEMO_IP_POOL_URL);
+    pub static ref DEMO_IP_POOL_ASSOC_BODY: params::IpPoolSiloLink =
+        params::IpPoolSiloLink {
             silo: NameOrId::Id(DEFAULT_SILO.identity().id),
             is_default: false,
-        });
+        };
     pub static ref DEMO_IP_POOL_RANGE: IpRange = IpRange::V4(Ipv4Range::new(
         std::net::Ipv4Addr::new(10, 0, 0, 0),
         std::net::Ipv4Addr::new(10, 0, 0, 255),

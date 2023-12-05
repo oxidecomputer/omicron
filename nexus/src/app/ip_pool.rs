@@ -91,31 +91,22 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pool_lookup: &lookup::IpPool<'_>,
-        assoc_create: &params::IpPoolAssociationCreate,
+        silo_link: &params::IpPoolSiloLink,
     ) -> CreateResult<db::model::IpPoolResource> {
         let (.., authz_pool) =
             pool_lookup.lookup_for(authz::Action::Modify).await?;
-        let (resource_type, resource_id, is_default) = match assoc_create {
-            params::IpPoolAssociationCreate::Silo(assoc_silo) => {
-                let (silo,) = self
-                    .silo_lookup(&opctx, assoc_silo.silo.clone())?
-                    .lookup_for(authz::Action::Read)
-                    .await?;
-                (
-                    db::model::IpPoolResourceType::Silo,
-                    silo.id(),
-                    assoc_silo.is_default,
-                )
-            }
-        };
+        let (silo,) = self
+            .silo_lookup(&opctx, silo_link.silo.clone())?
+            .lookup_for(authz::Action::Read)
+            .await?;
         self.db_datastore
             .ip_pool_associate_resource(
                 opctx,
                 db::model::IpPoolResource {
                     ip_pool_id: authz_pool.id(),
-                    resource_type,
-                    resource_id,
-                    is_default,
+                    resource_type: db::model::IpPoolResourceType::Silo,
+                    resource_id: silo.id(),
+                    is_default: silo_link.is_default,
                 },
             )
             .await

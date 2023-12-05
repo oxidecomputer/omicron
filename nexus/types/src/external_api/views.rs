@@ -248,12 +248,9 @@ pub struct IpPool {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-pub struct IpPoolResource {
-    // TODO: is including the pool ID redundant? it's convenient to have and
-    // makes this response a cohesive whole
+pub struct IpPoolSilo {
     pub ip_pool_id: Uuid,
-    pub resource_type: shared::IpPoolResourceType,
-    pub resource_id: Uuid,
+    pub silo_id: Uuid,
     pub is_default: bool,
 }
 
