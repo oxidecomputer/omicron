@@ -17,7 +17,7 @@ use crate::nexus::{ConvertInto, NexusClientWithResolver, NexusRequestQueue};
 use crate::params::{
     DiskStateRequested, InstanceHardware, InstanceMigrationSourceParams,
     InstancePutStateResponse, InstanceStateRequested,
-    InstanceUnregisterResponse, ServiceEnsureBody, SledRole, TimeSync,
+    InstanceUnregisterResponse, OmicronZonesConfig, SledRole, TimeSync,
     VpcFirewallRule, ZoneBundleMetadata, Zpool,
 };
 use crate::services::{self, ServiceManager};
@@ -68,6 +68,7 @@ use std::sync::Arc;
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
+use illumos_utils::running_zone::ZoneBuilderFactory;
 #[cfg(not(test))]
 use illumos_utils::{dladm::Dladm, zone::Zones};
 #[cfg(test)]
@@ -382,6 +383,7 @@ impl SledAgent {
             port_manager.clone(),
             storage_manager.clone(),
             long_running_task_handles.zone_bundler.clone(),
+            ZoneBuilderFactory::default(),
         )?;
 
         // Configure the VMM reservoir as either a percentage of DRAM or as an
@@ -505,7 +507,7 @@ impl SledAgent {
         // Nexus. This should not block progress here.
         let endpoint = ProducerEndpoint {
             id: request.body.id,
-            kind: Some(ProducerKind::SledAgent),
+            kind: ProducerKind::SledAgent,
             address: sled_address.into(),
             base_route: String::from("/metrics/collect"),
             interval: crate::metrics::METRIC_COLLECTION_INTERVAL,
@@ -553,12 +555,11 @@ impl SledAgent {
         Ok(sled_agent)
     }
 
-    /// Load services for which we're responsible; only meaningful to call
-    /// during a cold boot.
+    /// Load services for which we're responsible.
     ///
     /// Blocks until all services have started, retrying indefinitely on
     /// failure.
-    pub(crate) async fn cold_boot_load_services(&self) {
+    pub(crate) async fn load_services(&self) {
         info!(self.log, "Loading cold boot services");
         retry_notify(
             retry_policy_internal_service_aggressive(),
@@ -801,36 +802,40 @@ impl SledAgent {
         self.inner.zone_bundler.cleanup().await.map_err(Error::from)
     }
 
-    /// Ensures that particular services should be initialized.
-    ///
-    /// These services will be instantiated by this function, will be recorded
-    /// to a local file to ensure they start automatically on next boot.
-    pub async fn services_ensure(
+    /// List the Omicron zone configuration that's currently running
+    pub async fn omicron_zones_list(
         &self,
-        requested_services: ServiceEnsureBody,
-    ) -> Result<(), Error> {
-        let datasets: Vec<_> = requested_services
-            .services
-            .iter()
-            .filter_map(|service| service.dataset.clone())
-            .collect();
+    ) -> Result<OmicronZonesConfig, Error> {
+        Ok(self.inner.services.omicron_zones_list().await?)
+    }
 
+    /// Ensures that the specific set of Omicron zones are running as configured
+    /// (and that no other zones are running)
+    pub async fn omicron_zones_ensure(
+        &self,
+        requested_zones: OmicronZonesConfig,
+    ) -> Result<(), Error> {
         // TODO:
         // - If these are the set of filesystems, we should also consider
         // removing the ones which are not listed here.
         // - It's probably worth sending a bulk request to the storage system,
         // rather than requesting individual datasets.
-        for dataset in &datasets {
+        for zone in &requested_zones.zones {
+            let Some(dataset_name) = zone.dataset_name() else {
+                continue;
+            };
+
             // First, ensure the dataset exists
+            let dataset_id = zone.id;
             self.inner
                 .storage
-                .upsert_filesystem(dataset.id, dataset.name.clone())
+                .upsert_filesystem(dataset_id, dataset_name)
                 .await?;
         }
 
         self.inner
             .services
-            .ensure_all_services_persistent(requested_services)
+            .ensure_all_omicron_zones_persistent(requested_zones)
             .await?;
         Ok(())
     }

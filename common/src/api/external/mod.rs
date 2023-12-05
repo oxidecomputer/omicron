@@ -409,7 +409,7 @@ impl SemverVersion {
     /// This is the official ECMAScript-compatible validation regex for
     /// semver:
     /// <https://semver.org/#is-there-a-suggested-regular-expression-regex-to-check-a-semver-string>
-    const VALIDATION_REGEX: &str = r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$";
+    const VALIDATION_REGEX: &'static str = r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$";
 }
 
 impl JsonSchema for SemverVersion {
@@ -622,6 +622,7 @@ impl From<ByteCount> for i64 {
     Debug,
     Deserialize,
     Eq,
+    Hash,
     JsonSchema,
     Ord,
     PartialEq,

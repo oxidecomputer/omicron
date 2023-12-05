@@ -3637,6 +3637,34 @@
         "x-dropshot-pagination": {
           "required": []
         }
+      },
+      "post": {
+        "tags": [
+          "system/hardware"
+        ],
+        "summary": "Add a sled to an initialized rack",
+        "operationId": "add_sled_to_initialized_rack",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UninitializedSled"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/v1/system/hardware/sleds/{sled_id}": {
@@ -3813,6 +3841,55 @@
         },
         "x-dropshot-pagination": {
           "required": []
+        }
+      }
+    },
+    "/v1/system/hardware/sleds/{sled_id}/provision-state": {
+      "put": {
+        "tags": [
+          "system/hardware"
+        ],
+        "summary": "Set the sled's provision state.",
+        "operationId": "sled_set_provision_state",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sled_id",
+            "description": "ID of the sled",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SledProvisionStateParams"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SledProvisionStateResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
         }
       }
     },
@@ -7958,7 +8035,7 @@
           "switch"
         ]
       },
-      "BgpPeerConfig": {
+      "BgpPeer": {
         "description": "A BGP peer configuration for an interface. Includes the set of announcements that will be advertised to the peer identified by `addr`. The `bgp_config` parameter is a reference to global BGP parameters. The `interface_name` indicates what interface the peer should be contacted on.",
         "type": "object",
         "properties": {
@@ -8028,6 +8105,20 @@
           "idle_hold_time",
           "interface_name",
           "keepalive"
+        ]
+      },
+      "BgpPeerConfig": {
+        "type": "object",
+        "properties": {
+          "peers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BgpPeer"
+            }
+          }
+        },
+        "required": [
+          "peers"
         ]
       },
       "BgpPeerState": {
@@ -9821,7 +9912,58 @@
               "datum",
               "type"
             ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "datum": {
+                "$ref": "#/components/schemas/MissingDatum"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "missing"
+                ]
+              }
+            },
+            "required": [
+              "datum",
+              "type"
+            ]
           }
+        ]
+      },
+      "DatumType": {
+        "description": "The type of an individual datum of a metric.",
+        "type": "string",
+        "enum": [
+          "bool",
+          "i8",
+          "u8",
+          "i16",
+          "u16",
+          "i32",
+          "u32",
+          "i64",
+          "u64",
+          "f32",
+          "f64",
+          "string",
+          "bytes",
+          "cumulative_i64",
+          "cumulative_u64",
+          "cumulative_f32",
+          "cumulative_f64",
+          "histogram_i8",
+          "histogram_u8",
+          "histogram_i16",
+          "histogram_u16",
+          "histogram_i32",
+          "histogram_u32",
+          "histogram_i64",
+          "histogram_u64",
+          "histogram_f32",
+          "histogram_f64"
         ]
       },
       "DerEncodedKeyPair": {
@@ -12031,6 +12173,10 @@
         "description": "Switch link configuration.",
         "type": "object",
         "properties": {
+          "autoneg": {
+            "description": "Whether or not to set autonegotiation",
+            "type": "boolean"
+          },
           "fec": {
             "description": "The forward error correction mode of the link.",
             "allOf": [
@@ -12063,6 +12209,7 @@
           }
         },
         "required": [
+          "autoneg",
           "fec",
           "lldp",
           "mtu",
@@ -12341,6 +12488,22 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "MissingDatum": {
+        "type": "object",
+        "properties": {
+          "datum_type": {
+            "$ref": "#/components/schemas/DatumType"
+          },
+          "start_time": {
+            "nullable": true,
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "datum_type"
         ]
       },
       "Name": {
@@ -13188,6 +13351,14 @@
             "type": "string",
             "format": "uuid"
           },
+          "provision_state": {
+            "description": "The provision state of the sled.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SledProvisionState"
+              }
+            ]
+          },
           "rack_id": {
             "description": "The rack to which this Sled is currently attached",
             "type": "string",
@@ -13221,6 +13392,7 @@
         "required": [
           "baseboard",
           "id",
+          "provision_state",
           "rack_id",
           "time_created",
           "time_modified",
@@ -13309,6 +13481,68 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "SledProvisionState": {
+        "description": "The provision state of a sled.\n\nThis controls whether new resources are going to be provisioned on this sled.",
+        "oneOf": [
+          {
+            "description": "New resources will be provisioned on this sled.",
+            "type": "string",
+            "enum": [
+              "provisionable"
+            ]
+          },
+          {
+            "description": "New resources will not be provisioned on this sled. However, existing resources will continue to be on this sled unless manually migrated off.",
+            "type": "string",
+            "enum": [
+              "non_provisionable"
+            ]
+          }
+        ]
+      },
+      "SledProvisionStateParams": {
+        "description": "Parameters for `sled_set_provision_state`.",
+        "type": "object",
+        "properties": {
+          "state": {
+            "description": "The provision state.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SledProvisionState"
+              }
+            ]
+          }
+        },
+        "required": [
+          "state"
+        ]
+      },
+      "SledProvisionStateResponse": {
+        "description": "Response to `sled_set_provision_state`.",
+        "type": "object",
+        "properties": {
+          "new_state": {
+            "description": "The new provision state.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SledProvisionState"
+              }
+            ]
+          },
+          "old_state": {
+            "description": "The old provision state.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SledProvisionState"
+              }
+            ]
+          }
+        },
+        "required": [
+          "new_state",
+          "old_state"
         ]
       },
       "SledResultsPage": {
@@ -14211,7 +14445,7 @@
         ]
       },
       "UninitializedSled": {
-        "description": "View of a sled that has not been added to an initialized rack yet",
+        "description": "A sled that has not been added to an initialized rack yet",
         "type": "object",
         "properties": {
           "baseboard": {

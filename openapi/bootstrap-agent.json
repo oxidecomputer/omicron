@@ -510,6 +510,11 @@
               "$ref": "#/components/schemas/IpNetwork"
             }
           },
+          "autoneg": {
+            "description": "Whether or not to set autonegotiation",
+            "default": false,
+            "type": "boolean"
+          },
           "bgp_peers": {
             "description": "BGP peers on this port",
             "type": "array",

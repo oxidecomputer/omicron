@@ -17,6 +17,7 @@ use crate::zone_bundle::ZoneBundler;
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::PortManager;
+use illumos_utils::running_zone::ZoneBuilderFactory;
 use illumos_utils::vmm_reservoir;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
@@ -76,6 +77,7 @@ struct InstanceManagerInternal {
     port_manager: PortManager,
     storage: StorageHandle,
     zone_bundler: ZoneBundler,
+    zone_builder_factory: ZoneBuilderFactory,
 }
 
 pub(crate) struct InstanceManagerServices {
@@ -84,6 +86,7 @@ pub(crate) struct InstanceManagerServices {
     pub port_manager: PortManager,
     pub storage: StorageHandle,
     pub zone_bundler: ZoneBundler,
+    pub zone_builder_factory: ZoneBuilderFactory,
 }
 
 /// All instances currently running on the sled.
@@ -100,6 +103,7 @@ impl InstanceManager {
         port_manager: PortManager,
         storage: StorageHandle,
         zone_bundler: ZoneBundler,
+        zone_builder_factory: ZoneBuilderFactory,
     ) -> Result<InstanceManager, Error> {
         Ok(InstanceManager {
             inner: Arc::new(InstanceManagerInternal {
@@ -113,6 +117,7 @@ impl InstanceManager {
                 port_manager,
                 storage,
                 zone_bundler,
+                zone_builder_factory,
             }),
         })
     }
@@ -266,6 +271,10 @@ impl InstanceManager {
                     port_manager: self.inner.port_manager.clone(),
                     storage: self.inner.storage.clone(),
                     zone_bundler: self.inner.zone_bundler.clone(),
+                    zone_builder_factory: self
+                        .inner
+                        .zone_builder_factory
+                        .clone(),
                 };
 
                 let state = crate::instance::InstanceInitialState {

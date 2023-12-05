@@ -23,6 +23,7 @@
 // a CTE (where we want the alias name to come first).
 
 use crate::schema::dataset;
+use crate::schema::sled;
 use crate::schema::zpool;
 
 table! {
@@ -157,6 +158,7 @@ diesel::allow_tables_to_appear_in_same_query!(
 diesel::allow_tables_to_appear_in_same_query!(
     old_zpool_usage,
     zpool,
+    sled,
     proposed_dataset_changes,
 );
 

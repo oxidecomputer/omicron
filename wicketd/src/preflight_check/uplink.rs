@@ -775,10 +775,8 @@ fn build_port_settings(
         LinkSettings {
             addrs,
             params: LinkCreate {
-                // TODO we should take these parameters too
-                // https://github.com/oxidecomputer/omicron/issues/3061
-                autoneg: false,
-                kr: false,
+                autoneg: uplink.autoneg,
+                kr: false, //NOTE: kr does not apply to user configurable links
                 fec,
                 speed,
                 lane: Some(LinkId(0)),
