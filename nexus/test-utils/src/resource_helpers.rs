@@ -32,6 +32,8 @@ use omicron_common::api::external::Disk;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
+use omicron_common::api::external::Name;
+use omicron_common::api::external::NameOrId;
 use omicron_sled_agent::sim::SledAgent;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -144,17 +146,16 @@ pub async fn create_ip_pool(
     )
     .await;
 
-    // make pool available for use anywhere in fleet
     // let _assoc: views::IpPoolSilo = object_create(
     //     client,
     //     &format!("/v1/system/ip-pools/{pool_name}/associations"),
-    //     &params::IpPoolAssociationCreate::Fleet(params::IpPoolAssociateFleet {
+    //     &params::IpPoolSiloLink {
+    //         silo: NameOrId::Id(DEFAULT_SILO.id()),
     //         is_default: false,
-    //     }),
+    //     },
     // )
     // .await;
 
-    // TODO: associate with fleet as a non-default like before?
     let range = populate_ip_pool(client, pool_name, ip_range).await;
     (pool, range)
 }

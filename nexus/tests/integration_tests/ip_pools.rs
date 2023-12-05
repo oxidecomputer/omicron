@@ -4,12 +4,15 @@
 
 //! Integration tests for operating on IP Pools
 
+use std::collections::HashSet;
+
 use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use dropshot::ResultsPage;
 use http::method::Method;
 use http::StatusCode;
 use nexus_db_queries::db::datastore::SERVICE_IP_POOL_NAME;
+use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
@@ -25,6 +28,7 @@ use nexus_types::external_api::params::ExternalIpCreate;
 use nexus_types::external_api::params::InstanceDiskAttachment;
 use nexus_types::external_api::params::InstanceNetworkInterfaceAttachment;
 use nexus_types::external_api::params::IpPoolCreate;
+use nexus_types::external_api::params::IpPoolSiloLink;
 use nexus_types::external_api::params::IpPoolUpdate;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::shared::Ipv4Range;
@@ -33,12 +37,12 @@ use nexus_types::external_api::views::IpPool;
 use nexus_types::external_api::views::IpPoolRange;
 use nexus_types::external_api::views::IpPoolSilo;
 use nexus_types::external_api::views::Silo;
+use nexus_types::identity::Resource;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::{IdentityMetadataCreateParams, Name};
 use omicron_nexus::TestInterfaces;
 use sled_agent_client::TestInterfaces as SledTestInterfaces;
-use std::collections::HashSet;
 use uuid::Uuid;
 
 type ControlPlaneTestContext =
@@ -65,10 +69,7 @@ async fn test_ip_pool_basic_crud(cptestctx: &ControlPlaneTestContext) {
     .await
     .expect("Failed to list IP Pools")
     .all_items;
-    assert_eq!(ip_pools.len(), 1, "Expected to see default IP pool");
-    assert_eq!(ip_pools[0].identity.name, "default");
-    // assert_eq!(ip_pools[0].silo_id, None);
-    // assert!(ip_pools[0].is_default);
+    assert_eq!(ip_pools.len(), 0, "Expected empty list of IP pools");
 
     // Verify 404 if the pool doesn't exist yet, both for creating or deleting
     let error: HttpErrorResponseBody = NexusRequest::expect_failure(
@@ -135,8 +136,8 @@ async fn test_ip_pool_basic_crud(cptestctx: &ControlPlaneTestContext) {
     .await
     .expect("Failed to list IP Pools")
     .all_items;
-    assert_eq!(list.len(), 2, "Expected exactly two IP pools");
-    assert_pools_eq(&created_pool, &list[1]);
+    assert_eq!(list.len(), 1, "Expected exactly 1 IP pool");
+    assert_pools_eq(&created_pool, &list[0]);
 
     let fetched_pool: IpPool = NexusRequest::object_get(client, &ip_pool_url)
         .authn_as(AuthnMode::PrivilegedUser)
@@ -304,11 +305,10 @@ async fn test_ip_pool_service_no_cud(cptestctx: &ControlPlaneTestContext) {
         .execute_and_parse_unwrap::<IpPool>()
         .await;
 
-    // but it does not come back in the list. there's one in there and it's the default
+    // but it does not come back in the list. there are none in the list
     let pools =
         objects_list_page_authz::<IpPool>(client, "/v1/system/ip-pools").await;
-    assert_eq!(pools.items.len(), 1);
-    assert_ne!(pools.items[0].identity.id, pool.identity.id);
+    assert_eq!(pools.items.len(), 0);
 
     // deletes fail
 
@@ -384,7 +384,6 @@ async fn test_ip_pool_with_silo(cptestctx: &ControlPlaneTestContext) {
 
     // associate by name with silo that exists
     let params = params::IpPoolSiloLink {
-        // TODO: this is probably not the best silo ID to use
         silo: NameOrId::Name(cptestctx.silo_name.clone()),
         is_default: false,
     };
@@ -414,7 +413,7 @@ async fn test_ip_pool_with_silo(cptestctx: &ControlPlaneTestContext) {
         is_default: false,
     };
     let _: IpPoolSilo =
-        object_create(client, "/v1/system/ip-pools/p1/silo", &params).await;
+        object_create(client, "/v1/system/ip-pools/p1/silos", &params).await;
 
     // association should look the same as the other one, except different pool ID
     let assocs_p1 = get_associations(client, "p1").await;
@@ -438,11 +437,10 @@ async fn test_ip_pool_pagination(cptestctx: &ControlPlaneTestContext) {
     let base_url = "/v1/system/ip-pools";
     let first_page = objects_list_page_authz::<IpPool>(client, &base_url).await;
 
-    // we start out with one pool, and it's the default pool
-    assert_eq!(first_page.items.len(), 1);
-    assert_eq!(first_page.items[0].identity.name, "default");
+    // we start out with no pools
+    assert_eq!(first_page.items.len(), 0);
 
-    let mut pool_names = vec!["default".to_string()];
+    let mut pool_names = vec![];
 
     // create more pools to work with, adding their names to the list so we
     // can use it to check order
@@ -465,7 +463,7 @@ async fn test_ip_pool_pagination(cptestctx: &ControlPlaneTestContext) {
     );
     let next_page =
         objects_list_page_authz::<IpPool>(client, &next_page_url).await;
-    assert_eq!(get_names(next_page.items), &pool_names[5..9]);
+    assert_eq!(get_names(next_page.items), &pool_names[5..8]);
 }
 
 /// helper to make tests less ugly
@@ -799,40 +797,11 @@ async fn test_ip_pool_list_usable_by_project(
     let scoped_ip_pools_url = "/v1/ip-pools";
     let ip_pools_url = "/v1/system/ip-pools";
     let mypool_name = "mypool";
-    let default_ip_pool_add_range_url =
-        format!("{}/default/ranges/add", ip_pools_url);
+    let mypool_silos_url = format!("{}/{}/silos", ip_pools_url, mypool_name);
     let mypool_ip_pool_add_range_url =
         format!("{}/{}/ranges/add", ip_pools_url, mypool_name);
     let service_ip_pool_add_range_url =
         "/v1/system/ip-pools-service/ranges/add".to_string();
-
-    // Add an IP range to the default pool
-    let default_range = IpRange::V4(
-        Ipv4Range::new(
-            std::net::Ipv4Addr::new(10, 0, 0, 1),
-            std::net::Ipv4Addr::new(10, 0, 0, 2),
-        )
-        .unwrap(),
-    );
-    let created_range: IpPoolRange = NexusRequest::objects_post(
-        client,
-        &default_ip_pool_add_range_url,
-        &default_range,
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap()
-    .parsed_body()
-    .unwrap();
-    assert_eq!(
-        default_range.first_address(),
-        created_range.range.first_address()
-    );
-    assert_eq!(
-        default_range.last_address(),
-        created_range.range.last_address()
-    );
 
     // Create an org and project, and then try to make an instance with an IP from
     // each range to which the project is expected have access.
@@ -841,7 +810,6 @@ async fn test_ip_pool_list_usable_by_project(
     const INSTANCE_NAME: &str = "myinst";
     create_project(client, PROJECT_NAME).await;
 
-    // TODO: give this project explicit access when such functionality exists
     let params = IpPoolCreate {
         identity: IdentityMetadataCreateParams {
             name: String::from(mypool_name).parse().unwrap(),
@@ -853,19 +821,15 @@ async fn test_ip_pool_list_usable_by_project(
         .execute_and_parse_unwrap::<IpPool>()
         .await;
 
-    // add to fleet since we can't add to project yet
-    // TODO: could do silo, might as well? need the ID, though. at least
-    // until I make it so you can specify the resource by name
-    // let params =
-    //     params::IpPoolAssociationCreate::Fleet(params::IpPoolAssociateFleet {
-    //         is_default: false,
-    //     });
-    // let _: IpPoolResource = object_create(
-    //     client,
-    //     &format!("/v1/system/ip-pools/{mypool_name}/associations"),
-    //     &params,
-    // )
-    // .await;
+    // associate pool with default silo, which is the privileged user's silo
+    let params = IpPoolSiloLink {
+        silo: NameOrId::Id(DEFAULT_SILO.id()),
+        is_default: true,
+    };
+    NexusRequest::objects_post(client, &mypool_silos_url, &params)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<IpPoolSilo>()
+        .await;
 
     // Add an IP range to mypool
     let mypool_range = IpRange::V4(
@@ -921,8 +885,7 @@ async fn test_ip_pool_list_usable_by_project(
         created_range.range.last_address()
     );
 
-    // TODO: add non-service, ip pools that the project *can't* use, when that
-    // functionality is implemented in the future (i.e. a "notmypool")
+    // TODO: add non-service ip pools that the project *can't* use
 
     let list_url = format!("{}?project={}", scoped_ip_pools_url, PROJECT_NAME);
     let list = NexusRequest::iter_collection_authn::<IpPool>(
@@ -932,13 +895,12 @@ async fn test_ip_pool_list_usable_by_project(
     .expect("Failed to list IP Pools")
     .all_items;
 
-    // default and mypool
-    assert_eq!(list.len(), 2);
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].identity.name.to_string(), mypool_name);
+
+    // currently there's only one in the list, so this is overkill. But there might be more
     let pool_names: HashSet<String> =
         list.iter().map(|pool| pool.identity.name.to_string()).collect();
-    let expected_names: HashSet<String> =
-        ["default", "mypool"].into_iter().map(|s| s.to_string()).collect();
-    assert_eq!(pool_names, expected_names);
 
     // ensure we can view each pool returned
     for pool_name in &pool_names {
@@ -957,7 +919,7 @@ async fn test_ip_pool_list_usable_by_project(
     // should be able to access
     for pool_name in pool_names {
         let instance_name = format!("{}-{}", INSTANCE_NAME, pool_name);
-        let pool_name = Some(Name::try_from(pool_name).unwrap());
+        let pool_name = Some(Name::try_from(pool_name.to_string()).unwrap());
         create_instance_with(
             client,
             PROJECT_NAME,
@@ -978,13 +940,36 @@ async fn test_ip_range_delete_with_allocated_external_ip_fails(
     let apictx = &cptestctx.server.apictx();
     let nexus = &apictx.nexus;
     let ip_pools_url = "/v1/system/ip-pools";
-    let pool_name = "default";
+    let pool_name = "mypool";
     let ip_pool_url = format!("{}/{}", ip_pools_url, pool_name);
+    let ip_pool_silos_url = format!("{}/{}/silos", ip_pools_url, pool_name);
     let ip_pool_ranges_url = format!("{}/ranges", ip_pool_url);
     let ip_pool_add_range_url = format!("{}/add", ip_pool_ranges_url);
     let ip_pool_rem_range_url = format!("{}/remove", ip_pool_ranges_url);
 
-    // Add an IP range to the default pool
+    // create pool
+    let params = IpPoolCreate {
+        identity: IdentityMetadataCreateParams {
+            name: String::from(pool_name).parse().unwrap(),
+            description: String::from("right on cue"),
+        },
+    };
+    NexusRequest::objects_post(client, ip_pools_url, &params)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<IpPool>()
+        .await;
+
+    // associate pool with default silo, which is the privileged user's silo
+    let params = IpPoolSiloLink {
+        silo: NameOrId::Id(DEFAULT_SILO.id()),
+        is_default: true,
+    };
+    NexusRequest::objects_post(client, &ip_pool_silos_url, &params)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<IpPoolSilo>()
+        .await;
+
+    // Add an IP range to the pool
     let range = IpRange::V4(
         Ipv4Range::new(
             std::net::Ipv4Addr::new(10, 0, 0, 1),

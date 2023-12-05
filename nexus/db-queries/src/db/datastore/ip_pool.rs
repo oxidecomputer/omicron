@@ -137,10 +137,9 @@ impl DataStore {
         ip_pool::table
             .inner_join(ip_pool_resource::table)
             .filter(
-                ip_pool_resource::resource_type
-                    .eq(IpPoolResourceType::Silo)
-                    .and(ip_pool_resource::resource_id.eq(authz_silo_id)),
+                ip_pool_resource::resource_type.eq(IpPoolResourceType::Silo),
             )
+            .filter(ip_pool_resource::resource_id.eq(authz_silo_id))
             .filter(ip_pool_resource::is_default.eq(true))
             .filter(ip_pool::time_deleted.is_null())
             // Order by most specific first so we get the most specific.
@@ -443,7 +442,7 @@ impl DataStore {
             .load_async::<ExternalIp>(
                 &*self.pool_connection_authorized(opctx).await?,
             )
-            .await 
+            .await
             .map_err(|e| {
                 Error::internal_error(&format!(
                     "error checking for outstanding IPs before deleting IP pool association to resource: {:?}",
