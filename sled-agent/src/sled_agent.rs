@@ -1046,6 +1046,10 @@ impl SledAgent {
         self.inner.metrics_manager.registry()
     }
 
+    pub(crate) fn storage(&self) -> &StorageHandle {
+        &self.inner.storage
+    }
+
     pub(crate) fn boot_disk_os_writer(&self) -> &BootDiskOsWriter {
         &self.inner.boot_disk_os_writer
     }

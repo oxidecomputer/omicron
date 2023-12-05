@@ -98,6 +98,7 @@ slog-async.workspace = true
 slog-term.workspace = true
 tempfile.workspace = true
 tokio-stream.workspace = true
+tokio-util.workspace = true
 
 illumos-utils = { workspace = true, features = ["testing", "tmp_keypath"] }
 sled-storage = { workspace = true, features = ["testing"] }

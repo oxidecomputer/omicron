@@ -18,6 +18,7 @@ use crate::sled_agent::Error as SledAgentError;
 use crate::zone_bundle;
 use bootstore::schemes::v0::NetworkConfig;
 use camino::Utf8PathBuf;
+use display_error_chain::DisplayErrorChain;
 use dropshot::{
     endpoint, ApiDescription, FreeformBody, HttpError, HttpResponseCreated,
     HttpResponseDeleted, HttpResponseHeaders, HttpResponseOk,
@@ -38,6 +39,7 @@ use oximeter_producer::collect;
 use oximeter_producer::ProducerIdPathParams;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sled_hardware::DiskVariant;
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
@@ -787,10 +789,66 @@ async fn host_os_write_start(
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let sa = request_context.context();
     let boot_disk = path_params.into_inner().boot_disk;
+
+    // Find our corresponding disk.
+    let maybe_disk_path =
+        sa.storage().get_latest_resources().await.disks().values().find_map(
+            |(disk, _pool)| {
+                // Synthetic disks panic if asked for their `slot()`, so filter
+                // them out first; additionally, filter out any non-M2 disks.
+                if disk.is_synthetic() || disk.variant() != DiskVariant::M2 {
+                    return None;
+                }
+
+                // Convert this M2 disk's slot to an M2Slot, and skip any that
+                // don't match the requested boot_disk.
+                let Ok(slot) = M2Slot::try_from(disk.slot()) else {
+                    return None;
+                };
+                if slot != boot_disk {
+                    return None;
+                }
+
+                let raw_devs_path = true;
+                Some(disk.boot_image_devfs_path(raw_devs_path))
+            },
+        );
+
+    let disk_path = match maybe_disk_path {
+        Some(Ok(path)) => path,
+        Some(Err(err)) => {
+            let message = format!(
+                "failed to find devfs path for {boot_disk:?}: {}",
+                DisplayErrorChain::new(&err)
+            );
+            return Err(HttpError {
+                status_code: http::StatusCode::SERVICE_UNAVAILABLE,
+                error_code: None,
+                external_message: message.clone(),
+                internal_message: message,
+            });
+        }
+        None => {
+            let message = format!("no disk found for slot {boot_disk:?}",);
+            return Err(HttpError {
+                status_code: http::StatusCode::SERVICE_UNAVAILABLE,
+                error_code: None,
+                external_message: message.clone(),
+                internal_message: message,
+            });
+        }
+    };
+
     let BootDiskWriteStartQueryParams { update_id, sha3_256_digest } =
         query_params.into_inner();
     sa.boot_disk_os_writer()
-        .start_update(boot_disk, update_id, sha3_256_digest, body.into_stream())
+        .start_update(
+            boot_disk,
+            disk_path,
+            update_id,
+            sha3_256_digest,
+            body.into_stream(),
+        )
         .await
         .map_err(|err| HttpError::from(&*err))?;
     Ok(HttpResponseUpdatedNoContent())
@@ -802,6 +860,7 @@ async fn host_os_write_start(
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum BootDiskOsWriteProgress {
     ReceivingUploadedImage { bytes_received: usize },
+    WritingImageToDisk { bytes_written: usize },
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema, Serialize)]
