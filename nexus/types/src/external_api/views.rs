@@ -49,12 +49,52 @@ pub struct Silo {
         BTreeMap<shared::SiloRole, BTreeSet<shared::FleetRole>>,
 }
 
+/// A collection of resource counts used to describe capacity and utilization
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct VirtualResourceCounts {
+    /// Number of virtual CPUs
+    pub cpus: i64,
+    /// Amount of memory in bytes 
+    pub memory: ByteCount,
+    /// Amount of disk storage in bytes 
+    pub storage: ByteCount,
+}
+
+/// A collection of resource counts used to set the virtual capacity of a silo
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SiloQuotas {
     pub silo_id: Uuid,
-    pub cpus: i64,
-    pub memory: i64,
-    pub storage: i64,
+    #[serde(flatten)]
+    pub quotas: VirtualResourceCounts
+}
+
+/// View of a silo's resource utilization and capacity
+pub struct Utilization {
+    /// Accounts for resources allocated to running instances or storage allocated via disks or snapshots
+    /// Note that CPU and memory resources associated with a stopped instances are not counted here
+    /// whereas associated disks will still be counted
+    pub provisioned: VirtualResourceCounts,
+    /// The total amount of resources that can be provisioned in this silo
+    /// Actions that would exceed this limit will fail
+    pub capacity: VirtualResourceCounts, 
+}
+
+pub struct SiloUtilization {
+    pub silo_id: Uuid,
+    #[serde(flatten)]
+    pub utilization: Utilization
+}
+
+/// View of a fleet's utilization
+/// Note that these values represent _virtual_ resources in the system, not physical ones
+pub struct SystemUtilization {
+    /// Accounts for resources allocated by in silos like CPU or memory for running instances and storage for disks and snapshots
+    /// Note that CPU and memory resources associated with a stopped instances are not counted here
+    pub provisioned: VirtualResourceCounts,
+    /// Accounts for the total amount of resources reserved for silos via their quotas
+    pub allocated: VirtualResourceCounts,
+    /// The total amount of virtual resources available to the system 
+    pub capacity: VirtualResourceCounts,
 }
 
 // IDENTITY PROVIDER

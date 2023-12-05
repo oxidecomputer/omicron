@@ -268,7 +268,7 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(networking_bgp_announce_set_list)?;
         api.register(networking_bgp_announce_set_delete)?;
 
-        api.register(quotas_view)?;
+        api.register(utilization_view)?;
 
         // Fleet-wide API operations
         api.register(silo_list)?;
@@ -278,8 +278,10 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(silo_policy_view)?;
         api.register(silo_policy_update)?;
 
-        api.register(system_quotas_list)?;
+        api.register(system_utilization_view)?;
+        api.register(silo_utilization_list)?;
 
+        api.register(system_quotas_list)?;
         api.register(silo_quotas_view)?;
         api.register(silo_quotas_update)?;
 
@@ -513,25 +515,78 @@ async fn policy_update(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// View the resource quotas of the user's current silo
+/// View the resource utilization of the user's current silo
 #[endpoint {
     method = GET,
-    path = "/v1/quotas",
+    path = "/v1/utilization",
     tags = ["silos"],
 }]
-async fn quotas_view(
+async fn utilization_view(
     rqctx: RequestContext<Arc<ServerContext>>,
-) -> Result<HttpResponseOk<SiloQuotas>, HttpError> {
+) -> Result<HttpResponseOk<Utilization>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let authz_silo =
-            opctx.authn.silo_required().internal_context("listing quotas")?;
+            opctx.authn.silo_required().internal_context("get current silo utilization")?;
         let silo_lookup = nexus.silo_lookup(&opctx, authz_silo.id().into())?;
-        let quotas = nexus.silo_quotas_view(&opctx, &silo_lookup).await?;
+        let quotas = nexus.silo_utilization_view(&opctx, &silo_lookup).await?;
 
         Ok(HttpResponseOk(quotas.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+#[endpoint {
+    method = GET,
+    path = "/v1/system/utilization",
+    tags = ["system/utilization"],
+}]
+async fn system_utilization_view(
+    rqctx: RequestContext<Arc<ServerContext>>,
+) -> Result<HttpResponseOk<SiloQuotas>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let quotas = nexus.fleet_utilization_view(&opctx).await?;
+
+        Ok(HttpResponseOk(quotas.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+#[endpoint {
+    method = GET,
+    path = "/v1/system/utilization/silos",
+    tags = ["system/utilization"],
+}]
+async fn silo_utilization_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<SiloUtilization>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+
+        let query = query_params.into_inner();
+        let pagparams = data_page_params_for(&rqctx, &query)?;
+
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let quotas = nexus
+            .silo_utilization_list(&opctx, &pagparams)
+            .await?
+            .into_iter()
+            .map(|p| p.into())
+            .collect();
+
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            quotas,
+            &|_, quota: &SiloQuotas| quota.silo_id,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
