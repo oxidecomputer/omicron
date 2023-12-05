@@ -1,1 +1,4 @@
-ALTER TABLE omicron.public.external_ip ADD COLUMN IF NOT EXISTS project_id UUID;
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_deleted_disk ON omicron.public.disk (
+    id
+) WHERE
+    time_deleted IS NOT NULL;

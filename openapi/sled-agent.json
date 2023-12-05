@@ -2898,7 +2898,58 @@
               "datum",
               "type"
             ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "datum": {
+                "$ref": "#/components/schemas/MissingDatum"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "missing"
+                ]
+              }
+            },
+            "required": [
+              "datum",
+              "type"
+            ]
           }
+        ]
+      },
+      "DatumType": {
+        "description": "The type of an individual datum of a metric.",
+        "type": "string",
+        "enum": [
+          "bool",
+          "i8",
+          "u8",
+          "i16",
+          "u16",
+          "i32",
+          "u32",
+          "i64",
+          "u64",
+          "f32",
+          "f64",
+          "string",
+          "bytes",
+          "cumulative_i64",
+          "cumulative_u64",
+          "cumulative_f32",
+          "cumulative_f64",
+          "histogram_i8",
+          "histogram_u8",
+          "histogram_i16",
+          "histogram_u16",
+          "histogram_i32",
+          "histogram_u32",
+          "histogram_i64",
+          "histogram_u64",
+          "histogram_f32",
+          "histogram_f64"
         ]
       },
       "DeleteVirtualNetworkInterfaceHost": {
@@ -4824,7 +4875,75 @@
               "content",
               "type"
             ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "content": {
+                "type": "object",
+                "properties": {
+                  "datum_type": {
+                    "$ref": "#/components/schemas/DatumType"
+                  }
+                },
+                "required": [
+                  "datum_type"
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "missing_datum_requires_start_time"
+                ]
+              }
+            },
+            "required": [
+              "content",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "content": {
+                "type": "object",
+                "properties": {
+                  "datum_type": {
+                    "$ref": "#/components/schemas/DatumType"
+                  }
+                },
+                "required": [
+                  "datum_type"
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "missing_datum_cannot_have_start_time"
+                ]
+              }
+            },
+            "required": [
+              "content",
+              "type"
+            ]
           }
+        ]
+      },
+      "MissingDatum": {
+        "type": "object",
+        "properties": {
+          "datum_type": {
+            "$ref": "#/components/schemas/DatumType"
+          },
+          "start_time": {
+            "nullable": true,
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "datum_type"
         ]
       },
       "Name": {

@@ -4629,10 +4629,7 @@ async fn sled_set_provision_state(
 
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         // Convert the external `SledProvisionState` into our internal data model.
-        let new_state =
-            db::model::SledProvisionState::try_from(provision_state).map_err(
-                |error| HttpError::for_bad_request(None, format!("{error}")),
-            )?;
+        let new_state = db::model::SledProvisionState::from(provision_state);
 
         let sled_lookup = nexus.sled_lookup(&opctx, &path.sled_id)?;
 

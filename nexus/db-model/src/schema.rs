@@ -1322,7 +1322,7 @@ table! {
 ///
 /// This should be updated whenever the schema is changed. For more details,
 /// refer to: schema/crdb/README.adoc
-pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(18, 0, 0);
+pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(19, 0, 0);
 
 allow_tables_to_appear_in_same_query!(
     system_update,
@@ -1391,3 +1391,7 @@ allow_tables_to_appear_in_same_query!(
     switch_port,
     switch_port_settings_bgp_peer_config
 );
+
+allow_tables_to_appear_in_same_query!(disk, virtual_provisioning_resource);
+
+allow_tables_to_appear_in_same_query!(volume, virtual_provisioning_resource);

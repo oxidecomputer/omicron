@@ -34,19 +34,14 @@ impl From<SledProvisionState> for views::SledProvisionState {
     }
 }
 
-impl TryFrom<views::SledProvisionState> for SledProvisionState {
-    type Error = UnknownSledProvisionState;
-
-    fn try_from(state: views::SledProvisionState) -> Result<Self, Self::Error> {
+impl From<views::SledProvisionState> for SledProvisionState {
+    fn from(state: views::SledProvisionState) -> Self {
         match state {
             views::SledProvisionState::Provisionable => {
-                Ok(SledProvisionState::Provisionable)
+                SledProvisionState::Provisionable
             }
             views::SledProvisionState::NonProvisionable => {
-                Ok(SledProvisionState::NonProvisionable)
-            }
-            views::SledProvisionState::Unknown => {
-                Err(UnknownSledProvisionState)
+                SledProvisionState::NonProvisionable
             }
         }
     }
