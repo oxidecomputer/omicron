@@ -14,6 +14,7 @@ use self::conversions::component_from_str;
 use crate::error::SpCommsError;
 use crate::http_err_with_message;
 use crate::ServerContext;
+use base64::Engine;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
@@ -27,8 +28,7 @@ use dropshot::UntypedBody;
 use dropshot::WebsocketEndpointResult;
 use dropshot::WebsocketUpgrade;
 use futures::TryFutureExt;
-use gateway_messages::SpError;
-use gateway_sp_comms::error::CommunicationError;
+use gateway_messages::SpComponent;
 use gateway_sp_comms::HostPhase2Provider;
 use omicron_common::update::ArtifactHash;
 use schemars::JsonSchema;
@@ -118,6 +118,70 @@ pub enum RotSlot {
 pub struct RotImageDetails {
     pub digest: String,
     pub version: ImageVersion,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+pub struct RotCmpa {
+    pub base64_data: String,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+#[serde(tag = "slot", rename_all = "snake_case")]
+pub enum RotCfpaSlot {
+    Active,
+    Inactive,
+    Scratch,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+pub struct GetCfpaParams {
+    pub slot: RotCfpaSlot,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+pub struct RotCfpa {
+    pub base64_data: String,
+    pub slot: RotCfpaSlot,
 }
 
 #[derive(
@@ -422,7 +486,7 @@ pub struct SpComponentCaboose {
     pub git_commit: String,
     pub board: String,
     pub name: String,
-    pub version: Option<String>,
+    pub version: String,
 }
 
 /// Identity of a host phase2 recovery image.
@@ -659,18 +723,15 @@ async fn sp_component_caboose_get(
         .read_component_caboose(component, firmware_slot, CABOOSE_KEY_NAME)
         .await
         .map_err(SpCommsError::from)?;
-    let version = match sp
+    let version = sp
         .read_component_caboose(component, firmware_slot, CABOOSE_KEY_VERSION)
         .await
-    {
-        Ok(value) => Some(from_utf8(&CABOOSE_KEY_VERSION, value)?),
-        Err(CommunicationError::SpError(SpError::NoSuchCabooseKey(_))) => None,
-        Err(err) => return Err(SpCommsError::from(err).into()),
-    };
+        .map_err(SpCommsError::from)?;
 
     let git_commit = from_utf8(&CABOOSE_KEY_GIT_COMMIT, git_commit)?;
     let board = from_utf8(&CABOOSE_KEY_BOARD, board)?;
     let name = from_utf8(&CABOOSE_KEY_NAME, name)?;
+    let version = from_utf8(&CABOOSE_KEY_VERSION, version)?;
 
     let caboose = SpComponentCaboose { git_commit, board, name, version };
 
@@ -968,6 +1029,75 @@ async fn sp_component_update_abort(
     Ok(HttpResponseUpdatedNoContent {})
 }
 
+/// Read the CMPA from a root of trust.
+///
+/// This endpoint is only valid for the `rot` component.
+#[endpoint {
+    method = GET,
+    path = "/sp/{type}/{slot}/component/{component}/cmpa",
+}]
+async fn sp_rot_cmpa_get(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path: Path<PathSpComponent>,
+) -> Result<HttpResponseOk<RotCmpa>, HttpError> {
+    let apictx = rqctx.context();
+
+    let PathSpComponent { sp, component } = path.into_inner();
+
+    // Ensure the caller knows they're asking for the RoT
+    if component_from_str(&component)? != SpComponent::ROT {
+        return Err(HttpError::for_bad_request(
+            Some("RequestUnsupportedForComponent".to_string()),
+            "Only the RoT has a CFPA".into(),
+        ));
+    }
+
+    let sp = apictx.mgmt_switch.sp(sp.into())?;
+    let data = sp.read_rot_cmpa().await.map_err(SpCommsError::from)?;
+
+    let base64_data = base64::engine::general_purpose::STANDARD.encode(data);
+
+    Ok(HttpResponseOk(RotCmpa { base64_data }))
+}
+
+/// Read the requested CFPA slot from a root of trust.
+///
+/// This endpoint is only valid for the `rot` component.
+#[endpoint {
+    method = GET,
+    path = "/sp/{type}/{slot}/component/{component}/cfpa",
+}]
+async fn sp_rot_cfpa_get(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path: Path<PathSpComponent>,
+    params: TypedBody<GetCfpaParams>,
+) -> Result<HttpResponseOk<RotCfpa>, HttpError> {
+    let apictx = rqctx.context();
+
+    let PathSpComponent { sp, component } = path.into_inner();
+    let GetCfpaParams { slot } = params.into_inner();
+
+    // Ensure the caller knows they're asking for the RoT
+    if component_from_str(&component)? != SpComponent::ROT {
+        return Err(HttpError::for_bad_request(
+            Some("RequestUnsupportedForComponent".to_string()),
+            "Only the RoT has a CFPA".into(),
+        ));
+    }
+
+    let sp = apictx.mgmt_switch.sp(sp.into())?;
+    let data = match slot {
+        RotCfpaSlot::Active => sp.read_rot_active_cfpa().await,
+        RotCfpaSlot::Inactive => sp.read_rot_inactive_cfpa().await,
+        RotCfpaSlot::Scratch => sp.read_rot_scratch_cfpa().await,
+    }
+    .map_err(SpCommsError::from)?;
+
+    let base64_data = base64::engine::general_purpose::STANDARD.encode(data);
+
+    Ok(HttpResponseOk(RotCfpa { base64_data, slot }))
+}
+
 /// List SPs via Ignition
 ///
 /// Retreive information for all SPs via the Ignition controller. This is lower
@@ -1174,10 +1304,8 @@ async fn sp_host_phase2_progress_get(
     // this SP most recently requested. We'll treat that as "no progress
     // information", since it almost certainly means our progress info on this
     // SP is very stale.
-    let Ok(total_size) = apictx
-        .host_phase2_provider
-        .total_size(progress.hash)
-        .await
+    let Ok(total_size) =
+        apictx.host_phase2_provider.total_size(progress.hash).await
     else {
         return Ok(HttpResponseOk(HostPhase2Progress::None));
     };
@@ -1326,6 +1454,8 @@ pub fn api() -> GatewayApiDescription {
         api.register(sp_component_update)?;
         api.register(sp_component_update_status)?;
         api.register(sp_component_update_abort)?;
+        api.register(sp_rot_cmpa_get)?;
+        api.register(sp_rot_cfpa_get)?;
         api.register(sp_host_phase2_progress_get)?;
         api.register(sp_host_phase2_progress_delete)?;
         api.register(ignition_list)?;

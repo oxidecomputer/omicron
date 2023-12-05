@@ -2,17 +2,17 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use nexus_db_queries::authn::silos::{
+    IdentityProviderType, SamlIdentityProvider, SamlLoginPost,
+};
 use nexus_test_utils::assert_same_items;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{create_silo, object_create};
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::views::{self, Silo};
+use nexus_types::external_api::{params, shared};
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_nexus::authn::silos::{
-    IdentityProviderType, SamlIdentityProvider, SamlLoginPost,
-};
 use omicron_nexus::external_api::console_api;
-use omicron_nexus::external_api::views::{self, Silo};
-use omicron_nexus::external_api::{params, shared};
 use omicron_nexus::TestInterfaces;
 
 use base64::Engine;

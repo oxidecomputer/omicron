@@ -2,6 +2,7 @@
 name = "tufaceous"
 version = "0.1.0"
 edition = "2021"
+license = "MPL-2.0"
 publish = false
 
 [dependencies]
@@ -16,7 +17,9 @@ slog.workspace = true
 slog-async.workspace = true
 slog-envlogger.workspace = true
 slog-term.workspace = true
+tokio.workspace = true
 tufaceous-lib.workspace = true
+omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 assert_cmd.workspace = true
@@ -25,6 +28,7 @@ fs-err.workspace = true
 omicron-test-utils.workspace = true
 predicates.workspace = true
 tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
 
 [[test]]
 name = "manifest-tests"

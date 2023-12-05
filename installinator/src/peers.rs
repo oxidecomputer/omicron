@@ -393,28 +393,51 @@ impl Peers {
     ) -> impl Stream<Item = Result<(), ClientError>> + Send + '_ {
         futures::stream::iter(self.peers())
             .map(move |peer| {
-                let log = self.log.new(slog::o!("peer" => peer.to_string()));
                 let report = report.clone();
-                async move {
-                    // For each peer, report it to the network.
-                    match self.imp
-                        .report_progress_impl(peer, update_id, report)
-                        .await
-                    {
-                        Ok(()) => Ok(()),
-                        Err(err) => {
-                            // Error 422 means that the server didn't accept the update ID.
-                            if err.status() == Some(StatusCode::UNPROCESSABLE_ENTITY) {
-                                slog::debug!(log, "returned HTTP 422 for update ID {update_id}");
-                            } else {
-                                slog::debug!(log, "failed for update ID {update_id}");
-                            }
-                            Err(err)
-                        }
-                    }
-                }
+                self.send_report_to_peer(peer, update_id, report)
             })
             .buffer_unordered(8)
+    }
+
+    async fn send_report_to_peer(
+        &self,
+        peer: SocketAddr,
+        update_id: Uuid,
+        report: EventReport,
+    ) -> Result<(), ClientError> {
+        let log = self.log.new(slog::o!("peer" => peer.to_string()));
+        // For each peer, report it to the network.
+        match self.imp.report_progress_impl(peer, update_id, report).await {
+            Ok(()) => Ok(()),
+            Err(err) => {
+                // Error 422 means that the server didn't accept the update ID.
+                if err.status() == Some(StatusCode::UNPROCESSABLE_ENTITY) {
+                    slog::debug!(
+                        log,
+                        "received HTTP 422 Unprocessable Entity \
+                         for update ID {update_id} (update ID unrecognized)",
+                    );
+                } else if err.status() == Some(StatusCode::GONE) {
+                    // XXX If we establish a 1:1 relationship
+                    // between a particular instance of wicketd and
+                    // installinator, 410 Gone can be used to abort
+                    // the update. But we don't have that kind of
+                    // relationship at the moment.
+                    slog::warn!(
+                        log,
+                        "received HTTP 410 Gone for update ID {update_id} \
+                         (receiver closed)",
+                    );
+                } else {
+                    slog::warn!(
+                        log,
+                        "received HTTP error code {:?} for update ID {update_id}",
+                        err.status()
+                    );
+                }
+                Err(err)
+            }
+        }
     }
 }
 

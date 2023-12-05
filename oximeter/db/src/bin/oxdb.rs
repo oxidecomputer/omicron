@@ -148,7 +148,7 @@ async fn make_client(
     let address = SocketAddr::new(address, port);
     let client = Client::new(address, &log);
     client
-        .init_db()
+        .init_single_node_db()
         .await
         .context("Failed to initialize timeseries database")?;
     Ok(client)
@@ -261,13 +261,13 @@ async fn populate(
     Ok(())
 }
 
-async fn wipe_db(
+async fn wipe_single_node_db(
     address: IpAddr,
     port: u16,
     log: Logger,
 ) -> Result<(), anyhow::Error> {
     let client = make_client(address, port, &log).await?;
-    client.wipe_db().await.context("Failed to wipe database")
+    client.wipe_single_node_db().await.context("Failed to wipe database")
 }
 
 async fn query(
@@ -313,7 +313,7 @@ async fn main() {
                 .unwrap();
         }
         Subcommand::Wipe => {
-            wipe_db(args.address, args.port, log).await.unwrap()
+            wipe_single_node_db(args.address, args.port, log).await.unwrap()
         }
         Subcommand::Query {
             timeseries_name,

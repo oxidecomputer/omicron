@@ -8,20 +8,26 @@ use http::method::Method;
 use http::StatusCode;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::params::{
+    Address, AddressConfig, AddressLotBlockCreate, AddressLotCreate,
+    BgpAnnounceSetCreate, BgpAnnouncementCreate, BgpConfigCreate, BgpPeer,
+    BgpPeerConfig, LinkConfig, LinkFec, LinkSpeed, LldpServiceConfig, Route,
+    RouteConfig, SwitchInterfaceConfig, SwitchInterfaceKind,
+    SwitchPortApplySettings, SwitchPortSettingsCreate,
+};
+use nexus_types::external_api::views::Rack;
 use omicron_common::api::external::{
     self, AddressLotKind, IdentityMetadataCreateParams, NameOrId, SwitchPort,
     SwitchPortSettingsView,
 };
-use omicron_nexus::external_api::params::{
-    Address, AddressConfig, AddressLotBlockCreate, AddressLotCreate,
-    LinkConfig, LldpServiceConfig, Route, RouteConfig, SwitchInterfaceConfig,
-    SwitchInterfaceKind, SwitchPortApplySettings, SwitchPortSettingsCreate,
-};
-use omicron_nexus::external_api::views::Rack;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
+// TODO: unfortunately this test can no longer be run in the integration test
+//       suite because it depends on communicating with MGS which is not part
+//       of the infrastructure available in the integration test context.
+#[ignore]
 #[nexus_test]
 async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     let client = &ctx.external_client;
@@ -33,16 +39,65 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
             description: "an address parking lot".into(),
         },
         kind: AddressLotKind::Infra,
-        blocks: vec![AddressLotBlockCreate {
-            first_address: "203.0.113.10".parse().unwrap(),
-            last_address: "203.0.113.20".parse().unwrap(),
-        }],
+        blocks: vec![
+            AddressLotBlockCreate {
+                first_address: "203.0.113.10".parse().unwrap(),
+                last_address: "203.0.113.20".parse().unwrap(),
+            },
+            AddressLotBlockCreate {
+                first_address: "1.2.3.0".parse().unwrap(),
+                last_address: "1.2.3.255".parse().unwrap(),
+            },
+        ],
     };
 
     NexusRequest::objects_post(
         client,
         "/v1/system/networking/address-lot",
         &lot_params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Create BGP announce set
+    let announce_set = BgpAnnounceSetCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "instances".parse().unwrap(),
+            description: "autonomous system 47 announcements".into(),
+        },
+        announcement: vec![BgpAnnouncementCreate {
+            address_lot_block: NameOrId::Name("parkinglot".parse().unwrap()),
+            network: "1.2.3.0/24".parse().unwrap(),
+        }],
+    };
+
+    NexusRequest::objects_post(
+        client,
+        "/v1/system/networking/bgp-announce",
+        &announce_set,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Create BGP config
+    let bgp_config = BgpConfigCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "as47".parse().unwrap(),
+            description: "autonomous system 47".into(),
+        },
+        bgp_announce_set_id: NameOrId::Name("instances".parse().unwrap()),
+        asn: 47,
+        vrf: None,
+    };
+
+    NexusRequest::objects_post(
+        client,
+        "/v1/system/networking/bgp",
+        &bgp_config,
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -61,6 +116,9 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
         LinkConfig {
             mtu: 4700,
             lldp: LldpServiceConfig { enabled: false, lldp_config: None },
+            fec: LinkFec::None,
+            speed: LinkSpeed::Speed100G,
+            autoneg: false,
         },
     );
     // interfaces
@@ -191,6 +249,35 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     .parsed_body()
     .unwrap();
 
+    // Update port settings. Should not see conflict.
+    settings.bgp_peers.insert(
+        "phy0".into(),
+        BgpPeerConfig {
+            peers: vec![BgpPeer {
+                bgp_config: NameOrId::Name("as47".parse().unwrap()),
+                bgp_announce_set: NameOrId::Name("instances".parse().unwrap()),
+                interface_name: "phy0".to_string(),
+                addr: "1.2.3.4".parse().unwrap(),
+                hold_time: 6,
+                idle_hold_time: 6,
+                delay_open: 0,
+                connect_retry: 3,
+                keepalive: 2,
+            }],
+        },
+    );
+    let _created: SwitchPortSettingsView = NexusRequest::objects_post(
+        client,
+        "/v1/system/networking/switch-port-settings",
+        &settings,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
+
     // There should be one switch port to begin with, see
     // Server::start_and_populate in nexus/src/lib.rs
 
@@ -228,6 +315,21 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
             &format!("/v1/system/hardware/switch-port/qsfp0/settings?rack_id={rack_id}&switch_location=switch0"),
         )
         .body(Some(&apply_settings))
+        .expect_status(Some(StatusCode::NO_CONTENT)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // clear port settings
+
+    NexusRequest::new(
+        RequestBuilder::new(
+            client,
+            Method::DELETE,
+            &format!("/v1/system/hardware/switch-port/qsfp0/settings?rack_id={rack_id}&switch_location=switch0"),
+        )
         .expect_status(Some(StatusCode::NO_CONTENT)),
     )
     .authn_as(AuthnMode::PrivilegedUser)

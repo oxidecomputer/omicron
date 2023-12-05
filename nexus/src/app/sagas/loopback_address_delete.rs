@@ -7,11 +7,11 @@ use crate::app::sagas::retry_until_known_result;
 use crate::app::sagas::{
     declare_saga_actions, ActionRegistry, NexusSaga, SagaInitError,
 };
-use crate::authn;
-use crate::authz;
-use crate::db::model::{LoopbackAddress, Name};
 use crate::external_api::params;
 use anyhow::{anyhow, Error};
+use nexus_db_queries::authn;
+use nexus_db_queries::authz;
+use nexus_db_queries::db::model::{LoopbackAddress, Name};
 use nexus_types::identity::Asset;
 use omicron_common::api::external::{IpNet, NameOrId};
 use serde::{Deserialize, Serialize};
@@ -20,7 +20,7 @@ use steno::ActionError;
 use uuid::Uuid;
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Params {
+pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub rack_id: Uuid,
     pub switch_location: Name,
@@ -39,7 +39,7 @@ declare_saga_actions! {
 }
 
 #[derive(Debug)]
-pub struct SagaLoopbackAddressDelete;
+pub(crate) struct SagaLoopbackAddressDelete;
 impl NexusSaga for SagaLoopbackAddressDelete {
     const NAME: &'static str = "loopback-address-delete";
     type Params = Params;

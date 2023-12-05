@@ -9,14 +9,12 @@ use crate::db;
 use crate::db::datastore::address_lot::{
     ReserveBlockError, ReserveBlockTxnError,
 };
-use crate::db::error::public_error_from_diesel_pool;
+use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
 use crate::db::model::LoopbackAddress;
 use crate::db::pagination::paginated;
-use async_bb8_diesel::{
-    AsyncConnection, AsyncRunQueryDsl, ConnectionError, PoolError,
-};
+use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl};
 use diesel::result::Error as DieselError;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use ipnetwork::IpNetwork;
@@ -44,14 +42,14 @@ impl DataStore {
 
         type TxnError = TransactionError<LoopbackAddressCreateError>;
 
-        let pool = self.pool_authorized(opctx).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
 
         let inet = IpNetwork::new(params.address, params.mask)
             .map_err(|_| Error::invalid_request("invalid address"))?;
 
         // TODO https://github.com/oxidecomputer/omicron/issues/2811
         // Audit external networking database transaction usage
-        pool.transaction_async(|conn| async move {
+        conn.transaction_async(|conn| async move {
             let lot_id = authz_address_lot.id();
             let (block, rsvd_block) =
                 crate::db::datastore::address_lot::try_reserve_block(
@@ -67,7 +65,9 @@ impl DataStore {
                             LoopbackAddressCreateError::ReserveBlock(err),
                         )
                     }
-                    ReserveBlockTxnError::Pool(err) => TxnError::Pool(err),
+                    ReserveBlockTxnError::Database(err) => {
+                        TxnError::Database(err)
+                    }
                 })?;
 
             // Address block reserved, now create the loopback address.
@@ -103,17 +103,15 @@ impl DataStore {
                     ReserveBlockError::AddressNotInLot,
                 ),
             ) => Error::invalid_request("address not in lot"),
-            TxnError::Pool(e) => match e {
-                PoolError::Connection(ConnectionError::Query(
-                    DieselError::DatabaseError(_, _),
-                )) => public_error_from_diesel_pool(
+            TxnError::Database(e) => match e {
+                DieselError::DatabaseError(_, _) => public_error_from_diesel(
                     e,
                     ErrorHandler::Conflict(
                         ResourceType::LoopbackAddress,
                         &format!("lo {}", inet),
                     ),
                 ),
-                _ => public_error_from_diesel_pool(e, ErrorHandler::Server),
+                _ => public_error_from_diesel(e, ErrorHandler::Server),
             },
         })
     }
@@ -128,11 +126,11 @@ impl DataStore {
 
         let id = authz_loopback_address.id();
 
-        let pool = self.pool_authorized(opctx).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
 
         // TODO https://github.com/oxidecomputer/omicron/issues/2811
         // Audit external networking database transaction usage
-        pool.transaction_async(|conn| async move {
+        conn.transaction_async(|conn| async move {
             let la = diesel::delete(dsl::loopback_address)
                 .filter(dsl::id.eq(id))
                 .returning(LoopbackAddress::as_returning())
@@ -147,7 +145,7 @@ impl DataStore {
             Ok(())
         })
         .await
-        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     pub async fn loopback_address_get(
@@ -160,15 +158,15 @@ impl DataStore {
 
         let id = authz_loopback_address.id();
 
-        let pool = self.pool_authorized(opctx).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
 
         loopback_dsl::loopback_address
             .filter(loopback_address::id.eq(id))
             .select(LoopbackAddress::as_select())
             .limit(1)
-            .first_async::<LoopbackAddress>(pool)
+            .first_async::<LoopbackAddress>(&*conn)
             .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     pub async fn loopback_address_list(
@@ -180,8 +178,8 @@ impl DataStore {
 
         paginated(dsl::loopback_address, dsl::id, &pagparams)
             .select(LoopbackAddress::as_select())
-            .load_async(self.pool_authorized(opctx).await?)
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 }

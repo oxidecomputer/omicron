@@ -11,3 +11,4 @@ rand.workspace = true
 serde_json.workspace = true
 
 omicron-common.workspace = true
+omicron-workspace-hack.workspace = true

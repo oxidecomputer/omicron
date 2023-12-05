@@ -10,16 +10,13 @@ use async_trait::async_trait;
 use dropshot::HttpError;
 use hyper::Body;
 use installinator_common::EventReport;
-use omicron_common::update::{ArtifactHashId, ArtifactId};
+use omicron_common::update::ArtifactHashId;
 use slog::Logger;
 use uuid::Uuid;
 
 /// Represents a way to fetch artifacts.
 #[async_trait]
 pub trait ArtifactGetter: fmt::Debug + Send + Sync + 'static {
-    /// Gets an artifact, returning it as a [`Body`] along with its length.
-    async fn get(&self, id: &ArtifactId) -> Option<(u64, Body)>;
-
     /// Gets an artifact by hash, returning it as a [`Body`].
     async fn get_by_hash(&self, id: &ArtifactHashId) -> Option<(u64, Body)>;
 
@@ -40,6 +37,9 @@ pub enum EventReportStatus {
 
     /// The update ID was not recognized by the server.
     UnrecognizedUpdateId,
+
+    /// The progress receiver is closed.
+    ReceiverClosed,
 }
 
 /// The artifact store -- a simple wrapper around a dynamic [`ArtifactGetter`] that does some basic
@@ -58,14 +58,6 @@ impl ArtifactStore {
     ) -> Self {
         let log = log.new(slog::o!("component" => "artifact store"));
         Self { log, getter: Box::new(getter) }
-    }
-
-    pub(crate) async fn get_artifact(
-        &self,
-        id: &ArtifactId,
-    ) -> Option<(u64, Body)> {
-        slog::debug!(self.log, "Artifact requested: {:?}", id);
-        self.getter.get(id).await
     }
 
     pub(crate) async fn get_artifact_by_hash(

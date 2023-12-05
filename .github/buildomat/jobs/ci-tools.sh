@@ -3,7 +3,7 @@
 #: name = "helios / CI tools"
 #: variety = "basic"
 #: target = "helios-2.0"
-#: rust_toolchain = "1.70.0"
+#: rust_toolchain = "1.72.1"
 #: output_rules = [
 #:	"=/work/end-to-end-tests/*.gz",
 #:	"=/work/caboose-util.gz",
@@ -28,6 +28,7 @@ banner end-to-end-tests
 #
 export CARGO_PROFILE_DEV_DEBUG=1
 export CARGO_PROFILE_TEST_DEBUG=1
+export CARGO_INCREMENTAL=0
 
 ptime -m cargo build --locked -p end-to-end-tests --tests --bin bootstrap \
 	--message-format json-render-diagnostics >/tmp/output.end-to-end.json

@@ -8,9 +8,9 @@ use super::ButtonText;
 use super::PopupBuilder;
 use crate::state::ComponentId;
 use crate::ui::defaults::style;
-use tui::text::Span;
-use tui::text::Spans;
-use tui::text::Text;
+use ratatui::text::Line;
+use ratatui::text::Span;
+use ratatui::text::Text;
 use wicketd_client::types::IgnitionCommand;
 
 pub struct IgnitionPopup {
@@ -57,25 +57,25 @@ impl IgnitionPopup {
         component: ComponentId,
     ) -> PopupBuilder<'static> {
         PopupBuilder {
-            header: Spans::from(vec![Span::styled(
-                format!("IGNITION: {}", component),
+            header: Line::from(vec![Span::styled(
+                format!("IGNITION: {}", component.to_string_uppercase()),
                 style::header(true),
             )]),
             body: Text {
                 lines: vec![
-                    Spans::from(vec![Span::styled(
+                    Line::from(vec![Span::styled(
                         "Power On",
                         style::line(
                             self.selected_command == IgnitionCommand::PowerOn,
                         ),
                     )]),
-                    Spans::from(vec![Span::styled(
+                    Line::from(vec![Span::styled(
                         "Power Off",
                         style::line(
                             self.selected_command == IgnitionCommand::PowerOff,
                         ),
                     )]),
-                    Spans::from(vec![Span::styled(
+                    Line::from(vec![Span::styled(
                         "Power Reset",
                         style::line(
                             self.selected_command

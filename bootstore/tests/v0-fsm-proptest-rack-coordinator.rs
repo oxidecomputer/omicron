@@ -218,8 +218,9 @@ impl TestState {
         for (i, envelope) in envelopes.into_iter().enumerate() {
             let Envelope {
                 to,
-                msg: Msg::Req(Request { id, type_: RequestType::Init(pkg)})
-            } = envelope else {
+                msg: Msg::Req(Request { id, type_: RequestType::Init(pkg) }),
+            } = envelope
+            else {
                 panic!("Already verified the RequestType");
             };
             self.shares.insert(to.clone(), Share(pkg.common.share.clone()));

@@ -58,6 +58,7 @@ pub fn run_openapi() -> Result<(), String> {
 pub struct MgsArguments {
     pub id: Uuid,
     pub addresses: Vec<SocketAddrV6>,
+    pub rack_id: Option<Uuid>,
 }
 
 type HttpServer = dropshot::HttpServer<Arc<ServerContext>>;
@@ -100,10 +101,12 @@ fn start_dropshot_server(
     let http_server_starter = dropshot::HttpServerStarter::new(
         &dropshot,
         http_entrypoints::api(),
-        Arc::clone(&apictx),
+        Arc::clone(apictx),
         &log.new(o!("component" => "dropshot")),
     )
-    .map_err(|error| format!("initializing http server: {}", error))?;
+    .map_err(|error| {
+        format!("initializing http server listening at {addr}: {}", error)
+    })?;
 
     match http_servers.entry(addr) {
         Entry::Vacant(slot) => {
@@ -123,7 +126,6 @@ impl Server {
     pub async fn start(
         config: Config,
         args: MgsArguments,
-        _rack_id: Uuid,
         log: Logger,
     ) -> Result<Server, String> {
         if args.addresses.is_empty() {
@@ -144,12 +146,14 @@ impl Server {
             Arc::new(InMemoryHostPhase2Provider::with_capacity(
                 config.host_phase2_recovery_image_cache_max_images,
             ));
-        let apictx =
-            ServerContext::new(host_phase2_provider, config.switch, &log)
-                .await
-                .map_err(|error| {
-                    format!("initializing server context: {}", error)
-                })?;
+        let apictx = ServerContext::new(
+            host_phase2_provider,
+            config.switch,
+            args.rack_id,
+            &log,
+        )
+        .await
+        .map_err(|error| format!("initializing server context: {}", error))?;
 
         let mut http_servers = HashMap::with_capacity(args.addresses.len());
         let all_servers_shutdown = FuturesUnordered::new();
@@ -281,6 +285,25 @@ impl Server {
         Ok(())
     }
 
+    /// The rack_id will be set on a refresh of the SMF property when the sled
+    /// agent starts.
+    pub fn set_rack_id(&self, rack_id: Option<Uuid>) {
+        if let Some(rack_id) = rack_id {
+            let val = self.apictx.rack_id.get_or_init(|| rack_id);
+            if *val != rack_id {
+                error!(
+                    self.apictx.log,
+                    "Ignoring attempted change to rack ID";
+                    "current_rack_id" => %val,
+                    "ignored_new_rack_id" => %rack_id);
+            } else {
+                info!(self.apictx.log, "Set rack_id"; "rack_id" => %rack_id);
+            }
+        } else {
+            warn!(self.apictx.log, "SMF refresh called without a rack id");
+        }
+    }
+
     // TODO does MGS register itself with oximeter?
     // Register the Nexus server as a metric producer with `oximeter.
     // pub async fn register_as_producer(&self) {
@@ -311,8 +334,7 @@ pub async fn start_server(
     } else {
         debug!(log, "registered DTrace probes");
     }
-    let rack_id = Uuid::new_v4();
-    let server = Server::start(config, args, rack_id, log).await?;
+    let server = Server::start(config, args, log).await?;
     // server.register_as_producer().await;
     Ok(server)
 }

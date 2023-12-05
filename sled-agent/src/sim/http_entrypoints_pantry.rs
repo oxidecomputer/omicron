@@ -4,11 +4,11 @@
 
 //! HTTP entrypoint functions for simulating the crucible pantry API.
 
-use crucible_client_types::VolumeConstructionRequest;
 use dropshot::{
     endpoint, ApiDescription, HttpError, HttpResponseDeleted, HttpResponseOk,
     HttpResponseUpdatedNoContent, Path as TypedPath, RequestContext, TypedBody,
 };
+use propolis_client::types::VolumeConstructionRequest;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -96,7 +96,7 @@ struct JobPollResponse {
 /// Poll to see if a Pantry background job is done
 #[endpoint {
     method = GET,
-    path = "/crucible/pantry/0/job/{id}/is_finished",
+    path = "/crucible/pantry/0/job/{id}/is-finished",
 }]
 async fn is_job_finished(
     rc: RequestContext<Arc<Pantry>>,
@@ -139,6 +139,7 @@ async fn job_result_ok(
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 pub enum ExpectedDigest {
     Sha256(String),
 }
@@ -157,7 +158,7 @@ struct ImportFromUrlResponse {
 /// Import data from a URL into a volume
 #[endpoint {
     method = POST,
-    path = "/crucible/pantry/0/volume/{id}/import_from_url",
+    path = "/crucible/pantry/0/volume/{id}/import-from-url",
 }]
 async fn import_from_url(
     rc: RequestContext<Arc<Pantry>>,
@@ -213,7 +214,7 @@ struct BulkWriteRequest {
 /// Bulk write data into a volume at a specified offset
 #[endpoint {
     method = POST,
-    path = "/crucible/pantry/0/volume/{id}/bulk_write",
+    path = "/crucible/pantry/0/volume/{id}/bulk-write",
 }]
 async fn bulk_write(
     rc: RequestContext<Arc<Pantry>>,

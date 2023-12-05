@@ -198,7 +198,8 @@ impl UpdateManager {
                 let serde_json::Value::String(pkg) = &json["pkg"] else {
                     return Err(version_malformed_err(path, "pkg"));
                 };
-                let serde_json::Value::String(version) = &json["version"] else {
+                let serde_json::Value::String(version) = &json["version"]
+                else {
                     return Err(version_malformed_err(path, "version"));
                 };
 

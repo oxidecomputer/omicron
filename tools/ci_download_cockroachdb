@@ -11,7 +11,7 @@ set -o xtrace
 set -o errexit
 
 SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-ARG0="$(basename ${BASH_SOURCE[0]})"
+ARG0="$(basename "${BASH_SOURCE[0]}")"
 
 # If you change this, you must also update the md5sums below
 CIDL_VERSION="$(cat "$SOURCE_DIR/cockroachdb_version")"
@@ -93,7 +93,7 @@ function main
 
 function fail
 {
-	echo "$ARG0: $@" >&2
+	echo "$ARG0: $*" >&2
 	exit 1
 }
 

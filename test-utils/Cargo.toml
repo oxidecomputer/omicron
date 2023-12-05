@@ -6,21 +6,34 @@ license = "MPL-2.0"
 
 [dependencies]
 anyhow.workspace = true
+atomicwrites.workspace = true
+camino.workspace = true
+camino-tempfile.workspace = true
 dropshot.workspace = true
-futures.workspace = true
+filetime = { workspace = true, optional = true }
 headers.workspace = true
+hex.workspace = true
 http.workspace = true
 libc.workspace = true
 omicron-common.workspace = true
+pem.workspace = true
+ring.workspace = true
+rustls.workspace = true
 slog.workspace = true
 subprocess.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = [ "full" ] }
+tar.workspace = true
+tokio = { workspace = true, features = ["full"] }
 tokio-postgres.workspace = true
 usdt.workspace = true
+rcgen.workspace = true
 regex.workspace = true
 reqwest.workspace = true
+omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 expectorate.workspace = true
+
+[features]
+seed-gen = ["dep:filetime"]

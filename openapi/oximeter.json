@@ -10,7 +10,76 @@
     "version": "0.0.1"
   },
   "paths": {
+    "/info": {
+      "get": {
+        "operationId": "collector_info",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectorInfo"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/producers": {
+      "get": {
+        "operationId": "producers_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProducerEndpointResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      },
       "post": {
         "operationId": "producers_post",
         "requestBody": {
@@ -35,22 +104,50 @@
           }
         }
       }
-    }
-  },
-  "components": {
-    "responses": {
-      "Error": {
-        "description": "Error",
-        "content": {
-          "application/json": {
+    },
+    "/producers/{producer_id}": {
+      "delete": {
+        "operationId": "producer_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "producer_id",
+            "required": true,
             "schema": {
-              "$ref": "#/components/schemas/Error"
+              "type": "string",
+              "format": "uuid"
             }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
-    },
+    }
+  },
+  "components": {
     "schemas": {
+      "CollectorInfo": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "The collector's UUID.",
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
       "Duration": {
         "type": "object",
         "properties": {
@@ -94,25 +191,101 @@
         "type": "object",
         "properties": {
           "address": {
+            "description": "The IP address and port at which `oximeter` can collect metrics from the producer.",
             "type": "string"
           },
           "base_route": {
+            "description": "The API base route from which `oximeter` can collect metrics.\n\nThe full route is `{base_route}/{id}`.",
             "type": "string"
           },
           "id": {
+            "description": "A unique ID for this producer.",
             "type": "string",
             "format": "uuid"
           },
           "interval": {
-            "$ref": "#/components/schemas/Duration"
+            "description": "The interval on which `oximeter` should collect metrics.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          },
+          "kind": {
+            "description": "The kind of producer.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProducerKind"
+              }
+            ]
           }
         },
         "required": [
           "address",
           "base_route",
           "id",
-          "interval"
+          "interval",
+          "kind"
         ]
+      },
+      "ProducerEndpointResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProducerEndpoint"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "ProducerKind": {
+        "description": "The kind of metric producer this is.",
+        "oneOf": [
+          {
+            "description": "The producer is a sled-agent.",
+            "type": "string",
+            "enum": [
+              "sled_agent"
+            ]
+          },
+          {
+            "description": "The producer is an Omicron-managed service.",
+            "type": "string",
+            "enum": [
+              "service"
+            ]
+          },
+          {
+            "description": "The producer is a Propolis VMM managing a guest instance.",
+            "type": "string",
+            "enum": [
+              "instance"
+            ]
+          }
+        ]
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "Error",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
       }
     }
   }

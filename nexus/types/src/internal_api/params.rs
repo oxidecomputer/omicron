@@ -25,7 +25,7 @@ use uuid::Uuid;
 ///
 /// Note that this may change if the sled is physically moved
 /// within the rack.
-#[derive(Serialize, Deserialize, JsonSchema)]
+#[derive(Serialize, Deserialize, JsonSchema, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum SledRole {
     /// The sled is a general compute sled.
@@ -45,7 +45,7 @@ pub struct Baseboard {
 }
 
 /// Sent by a sled agent on startup to Nexus to request further instruction
-#[derive(Serialize, Deserialize, JsonSchema)]
+#[derive(Serialize, Deserialize, Debug, JsonSchema)]
 pub struct SledAgentStartupInfo {
     /// The address of the sled agent's API endpoint
     pub sa_address: SocketAddrV6,
@@ -125,6 +125,7 @@ pub enum DatasetKind {
     Crucible,
     Cockroach,
     Clickhouse,
+    ClickhouseKeeper,
     ExternalDns,
     InternalDns,
 }
@@ -136,6 +137,7 @@ impl fmt::Display for DatasetKind {
             Crucible => "crucible",
             Cockroach => "cockroach",
             Clickhouse => "clickhouse",
+            ClickhouseKeeper => "clickhouse_keeper",
             ExternalDns => "external_dns",
             InternalDns => "internal_dns",
         };
@@ -168,6 +170,7 @@ pub struct ServiceNic {
 #[serde(rename_all = "snake_case", tag = "type", content = "content")]
 pub enum ServiceKind {
     Clickhouse,
+    ClickhouseKeeper,
     Cockroach,
     Crucible,
     CruciblePantry,
@@ -179,6 +182,7 @@ pub enum ServiceKind {
     Tfport,
     BoundaryNtp { snat: SourceNatConfig, nic: ServiceNic },
     InternalNtp,
+    Mgd,
 }
 
 impl fmt::Display for ServiceKind {
@@ -186,6 +190,7 @@ impl fmt::Display for ServiceKind {
         use ServiceKind::*;
         let s = match self {
             Clickhouse => "clickhouse",
+            ClickhouseKeeper => "clickhouse_keeper",
             Cockroach => "cockroach",
             Crucible => "crucible",
             ExternalDns { .. } => "external_dns",
@@ -196,6 +201,7 @@ impl fmt::Display for ServiceKind {
             Tfport => "tfport",
             CruciblePantry => "crucible_pantry",
             BoundaryNtp { .. } | InternalNtp => "ntp",
+            Mgd => "mgd",
         };
         write!(f, "{}", s)
     }

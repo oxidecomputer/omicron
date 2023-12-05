@@ -12,6 +12,9 @@ use std::env::current_dir;
 use crate::integration_tests::saml::SAML_RESPONSE_IDP_DESCRIPTOR;
 use base64::Engine;
 use internal_dns::names::DNS_ZONE_EXTERNAL_TESTING;
+use nexus_db_queries::authn::{USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED};
+use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
+use nexus_db_queries::db::identity::{Asset, Resource};
 use nexus_test_utils::http_testing::{
     AuthnMode, NexusRequest, RequestBuilder, TestResponse,
 };
@@ -22,15 +25,12 @@ use nexus_test_utils::{
     load_test_config, test_setup_with_config, TEST_SUITE_PASSWORD,
 };
 use nexus_test_utils_macros::nexus_test;
-use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_nexus::authn::{USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED};
-use omicron_nexus::db::fixed_data::silo::DEFAULT_SILO;
-use omicron_nexus::db::identity::{Asset, Resource};
-use omicron_nexus::external_api::params::{
+use nexus_types::external_api::params::{
     self, ProjectCreate, UsernamePasswordCredentials,
 };
-use omicron_nexus::external_api::shared::{SiloIdentityMode, SiloRole};
-use omicron_nexus::external_api::{shared, views};
+use nexus_types::external_api::shared::{SiloIdentityMode, SiloRole};
+use nexus_types::external_api::{shared, views};
+use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 

@@ -62,12 +62,12 @@ pub async fn test_setup(
     test_name: &str,
     sp_port: SpPort,
 ) -> GatewayTestContext {
-    let (server_config, mut sp_sim_config) = load_test_config();
+    let (server_config, sp_sim_config) = load_test_config();
     test_setup_with_config(
         test_name,
         sp_port,
         server_config,
-        &mut sp_sim_config,
+        &sp_sim_config,
         None,
     )
     .await
@@ -142,13 +142,12 @@ pub async fn test_setup_with_config(
     }
 
     // Start gateway server
-    let rack_id = Uuid::parse_str(RACK_UUID).unwrap();
+    let rack_id = Some(Uuid::parse_str(RACK_UUID).unwrap());
 
-    let args = MgsArguments { id: Uuid::new_v4(), addresses };
+    let args = MgsArguments { id: Uuid::new_v4(), addresses, rack_id };
     let server = omicron_gateway::Server::start(
         server_config.clone(),
         args,
-        rack_id,
         log.clone(),
     )
     .await

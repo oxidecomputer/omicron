@@ -5,26 +5,35 @@
 //! HTTP entrypoint functions for the sled agent's exposed API
 
 use super::sled_agent::SledAgent;
+use crate::bootstrap::early_networking::EarlyNetworkConfig;
+use crate::bootstrap::params::AddSledRequest;
 use crate::params::{
     CleanupContextUpdate, DiskEnsureBody, InstanceEnsureBody,
     InstancePutMigrationIdsBody, InstancePutStateBody,
-    InstancePutStateResponse, InstanceUnregisterResponse, ServiceEnsureBody,
+    InstancePutStateResponse, InstanceUnregisterResponse, OmicronZonesConfig,
     SledRole, TimeSync, VpcFirewallRulesEnsureBody, ZoneBundleId,
     ZoneBundleMetadata, Zpool,
 };
 use crate::sled_agent::Error as SledAgentError;
 use crate::zone_bundle;
+use bootstore::schemes::v0::NetworkConfig;
 use camino::Utf8PathBuf;
 use dropshot::{
     endpoint, ApiDescription, FreeformBody, HttpError, HttpResponseCreated,
     HttpResponseDeleted, HttpResponseHeaders, HttpResponseOk,
     HttpResponseUpdatedNoContent, Path, Query, RequestContext, TypedBody,
 };
-use illumos_utils::opte::params::SetVirtualNetworkInterfaceHost;
+use illumos_utils::opte::params::{
+    DeleteVirtualNetworkInterfaceHost, SetVirtualNetworkInterfaceHost,
+};
 use omicron_common::api::external::Error;
-use omicron_common::api::internal::nexus::DiskRuntimeState;
-use omicron_common::api::internal::nexus::InstanceRuntimeState;
-use omicron_common::api::internal::nexus::UpdateArtifactId;
+use omicron_common::api::internal::nexus::{
+    DiskRuntimeState, SledInstanceState, UpdateArtifactId,
+};
+use omicron_common::api::internal::shared::SwitchPorts;
+use oximeter::types::ProducerResults;
+use oximeter_producer::collect;
+use oximeter_producer::ProducerIdPathParams;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -42,7 +51,8 @@ pub fn api() -> SledApiDescription {
         api.register(instance_put_state)?;
         api.register(instance_register)?;
         api.register(instance_unregister)?;
-        api.register(services_put)?;
+        api.register(omicron_zones_get)?;
+        api.register(omicron_zones_put)?;
         api.register(zones_list)?;
         api.register(zone_bundle_list)?;
         api.register(zone_bundle_list_all)?;
@@ -60,6 +70,11 @@ pub fn api() -> SledApiDescription {
         api.register(update_artifact)?;
         api.register(vpc_firewall_rules_put)?;
         api.register(zpools_get)?;
+        api.register(uplink_ensure)?;
+        api.register(read_network_bootstore_config_cache)?;
+        api.register(write_network_bootstore_config)?;
+        api.register(add_sled_to_initialized_rack)?;
+        api.register(metrics_collect)?;
 
         Ok(())
     }
@@ -149,7 +164,8 @@ async fn zone_bundle_get(
     let zone_name = params.zone_name;
     let bundle_id = params.bundle_id;
     let sa = rqctx.context();
-    let Some(path) = sa.get_zone_bundle_paths(&zone_name, &bundle_id)
+    let Some(path) = sa
+        .get_zone_bundle_paths(&zone_name, &bundle_id)
         .await
         .map_err(HttpError::from)?
         .into_iter()
@@ -157,7 +173,11 @@ async fn zone_bundle_get(
     else {
         return Err(HttpError::for_not_found(
             None,
-            format!("No zone bundle for zone '{}' with ID '{}'", zone_name, bundle_id)));
+            format!(
+                "No zone bundle for zone '{}' with ID '{}'",
+                zone_name, bundle_id
+            ),
+        ));
     };
     let f = tokio::fs::File::open(&path).await.map_err(|e| {
         HttpError::for_internal_error(format!(
@@ -297,43 +317,27 @@ async fn zones_list(
 }
 
 #[endpoint {
-    method = PUT,
-    path = "/services",
+    method = GET,
+    path = "/omicron-zones",
 }]
-async fn services_put(
+async fn omicron_zones_get(
     rqctx: RequestContext<SledAgent>,
-    body: TypedBody<ServiceEnsureBody>,
+) -> Result<HttpResponseOk<OmicronZonesConfig>, HttpError> {
+    let sa = rqctx.context();
+    Ok(HttpResponseOk(sa.omicron_zones_list().await?))
+}
+
+#[endpoint {
+    method = PUT,
+    path = "/omicron-zones",
+}]
+async fn omicron_zones_put(
+    rqctx: RequestContext<SledAgent>,
+    body: TypedBody<OmicronZonesConfig>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let sa = rqctx.context().clone();
+    let sa = rqctx.context();
     let body_args = body.into_inner();
-
-    // Spawn a separate task to run `services_ensure`: cancellation of this
-    // endpoint's future (as might happen if the client abandons the request or
-    // times out) could result in leaving zones partially configured and the
-    // in-memory state of the service manager invalid. See:
-    // oxidecomputer/omicron#3098.
-    let handler = async move {
-        match sa.services_ensure(body_args).await {
-            Ok(()) => Ok(()),
-            Err(e) => {
-                // Log the error here to make things clear even if the client
-                // has already disconnected.
-                error!(sa.logger(), "failed to initialize services: {e}");
-                Err(e)
-            }
-        }
-    };
-    match tokio::spawn(handler).await {
-        Ok(result) => result.map_err(|e| Error::from(e))?,
-
-        Err(e) => {
-            return Err(HttpError::for_internal_error(format!(
-                "unexpected failure awaiting \"services_ensure\": {:#}",
-                e
-            )));
-        }
-    }
-
+    sa.omicron_zones_ensure(body_args).await?;
     Ok(HttpResponseUpdatedNoContent())
 }
 
@@ -345,7 +349,7 @@ async fn zpools_get(
     rqctx: RequestContext<SledAgent>,
 ) -> Result<HttpResponseOk<Vec<Zpool>>, HttpError> {
     let sa = rqctx.context();
-    Ok(HttpResponseOk(sa.zpools_get().await.map_err(|e| Error::from(e))?))
+    Ok(HttpResponseOk(sa.zpools_get().await))
 }
 
 #[endpoint {
@@ -386,12 +390,20 @@ async fn instance_register(
     rqctx: RequestContext<SledAgent>,
     path_params: Path<InstancePathParam>,
     body: TypedBody<InstanceEnsureBody>,
-) -> Result<HttpResponseOk<InstanceRuntimeState>, HttpError> {
+) -> Result<HttpResponseOk<SledInstanceState>, HttpError> {
     let sa = rqctx.context();
     let instance_id = path_params.into_inner().instance_id;
     let body_args = body.into_inner();
     Ok(HttpResponseOk(
-        sa.instance_ensure_registered(instance_id, body_args.initial).await?,
+        sa.instance_ensure_registered(
+            instance_id,
+            body_args.propolis_id,
+            body_args.hardware,
+            body_args.instance_runtime,
+            body_args.vmm_runtime,
+            body_args.propolis_addr,
+        )
+        .await?,
     ))
 }
 
@@ -433,7 +445,7 @@ async fn instance_put_migration_ids(
     rqctx: RequestContext<SledAgent>,
     path_params: Path<InstancePathParam>,
     body: TypedBody<InstancePutMigrationIdsBody>,
-) -> Result<HttpResponseOk<InstanceRuntimeState>, HttpError> {
+) -> Result<HttpResponseOk<SledInstanceState>, HttpError> {
     let sa = rqctx.context();
     let instance_id = path_params.into_inner().instance_id;
     let body_args = body.into_inner();
@@ -595,7 +607,7 @@ async fn set_v2p(
 async fn del_v2p(
     rqctx: RequestContext<SledAgent>,
     _path_params: Path<V2pPathParam>,
-    body: TypedBody<SetVirtualNetworkInterfaceHost>,
+    body: TypedBody<DeleteVirtualNetworkInterfaceHost>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let sa = rqctx.context();
     let body_args = body.into_inner();
@@ -614,4 +626,129 @@ async fn timesync_get(
 ) -> Result<HttpResponseOk<TimeSync>, HttpError> {
     let sa = rqctx.context();
     Ok(HttpResponseOk(sa.timesync_get().await.map_err(|e| Error::from(e))?))
+}
+
+#[endpoint {
+    method = POST,
+    path = "/switch-ports",
+}]
+async fn uplink_ensure(
+    rqctx: RequestContext<SledAgent>,
+    body: TypedBody<SwitchPorts>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let sa = rqctx.context();
+    sa.ensure_scrimlet_host_ports(body.into_inner().uplinks).await?;
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+/// This API endpoint is only reading the local sled agent's view of the
+/// bootstore. The boostore is a distributed data store that is eventually
+/// consistent. Reads from individual nodes may not represent the latest state.
+#[endpoint {
+    method = GET,
+    path = "/network-bootstore-config",
+}]
+async fn read_network_bootstore_config_cache(
+    rqctx: RequestContext<SledAgent>,
+) -> Result<HttpResponseOk<EarlyNetworkConfig>, HttpError> {
+    let sa = rqctx.context();
+    let bs = sa.bootstore();
+
+    let config = bs.get_network_config().await.map_err(|e| {
+        HttpError::for_internal_error(format!("failed to get bootstore: {e}"))
+    })?;
+
+    let config = match config {
+        Some(config) => EarlyNetworkConfig::try_from(config).map_err(|e| {
+            HttpError::for_internal_error(format!(
+                "deserialize early network config: {e}"
+            ))
+        })?,
+        None => {
+            return Err(HttpError::for_unavail(
+                None,
+                "early network config does not exist yet".into(),
+            ));
+        }
+    };
+
+    Ok(HttpResponseOk(config))
+}
+
+#[endpoint {
+    method = PUT,
+    path = "/network-bootstore-config",
+}]
+async fn write_network_bootstore_config(
+    rqctx: RequestContext<SledAgent>,
+    body: TypedBody<EarlyNetworkConfig>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let sa = rqctx.context();
+    let bs = sa.bootstore();
+    let config = body.into_inner();
+
+    bs.update_network_config(NetworkConfig::from(config)).await.map_err(
+        |e| {
+            HttpError::for_internal_error(format!(
+                "failed to write updated config to boot store: {e}"
+            ))
+        },
+    )?;
+
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+/// Add a sled to a rack that was already initialized via RSS
+#[endpoint {
+    method = PUT,
+    path = "/sleds"
+}]
+async fn add_sled_to_initialized_rack(
+    rqctx: RequestContext<SledAgent>,
+    body: TypedBody<AddSledRequest>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let sa = rqctx.context();
+    let request = body.into_inner();
+
+    // Perform some minimal validation
+    if request.start_request.body.use_trust_quorum
+        && !request.start_request.body.is_lrtq_learner
+    {
+        return Err(HttpError::for_bad_request(
+            None,
+            "New sleds must be LRTQ learners if trust quorum is in use"
+                .to_string(),
+        ));
+    }
+
+    crate::sled_agent::add_sled_to_initialized_rack(
+        sa.logger().clone(),
+        request.sled_id,
+        request.start_request,
+    )
+    .await
+    .map_err(|e| {
+        let message = format!("Failed to add sled to rack cluster: {e}");
+        HttpError {
+            status_code: http::StatusCode::INTERNAL_SERVER_ERROR,
+            error_code: None,
+            external_message: message.clone(),
+            internal_message: message,
+        }
+    })?;
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+/// Collect oximeter samples from the sled agent.
+#[endpoint {
+    method = GET,
+    path = "/metrics/collect/{producer_id}",
+}]
+async fn metrics_collect(
+    request_context: RequestContext<SledAgent>,
+    path_params: Path<ProducerIdPathParams>,
+) -> Result<HttpResponseOk<ProducerResults>, HttpError> {
+    let sa = request_context.context();
+    let producer_id = path_params.into_inner().producer_id;
+    collect(&sa.metrics_registry(), producer_id).await
 }

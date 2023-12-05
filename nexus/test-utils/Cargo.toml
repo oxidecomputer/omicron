@@ -14,6 +14,8 @@ crucible-agent-client.workspace = true
 dns-server.workspace = true
 dns-service-client.workspace = true
 dropshot.workspace = true
+gateway-messages.workspace = true
+gateway-test-utils.workspace = true
 headers.workspace = true
 http.workspace = true
 hyper.workspace = true
@@ -26,20 +28,15 @@ omicron-passwords.workspace = true
 omicron-sled-agent.workspace = true
 omicron-test-utils.workspace = true
 oximeter.workspace = true
-oximeter-client.workspace = true
 oximeter-collector.workspace = true
 oximeter-producer.workspace = true
-parse-display.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_urlencoded.workspace = true
 slog.workspace = true
-tempfile.workspace = true
-trust-dns-proto.workspace = true
 trust-dns-resolver.workspace = true
 uuid.workspace = true
+omicron-workspace-hack.workspace = true
 
-[build-dependencies]
-dropshot.workspace = true
-omicron-test-utils.workspace = true
-tokio.workspace = true
+[features]
+omicron-dev = ["omicron-test-utils/seed-gen"]

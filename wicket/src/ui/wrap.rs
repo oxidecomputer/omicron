@@ -16,11 +16,11 @@
 //! won't break the output, but they might make the output look a bit weird.)
 
 use itertools::{Itertools, Position};
+use ratatui::text::{Line, Span, Text};
 use textwrap::{
     core::{display_width, Fragment},
     wrap_algorithms::{wrap_optimal_fit, Penalties},
 };
-use tui::text::{Span, Spans, Text};
 
 pub struct Options<'a> {
     /// The width in columns at which the text will be wrapped.
@@ -52,11 +52,11 @@ pub(crate) fn wrap_text<'a>(
     Text::from(lines)
 }
 
-/// Wraps a [`Spans`] representing a single line.
+/// Wraps a [`Line`] representing a single line.
 ///
 /// If the text contains multiple lines, use [`wrap_text`] instead.
 pub(crate) fn wrap_line<'a>(
-    line: &'a Spans<'_>,
+    line: &'a Line<'_>,
     options: Options<'a>,
 ) -> Text<'a> {
     let mut lines = Vec::new();
@@ -65,9 +65,9 @@ pub(crate) fn wrap_line<'a>(
 }
 
 fn wrap_single_line<'a>(
-    line: &'a Spans<'_>,
+    line: &'a Line<'_>,
     options: &Options<'a>,
-    lines: &mut Vec<Spans<'a>>,
+    lines: &mut Vec<Line<'a>>,
 ) {
     let indent = if lines.is_empty() {
         options.initial_indent.clone()
@@ -81,19 +81,19 @@ fn wrap_single_line<'a>(
     }
 }
 
-fn borrow_line<'a>(line: &'a Spans<'_>) -> Spans<'a> {
+fn borrow_line<'a>(line: &'a Line<'_>) -> Line<'a> {
     let spans = line
-        .0
+        .spans
         .iter()
         .map(|span| Span::styled(span.content.as_ref(), span.style))
-        .collect();
-    Spans(spans)
+        .collect::<Vec<_>>();
+    Line::from(spans)
 }
 
 fn wrap_single_line_slow_path<'a>(
-    line: &'a Spans<'_>,
+    line: &'a Line<'_>,
     options: &Options<'a>,
-    lines: &mut Vec<Spans<'a>>,
+    lines: &mut Vec<Line<'a>>,
 ) {
     // Span::width (options.initial_indent.width() etc) use the Unicode display
     // width, which is what we expect.
@@ -156,14 +156,14 @@ fn wrap_single_line_slow_path<'a>(
             }
         }
 
-        lines.push(Spans::from(output_line));
+        lines.push(Line::from(output_line));
     }
 }
 
 fn find_words_in_line<'a>(
-    line: &'a Spans<'_>,
+    line: &'a Line<'_>,
 ) -> impl Iterator<Item = StyledWord<'a>> {
-    line.0.iter().flat_map(|span| find_words_in_span(span))
+    line.spans.iter().flat_map(|span| find_words_in_span(span))
 }
 
 /// Breaks this span into smaller words.
@@ -209,7 +209,7 @@ struct StyledWord<'a> {
     word: &'a str,
     width: usize,
     whitespace: &'a str,
-    style: tui::style::Style,
+    style: ratatui::style::Style,
 }
 
 impl<'a> StyledWord<'a> {
@@ -225,7 +225,7 @@ impl<'a> StyledWord<'a> {
         Self::new_impl(content, span.style)
     }
 
-    fn new_impl(content: &'a str, style: tui::style::Style) -> Self {
+    fn new_impl(content: &'a str, style: ratatui::style::Style) -> Self {
         let trimmed = content.trim_end_matches(' ');
         Self {
             word: trimmed,
@@ -240,7 +240,7 @@ impl<'a> StyledWord<'a> {
             word: "",
             width: 0,
             whitespace: "",
-            style: tui::style::Style::default(),
+            style: ratatui::style::Style::default(),
         }
     }
 
@@ -324,7 +324,7 @@ impl<'a> Fragment for StyledWord<'a> {
 
 /// Forcibly break spans wider than `line_width` into smaller spans.
 ///
-/// This simply calls [`Span::break_apart`] on spans that are too wide.
+/// This simply calls [`StyledWord::break_apart`] on spans that are too wide.
 fn break_words<'a, I>(spans: I, line_width: usize) -> Vec<StyledWord<'a>>
 where
     I: IntoIterator<Item = StyledWord<'a>>,

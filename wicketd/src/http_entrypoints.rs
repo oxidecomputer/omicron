@@ -4,11 +4,15 @@
 
 //! HTTP entrypoint functions for wicketd
 
+use crate::helpers::sps_to_string;
+use crate::helpers::SpIdentifierDisplay;
 use crate::mgs::GetInventoryError;
 use crate::mgs::GetInventoryResponse;
 use crate::mgs::MgsHandle;
 use crate::mgs::ShutdownInProgress;
+use crate::preflight_check::UplinkEventReport;
 use crate::RackV1Inventory;
+use crate::SmfConfigValues;
 use bootstrap_agent_client::types::RackInitId;
 use bootstrap_agent_client::types::RackOperationStatus;
 use bootstrap_agent_client::types::RackResetId;
@@ -26,22 +30,28 @@ use gateway_client::types::IgnitionCommand;
 use gateway_client::types::SpIdentifier;
 use gateway_client::types::SpType;
 use http::StatusCode;
+use internal_dns::resolver::Resolver;
 use omicron_common::address;
 use omicron_common::api::external::SemverVersion;
 use omicron_common::api::internal::shared::RackNetworkConfig;
+use omicron_common::api::internal::shared::SwitchLocation;
+use omicron_common::update::ArtifactHashId;
 use omicron_common::update::ArtifactId;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use sled_hardware::Baseboard;
+use slog::o;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::io;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::time::Duration;
-use uuid::Uuid;
+use tokio::io::AsyncWriteExt;
 use wicket_common::rack_setup::PutRssUserConfigInsensitive;
 use wicket_common::update_events::EventReport;
+use wicket_common::WICKETD_TIMEOUT;
 
 use crate::ServerContext;
 
@@ -72,6 +82,9 @@ pub fn api() -> WicketdApiDescription {
         api.register(post_clear_update_state)?;
         api.register(get_update_sp)?;
         api.register(post_ignition_command)?;
+        api.register(post_start_preflight_uplink_check)?;
+        api.register(get_preflight_uplink_report)?;
+        api.register(post_reload_config)?;
         Ok(())
     }
 
@@ -411,7 +424,7 @@ async fn post_run_rack_setup(
         .map_err(|err| HttpError::for_bad_request(None, format!("{err:#}")))?;
 
     let request = {
-        let config = ctx.rss_config.lock().unwrap();
+        let mut config = ctx.rss_config.lock().unwrap();
         config.start_rss_request(&ctx.bootstrap_peers, log).map_err(|err| {
             HttpError::for_bad_request(None, format!("{err:#}"))
         })?
@@ -557,12 +570,53 @@ async fn put_repository(
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let rqctx = rqctx.context();
 
-    // TODO: do we need to return more information with the response?
+    // Create a temporary file to store the incoming archive.
+    let tempfile = tokio::task::spawn_blocking(|| {
+        camino_tempfile::tempfile().map_err(|err| {
+            HttpError::for_unavail(
+                None,
+                format!("failed to create temp file: {err}"),
+            )
+        })
+    })
+    .await
+    .unwrap()?;
+    let mut tempfile =
+        tokio::io::BufWriter::new(tokio::fs::File::from_std(tempfile));
 
-    let bytes = body.into_stream().try_collect().await?;
-    rqctx.update_tracker.put_repository(bytes).await?;
+    let mut body = std::pin::pin!(body.into_stream());
+
+    // Stream the uploaded body into our tempfile.
+    while let Some(bytes) = body.try_next().await? {
+        tempfile.write_all(&bytes).await.map_err(|err| {
+            HttpError::for_unavail(
+                None,
+                format!("failed to write to temp file: {err}"),
+            )
+        })?;
+    }
+
+    // Flush writes. We don't need to seek back to the beginning of the file
+    // because extracting the repository will do its own seeking as a part of
+    // unzipping this repo.
+    tempfile.flush().await.map_err(|err| {
+        HttpError::for_unavail(
+            None,
+            format!("failed to flush temp file: {err}"),
+        )
+    })?;
+
+    let tempfile = tempfile.into_inner().into_std().await;
+    rqctx.update_tracker.put_repository(io::BufReader::new(tempfile)).await?;
 
     Ok(HttpResponseUpdatedNoContent())
+}
+
+#[derive(Clone, Debug, JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct InstallableArtifacts {
+    pub artifact_id: ArtifactId,
+    pub installable: Vec<ArtifactHashId>,
 }
 
 /// The response to a `get_artifacts` call: the system version, and the list of
@@ -571,7 +625,20 @@ async fn put_repository(
 #[serde(rename_all = "snake_case")]
 pub struct GetArtifactsAndEventReportsResponse {
     pub system_version: Option<SemverVersion>,
-    pub artifacts: Vec<ArtifactId>,
+
+    /// Map of artifacts we ingested from the most-recently-uploaded TUF
+    /// repository to a list of artifacts we're serving over the bootstrap
+    /// network. In some cases the list of artifacts being served will have
+    /// length 1 (when we're serving the artifact directly); in other cases the
+    /// artifact in the TUF repo contains multiple nested artifacts inside it
+    /// (e.g., RoT artifacts contain both A and B images), and we serve the list
+    /// of extracted artifacts but not the original combination.
+    ///
+    /// Conceptually, this is a `BTreeMap<ArtifactId, Vec<ArtifactHashId>>`, but
+    /// JSON requires string keys for maps, so we give back a vec of pairs
+    /// instead.
+    pub artifacts: Vec<InstallableArtifacts>,
+
     pub event_reports: BTreeMap<SpType, BTreeMap<u32, EventReport>>,
 }
 
@@ -589,6 +656,15 @@ async fn get_artifacts_and_event_reports(
     let response =
         rqctx.context().update_tracker.artifacts_and_event_reports().await;
     Ok(HttpResponseOk(response))
+}
+
+#[derive(Clone, Debug, JsonSchema, Deserialize)]
+pub(crate) struct StartUpdateParams {
+    /// The SP identifiers to start the update with. Must be non-empty.
+    pub(crate) targets: BTreeSet<SpIdentifier>,
+
+    /// Options for the update.
+    pub(crate) options: StartUpdateOptions,
 }
 
 #[derive(Clone, Debug, JsonSchema, Deserialize)]
@@ -634,10 +710,28 @@ pub(crate) enum UpdateSimulatedResult {
 }
 
 #[derive(Clone, Debug, JsonSchema, Deserialize)]
+pub(crate) struct ClearUpdateStateParams {
+    /// The SP identifiers to clear the update state for. Must be non-empty.
+    pub(crate) targets: BTreeSet<SpIdentifier>,
+
+    /// Options for clearing update state
+    pub(crate) options: ClearUpdateStateOptions,
+}
+
+#[derive(Clone, Debug, JsonSchema, Deserialize)]
 pub(crate) struct ClearUpdateStateOptions {
     /// If passed in, fails the clear update state operation with a simulated
     /// error.
     pub(crate) test_error: Option<UpdateTestError>,
+}
+
+#[derive(Clone, Debug, Default, JsonSchema, Serialize)]
+pub(crate) struct ClearUpdateStateResponse {
+    /// The SPs for which update data was cleared.
+    pub(crate) cleared: BTreeSet<SpIdentifier>,
+
+    /// The SPs that had no update state to clear.
+    pub(crate) no_update_data: BTreeSet<SpIdentifier>,
 }
 
 #[derive(Clone, Debug, JsonSchema, Deserialize)]
@@ -669,19 +763,24 @@ impl UpdateTestError {
         log: &slog::Logger,
         reason: &str,
     ) -> HttpError {
+        let message = self.into_error_string(log, reason).await;
+        HttpError::for_bad_request(None, message)
+    }
+
+    pub(crate) async fn into_error_string(
+        self,
+        log: &slog::Logger,
+        reason: &str,
+    ) -> String {
         match self {
-            UpdateTestError::Fail => HttpError::for_bad_request(
-                None,
-                format!("Simulated failure while {reason}"),
-            ),
+            UpdateTestError::Fail => {
+                format!("Simulated failure while {reason}")
+            }
             UpdateTestError::Timeout { secs } => {
                 slog::info!(log, "Simulating timeout while {reason}");
                 // 15 seconds should be enough to cause a timeout.
                 tokio::time::sleep(Duration::from_secs(secs)).await;
-                HttpError::for_bad_request(
-                    None,
-                    "XXX request should time out before this is hit".into(),
-                )
+                "XXX request should time out before this is hit".into()
             }
         }
     }
@@ -773,107 +872,199 @@ async fn get_location(
     }))
 }
 
-/// An endpoint to start updating a sled.
+/// An endpoint to start updating one or more sleds, switches and PSCs.
 #[endpoint {
     method = POST,
-    path = "/update/{type}/{slot}",
+    path = "/update",
 }]
 async fn post_start_update(
     rqctx: RequestContext<ServerContext>,
-    target: Path<SpIdentifier>,
-    opts: TypedBody<StartUpdateOptions>,
+    params: TypedBody<StartUpdateParams>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let log = &rqctx.log;
     let rqctx = rqctx.context();
-    let target = target.into_inner();
+    let params = params.into_inner();
 
-    // Can we update the target SP? We refuse to update if:
+    if params.targets.is_empty() {
+        return Err(HttpError::for_bad_request(
+            None,
+            "No update targets specified".into(),
+        ));
+    }
+
+    // Can we update the target SPs? We refuse to update if, for any target SP:
     //
     // 1. We haven't pulled its state in our inventory (most likely cause: the
     //    cubby is empty; less likely cause: the SP is misbehaving, which will
     //    make updating it very unlikely to work anyway)
-    // 2. We have pulled its state but our hardware manager says we can't update
-    //    it (most likely cause: the target is the sled we're currently running
-    //    on; less likely cause: our hardware manager failed to get our local
-    //    identifying information, and it refuses to update this target out of
-    //    an abundance of caution).
+    // 2. We have pulled its state but our hardware manager says we can't
+    //    update it (most likely cause: the target is the sled we're currently
+    //    running on; less likely cause: our hardware manager failed to get our
+    //    local identifying information, and it refuses to update this target
+    //    out of an abundance of caution).
     //
-    // First, get our most-recently-cached inventory view.
-    let inventory = match rqctx.mgs_handle.get_cached_inventory().await {
-        Ok(inventory) => inventory,
-        Err(ShutdownInProgress) => {
+    // First, get our most-recently-cached inventory view. (Only wait 80% of
+    // WICKETD_TIMEOUT for this: if even a cached inventory isn't available,
+    // it's because we've never established contact with MGS. In that case, we
+    // should produce a useful error message rather than timing out on the
+    // client.)
+    let inventory = match tokio::time::timeout(
+        WICKETD_TIMEOUT.mul_f32(0.8),
+        rqctx.mgs_handle.get_cached_inventory(),
+    )
+    .await
+    {
+        Ok(Ok(inventory)) => inventory,
+        Ok(Err(ShutdownInProgress)) => {
             return Err(HttpError::for_unavail(
                 None,
                 "Server is shutting down".into(),
             ));
         }
+        Err(_) => {
+            // Have to construct an HttpError manually because
+            // HttpError::for_unavail doesn't accept an external message.
+            let message =
+                "Rack inventory not yet available (is MGS alive?)".to_owned();
+            return Err(HttpError {
+                status_code: http::StatusCode::SERVICE_UNAVAILABLE,
+                error_code: None,
+                external_message: message.clone(),
+                internal_message: message,
+            });
+        }
     };
 
-    // Next, do we have the state of the target SP?
-    let sp_state = match inventory {
+    // Error cases.
+    let mut inventory_absent = BTreeSet::new();
+    let mut self_update = None;
+    let mut maybe_self_update = BTreeSet::new();
+
+    // Next, do we have the states of the target SP?
+    let sp_states = match inventory {
         GetInventoryResponse::Response { inventory, .. } => inventory
             .sps
             .into_iter()
-            .filter_map(|sp| if sp.id == target { sp.state } else { None })
-            .next(),
-        GetInventoryResponse::Unavailable => None,
+            .filter_map(|sp| {
+                if params.targets.contains(&sp.id) {
+                    if let Some(sp_state) = sp.state {
+                        Some((sp.id, sp_state))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+            .collect(),
+        GetInventoryResponse::Unavailable => BTreeMap::new(),
     };
-    let Some(sp_state) = sp_state else {
-        return Err(HttpError::for_bad_request(
-            None,
-            "cannot update target sled (no inventory state present)"
-                .into(),
+
+    for target in &params.targets {
+        let sp_state = match sp_states.get(target) {
+            Some(sp_state) => sp_state,
+            None => {
+                // The state isn't present, so add to inventory_absent.
+                inventory_absent.insert(*target);
+                continue;
+            }
+        };
+
+        // If we have the state of the SP, are we allowed to update it? We
+        // refuse to try to update our own sled.
+        match &rqctx.baseboard {
+            Some(baseboard) => {
+                if baseboard.identifier() == sp_state.serial_number
+                    && baseboard.model() == sp_state.model
+                    && baseboard.revision() == i64::from(sp_state.revision)
+                {
+                    self_update = Some(*target);
+                    continue;
+                }
+            }
+            None => {
+                // We don't know our own baseboard, which is a very questionable
+                // state to be in! For now, we will hard-code the possibly
+                // locations where we could be running: scrimlets can only be in
+                // cubbies 14 or 16, so we refuse to update either of those.
+                let target_is_scrimlet = matches!(
+                    (target.type_, target.slot),
+                    (SpType::Sled, 14 | 16)
+                );
+                if target_is_scrimlet {
+                    maybe_self_update.insert(*target);
+                    continue;
+                }
+            }
+        }
+    }
+
+    // Do we have any errors?
+    let mut errors = Vec::new();
+    if !inventory_absent.is_empty() {
+        errors.push(format!(
+            "cannot update sleds (no inventory state present for {})",
+            sps_to_string(&inventory_absent)
         ));
+    }
+    if let Some(self_update) = self_update {
+        errors.push(format!(
+            "cannot update sled where wicketd is running ({})",
+            SpIdentifierDisplay(self_update)
+        ));
+    }
+    if !maybe_self_update.is_empty() {
+        errors.push(format!(
+            "wicketd does not know its own baseboard details: \
+             refusing to update either scrimlet ({})",
+            sps_to_string(&inventory_absent)
+        ));
+    }
+
+    if let Some(test_error) = &params.options.test_error {
+        errors.push(test_error.into_error_string(log, "starting update").await);
+    }
+
+    let start_update_errors = if errors.is_empty() {
+        // No errors: we can try and proceed with this update.
+        match rqctx.update_tracker.start(params.targets, params.options).await {
+            Ok(()) => return Ok(HttpResponseUpdatedNoContent {}),
+            Err(errors) => errors,
+        }
+    } else {
+        // We've already found errors, so all we want to do is to check whether
+        // the update tracker thinks there are any errors as well.
+        match rqctx.update_tracker.update_pre_checks(params.targets).await {
+            Ok(()) => Vec::new(),
+            Err(errors) => errors,
+        }
     };
 
-    // If we have the state of the SP, are we allowed to update it? We
-    // refuse to try to update our own sled.
-    match &rqctx.baseboard {
-        Some(baseboard) => {
-            if baseboard.identifier() == sp_state.serial_number
-                && baseboard.model() == sp_state.model
-                && baseboard.revision() == i64::from(sp_state.revision)
-            {
-                return Err(HttpError::for_bad_request(
-                    None,
-                    "cannot update sled where wicketd is running".into(),
-                ));
-            }
+    errors.extend(start_update_errors.iter().map(|error| error.to_string()));
+
+    // If we get here, we have errors to report.
+
+    match errors.len() {
+        0 => {
+            unreachable!(
+                "we already returned Ok(_) above if there were no errors"
+            )
         }
-        None => {
-            // We don't know our own baseboard, which is a very
-            // questionable state to be in! For now, we will hard-code
-            // the possibly locations where we could be running:
-            // scrimlets can only be in cubbies 14 or 16, so we refuse
-            // to update either of those.
-            let target_is_scrimlet =
-                matches!((target.type_, target.slot), (SpType::Sled, 14 | 16));
-            if target_is_scrimlet {
-                return Err(HttpError::for_bad_request(
-                    None,
-                    "wicketd does not know its own baseboard details: \
-                     refusing to update either scrimlet"
-                        .into(),
-                ));
-            }
+        1 => {
+            return Err(HttpError::for_bad_request(
+                None,
+                errors.pop().unwrap(),
+            ));
         }
-    }
-
-    let opts = opts.into_inner();
-    if let Some(test_error) = opts.test_error {
-        return Err(test_error.into_http_error(log, "starting update").await);
-    }
-
-    // All pre-flight update checks look OK: start the update.
-    //
-    // Generate an ID for this update; the update tracker will send it to the
-    // sled as part of the InstallinatorImageId, and installinator will send it
-    // back to our artifact server with its progress reports.
-    let update_id = Uuid::new_v4();
-
-    match rqctx.update_tracker.start(target, update_id, opts).await {
-        Ok(()) => Ok(HttpResponseUpdatedNoContent {}),
-        Err(err) => Err(err.to_http_error()),
+        _ => {
+            return Err(HttpError::for_bad_request(
+                None,
+                format!(
+                    "multiple errors encountered:\n - {}",
+                    itertools::join(errors, "\n - ")
+                ),
+            ));
+        }
     }
 }
 
@@ -929,25 +1120,31 @@ async fn post_abort_update(
 /// Use this to clear update state after a failed update.
 #[endpoint {
     method = POST,
-    path = "/clear-update-state/{type}/{slot}",
+    path = "/clear-update-state",
 }]
 async fn post_clear_update_state(
     rqctx: RequestContext<ServerContext>,
-    target: Path<SpIdentifier>,
-    opts: TypedBody<ClearUpdateStateOptions>,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    params: TypedBody<ClearUpdateStateParams>,
+) -> Result<HttpResponseOk<ClearUpdateStateResponse>, HttpError> {
     let log = &rqctx.log;
-    let target = target.into_inner();
+    let rqctx = rqctx.context();
+    let params = params.into_inner();
 
-    let opts = opts.into_inner();
-    if let Some(test_error) = opts.test_error {
+    if params.targets.is_empty() {
+        return Err(HttpError::for_bad_request(
+            None,
+            "No targets specified".into(),
+        ));
+    }
+
+    if let Some(test_error) = params.options.test_error {
         return Err(test_error
             .into_http_error(log, "clearing update state")
             .await);
     }
 
-    match rqctx.context().update_tracker.clear_update_state(target).await {
-        Ok(()) => Ok(HttpResponseUpdatedNoContent {}),
+    match rqctx.update_tracker.clear_update_state(params.targets).await {
+        Ok(response) => Ok(HttpResponseOk(response)),
         Err(err) => Err(err.to_http_error()),
     }
 }
@@ -982,6 +1179,157 @@ async fn post_ignition_command(
         .ignition_command(type_, slot, command)
         .await
         .map_err(http_error_from_client_error)?;
+
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+/// Options provided to the preflight uplink check.
+#[derive(Clone, Debug, JsonSchema, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct PreflightUplinkCheckOptions {
+    /// DNS name to query.
+    pub dns_name_to_query: Option<String>,
+}
+
+/// An endpoint to start a preflight check for uplink configuration.
+#[endpoint {
+    method = POST,
+    path = "/preflight/uplink",
+}]
+async fn post_start_preflight_uplink_check(
+    rqctx: RequestContext<ServerContext>,
+    body: TypedBody<PreflightUplinkCheckOptions>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let rqctx = rqctx.context();
+    let options = body.into_inner();
+
+    let our_switch_location = match rqctx.local_switch_id().await {
+        Some(SpIdentifier { slot, type_: SpType::Switch }) => match slot {
+            0 => SwitchLocation::Switch0,
+            1 => SwitchLocation::Switch1,
+            _ => {
+                return Err(HttpError::for_internal_error(format!(
+                    "unexpected switch slot {slot}"
+                )));
+            }
+        },
+        Some(other) => {
+            return Err(HttpError::for_internal_error(format!(
+                "unexpected switch SP identifier {other:?}"
+            )));
+        }
+        None => {
+            return Err(HttpError::for_unavail(
+                Some("UnknownSwitchLocation".to_string()),
+                "local switch location not yet determined".to_string(),
+            ));
+        }
+    };
+
+    let (network_config, dns_servers, ntp_servers) = {
+        let rss_config = rqctx.rss_config.lock().unwrap();
+
+        let network_config =
+            rss_config.rack_network_config().cloned().ok_or_else(|| {
+                HttpError::for_bad_request(
+                    None,
+                    "uplink preflight check requires setting \
+                 the uplink config for RSS"
+                        .to_string(),
+                )
+            })?;
+
+        (
+            network_config,
+            rss_config.dns_servers().to_vec(),
+            rss_config.ntp_servers().to_vec(),
+        )
+    };
+
+    match rqctx
+        .preflight_checker
+        .uplink_start(
+            network_config,
+            dns_servers,
+            ntp_servers,
+            our_switch_location,
+            options.dns_name_to_query,
+        )
+        .await
+    {
+        Ok(()) => Ok(HttpResponseUpdatedNoContent {}),
+        Err(err) => Err(HttpError::for_client_error(
+            None,
+            StatusCode::TOO_MANY_REQUESTS,
+            err.to_string(),
+        )),
+    }
+}
+
+/// An endpoint to get the report for the most recent (or still running)
+/// preflight uplink check.
+#[endpoint {
+    method = GET,
+    path = "/preflight/uplink",
+}]
+async fn get_preflight_uplink_report(
+    rqctx: RequestContext<ServerContext>,
+) -> Result<HttpResponseOk<UplinkEventReport>, HttpError> {
+    let rqctx = rqctx.context();
+
+    match rqctx.preflight_checker.uplink_event_report() {
+        Some(report) => Ok(HttpResponseOk(report)),
+        None => Err(HttpError::for_bad_request(
+            None,
+            "no preflight uplink report available - have you started a check?"
+                .to_string(),
+        )),
+    }
+}
+
+/// An endpoint instructing wicketd to reload its SMF config properties.
+///
+/// The only expected client of this endpoint is `curl` from wicketd's SMF
+/// `refresh` method, but other clients hitting it is harmless.
+#[endpoint {
+    method = POST,
+    path = "/reload-config",
+}]
+async fn post_reload_config(
+    rqctx: RequestContext<ServerContext>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let smf_values = SmfConfigValues::read_current().map_err(|err| {
+        HttpError::for_unavail(
+            None,
+            format!("failed to read SMF values: {err}"),
+        )
+    })?;
+
+    let rqctx = rqctx.context();
+
+    // We do not allow a config reload to change our bound address; return an
+    // error if the caller is attempting to do so.
+    if rqctx.bind_address != smf_values.address {
+        return Err(HttpError::for_bad_request(
+            None,
+            "listening address cannot be reconfigured".to_string(),
+        ));
+    }
+
+    if let Some(rack_subnet) = smf_values.rack_subnet {
+        let resolver = Resolver::new_from_subnet(
+            rqctx.log.new(o!("component" => "InternalDnsResolver")),
+            rack_subnet,
+        )
+        .map_err(|err| {
+            HttpError::for_unavail(
+                None,
+                format!("failed to create internal DNS resolver: {err}"),
+            )
+        })?;
+
+        *rqctx.internal_dns_resolver.lock().unwrap() = Some(resolver);
+    }
 
     Ok(HttpResponseUpdatedNoContent())
 }

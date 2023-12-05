@@ -21,6 +21,7 @@ sprockets-rot.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
 toml.workspace = true
+omicron-workspace-hack.workspace = true
 
 [[bin]]
 name = "sp-sim"

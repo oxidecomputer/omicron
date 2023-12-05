@@ -17,7 +17,7 @@ use super::cte_utils::{
     QueryFromClause, QuerySqlType, TableDefaultWhereClause,
 };
 use super::pool::DbConnection;
-use async_bb8_diesel::{AsyncRunQueryDsl, PoolError};
+use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::associations::HasTable;
 use diesel::expression::{AsExpression, Expression};
 use diesel::helper_types::*;
@@ -26,6 +26,7 @@ use diesel::prelude::*;
 use diesel::query_builder::*;
 use diesel::query_dsl::methods as query_methods;
 use diesel::query_source::Table;
+use diesel::result::Error as DieselError;
 use diesel::sql_types::{BigInt, Nullable, SingleValue};
 use nexus_db_model::DatastoreAttachTargetConfig;
 use std::fmt::Debug;
@@ -299,7 +300,7 @@ where
 
 /// Result of [`AttachToCollectionStatement`] when executed asynchronously
 pub type AsyncAttachToCollectionResult<ResourceType, C> =
-    Result<(C, ResourceType), AttachError<ResourceType, C, PoolError>>;
+    Result<(C, ResourceType), AttachError<ResourceType, C, DieselError>>;
 
 /// Errors returned by [`AttachToCollectionStatement`].
 #[derive(Debug)]
@@ -332,10 +333,9 @@ where
     AttachToCollectionStatement<ResourceType, V, C>: Send,
 {
     /// Issues the CTE asynchronously and parses the result.
-    pub async fn attach_and_get_result_async<ConnErr>(
+    pub async fn attach_and_get_result_async(
         self,
-        conn: &(impl async_bb8_diesel::AsyncConnection<DbConnection, ConnErr>
-              + Sync),
+        conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> AsyncAttachToCollectionResult<ResourceType, C>
     where
         // We require this bound to ensure that "Self" is runnable as query.
@@ -344,13 +344,11 @@ where
             DbConnection,
             RawOutput<ResourceType, C>,
         >,
-        ConnErr: From<diesel::result::Error> + Send + 'static,
-        PoolError: From<ConnErr>,
     {
         self.get_result_async::<RawOutput<ResourceType, C>>(conn)
             .await
             // If the database returns an error, propagate it right away.
-            .map_err(|e| AttachError::DatabaseError(PoolError::from(e)))
+            .map_err(|e| AttachError::DatabaseError(e))
             // Otherwise, parse the output to determine if the CTE succeeded.
             .and_then(Self::parse_result)
     }
@@ -570,6 +568,7 @@ mod test {
     };
     use async_bb8_diesel::{
         AsyncConnection, AsyncRunQueryDsl, AsyncSimpleConnection,
+        ConnectionManager,
     };
     use chrono::Utc;
     use db_macros::Resource;
@@ -605,7 +604,9 @@ mod test {
         }
     }
 
-    async fn setup_db(pool: &crate::db::Pool) {
+    async fn setup_db(
+        pool: &crate::db::Pool,
+    ) -> bb8::PooledConnection<ConnectionManager<DbConnection>> {
         let connection = pool.pool().get().await.unwrap();
         (*connection)
             .batch_execute_async(
@@ -633,6 +634,7 @@ mod test {
             )
             .await
             .unwrap();
+        connection
     }
 
     /// Describes a resource within the database.
@@ -669,7 +671,7 @@ mod test {
     async fn insert_collection(
         id: Uuid,
         name: &str,
-        pool: &db::Pool,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> Collection {
         let create_params = IdentityMetadataCreateParams {
             name: Name::try_from(name.to_string()).unwrap(),
@@ -680,18 +682,21 @@ mod test {
 
         diesel::insert_into(collection::table)
             .values(c)
-            .execute_async(pool.pool())
+            .execute_async(conn)
             .await
             .unwrap();
 
-        get_collection(id, &pool).await
+        get_collection(id, &conn).await
     }
 
-    async fn get_collection(id: Uuid, pool: &db::Pool) -> Collection {
+    async fn get_collection(
+        id: Uuid,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> Collection {
         collection::table
             .find(id)
             .select(Collection::as_select())
-            .first_async(pool.pool())
+            .first_async(conn)
             .await
             .unwrap()
     }
@@ -699,7 +704,7 @@ mod test {
     async fn insert_resource(
         id: Uuid,
         name: &str,
-        pool: &db::Pool,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> Resource {
         let create_params = IdentityMetadataCreateParams {
             name: Name::try_from(name.to_string()).unwrap(),
@@ -712,18 +717,21 @@ mod test {
 
         diesel::insert_into(resource::table)
             .values(r)
-            .execute_async(pool.pool())
+            .execute_async(conn)
             .await
             .unwrap();
 
-        get_resource(id, &pool).await
+        get_resource(id, conn).await
     }
 
-    async fn get_resource(id: Uuid, pool: &db::Pool) -> Resource {
+    async fn get_resource(
+        id: Uuid,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> Resource {
         resource::table
             .find(id)
             .select(Resource::as_select())
-            .first_async(pool.pool())
+            .first_async(conn)
             .await
             .unwrap()
     }
@@ -856,7 +864,7 @@ mod test {
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&logctx.log, &cfg);
 
-        setup_db(&pool).await;
+        let conn = setup_db(&pool).await;
 
         let collection_id = uuid::Uuid::new_v4();
         let resource_id = uuid::Uuid::new_v4();
@@ -869,7 +877,7 @@ mod test {
             diesel::update(resource::table)
                 .set(resource::dsl::collection_id.eq(collection_id)),
         )
-        .attach_and_get_result_async(pool.pool())
+        .attach_and_get_result_async(&conn)
         .await;
 
         assert!(matches!(attach, Err(AttachError::CollectionNotFound)));
@@ -885,14 +893,14 @@ mod test {
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&logctx.log, &cfg);
 
-        setup_db(&pool).await;
+        let conn = setup_db(&pool).await;
 
         let collection_id = uuid::Uuid::new_v4();
         let resource_id = uuid::Uuid::new_v4();
 
         // Create the collection
         let collection =
-            insert_collection(collection_id, "collection", &pool).await;
+            insert_collection(collection_id, "collection", &conn).await;
 
         // Attempt to attach - even though the resource does not exist.
         let attach = Collection::attach_resource(
@@ -904,12 +912,12 @@ mod test {
             diesel::update(resource::table)
                 .set(resource::dsl::collection_id.eq(collection_id)),
         )
-        .attach_and_get_result_async(pool.pool())
+        .attach_and_get_result_async(&conn)
         .await;
 
         assert!(matches!(attach, Err(AttachError::ResourceNotFound)));
         // The collection should remain unchanged.
-        assert_eq!(collection, get_collection(collection_id, &pool).await);
+        assert_eq!(collection, get_collection(collection_id, &conn).await);
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
@@ -922,15 +930,15 @@ mod test {
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&logctx.log, &cfg);
 
-        setup_db(&pool).await;
+        let conn = setup_db(&pool).await;
 
         let collection_id = uuid::Uuid::new_v4();
         let resource_id = uuid::Uuid::new_v4();
 
         // Create the collection and resource.
         let _collection =
-            insert_collection(collection_id, "collection", &pool).await;
-        let _resource = insert_resource(resource_id, "resource", &pool).await;
+            insert_collection(collection_id, "collection", &conn).await;
+        let _resource = insert_resource(resource_id, "resource", &conn).await;
 
         // Attach the resource to the collection.
         let attach = Collection::attach_resource(
@@ -942,7 +950,7 @@ mod test {
             diesel::update(resource::table)
                 .set(resource::dsl::collection_id.eq(collection_id)),
         )
-        .attach_and_get_result_async(pool.pool())
+        .attach_and_get_result_async(&conn)
         .await;
 
         // "attach_and_get_result_async" should return the "attached" resource.
@@ -955,9 +963,9 @@ mod test {
         // The returned value should be the latest value in the DB.
         assert_eq!(
             returned_collection,
-            get_collection(collection_id, &pool).await
+            get_collection(collection_id, &conn).await
         );
-        assert_eq!(returned_resource, get_resource(resource_id, &pool).await);
+        assert_eq!(returned_resource, get_resource(resource_id, &conn).await);
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
@@ -970,15 +978,15 @@ mod test {
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&logctx.log, &cfg);
 
-        setup_db(&pool).await;
+        let conn = setup_db(&pool).await;
 
         let collection_id = uuid::Uuid::new_v4();
         let resource_id = uuid::Uuid::new_v4();
 
         // Create the collection and resource.
         let _collection =
-            insert_collection(collection_id, "collection", &pool).await;
-        let _resource = insert_resource(resource_id, "resource", &pool).await;
+            insert_collection(collection_id, "collection", &conn).await;
+        let _resource = insert_resource(resource_id, "resource", &conn).await;
 
         // Attach the resource to the collection.
         let attach_query = Collection::attach_resource(
@@ -992,9 +1000,8 @@ mod test {
         );
 
         type TxnError =
-            TransactionError<AttachError<Resource, Collection, PoolError>>;
-        let result = pool
-            .pool()
+            TransactionError<AttachError<Resource, Collection, DieselError>>;
+        let result = conn
             .transaction_async(|conn| async move {
                 attach_query.attach_and_get_result_async(&conn).await.map_err(
                     |e| match e {
@@ -1015,9 +1022,9 @@ mod test {
         // The returned values should be the latest value in the DB.
         assert_eq!(
             returned_collection,
-            get_collection(collection_id, &pool).await
+            get_collection(collection_id, &conn).await
         );
-        assert_eq!(returned_resource, get_resource(resource_id, &pool).await);
+        assert_eq!(returned_resource, get_resource(resource_id, &conn).await);
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
@@ -1030,7 +1037,7 @@ mod test {
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&logctx.log, &cfg);
 
-        setup_db(&pool).await;
+        let conn = setup_db(&pool).await;
 
         const RESOURCE_COUNT: u32 = 5;
 
@@ -1038,12 +1045,12 @@ mod test {
 
         // Create the collection.
         let _collection =
-            insert_collection(collection_id, "collection", &pool).await;
+            insert_collection(collection_id, "collection", &conn).await;
 
         // Create each resource, attaching them to the collection.
         for i in 0..RESOURCE_COUNT {
             let resource_id = uuid::Uuid::new_v4();
-            insert_resource(resource_id, &format!("resource{}", i), &pool)
+            insert_resource(resource_id, &format!("resource{}", i), &conn)
                 .await;
 
             // Attach the resource to the collection.
@@ -1056,7 +1063,7 @@ mod test {
                 diesel::update(resource::table)
                     .set(resource::dsl::collection_id.eq(collection_id)),
             )
-            .attach_and_get_result_async(pool.pool())
+            .attach_and_get_result_async(&conn)
             .await;
 
             // "attach_and_get_result_async" should return the "attached" resource.
@@ -1071,7 +1078,7 @@ mod test {
             // The returned resource value should be the latest value in the DB.
             assert_eq!(
                 returned_resource,
-                get_resource(resource_id, &pool).await
+                get_resource(resource_id, &conn).await
             );
         }
 
@@ -1086,15 +1093,15 @@ mod test {
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&logctx.log, &cfg);
 
-        setup_db(&pool).await;
+        let conn = setup_db(&pool).await;
 
         let collection_id = uuid::Uuid::new_v4();
 
         // Attach a resource to a collection, as usual.
         let _collection =
-            insert_collection(collection_id, "collection", &pool).await;
+            insert_collection(collection_id, "collection", &conn).await;
         let resource_id1 = uuid::Uuid::new_v4();
-        let _resource = insert_resource(resource_id1, "resource1", &pool).await;
+        let _resource = insert_resource(resource_id1, "resource1", &conn).await;
         let attach = Collection::attach_resource(
             collection_id,
             resource_id1,
@@ -1104,7 +1111,7 @@ mod test {
             diesel::update(resource::table)
                 .set(resource::dsl::collection_id.eq(collection_id)),
         )
-        .attach_and_get_result_async(pool.pool())
+        .attach_and_get_result_async(&conn)
         .await;
         assert_eq!(
             attach.expect("Attach should have worked").1.id(),
@@ -1113,7 +1120,7 @@ mod test {
 
         // Let's try attaching a second resource, now that we're at capacity.
         let resource_id2 = uuid::Uuid::new_v4();
-        let _resource = insert_resource(resource_id2, "resource2", &pool).await;
+        let _resource = insert_resource(resource_id2, "resource2", &conn).await;
         let attach = Collection::attach_resource(
             collection_id,
             resource_id2,
@@ -1123,17 +1130,17 @@ mod test {
             diesel::update(resource::table)
                 .set(resource::dsl::collection_id.eq(collection_id)),
         )
-        .attach_and_get_result_async(pool.pool())
+        .attach_and_get_result_async(&conn)
         .await;
 
         let err = attach.expect_err("Should have failed to attach");
         match err {
             AttachError::NoUpdate { attached_count, resource, collection } => {
                 assert_eq!(attached_count, 1);
-                assert_eq!(resource, get_resource(resource_id2, &pool).await);
+                assert_eq!(resource, get_resource(resource_id2, &conn).await);
                 assert_eq!(
                     collection,
-                    get_collection(collection_id, &pool).await
+                    get_collection(collection_id, &conn).await
                 );
             }
             _ => panic!("Unexpected error: {:?}", err),
@@ -1150,15 +1157,15 @@ mod test {
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&logctx.log, &cfg);
 
-        setup_db(&pool).await;
+        let conn = setup_db(&pool).await;
 
         let collection_id = uuid::Uuid::new_v4();
 
         // Attach a resource to a collection, as usual.
         let _collection =
-            insert_collection(collection_id, "collection", &pool).await;
+            insert_collection(collection_id, "collection", &conn).await;
         let resource_id = uuid::Uuid::new_v4();
-        let _resource = insert_resource(resource_id, "resource", &pool).await;
+        let _resource = insert_resource(resource_id, "resource", &conn).await;
         let attach = Collection::attach_resource(
             collection_id,
             resource_id,
@@ -1168,7 +1175,7 @@ mod test {
             diesel::update(resource::table)
                 .set(resource::dsl::collection_id.eq(collection_id)),
         )
-        .attach_and_get_result_async(pool.pool())
+        .attach_and_get_result_async(&conn)
         .await;
         assert_eq!(
             attach.expect("Attach should have worked").1.id(),
@@ -1185,7 +1192,7 @@ mod test {
             diesel::update(resource::table)
                 .set(resource::dsl::collection_id.eq(collection_id)),
         )
-        .attach_and_get_result_async(pool.pool())
+        .attach_and_get_result_async(&conn)
         .await;
         let err = attach.expect_err("Should have failed to attach");
 
@@ -1203,10 +1210,10 @@ mod test {
                         .expect("Should already be attached"),
                     collection_id
                 );
-                assert_eq!(resource, get_resource(resource_id, &pool).await);
+                assert_eq!(resource, get_resource(resource_id, &conn).await);
                 assert_eq!(
                     collection,
-                    get_collection(collection_id, &pool).await
+                    get_collection(collection_id, &conn).await
                 );
             }
             _ => panic!("Unexpected error: {:?}", err),
@@ -1222,7 +1229,7 @@ mod test {
             diesel::update(resource::table)
                 .set(resource::dsl::collection_id.eq(collection_id)),
         )
-        .attach_and_get_result_async(pool.pool())
+        .attach_and_get_result_async(&conn)
         .await;
         let err = attach.expect_err("Should have failed to attach");
         // Even when at capacity, the same information should be propagated back
@@ -1237,10 +1244,10 @@ mod test {
                         .expect("Should already be attached"),
                     collection_id
                 );
-                assert_eq!(resource, get_resource(resource_id, &pool).await);
+                assert_eq!(resource, get_resource(resource_id, &conn).await);
                 assert_eq!(
                     collection,
-                    get_collection(collection_id, &pool).await
+                    get_collection(collection_id, &conn).await
                 );
             }
             _ => panic!("Unexpected error: {:?}", err),
@@ -1257,15 +1264,15 @@ mod test {
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&logctx.log, &cfg);
 
-        setup_db(&pool).await;
+        let conn = setup_db(&pool).await;
 
         let collection_id = uuid::Uuid::new_v4();
         let resource_id = uuid::Uuid::new_v4();
 
         // Create the collection and resource.
         let _collection =
-            insert_collection(collection_id, "collection", &pool).await;
-        let _resource = insert_resource(resource_id, "resource", &pool).await;
+            insert_collection(collection_id, "collection", &conn).await;
+        let _resource = insert_resource(resource_id, "resource", &conn).await;
 
         // Attach the resource to the collection.
         //
@@ -1290,7 +1297,7 @@ mod test {
                 resource::dsl::description.eq("new description".to_string()),
             )),
         )
-        .attach_and_get_result_async(pool.pool())
+        .attach_and_get_result_async(&conn)
         .await;
 
         let (_, returned_resource) = attach.expect("Attach should have worked");
@@ -1298,7 +1305,7 @@ mod test {
             returned_resource.collection_id.expect("Expected a collection ID"),
             collection_id
         );
-        assert_eq!(returned_resource, get_resource(resource_id, &pool).await);
+        assert_eq!(returned_resource, get_resource(resource_id, &conn).await);
         assert_eq!(returned_resource.description(), "new description");
 
         db.cleanup().await.unwrap();
@@ -1312,22 +1319,22 @@ mod test {
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&logctx.log, &cfg);
 
-        setup_db(&pool).await;
+        let conn = setup_db(&pool).await;
 
         let collection_id = uuid::Uuid::new_v4();
         let resource_id = uuid::Uuid::new_v4();
 
         // Create the collection and resource.
         let _collection =
-            insert_collection(collection_id, "collection", &pool).await;
-        let _resource = insert_resource(resource_id, "resource", &pool).await;
+            insert_collection(collection_id, "collection", &conn).await;
+        let _resource = insert_resource(resource_id, "resource", &conn).await;
 
         // Immediately soft-delete the resource.
         diesel::update(
             resource::table.filter(resource::dsl::id.eq(resource_id)),
         )
         .set(resource::dsl::time_deleted.eq(Utc::now()))
-        .execute_async(pool.pool())
+        .execute_async(&*conn)
         .await
         .unwrap();
 
@@ -1342,7 +1349,7 @@ mod test {
             diesel::update(resource::table)
                 .set(resource::dsl::collection_id.eq(collection_id)),
         )
-        .attach_and_get_result_async(pool.pool())
+        .attach_and_get_result_async(&conn)
         .await;
         assert!(matches!(attach, Err(AttachError::ResourceNotFound)));
 
@@ -1357,19 +1364,19 @@ mod test {
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&logctx.log, &cfg);
 
-        setup_db(&pool).await;
+        let conn = setup_db(&pool).await;
 
         let collection_id = uuid::Uuid::new_v4();
 
         // Create the collection and some resources.
         let _collection =
-            insert_collection(collection_id, "collection", &pool).await;
+            insert_collection(collection_id, "collection", &conn).await;
         let resource_id1 = uuid::Uuid::new_v4();
         let resource_id2 = uuid::Uuid::new_v4();
         let _resource1 =
-            insert_resource(resource_id1, "resource1", &pool).await;
+            insert_resource(resource_id1, "resource1", &conn).await;
         let _resource2 =
-            insert_resource(resource_id2, "resource2", &pool).await;
+            insert_resource(resource_id2, "resource2", &conn).await;
 
         // Attach the resource to the collection.
         //
@@ -1384,7 +1391,7 @@ mod test {
             diesel::update(resource::table)
                 .set(resource::dsl::collection_id.eq(collection_id)),
         )
-        .attach_and_get_result_async(pool.pool())
+        .attach_and_get_result_async(&conn)
         .await;
 
         let (_, returned_resource) = attach.expect("Attach should have worked");
@@ -1394,10 +1401,10 @@ mod test {
         // "resource2" should have automatically been filtered away from the
         // update statement, regardless of user input.
         assert_eq!(
-            get_resource(resource_id1, &pool).await.collection_id.unwrap(),
+            get_resource(resource_id1, &conn).await.collection_id.unwrap(),
             collection_id
         );
-        assert!(get_resource(resource_id2, &pool)
+        assert!(get_resource(resource_id2, &conn)
             .await
             .collection_id
             .is_none());

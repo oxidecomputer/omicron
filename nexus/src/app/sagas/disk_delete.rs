@@ -8,8 +8,8 @@ use super::NexusSaga;
 use crate::app::sagas::declare_saga_actions;
 use crate::app::sagas::volume_delete;
 use crate::app::sagas::SagaInitError;
-use crate::authn;
-use crate::db;
+use nexus_db_queries::authn;
+use nexus_db_queries::db;
 use omicron_common::api::external::DiskState;
 use serde::Deserialize;
 use serde::Serialize;
@@ -20,7 +20,7 @@ use uuid::Uuid;
 // disk delete saga: input parameters
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Params {
+pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub project_id: Uuid,
     pub disk_id: Uuid,
@@ -32,10 +32,8 @@ pub struct Params {
 declare_saga_actions! {
     disk_delete;
     DELETE_DISK_RECORD -> "deleted_disk" {
-        // TODO: See the comment on the "DeleteRegions" step,
-        // we may want to un-delete the disk if we cannot remove
-        // underlying regions.
         + sdd_delete_disk_record
+        - sdd_delete_disk_record_undo
     }
     SPACE_ACCOUNT -> "no_result1" {
         + sdd_account_space
@@ -46,7 +44,7 @@ declare_saga_actions! {
 // disk delete saga: definition
 
 #[derive(Debug)]
-pub struct SagaDiskDelete;
+pub(crate) struct SagaDiskDelete;
 impl NexusSaga for SagaDiskDelete {
     const NAME: &'static str = "disk-delete";
     type Params = Params;
@@ -117,6 +115,21 @@ async fn sdd_delete_disk_record(
     Ok(disk)
 }
 
+async fn sdd_delete_disk_record_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+
+    osagactx
+        .datastore()
+        .project_undelete_disk_set_faulted_no_auth(&params.disk_id)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    Ok(())
+}
+
 async fn sdd_account_space(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
@@ -169,10 +182,11 @@ async fn sdd_account_space_undo(
 pub(crate) mod test {
     use crate::{
         app::saga::create_saga_dag, app::sagas::disk_delete::Params,
-        app::sagas::disk_delete::SagaDiskDelete, authn::saga::Serialized,
+        app::sagas::disk_delete::SagaDiskDelete,
     };
     use dropshot::test_util::ClientTestContext;
     use nexus_db_model::Disk;
+    use nexus_db_queries::authn::saga::Serialized;
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils::resource_helpers::create_ip_pool;
     use nexus_test_utils::resource_helpers::create_project;
@@ -180,7 +194,6 @@ pub(crate) mod test {
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::external_api::params;
     use omicron_common::api::external::Name;
-    use std::num::NonZeroU32;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -267,31 +280,10 @@ pub(crate) mod test {
             volume_id: disk.volume_id,
         };
         let dag = create_saga_dag::<SagaDiskDelete>(params).unwrap();
-
-        let runnable_saga =
-            nexus.create_runnable_saga(dag.clone()).await.unwrap();
-
-        // Cause all actions to run twice. The saga should succeed regardless!
-        for node in dag.get_nodes() {
-            nexus
-                .sec()
-                .saga_inject_repeat(
-                    runnable_saga.id(),
-                    node.index(),
-                    steno::RepeatInjected {
-                        action: NonZeroU32::new(2).unwrap(),
-                        undo: NonZeroU32::new(1).unwrap(),
-                    },
-                )
-                .await
-                .unwrap();
-        }
-
-        // Verify that the saga's execution succeeded.
-        nexus
-            .run_saga(runnable_saga)
-            .await
-            .expect("Saga should have succeeded");
+        crate::app::sagas::test_helpers::actions_succeed_idempotently(
+            nexus, dag,
+        )
+        .await;
 
         crate::app::sagas::disk_create::test::verify_clean_slate(
             &cptestctx, &test,

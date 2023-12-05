@@ -31,7 +31,9 @@ pub async fn current_simulator_state(simrack: &SimRack) -> Vec<SpInfo> {
     let mut all_sps: Vec<SpInfo> = Vec::new();
     let mut slot = 0;
     for state in sim_state {
-        let Some(target_state) = state.target else { continue; };
+        let Some(target_state) = state.target else {
+            continue;
+        };
         let typ = match target_state.system_type {
             SystemType::Sidecar => SpType::Switch,
             SystemType::Gimlet => SpType::Sled,

@@ -16,6 +16,7 @@ set -x
 
 SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 OMICRON_TOP="$SOURCE_DIR/.."
+SOFTNPU_MODE=${SOFTNPU_MODE:-zone};
 
 . "$SOURCE_DIR/virtual_hardware.sh"
 
@@ -37,13 +38,16 @@ function ensure_simulated_links {
             dladm create-simnet -t "net$I"
             dladm create-simnet -t "sc${I}_0"
             dladm modify-simnet -t -p "net$I" "sc${I}_0"
-            dladm set-linkprop -p mtu=1600 "sc${I}_0" # encap headroom
+            dladm set-linkprop -p mtu=9000 "sc${I}_0" # match emulated devices
         fi
         success "Simnet net$I/sc${I}_0 exists"
     done
 
     if [[ -z "$(get_vnic_name_if_exists "sc0_1")" ]]; then
-        dladm create-vnic -t "sc0_1" -l $PHYSICAL_LINK -m a8:e1:de:01:70:1d
+        dladm create-vnic -t "sc0_1" -l "$PHYSICAL_LINK" -m a8:e1:de:01:70:1d
+        if [[ -v PROMISC_FILT_OFF ]]; then
+            dladm set-linkprop -p promisc-filtered=off sc0_1
+        fi
     fi
     success "Vnic sc0_1 exists"
 }
@@ -58,9 +62,11 @@ function ensure_softnpu_zone {
         out/npuzone/npuzone create sidecar \
             --omicron-zone \
             --ports sc0_0,tfportrear0_0 \
-            --ports sc0_1,tfportqsfp0_0
-    }
-    $SOURCE_DIR/scrimlet/softnpu-init.sh
+            --ports sc0_1,tfportqsfp0_0 \
+            --sidecar-lite-commit f0585a29fb0285f7a1220c1118856b0e5c1f75c5 \
+            --softnpu-commit dec63e67156fe6e958991bbfa090629868115ab5
+     }
+    "$SOURCE_DIR"/scrimlet/softnpu-init.sh
     success "softnpu zone exists"
 }
 
@@ -79,6 +85,9 @@ in the SoftNPU zone later to add those entries."
 
 ensure_run_as_root
 ensure_zpools
-ensure_simulated_links "$PHYSICAL_LINK"
-warn_if_no_proxy_arp
-ensure_softnpu_zone
+
+if [[ "$SOFTNPU_MODE" == "zone" ]]; then
+    ensure_simulated_links "$PHYSICAL_LINK"
+    warn_if_no_proxy_arp
+    ensure_softnpu_zone
+fi

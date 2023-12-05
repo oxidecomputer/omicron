@@ -1,7 +1,7 @@
 use crate::ui::defaults::style;
-use tui::buffer::Buffer;
-use tui::layout::Rect;
-use tui::widgets::Widget;
+use ratatui::buffer::Buffer;
+use ratatui::layout::Rect;
+use ratatui::widgets::Widget;
 
 /// Style every character as `style::faded_background`
 #[derive(Default)]

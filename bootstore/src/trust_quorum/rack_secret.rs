@@ -67,7 +67,7 @@ impl Eq for RackSecret {}
 impl RackSecret {
     /// Create a secret based on Curve25519
     pub fn new() -> RackSecret {
-        let mut rng = OsRng::default();
+        let mut rng = OsRng;
         RackSecret { secret: Secret::new(Scalar::random(&mut rng)) }
     }
 
@@ -78,7 +78,7 @@ impl RackSecret {
         threshold: u8,
         total_shares: u8,
     ) -> Result<Secret<Vec<Vec<u8>>>, vsss_rs::Error> {
-        let mut rng = OsRng::default();
+        let mut rng = OsRng;
         Ok(Secret::new(shamir::split_secret::<WrappedScalar, u8, Vec<u8>>(
             threshold as usize,
             total_shares as usize,

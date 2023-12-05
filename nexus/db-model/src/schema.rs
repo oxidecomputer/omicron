@@ -144,6 +144,9 @@ table! {
         lldp_service_config_id -> Uuid,
         link_name -> Text,
         mtu -> Int4,
+        fec -> crate::SwitchLinkFecEnum,
+        speed -> crate::SwitchLinkSpeedEnum,
+        autoneg -> Bool,
     }
 }
 
@@ -188,7 +191,7 @@ table! {
 }
 
 table! {
-    switch_port_settings_route_config (port_settings_id, interface_name, dst, gw, vid) {
+    switch_port_settings_route_config (port_settings_id, interface_name, dst, gw) {
         port_settings_id -> Uuid,
         interface_name -> Text,
         dst -> Inet,
@@ -200,10 +203,14 @@ table! {
 table! {
     switch_port_settings_bgp_peer_config (port_settings_id, interface_name, addr) {
         port_settings_id -> Uuid,
-        bgp_announce_set_id -> Uuid,
         bgp_config_id -> Uuid,
         interface_name -> Text,
         addr -> Inet,
+        hold_time -> Int8,
+        idle_hold_time -> Int8,
+        delay_open -> Int8,
+        connect_retry -> Int8,
+        keepalive -> Int8,
     }
 }
 
@@ -216,6 +223,7 @@ table! {
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
         asn -> Int8,
+        bgp_announce_set_id -> Uuid,
         vrf -> Nullable<Text>,
     }
 }
@@ -344,19 +352,30 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         project_id -> Uuid,
         user_data -> Binary,
-        state -> crate::InstanceStateEnum,
-        time_state_updated -> Timestamptz,
-        state_generation -> Int8,
-        active_sled_id -> Uuid,
-        active_propolis_id -> Uuid,
-        active_propolis_ip -> Nullable<Inet>,
-        target_propolis_id -> Nullable<Uuid>,
-        migration_id -> Nullable<Uuid>,
-        propolis_generation -> Int8,
         ncpus -> Int8,
         memory -> Int8,
         hostname -> Text,
         boot_on_fault -> Bool,
+        state -> crate::InstanceStateEnum,
+        time_state_updated -> Timestamptz,
+        state_generation -> Int8,
+        active_propolis_id -> Nullable<Uuid>,
+        target_propolis_id -> Nullable<Uuid>,
+        migration_id -> Nullable<Uuid>,
+    }
+}
+
+table! {
+    vmm (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        instance_id -> Uuid,
+        sled_id -> Uuid,
+        propolis_ip -> Inet,
+        state -> crate::InstanceStateEnum,
+        time_state_updated -> Timestamptz,
+        state_generation -> Int8,
     }
 }
 
@@ -381,6 +400,7 @@ table! {
         id -> Uuid,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
+        kind -> crate::ProducerKindEnum,
         ip -> Inet,
         port -> Int4,
         interval -> Float8,
@@ -452,8 +472,9 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
-        internal -> Bool,
         rcgen -> Int8,
+        silo_id -> Nullable<Uuid>,
+        is_default -> Bool,
     }
 }
 
@@ -467,6 +488,32 @@ table! {
         last_address -> Inet,
         ip_pool_id -> Uuid,
         rcgen -> Int8,
+    }
+}
+
+table! {
+    ipv4_nat_entry (id) {
+        id -> Uuid,
+        external_address -> Inet,
+        first_port -> Int4,
+        last_port -> Int4,
+        sled_address -> Inet,
+        vni -> Int4,
+        mac -> Int8,
+        version_added -> Int8,
+        version_removed -> Nullable<Int8>,
+        time_created -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+    }
+}
+
+// This is the sequence used for the version number
+// in ipv4_nat_entry.
+table! {
+    ipv4_nat_version (last_value) {
+        last_value -> Int8,
+        log_cnt -> Int8,
+        is_called -> Bool,
     }
 }
 
@@ -661,6 +708,7 @@ table! {
         time_modified -> Timestamptz,
         initialized -> Bool,
         tuf_base_url -> Nullable<Text>,
+        rack_subnet -> Nullable<Inet>,
     }
 }
 
@@ -694,6 +742,7 @@ table! {
         ip -> Inet,
         port -> Int4,
         last_used_address -> Inet,
+        provision_state -> crate::SledProvisionStateEnum,
     }
 }
 
@@ -707,6 +756,16 @@ table! {
         reservoir_ram -> Int8,
     }
 }
+
+table! {
+    sled_underlay_subnet_allocation (rack_id, sled_id) {
+        rack_id -> Uuid,
+        sled_id -> Uuid,
+        subnet_octet -> Int2,
+        hw_baseboard_id -> Uuid,
+    }
+}
+allow_tables_to_appear_in_same_query!(rack, sled_underlay_subnet_allocation);
 
 table! {
     switch (id) {
@@ -800,6 +859,11 @@ table! {
     }
 }
 
+allow_tables_to_appear_in_same_query! {
+    virtual_provisioning_resource,
+    instance
+}
+
 table! {
     zpool (id) {
         id -> Uuid,
@@ -855,6 +919,7 @@ table! {
         snapshot_id -> Uuid,
         snapshot_addr -> Text,
         volume_references -> Int8,
+        deleting -> Bool,
     }
 }
 
@@ -1114,6 +1179,113 @@ table! {
     }
 }
 
+/* hardware inventory */
+
+table! {
+    hw_baseboard_id (id) {
+        id -> Uuid,
+        part_number -> Text,
+        serial_number -> Text,
+    }
+}
+
+table! {
+    sw_caboose (id) {
+        id -> Uuid,
+        board -> Text,
+        git_commit -> Text,
+        name -> Text,
+        version -> Text,
+    }
+}
+
+table! {
+    sw_root_of_trust_page (id) {
+        id -> Uuid,
+        data_base64 -> Text,
+    }
+}
+
+table! {
+    inv_collection (id) {
+        id -> Uuid,
+        time_started -> Timestamptz,
+        time_done -> Timestamptz,
+        collector -> Text,
+    }
+}
+
+table! {
+    inv_collection_error (inv_collection_id, idx) {
+        inv_collection_id -> Uuid,
+        idx -> Int4,
+        message -> Text,
+    }
+}
+
+table! {
+    inv_service_processor (inv_collection_id, hw_baseboard_id) {
+        inv_collection_id -> Uuid,
+        hw_baseboard_id -> Uuid,
+        time_collected -> Timestamptz,
+        source -> Text,
+
+        sp_type -> crate::SpTypeEnum,
+        sp_slot -> Int4,
+
+        baseboard_revision -> Int8,
+        hubris_archive_id -> Text,
+        power_state -> crate::HwPowerStateEnum,
+    }
+}
+
+table! {
+    inv_root_of_trust (inv_collection_id, hw_baseboard_id) {
+        inv_collection_id -> Uuid,
+        hw_baseboard_id -> Uuid,
+        time_collected -> Timestamptz,
+        source -> Text,
+
+        slot_active -> crate::HwRotSlotEnum,
+        slot_boot_pref_transient -> Nullable<crate::HwRotSlotEnum>,
+        slot_boot_pref_persistent -> crate::HwRotSlotEnum,
+        slot_boot_pref_persistent_pending -> Nullable<crate::HwRotSlotEnum>,
+        slot_a_sha3_256 -> Nullable<Text>,
+        slot_b_sha3_256 -> Nullable<Text>,
+    }
+}
+
+table! {
+    inv_caboose (inv_collection_id, hw_baseboard_id, which) {
+        inv_collection_id -> Uuid,
+        hw_baseboard_id -> Uuid,
+        time_collected -> Timestamptz,
+        source -> Text,
+
+        which -> crate::CabooseWhichEnum,
+        sw_caboose_id -> Uuid,
+    }
+}
+
+table! {
+    inv_root_of_trust_page (inv_collection_id, hw_baseboard_id, which) {
+        inv_collection_id -> Uuid,
+        hw_baseboard_id -> Uuid,
+        time_collected -> Timestamptz,
+        source -> Text,
+
+        which -> crate::RotPageWhichEnum,
+        sw_root_of_trust_page_id -> Uuid,
+    }
+}
+
+table! {
+    bootstore_keys (key, generation) {
+        key -> Text,
+        generation -> Int8,
+    }
+}
+
 table! {
     db_metadata (singleton) {
         singleton -> Bool,
@@ -1129,7 +1301,7 @@ table! {
 ///
 /// This should be updated whenever the schema is changed. For more details,
 /// refer to: schema/crdb/README.adoc
-pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(2, 0, 0);
+pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(18, 0, 0);
 
 allow_tables_to_appear_in_same_query!(
     system_update,
@@ -1140,6 +1312,15 @@ joinable!(system_update_component_update -> component_update (component_update_i
 
 allow_tables_to_appear_in_same_query!(ip_pool_range, ip_pool);
 joinable!(ip_pool_range -> ip_pool (ip_pool_id));
+
+allow_tables_to_appear_in_same_query!(inv_collection, inv_collection_error);
+joinable!(inv_collection_error -> inv_collection (inv_collection_id));
+allow_tables_to_appear_in_same_query!(hw_baseboard_id, sw_caboose, inv_caboose);
+allow_tables_to_appear_in_same_query!(
+    hw_baseboard_id,
+    sw_root_of_trust_page,
+    inv_root_of_trust_page
+);
 
 allow_tables_to_appear_in_same_query!(
     dataset,
@@ -1166,6 +1347,7 @@ allow_tables_to_appear_in_same_query!(
     sled,
     sled_resource,
     router_route,
+    vmm,
     volume,
     vpc,
     vpc_subnet,
@@ -1183,3 +1365,12 @@ allow_tables_to_appear_in_same_query!(
     switch_port,
     switch_port_settings_route_config
 );
+
+allow_tables_to_appear_in_same_query!(
+    switch_port,
+    switch_port_settings_bgp_peer_config
+);
+
+allow_tables_to_appear_in_same_query!(disk, virtual_provisioning_resource);
+
+allow_tables_to_appear_in_same_query!(volume, virtual_provisioning_resource);

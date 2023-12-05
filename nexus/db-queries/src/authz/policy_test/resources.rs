@@ -67,6 +67,7 @@ pub async fn make_resources(
     builder.new_resource(authz::CONSOLE_SESSION_LIST);
     builder.new_resource(authz::DNS_CONFIG);
     builder.new_resource(authz::DEVICE_AUTH_REQUEST_LIST);
+    builder.new_resource(authz::INVENTORY);
     builder.new_resource(authz::IP_POOL_LIST);
 
     // Silo/organization/project hierarchy
@@ -86,6 +87,13 @@ pub async fn make_resources(
         authz::FLEET,
         sled_id,
         LookupType::ById(sled_id),
+    ));
+
+    let zpool_id = "aaaaaaaa-1233-af7d-9220-afe1d8090900".parse().unwrap();
+    builder.new_resource(authz::Zpool::new(
+        authz::FLEET,
+        zpool_id,
+        LookupType::ById(zpool_id),
     ));
 
     make_services(&mut builder).await;

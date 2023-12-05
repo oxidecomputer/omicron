@@ -8,10 +8,10 @@ use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::grant_iam;
 use nexus_test_utils::resource_helpers::{create_local_user, create_silo};
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::params;
+use nexus_types::external_api::shared::{self, SiloRole};
+use nexus_types::external_api::views;
 use omicron_common::api::external::Name;
-use omicron_nexus::external_api::params;
-use omicron_nexus::external_api::shared::{self, SiloRole};
-use omicron_nexus::external_api::views;
 use omicron_passwords::MIN_EXPECTED_PASSWORD_VERIFY_TIME;
 use std::str::FromStr;
 

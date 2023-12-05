@@ -3,28 +3,30 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::integration_tests::saml::SAML_IDP_DESCRIPTOR;
+use nexus_db_queries::authn::silos::{
+    AuthenticatedSubject, IdentityProviderType,
+};
+use nexus_db_queries::authn::{USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED};
+use nexus_db_queries::authz::{self};
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
+use nexus_db_queries::db::fixed_data::silo::{DEFAULT_SILO, SILO_ID};
+use nexus_db_queries::db::identity::Asset;
+use nexus_db_queries::db::lookup::LookupPath;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
     create_local_user, create_project, create_silo, grant_iam, object_create,
     objects_list_page_authz, projects_list,
 };
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::views::{
+    self, IdentityProvider, Project, SamlIdentityProvider, Silo,
+};
+use nexus_types::external_api::{params, shared};
 use omicron_common::api::external::ObjectIdentity;
 use omicron_common::api::external::{
     IdentityMetadataCreateParams, LookupType, Name,
 };
-use omicron_nexus::authn::silos::{AuthenticatedSubject, IdentityProviderType};
-use omicron_nexus::authn::{USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED};
-use omicron_nexus::authz::{self};
-use omicron_nexus::db;
-use omicron_nexus::db::fixed_data::silo::{DEFAULT_SILO, SILO_ID};
-use omicron_nexus::db::identity::Asset;
-use omicron_nexus::db::lookup::LookupPath;
-use omicron_nexus::external_api::views::{
-    self, IdentityProvider, Project, SamlIdentityProvider, Silo,
-};
-use omicron_nexus::external_api::{params, shared};
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -35,7 +37,7 @@ use base64::Engine;
 use http::method::Method;
 use http::StatusCode;
 use httptest::{matchers::*, responders::*, Expectation, Server};
-use omicron_nexus::external_api::shared::{FleetRole, SiloRole};
+use nexus_types::external_api::shared::{FleetRole, SiloRole};
 use std::convert::Infallible;
 use std::net::Ipv4Addr;
 use std::time::Duration;

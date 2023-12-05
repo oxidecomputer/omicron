@@ -5,9 +5,9 @@
 //! Default consistent styling for various widgets
 
 use super::colors::*;
-use tui::style::Color;
-use tui::style::Modifier;
-use tui::style::Style;
+use ratatui::style::Color;
+use ratatui::style::Modifier;
+use ratatui::style::Style;
 
 pub fn selected() -> Style {
     Style::default().fg(TUI_GREEN)

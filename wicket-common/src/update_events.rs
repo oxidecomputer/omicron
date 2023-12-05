@@ -10,6 +10,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use std::fmt;
+use std::sync::Arc;
 use thiserror::Error;
 use update_engine::errors::NestedEngineError;
 use update_engine::StepSpec;
@@ -110,6 +111,7 @@ pub enum SpComponentUpdateStepId {
     Writing,
     SettingActiveBootSlot,
     Resetting,
+    CheckingActiveBootSlot,
 }
 
 impl StepSpec for SpComponentUpdateSpec {
@@ -158,6 +160,21 @@ pub enum UpdateTerminalError {
         #[source]
         error: gateway_client::Error<gateway_client::types::Error>,
     },
+    #[error("getting RoT CMPA failed")]
+    GetRotCmpaFailed {
+        #[source]
+        error: anyhow::Error,
+    },
+    #[error("getting RoT CFPA failed")]
+    GetRotCfpaFailed {
+        #[source]
+        error: anyhow::Error,
+    },
+    #[error("failed to find correctly-signed RoT image")]
+    FailedFindingSignedRotImage {
+        #[source]
+        error: anyhow::Error,
+    },
     #[error("getting SP caboose failed")]
     GetSpCabooseFailed {
         #[source]
@@ -181,12 +198,13 @@ pub enum UpdateTerminalError {
         #[source]
         error: gateway_client::Error<gateway_client::types::Error>,
     },
-    #[error("failed to upload trampoline phase 2 to MGS (was a new TUF repo uploaded?)")]
-    // Currently, the only way this error variant can be produced is if the
-    // upload task died or was replaced because a new TUF repository was
-    // uploaded. In the future, we may want to produce errors here if the upload
-    // to MGS fails too many times, for example.
-    TrampolinePhase2UploadFailed,
+    #[error("uploading trampoline phase 2 to MGS failed")]
+    TrampolinePhase2UploadFailed {
+        #[source]
+        error: Arc<anyhow::Error>,
+    },
+    #[error("uploading trampoline phase 2 to MGS cancelled (was a new TUF repo uploaded?)")]
+    TrampolinePhase2UploadCancelled,
     #[error("downloading installinator failed")]
     DownloadingInstallinatorFailed {
         #[source]
@@ -222,6 +240,11 @@ pub enum SpComponentUpdateTerminalError {
         #[source]
         error: anyhow::Error,
     },
+    #[error("getting currently-active RoT slot failed")]
+    GetRotActiveSlotFailed {
+        #[source]
+        error: anyhow::Error,
+    },
     #[error("resetting RoT failed")]
     RotResetFailed {
         #[source]
@@ -232,6 +255,8 @@ pub enum SpComponentUpdateTerminalError {
         #[source]
         error: anyhow::Error,
     },
+    #[error("RoT booted into unexpected slot {active_slot}")]
+    RotUnexpectedActiveSlot { active_slot: u16 },
 }
 
 impl update_engine::AsError for SpComponentUpdateTerminalError {

@@ -643,6 +643,9 @@ async fn perform_handshake(
 
         let end = INITIAL_READ + identify_len;
 
+        // Clippy for Rust 1.73 warns on this but there doesn't seem to be a
+        // better way to write it?
+        #[allow(clippy::unnecessary_unwrap)]
         if identify.is_some() && !out_cursor.has_remaining() {
             return Ok((read_sock, write_sock, identify.unwrap()));
         }

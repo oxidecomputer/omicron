@@ -7,6 +7,7 @@ use http::StatusCode;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest};
 use nexus_test_utils::resource_helpers::{create_project, create_vpc};
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::views::Vpc;
 use omicron_common::api::external::{
     IdentityMetadata, L4Port, L4PortRange, VpcFirewallRule,
     VpcFirewallRuleAction, VpcFirewallRuleDirection, VpcFirewallRuleFilter,
@@ -14,7 +15,6 @@ use omicron_common::api::external::{
     VpcFirewallRuleProtocol, VpcFirewallRuleStatus, VpcFirewallRuleTarget,
     VpcFirewallRuleUpdate, VpcFirewallRuleUpdateParams, VpcFirewallRules,
 };
-use omicron_nexus::external_api::views::Vpc;
 use std::convert::TryFrom;
 use uuid::Uuid;
 

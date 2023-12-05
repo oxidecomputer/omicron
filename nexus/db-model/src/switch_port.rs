@@ -2,7 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::impl_enum_type;
 use crate::schema::{
     lldp_config, lldp_service_config, switch_port, switch_port_settings,
     switch_port_settings_address_config, switch_port_settings_bgp_peer_config,
@@ -11,11 +10,14 @@ use crate::schema::{
     switch_port_settings_port_config, switch_port_settings_route_config,
 };
 use crate::SqlU16;
+use crate::{impl_enum_type, SqlU32};
 use db_macros::Resource;
+use diesel::AsChangeset;
 use ipnetwork::IpNetwork;
 use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
+use omicron_common::api::internal::shared::{PortFec, PortSpeed};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -41,6 +43,110 @@ impl_enum_type!(
     Qsfp28x2 => b"Qsfp28x2"
     Sfp28x4 => b"Sfp28x4"
 );
+
+impl_enum_type!(
+    #[derive(SqlType, Debug, Clone, Copy)]
+    #[diesel(postgres_type(name = "switch_link_fec"))]
+    pub struct SwitchLinkFecEnum;
+
+    #[derive(
+        Clone,
+        Copy,
+        Debug,
+        AsExpression,
+        FromSqlRow,
+        PartialEq,
+        Serialize,
+        Deserialize
+    )]
+    #[diesel(sql_type = SwitchLinkFecEnum)]
+    pub enum SwitchLinkFec;
+
+    Firecode => b"Firecode"
+    None => b"None"
+    Rs => b"Rs"
+);
+
+impl_enum_type!(
+    #[derive(SqlType, Debug, Clone, Copy)]
+    #[diesel(postgres_type(name = "switch_link_speed"))]
+    pub struct SwitchLinkSpeedEnum;
+
+    #[derive(
+        Clone,
+        Copy,
+        Debug,
+        AsExpression,
+        FromSqlRow,
+        PartialEq,
+        Serialize,
+        Deserialize
+    )]
+    #[diesel(sql_type = SwitchLinkSpeedEnum)]
+    pub enum SwitchLinkSpeed;
+
+    Speed0G => b"0G"
+    Speed1G => b"1G"
+    Speed10G => b"10G"
+    Speed25G => b"25G"
+    Speed40G => b"40G"
+    Speed50G => b"50G"
+    Speed100G => b"100G"
+    Speed200G => b"200G"
+    Speed400G => b"400G"
+);
+
+impl From<SwitchLinkFec> for PortFec {
+    fn from(value: SwitchLinkFec) -> Self {
+        match value {
+            SwitchLinkFec::Firecode => PortFec::Firecode,
+            SwitchLinkFec::None => PortFec::None,
+            SwitchLinkFec::Rs => PortFec::Rs,
+        }
+    }
+}
+
+impl From<params::LinkFec> for SwitchLinkFec {
+    fn from(value: params::LinkFec) -> Self {
+        match value {
+            params::LinkFec::Firecode => SwitchLinkFec::Firecode,
+            params::LinkFec::None => SwitchLinkFec::None,
+            params::LinkFec::Rs => SwitchLinkFec::Rs,
+        }
+    }
+}
+
+impl From<SwitchLinkSpeed> for PortSpeed {
+    fn from(value: SwitchLinkSpeed) -> Self {
+        match value {
+            SwitchLinkSpeed::Speed0G => PortSpeed::Speed0G,
+            SwitchLinkSpeed::Speed1G => PortSpeed::Speed1G,
+            SwitchLinkSpeed::Speed10G => PortSpeed::Speed10G,
+            SwitchLinkSpeed::Speed25G => PortSpeed::Speed25G,
+            SwitchLinkSpeed::Speed40G => PortSpeed::Speed40G,
+            SwitchLinkSpeed::Speed50G => PortSpeed::Speed50G,
+            SwitchLinkSpeed::Speed100G => PortSpeed::Speed100G,
+            SwitchLinkSpeed::Speed200G => PortSpeed::Speed200G,
+            SwitchLinkSpeed::Speed400G => PortSpeed::Speed400G,
+        }
+    }
+}
+
+impl From<params::LinkSpeed> for SwitchLinkSpeed {
+    fn from(value: params::LinkSpeed) -> Self {
+        match value {
+            params::LinkSpeed::Speed0G => SwitchLinkSpeed::Speed0G,
+            params::LinkSpeed::Speed1G => SwitchLinkSpeed::Speed1G,
+            params::LinkSpeed::Speed10G => SwitchLinkSpeed::Speed10G,
+            params::LinkSpeed::Speed25G => SwitchLinkSpeed::Speed25G,
+            params::LinkSpeed::Speed40G => SwitchLinkSpeed::Speed40G,
+            params::LinkSpeed::Speed50G => SwitchLinkSpeed::Speed50G,
+            params::LinkSpeed::Speed100G => SwitchLinkSpeed::Speed100G,
+            params::LinkSpeed::Speed200G => SwitchLinkSpeed::Speed200G,
+            params::LinkSpeed::Speed400G => SwitchLinkSpeed::Speed400G,
+        }
+    }
+}
 
 impl From<params::SwitchPortGeometry> for SwitchPortGeometry {
     fn from(g: params::SwitchPortGeometry) -> Self {
@@ -140,13 +246,20 @@ pub struct SwitchPortSettings {
 }
 
 impl SwitchPortSettings {
-    pub fn new(id: &external::IdentityMetadataCreateParams) -> Self {
+    pub fn new(meta: &external::IdentityMetadataCreateParams) -> Self {
         Self {
             identity: SwitchPortSettingsIdentity::new(
                 Uuid::new_v4(),
-                id.clone(),
+                meta.clone(),
             ),
         }
+    }
+
+    pub fn with_id(
+        id: Uuid,
+        meta: &external::IdentityMetadataCreateParams,
+    ) -> Self {
+        Self { identity: SwitchPortSettingsIdentity::new(id, meta.clone()) }
     }
 }
 
@@ -225,7 +338,14 @@ impl Into<external::SwitchPortConfig> for SwitchPortConfig {
 }
 
 #[derive(
-    Queryable, Insertable, Selectable, Clone, Debug, Serialize, Deserialize,
+    Queryable,
+    Insertable,
+    Selectable,
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    AsChangeset,
 )]
 #[diesel(table_name = switch_port_settings_link_config)]
 pub struct SwitchPortLinkConfig {
@@ -233,6 +353,9 @@ pub struct SwitchPortLinkConfig {
     pub lldp_service_config_id: Uuid,
     pub link_name: String,
     pub mtu: SqlU16,
+    pub fec: SwitchLinkFec,
+    pub speed: SwitchLinkSpeed,
+    pub autoneg: bool,
 }
 
 impl SwitchPortLinkConfig {
@@ -241,11 +364,17 @@ impl SwitchPortLinkConfig {
         lldp_service_config_id: Uuid,
         link_name: String,
         mtu: u16,
+        fec: SwitchLinkFec,
+        speed: SwitchLinkSpeed,
+        autoneg: bool,
     ) -> Self {
         Self {
             port_settings_id,
             lldp_service_config_id,
             link_name,
+            fec,
+            speed,
+            autoneg,
             mtu: mtu.into(),
         }
     }
@@ -263,7 +392,14 @@ impl Into<external::SwitchPortLinkConfig> for SwitchPortLinkConfig {
 }
 
 #[derive(
-    Queryable, Insertable, Selectable, Clone, Debug, Serialize, Deserialize,
+    Queryable,
+    Insertable,
+    Selectable,
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    AsChangeset,
 )]
 #[diesel(table_name = lldp_service_config)]
 pub struct LldpServiceConfig {
@@ -321,7 +457,14 @@ impl Into<external::LldpConfig> for LldpConfig {
 }
 
 #[derive(
-    Queryable, Insertable, Selectable, Clone, Debug, Serialize, Deserialize,
+    Queryable,
+    Insertable,
+    Selectable,
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    AsChangeset,
 )]
 #[diesel(table_name = switch_port_settings_interface_config)]
 pub struct SwitchInterfaceConfig {
@@ -362,7 +505,14 @@ impl Into<external::SwitchInterfaceConfig> for SwitchInterfaceConfig {
 }
 
 #[derive(
-    Queryable, Insertable, Selectable, Clone, Debug, Serialize, Deserialize,
+    Queryable,
+    Insertable,
+    Selectable,
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    AsChangeset,
 )]
 #[diesel(table_name = switch_port_settings_route_config)]
 pub struct SwitchPortRouteConfig {
@@ -398,31 +548,51 @@ impl Into<external::SwitchPortRouteConfig> for SwitchPortRouteConfig {
 }
 
 #[derive(
-    Queryable, Insertable, Selectable, Clone, Debug, Serialize, Deserialize,
+    Queryable,
+    Insertable,
+    Selectable,
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    AsChangeset,
 )]
 #[diesel(table_name = switch_port_settings_bgp_peer_config)]
 pub struct SwitchPortBgpPeerConfig {
     pub port_settings_id: Uuid,
-    pub bgp_announce_set_id: Uuid,
     pub bgp_config_id: Uuid,
     pub interface_name: String,
     pub addr: IpNetwork,
+    pub hold_time: SqlU32,
+    pub idle_hold_time: SqlU32,
+    pub delay_open: SqlU32,
+    pub connect_retry: SqlU32,
+    pub keepalive: SqlU32,
 }
 
 impl SwitchPortBgpPeerConfig {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         port_settings_id: Uuid,
-        bgp_announce_set_id: Uuid,
         bgp_config_id: Uuid,
         interface_name: String,
         addr: IpNetwork,
+        hold_time: SqlU32,
+        idle_hold_time: SqlU32,
+        delay_open: SqlU32,
+        connect_retry: SqlU32,
+        keepalive: SqlU32,
     ) -> Self {
         Self {
             port_settings_id,
-            bgp_announce_set_id,
             bgp_config_id,
             interface_name,
             addr,
+            hold_time,
+            idle_hold_time,
+            delay_open,
+            connect_retry,
+            keepalive,
         }
     }
 }
@@ -431,7 +601,6 @@ impl Into<external::SwitchPortBgpPeerConfig> for SwitchPortBgpPeerConfig {
     fn into(self) -> external::SwitchPortBgpPeerConfig {
         external::SwitchPortBgpPeerConfig {
             port_settings_id: self.port_settings_id,
-            bgp_announce_set_id: self.bgp_announce_set_id,
             bgp_config_id: self.bgp_config_id,
             interface_name: self.interface_name.clone(),
             addr: self.addr.ip(),
@@ -440,7 +609,14 @@ impl Into<external::SwitchPortBgpPeerConfig> for SwitchPortBgpPeerConfig {
 }
 
 #[derive(
-    Queryable, Insertable, Selectable, Clone, Debug, Serialize, Deserialize,
+    Queryable,
+    Insertable,
+    Selectable,
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    AsChangeset,
 )]
 #[diesel(table_name = switch_port_settings_address_config)]
 pub struct SwitchPortAddressConfig {

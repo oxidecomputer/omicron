@@ -6,10 +6,7 @@
 
 use self::external_endpoints::NexusCertResolver;
 use crate::app::oximeter::LazyTimeseriesClient;
-use crate::authn;
-use crate::authz;
 use crate::config;
-use crate::db;
 use crate::populate::populate_start;
 use crate::populate::PopulateArgs;
 use crate::populate::PopulateStatus;
@@ -18,37 +15,44 @@ use crate::DropshotServer;
 use ::oximeter::types::ProducerRegistry;
 use anyhow::anyhow;
 use internal_dns::ServiceName;
+use nexus_db_queries::authn;
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
 use omicron_common::address::DENDRITE_PORT;
+use omicron_common::address::MGD_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::shared::SwitchLocation;
+use omicron_common::nexus_config::RegionAllocationStrategy;
 use slog::Logger;
 use std::collections::HashMap;
-use std::net::Ipv6Addr;
+use std::net::{IpAddr, Ipv6Addr};
 use std::sync::Arc;
 use uuid::Uuid;
 
 // The implementation of Nexus is large, and split into a number of submodules
 // by resource.
 mod address_lot;
-pub mod background;
+pub(crate) mod background;
+mod bgp;
 mod certificate;
 mod device_auth;
 mod disk;
 mod external_dns;
-pub mod external_endpoints;
+pub(crate) mod external_endpoints;
 mod external_ip;
 mod iam;
 mod image;
 mod instance;
+mod instance_network;
 mod ip_pool;
 mod metrics;
 mod network_interface;
 mod oximeter;
 mod project;
 mod rack;
-pub mod saga;
+pub(crate) mod saga;
 mod session;
 mod silo;
 mod sled;
@@ -66,7 +70,7 @@ mod vpc_subnet;
 
 // Sagas are not part of the "Nexus" implementation, but they are
 // application logic.
-pub mod sagas;
+pub(crate) mod sagas;
 
 /// Manages an Oxide fleet -- the heart of the control plane
 pub struct Nexus {
@@ -93,6 +97,10 @@ pub struct Nexus {
 
     /// External dropshot servers
     external_server: std::sync::Mutex<Option<DropshotServer>>,
+
+    /// External dropshot server that listens on the internal network to allow
+    /// connections from the tech port; see RFD 431.
+    techport_external_server: std::sync::Mutex<Option<DropshotServer>>,
 
     /// Internal dropshot server
     internal_server: std::sync::Mutex<Option<DropshotServer>>,
@@ -129,17 +137,29 @@ pub struct Nexus {
     /// DNS resolver Nexus uses to resolve an external host
     external_resolver: Arc<external_dns::Resolver>,
 
+    /// DNS servers used in `external_resolver`, used to provide DNS servers to
+    /// instances via DHCP
+    // TODO: This needs to be moved to the database.
+    // https://github.com/oxidecomputer/omicron/issues/3732
+    external_dns_servers: Vec<IpAddr>,
+
     /// Mapping of SwitchLocations to their respective Dendrite Clients
     dpd_clients: HashMap<SwitchLocation, Arc<dpd_client::Client>>,
 
+    /// Map switch location to maghemite admin clients.
+    mg_clients: HashMap<SwitchLocation, Arc<mg_admin_client::Client>>,
+
     /// Background tasks
     background_tasks: background::BackgroundTasks,
+
+    /// Default Crucible region allocation strategy
+    default_region_allocation_strategy: RegionAllocationStrategy,
 }
 
 impl Nexus {
     /// Create a new Nexus instance for the given rack id `rack_id`
     // TODO-polish revisit rack metadata
-    pub async fn new_with_id(
+    pub(crate) async fn new_with_id(
         rack_id: Uuid,
         log: Logger,
         resolver: internal_dns::resolver::Resolver,
@@ -183,7 +203,13 @@ impl Nexus {
         let mut dpd_clients: HashMap<SwitchLocation, Arc<dpd_client::Client>> =
             HashMap::new();
 
-        // Currently static dpd configuration mappings are still required for testing
+        let mut mg_clients: HashMap<
+            SwitchLocation,
+            Arc<mg_admin_client::Client>,
+        > = HashMap::new();
+
+        // Currently static dpd configuration mappings are still required for
+        // testing
         for (location, config) in &config.pkg.dendrite {
             let address = config.address.ip().to_string();
             let port = config.address.port();
@@ -192,6 +218,11 @@ impl Nexus {
                 client_state.clone(),
             );
             dpd_clients.insert(*location, Arc::new(dpd_client));
+        }
+        for (location, config) in &config.pkg.mgd {
+            let mg_client = mg_admin_client::Client::new(&log, config.address)
+                .map_err(|e| format!("mg admin client: {e}"))?;
+            mg_clients.insert(*location, Arc::new(mg_client));
         }
         if config.pkg.dendrite.is_empty() {
             loop {
@@ -220,6 +251,42 @@ impl Nexus {
                     }
                     Err(e) => {
                         warn!(log, "Failed to lookup Dendrite address: {e}");
+                        tokio::time::sleep(std::time::Duration::from_secs(1))
+                            .await;
+                    }
+                }
+            }
+        }
+        if config.pkg.mgd.is_empty() {
+            loop {
+                let result = resolver
+                    // TODO this should be ServiceName::Mgd, but in the upgrade
+                    //      path, that does not exist because RSS has not
+                    //      created it. So we just piggyback on Dendrite's SRV
+                    //      record.
+                    .lookup_all_ipv6(ServiceName::Dendrite)
+                    .await
+                    .map_err(|e| format!("Cannot lookup mgd addresses: {e}"));
+                match result {
+                    Ok(addrs) => {
+                        let mappings = map_switch_zone_addrs(
+                            &log.new(o!("component" => "Nexus")),
+                            addrs,
+                        )
+                        .await;
+                        for (location, addr) in &mappings {
+                            let port = MGD_PORT;
+                            let mgd_client = mg_admin_client::Client::new(
+                                &log,
+                                std::net::SocketAddr::new((*addr).into(), port),
+                            )
+                            .map_err(|e| format!("mg admin client: {e}"))?;
+                            mg_clients.insert(*location, Arc::new(mgd_client));
+                        }
+                        break;
+                    }
+                    Err(e) => {
+                        warn!(log, "Failed to lookup mgd address: {e}");
                         tokio::time::sleep(std::time::Duration::from_secs(1))
                             .await;
                     }
@@ -264,6 +331,9 @@ impl Nexus {
             &background_ctx,
             Arc::clone(&db_datastore),
             &config.pkg.background_tasks,
+            &dpd_clients,
+            config.deployment.id,
+            resolver.clone(),
         );
 
         let external_resolver = {
@@ -284,6 +354,7 @@ impl Nexus {
             sec_client: Arc::clone(&sec_client),
             recovery_task: std::sync::Mutex::new(None),
             external_server: std::sync::Mutex::new(None),
+            techport_external_server: std::sync::Mutex::new(None),
             internal_server: std::sync::Mutex::new(None),
             populate_status,
             timeseries_client,
@@ -304,12 +375,27 @@ impl Nexus {
             samael_max_issue_delay: std::sync::Mutex::new(None),
             internal_resolver: resolver,
             external_resolver,
+            external_dns_servers: config
+                .deployment
+                .external_dns_servers
+                .clone(),
             dpd_clients,
+            mg_clients,
             background_tasks,
+            default_region_allocation_strategy: config
+                .pkg
+                .default_region_allocation_strategy
+                .clone(),
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong
         let nexus = Arc::new(nexus);
+        let bootstore_opctx = OpContext::for_background(
+            log.new(o!("component" => "Bootstore")),
+            Arc::clone(&authz),
+            authn::Context::internal_api(),
+            Arc::clone(&db_datastore),
+        );
         let opctx = OpContext::for_background(
             log.new(o!("component" => "SagaRecoverer")),
             Arc::clone(&authz),
@@ -349,6 +435,12 @@ impl Nexus {
                     for task in task_nexus.background_tasks.driver.tasks() {
                         task_nexus.background_tasks.driver.activate(task);
                     }
+                    if let Err(e) = task_nexus
+                        .initial_bootstore_sync(&bootstore_opctx)
+                        .await
+                    {
+                        error!(task_log, "failed to run bootstore sync: {e}");
+                    }
                 }
                 Err(_) => {
                     error!(task_log, "populate failed");
@@ -364,7 +456,7 @@ impl Nexus {
         &self.tunables
     }
 
-    pub async fn wait_for_populate(&self) -> Result<(), anyhow::Error> {
+    pub(crate) async fn wait_for_populate(&self) -> Result<(), anyhow::Error> {
         let mut my_rx = self.populate_status.clone();
         loop {
             my_rx
@@ -381,7 +473,7 @@ impl Nexus {
         }
     }
 
-    pub async fn external_tls_config(
+    pub(crate) async fn external_tls_config(
         &self,
         tls_enabled: bool,
     ) -> Option<rustls::ServerConfig> {
@@ -412,6 +504,7 @@ impl Nexus {
     pub(crate) async fn set_servers(
         &self,
         external_server: DropshotServer,
+        techport_external_server: DropshotServer,
         internal_server: DropshotServer,
     ) {
         // If any servers already exist, close them.
@@ -419,12 +512,21 @@ impl Nexus {
 
         // Insert the new servers.
         self.external_server.lock().unwrap().replace(external_server);
+        self.techport_external_server
+            .lock()
+            .unwrap()
+            .replace(techport_external_server);
         self.internal_server.lock().unwrap().replace(internal_server);
     }
 
-    pub async fn close_servers(&self) -> Result<(), String> {
+    pub(crate) async fn close_servers(&self) -> Result<(), String> {
         let external_server = self.external_server.lock().unwrap().take();
         if let Some(server) = external_server {
+            server.close().await?;
+        }
+        let techport_external_server =
+            self.techport_external_server.lock().unwrap().take();
+        if let Some(server) = techport_external_server {
             server.close().await?;
         }
         let internal_server = self.internal_server.lock().unwrap().take();
@@ -434,7 +536,7 @@ impl Nexus {
         Ok(())
     }
 
-    pub async fn wait_for_shutdown(&self) -> Result<(), String> {
+    pub(crate) async fn wait_for_shutdown(&self) -> Result<(), String> {
         // The internal server is the last server to be closed.
         //
         // We don't wait for the external servers to be closed; we just expect
@@ -451,7 +553,7 @@ impl Nexus {
         Ok(())
     }
 
-    pub async fn get_external_server_address(
+    pub(crate) async fn get_external_server_address(
         &self,
     ) -> Option<std::net::SocketAddr> {
         self.external_server
@@ -461,7 +563,7 @@ impl Nexus {
             .map(|server| server.local_addr())
     }
 
-    pub async fn get_internal_server_address(
+    pub(crate) async fn get_internal_server_address(
         &self,
     ) -> Option<std::net::SocketAddr> {
         self.internal_server
@@ -477,7 +579,7 @@ impl Nexus {
     }
 
     /// Returns an [`OpContext`] used for balancing services.
-    pub fn opctx_for_service_balancer(&self) -> OpContext {
+    pub(crate) fn opctx_for_service_balancer(&self) -> OpContext {
         OpContext::for_background(
             self.log.new(o!("component" => "ServiceBalancer")),
             Arc::clone(&self.authz),
@@ -487,7 +589,7 @@ impl Nexus {
     }
 
     /// Returns an [`OpContext`] used for internal API calls.
-    pub fn opctx_for_internal_api(&self) -> OpContext {
+    pub(crate) fn opctx_for_internal_api(&self) -> OpContext {
         OpContext::for_background(
             self.log.new(o!("component" => "InternalApi")),
             Arc::clone(&self.authz),
@@ -518,9 +620,9 @@ impl Nexus {
     ///
     /// ```
     /// use nexus_db_queries::context::OpContext;
+    /// use nexus_db_queries::db::DataStore;
     /// use omicron_nexus::app::Nexus;
     /// use omicron_nexus::app::Unimpl;
-    /// use omicron_nexus::db::DataStore;
     /// use omicron_common::api::external::Error;
     ///
     /// async fn my_things_list(
@@ -540,10 +642,10 @@ impl Nexus {
     ///
     /// ```
     /// use nexus_db_queries::context::OpContext;
+    /// use nexus_db_queries::db::model::Name;
+    /// use nexus_db_queries::db::DataStore;
     /// use omicron_nexus::app::Nexus;
     /// use omicron_nexus::app::Unimpl;
-    /// use omicron_nexus::db::model::Name;
-    /// use omicron_nexus::db::DataStore;
     /// use omicron_common::api::external::Error;
     /// use omicron_common::api::external::LookupType;
     /// use omicron_common::api::external::ResourceType;
@@ -581,13 +683,13 @@ impl Nexus {
     /// underneath Organizations:
     ///
     /// ```
+    /// use nexus_db_queries::authz;
     /// use nexus_db_queries::context::OpContext;
+    /// use nexus_db_queries::db::lookup::LookupPath;
+    /// use nexus_db_queries::db::model::Name;
+    /// use nexus_db_queries::db::DataStore;
     /// use omicron_nexus::app::Nexus;
     /// use omicron_nexus::app::Unimpl;
-    /// use omicron_nexus::authz;
-    /// use omicron_nexus::db::lookup::LookupPath;
-    /// use omicron_nexus::db::model::Name;
-    /// use omicron_nexus::db::DataStore;
     /// use omicron_common::api::external::Error;
     ///
     /// async fn project_list_my_thing(
@@ -611,13 +713,13 @@ impl Nexus {
     /// example stub for the "get" endpoint for that same resource:
     ///
     /// ```
+    /// use nexus_db_queries::authz;
     /// use nexus_db_queries::context::OpContext;
+    /// use nexus_db_queries::db::lookup::LookupPath;
+    /// use nexus_db_queries::db::model::Name;
+    /// use nexus_db_queries::db::DataStore;
     /// use omicron_nexus::app::Nexus;
     /// use omicron_nexus::app::Unimpl;
-    /// use omicron_nexus::authz;
-    /// use omicron_nexus::db::lookup::LookupPath;
-    /// use omicron_nexus::db::model::Name;
-    /// use omicron_nexus::db::DataStore;
     /// use omicron_common::api::external::Error;
     /// use omicron_common::api::external::LookupType;
     /// use omicron_common::api::external::ResourceType;
@@ -686,22 +788,12 @@ impl Nexus {
         &self.db_datastore
     }
 
-    pub fn samael_max_issue_delay(&self) -> Option<chrono::Duration> {
+    pub(crate) fn samael_max_issue_delay(&self) -> Option<chrono::Duration> {
         let mid = self.samael_max_issue_delay.lock().unwrap();
         *mid
     }
 
-    // Convenience function that exists solely because writing
-    // LookupPath::new(&opctx, &nexus.datastore()) in an endpoint handler feels
-    // like too much
-    pub fn db_lookup<'a>(
-        &'a self,
-        opctx: &'a OpContext,
-    ) -> db::lookup::LookupPath {
-        db::lookup::LookupPath::new(opctx, &self.db_datastore)
-    }
-
-    pub async fn resolver(&self) -> internal_dns::resolver::Resolver {
+    pub(crate) async fn resolver(&self) -> internal_dns::resolver::Resolver {
         self.internal_resolver.clone()
     }
 }
@@ -717,6 +809,7 @@ impl Nexus {
 /// If you're not authorized to view it, you'll get a "404 Not Found".  It's
 /// `Unimpl::ProtectedLookup(LookupType::ByName("some-image"))`.
 pub enum Unimpl {
+    #[allow(unused)]
     Public,
     ProtectedLookup(Error),
 }

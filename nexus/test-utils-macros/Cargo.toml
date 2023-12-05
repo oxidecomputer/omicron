@@ -2,11 +2,12 @@
 name = "nexus-test-utils-macros"
 version = "0.1.0"
 edition = "2021"
+license = "MPL-2.0"
 
 [lib]
 proc-macro = true
 
 [dependencies]
-proc-macro2.workspace = true
 quote.workspace = true
 syn = { workspace = true, features = [ "fold", "parsing" ] }
+omicron-workspace-hack.workspace = true

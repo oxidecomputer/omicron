@@ -131,44 +131,31 @@
         }
       }
     },
-    "/clear-update-state/{type}/{slot}": {
+    "/clear-update-state": {
       "post": {
         "summary": "Resets update state for a sled.",
         "description": "Use this to clear update state after a failed update.",
         "operationId": "post_clear_update_state",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "slot",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 0
-            }
-          },
-          {
-            "in": "path",
-            "name": "type",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/SpType"
-            }
-          }
-        ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ClearUpdateStateOptions"
+                "$ref": "#/components/schemas/ClearUpdateStateParams"
               }
             }
           },
           "required": true
         },
         "responses": {
-          "204": {
-            "description": "resource updated"
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClearUpdateStateResponse"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -275,6 +262,56 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/preflight/uplink": {
+      "get": {
+        "summary": "An endpoint to get the report for the most recent (or still running)",
+        "description": "preflight uplink check.",
+        "operationId": "get_preflight_uplink_report",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventReportForGenericSpec"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "summary": "An endpoint to start a preflight check for uplink configuration.",
+        "operationId": "post_start_preflight_uplink_check",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreflightUplinkCheckOptions"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -519,6 +556,24 @@
         }
       }
     },
+    "/reload-config": {
+      "post": {
+        "summary": "An endpoint instructing wicketd to reload its SMF config properties.",
+        "description": "The only expected client of this endpoint is `curl` from wicketd's SMF `refresh` method, but other clients hitting it is harmless.",
+        "operationId": "post_reload_config",
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/repository": {
       "put": {
         "summary": "Upload a TUF repository to the server.",
@@ -530,6 +585,33 @@
               "schema": {
                 "type": "string",
                 "format": "binary"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/update": {
+      "post": {
+        "summary": "An endpoint to start updating one or more sleds, switches and PSCs.",
+        "operationId": "post_start_update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartUpdateParams"
               }
             }
           },
@@ -591,67 +673,10 @@
             "$ref": "#/components/responses/Error"
           }
         }
-      },
-      "post": {
-        "summary": "An endpoint to start updating a sled.",
-        "operationId": "post_start_update",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "slot",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 0
-            }
-          },
-          {
-            "in": "path",
-            "name": "type",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/SpType"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/StartUpdateOptions"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
       }
     }
   },
   "components": {
-    "responses": {
-      "Error": {
-        "description": "Error",
-        "content": {
-          "application/json": {
-            "schema": {
-              "$ref": "#/components/schemas/Error"
-            }
-          }
-        }
-      }
-    },
     "schemas": {
       "AbortUpdateOptions": {
         "type": "object",
@@ -672,6 +697,25 @@
         },
         "required": [
           "message"
+        ]
+      },
+      "ArtifactHashId": {
+        "description": "A hash-based identifier for an artifact.\n\nSome places, e.g. the installinator, request artifacts by hash rather than by name and version. This type indicates that.",
+        "type": "object",
+        "properties": {
+          "hash": {
+            "description": "The hash of the artifact.",
+            "type": "string",
+            "format": "hex string (32 bytes)"
+          },
+          "kind": {
+            "description": "The kind of artifact this is.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "hash",
+          "kind"
         ]
       },
       "ArtifactId": {
@@ -767,6 +811,88 @@
               "type"
             ]
           }
+        ]
+      },
+      "BgpConfig": {
+        "type": "object",
+        "properties": {
+          "asn": {
+            "description": "The autonomous system number for the BGP configuration.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "originate": {
+            "description": "The set of prefixes for the BGP router to originate.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Ipv4Network"
+            }
+          }
+        },
+        "required": [
+          "asn",
+          "originate"
+        ]
+      },
+      "BgpPeerConfig": {
+        "type": "object",
+        "properties": {
+          "addr": {
+            "description": "Address of the peer.",
+            "type": "string",
+            "format": "ipv4"
+          },
+          "asn": {
+            "description": "The autonomous sysetm number of the router the peer belongs to.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "connect_retry": {
+            "nullable": true,
+            "description": "The interval in seconds between peer connection retry attempts.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "delay_open": {
+            "nullable": true,
+            "description": "How long to delay sending open messages to a peer. In seconds.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "hold_time": {
+            "nullable": true,
+            "description": "How long to keep a session alive without a keepalive in seconds. Defaults to 6.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "idle_hold_time": {
+            "nullable": true,
+            "description": "How long to keep a peer in idle after a state machine reset in seconds.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "keepalive": {
+            "nullable": true,
+            "description": "The interval to send keepalive messages at.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "port": {
+            "description": "Switch port the peer is reachable on.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "addr",
+          "asn",
+          "port"
         ]
       },
       "BootstrapSledDescription": {
@@ -898,6 +1024,56 @@
           }
         }
       },
+      "ClearUpdateStateParams": {
+        "type": "object",
+        "properties": {
+          "options": {
+            "description": "Options for clearing update state",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ClearUpdateStateOptions"
+              }
+            ]
+          },
+          "targets": {
+            "description": "The SP identifiers to clear the update state for. Must be non-empty.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpIdentifier"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "options",
+          "targets"
+        ]
+      },
+      "ClearUpdateStateResponse": {
+        "type": "object",
+        "properties": {
+          "cleared": {
+            "description": "The SPs for which update data was cleared.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpIdentifier"
+            },
+            "uniqueItems": true
+          },
+          "no_update_data": {
+            "description": "The SPs that had no update state to clear.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpIdentifier"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "cleared",
+          "no_update_data"
+        ]
+      },
       "CurrentRssUserConfig": {
         "type": "object",
         "properties": {
@@ -956,7 +1132,7 @@
             "nullable": true,
             "allOf": [
               {
-                "$ref": "#/components/schemas/RackNetworkConfig"
+                "$ref": "#/components/schemas/RackNetworkConfigV1"
               }
             ]
           }
@@ -1025,6 +1201,43 @@
           "request_id"
         ]
       },
+      "EventReportForGenericSpec": {
+        "description": "A report produced from an [`EventBuffer`](crate::EventBuffer).\n\nRemote reports can be passed into a [`StepContext`](crate::StepContext), in which case they show up as nested events.",
+        "type": "object",
+        "properties": {
+          "last_seen": {
+            "nullable": true,
+            "description": "The last event seen.\n\n`last_seen` can be used to retrieve deltas of events.",
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "progress_events": {
+            "description": "A list of progress events, or whether we're currently waiting for a progress event.\n\nCurrently, this produces one progress event for each top-level and nested event in progress.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProgressEventForGenericSpec"
+            }
+          },
+          "root_execution_id": {
+            "nullable": true,
+            "description": "The root execution ID for this report.\n\nEach report has a root execution ID, which ties together all step and progress events. This is always filled out if the list of step events is non-empty.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "step_events": {
+            "description": "A list of step events.\n\nStep events include success and failure events.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StepEventForGenericSpec"
+            }
+          }
+        },
+        "required": [
+          "progress_events",
+          "step_events"
+        ]
+      },
       "EventReportForWicketdEngineSpec": {
         "description": "A report produced from an [`EventBuffer`](crate::EventBuffer).\n\nRemote reports can be passed into a [`StepContext`](crate::StepContext), in which case they show up as nested events.",
         "type": "object",
@@ -1067,9 +1280,10 @@
         "type": "object",
         "properties": {
           "artifacts": {
+            "description": "Map of artifacts we ingested from the most-recently-uploaded TUF repository to a list of artifacts we're serving over the bootstrap network. In some cases the list of artifacts being served will have length 1 (when we're serving the artifact directly); in other cases the artifact in the TUF repo contains multiple nested artifacts inside it (e.g., RoT artifacts contain both A and B images), and we serve the list of extracted artifacts but not the original combination.\n\nConceptually, this is a `BTreeMap<ArtifactId, Vec<ArtifactHashId>>`, but JSON requires string keys for maps, so we give back a vec of pairs instead.",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/ArtifactId"
+              "$ref": "#/components/schemas/InstallableArtifacts"
             }
           },
           "event_reports": {
@@ -1214,6 +1428,44 @@
           }
         }
       },
+      "InstallableArtifacts": {
+        "type": "object",
+        "properties": {
+          "artifact_id": {
+            "$ref": "#/components/schemas/ArtifactId"
+          },
+          "installable": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ArtifactHashId"
+            }
+          }
+        },
+        "required": [
+          "artifact_id",
+          "installable"
+        ]
+      },
+      "IpNetwork": {
+        "oneOf": [
+          {
+            "title": "v4",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv4Network"
+              }
+            ]
+          },
+          {
+            "title": "v6",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv6Network"
+              }
+            ]
+          }
+        ]
+      },
       "IpRange": {
         "oneOf": [
           {
@@ -1256,6 +1508,10 @@
           "last"
         ]
       },
+      "Ipv6Network": {
+        "type": "string",
+        "pattern": "^(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\")[/](12[0-8]|1[0-1][0-9]|[0-9]?[0-9])$"
+      },
       "Ipv6Range": {
         "description": "A non-decreasing IPv6 address range, inclusive of both ends.\n\nThe first address must be less than or equal to the last address.",
         "type": "object",
@@ -1278,6 +1534,74 @@
         "title": "A password hash in PHC string format",
         "description": "Password hashes must be in PHC (Password Hashing Competition) string format.  Passwords must be hashed with Argon2id.  Password hashes may be rejected if the parameters appear not to be secure enough.",
         "type": "string"
+      },
+      "PortConfigV1": {
+        "type": "object",
+        "properties": {
+          "addresses": {
+            "description": "This port's addresses.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpNetwork"
+            }
+          },
+          "autoneg": {
+            "description": "Whether or not to set autonegotiation",
+            "default": false,
+            "type": "boolean"
+          },
+          "bgp_peers": {
+            "description": "BGP peers on this port",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BgpPeerConfig"
+            }
+          },
+          "port": {
+            "description": "Nmae of the port this config applies to.",
+            "type": "string"
+          },
+          "routes": {
+            "description": "The set of routes associated with this port.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouteConfig"
+            }
+          },
+          "switch": {
+            "description": "Switch the port belongs to.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SwitchLocation"
+              }
+            ]
+          },
+          "uplink_port_fec": {
+            "description": "Port forward error correction type.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PortFec"
+              }
+            ]
+          },
+          "uplink_port_speed": {
+            "description": "Port speed.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PortSpeed"
+              }
+            ]
+          }
+        },
+        "required": [
+          "addresses",
+          "bgp_peers",
+          "port",
+          "routes",
+          "switch",
+          "uplink_port_fec",
+          "uplink_port_speed"
+        ]
       },
       "PortFec": {
         "description": "Switchport FEC options",
@@ -1311,6 +1635,17 @@
           "A1",
           "A2"
         ]
+      },
+      "PreflightUplinkCheckOptions": {
+        "description": "Options provided to the preflight uplink check.",
+        "type": "object",
+        "properties": {
+          "dns_name_to_query": {
+            "nullable": true,
+            "description": "DNS name to query.",
+            "type": "string"
+          }
+        }
       },
       "ProgressCounter": {
         "description": "Current progress.\n\nBoth `current` and `total` are abstract counters. These counters are often a number of bytes. There is no guarantee that the counter won't go back in subsequent events; that can happen e.g. if a fetch happens from multiple peers within a single attempt.",
@@ -1837,7 +2172,7 @@
             }
           },
           "rack_network_config": {
-            "$ref": "#/components/schemas/RackNetworkConfig"
+            "$ref": "#/components/schemas/RackNetworkConfigV1"
           }
         },
         "required": [
@@ -1854,10 +2189,17 @@
         "type": "string",
         "format": "uuid"
       },
-      "RackNetworkConfig": {
+      "RackNetworkConfigV1": {
         "description": "Initial network configuration",
         "type": "object",
         "properties": {
+          "bgp": {
+            "description": "BGP configurations for connecting the rack to external networks",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BgpConfig"
+            }
+          },
           "infra_ip_first": {
             "description": "First ip address to be used for configuring network infrastructure",
             "type": "string",
@@ -1868,18 +2210,23 @@
             "type": "string",
             "format": "ipv4"
           },
-          "uplinks": {
+          "ports": {
             "description": "Uplinks for connecting the rack to external networks",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/UplinkConfig"
+              "$ref": "#/components/schemas/PortConfigV1"
             }
+          },
+          "rack_subnet": {
+            "$ref": "#/components/schemas/Ipv6Network"
           }
         },
         "required": [
+          "bgp",
           "infra_ip_first",
           "infra_ip_last",
-          "uplinks"
+          "ports",
+          "rack_subnet"
         ]
       },
       "RackOperationStatus": {
@@ -2196,6 +2543,28 @@
           }
         ]
       },
+      "RouteConfig": {
+        "type": "object",
+        "properties": {
+          "destination": {
+            "description": "The destination of the route.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpNetwork"
+              }
+            ]
+          },
+          "nexthop": {
+            "description": "The nexthop/gateway address.",
+            "type": "string",
+            "format": "ip"
+          }
+        },
+        "required": [
+          "destination",
+          "nexthop"
+        ]
+      },
       "SemverVersion": {
         "type": "string",
         "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
@@ -2213,14 +2582,14 @@
             "type": "string"
           },
           "version": {
-            "nullable": true,
             "type": "string"
           }
         },
         "required": [
           "board",
           "git_commit",
-          "name"
+          "name",
+          "version"
         ]
       },
       "SpComponentInfo": {
@@ -2623,6 +2992,31 @@
         "required": [
           "skip_rot_version_check",
           "skip_sp_version_check"
+        ]
+      },
+      "StartUpdateParams": {
+        "type": "object",
+        "properties": {
+          "options": {
+            "description": "Options for the update.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/StartUpdateOptions"
+              }
+            ]
+          },
+          "targets": {
+            "description": "The SP identifiers to start the update with. Must be non-empty.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpIdentifier"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "options",
+          "targets"
         ]
       },
       "StepComponentSummaryForGenericSpec": {
@@ -4296,67 +4690,6 @@
           }
         ]
       },
-      "UplinkConfig": {
-        "type": "object",
-        "properties": {
-          "gateway_ip": {
-            "description": "Gateway address",
-            "type": "string",
-            "format": "ipv4"
-          },
-          "switch": {
-            "description": "Switch to use for uplink",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SwitchLocation"
-              }
-            ]
-          },
-          "uplink_cidr": {
-            "description": "IP Address and prefix (e.g., `192.168.0.1/16`) to apply to switchport (must be in infra_ip pool)",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Ipv4Network"
-              }
-            ]
-          },
-          "uplink_port": {
-            "description": "Switchport to use for external connectivity",
-            "type": "string"
-          },
-          "uplink_port_fec": {
-            "description": "Forward Error Correction setting for the uplink port",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/PortFec"
-              }
-            ]
-          },
-          "uplink_port_speed": {
-            "description": "Speed for the Switchport",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/PortSpeed"
-              }
-            ]
-          },
-          "uplink_vid": {
-            "nullable": true,
-            "description": "VLAN id to use for uplink",
-            "type": "integer",
-            "format": "uint16",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "gateway_ip",
-          "switch",
-          "uplink_cidr",
-          "uplink_port",
-          "uplink_port_fec",
-          "uplink_port_speed"
-        ]
-      },
       "IgnitionCommand": {
         "description": "Ignition command.",
         "type": "string",
@@ -4365,6 +4698,18 @@
           "power_off",
           "power_reset"
         ]
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "Error",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
       }
     }
   }

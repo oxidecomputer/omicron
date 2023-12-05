@@ -83,11 +83,12 @@ impl ArtifactManifest {
                         ArtifactSource::File(base_dir.join(path))
                     }
                     DeserializedArtifactSource::Fake { size } => {
-                        let fake_data = make_fake_data(
-                            &kind,
+                        let fake_data = FakeDataAttributes::new(
+                            &data.name,
+                            kind,
                             &data.version,
-                            size.0 as usize,
-                        );
+                        )
+                        .make_data(size.0 as usize);
                         ArtifactSource::Memory(fake_data.into())
                     }
                     DeserializedArtifactSource::CompositeHost {
@@ -104,15 +105,30 @@ impl ArtifactManifest {
                              artifact kind {kind:?}"
                         );
 
-                        let data = Vec::new();
                         let mut builder =
-                            CompositeHostArchiveBuilder::new(data)?;
-                        phase_1.with_data(|data| {
-                            builder.append_phase_1(data.len(), data.as_slice())
-                        })?;
-                        phase_2.with_data(|data| {
-                            builder.append_phase_2(data.len(), data.as_slice())
-                        })?;
+                            CompositeHostArchiveBuilder::new(Vec::new())?;
+                        phase_1.with_data(
+                            FakeDataAttributes::new(
+                                "fake-phase-1",
+                                kind,
+                                &data.version,
+                            ),
+                            |buf| {
+                                builder
+                                    .append_phase_1(buf.len(), buf.as_slice())
+                            },
+                        )?;
+                        phase_2.with_data(
+                            FakeDataAttributes::new(
+                                "fake-phase-2",
+                                kind,
+                                &data.version,
+                            ),
+                            |buf| {
+                                builder
+                                    .append_phase_2(buf.len(), buf.as_slice())
+                            },
+                        )?;
                         ArtifactSource::Memory(builder.finish()?.into())
                     }
                     DeserializedArtifactSource::CompositeRot {
@@ -130,17 +146,30 @@ impl ArtifactManifest {
                              artifact kind {kind:?}"
                         );
 
-                        let data = Vec::new();
                         let mut builder =
-                            CompositeRotArchiveBuilder::new(data)?;
-                        archive_a.with_data(|data| {
-                            builder
-                                .append_archive_a(data.len(), data.as_slice())
-                        })?;
-                        archive_b.with_data(|data| {
-                            builder
-                                .append_archive_b(data.len(), data.as_slice())
-                        })?;
+                            CompositeRotArchiveBuilder::new(Vec::new())?;
+                        archive_a.with_data(
+                            FakeDataAttributes::new(
+                                "fake-rot-archive-a",
+                                kind,
+                                &data.version,
+                            ),
+                            |buf| {
+                                builder
+                                    .append_archive_a(buf.len(), buf.as_slice())
+                            },
+                        )?;
+                        archive_b.with_data(
+                            FakeDataAttributes::new(
+                                "fake-rot-archive-b",
+                                kind,
+                                &data.version,
+                            ),
+                            |buf| {
+                                builder
+                                    .append_archive_b(buf.len(), buf.as_slice())
+                            },
+                        )?;
                         ArtifactSource::Memory(builder.finish()?.into())
                     }
                     DeserializedArtifactSource::CompositeControlPlane {
@@ -207,38 +236,52 @@ impl ArtifactManifest {
     }
 }
 
-fn make_fake_data(
-    kind: &KnownArtifactKind,
-    version: &SemverVersion,
-    size: usize,
-) -> Vec<u8> {
-    use hubtools::{CabooseBuilder, HubrisArchiveBuilder};
+#[derive(Debug)]
+struct FakeDataAttributes<'a> {
+    name: &'a str,
+    kind: KnownArtifactKind,
+    version: &'a SemverVersion,
+}
 
-    let board = match kind {
-        // non-Hubris artifacts: just make fake data
-        KnownArtifactKind::Host
-        | KnownArtifactKind::Trampoline
-        | KnownArtifactKind::ControlPlane => return make_filler_text(size),
+impl<'a> FakeDataAttributes<'a> {
+    fn new(
+        name: &'a str,
+        kind: KnownArtifactKind,
+        version: &'a SemverVersion,
+    ) -> Self {
+        Self { name, kind, version }
+    }
 
-        // hubris artifacts: build a fake archive
-        KnownArtifactKind::GimletSp => "fake-gimlet-sp",
-        KnownArtifactKind::GimletRot => "fake-gimlet-rot",
-        KnownArtifactKind::PscSp => "fake-psc-sp",
-        KnownArtifactKind::PscRot => "fake-psc-rot",
-        KnownArtifactKind::SwitchSp => "fake-sidecar-sp",
-        KnownArtifactKind::SwitchRot => "fake-sidecar-rot",
-    };
+    fn make_data(&self, size: usize) -> Vec<u8> {
+        use hubtools::{CabooseBuilder, HubrisArchiveBuilder};
 
-    let caboose = CabooseBuilder::default()
-        .git_commit("this-is-fake-data")
-        .board(board)
-        .version(version.to_string())
-        .name(board)
-        .build();
+        let board = match self.kind {
+            // non-Hubris artifacts: just make fake data
+            KnownArtifactKind::Host
+            | KnownArtifactKind::Trampoline
+            | KnownArtifactKind::ControlPlane => return make_filler_text(size),
 
-    let mut builder = HubrisArchiveBuilder::with_fake_image();
-    builder.write_caboose(caboose.as_slice()).unwrap();
-    builder.build_to_vec().unwrap()
+            // hubris artifacts: build a fake archive (SimGimletSp and
+            // SimGimletRot are used by sp-sim)
+            KnownArtifactKind::GimletSp => "SimGimletSp",
+            KnownArtifactKind::GimletRot => "SimGimletRot",
+            KnownArtifactKind::PscSp => "fake-psc-sp",
+            KnownArtifactKind::PscRot => "fake-psc-rot",
+            KnownArtifactKind::SwitchSp => "fake-sidecar-sp",
+            KnownArtifactKind::SwitchRot => "fake-sidecar-rot",
+        };
+
+        let caboose = CabooseBuilder::default()
+            .git_commit("this-is-fake-data")
+            .board(board)
+            .version(self.version.to_string())
+            .name(self.name)
+            .build();
+
+        let mut builder = HubrisArchiveBuilder::with_fake_image();
+        builder.write_caboose(caboose.as_slice()).unwrap();
+        builder.build_to_vec().unwrap()
+    }
 }
 
 /// Information about an individual artifact.
@@ -301,7 +344,7 @@ enum DeserializedFileArtifactSource {
 }
 
 impl DeserializedFileArtifactSource {
-    fn with_data<F, T>(&self, f: F) -> Result<T>
+    fn with_data<F, T>(&self, fake_attr: FakeDataAttributes, f: F) -> Result<T>
     where
         F: FnOnce(Vec<u8>) -> Result<T>,
     {
@@ -311,7 +354,7 @@ impl DeserializedFileArtifactSource {
                     .with_context(|| format!("failed to read {path}"))?
             }
             DeserializedFileArtifactSource::Fake { size } => {
-                make_filler_text(size.0 as usize)
+                fake_attr.make_data(size.0 as usize)
             }
         };
         f(data)

@@ -83,6 +83,12 @@ pub enum Cmd {
     /// Begin rack setup.
     StartRackSetup,
 
+    /// Page up.
+    PageUp,
+
+    /// Page down.
+    PageDown,
+
     /// Goto top of list/screen/etc...
     GotoTop,
 
@@ -232,6 +238,10 @@ impl KeyHandler {
             KeyCode::Down => Cmd::Down,
             KeyCode::Right => Cmd::Right,
             KeyCode::Left => Cmd::Left,
+            KeyCode::PageUp => Cmd::PageUp,
+            KeyCode::PageDown => Cmd::PageDown,
+            KeyCode::Home => Cmd::GotoTop,
+            KeyCode::End => Cmd::GotoBottom,
             KeyCode::Char('y') => Cmd::Yes,
             KeyCode::Char('u') if event.modifiers == KeyModifiers::CONTROL => {
                 Cmd::StartUpdate

@@ -5,6 +5,7 @@
 //! Configuration parameters to Nexus that are usually only known
 //! at deployment time.
 
+use crate::address::NEXUS_TECHPORT_EXTERNAL_PORT;
 use crate::api::internal::shared::SwitchLocation;
 
 use super::address::{Ipv6Subnet, RACK_PREFIX};
@@ -132,6 +133,19 @@ pub struct DeploymentConfig {
     pub id: Uuid,
     /// Uuid of the Rack where Nexus is executing.
     pub rack_id: Uuid,
+    /// Port on which the "techport external" dropshot server should listen.
+    /// This dropshot server copies _most_ of its config from
+    /// `dropshot_external` (so that it matches TLS, etc.), but builds its
+    /// listening address by combining `dropshot_internal`'s IP address with
+    /// this port.
+    ///
+    /// We use `serde(default = ...)` to ensure we don't break any serialized
+    /// configs that were created before this field was added. In production we
+    /// always expect this port to be constant, but we need to be able to
+    /// override it when running tests.
+    #[schemars(skip)]
+    #[serde(default = "default_techport_external_server_port")]
+    pub techport_external_server_port: u16,
     /// Dropshot configuration for the external API server.
     #[schemars(skip)] // TODO we're protected against dropshot changes
     pub dropshot_external: ConfigDropshotWithTls,
@@ -145,6 +159,10 @@ pub struct DeploymentConfig {
     pub database: Database,
     /// External DNS servers Nexus can use to resolve external hosts.
     pub external_dns_servers: Vec<IpAddr>,
+}
+
+fn default_techport_external_server_port() -> u16 {
+    NEXUS_TECHPORT_EXTERNAL_PORT
 }
 
 impl DeploymentConfig {
@@ -220,6 +238,12 @@ pub struct TimeseriesDbConfig {
 /// Configuration for the `Dendrite` dataplane daemon.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct DpdConfig {
+    pub address: SocketAddr,
+}
+
+/// Configuration for the `Dendrite` dataplane daemon.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct MgdConfig {
     pub address: SocketAddr,
 }
 
@@ -311,6 +335,12 @@ pub struct BackgroundTaskConfig {
     pub dns_external: DnsTasksConfig,
     /// configuration for external endpoint list watcher
     pub external_endpoints: ExternalEndpointsConfig,
+    /// configuration for nat table garbage collector
+    pub nat_cleanup: NatCleanupConfig,
+    /// configuration for inventory tasks
+    pub inventory: InventoryConfig,
+    /// configuration for phantom disks task
+    pub phantom_disks: PhantomDiskConfig,
 }
 
 #[serde_as]
@@ -345,6 +375,46 @@ pub struct ExternalEndpointsConfig {
     // allow/disallow wildcard certs, don't serve expired certs, etc.)
 }
 
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct NatCleanupConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct InventoryConfig {
+    /// period (in seconds) for periodic activations of this background task
+    ///
+    /// Each activation fetches information about all hardware and software in
+    /// the system and inserts it into the database.  This generates a moderate
+    /// amount of data.
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+
+    /// maximum number of past collections to keep in the database
+    ///
+    /// This is a very coarse mechanism to keep the system from overwhelming
+    /// itself with inventory data.
+    pub nkeep: u32,
+
+    /// disable inventory collection altogether
+    ///
+    /// This is an emergency lever for support / operations.  It should never be
+    /// necessary.
+    pub disable: bool,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct PhantomDiskConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
 /// Configuration for a nexus server
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct PackageConfig {
@@ -370,8 +440,13 @@ pub struct PackageConfig {
     /// `Dendrite` dataplane daemon configuration
     #[serde(default)]
     pub dendrite: HashMap<SwitchLocation, DpdConfig>,
+    /// Maghemite mgd daemon configuration
+    #[serde(default)]
+    pub mgd: HashMap<SwitchLocation, MgdConfig>,
     /// Background task configuration
     pub background_tasks: BackgroundTaskConfig,
+    /// Default Crucible region allocation strategy
+    pub default_region_allocation_strategy: RegionAllocationStrategy,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -438,18 +513,17 @@ impl std::fmt::Display for SchemeName {
 
 #[cfg(test)]
 mod test {
-    use super::Tunables;
     use super::{
-        AuthnConfig, Config, ConsoleConfig, LoadError, PackageConfig,
-        SchemeName, TimeseriesDbConfig, UpdatesConfig,
+        default_techport_external_server_port, AuthnConfig,
+        BackgroundTaskConfig, Config, ConfigDropshotWithTls, ConsoleConfig,
+        Database, DeploymentConfig, DnsTasksConfig, DpdConfig,
+        ExternalEndpointsConfig, InternalDns, InventoryConfig, LoadError,
+        LoadErrorKind, MgdConfig, NatCleanupConfig, PackageConfig,
+        PhantomDiskConfig, SchemeName, TimeseriesDbConfig, Tunables,
+        UpdatesConfig,
     };
     use crate::address::{Ipv6Subnet, RACK_PREFIX};
     use crate::api::internal::shared::SwitchLocation;
-    use crate::nexus_config::{
-        BackgroundTaskConfig, ConfigDropshotWithTls, Database,
-        DeploymentConfig, DnsTasksConfig, DpdConfig, ExternalEndpointsConfig,
-        InternalDns, LoadErrorKind,
-    };
     use dropshot::ConfigDropshot;
     use dropshot::ConfigLogging;
     use dropshot::ConfigLoggingIfExists;
@@ -584,6 +658,8 @@ mod test {
             type = "from_dns"
             [dendrite.switch0]
             address = "[::1]:12224"
+            [mgd.switch0]
+            address = "[::1]:4676"
             [background_tasks]
             dns_internal.period_secs_config = 1
             dns_internal.period_secs_servers = 2
@@ -594,6 +670,14 @@ mod test {
             dns_external.period_secs_propagation = 7
             dns_external.max_concurrent_server_updates = 8
             external_endpoints.period_secs = 9
+            nat_cleanup.period_secs = 30
+            inventory.period_secs = 10
+            inventory.nkeep = 11
+            inventory.disable = false
+            phantom_disks.period_secs = 30
+            [default_region_allocation_strategy]
+            type = "random"
+            seed = 0
             "##,
         )
         .unwrap();
@@ -606,6 +690,8 @@ mod test {
                     rack_id: "38b90dc4-c22a-65ba-f49a-f051fe01208f"
                         .parse()
                         .unwrap(),
+                    techport_external_server_port:
+                        default_techport_external_server_port(),
                     dropshot_external: ConfigDropshotWithTls {
                         tls: false,
                         dropshot: ConfigDropshot {
@@ -660,6 +746,13 @@ mod test {
                                 .unwrap(),
                         }
                     )]),
+                    mgd: HashMap::from([(
+                        SwitchLocation::Switch0,
+                        MgdConfig {
+                            address: SocketAddr::from_str("[::1]:4676")
+                                .unwrap(),
+                        }
+                    )]),
                     background_tasks: BackgroundTaskConfig {
                         dns_internal: DnsTasksConfig {
                             period_secs_config: Duration::from_secs(1),
@@ -675,8 +768,23 @@ mod test {
                         },
                         external_endpoints: ExternalEndpointsConfig {
                             period_secs: Duration::from_secs(9),
-                        }
+                        },
+                        nat_cleanup: NatCleanupConfig {
+                            period_secs: Duration::from_secs(30),
+                        },
+                        inventory: InventoryConfig {
+                            period_secs: Duration::from_secs(10),
+                            nkeep: 11,
+                            disable: false,
+                        },
+                        phantom_disks: PhantomDiskConfig {
+                            period_secs: Duration::from_secs(30),
+                        },
                     },
+                    default_region_allocation_strategy:
+                        crate::nexus_config::RegionAllocationStrategy::Random {
+                            seed: Some(0)
+                        }
                 },
             }
         );
@@ -700,6 +808,7 @@ mod test {
             [deployment]
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
+            techport_external_server_port = 12345
             external_dns_servers = [ "1.1.1.1", "9.9.9.9" ]
             [deployment.dropshot_external]
             bind_address = "10.1.2.3:4567"
@@ -724,6 +833,13 @@ mod test {
             dns_external.period_secs_propagation = 7
             dns_external.max_concurrent_server_updates = 8
             external_endpoints.period_secs = 9
+            nat_cleanup.period_secs = 30
+            inventory.period_secs = 10
+            inventory.nkeep = 3
+            inventory.disable = false
+            phantom_disks.period_secs = 30
+            [default_region_allocation_strategy]
+            type = "random"
             "##,
         )
         .unwrap();
@@ -732,6 +848,7 @@ mod test {
             config.pkg.authn.schemes_external,
             vec![SchemeName::Spoof, SchemeName::SessionCookie],
         );
+        assert_eq!(config.deployment.techport_external_server_port, 12345);
     }
 
     #[test]
@@ -864,25 +981,31 @@ mod test {
         struct DummyConfig {
             deployment: DeploymentConfig,
         }
-        let config_path = "../smf/nexus/config-partial.toml";
-        println!(
-            "checking {:?} with example deployment section added",
-            config_path
-        );
-        let mut contents = std::fs::read_to_string(config_path)
-            .expect("failed to read Nexus SMF config file");
-        contents.push_str(
-            "\n\n\n \
-            # !! content below added by test_repo_configs_are_valid()\n\
-            \n\n\n",
-        );
         let example_deployment = toml::to_string_pretty(&DummyConfig {
             deployment: example_config.deployment,
         })
         .unwrap();
-        contents.push_str(&example_deployment);
-        let _: Config = toml::from_str(&contents)
-            .expect("Nexus SMF config file is not valid");
+
+        let nexus_config_paths = [
+            "../smf/nexus/single-sled/config-partial.toml",
+            "../smf/nexus/multi-sled/config-partial.toml",
+        ];
+        for config_path in nexus_config_paths {
+            println!(
+                "checking {:?} with example deployment section added",
+                config_path
+            );
+            let mut contents = std::fs::read_to_string(config_path)
+                .expect("failed to read Nexus SMF config file");
+            contents.push_str(
+                "\n\n\n \
+            # !! content below added by test_repo_configs_are_valid()\n\
+            \n\n\n",
+            );
+            contents.push_str(&example_deployment);
+            let _: Config = toml::from_str(&contents)
+                .expect("Nexus SMF config file is not valid");
+        }
     }
 
     #[test]
@@ -893,4 +1016,31 @@ mod test {
             &serde_json::to_string_pretty(&schema).unwrap(),
         );
     }
+}
+
+/// Defines a strategy for choosing what physical disks to use when allocating
+/// new crucible regions.
+///
+/// NOTE: More strategies can - and should! - be added.
+///
+/// See <https://rfd.shared.oxide.computer/rfd/0205> for a more
+/// complete discussion.
+///
+/// Longer-term, we should consider:
+/// - Storage size + remaining free space
+/// - Sled placement of datasets
+/// - What sort of loads we'd like to create (even split across all disks
+///   may not be preferable, especially if maintenance is expected)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum RegionAllocationStrategy {
+    /// Choose disks pseudo-randomly. An optional seed may be provided to make
+    /// the ordering deterministic, otherwise the current time in nanoseconds
+    /// will be used. Ordering is based on sorting the output of `md5(UUID of
+    /// candidate dataset + seed)`. The seed does not need to come from a
+    /// cryptographically secure source.
+    Random { seed: Option<u64> },
+
+    /// Like Random, but ensures that each region is allocated on its own sled.
+    RandomWithDistinctSleds { seed: Option<u64> },
 }

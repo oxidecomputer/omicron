@@ -10,18 +10,18 @@ use futures::Future;
 use futures::FutureExt;
 use http::Method;
 use http::StatusCode;
+use nexus_db_queries::authn::USER_TEST_UNPRIVILEGED;
+use nexus_db_queries::db::fixed_data;
+use nexus_db_queries::db::identity::Asset;
+use nexus_db_queries::db::identity::Resource;
+use nexus_db_queries::db::model::DatabaseString;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::shared;
+use nexus_types::external_api::views;
 use omicron_common::api::external::ObjectIdentity;
-use omicron_nexus::authn::USER_TEST_UNPRIVILEGED;
-use omicron_nexus::db::fixed_data;
-use omicron_nexus::db::identity::Asset;
-use omicron_nexus::db::identity::Resource;
-use omicron_nexus::db::model::DatabaseString;
-use omicron_nexus::external_api::shared;
-use omicron_nexus::external_api::views;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;

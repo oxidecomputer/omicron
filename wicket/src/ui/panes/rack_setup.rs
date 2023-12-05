@@ -5,30 +5,31 @@
 use super::help_text;
 use super::push_text_lines;
 use super::ComputedScrollOffset;
+use super::PendingScroll;
 use crate::keymap::ShowPopupCmd;
 use crate::ui::defaults::style;
 use crate::ui::widgets::BoxConnector;
 use crate::ui::widgets::BoxConnectorKind;
 use crate::ui::widgets::ButtonText;
 use crate::ui::widgets::PopupBuilder;
-use crate::ui::widgets::PopupScrollKind;
+use crate::ui::widgets::PopupScrollOffset;
 use crate::Action;
 use crate::Cmd;
 use crate::Control;
 use crate::Frame;
 use crate::State;
+use ratatui::layout::Constraint;
+use ratatui::layout::Direction;
+use ratatui::layout::Layout;
+use ratatui::layout::Rect;
+use ratatui::text::Line;
+use ratatui::text::Span;
+use ratatui::text::Text;
+use ratatui::widgets::Block;
+use ratatui::widgets::BorderType;
+use ratatui::widgets::Borders;
+use ratatui::widgets::Paragraph;
 use std::borrow::Cow;
-use tui::layout::Constraint;
-use tui::layout::Direction;
-use tui::layout::Layout;
-use tui::layout::Rect;
-use tui::text::Span;
-use tui::text::Spans;
-use tui::text::Text;
-use tui::widgets::Block;
-use tui::widgets::BorderType;
-use tui::widgets::Borders;
-use tui::widgets::Paragraph;
 use wicketd_client::types::Baseboard;
 use wicketd_client::types::CurrentRssUserConfig;
 use wicketd_client::types::IpRange;
@@ -38,7 +39,7 @@ use wicketd_client::types::RackOperationStatus;
 enum Popup {
     RackSetup(PopupKind),
     RackReset(PopupKind),
-    RackStatusDetails(PopupScrollKind),
+    RackStatusDetails(PopupScrollOffset),
 }
 
 impl Popup {
@@ -51,40 +52,16 @@ impl Popup {
     }
 
     fn new_rack_status_details() -> Self {
-        Self::RackStatusDetails(PopupScrollKind::Enabled { offset: 0 })
+        Self::RackStatusDetails(PopupScrollOffset::default())
     }
 
-    fn is_scrollable(&self) -> bool {
+    fn scroll_offset_mut(&mut self) -> Option<&mut PopupScrollOffset> {
         match self {
             Popup::RackSetup(kind) | Popup::RackReset(kind) => match kind {
-                PopupKind::Prompting | PopupKind::Waiting => false,
-                PopupKind::Failed { .. } => true,
+                PopupKind::Prompting | PopupKind::Waiting => None,
+                PopupKind::Failed { scroll_offset, .. } => Some(scroll_offset),
             },
-            Popup::RackStatusDetails(_) => true,
-        }
-    }
-
-    fn scroll_up(&mut self) {
-        match self {
-            Popup::RackSetup(kind) | Popup::RackReset(kind) => match kind {
-                PopupKind::Prompting | PopupKind::Waiting => (),
-                PopupKind::Failed { scroll_kind, .. } => {
-                    scroll_kind.scroll_up()
-                }
-            },
-            Popup::RackStatusDetails(scroll_kind) => scroll_kind.scroll_up(),
-        }
-    }
-
-    fn scroll_down(&mut self) {
-        match self {
-            Popup::RackSetup(kind) | Popup::RackReset(kind) => match kind {
-                PopupKind::Prompting | PopupKind::Waiting => (),
-                PopupKind::Failed { scroll_kind, .. } => {
-                    scroll_kind.scroll_down()
-                }
-            },
-            Popup::RackStatusDetails(scroll_kind) => scroll_kind.scroll_down(),
+            Popup::RackStatusDetails(scroll_offset) => Some(scroll_offset),
         }
     }
 }
@@ -93,7 +70,7 @@ impl Popup {
 enum PopupKind {
     Prompting,
     Waiting,
-    Failed { message: String, scroll_kind: PopupScrollKind },
+    Failed { message: String, scroll_offset: PopupScrollOffset },
 }
 
 /// `RackSetupPane` shows the current rack setup configuration and allows
@@ -106,6 +83,7 @@ pub struct RackSetupPane {
     rack_uninitialized_help: Vec<(&'static str, &'static str)>,
     rack_initialized_help: Vec<(&'static str, &'static str)>,
     scroll_offset: usize,
+    pending_scroll: Option<PendingScroll>,
 
     popup: Option<Popup>,
 }
@@ -128,6 +106,7 @@ impl Default for RackSetupPane {
                 ("Start Rack Reset", "<Ctrl-R Ctrl-R>"),
             ],
             scroll_offset: 0,
+            pending_scroll: None,
             popup: None,
         }
     }
@@ -141,18 +120,11 @@ impl RackSetupPane {
     ) -> Option<Action> {
         let popup = self.popup.as_mut().unwrap();
 
-        // Handle up or down commands here.
-        if popup.is_scrollable() {
-            match cmd {
-                Cmd::Up => {
-                    popup.scroll_up();
-                    return Some(Action::Redraw);
-                }
-                Cmd::Down => {
-                    popup.scroll_down();
-                    return Some(Action::Redraw);
-                }
-                _ => {}
+        // Handle scroll commands here.
+        if let Some(offset) = popup.scroll_offset_mut() {
+            if let Some(pending_scroll) = PendingScroll::from_cmd(&cmd) {
+                offset.set_pending_scroll(pending_scroll);
+                return Some(Action::Redraw);
             }
         }
 
@@ -190,7 +162,7 @@ impl RackSetupPane {
                     Err(message) => {
                         *kind = PopupKind::Failed {
                             message,
-                            scroll_kind: PopupScrollKind::Enabled { offset: 0 },
+                            scroll_offset: PopupScrollOffset::default(),
                         };
                     }
                 }
@@ -207,7 +179,7 @@ impl RackSetupPane {
                     Err(message) => {
                         *kind = PopupKind::Failed {
                             message,
-                            scroll_kind: PopupScrollKind::Enabled { offset: 0 },
+                            scroll_offset: PopupScrollOffset::default(),
                         };
                     }
                 }
@@ -223,51 +195,6 @@ fn draw_rack_setup_popup(
     frame: &mut Frame<'_>,
     kind: &mut PopupKind,
 ) {
-    let header;
-    let body;
-    let buttons;
-    let current_scroll_kind;
-
-    match kind {
-        PopupKind::Prompting => {
-            header = Spans::from(vec![Span::styled(
-                "Start Rack Setup",
-                style::header(true),
-            )]);
-            body = Text::from(vec![Spans::from(vec![Span::styled(
-                "Would you like to begin rack setup?",
-                style::plain_text(),
-            )])]);
-            buttons =
-                vec![ButtonText::new("Yes", "Y"), ButtonText::new("No", "N")];
-            current_scroll_kind = None;
-        }
-        PopupKind::Waiting => {
-            header = Spans::from(vec![Span::styled(
-                "Start Rack Setup",
-                style::header(true),
-            )]);
-            body = Text::from(vec![Spans::from(vec![Span::styled(
-                "Waiting for rack setup to start",
-                style::plain_text(),
-            )])]);
-            buttons = vec![];
-            current_scroll_kind = None;
-        }
-        PopupKind::Failed { message, scroll_kind } => {
-            header = Spans::from(vec![Span::styled(
-                "Start Rack Setup Failed",
-                style::failed_update(),
-            )]);
-            let mut failed_body = Text::default();
-            let prefix = vec![Span::styled("Message: ", style::selected())];
-            push_text_lines(message, prefix, &mut failed_body.lines);
-            body = failed_body;
-            buttons = vec![ButtonText::new("Close", "Esc")];
-            current_scroll_kind = Some(scroll_kind);
-        }
-    }
-
     let full_screen = Rect {
         width: state.screen_width,
         height: state.screen_height,
@@ -275,19 +202,55 @@ fn draw_rack_setup_popup(
         y: 0,
     };
 
-    let popup_builder = PopupBuilder { header, body, buttons };
-    let popup = popup_builder.build(
-        full_screen,
-        current_scroll_kind
-            .as_ref()
-            .map(|k| **k)
-            .unwrap_or(PopupScrollKind::Disabled),
-    );
-    let actual_scroll_kind = popup.actual_scroll_kind();
-    frame.render_widget(popup, full_screen);
+    match kind {
+        PopupKind::Prompting => {
+            let header = Line::from(vec![Span::styled(
+                "Start Rack Setup",
+                style::header(true),
+            )]);
+            let body = Text::from(vec![Line::from(vec![Span::styled(
+                "Would you like to begin rack setup?",
+                style::plain_text(),
+            )])]);
+            let buttons =
+                vec![ButtonText::new("Yes", "Y"), ButtonText::new("No", "N")];
 
-    if let Some(current_scroll_kind) = current_scroll_kind {
-        *current_scroll_kind = actual_scroll_kind;
+            let popup_builder = PopupBuilder { header, body, buttons };
+            let popup = popup_builder.build(full_screen);
+            frame.render_widget(popup, full_screen);
+        }
+        PopupKind::Waiting => {
+            let header = Line::from(vec![Span::styled(
+                "Start Rack Setup",
+                style::header(true),
+            )]);
+            let body = Text::from(vec![Line::from(vec![Span::styled(
+                "Waiting for rack setup to start",
+                style::plain_text(),
+            )])]);
+            let buttons = vec![];
+
+            let popup_builder = PopupBuilder { header, body, buttons };
+            let popup = popup_builder.build(full_screen);
+            frame.render_widget(popup, full_screen);
+        }
+        PopupKind::Failed { message, scroll_offset } => {
+            let header = Line::from(vec![Span::styled(
+                "Start Rack Setup Failed",
+                style::failed_update(),
+            )]);
+            let mut failed_body = Text::default();
+            let prefix = vec![Span::styled("Message: ", style::selected())];
+            push_text_lines(message, prefix, &mut failed_body.lines);
+            let body = failed_body;
+            let buttons = vec![ButtonText::new("Close", "Esc")];
+
+            let popup_builder = PopupBuilder { header, body, buttons };
+            let popup =
+                popup_builder.build_scrollable(full_screen, *scroll_offset);
+            *scroll_offset = popup.actual_scroll_offset();
+            frame.render_widget(popup, full_screen);
+        }
     }
 }
 
@@ -296,51 +259,6 @@ fn draw_rack_reset_popup(
     frame: &mut Frame<'_>,
     kind: &mut PopupKind,
 ) {
-    let header;
-    let body;
-    let buttons;
-    let current_scroll_kind;
-
-    match kind {
-        PopupKind::Prompting => {
-            header = Spans::from(vec![Span::styled(
-                "Rack Reset (DESTRUCTIVE!)",
-                style::header(true),
-            )]);
-            body = Text::from(vec![Spans::from(vec![Span::styled(
-                "Would you like to reset the rack to an uninitialized state?",
-                style::plain_text(),
-            )])]);
-            buttons =
-                vec![ButtonText::new("Yes", "Y"), ButtonText::new("No", "N")];
-            current_scroll_kind = None;
-        }
-        PopupKind::Waiting => {
-            header = Spans::from(vec![Span::styled(
-                "Rack Reset",
-                style::header(true),
-            )]);
-            body = Text::from(vec![Spans::from(vec![Span::styled(
-                "Waiting for rack reset to start",
-                style::plain_text(),
-            )])]);
-            buttons = vec![];
-            current_scroll_kind = None;
-        }
-        PopupKind::Failed { message, scroll_kind } => {
-            header = Spans::from(vec![Span::styled(
-                "Rack Reset Failed",
-                style::failed_update(),
-            )]);
-            let mut failed_body = Text::default();
-            let prefix = vec![Span::styled("Message: ", style::selected())];
-            push_text_lines(message, prefix, &mut failed_body.lines);
-            body = failed_body;
-            buttons = vec![ButtonText::new("Close", "Esc")];
-            current_scroll_kind = Some(scroll_kind);
-        }
-    }
-
     let full_screen = Rect {
         width: state.screen_width,
         height: state.screen_height,
@@ -348,28 +266,64 @@ fn draw_rack_reset_popup(
         y: 0,
     };
 
-    let popup_builder = PopupBuilder { header, body, buttons };
-    let popup = popup_builder.build(
-        full_screen,
-        current_scroll_kind
-            .as_ref()
-            .map(|k| **k)
-            .unwrap_or(PopupScrollKind::Disabled),
-    );
-    let actual_scroll_kind = popup.actual_scroll_kind();
-    frame.render_widget(popup, full_screen);
+    match kind {
+        PopupKind::Prompting => {
+            let header = Line::from(vec![Span::styled(
+                "Rack Reset (DESTRUCTIVE!)",
+                style::header(true),
+            )]);
+            let body = Text::from(vec![Line::from(vec![Span::styled(
+                "Would you like to reset the rack to an uninitialized state?",
+                style::plain_text(),
+            )])]);
+            let buttons =
+                vec![ButtonText::new("Yes", "Y"), ButtonText::new("No", "N")];
 
-    if let Some(current_scroll_kind) = current_scroll_kind {
-        *current_scroll_kind = actual_scroll_kind;
+            let popup_builder = PopupBuilder { header, body, buttons };
+            let popup = popup_builder.build(full_screen);
+            frame.render_widget(popup, full_screen);
+        }
+        PopupKind::Waiting => {
+            let header = Line::from(vec![Span::styled(
+                "Rack Reset",
+                style::header(true),
+            )]);
+            let body = Text::from(vec![Line::from(vec![Span::styled(
+                "Waiting for rack reset to start",
+                style::plain_text(),
+            )])]);
+            let buttons = vec![];
+
+            let popup_builder = PopupBuilder { header, body, buttons };
+            let popup = popup_builder.build(full_screen);
+            frame.render_widget(popup, full_screen);
+        }
+        PopupKind::Failed { message, scroll_offset } => {
+            let header = Line::from(vec![Span::styled(
+                "Rack Reset Failed",
+                style::failed_update(),
+            )]);
+            let mut failed_body = Text::default();
+            let prefix = vec![Span::styled("Message: ", style::selected())];
+            push_text_lines(message, prefix, &mut failed_body.lines);
+            let body = failed_body;
+            let buttons = vec![ButtonText::new("Close", "Esc")];
+
+            let popup_builder = PopupBuilder { header, body, buttons };
+            let popup =
+                popup_builder.build_scrollable(full_screen, *scroll_offset);
+            *scroll_offset = popup.actual_scroll_offset();
+            frame.render_widget(popup, full_screen);
+        }
     }
 }
 
 fn draw_rack_status_details_popup(
     state: &State,
     frame: &mut Frame<'_>,
-    scroll_kind: &mut PopupScrollKind,
+    scroll_offset: &mut PopupScrollOffset,
 ) {
-    let header = Spans::from(vec![Span::styled(
+    let header = Line::from(vec![Span::styled(
         "Current Rack Setup Status",
         style::header(true),
     )]);
@@ -380,93 +334,93 @@ fn draw_rack_status_details_popup(
     let prefix = vec![Span::styled("Message: ", style::selected())];
     match state.rack_setup_state.as_ref() {
         Ok(RackOperationStatus::Uninitialized { reset_id }) => {
-            body.lines.push(Spans::from(vec![
+            body.lines.push(Line::from(vec![
                 status,
                 Span::styled("Uninitialized", style::plain_text()),
             ]));
             if let Some(id) = reset_id {
-                body.lines.push(Spans::from(vec![Span::styled(
+                body.lines.push(Line::from(vec![Span::styled(
                     format!("Last reset operation ID: {}", id.0),
                     style::plain_text(),
                 )]));
             }
         }
         Ok(RackOperationStatus::Initialized { id }) => {
-            body.lines.push(Spans::from(vec![
+            body.lines.push(Line::from(vec![
                 status,
                 Span::styled("Initialized", style::plain_text()),
             ]));
             if let Some(id) = id {
-                body.lines.push(Spans::from(vec![Span::styled(
+                body.lines.push(Line::from(vec![Span::styled(
                     format!("Last initialization operation ID: {}", id.0),
                     style::plain_text(),
                 )]));
             }
         }
         Ok(RackOperationStatus::InitializationFailed { id, message }) => {
-            body.lines.push(Spans::from(vec![
+            body.lines.push(Line::from(vec![
                 status,
                 Span::styled("Initialization Failed", style::plain_text()),
             ]));
-            body.lines.push(Spans::from(vec![Span::styled(
+            body.lines.push(Line::from(vec![Span::styled(
                 format!("Last initialization operation ID: {}", id.0),
                 style::plain_text(),
             )]));
             push_text_lines(message, prefix, &mut body.lines);
         }
         Ok(RackOperationStatus::InitializationPanicked { id }) => {
-            body.lines.push(Spans::from(vec![
+            body.lines.push(Line::from(vec![
                 status,
                 Span::styled("Initialization Panicked", style::plain_text()),
             ]));
-            body.lines.push(Spans::from(vec![Span::styled(
+            body.lines.push(Line::from(vec![Span::styled(
                 format!("Last initialization operation ID: {}", id.0),
                 style::plain_text(),
             )]));
         }
         Ok(RackOperationStatus::ResetFailed { id, message }) => {
-            body.lines.push(Spans::from(vec![
+            body.lines.push(Line::from(vec![
                 status,
                 Span::styled("Reset Failed", style::plain_text()),
             ]));
-            body.lines.push(Spans::from(vec![Span::styled(
+            body.lines.push(Line::from(vec![Span::styled(
                 format!("Last reset operation ID: {}", id.0),
                 style::plain_text(),
             )]));
             push_text_lines(message, prefix, &mut body.lines);
         }
         Ok(RackOperationStatus::ResetPanicked { id }) => {
-            body.lines.push(Spans::from(vec![
+            body.lines.push(Line::from(vec![
                 status,
                 Span::styled("Reset Panicked", style::plain_text()),
             ]));
-            body.lines.push(Spans::from(vec![Span::styled(
+            body.lines.push(Line::from(vec![Span::styled(
                 format!("Last reset operation ID: {}", id.0),
                 style::plain_text(),
             )]));
         }
         Ok(RackOperationStatus::Initializing { id }) => {
-            body.lines.push(Spans::from(vec![
+            body.lines.push(Line::from(vec![
                 status,
                 Span::styled("Initializing", style::plain_text()),
             ]));
-            body.lines.push(Spans::from(vec![Span::styled(
+            body.lines.push(Line::from(vec![Span::styled(
                 format!("Current operation ID: {}", id.0),
                 style::plain_text(),
             )]));
         }
         Ok(RackOperationStatus::Resetting { id }) => {
-            body.lines.push(Spans::from(vec![
+            body.lines.push(Line::from(vec![
                 status,
                 Span::styled("Resetting", style::plain_text()),
             ]));
-            body.lines.push(Spans::from(vec![Span::styled(
+            body.lines.push(Line::from(vec![Span::styled(
                 format!("Current operation ID: {}", id.0),
                 style::plain_text(),
             )]));
         }
         Err(message) => {
-            body.lines.push(Spans::from(vec![
+            body.lines.push(Line::from(vec![
                 status,
                 Span::styled(
                     "Unknown (request to wicketd failed)",
@@ -485,8 +439,8 @@ fn draw_rack_status_details_popup(
     };
 
     let popup_builder = PopupBuilder { header, body, buttons };
-    let popup = popup_builder.build(full_screen, *scroll_kind);
-    *scroll_kind = popup.actual_scroll_kind();
+    let popup = popup_builder.build_scrollable(full_screen, *scroll_offset);
+    *scroll_offset = popup.actual_scroll_offset();
     frame.render_widget(popup, full_screen);
 }
 
@@ -495,15 +449,12 @@ impl Control for RackSetupPane {
         if self.popup.is_some() {
             return self.handle_cmd_in_popup(state, cmd);
         }
+        if let Some(pending_scroll) = PendingScroll::from_cmd(&cmd) {
+            self.pending_scroll = Some(pending_scroll);
+            return Some(Action::Redraw);
+        }
+
         match cmd {
-            Cmd::Up => {
-                self.scroll_offset = self.scroll_offset.saturating_sub(1);
-                Some(Action::Redraw)
-            }
-            Cmd::Down => {
-                self.scroll_offset += 1;
-                Some(Action::Redraw)
-            }
             Cmd::Details => {
                 self.popup = Some(Popup::new_rack_status_details());
                 Some(Action::Redraw)
@@ -530,7 +481,7 @@ impl Control for RackSetupPane {
         &mut self,
         state: &State,
         frame: &mut Frame<'_>,
-        rect: tui::layout::Rect,
+        rect: ratatui::layout::Rect,
         active: bool,
     ) {
         let chunks = Layout::default()
@@ -554,7 +505,7 @@ impl Control for RackSetupPane {
             .style(border_style);
 
         // Draw the screen title (subview look)
-        let title_bar = Paragraph::new(Spans::from(vec![Span::styled(
+        let title_bar = Paragraph::new(Line::from(vec![Span::styled(
             "Oxide Rack Setup",
             border_style,
         )]))
@@ -573,6 +524,7 @@ impl Control for RackSetupPane {
             self.scroll_offset,
             text.height(),
             chunks[1].height as usize,
+            self.pending_scroll.take(),
         )
         .into_offset();
         self.scroll_offset = y_offset as usize;
@@ -609,8 +561,8 @@ impl Control for RackSetupPane {
                 Popup::RackReset(kind) => {
                     draw_rack_reset_popup(state, frame, kind);
                 }
-                Popup::RackStatusDetails(scroll_kind) => {
-                    draw_rack_status_details_popup(state, frame, scroll_kind);
+                Popup::RackStatusDetails(scroll_offset) => {
+                    draw_rack_status_details_popup(state, frame, scroll_offset);
                 }
             }
         }
@@ -666,11 +618,11 @@ fn rss_config_text<'a>(
     };
 
     let mut spans = vec![
-        Spans::from(vec![
+        Line::from(vec![
             Span::styled("Current rack status: ", label_style),
             setup_description,
         ]),
-        Spans::default(),
+        Line::default(),
     ];
 
     let Some(config) = config else {
@@ -682,14 +634,14 @@ fn rss_config_text<'a>(
 
     // Special single-line values, where we convert some kind of condition into
     // a user-appropriate string.
-    spans.push(Spans::from(vec![
+    spans.push(Line::from(vec![
         Span::styled("Uploaded cert/key pairs: ", label_style),
         Span::styled(
             sensitive.num_external_certificates.to_string(),
             dyn_style(sensitive.num_external_certificates > 0),
         ),
     ]));
-    spans.push(Spans::from(vec![
+    spans.push(Line::from(vec![
         Span::styled("Recovery password set: ", label_style),
         dyn_span(sensitive.recovery_silo_password_set, "Yes", "No"),
     ]));
@@ -714,7 +666,7 @@ fn rss_config_text<'a>(
                 .map_or("".into(), |c| c.infra_ip_last.to_string().into()),
         ),
     ] {
-        spans.push(Spans::from(vec![
+        spans.push(Line::from(vec![
             Span::styled(label, label_style),
             dyn_span(!contents.is_empty(), contents, "Not set"),
         ]));
@@ -722,21 +674,20 @@ fn rss_config_text<'a>(
 
     // Helper function for multivalued items: we either print "None" (in
     // bad_style) if there are no items, or return a the list of spans.
-    let append_list =
-        |spans: &mut Vec<Spans>, label_str, items: Vec<Vec<Span<'static>>>| {
-            let label = Span::styled(label_str, label_style);
-            if items.is_empty() {
-                spans.push(Spans::from(vec![
-                    label,
-                    Span::styled("None", bad_style),
-                ]));
-            } else {
-                spans.push(label.into());
-                for item in items {
-                    spans.push(Spans::from(item));
-                }
+    let append_list = |spans: &mut Vec<Line>,
+                       label_str,
+                       items: Vec<Vec<Span<'static>>>| {
+        let label = Span::styled(label_str, label_style);
+        if items.is_empty() {
+            spans
+                .push(Line::from(vec![label, Span::styled("None", bad_style)]));
+        } else {
+            spans.push(label.into());
+            for item in items {
+                spans.push(Line::from(item));
             }
-        };
+        }
+    };
 
     // Helper function to created a bulleted item for a single value.
     let plain_list_item = |item: String| {
@@ -744,56 +695,61 @@ fn rss_config_text<'a>(
     };
 
     if let Some(cfg) = insensitive.rack_network_config.as_ref() {
-        for (i, uplink) in cfg.uplinks.iter().enumerate() {
+        for (i, uplink) in cfg.ports.iter().enumerate() {
             let mut items = vec![
                 vec![
-                    Span::styled("  • Switch           : ", label_style),
+                    Span::styled("  • Switch    : ", label_style),
                     Span::styled(uplink.switch.to_string(), ok_style),
                 ],
                 vec![
-                    Span::styled("  • Gateway IP       : ", label_style),
-                    Span::styled(uplink.gateway_ip.to_string(), ok_style),
-                ],
-                vec![
-                    Span::styled("  • Uplink CIDR      : ", label_style),
-                    Span::styled(uplink.uplink_cidr.to_string(), ok_style),
-                ],
-                vec![
-                    Span::styled("  • Uplink port      : ", label_style),
-                    Span::styled(uplink.uplink_port.clone(), ok_style),
-                ],
-                vec![
-                    Span::styled("  • Uplink port speed: ", label_style),
+                    Span::styled("  • Speed     : ", label_style),
                     Span::styled(
                         uplink.uplink_port_speed.to_string(),
                         ok_style,
                     ),
                 ],
                 vec![
-                    Span::styled("  • Uplink port FEC  : ", label_style),
+                    Span::styled("  • FEC       : ", label_style),
                     Span::styled(uplink.uplink_port_fec.to_string(), ok_style),
                 ],
             ];
-            if let Some(uplink_vid) = uplink.uplink_vid {
-                items.push(vec![
-                    Span::styled("  • Uplink VLAN id   : ", label_style),
-                    Span::styled(uplink_vid.to_string(), ok_style),
-                ]);
-            } else {
-                items.push(vec![
-                    Span::styled("  • Uplink VLAN id   : ", label_style),
-                    Span::styled("none", ok_style),
-                ]);
-            }
+
+            let routes = uplink.routes.iter().map(|r| {
+                vec![
+                    Span::styled("  • Route     : ", label_style),
+                    Span::styled(
+                        format!("{} -> {}", r.destination, r.nexthop),
+                        ok_style,
+                    ),
+                ]
+            });
+
+            let addresses = uplink.addresses.iter().map(|a| {
+                vec![
+                    Span::styled("  • Address   : ", label_style),
+                    Span::styled(a.to_string(), ok_style),
+                ]
+            });
+
+            let peers = uplink.bgp_peers.iter().map(|p| {
+                vec![
+                    Span::styled("  • BGP peer  : ", label_style),
+                    Span::styled(format!("{} ASN={}", p.addr, p.asn), ok_style),
+                ]
+            });
+
+            items.extend(routes);
+            items.extend(addresses);
+            items.extend(peers);
 
             append_list(
                 &mut spans,
-                Cow::from(format!("Uplink {}: ", i + 1)),
+                Cow::from(format!("Port {}: ", i + 1)),
                 items,
             );
         }
     } else {
-        append_list(&mut spans, "Uplinks: ".into(), vec![]);
+        append_list(&mut spans, "Ports: ".into(), vec![]);
     }
 
     append_list(
@@ -867,7 +823,7 @@ fn rss_config_text<'a>(
     );
 
     // Add a "trailing newline" for scrolling to work correctly.
-    spans.push(Spans::default());
+    spans.push(Line::default());
 
     Text::from(spans)
 }

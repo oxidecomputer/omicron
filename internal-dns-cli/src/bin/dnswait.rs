@@ -23,21 +23,31 @@ struct Opt {
     #[clap(long, action)]
     nameserver_addresses: Vec<SocketAddr>,
 
-    /// service name to be resolved (should be the target of a DNS name)
+    /// Service name to be resolved (should be the target of a DNS name)
     #[arg(value_enum)]
     srv_name: ServiceName,
+
+    /// Output service host names only, omitting the port
+    #[clap(long, short = 'H', action)]
+    hostname_only: bool,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 #[value(rename_all = "kebab-case")]
 enum ServiceName {
     Cockroach,
+    Clickhouse,
+    ClickhouseKeeper,
 }
 
 impl From<ServiceName> for internal_dns::ServiceName {
     fn from(value: ServiceName) -> Self {
         match value {
             ServiceName::Cockroach => internal_dns::ServiceName::Cockroach,
+            ServiceName::Clickhouse => internal_dns::ServiceName::Clickhouse,
+            ServiceName::ClickhouseKeeper => {
+                internal_dns::ServiceName::ClickhouseKeeper
+            }
         }
     }
 }
@@ -62,7 +72,7 @@ async fn main() -> Result<()> {
     } else {
         let addrs = opt.nameserver_addresses;
         info!(&log, "using explicit nameservers"; "nameservers" => ?addrs);
-        Resolver::new_from_addrs(log.clone(), addrs)
+        Resolver::new_from_addrs(log.clone(), &addrs)
             .context("creating resolver with explicit nameserver addresses")?
     };
 
@@ -91,7 +101,11 @@ async fn main() -> Result<()> {
     .context("unexpectedly gave up")?;
 
     for (target, port) in result {
-        println!("{}:{}", target, port)
+        if opt.hostname_only {
+            println!("{}", target)
+        } else {
+            println!("{}:{}", target, port)
+        }
     }
 
     Ok(())

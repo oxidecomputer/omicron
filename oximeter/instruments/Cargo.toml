@@ -5,14 +5,27 @@ edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
+cfg-if.workspace = true
 chrono.workspace = true
 dropshot.workspace = true
 futures.workspace = true
-oximeter.workspace = true
-tokio.workspace = true
 http = { workspace = true, optional = true }
+oximeter.workspace = true
+slog.workspace = true
+tokio.workspace = true
+thiserror.workspace = true
 uuid.workspace = true
+omicron-workspace-hack.workspace = true
 
 [features]
-default = ["http-instruments"]
+default = ["http-instruments", "kstat"]
 http-instruments = ["http"]
+kstat = ["kstat-rs"]
+
+[dev-dependencies]
+rand.workspace = true
+slog-async.workspace = true
+slog-term.workspace = true
+
+[target.'cfg(target_os = "illumos")'.dependencies]
+kstat-rs = { workspace = true, optional = true }

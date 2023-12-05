@@ -6,9 +6,13 @@
 
 use super::DataStore;
 use crate::db;
-use crate::db::error::public_error_from_diesel_pool;
+use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
-use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
+use crate::db::TransactionError;
+use async_bb8_diesel::{
+    AsyncConnection, AsyncRunQueryDsl, AsyncSimpleConnection,
+};
+use camino::{Utf8Path, Utf8PathBuf};
 use chrono::Utc;
 use diesel::prelude::*;
 use omicron_common::api::external::Error;
@@ -18,6 +22,132 @@ use slog::Logger;
 use std::collections::BTreeSet;
 use std::ops::Bound;
 use std::str::FromStr;
+
+pub const EARLIEST_SUPPORTED_VERSION: &'static str = "1.0.0";
+
+/// Describes a single file containing a schema change, as SQL.
+#[derive(Debug)]
+pub struct SchemaUpgradeStep {
+    pub path: Utf8PathBuf,
+    pub sql: String,
+}
+
+/// Describes a sequence of files containing schema changes.
+#[derive(Debug)]
+pub struct SchemaUpgrade {
+    pub steps: Vec<SchemaUpgradeStep>,
+}
+
+/// Reads a "version directory" and reads all SQL changes into
+/// a result Vec.
+///
+/// Files that do not begin with "up" and end with ".sql" are ignored. The
+/// collection of `up*.sql` files must fall into one of these two conventions:
+///
+/// * "up.sql" with no other files
+/// * "up1.sql", "up2.sql", ..., beginning from 1, optionally with leading
+///   zeroes (e.g., "up01.sql", "up02.sql", ...). There is no maximum value, but
+///   there may not be any gaps (e.g., if "up2.sql" and "up4.sql" exist, so must
+///   "up3.sql") and there must not be any repeats (e.g., if "up1.sql" exists,
+///   "up01.sql" must not exist).
+///
+/// Any violation of these two rules will result in an error. Collections of the
+/// second form (`up1.sql`, ...) will be sorted numerically.
+pub async fn all_sql_for_version_migration<P: AsRef<Utf8Path>>(
+    path: P,
+) -> Result<SchemaUpgrade, String> {
+    let target_dir = path.as_ref();
+    let mut up_sqls = vec![];
+    let entries = target_dir
+        .read_dir_utf8()
+        .map_err(|e| format!("Failed to readdir {target_dir}: {e}"))?;
+    for entry in entries {
+        let entry = entry.map_err(|err| format!("Invalid entry: {err}"))?;
+        let pathbuf = entry.into_path();
+
+        // Ensure filename ends with ".sql"
+        if pathbuf.extension() != Some("sql") {
+            continue;
+        }
+
+        // Ensure filename begins with "up", and extract anything in between
+        // "up" and ".sql".
+        let Some(remaining_filename) = pathbuf
+            .file_stem()
+            .and_then(|file_stem| file_stem.strip_prefix("up"))
+        else {
+            continue;
+        };
+
+        // Ensure the remaining filename is either empty (i.e., the filename is
+        // exactly "up.sql") or parseable as an unsigned integer. We give
+        // "up.sql" the "up_number" 0 (checked in the loop below), and require
+        // any other number to be nonzero.
+        if remaining_filename.is_empty() {
+            up_sqls.push((0, pathbuf));
+        } else {
+            let Ok(up_number) = remaining_filename.parse::<u64>() else {
+                return Err(format!(
+                    "invalid filename (non-numeric `up*.sql`): {pathbuf}",
+                ));
+            };
+            if up_number == 0 {
+                return Err(format!(
+                    "invalid filename (`up*.sql` numbering must start at 1): \
+                     {pathbuf}",
+                ));
+            }
+            up_sqls.push((up_number, pathbuf));
+        }
+    }
+    up_sqls.sort();
+
+    // Validate that we have a reasonable sequence of `up*.sql` numbers.
+    match up_sqls.as_slice() {
+        [] => return Err("no `up*.sql` files found".to_string()),
+        [(up_number, path)] => {
+            // For a single file, we allow either `up.sql` (keyed as
+            // up_number=0) or `up1.sql`; reject any higher number.
+            if *up_number > 1 {
+                return Err(format!(
+                    "`up*.sql` numbering must start at 1: found first file \
+                     {path}"
+                ));
+            }
+        }
+        _ => {
+            for (i, (up_number, path)) in up_sqls.iter().enumerate() {
+                // We have 2 or more `up*.sql`; they should be numbered exactly
+                // 1..=up_sqls.len().
+                if i as u64 + 1 != *up_number {
+                    // We know we have at least two elements, so report an error
+                    // referencing either the next item (if we're first) or the
+                    // previous item (if we're not first).
+                    let (path_a, path_b) = if i == 0 {
+                        let (_, next_path) = &up_sqls[1];
+                        (path, next_path)
+                    } else {
+                        let (_, prev_path) = &up_sqls[i - 1];
+                        (prev_path, path)
+                    };
+                    return Err(format!(
+                        "invalid `up*.sql` combination: {path_a}, {path_b}"
+                    ));
+                }
+            }
+        }
+    }
+
+    // This collection of `up*.sql` files is valid; read them all, in order.
+    let mut result = SchemaUpgrade { steps: vec![] };
+    for (_, path) in up_sqls.into_iter() {
+        let sql = tokio::fs::read_to_string(&path)
+            .await
+            .map_err(|e| format!("Cannot read {path}: {e}"))?;
+        result.steps.push(SchemaUpgradeStep { path: path.to_owned(), sql });
+    }
+    Ok(result)
+}
 
 impl DataStore {
     // Ensures that the database schema matches "desired_version".
@@ -64,7 +194,9 @@ impl DataStore {
         };
 
         let Some(config) = config else {
-            return Err("Not configured to automatically update schema".to_string());
+            return Err(
+                "Not configured to automatically update schema".to_string()
+            );
         };
 
         if current_version > desired_version {
@@ -134,13 +266,13 @@ impl DataStore {
                 "target_version" => target_version.to_string(),
             );
 
-            let up = config
-                .schema_dir
-                .join(target_version.to_string())
-                .join("up.sql");
-            let sql = tokio::fs::read_to_string(&up).await.map_err(|e| {
-                format!("Cannot read {up}: {e}", up = up.display())
-            })?;
+            let target_dir = Utf8PathBuf::from_path_buf(
+                config.schema_dir.join(target_version.to_string()),
+            )
+            .map_err(|e| format!("Invalid schema path: {}", e.display()))?;
+
+            let schema_change =
+                all_sql_for_version_migration(&target_dir).await?;
 
             // Confirm the current version, set the "target_version"
             // column to indicate that a schema update is in-progress.
@@ -158,8 +290,16 @@ impl DataStore {
                 "target_version" => target_version.to_string(),
             );
 
-            // Perform the schema change.
-            self.apply_schema_update(&sql).await.map_err(|e| e.to_string())?;
+            for SchemaUpgradeStep { path: _, sql } in &schema_change.steps {
+                // Perform the schema change.
+                self.apply_schema_update(
+                    &current_version,
+                    &target_version,
+                    &sql,
+                )
+                .await
+                .map_err(|e| e.to_string())?;
+            }
 
             info!(
                 log,
@@ -215,11 +355,9 @@ impl DataStore {
         let version: String = dsl::db_metadata
             .filter(dsl::singleton.eq(true))
             .select(dsl::version)
-            .get_result_async(self.pool())
+            .get_result_async(&*self.pool_connection_unauthorized().await?)
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
-            })?;
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         SemverVersion::from_str(&version).map_err(|e| {
             Error::internal_error(&format!("Invalid schema version: {e}"))
@@ -257,9 +395,9 @@ impl DataStore {
             dsl::time_modified.eq(Utc::now()),
             dsl::target_version.eq(Some(to_version.to_string())),
         ))
-        .execute_async(self.pool())
+        .execute_async(&*self.pool_connection_unauthorized().await?)
         .await
-        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         if rows_updated != 1 {
             return Err(Error::internal_error(
@@ -271,11 +409,37 @@ impl DataStore {
 
     // Applies a schema update, using raw SQL read from a caller-supplied
     // configuration file.
-    async fn apply_schema_update(&self, sql: &String) -> Result<(), Error> {
-        self.pool().batch_execute_async(&sql).await.map_err(|e| {
-            Error::internal_error(&format!("Failed to execute upgrade: {e}"))
-        })?;
-        Ok(())
+    async fn apply_schema_update(
+        &self,
+        current: &SemverVersion,
+        target: &SemverVersion,
+        sql: &String,
+    ) -> Result<(), Error> {
+        let result = self.pool_connection_unauthorized().await?.transaction_async(|conn| async move {
+            if target.to_string() != EARLIEST_SUPPORTED_VERSION {
+                let validate_version_query = format!("SELECT CAST(\
+                        IF(\
+                            (\
+                                SELECT version = '{current}' and target_version = '{target}'\
+                                FROM omicron.public.db_metadata WHERE singleton = true\
+                            ),\
+                            'true',\
+                            'Invalid starting version for schema change'\
+                        ) AS BOOL\
+                    );");
+                conn.batch_execute_async(&validate_version_query).await?;
+            }
+            conn.batch_execute_async(&sql).await?;
+            Ok::<_, TransactionError<()>>(())
+        }).await;
+
+        match result {
+            Ok(()) => Ok(()),
+            Err(TransactionError::CustomError(())) => panic!("No custom error"),
+            Err(TransactionError::Database(e)) => {
+                Err(public_error_from_diesel(e, ErrorHandler::Server))
+            }
+        }
     }
 
     // Completes a schema migration, upgrading to the new version.
@@ -297,9 +461,9 @@ impl DataStore {
             dsl::version.eq(to_version.to_string()),
             dsl::target_version.eq(None as Option<String>),
         ))
-        .execute_async(self.pool())
+        .execute_async(&*self.pool_connection_unauthorized().await?)
         .await
-        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         if rows_updated != 1 {
             return Err(Error::internal_error(
@@ -313,10 +477,149 @@ impl DataStore {
 #[cfg(test)]
 mod test {
     use super::*;
+    use camino_tempfile::Utf8TempDir;
     use nexus_db_model::schema::SCHEMA_VERSION;
     use nexus_test_utils::db as test_db;
     use omicron_test_utils::dev;
     use std::sync::Arc;
+
+    // Confirm that `all_sql_for_version_migration` rejects `up*.sql` files
+    // where the `*` doesn't contain a positive integer.
+    #[tokio::test]
+    async fn all_sql_for_version_migration_rejects_invalid_up_sql_names() {
+        for (invalid_filename, error_prefix) in [
+            ("upA.sql", "invalid filename (non-numeric `up*.sql`)"),
+            ("up1a.sql", "invalid filename (non-numeric `up*.sql`)"),
+            ("upaaa1.sql", "invalid filename (non-numeric `up*.sql`)"),
+            ("up-3.sql", "invalid filename (non-numeric `up*.sql`)"),
+            (
+                "up0.sql",
+                "invalid filename (`up*.sql` numbering must start at 1)",
+            ),
+            (
+                "up00.sql",
+                "invalid filename (`up*.sql` numbering must start at 1)",
+            ),
+            (
+                "up000.sql",
+                "invalid filename (`up*.sql` numbering must start at 1)",
+            ),
+        ] {
+            let tempdir = Utf8TempDir::new().unwrap();
+            let filename = tempdir.path().join(invalid_filename);
+            _ = tokio::fs::File::create(&filename).await.unwrap();
+
+            match all_sql_for_version_migration(tempdir.path()).await {
+                Ok(upgrade) => {
+                    panic!(
+                        "unexpected success on {invalid_filename} \
+                         (produced {upgrade:?})"
+                    );
+                }
+                Err(message) => {
+                    assert_eq!(message, format!("{error_prefix}: {filename}"));
+                }
+            }
+        }
+    }
+
+    // Confirm that `all_sql_for_version_migration` rejects a directory with no
+    // appriopriately-named files.
+    #[tokio::test]
+    async fn all_sql_for_version_migration_rejects_no_up_sql_files() {
+        for filenames in [
+            &[] as &[&str],
+            &["README.md"],
+            &["foo.sql", "bar.sql"],
+            &["up1sql", "up2sql"],
+        ] {
+            let tempdir = Utf8TempDir::new().unwrap();
+            for filename in filenames {
+                _ = tokio::fs::File::create(tempdir.path().join(filename))
+                    .await
+                    .unwrap();
+            }
+
+            match all_sql_for_version_migration(tempdir.path()).await {
+                Ok(upgrade) => {
+                    panic!(
+                        "unexpected success on {filenames:?} \
+                         (produced {upgrade:?})"
+                    );
+                }
+                Err(message) => {
+                    assert_eq!(message, "no `up*.sql` files found");
+                }
+            }
+        }
+    }
+
+    // Confirm that `all_sql_for_version_migration` rejects collections of
+    // `up*.sql` files with individually-valid names but that do not pass the
+    // rules of the entire collection.
+    #[tokio::test]
+    async fn all_sql_for_version_migration_rejects_invalid_up_sql_collections()
+    {
+        for invalid_filenames in [
+            &["up.sql", "up1.sql"] as &[&str],
+            &["up1.sql", "up01.sql"],
+            &["up1.sql", "up3.sql"],
+            &["up1.sql", "up2.sql", "up3.sql", "up02.sql"],
+        ] {
+            let tempdir = Utf8TempDir::new().unwrap();
+            for filename in invalid_filenames {
+                _ = tokio::fs::File::create(tempdir.path().join(filename))
+                    .await
+                    .unwrap();
+            }
+
+            match all_sql_for_version_migration(tempdir.path()).await {
+                Ok(upgrade) => {
+                    panic!(
+                        "unexpected success on {invalid_filenames:?} \
+                         (produced {upgrade:?})"
+                    );
+                }
+                Err(message) => {
+                    assert!(
+                        message.starts_with("invalid `up*.sql` combination: "),
+                        "message did not start with expected prefix: \
+                         {message:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    // Confirm that `all_sql_for_version_migration` accepts legal collections of
+    // `up*.sql` filenames.
+    #[tokio::test]
+    async fn all_sql_for_version_migration_allows_valid_up_sql_collections() {
+        for filenames in [
+            &["up.sql"] as &[&str],
+            &["up1.sql", "up2.sql"],
+            &[
+                "up01.sql", "up02.sql", "up03.sql", "up04.sql", "up05.sql",
+                "up06.sql", "up07.sql", "up08.sql", "up09.sql", "up10.sql",
+                "up11.sql",
+            ],
+            &["up00001.sql", "up00002.sql", "up00003.sql"],
+        ] {
+            let tempdir = Utf8TempDir::new().unwrap();
+            for filename in filenames {
+                _ = tokio::fs::File::create(tempdir.path().join(filename))
+                    .await
+                    .unwrap();
+            }
+
+            match all_sql_for_version_migration(tempdir.path()).await {
+                Ok(_) => (),
+                Err(message) => {
+                    panic!("unexpected failure on {filenames:?}: {message:?}");
+                }
+            }
+        }
+    }
 
     // Confirms that calling the internal "ensure_schema" function can succeed
     // when the database is already at that version.
@@ -351,9 +654,10 @@ mod test {
 
         let cfg = db::Config { url: crdb.pg_config().clone() };
         let pool = Arc::new(db::Pool::new(&logctx.log, &cfg));
+        let conn = pool.pool().get().await.unwrap();
 
         // Mimic the layout of "schema/crdb".
-        let config_dir = tempfile::TempDir::new().unwrap();
+        let config_dir = Utf8TempDir::new().unwrap();
 
         // Helper to create the version directory and "up.sql".
         let add_upgrade = |version: SemverVersion, sql: String| {
@@ -376,7 +680,7 @@ mod test {
         use db::schema::db_metadata::dsl;
         diesel::update(dsl::db_metadata.filter(dsl::singleton.eq(true)))
             .set(dsl::version.eq(v0.to_string()))
-            .execute_async(pool.pool())
+            .execute_async(&*conn)
             .await
             .expect("Failed to set version back to 0.0.0");
 
@@ -390,54 +694,27 @@ mod test {
         // v0 to v1 to v2, but it doesn't need to re-apply it.
         add_upgrade(v0.clone(), "SELECT true;".to_string()).await;
 
-        // Ensure that all schema changes also validate the expected version
-        // information.
-        let wrap_in_version_checking_txn = |version, target, sql| -> String {
-            format!("BEGIN; \
-                SELECT CAST(\
-                    IF(\
-                        (\
-                            SELECT version = '{version}' and target_version = '{target}'\
-                            FROM omicron.public.db_metadata WHERE singleton = true\
-                        ),\
-                        'true',\
-                        'Invalid starting version for schema change'\
-                    ) AS BOOL\
-                );\
-                {sql};\
-                COMMIT;")
-        };
-
         // This version adds a new table, but it takes a little while.
         //
         // This delay is intentional, so that some Nexus instances issuing
         // the update act quickly, while others lag behind.
         add_upgrade(
             v1.clone(),
-            wrap_in_version_checking_txn(
-                &v0,
-                &v1,
-                "SELECT pg_sleep(RANDOM()); \
-                 CREATE TABLE IF NOT EXISTS widget(); \
-                 SELECT pg_sleep(RANDOM());",
-            ),
+            "SELECT pg_sleep(RANDOM() / 10); \
+             CREATE TABLE IF NOT EXISTS widget(); \
+             SELECT pg_sleep(RANDOM() / 10);"
+                .to_string(),
         )
         .await;
 
         // The table we just created is deleted by a subsequent update.
-        add_upgrade(
-            v2.clone(),
-            wrap_in_version_checking_txn(
-                &v1,
-                &v2,
-                "DROP TABLE IF EXISTS widget;",
-            ),
-        )
-        .await;
+        add_upgrade(v2.clone(), "DROP TABLE IF EXISTS widget;".to_string())
+            .await;
 
         // Show that the datastores can be created concurrently.
-        let config =
-            SchemaConfig { schema_dir: config_dir.path().to_path_buf() };
+        let config = SchemaConfig {
+            schema_dir: config_dir.path().to_path_buf().into_std_path_buf(),
+        };
         let _ = futures::future::join_all((0..10).map(|_| {
             let log = log.clone();
             let pool = pool.clone();
@@ -454,7 +731,7 @@ mod test {
                             "EXISTS (SELECT * FROM pg_tables WHERE tablename = 'widget')"
                         )
                     )
-                    .get_result_async::<bool>(datastore.pool())
+                    .get_result_async::<bool>(&*datastore.pool_connection_for_tests().await.unwrap())
                     .await
                     .expect("Failed to query for table");
                 assert_eq!(result, false, "The 'widget' table should have been deleted, but it exists.\

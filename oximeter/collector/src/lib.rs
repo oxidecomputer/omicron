@@ -4,35 +4,48 @@
 
 //! Implementation of the `oximeter` metric collection server.
 
-// Copyright 2021 Oxide Computer Company
+// Copyright 2023 Oxide Computer Company
 
-use dropshot::{
-    endpoint, ApiDescription, ConfigDropshot, ConfigLogging, HttpError,
-    HttpResponseUpdatedNoContent, HttpServer, HttpServerStarter,
-    RequestContext, TypedBody,
-};
-use internal_dns::resolver::{ResolveError, Resolver};
+use dropshot::ConfigDropshot;
+use dropshot::ConfigLogging;
+use dropshot::HttpError;
+use dropshot::HttpServer;
+use dropshot::HttpServerStarter;
+use internal_dns::resolver::ResolveError;
+use internal_dns::resolver::Resolver;
 use internal_dns::ServiceName;
-use omicron_common::address::{CLICKHOUSE_PORT, NEXUS_INTERNAL_PORT};
+use omicron_common::address::NEXUS_INTERNAL_PORT;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
-use omicron_common::{backoff, FileKv};
-use oximeter::types::{ProducerResults, ProducerResultsItem};
-use oximeter_db::{Client, DbWrite};
-use serde::{Deserialize, Serialize};
-use slog::{debug, error, info, o, trace, warn, Drain, Logger};
-use std::collections::{btree_map::Entry, BTreeMap};
-use std::net::{SocketAddr, SocketAddrV6};
+use omicron_common::backoff;
+use omicron_common::FileKv;
+use serde::Deserialize;
+use serde::Serialize;
+use slog::debug;
+use slog::error;
+use slog::info;
+use slog::o;
+use slog::warn;
+use slog::Drain;
+use slog::Logger;
+use std::net::SocketAddr;
+use std::net::SocketAddrV6;
 use std::path::Path;
 use std::sync::Arc;
-use std::time::Duration;
 use thiserror::Error;
-use tokio::{
-    sync::mpsc, sync::oneshot, sync::Mutex, task::JoinHandle, time::interval,
-};
 use uuid::Uuid;
 
+mod agent;
+mod http_entrypoints;
+mod self_stats;
+mod standalone;
+
+pub use agent::OximeterAgent;
+pub use http_entrypoints::oximeter_api;
+pub use standalone::standalone_nexus_api;
+pub use standalone::Server as StandaloneNexus;
+
 /// Errors collecting metric data
-#[derive(Debug, Clone, Error)]
+#[derive(Debug, Error)]
 pub enum Error {
     #[error("Error running Oximeter collector server: {0}")]
     Server(String),
@@ -45,226 +58,22 @@ pub enum Error {
 
     #[error(transparent)]
     ResolveError(#[from] ResolveError),
+
+    #[error("No producer is registered with ID")]
+    NoSuchProducer(Uuid),
+
+    #[error("Error running standalone")]
+    Standalone(#[from] anyhow::Error),
 }
 
-type CollectionToken = oneshot::Sender<()>;
-
-// Messages for controlling a collection task
-#[derive(Debug)]
-enum CollectionMessage {
-    // Explicit request that the task collect data from its producer
-    //
-    // Also sends a oneshot that is signalled once the task scrapes
-    // data from the Producer, and places it in the Clickhouse server.
-    Collect(CollectionToken),
-    // Request that the task update its interval and the socket address on which it collects data
-    // from its producer.
-    Update(ProducerEndpoint),
-    // Request that the task exit
-    #[allow(dead_code)]
-    Shutdown,
-}
-
-async fn perform_collection(
-    log: &Logger,
-    client: &reqwest::Client,
-    producer: &ProducerEndpoint,
-    outbox: &mpsc::Sender<(Option<CollectionToken>, ProducerResults)>,
-    token: Option<CollectionToken>,
-) {
-    info!(log, "collecting from producer");
-    let res = client
-        .get(format!(
-            "http://{}{}",
-            producer.address,
-            producer.collection_route()
-        ))
-        .send()
-        .await;
-    match res {
-        Ok(res) => {
-            if res.status().is_success() {
-                match res.json::<ProducerResults>().await {
-                    Ok(results) => {
-                        debug!(
-                            log,
-                            "collected {} total results",
-                            results.len();
-                        );
-                        outbox.send((token, results)).await.unwrap();
-                    }
-                    Err(e) => {
-                        warn!(
-                            log,
-                            "failed to collect results from producer: {}",
-                            e.to_string();
-                        );
-                    }
-                }
-            } else {
-                warn!(
-                    log,
-                    "failed to receive metric results from producer";
-                    "status_code" => res.status().as_u16(),
-                );
-            }
-        }
-        Err(e) => {
-            warn!(
-                log,
-                "failed to send collection request to producer: {}",
-                e.to_string();
-            );
-        }
-    }
-}
-
-// Background task used to collect metrics from one producer on an interval.
-//
-// This function is started by the `OximeterAgent`, when a producer is registered. The task loops
-// endlessly, and collects metrics from the assigned producer on a timeout. The assigned agent can
-// also send a `CollectionMessage`, for example to update the collection interval. This is not
-// currently used, but will likely be exposed via control plane interfaces in the future.
-async fn collection_task(
-    log: Logger,
-    mut producer: ProducerEndpoint,
-    mut inbox: mpsc::Receiver<CollectionMessage>,
-    outbox: mpsc::Sender<(Option<CollectionToken>, ProducerResults)>,
-) {
-    let client = reqwest::Client::new();
-    let mut collection_timer = interval(producer.interval);
-    collection_timer.tick().await; // completes immediately
-    debug!(
-        log,
-        "starting oximeter collection task";
-        "interval" => ?producer.interval,
-    );
-
-    loop {
-        tokio::select! {
-            message = inbox.recv() => {
-                match message {
-                    None => {
-                        debug!(log, "collection task inbox closed, shutting down");
-                        return;
-                    }
-                    Some(CollectionMessage::Shutdown) => {
-                        debug!(log, "collection task received shutdown request");
-                        return;
-                    },
-                    Some(CollectionMessage::Collect(token)) => {
-                        debug!(log, "collection task received explicit request to collect");
-                        perform_collection(&log, &client, &producer, &outbox, Some(token)).await;
-                    },
-                    Some(CollectionMessage::Update(new_info)) => {
-                        producer = new_info;
-                        debug!(
-                            log,
-                            "collection task received request to update its producer information";
-                            "interval" => ?producer.interval,
-                            "address" => producer.address,
-                        );
-                        collection_timer = interval(producer.interval);
-                        collection_timer.tick().await; // completes immediately
-                    }
-                }
-            }
-            _ = collection_timer.tick() => {
-                perform_collection(&log, &client, &producer, &outbox, None).await;
-            }
-        }
-    }
-}
-
-// Struct representing a task for collecting metric data from a single producer
-#[derive(Debug)]
-struct CollectionTask {
-    // Channel used to send messages from the agent to the actual task. The task owns the other
-    // side.
-    pub inbox: mpsc::Sender<CollectionMessage>,
-    // Handle to the actual tokio task running the collection loop.
-    #[allow(dead_code)]
-    pub task: JoinHandle<()>,
-}
-
-// Aggregation point for all results, from all collection tasks.
-async fn results_sink(
-    log: Logger,
-    client: Client,
-    batch_size: usize,
-    batch_interval: Duration,
-    mut rx: mpsc::Receiver<(Option<CollectionToken>, ProducerResults)>,
-) {
-    let mut timer = interval(batch_interval);
-    timer.tick().await; // completes immediately
-    let mut batch = Vec::with_capacity(batch_size);
-    loop {
-        let mut collection_token = None;
-        let insert = tokio::select! {
-            _ = timer.tick() => {
-                if batch.is_empty() {
-                    trace!(log, "batch interval expired, but no samples to insert");
-                    false
-                } else {
-                    true
-                }
-            }
-            results = rx.recv() => {
-                match results {
-                    Some((token, results)) => {
-                        let flattened_results = {
-                            let mut flattened = Vec::with_capacity(results.len());
-                            for inner_batch in results.into_iter() {
-                                match inner_batch {
-                                    ProducerResultsItem::Ok(samples) => flattened.extend(samples.into_iter()),
-                                    ProducerResultsItem::Err(e) => {
-                                        debug!(
-                                            log,
-                                            "received error (not samples) from a producer: {}",
-                                            e.to_string()
-                                        );
-                                    }
-                                }
-                            }
-                            flattened
-                        };
-                        batch.extend(flattened_results);
-
-                        collection_token = token;
-                        if collection_token.is_some() {
-                            true
-                        } else {
-                            batch.len() >= batch_size
-                        }
-                    }
-                    None => {
-                        warn!(log, "result queue closed, exiting");
-                        return;
-                    }
-                }
-            }
-        };
-
-        if insert {
-            debug!(log, "inserting {} samples into database", batch.len());
-            match client.insert_samples(&batch).await {
-                Ok(()) => trace!(log, "successfully inserted samples"),
-                Err(e) => {
-                    warn!(
-                        log,
-                        "failed to insert some results into metric DB: {}",
-                        e.to_string()
-                    );
-                }
-            }
-            // TODO-correctness The `insert_samples` call above may fail. The method itself needs
-            // better handling of partially-inserted results in that case, but we may need to retry
-            // or otherwise handle an error here as well.
-            batch.clear();
-        }
-
-        if let Some(token) = collection_token {
-            let _ = token.send(());
+impl From<Error> for HttpError {
+    fn from(e: Error) -> Self {
+        match e {
+            Error::NoSuchProducer(id) => HttpError::for_not_found(
+                None,
+                format!("No such producer: {id}"),
+            ),
+            _ => HttpError::for_internal_error(e.to_string()),
         }
     }
 }
@@ -286,126 +95,22 @@ pub struct DbConfig {
     pub batch_interval: u64,
 }
 
-/// The internal agent the oximeter server uses to collect metrics from producers.
-#[derive(Debug)]
-pub struct OximeterAgent {
-    /// The collector ID for this agent
-    pub id: Uuid,
-    log: Logger,
-    // Handle to the TX-side of a channel for collecting results from the collection tasks
-    result_sender: mpsc::Sender<(Option<CollectionToken>, ProducerResults)>,
-    // The actual tokio tasks running the collection on a timer.
-    collection_tasks: Arc<Mutex<BTreeMap<Uuid, CollectionTask>>>,
-}
+impl DbConfig {
+    /// Default number of samples to wait for before inserting a batch into
+    /// ClickHouse.
+    pub const DEFAULT_BATCH_SIZE: usize = 1000;
 
-impl OximeterAgent {
-    /// Construct a new agent with the given ID and logger.
-    pub async fn with_id(
-        id: Uuid,
-        db_config: DbConfig,
-        resolver: &Resolver,
-        log: &Logger,
-    ) -> Result<Self, Error> {
-        let (result_sender, result_receiver) = mpsc::channel(8);
-        let log = log.new(o!("component" => "oximeter-agent", "collector_id" => id.to_string()));
-        let insertion_log = log.new(o!("component" => "results-sink"));
+    /// Default number of seconds to wait before inserting a batch into
+    /// ClickHouse.
+    pub const DEFAULT_BATCH_INTERVAL: u64 = 5;
 
-        // Construct the ClickHouse client first, propagate an error if we can't reach the
-        // database.
-        let db_address = if let Some(address) = db_config.address {
-            address
-        } else {
-            SocketAddr::new(
-                resolver.lookup_ip(ServiceName::Clickhouse).await?,
-                CLICKHOUSE_PORT,
-            )
-        };
-        let client = Client::new(db_address, &log);
-        client.init_db().await?;
-
-        // Spawn the task for aggregating and inserting all metrics
-        tokio::spawn(async move {
-            results_sink(
-                insertion_log,
-                client,
-                db_config.batch_size,
-                Duration::from_secs(db_config.batch_interval),
-                result_receiver,
-            )
-            .await
-        });
-        Ok(Self {
-            id,
-            log,
-            result_sender,
-            collection_tasks: Arc::new(Mutex::new(BTreeMap::new())),
-        })
-    }
-
-    /// Register a new producer with this oximeter instance.
-    pub async fn register_producer(
-        &self,
-        info: ProducerEndpoint,
-    ) -> Result<(), Error> {
-        let id = info.id;
-        match self.collection_tasks.lock().await.entry(id) {
-            Entry::Vacant(value) => {
-                info!(self.log, "registered new metric producer";
-                      "producer_id" => id.to_string(),
-                      "address" => info.address,
-                );
-
-                // Build channel to control the task and receive results.
-                let (tx, rx) = mpsc::channel(4);
-                let q = self.result_sender.clone();
-                let log = self.log.new(o!("component" => "collection-task", "producer_id" => id.to_string()));
-                let task = tokio::spawn(async move {
-                    collection_task(log, info, rx, q).await;
-                });
-                value.insert(CollectionTask { inbox: tx, task });
-            }
-            Entry::Occupied(value) => {
-                info!(
-                    self.log,
-                    "received request to register existing metric producer, updating collection information";
-                   "producer_id" => id.to_string(),
-                   "interval" => ?info.interval,
-                   "address" => info.address,
-                );
-                value
-                    .get()
-                    .inbox
-                    .send(CollectionMessage::Update(info))
-                    .await
-                    .unwrap();
-            }
+    // Construct config with an address, using the defaults for other fields
+    fn with_address(address: SocketAddr) -> Self {
+        Self {
+            address: Some(address),
+            batch_size: Self::DEFAULT_BATCH_SIZE,
+            batch_interval: Self::DEFAULT_BATCH_INTERVAL,
         }
-        Ok(())
-    }
-
-    /// Forces a collection from all producers.
-    ///
-    /// Returns once all those values have been inserted into Clickhouse,
-    /// or an error occurs trying to perform the collection.
-    pub async fn force_collection(&self) {
-        let mut collection_oneshots = vec![];
-        let collection_tasks = self.collection_tasks.lock().await;
-        for task in collection_tasks.iter() {
-            let (tx, rx) = oneshot::channel();
-            // Scrape from each producer, into oximeter...
-            task.1.inbox.send(CollectionMessage::Collect(tx)).await.unwrap();
-            // ... and keep track of the token that indicates once the metric
-            // has made it into Clickhouse.
-            collection_oneshots.push(rx);
-        }
-        drop(collection_tasks);
-
-        // Only return once all producers finish processing the token we
-        // provided.
-        //
-        // NOTE: This can either mean that the collection completed
-        // successfully, or an error occurred in the collection pathway.
-        futures::future::join_all(collection_oneshots).await;
     }
 }
 
@@ -435,6 +140,7 @@ impl Config {
     }
 }
 
+/// Arguments for running the `oximeter` collector.
 pub struct OximeterArguments {
     pub id: Uuid,
     pub address: SocketAddrV6,
@@ -442,7 +148,7 @@ pub struct OximeterArguments {
 
 /// A server used to collect metrics from components in the control plane.
 pub struct Oximeter {
-    _agent: Arc<OximeterAgent>,
+    agent: Arc<OximeterAgent>,
     server: HttpServer<Arc<OximeterAgent>>,
 }
 
@@ -466,6 +172,9 @@ impl Oximeter {
     ///
     /// This can be used to override / ignore the logging configuration in
     /// `config`, using `log` instead.
+    ///
+    /// Note that this blocks until the ClickHouse database is available **and
+    /// at the expected version**.
     pub async fn with_logger(
         config: &Config,
         args: &OximeterArguments,
@@ -490,14 +199,21 @@ impl Oximeter {
         let make_agent = || async {
             debug!(log, "creating ClickHouse client");
             Ok(Arc::new(
-                OximeterAgent::with_id(args.id, config.db, &resolver, &log)
-                    .await?,
+                OximeterAgent::with_id(
+                    args.id,
+                    args.address,
+                    config.db,
+                    &resolver,
+                    &log,
+                )
+                .await?,
             ))
         };
         let log_client_failure = |error, delay| {
             warn!(
                 log,
-                "failed to initialize ClickHouse database, will retry in {:?}", delay;
+                "failed to create ClickHouse client";
+                "retry_after" => ?delay,
                 "error" => ?error,
             );
         };
@@ -567,7 +283,73 @@ impl Oximeter {
         .expect("Expected an infinite retry loop contacting Nexus");
 
         info!(log, "oximeter registered with nexus"; "id" => ?agent.id);
-        Ok(Self { _agent: agent, server })
+        Ok(Self { agent, server })
+    }
+
+    /// Create a new `oximeter` collector running in standalone mode.
+    pub async fn new_standalone(
+        log: &Logger,
+        args: &OximeterArguments,
+        nexus: SocketAddr,
+        clickhouse: Option<SocketAddr>,
+    ) -> Result<Self, Error> {
+        let db_config = clickhouse.map(DbConfig::with_address);
+        let agent = Arc::new(
+            OximeterAgent::new_standalone(
+                args.id,
+                args.address,
+                db_config,
+                &log,
+            )
+            .await?,
+        );
+
+        let dropshot_log = log.new(o!("component" => "dropshot"));
+        let server = HttpServerStarter::new(
+            &ConfigDropshot {
+                bind_address: SocketAddr::V6(args.address),
+                ..Default::default()
+            },
+            oximeter_api(),
+            Arc::clone(&agent),
+            &dropshot_log,
+        )
+        .map_err(|e| Error::Server(e.to_string()))?
+        .start();
+        info!(log, "started oximeter standalone server");
+
+        // Notify the standalone nexus.
+        let client = reqwest::Client::new();
+        let notify_nexus = || async {
+            debug!(log, "contacting nexus");
+            client
+                .post(format!("http://{}/metrics/collectors", nexus))
+                .json(&nexus_client::types::OximeterInfo {
+                    address: server.local_addr().to_string(),
+                    collector_id: agent.id,
+                })
+                .send()
+                .await
+                .map_err(|e| backoff::BackoffError::transient(e.to_string()))?
+                .error_for_status()
+                .map_err(|e| backoff::BackoffError::transient(e.to_string()))
+        };
+        let log_notification_failure = |error, delay| {
+            warn!(
+                log,
+                "failed to contact nexus, will retry in {:?}", delay;
+                "error" => ?error
+            );
+        };
+        backoff::retry_notify(
+            backoff::retry_policy_internal_service(),
+            notify_nexus,
+            log_notification_failure,
+        )
+        .await
+        .expect("Expected an infinite retry loop contacting Nexus");
+
+        Ok(Self { agent, server })
     }
 
     /// Serve requests forever, consuming the server.
@@ -587,30 +369,18 @@ impl Oximeter {
     pub async fn force_collect(&self) {
         self.server.app_private().force_collection().await
     }
-}
 
-// Build the HTTP API internal to the control plane
-pub fn oximeter_api() -> ApiDescription<Arc<OximeterAgent>> {
-    let mut api = ApiDescription::new();
-    api.register(producers_post)
-        .expect("Could not register producers_post API handler");
-    api
-}
+    /// List producers.
+    pub async fn list_producers(
+        &self,
+        start: Option<Uuid>,
+        limit: usize,
+    ) -> Vec<ProducerEndpoint> {
+        self.agent.list_producers(start, limit).await
+    }
 
-// Handle a request from Nexus to register a new producer with this collector.
-#[endpoint {
-    method = POST,
-    path = "/producers",
-}]
-async fn producers_post(
-    request_context: RequestContext<Arc<OximeterAgent>>,
-    body: TypedBody<ProducerEndpoint>,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let agent = request_context.context();
-    let producer_info = body.into_inner();
-    agent
-        .register_producer(producer_info)
-        .await
-        .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
-    Ok(HttpResponseUpdatedNoContent())
+    /// Delete a producer by ID, stopping its collection task.
+    pub async fn delete_producer(&self, id: Uuid) -> Result<(), Error> {
+        self.agent.delete_producer(id).await
+    }
 }

@@ -1,8 +1,6 @@
 -- DO NOT EDIT THIS SCHEMA.
 -- This file is a point-in-time snapshot of revision "1.0.0" of the database.
 
-BEGIN;
-
 /*
  * We assume the database and user do not already exist so that we don't
  * inadvertently clobber what's there.  If they might exist, the user has to
@@ -2524,5 +2522,3 @@ INSERT INTO omicron.public.db_metadata (
 ) VALUES
     ( TRUE, NOW(), NOW(), '1.0.0', NULL)
 ON CONFLICT DO NOTHING;
-
-COMMIT;

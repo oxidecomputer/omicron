@@ -2,6 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+// TODO: Remove when https://github.com/frozenlib/test-strategy/commit/c0ca38711757d2b51f74b28e80ef4c78275c284f
+// is pulled into a new published version of "test_strategy" that we can use.
+#![allow(clippy::arc_with_non_send_sync)]
+
 use std::{
     collections::BTreeMap,
     fmt,

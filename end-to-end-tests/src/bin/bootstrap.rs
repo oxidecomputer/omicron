@@ -32,7 +32,7 @@ async fn main() -> Result<()> {
     let (first, last) = get_system_ip_pool().await?;
 
     // ===== CREATE IP POOL ===== //
-    eprintln!("creating IP pool...");
+    eprintln!("creating IP pool... {:?} - {:?}", first, last);
     client
         .ip_pool_range_add()
         .pool("default")

@@ -9,11 +9,11 @@ use crate::ui::defaults::colors::*;
 use crate::ui::defaults::style;
 use crate::ui::widgets::Fade;
 use crate::{Action, Cmd, Frame, State, Term};
+use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
+use ratatui::style::{Modifier, Style};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, Paragraph};
 use slog::{o, Logger};
-use tui::layout::{Alignment, Constraint, Direction, Layout, Rect};
-use tui::style::{Modifier, Style};
-use tui::text::{Span, Spans};
-use tui::widgets::{Block, BorderType, Borders, List, ListItem, Paragraph};
 use wicketd_client::types::GetLocationResponse;
 
 /// The [`MainScreen`] is the primary UI element of the terminal, covers the
@@ -23,7 +23,7 @@ use wicketd_client::types::GetLocationResponse;
 /// This structure allows us to maintain similar styling and navigation
 /// throughout wicket with a minimum of code.
 ///
-/// Specific functionality is put inside [`Pane`]s, which can be customized
+/// Specific functionality is put inside Panes, which can be customized
 /// as needed.
 pub struct MainScreen {
     #[allow(unused)]
@@ -204,7 +204,7 @@ impl MainScreen {
         spans.push(Span::styled(" | ", style::divider()));
         spans.push(Span::styled("MGS: ", style::service()));
         spans.extend_from_slice(&mgs_spans);
-        let main = Paragraph::new(Spans::from(spans));
+        let main = Paragraph::new(Line::from(spans));
         frame.render_widget(main, rect);
 
         let system_version = state
@@ -213,7 +213,7 @@ impl MainScreen {
             .as_ref()
             .map_or_else(|| "UNKNOWN".to_string(), |v| v.to_string());
 
-        let test = Paragraph::new(Spans::from(vec![
+        let test = Paragraph::new(Line::from(vec![
             Span::styled(
                 "UPDATE VERSION: ",
                 Style::default().fg(TUI_GREEN_DARK),

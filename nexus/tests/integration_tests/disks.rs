@@ -6,12 +6,13 @@
 
 use super::metrics::{get_latest_silo_metric, query_for_metrics};
 use chrono::Utc;
-use crucible_agent_client::types::State as RegionState;
 use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use http::method::Method;
 use http::StatusCode;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::fixed_data::{silo::SILO_ID, FLEET_ID};
+use nexus_db_queries::db::lookup::LookupPath;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::Collection;
 use nexus_test_utils::http_testing::NexusRequest;
@@ -25,6 +26,7 @@ use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::populate_ip_pool;
 use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::params;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskState;
@@ -34,10 +36,8 @@ use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::limits::MAX_DISK_SIZE_BYTES;
 use omicron_common::limits::MIN_DISK_SIZE_BYTES;
-use omicron_nexus::db::fixed_data::{silo::SILO_ID, FLEET_ID};
-use omicron_nexus::db::lookup::LookupPath;
+use omicron_nexus::Nexus;
 use omicron_nexus::TestInterfaces as _;
-use omicron_nexus::{external_api::params, Nexus};
 use oximeter::types::Datum;
 use oximeter::types::Measurement;
 use sled_agent_client::TestInterfaces as _;
@@ -173,7 +173,11 @@ async fn set_instance_state(
 }
 
 async fn instance_simulate(nexus: &Arc<Nexus>, id: &Uuid) {
-    let sa = nexus.instance_sled_by_id(id).await.unwrap();
+    let sa = nexus
+        .instance_sled_by_id(id)
+        .await
+        .unwrap()
+        .expect("instance must be on a sled to simulate a state change");
     sa.instance_finish_transition(*id).await;
 }
 
@@ -729,38 +733,10 @@ async fn test_disk_region_creation_failure(
     .await
     .unwrap();
 
-    // After the failed allocation, the disk should not exist.
+    // After the failed allocation, the disk should be Faulted
     let disks = disks_list(&client, &disks_url).await;
-    assert_eq!(disks.len(), 0);
-
-    // After the failed allocation, regions will exist, but be "Failed".
-    for zpool in &test.zpools {
-        for dataset in &zpool.datasets {
-            let crucible = test
-                .sled_agent
-                .get_crucible_dataset(zpool.id, dataset.id)
-                .await;
-            let regions = crucible.list().await;
-            assert_eq!(regions.len(), 1);
-            assert_eq!(regions[0].state, RegionState::Failed);
-        }
-    }
-
-    // Validate that the underlying regions were released as a part of
-    // unwinding the failed disk allocation, by performing another disk
-    // allocation that should succeed.
-    for zpool in &test.zpools {
-        for dataset in &zpool.datasets {
-            let crucible = test
-                .sled_agent
-                .get_crucible_dataset(zpool.id, dataset.id)
-                .await;
-            crucible
-                .set_create_callback(Box::new(|_| RegionState::Created))
-                .await;
-        }
-    }
-    let _ = create_disk(client, PROJECT_NAME, DISK_NAME).await;
+    assert_eq!(disks.len(), 1);
+    assert_eq!(disks[0].state, DiskState::Faulted);
 }
 
 // Tests that invalid block sizes are rejected
@@ -1266,6 +1242,138 @@ async fn test_disk_virtual_provisioning_collection(
     );
 }
 
+#[nexus_test]
+async fn test_disk_virtual_provisioning_collection_failed_delete(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    // Confirm that there's a panic deleting a project if a disk deletion fails
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.apictx().nexus;
+    let datastore = nexus.datastore();
+
+    let disk_test = DiskTest::new(&cptestctx).await;
+
+    populate_ip_pool(&client, "default", None).await;
+    let project_id1 = create_project(client, PROJECT_NAME).await.identity.id;
+
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    // Create a 1 GB disk
+    let disk_size = ByteCount::from_gibibytes_u32(1);
+    let disks_url = get_disks_url();
+    let disk_one = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "disk-one".parse().unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_source: params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(512).unwrap(),
+        },
+        size: disk_size,
+    };
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&disk_one))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("unexpected failure creating 1 GiB disk");
+
+    // Assert correct virtual provisioning collection numbers
+    let virtual_provisioning_collection = datastore
+        .virtual_provisioning_collection_get(&opctx, project_id1)
+        .await
+        .unwrap();
+    assert_eq!(
+        virtual_provisioning_collection.virtual_disk_bytes_provisioned.0,
+        disk_size
+    );
+
+    // Set the third agent to fail when deleting regions
+    let zpool = &disk_test.zpools[2];
+    let dataset = &zpool.datasets[0];
+    disk_test
+        .sled_agent
+        .get_crucible_dataset(zpool.id, dataset.id)
+        .await
+        .set_region_deletion_error(true)
+        .await;
+
+    // Delete the disk - expect this to fail
+    let disk_url = format!("/v1/disks/{}?project={}", "disk-one", PROJECT_NAME);
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::DELETE, &disk_url)
+            .expect_status(Some(StatusCode::INTERNAL_SERVER_ERROR)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("unexpected success deleting 1 GiB disk");
+
+    // The virtual provisioning collection numbers haven't changed
+    let virtual_provisioning_collection = datastore
+        .virtual_provisioning_collection_get(&opctx, project_id1)
+        .await
+        .unwrap();
+    assert_eq!(
+        virtual_provisioning_collection.virtual_disk_bytes_provisioned.0,
+        disk_size
+    );
+
+    // And the disk is now faulted
+    let disk = disk_get(&client, &disk_url).await;
+    assert_eq!(disk.state, DiskState::Faulted);
+
+    // Set the third agent to respond normally
+    disk_test
+        .sled_agent
+        .get_crucible_dataset(zpool.id, dataset.id)
+        .await
+        .set_region_deletion_error(false)
+        .await;
+
+    // Request disk delete again
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::DELETE, &disk_url)
+            .expect_status(Some(StatusCode::NO_CONTENT)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("unexpected failure deleting 1 GiB disk");
+
+    // Delete the project's default VPC subnet and VPC
+    let subnet_url =
+        format!("/v1/vpc-subnets/default?project={}&vpc=default", PROJECT_NAME);
+    NexusRequest::object_delete(&client, &subnet_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to make request");
+
+    let vpc_url = format!("/v1/vpcs/default?project={}", PROJECT_NAME);
+    NexusRequest::object_delete(&client, &vpc_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to make request");
+
+    // The project can be deleted now
+    let url = format!("/v1/projects/{}", PROJECT_NAME);
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::DELETE, &url)
+            .expect_status(Some(StatusCode::NO_CONTENT)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("unexpected failure deleting project");
+}
+
 // Test disk size accounting
 #[nexus_test]
 async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
@@ -1695,6 +1803,84 @@ async fn test_disk_create_for_importing(cptestctx: &ControlPlaneTestContext) {
     let disks = disks_list(&client, &disks_url).await;
     assert_eq!(disks.len(), 1);
     disks_eq(&disks[0], &disk);
+}
+
+#[nexus_test]
+async fn test_project_delete_disk_no_auth_idempotent(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    DiskTest::new(&cptestctx).await;
+    create_org_and_project(client).await;
+
+    // Create a disk
+    let disks_url = get_disks_url();
+
+    let new_disk = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: DISK_NAME.parse().unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_source: params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(512).unwrap(),
+        },
+        size: ByteCount::from_gibibytes_u32(1),
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&new_disk))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<Disk>()
+    .unwrap();
+
+    let disk_url = get_disk_url(DISK_NAME);
+    let disk = disk_get(&client, &disk_url).await;
+    assert_eq!(disk.state, DiskState::Detached);
+
+    // Call project_delete_disk_no_auth twice, ensuring that the disk is either
+    // there before deleting and not afterwards.
+
+    let nexus = &cptestctx.server.apictx().nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+        .disk_id(disk.identity.id)
+        .fetch()
+        .await
+        .unwrap();
+
+    assert_eq!(db_disk.id(), disk.identity.id);
+
+    datastore
+        .project_delete_disk_no_auth(
+            &disk.identity.id,
+            &[DiskState::Detached, DiskState::Faulted],
+        )
+        .await
+        .unwrap();
+
+    let r = LookupPath::new(&opctx, &datastore)
+        .disk_id(disk.identity.id)
+        .fetch()
+        .await;
+
+    assert!(r.is_err());
+
+    datastore
+        .project_delete_disk_no_auth(
+            &disk.identity.id,
+            &[DiskState::Detached, DiskState::Faulted],
+        )
+        .await
+        .unwrap();
 }
 
 async fn disk_get(client: &ClientTestContext, disk_url: &str) -> Disk {

@@ -4,23 +4,23 @@
 
 //! Information about all top-level Oxide components (sleds, switches, PSCs)
 
-use anyhow::anyhow;
+use anyhow::{bail, Result};
 use omicron_common::api::internal::nexus::KnownArtifactKind;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::Display;
 use std::iter::Iterator;
-use tui::text::Text;
+use wicket_common::rack_update::SpType;
 use wicketd_client::types::{
     RackV1Inventory, RotInventory, RotSlot, SpComponentCaboose,
-    SpComponentInfo, SpIgnition, SpState, SpType,
+    SpComponentInfo, SpIgnition, SpState,
 };
 
 pub static ALL_COMPONENT_IDS: Lazy<Vec<ComponentId>> = Lazy::new(|| {
     (0..=31u8)
-        .map(|i| ComponentId::Sled(i))
-        .chain((0..=1u8).map(|i| ComponentId::Switch(i)))
+        .map(ComponentId::Sled)
+        .chain((0..=1u8).map(ComponentId::Switch))
         // Currently shipping racks don't have PSC 1.
         .chain(std::iter::once(ComponentId::Psc(0)))
         .collect()
@@ -66,26 +66,13 @@ impl Inventory {
             };
 
             // Validate and get a ComponentId
-            let (id, component) = match type_ {
-                SpType::Sled => {
-                    if i > 31 {
-                        return Err(anyhow!("Invalid sled slot: {}", i));
-                    }
-                    (ComponentId::Sled(i as u8), Component::Sled(sp))
-                }
-                SpType::Switch => {
-                    if i > 1 {
-                        return Err(anyhow!("Invalid switch slot: {}", i));
-                    }
-                    (ComponentId::Switch(i as u8), Component::Switch(sp))
-                }
-                SpType::Power => {
-                    if i > 1 {
-                        return Err(anyhow!("Invalid power shelf slot: {}", i));
-                    }
-                    (ComponentId::Psc(i as u8), Component::Psc(sp))
-                }
+            let id = ComponentId::from_sp_type_and_slot(type_, i)?;
+            let component = match type_ {
+                SpType::Sled => Component::Sled(sp),
+                SpType::Switch => Component::Switch(sp),
+                SpType::Power => Component::Psc(sp),
             };
+
             new_inventory.inventory.insert(id, component);
 
             // TODO: Plumb through real power state
@@ -149,7 +136,7 @@ pub enum Component {
 }
 
 fn version_or_unknown(caboose: Option<&SpComponentCaboose>) -> String {
-    caboose.and_then(|c| c.version.as_deref()).unwrap_or("UNKNOWN").to_string()
+    caboose.map(|c| c.version.as_str()).unwrap_or("UNKNOWN").to_string()
 }
 
 impl Component {
@@ -186,7 +173,7 @@ impl Component {
     }
 }
 
-// The component type and its slot.
+/// The component type and its slot.
 #[derive(
     Debug,
     Clone,
@@ -206,6 +193,49 @@ pub enum ComponentId {
 }
 
 impl ComponentId {
+    /// The maximum possible sled ID.
+    pub const MAX_SLED_ID: u8 = 31;
+
+    /// The maximum possible switch ID.
+    pub const MAX_SWITCH_ID: u8 = 1;
+
+    /// The maximum possible power shelf ID.
+    ///
+    /// Currently shipping racks don't have PSC 1.
+    pub const MAX_PSC_ID: u8 = 0;
+
+    pub fn new_sled(slot: u8) -> Result<Self> {
+        if slot > Self::MAX_SLED_ID {
+            bail!("Invalid sled slot: {}", slot);
+        }
+        Ok(Self::Sled(slot))
+    }
+
+    pub fn new_switch(slot: u8) -> Result<Self> {
+        if slot > Self::MAX_SWITCH_ID {
+            bail!("Invalid switch slot: {}", slot);
+        }
+        Ok(Self::Switch(slot))
+    }
+
+    pub fn new_psc(slot: u8) -> Result<Self> {
+        if slot > Self::MAX_PSC_ID {
+            bail!("Invalid power shelf slot: {}", slot);
+        }
+        Ok(Self::Psc(slot))
+    }
+
+    pub fn from_sp_type_and_slot(sp_type: SpType, slot: u32) -> Result<Self> {
+        let slot = slot.try_into().map_err(|_| {
+            anyhow::anyhow!("invalid slot (must fit in a u8): {}", slot)
+        })?;
+        match sp_type {
+            SpType::Sled => Self::new_sled(slot),
+            SpType::Switch => Self::new_switch(slot),
+            SpType::Power => Self::new_psc(slot),
+        }
+    }
+
     pub fn name(&self) -> String {
         self.to_string()
     }
@@ -225,21 +255,22 @@ impl ComponentId {
             ComponentId::Psc(_) => KnownArtifactKind::PscRot,
         }
     }
-}
 
-impl Display for ComponentId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ComponentId::Sled(i) => write!(f, "SLED {}", i),
-            ComponentId::Switch(i) => write!(f, "SWITCH {}", i),
-            ComponentId::Psc(i) => write!(f, "PSC {}", i),
-        }
+    pub fn to_string_uppercase(&self) -> String {
+        let mut s = self.to_string();
+        s.make_ascii_uppercase();
+        s
     }
 }
 
-impl From<ComponentId> for Text<'_> {
-    fn from(value: ComponentId) -> Self {
-        value.to_string().into()
+/// Prints the component type in standard case.
+impl Display for ComponentId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ComponentId::Sled(i) => write!(f, "sled {}", i),
+            ComponentId::Switch(i) => write!(f, "switch {}", i),
+            ComponentId::Psc(i) => write!(f, "PSC {}", i),
+        }
     }
 }
 
@@ -284,5 +315,17 @@ impl PowerState {
             PowerState::A3 => "commanded off",
             PowerState::A4 => "mechanical off (unplugged)",
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn component_id_display() {
+        assert_eq!(ComponentId::Sled(0).to_string(), "sled 0");
+        assert_eq!(ComponentId::Switch(1).to_string(), "switch 1");
+        assert_eq!(ComponentId::Psc(2).to_string(), "PSC 2");
     }
 }

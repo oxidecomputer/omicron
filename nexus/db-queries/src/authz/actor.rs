@@ -72,9 +72,12 @@ impl AuthenticatedActor {
     /// this actor's Silo
     pub fn confers_fleet_role(&self, fleet_role_str: &str) -> Vec<String> {
         let Ok(fleet_role) = FleetRole::from_database_string(fleet_role_str)
-            else { return vec![] };
-        let Some(silo_policy) = self.silo_policy.as_ref()
-            else { return vec![] };
+        else {
+            return vec![];
+        };
+        let Some(silo_policy) = self.silo_policy.as_ref() else {
+            return vec![];
+        };
         silo_policy
             .mapped_fleet_roles()
             .into_iter()

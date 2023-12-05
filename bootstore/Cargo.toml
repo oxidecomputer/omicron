@@ -5,16 +5,14 @@ version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
 
-[build-dependencies.omicron-rpaths]
-path = "../rpaths"
+[build-dependencies]
+omicron-rpaths.workspace = true
 
 [dependencies]
 bytes.workspace = true
 camino.workspace = true
-camino-tempfile.workspace = true
 chacha20poly1305.workspace = true
 ciborium.workspace = true
-curve25519-dalek.workspace = true
 derive_more.workspace = true
 hex.workspace = true
 hkdf.workspace = true
@@ -29,7 +27,7 @@ slog.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 uuid.workspace = true
-vsss-rs = { version = "3.2.0", features = ["std", "curve25519"] }
+vsss-rs = { version = "3.3.1", features = ["std", "curve25519"] }
 zeroize.workspace = true
 
 # See omicron-rpaths for more about the "pq-sys" dependency.
@@ -38,9 +36,11 @@ zeroize.workspace = true
 # utils`. Unfortunately, it doesn't appear possible to put the `pq-sys` dep
 # only in `[dev-dependencies]`.
 pq-sys = "*"
+omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 assert_matches.workspace = true
+camino-tempfile.workspace = true
 omicron-test-utils.workspace = true
 proptest.workspace = true
 slog-async.workspace = true

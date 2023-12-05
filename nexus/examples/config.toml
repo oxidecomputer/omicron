@@ -92,3 +92,23 @@ dns_external.max_concurrent_server_updates = 5
 # certificates it will take _other_ Nexus instances to notice and stop serving
 # them (on a sunny day).
 external_endpoints.period_secs = 60
+nat_cleanup.period_secs = 30
+# How frequently to collect hardware/software inventory from the whole system
+# (even if we don't have reason to believe anything has changed).
+inventory.period_secs = 600
+# Maximum number of past collections to keep in the database
+inventory.nkeep = 5
+# Disable inventory collection altogether (for emergencies)
+inventory.disable = false
+phantom_disks.period_secs = 30
+
+[default_region_allocation_strategy]
+# allocate region on 3 random distinct zpools, on 3 random distinct sleds.
+type = "random_with_distinct_sleds"
+
+# the same as random_with_distinct_sleds, but without requiring distinct sleds
+# type = "random"
+
+# setting `seed` to a fixed value will make dataset selection ordering use the
+# same shuffling order for every region allocation.
+# seed = 0

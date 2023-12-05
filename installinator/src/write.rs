@@ -122,8 +122,9 @@ impl WriteDestination {
                     );
 
                     let zpool_name = disk.zpool_name().clone();
-                    let control_plane_dir = zpool_name
-                        .dataset_mountpoint(sled_hardware::INSTALL_DATASET);
+                    let control_plane_dir = zpool_name.dataset_mountpoint(
+                        sled_storage::dataset::INSTALL_DATASET,
+                    );
 
                     match drives.entry(slot) {
                         Entry::Vacant(entry) => {
@@ -953,7 +954,9 @@ mod tests {
         Event, InstallinatorCompletionMetadata, InstallinatorComponent,
         InstallinatorStepId, StepEventKind, StepOutcome,
     };
-    use omicron_common::api::internal::nexus::KnownArtifactKind;
+    use omicron_common::{
+        api::internal::nexus::KnownArtifactKind, update::ArtifactKind,
+    };
     use omicron_test_utils::dev::test_setup_log;
     use partial_io::{
         proptest_types::{
@@ -1072,7 +1075,7 @@ mod tests {
             data2.into_iter().map(Bytes::from).collect();
 
         let host_id = ArtifactHashId {
-            kind: KnownArtifactKind::Host.into(),
+            kind: ArtifactKind::HOST_PHASE_2,
             hash: {
                 // The `validate_written_host_phase_2_hash()` will fail unless
                 // we give the actual hash of the host phase 2 data, so compute

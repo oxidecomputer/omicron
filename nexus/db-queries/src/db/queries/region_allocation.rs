@@ -6,7 +6,6 @@
 
 use crate::db::alias::ExpressionAlias;
 use crate::db::cast_uuid_as_bytea::CastUuidToBytea;
-use crate::db::datastore::RegionAllocationStrategy;
 use crate::db::datastore::REGION_REDUNDANCY_THRESHOLD;
 use crate::db::model::{Dataset, DatasetKind, Region};
 use crate::db::pool::DbConnection;
@@ -15,6 +14,7 @@ use crate::db::true_or_cast_error::{matches_sentinel, TrueOrCastError};
 use db_macros::Subquery;
 use diesel::pg::Pg;
 use diesel::query_builder::{AstPass, Query, QueryFragment, QueryId};
+use diesel::result::Error as DieselError;
 use diesel::PgBinaryExpressionMethods;
 use diesel::{
     sql_types, BoolExpressionMethods, Column, CombineDsl, ExpressionMethods,
@@ -24,10 +24,11 @@ use diesel::{
 use nexus_db_model::queries::region_allocation::{
     candidate_datasets, candidate_regions, candidate_zpools, cockroach_md5,
     do_insert, inserted_regions, old_regions, old_zpool_usage,
-    proposed_dataset_changes, updated_datasets,
+    proposed_dataset_changes, shuffled_candidate_datasets, updated_datasets,
 };
 use nexus_db_model::schema;
 use omicron_common::api::external;
+use omicron_common::nexus_config::RegionAllocationStrategy;
 
 const NOT_ENOUGH_DATASETS_SENTINEL: &'static str = "Not enough datasets";
 const NOT_ENOUGH_ZPOOL_SPACE_SENTINEL: &'static str = "Not enough space";
@@ -36,7 +37,7 @@ const NOT_ENOUGH_UNIQUE_ZPOOLS_SENTINEL: &'static str =
 
 /// Translates a generic pool error to an external error based
 /// on messages which may be emitted during region provisioning.
-pub fn from_pool(e: async_bb8_diesel::PoolError) -> external::Error {
+pub fn from_diesel(e: DieselError) -> external::Error {
     use crate::db::error;
 
     let sentinels = [
@@ -53,7 +54,7 @@ pub fn from_pool(e: async_bb8_diesel::PoolError) -> external::Error {
             }
             NOT_ENOUGH_ZPOOL_SPACE_SENTINEL => {
                 return external::Error::unavail(
-                    "Not enough zpool space to allocate disks",
+                    "Not enough zpool space to allocate disks. There may not be enough disks with space for the requested region. You may also see this if your rack is in a degraded state, or you're running the default multi-rack topology configuration in a 1-sled development environment.",
                 );
             }
             NOT_ENOUGH_UNIQUE_ZPOOLS_SENTINEL => {
@@ -66,7 +67,7 @@ pub fn from_pool(e: async_bb8_diesel::PoolError) -> external::Error {
         }
     }
 
-    error::public_error_from_diesel_pool(e, error::ErrorHandler::Server)
+    error::public_error_from_diesel(e, error::ErrorHandler::Server)
 }
 
 /// A subquery to find all old regions associated with a particular volume.
@@ -91,6 +92,8 @@ impl OldRegions {
 /// This implicitly distinguishes between "M.2s" and "U.2s" -- Nexus needs to
 /// determine during dataset provisioning which devices should be considered for
 /// usage as Crucible storage.
+///
+/// We select only one dataset from each zpool.
 #[derive(Subquery, QueryId)]
 #[subquery(name = candidate_datasets)]
 struct CandidateDatasets {
@@ -98,71 +101,65 @@ struct CandidateDatasets {
 }
 
 impl CandidateDatasets {
-    fn new(
-        allocation_strategy: &RegionAllocationStrategy,
-        candidate_zpools: &CandidateZpools,
-    ) -> Self {
+    fn new(candidate_zpools: &CandidateZpools, seed: u128) -> Self {
         use crate::db::schema::dataset::dsl as dataset_dsl;
         use candidate_zpools::dsl as candidate_zpool_dsl;
 
-        let query = match allocation_strategy {
-            #[cfg(test)]
-            RegionAllocationStrategy::LeastUsedDisk => {
-                let query: Box<
-                    dyn CteQuery<SqlType = candidate_datasets::SqlType>,
-                > = Box::new(
-                    dataset_dsl::dataset
-                        .inner_join(
-                            candidate_zpools
-                                .query_source()
-                                .on(dataset_dsl::pool_id
-                                    .eq(candidate_zpool_dsl::pool_id)),
-                        )
-                        .filter(dataset_dsl::time_deleted.is_null())
-                        .filter(dataset_dsl::size_used.is_not_null())
-                        .filter(dataset_dsl::kind.eq(DatasetKind::Crucible))
-                        .order(dataset_dsl::size_used.asc())
-                        .limit(REGION_REDUNDANCY_THRESHOLD.try_into().unwrap())
-                        .select((dataset_dsl::id, dataset_dsl::pool_id)),
-                );
-                query
-            }
-            RegionAllocationStrategy::Random(seed) => {
-                let seed = seed.unwrap_or_else(|| {
-                    std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap()
-                        .as_nanos()
-                });
+        let seed_bytes = seed.to_le_bytes();
 
-                let seed_bytes = seed.to_le_bytes();
-
-                let query: Box<
-                    dyn CteQuery<SqlType = candidate_datasets::SqlType>,
-                > = Box::new(
-                    dataset_dsl::dataset
-                        .inner_join(
-                            candidate_zpools
-                                .query_source()
-                                .on(dataset_dsl::pool_id
-                                    .eq(candidate_zpool_dsl::pool_id)),
-                        )
-                        .filter(dataset_dsl::time_deleted.is_null())
-                        .filter(dataset_dsl::size_used.is_not_null())
-                        .filter(dataset_dsl::kind.eq(DatasetKind::Crucible))
-                        // We order by md5 to shuffle the ordering of the datasets.
-                        // md5 has a uniform output distribution so it does the job.
-                        .order(cockroach_md5::dsl::md5(
+        let query: Box<dyn CteQuery<SqlType = candidate_datasets::SqlType>> =
+            Box::new(
+                dataset_dsl::dataset
+                    .inner_join(candidate_zpools.query_source().on(
+                        dataset_dsl::pool_id.eq(candidate_zpool_dsl::pool_id),
+                    ))
+                    .filter(dataset_dsl::time_deleted.is_null())
+                    .filter(dataset_dsl::size_used.is_not_null())
+                    .filter(dataset_dsl::kind.eq(DatasetKind::Crucible))
+                    .distinct_on(dataset_dsl::pool_id)
+                    .order_by((
+                        dataset_dsl::pool_id,
+                        cockroach_md5::dsl::md5(
                             CastUuidToBytea::new(dataset_dsl::id)
                                 .concat(seed_bytes.to_vec()),
-                        ))
-                        .select((dataset_dsl::id, dataset_dsl::pool_id))
-                        .limit(REGION_REDUNDANCY_THRESHOLD.try_into().unwrap()),
-                );
-                query
-            }
-        };
+                        ),
+                    ))
+                    .select((dataset_dsl::id, dataset_dsl::pool_id)),
+            );
+        Self { query }
+    }
+}
 
+/// Shuffle the candidate datasets, and select REGION_REDUNDANCY_THRESHOLD
+/// regions from it.
+#[derive(Subquery, QueryId)]
+#[subquery(name = shuffled_candidate_datasets)]
+struct ShuffledCandidateDatasets {
+    query: Box<dyn CteQuery<SqlType = shuffled_candidate_datasets::SqlType>>,
+}
+
+impl ShuffledCandidateDatasets {
+    fn new(candidate_datasets: &CandidateDatasets, seed: u128) -> Self {
+        use candidate_datasets::dsl as candidate_datasets_dsl;
+
+        let seed_bytes = seed.to_le_bytes();
+
+        let query: Box<dyn CteQuery<SqlType = candidate_datasets::SqlType>> =
+            Box::new(
+                candidate_datasets
+                    .query_source()
+                    // We order by md5 to shuffle the ordering of the datasets.
+                    // md5 has a uniform output distribution so it does the job.
+                    .order(cockroach_md5::dsl::md5(
+                        CastUuidToBytea::new(candidate_datasets_dsl::id)
+                            .concat(seed_bytes.to_vec()),
+                    ))
+                    .select((
+                        candidate_datasets_dsl::id,
+                        candidate_datasets_dsl::pool_id,
+                    ))
+                    .limit(REGION_REDUNDANCY_THRESHOLD.try_into().unwrap()),
+            );
         Self { query }
     }
 }
@@ -179,14 +176,14 @@ diesel::sql_function!(fn now() -> Timestamptz);
 
 impl CandidateRegions {
     fn new(
-        candidate_datasets: &CandidateDatasets,
+        shuffled_candidate_datasets: &ShuffledCandidateDatasets,
         volume_id: uuid::Uuid,
         block_size: u64,
         blocks_per_extent: u64,
         extent_count: u64,
     ) -> Self {
-        use candidate_datasets::dsl as candidate_datasets_dsl;
         use schema::region;
+        use shuffled_candidate_datasets::dsl as shuffled_candidate_datasets_dsl;
 
         let volume_id = volume_id.into_sql::<sql_types::Uuid>();
         let block_size = (block_size as i64).into_sql::<sql_types::BigInt>();
@@ -195,20 +192,22 @@ impl CandidateRegions {
         let extent_count =
             (extent_count as i64).into_sql::<sql_types::BigInt>();
         Self {
-            query: Box::new(candidate_datasets.query_source().select((
-                ExpressionAlias::new::<region::id>(gen_random_uuid()),
-                ExpressionAlias::new::<region::time_created>(now()),
-                ExpressionAlias::new::<region::time_modified>(now()),
-                ExpressionAlias::new::<region::dataset_id>(
-                    candidate_datasets_dsl::id,
+            query: Box::new(shuffled_candidate_datasets.query_source().select(
+                (
+                    ExpressionAlias::new::<region::id>(gen_random_uuid()),
+                    ExpressionAlias::new::<region::time_created>(now()),
+                    ExpressionAlias::new::<region::time_modified>(now()),
+                    ExpressionAlias::new::<region::dataset_id>(
+                        shuffled_candidate_datasets_dsl::id,
+                    ),
+                    ExpressionAlias::new::<region::volume_id>(volume_id),
+                    ExpressionAlias::new::<region::block_size>(block_size),
+                    ExpressionAlias::new::<region::blocks_per_extent>(
+                        blocks_per_extent,
+                    ),
+                    ExpressionAlias::new::<region::extent_count>(extent_count),
                 ),
-                ExpressionAlias::new::<region::volume_id>(volume_id),
-                ExpressionAlias::new::<region::block_size>(block_size),
-                ExpressionAlias::new::<region::blocks_per_extent>(
-                    blocks_per_extent,
-                ),
-                ExpressionAlias::new::<region::extent_count>(extent_count),
-            ))),
+            )),
         }
     }
 }
@@ -285,11 +284,14 @@ struct CandidateZpools {
 }
 
 impl CandidateZpools {
-    fn new(old_zpool_usage: &OldPoolUsage, zpool_size_delta: u64) -> Self {
+    fn new(
+        old_zpool_usage: &OldPoolUsage,
+        zpool_size_delta: u64,
+        seed: u128,
+        distinct_sleds: bool,
+    ) -> Self {
+        use schema::sled::dsl as sled_dsl;
         use schema::zpool::dsl as zpool_dsl;
-
-        let with_zpool = zpool_dsl::zpool
-            .on(zpool_dsl::id.eq(old_zpool_usage::dsl::pool_id));
 
         // Why are we using raw `diesel::dsl::sql` here?
         //
@@ -309,15 +311,47 @@ impl CandidateZpools {
             + diesel::dsl::sql(&zpool_size_delta.to_string()))
         .le(diesel::dsl::sql(zpool_dsl::total_size::NAME));
 
-        Self {
-            query: Box::new(
-                old_zpool_usage
-                    .query_source()
-                    .inner_join(with_zpool)
-                    .filter(it_will_fit)
-                    .select((old_zpool_usage::dsl::pool_id,)),
-            ),
-        }
+        // We need to join on the sled table to access provision_state.
+        let with_sled = sled_dsl::sled.on(zpool_dsl::sled_id.eq(sled_dsl::id));
+        let with_zpool = zpool_dsl::zpool
+            .on(zpool_dsl::id.eq(old_zpool_usage::dsl::pool_id))
+            .inner_join(with_sled);
+
+        let sled_is_provisionable = sled_dsl::provision_state
+            .eq(crate::db::model::SledProvisionState::Provisionable);
+
+        let base_query = old_zpool_usage
+            .query_source()
+            .inner_join(with_zpool)
+            .filter(it_will_fit)
+            .filter(sled_is_provisionable)
+            .select((old_zpool_usage::dsl::pool_id,));
+
+        let query = if distinct_sleds {
+            let seed_bytes = seed.to_le_bytes();
+
+            let query: Box<dyn CteQuery<SqlType = candidate_zpools::SqlType>> =
+                Box::new(
+                    base_query
+                        .order_by((
+                            zpool_dsl::sled_id,
+                            cockroach_md5::dsl::md5(
+                                CastUuidToBytea::new(zpool_dsl::id)
+                                    .concat(seed_bytes.to_vec()),
+                            ),
+                        ))
+                        .distinct_on(zpool_dsl::sled_id),
+                );
+
+            query
+        } else {
+            let query: Box<dyn CteQuery<SqlType = candidate_zpools::SqlType>> =
+                Box::new(base_query);
+
+            query
+        };
+
+        Self { query }
     }
 }
 
@@ -508,19 +542,47 @@ impl RegionAllocate {
         extent_count: u64,
         allocation_strategy: &RegionAllocationStrategy,
     ) -> Self {
+        let (seed, distinct_sleds) = {
+            let (input_seed, distinct_sleds) = match allocation_strategy {
+                RegionAllocationStrategy::Random { seed } => (seed, false),
+                RegionAllocationStrategy::RandomWithDistinctSleds { seed } => {
+                    (seed, true)
+                }
+            };
+            (
+                input_seed.map_or_else(
+                    || {
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap()
+                            .as_nanos()
+                    },
+                    |seed| seed as u128,
+                ),
+                distinct_sleds,
+            )
+        };
+
         let size_delta = block_size * blocks_per_extent * extent_count;
 
         let old_regions = OldRegions::new(volume_id);
 
         let old_pool_usage = OldPoolUsage::new();
-        let candidate_zpools =
-            CandidateZpools::new(&old_pool_usage, size_delta);
+        let candidate_zpools = CandidateZpools::new(
+            &old_pool_usage,
+            size_delta,
+            seed,
+            distinct_sleds,
+        );
 
         let candidate_datasets =
-            CandidateDatasets::new(&allocation_strategy, &candidate_zpools);
+            CandidateDatasets::new(&candidate_zpools, seed);
+
+        let shuffled_candidate_datasets =
+            ShuffledCandidateDatasets::new(&candidate_datasets, seed);
 
         let candidate_regions = CandidateRegions::new(
-            &candidate_datasets,
+            &shuffled_candidate_datasets,
             volume_id,
             block_size,
             blocks_per_extent,
@@ -577,6 +639,7 @@ impl RegionAllocate {
             .add_subquery(old_pool_usage)
             .add_subquery(candidate_zpools)
             .add_subquery(candidate_datasets)
+            .add_subquery(shuffled_candidate_datasets)
             .add_subquery(candidate_regions)
             .add_subquery(proposed_changes)
             .add_subquery(do_insert)

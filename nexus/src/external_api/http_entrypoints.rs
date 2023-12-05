@@ -6,16 +6,13 @@
 
 use super::{
     console_api, device_auth, params,
+    shared::UninitializedSled,
     views::{
         self, Certificate, Group, IdentityProvider, Image, IpPool, IpPoolRange,
         PhysicalDisk, Project, Rack, Role, Silo, Sled, Snapshot, SshKey, User,
         UserBuiltin, Vpc, VpcRouter, VpcSubnet,
     },
 };
-use crate::authz;
-use crate::db;
-use crate::db::identity::Resource;
-use crate::db::model::Name;
 use crate::external_api::shared;
 use crate::ServerContext;
 use chrono::Utc;
@@ -39,9 +36,15 @@ use dropshot::{
     channel, endpoint, WebsocketChannelResult, WebsocketConnection,
 };
 use ipnetwork::IpNetwork;
-use nexus_db_queries::authz::ApiResource;
+use nexus_db_queries::authz;
+use nexus_db_queries::db;
+use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup::ImageLookup;
 use nexus_db_queries::db::lookup::ImageParentLookup;
+use nexus_db_queries::db::model::Name;
+use nexus_db_queries::{
+    authz::ApiResource, db::fixed_data::silo::INTERNAL_SILO_ID,
+};
 use nexus_types::external_api::params::ProjectSelector;
 use nexus_types::{
     external_api::views::{SledInstance, Switch},
@@ -61,6 +64,11 @@ use omicron_common::api::external::http_pagination::ScanParams;
 use omicron_common::api::external::AddressLot;
 use omicron_common::api::external::AddressLotBlock;
 use omicron_common::api::external::AddressLotCreateResponse;
+use omicron_common::api::external::BgpAnnounceSet;
+use omicron_common::api::external::BgpAnnouncement;
+use omicron_common::api::external::BgpConfig;
+use omicron_common::api::external::BgpImportedRouteIpv4;
+use omicron_common::api::external::BgpPeerStatus;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::Error;
@@ -94,8 +102,10 @@ use uuid::Uuid;
 type NexusApiDescription = ApiDescription<Arc<ServerContext>>;
 
 /// Returns a description of the external nexus API
-pub fn external_api() -> NexusApiDescription {
+pub(crate) fn external_api() -> NexusApiDescription {
     fn register_endpoints(api: &mut NexusApiDescription) -> Result<(), String> {
+        api.register(ping)?;
+
         api.register(system_policy_view)?;
         api.register(system_policy_update)?;
 
@@ -208,11 +218,14 @@ pub fn external_api() -> NexusApiDescription {
         api.register(rack_view)?;
         api.register(sled_list)?;
         api.register(sled_view)?;
+        api.register(sled_set_provision_state)?;
         api.register(sled_instance_list)?;
         api.register(sled_physical_disk_list)?;
         api.register(physical_disk_list)?;
         api.register(switch_list)?;
         api.register(switch_view)?;
+        api.register(uninitialized_sled_list)?;
+        api.register(add_sled_to_initialized_rack)?;
 
         api.register(user_builtin_list)?;
         api.register(user_builtin_view)?;
@@ -245,6 +258,15 @@ pub fn external_api() -> NexusApiDescription {
         api.register(networking_switch_port_list)?;
         api.register(networking_switch_port_apply_settings)?;
         api.register(networking_switch_port_clear_settings)?;
+
+        api.register(networking_bgp_config_create)?;
+        api.register(networking_bgp_config_list)?;
+        api.register(networking_bgp_status)?;
+        api.register(networking_bgp_imported_routes_ipv4)?;
+        api.register(networking_bgp_config_delete)?;
+        api.register(networking_bgp_announce_set_create)?;
+        api.register(networking_bgp_announce_set_list)?;
+        api.register(networking_bgp_announce_set_delete)?;
 
         // Fleet-wide API operations
         api.register(silo_list)?;
@@ -362,6 +384,20 @@ pub fn external_api() -> NexusApiDescription {
 // clients. Client generators use operationId to name API methods, so changing
 // a function name is a breaking change from a client perspective.
 
+/// Ping API
+///
+/// Always responds with Ok if it responds at all.
+#[endpoint {
+    method = GET,
+    path = "/v1/ping",
+    tags = ["system/status"],
+}]
+async fn ping(
+    _rqctx: RequestContext<Arc<ServerContext>>,
+) -> Result<HttpResponseOk<views::Ping>, HttpError> {
+    Ok(HttpResponseOk(views::Ping { status: views::PingStatus::Ok }))
+}
+
 /// Fetch the top-level IAM policy
 #[endpoint {
     method = GET,
@@ -417,7 +453,7 @@ async fn system_policy_update(
     path = "/v1/policy",
     tags = ["silos"],
  }]
-pub async fn policy_view(
+pub(crate) async fn policy_view(
     rqctx: RequestContext<Arc<ServerContext>>,
 ) -> Result<HttpResponseOk<shared::Policy<shared::SiloRole>>, HttpError> {
     let apictx = rqctx.context();
@@ -1149,7 +1185,7 @@ async fn project_ip_pool_view(
             .await?;
         // TODO(2148): once we've actualy implemented filtering to pools belonging to
         // the specified project, we can remove this internal check.
-        if pool.internal {
+        if pool.silo_id == Some(*INTERNAL_SILO_ID) {
             return Err(authz_pool.not_found().into());
         }
         Ok(HttpResponseOk(IpPool::from(pool)))
@@ -1908,8 +1944,13 @@ async fn instance_view(
         };
         let instance_lookup =
             nexus.instance_lookup(&opctx, instance_selector)?;
-        let (.., instance) = instance_lookup.fetch().await?;
-        Ok(HttpResponseOk(instance.into()))
+        let (.., authz_instance) =
+            instance_lookup.lookup_for(authz::Action::Read).await?;
+        let instance_and_vmm = nexus
+            .datastore()
+            .instance_fetch_with_vmm(&opctx, &authz_instance)
+            .await?;
+        Ok(HttpResponseOk(instance_and_vmm.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -2092,7 +2133,7 @@ async fn instance_serial_console(
         let instance_lookup =
             nexus.instance_lookup(&opctx, instance_selector)?;
         let data = nexus
-            .instance_serial_console_data(&instance_lookup, &query)
+            .instance_serial_console_data(&opctx, &instance_lookup, &query)
             .await?;
         Ok(HttpResponseOk(data))
     };
@@ -2130,6 +2171,7 @@ async fn instance_serial_console_stream(
         Ok(instance_lookup) => {
             nexus
                 .instance_serial_console_stream(
+                    &opctx,
                     client_stream,
                     &instance_lookup,
                     &query,
@@ -2571,7 +2613,7 @@ async fn networking_loopback_address_delete(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Get loopback addresses, optionally filtering by id
+/// List loopback addresses
 #[endpoint {
     method = GET,
     path = "/v1/system/networking/loopback-address",
@@ -2618,7 +2660,7 @@ async fn networking_switch_port_settings_create(
         let nexus = &apictx.nexus;
         let params = new_settings.into_inner();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let result = nexus.switch_port_settings_create(&opctx, params).await?;
+        let result = nexus.switch_port_settings_post(&opctx, params).await?;
 
         let settings: SwitchPortSettingsView = result.into();
         Ok(HttpResponseCreated(settings))
@@ -2781,6 +2823,193 @@ async fn networking_switch_port_clear_settings(
         let query = query_params.into_inner();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         nexus.switch_port_clear_settings(&opctx, &port, &query).await?;
+        Ok(HttpResponseUpdatedNoContent {})
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Create a new BGP configuration
+#[endpoint {
+    method = POST,
+    path = "/v1/system/networking/bgp",
+    tags = ["system/networking"],
+}]
+async fn networking_bgp_config_create(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    config: TypedBody<params::BgpConfigCreate>,
+) -> Result<HttpResponseCreated<BgpConfig>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let config = config.into_inner();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let result = nexus.bgp_config_set(&opctx, &config).await?;
+        Ok(HttpResponseCreated::<BgpConfig>(result.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// List BGP configurations
+#[endpoint {
+    method = GET,
+    path = "/v1/system/networking/bgp",
+    tags = ["system/networking"],
+}]
+async fn networking_bgp_config_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedByNameOrId<params::BgpConfigListSelector>>,
+) -> Result<HttpResponseOk<ResultsPage<BgpConfig>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let configs = nexus
+            .bgp_config_list(&opctx, &paginated_by)
+            .await?
+            .into_iter()
+            .map(|p| p.into())
+            .collect();
+
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
+            configs,
+            &marker_for_name_or_id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+//TODO pagination? the normal by-name/by-id stuff does not work here
+/// Get BGP peer status
+#[endpoint {
+    method = GET,
+    path = "/v1/system/networking/bgp-status",
+    tags = ["system/networking"],
+}]
+async fn networking_bgp_status(
+    rqctx: RequestContext<Arc<ServerContext>>,
+) -> Result<HttpResponseOk<Vec<BgpPeerStatus>>, HttpError> {
+    let apictx = rqctx.context();
+    let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let result = nexus.bgp_peer_status(&opctx).await?;
+        Ok(HttpResponseOk(result))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+//TODO pagination? the normal by-name/by-id stuff does not work here
+/// Get imported IPv4 BGP routes
+#[endpoint {
+    method = GET,
+    path = "/v1/system/networking/bgp-routes-ipv4",
+    tags = ["system/networking"],
+}]
+async fn networking_bgp_imported_routes_ipv4(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<params::BgpRouteSelector>,
+) -> Result<HttpResponseOk<Vec<BgpImportedRouteIpv4>>, HttpError> {
+    let apictx = rqctx.context();
+    let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let sel = query_params.into_inner();
+        let result = nexus.bgp_imported_routes_ipv4(&opctx, &sel).await?;
+        Ok(HttpResponseOk(result))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Delete a BGP configuration
+#[endpoint {
+    method = DELETE,
+    path = "/v1/system/networking/bgp",
+    tags = ["system/networking"],
+}]
+async fn networking_bgp_config_delete(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    sel: Query<params::BgpConfigSelector>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let sel = sel.into_inner();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        nexus.bgp_config_delete(&opctx, &sel).await?;
+        Ok(HttpResponseUpdatedNoContent {})
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Create a new BGP announce set
+#[endpoint {
+    method = POST,
+    path = "/v1/system/networking/bgp-announce",
+    tags = ["system/networking"],
+}]
+async fn networking_bgp_announce_set_create(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    config: TypedBody<params::BgpAnnounceSetCreate>,
+) -> Result<HttpResponseCreated<BgpAnnounceSet>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let config = config.into_inner();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let result = nexus.bgp_create_announce_set(&opctx, &config).await?;
+        Ok(HttpResponseCreated::<BgpAnnounceSet>(result.0.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+//TODO pagination? the normal by-name/by-id stuff does not work here
+/// Get originated routes for a BGP configuration
+#[endpoint {
+    method = GET,
+    path = "/v1/system/networking/bgp-announce",
+    tags = ["system/networking"],
+}]
+async fn networking_bgp_announce_set_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<params::BgpAnnounceSetSelector>,
+) -> Result<HttpResponseOk<Vec<BgpAnnouncement>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let sel = query_params.into_inner();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let result = nexus
+            .bgp_announce_list(&opctx, &sel)
+            .await?
+            .into_iter()
+            .map(|p| p.into())
+            .collect();
+        Ok(HttpResponseOk(result))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Delete a BGP announce set
+#[endpoint {
+    method = DELETE,
+    path = "/v1/system/networking/bgp-announce",
+    tags = ["system/networking"],
+}]
+async fn networking_bgp_announce_set_delete(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    selector: Query<params::BgpAnnounceSetSelector>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let sel = selector.into_inner();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        nexus.bgp_delete_announce_set(&opctx, &sel).await?;
         Ok(HttpResponseUpdatedNoContent {})
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -3767,6 +3996,7 @@ async fn vpc_firewall_rules_update(
     method = GET,
     path = "/v1/vpc-routers",
     tags = ["vpcs"],
+    unpublished = true,
 }]
 async fn vpc_router_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -3802,6 +4032,7 @@ async fn vpc_router_list(
     method = GET,
     path = "/v1/vpc-routers/{router}",
     tags = ["vpcs"],
+    unpublished = true,
 }]
 async fn vpc_router_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -3831,6 +4062,7 @@ async fn vpc_router_view(
     method = POST,
     path = "/v1/vpc-routers",
     tags = ["vpcs"],
+    unpublished = true,
 }]
 async fn vpc_router_create(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -3862,6 +4094,7 @@ async fn vpc_router_create(
     method = DELETE,
     path = "/v1/vpc-routers/{router}",
     tags = ["vpcs"],
+    unpublished = true,
 }]
 async fn vpc_router_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -3891,6 +4124,7 @@ async fn vpc_router_delete(
     method = PUT,
     path = "/v1/vpc-routers/{router}",
     tags = ["vpcs"],
+    unpublished = true,
 }]
 async fn vpc_router_update(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -3926,6 +4160,7 @@ async fn vpc_router_update(
     method = GET,
     path = "/v1/vpc-router-routes",
     tags = ["vpcs"],
+    unpublished = true,
 }]
 async fn vpc_router_route_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -3963,6 +4198,7 @@ async fn vpc_router_route_list(
     method = GET,
     path = "/v1/vpc-router-routes/{route}",
     tags = ["vpcs"],
+    unpublished = true,
 }]
 async fn vpc_router_route_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -3995,6 +4231,7 @@ async fn vpc_router_route_view(
     method = POST,
     path = "/v1/vpc-router-routes",
     tags = ["vpcs"],
+    unpublished = true,
 }]
 async fn vpc_router_route_create(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4026,6 +4263,7 @@ async fn vpc_router_route_create(
     method = DELETE,
     path = "/v1/vpc-router-routes/{route}",
     tags = ["vpcs"],
+    unpublished = true,
 }]
 async fn vpc_router_route_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4057,6 +4295,7 @@ async fn vpc_router_route_delete(
     method = PUT,
     path = "/v1/vpc-router-routes/{route}",
     tags = ["vpcs"],
+    unpublished = true,
 }]
 async fn vpc_router_route_update(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -4147,6 +4386,50 @@ async fn rack_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// List uninitialized sleds in a given rack
+#[endpoint {
+    method = GET,
+    path = "/v1/system/hardware/uninitialized-sleds",
+    tags = ["system/hardware"]
+}]
+async fn uninitialized_sled_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+) -> Result<HttpResponseOk<Vec<UninitializedSled>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let sleds = nexus.uninitialized_sled_list(&opctx).await?;
+        Ok(HttpResponseOk(sleds))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Add a sled to an initialized rack
+//
+// TODO: In the future this should really be a PUT request, once we resolve
+// https://github.com/oxidecomputer/omicron/issues/4494. It should also
+// explicitly be tied to a rack via a `rack_id` path param. For now we assume
+// we are only operating on single rack systems.
+#[endpoint {
+    method = POST,
+    path = "/v1/system/hardware/sleds/",
+    tags = ["system/hardware"]
+}]
+async fn add_sled_to_initialized_rack(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    sled: TypedBody<UninitializedSled>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        nexus.add_sled_to_initialized_rack(&opctx, sled.into_inner()).await?;
+        Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 // Sleds
 
 /// List sleds
@@ -4197,6 +4480,44 @@ async fn sled_view(
         let (.., sled) =
             nexus.sled_lookup(&opctx, &path.sled_id)?.fetch().await?;
         Ok(HttpResponseOk(sled.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Set the sled's provision state.
+#[endpoint {
+    method = PUT,
+    path = "/v1/system/hardware/sleds/{sled_id}/provision-state",
+    tags = ["system/hardware"],
+}]
+async fn sled_set_provision_state(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::SledPath>,
+    new_provision_state: TypedBody<params::SledProvisionStateParams>,
+) -> Result<HttpResponseOk<params::SledProvisionStateResponse>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+
+        let path = path_params.into_inner();
+        let provision_state = new_provision_state.into_inner().state;
+
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        // Convert the external `SledProvisionState` into our internal data model.
+        let new_state = db::model::SledProvisionState::from(provision_state);
+
+        let sled_lookup = nexus.sled_lookup(&opctx, &path.sled_id)?;
+
+        let old_state = nexus
+            .sled_set_provision_state(&opctx, &sled_lookup, new_state)
+            .await?;
+
+        let response = params::SledProvisionStateResponse {
+            old_state: old_state.into(),
+            new_state: new_state.into(),
+        };
+
+        Ok(HttpResponseOk(response))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -5044,7 +5365,7 @@ async fn role_view(
    path = "/v1/me",
    tags = ["session"],
 }]
-pub async fn current_user_view(
+pub(crate) async fn current_user_view(
     rqctx: RequestContext<Arc<ServerContext>>,
 ) -> Result<HttpResponseOk<views::CurrentUser>, HttpError> {
     let apictx = rqctx.context();
@@ -5067,7 +5388,7 @@ pub async fn current_user_view(
     path = "/v1/me/groups",
     tags = ["session"],
  }]
-pub async fn current_user_groups(
+pub(crate) async fn current_user_groups(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedById>,
 ) -> Result<HttpResponseOk<ResultsPage<views::Group>>, HttpError> {

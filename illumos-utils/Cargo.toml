@@ -11,7 +11,9 @@ async-trait.workspace = true
 bhyve_api.workspace = true
 byteorder.workspace = true
 camino.workspace = true
+camino-tempfile.workspace = true
 cfg-if.workspace = true
+crucible-smf.workspace = true
 futures.workspace = true
 ipnetwork.workspace = true
 libc.workspace = true
@@ -29,6 +31,7 @@ zone.workspace = true
 
 # only enabled via the `testing` feature
 mockall = { workspace = true, optional = true }
+omicron-workspace-hack.workspace = true
 
 [target.'cfg(target_os = "illumos")'.dependencies]
 opte-ioctl.workspace = true
@@ -42,3 +45,6 @@ toml.workspace = true
 [features]
 # Enable to generate MockZones
 testing = ["mockall"]
+# Useful for tests that want real functionality and ability to run without
+# pfexec
+tmp_keypath = []

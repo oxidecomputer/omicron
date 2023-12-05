@@ -12,6 +12,7 @@ pub mod http_pagination;
 use dropshot::HttpError;
 pub use error::*;
 
+pub use crate::api::internal::shared::SwitchLocation;
 use anyhow::anyhow;
 use anyhow::Context;
 use api_identity::ObjectIdentity;
@@ -100,6 +101,13 @@ pub struct DataPageParams<'a, NameType> {
 }
 
 impl<'a, NameType> DataPageParams<'a, NameType> {
+    pub fn max_page() -> Self {
+        Self {
+            marker: None,
+            direction: dropshot::PaginationOrder::Ascending,
+            limit: NonZeroU32::new(u32::MAX).unwrap(),
+        }
+    }
     /// Maps the marker type to a new type.
     ///
     /// Equivalent to [std::option::Option::map], because that's what it calls.
@@ -402,8 +410,8 @@ impl SemverVersion {
 
     /// This is the official ECMAScript-compatible validation regex for
     /// semver:
-    /// https://semver.org/#is-there-a-suggested-regular-expression-regex-to-check-a-semver-string
-    const VALIDATION_REGEX: &str = r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$";
+    /// <https://semver.org/#is-there-a-suggested-regular-expression-regex-to-check-a-semver-string>
+    const VALIDATION_REGEX: &'static str = r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$";
 }
 
 impl JsonSchema for SemverVersion {
@@ -616,6 +624,7 @@ impl From<ByteCount> for i64 {
     Debug,
     Deserialize,
     Eq,
+    Hash,
     JsonSchema,
     Ord,
     PartialEq,
@@ -654,6 +663,12 @@ impl From<&Generation> for i64 {
     }
 }
 
+impl From<u32> for Generation {
+    fn from(value: u32) -> Self {
+        Generation(u64::from(value))
+    }
+}
+
 impl TryFrom<i64> for Generation {
     type Error = anyhow::Error;
 
@@ -685,6 +700,9 @@ impl TryFrom<i64> for Generation {
 pub enum ResourceType {
     AddressLot,
     AddressLotBlock,
+    BackgroundTask,
+    BgpConfig,
+    BgpAnnounceSet,
     Fleet,
     Silo,
     SiloUser,
@@ -734,6 +752,8 @@ pub enum ResourceType {
     UpdateableComponent,
     UserBuiltin,
     Zpool,
+    Vmm,
+    Ipv4NatEntry,
 }
 
 // IDENTITY METADATA
@@ -861,25 +881,6 @@ impl InstanceState {
             InstanceState::Destroyed => "destroyed",
         }
     }
-
-    /// Returns true if the given state represents a fully stopped Instance.
-    /// This means that a transition from an !is_stopped() state must go
-    /// through Stopping.
-    pub fn is_stopped(&self) -> bool {
-        match self {
-            InstanceState::Starting => false,
-            InstanceState::Running => false,
-            InstanceState::Stopping => false,
-            InstanceState::Rebooting => false,
-            InstanceState::Migrating => false,
-
-            InstanceState::Creating => true,
-            InstanceState::Stopped => true,
-            InstanceState::Repairing => true,
-            InstanceState::Failed => true,
-            InstanceState::Destroyed => true,
-        }
-    }
 }
 
 /// The number of CPUs in an Instance
@@ -937,17 +938,6 @@ pub struct InstanceRuntimeState {
     pub time_run_state_updated: DateTime<Utc>,
 }
 
-impl From<crate::api::internal::nexus::InstanceRuntimeState>
-    for InstanceRuntimeState
-{
-    fn from(state: crate::api::internal::nexus::InstanceRuntimeState) -> Self {
-        InstanceRuntimeState {
-            run_state: state.run_state,
-            time_run_state_updated: state.time_updated,
-        }
-    }
-}
-
 /// View of an Instance
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Instance {
@@ -977,7 +967,9 @@ pub struct Disk {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
     pub project_id: Uuid,
+    /// ID of snapshot from which disk was created, if any
     pub snapshot_id: Option<Uuid>,
+    /// ID of image from which disk was created, if any
     pub image_id: Option<Uuid>,
     pub size: ByteCount,
     pub block_size: ByteCount,
@@ -2511,9 +2503,6 @@ pub struct SwitchPortBgpPeerConfig {
     /// The port settings object this BGP configuration belongs to.
     pub port_settings_id: Uuid,
 
-    /// The id for the set of prefixes announced in this peer configuration.
-    pub bgp_announce_set_id: Uuid,
-
     /// The id of the global BGP configuration referenced by this peer
     /// configuration.
     pub bgp_config_id: Uuid,
@@ -2528,7 +2517,9 @@ pub struct SwitchPortBgpPeerConfig {
 }
 
 /// A base BGP configuration.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+#[derive(
+    ObjectIdentity, Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq,
+)]
 pub struct BgpConfig {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
@@ -2578,6 +2569,72 @@ pub struct SwitchPortAddressConfig {
     // TODO: https://github.com/oxidecomputer/omicron/issues/3050
     // Use `Name` instead of `String` for `interface_name` type
     pub interface_name: String,
+}
+
+/// The current state of a BGP peer.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum BgpPeerState {
+    /// Initial state. Refuse all incomming BGP connections. No resources
+    /// allocated to peer.
+    Idle,
+
+    /// Waiting for the TCP connection to be completed.
+    Connect,
+
+    /// Trying to acquire peer by listening for and accepting a TCP connection.
+    Active,
+
+    /// Waiting for open message from peer.
+    OpenSent,
+
+    /// Waiting for keepaliave or notification from peer.
+    OpenConfirm,
+
+    /// Synchronizing with peer.
+    SessionSetup,
+
+    /// Session established. Able to exchange update, notification and keepliave
+    /// messages with peers.
+    Established,
+}
+
+/// The current status of a BGP peer.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct BgpPeerStatus {
+    /// IP address of the peer.
+    pub addr: IpAddr,
+
+    /// Local autonomous system number.
+    pub local_asn: u32,
+
+    /// Remote autonomous system number.
+    pub remote_asn: u32,
+
+    /// State of the peer.
+    pub state: BgpPeerState,
+
+    /// Time of last state change.
+    pub state_duration_millis: u64,
+
+    /// Switch with the peer session.
+    pub switch: SwitchLocation,
+}
+
+/// A route imported from a BGP peer.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct BgpImportedRouteIpv4 {
+    /// The destination network prefix.
+    pub prefix: Ipv4Net,
+
+    /// The nexthop the prefix is reachable through.
+    pub nexthop: Ipv4Addr,
+
+    /// BGP identifier of the originating router.
+    pub id: u32,
+
+    /// Switch the route is imported into.
+    pub switch: SwitchLocation,
 }
 
 #[cfg(test)]

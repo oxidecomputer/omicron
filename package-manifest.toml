@@ -38,7 +38,7 @@
 service_name = "sled-agent"
 only_for_targets.image = "standard"
 source.type = "local"
-source.rust.binary_names = ["sled-agent"]
+source.rust.binary_names = ["sled-agent", "zone-bundle"]
 source.rust.release = true
 source.paths = [
   { from = "smf/sled-agent/manifest.xml", to = "pkg/manifest.xml" },
@@ -92,7 +92,8 @@ source.rust.binary_names = ["nexus", "schema-updater"]
 source.rust.release = true
 source.paths = [
   { from = "/opt/ooce/pgsql-13/lib/amd64", to = "/opt/ooce/pgsql-13/lib/amd64" },
-  { from = "smf/nexus", to = "/var/svc/manifest/site/nexus" },
+  { from = "smf/nexus/manifest.xml", to = "/var/svc/manifest/site/nexus/manifest.xml" },
+  { from = "smf/nexus/{{rack-topology}}", to = "/var/svc/manifest/site/nexus" },
   { from = "out/console-assets", to = "/var/nexus/static" },
   { from = "schema/crdb", to = "/var/nexus/schema/crdb" },
 ]
@@ -106,21 +107,54 @@ setup_hint = """
 service_name = "oximeter"
 only_for_targets.image = "standard"
 source.type = "local"
-source.rust.binary_names = ["oximeter"]
+source.rust.binary_names = ["oximeter", "clickhouse-schema-updater"]
 source.rust.release = true
-source.paths = [ { from = "smf/oximeter", to = "/var/svc/manifest/site/oximeter" } ]
+source.paths = [
+    { from = "smf/oximeter", to = "/var/svc/manifest/site/oximeter" },
+    { from = "oximeter/db/schema", to = "/opt/oxide/oximeter/schema" },
+]
 output.type = "zone"
 
 [package.clickhouse]
 service_name = "clickhouse"
 only_for_targets.image = "standard"
+source.type = "composite"
+source.packages = [ "clickhouse_svc.tar.gz", "internal-dns-cli.tar.gz" ]
+output.type = "zone"
+
+[package.clickhouse_svc]
+service_name = "clickhouse_svc"
+only_for_targets.image = "standard"
 source.type = "local"
 source.paths = [
   { from = "out/clickhouse", to = "/opt/oxide/clickhouse" },
   { from = "smf/clickhouse/manifest.xml", to = "/var/svc/manifest/site/clickhouse/manifest.xml" },
-  { from = "smf/clickhouse/method_script.sh", to = "/opt/oxide/lib/svc/manifest/clickhouse.sh" }
+  { from = "smf/clickhouse/method_script.sh", to = "/opt/oxide/lib/svc/manifest/clickhouse.sh" },
+  { from = "smf/clickhouse/config_replica.xml", to = "/opt/oxide/clickhouse/config.d/config_replica.xml" }
 ]
 output.type = "zone"
+output.intermediate_only = true
+setup_hint = "Run `./tools/ci_download_clickhouse` to download the necessary binaries"
+
+[package.clickhouse_keeper]
+service_name = "clickhouse_keeper"
+only_for_targets.image = "standard"
+source.type = "composite"
+source.packages = [ "clickhouse_keeper_svc.tar.gz", "internal-dns-cli.tar.gz" ]
+output.type = "zone"
+
+[package.clickhouse_keeper_svc]
+service_name = "clickhouse_keeper_svc"
+only_for_targets.image = "standard"
+source.type = "local"
+source.paths = [
+  { from = "out/clickhouse", to = "/opt/oxide/clickhouse_keeper" },
+  { from = "smf/clickhouse_keeper/manifest.xml", to = "/var/svc/manifest/site/clickhouse_keeper/manifest.xml" },
+  { from = "smf/clickhouse_keeper/method_script.sh", to = "/opt/oxide/lib/svc/manifest/clickhouse_keeper.sh" },
+  { from = "smf/clickhouse_keeper/keeper_config.xml", to = "/opt/oxide/clickhouse_keeper/keeper_config.xml" }
+]
+output.type = "zone"
+output.intermediate_only = true
 setup_hint = "Run `./tools/ci_download_clickhouse` to download the necessary binaries"
 
 [package.cockroachdb]
@@ -229,7 +263,10 @@ service_name = "mgs"
 only_for_targets.image = "standard"
 only_for_targets.switch = "stub"
 source.type = "local"
-source.paths = [ { from = "smf/mgs-sim", to = "/var/svc/manifest/site/mgs" } ]
+source.paths = [ 
+  { from = "smf/mgs/manifest.xml", to = "/var/svc/manifest/site/mgs/manifest.xml" }, 
+  { from = "smf/mgs-sim/config.toml", to = "/var/svc/manifest/site/mgs/config.toml" } 
+]
 output.intermediate_only = true
 output.type = "zone"
 
@@ -238,7 +275,10 @@ service_name = "mgs"
 only_for_targets.image = "standard"
 only_for_targets.switch = "softnpu"
 source.type = "local"
-source.paths = [ { from = "smf/mgs-sim", to = "/var/svc/manifest/site/mgs" } ]
+source.paths = [ 
+  { from = "smf/mgs/manifest.xml", to = "/var/svc/manifest/site/mgs/manifest.xml" }, 
+  { from = "smf/mgs-sim/config.toml", to = "/var/svc/manifest/site/mgs/config.toml" } 
+]
 output.intermediate_only = true
 output.type = "zone"
 
@@ -344,10 +384,10 @@ only_for_targets.image = "standard"
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "84507ed89aced20920de73342666a8abcb8237c1"
+source.commit = "945f040d259ca8013d3fb26f510453da7cd7b1a6"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible.sha256.txt
-source.sha256 = "3e55c672a2ba17a58b17f89128257cfd9fdb57c6e7f66d03535dd8f3c60036c3"
+source.sha256 = "f8c23cbf89fd0bbd928d8e3db1357bbea6e6b50560e221f873da5b56ed9d7527"
 output.type = "zone"
 
 [package.crucible-pantry]
@@ -355,10 +395,10 @@ service_name = "crucible_pantry"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "84507ed89aced20920de73342666a8abcb8237c1"
+source.commit = "945f040d259ca8013d3fb26f510453da7cd7b1a6"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible-pantry.sha256.txt
-source.sha256 = "6b53e106d1449ea6465e0d352080b63da191b890aabe8d751b0b75e5ddc18621"
+source.sha256 = "a25b31c81798eb65564dbe259858fdd9715784d212d3508791b1ef0cf6d17da6"
 output.type = "zone"
 
 # Refer to
@@ -369,13 +409,13 @@ service_name = "propolis-server"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "propolis"
-source.commit = "f2f0ad2dc7ea9a6d02f6b41d4b15ca40b8e2dcc4"
+source.commit = "3e1d129151c3621d28ead5c6e5760693ba6e7fec"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/propolis/image/<commit>/propolis-server.sha256.txt
-source.sha256 = "b0e6951b347bd4755ee2fc41eb51482f5de7169032c064ea54820c5dbdb63bfd"
+source.sha256 = "cd341409eb2ffc3d8bec89fd20cad61d170f89d3adf926f6104eb01f4f4da881"
 output.type = "zone"
 
-[package.maghemite]
+[package.mg-ddm-gz]
 service_name = "mg-ddm"
 # Note: unlike every other package, `maghemite` is not restricted to either the
 # "standard" or "trampoline" image; it is included in both.
@@ -385,10 +425,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "12703675393459e74139f8140e0b3c4c4f129d5d"
+source.commit = "579592bf474ec4b86805ada60c1b920b3beef5a7"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/maghemite.sha256.txt
-source.sha256 = "e57fe791ee898d59890c5779fbd4dce598250fb6ed53832024212bcdeec0cc5b"
+source.sha256 = "38851c79c85d53e997db748520fb27c82299ce7e58a550e35646a548498f1271"
 output.type = "tarball"
 
 [package.mg-ddm]
@@ -401,10 +441,25 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "12703675393459e74139f8140e0b3c4c4f129d5d"
+source.commit = "579592bf474ec4b86805ada60c1b920b3beef5a7"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "3aa0d32b1d2b6be7091b9c665657296e924a86a00ca38756e9f45a1e629fd92b"
+source.sha256 = "8cd94e9a6f6175081ce78f0281085a08a5306cde453d8e21deb28050945b1d88"
+output.type = "zone"
+output.intermediate_only = true
+
+[package.mgd]
+service_name = "mgd"
+source.type = "prebuilt"
+source.repo = "maghemite"
+# Updating the commit hash here currently requires also updating
+# `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
+# building `ddm-admin-client` (which will instruct you to update
+# `tools/maghemite_openapi_version`).
+source.commit = "579592bf474ec4b86805ada60c1b920b3beef5a7"
+# The SHA256 digest is automatically posted to:
+# https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
+source.sha256 = "82aa1ca1d7701b2221c442d58f912be59798258d574effcb866ffab22753cf38"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -421,8 +476,8 @@ only_for_targets.image = "standard"
 # 2. Copy dendrite.tar.gz from dendrite/out to omicron/out
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "ef8a97532214c795abb6c7de05289c161e9a80ca"
-source.sha256 = "a63c05e81cf58efd28f89f4f860f4e5e68865c234eb071bec03184437521245b"
+source.commit = "2af6adea85c62ac37e451148b84e5eb0ef005f36"
+source.sha256 = "dc93b671cce54e83ed55faaa267f81ba9e65abcd6714aa559d68a8783d73b1c1"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -446,8 +501,8 @@ only_for_targets.image = "standard"
 # 2. Copy the output zone image from dendrite/out to omicron/out
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "ef8a97532214c795abb6c7de05289c161e9a80ca"
-source.sha256 = "7a828286c4e3c97cff56b347fa5922acb6ba93fd8fdfb3e9ea61f1d5fb9b53a5"
+source.commit = "2af6adea85c62ac37e451148b84e5eb0ef005f36"
+source.sha256 = "c34b10d47fa3eb9f9f6b3655ea4ed8a726f93399ea177efea79f5c89f2ab5a1e"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -464,8 +519,8 @@ only_for_targets.image = "standard"
 # 2. Copy dendrite.tar.gz from dendrite/out to omicron/out/dendrite-softnpu.tar.gz
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "ef8a97532214c795abb6c7de05289c161e9a80ca"
-source.sha256 = "aef8ecec0ebdbf8ea790cb65702be636b7e1fae007dcd1434fdba2bc4ccbc06f"
+source.commit = "2af6adea85c62ac37e451148b84e5eb0ef005f36"
+source.sha256 = "ce7065227c092ee82704f39a966b7441e3ae82d75eedb6eb281bd8b3e5873e32"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -497,6 +552,7 @@ source.packages = [
   "wicketd.tar.gz",
   "wicket.tar.gz",
   "mg-ddm.tar.gz",
+  "mgd.tar.gz",
   "switch_zone_setup.tar.gz",
   "xcvradm.tar.gz"
 ]
@@ -518,6 +574,7 @@ source.packages = [
   "wicketd.tar.gz",
   "wicket.tar.gz",
   "mg-ddm.tar.gz",
+  "mgd.tar.gz",
   "switch_zone_setup.tar.gz",
   "sp-sim-stub.tar.gz"
 ]
@@ -539,6 +596,7 @@ source.packages = [
   "wicketd.tar.gz",
   "wicket.tar.gz",
   "mg-ddm.tar.gz",
+  "mgd.tar.gz",
   "switch_zone_setup.tar.gz",
   "sp-sim-softnpu.tar.gz"
 ]

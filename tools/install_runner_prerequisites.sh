@@ -105,6 +105,7 @@ function install_packages {
       'pkg-config'
       'brand/omicron1/tools'
       'library/libxmlsec1'
+      'chrony'
     )
 
     # Install/update the set of packages.
@@ -119,13 +120,15 @@ function install_packages {
       exit "$rc"
     fi
 
+    pfexec svcadm enable chrony
+
     pkg list -v "${packages[@]}"
   elif [[ "${HOST_OS}" == "Linux" ]]; then
     packages=(
       'ca-certificates'
       'libpq5'
       'libsqlite3-0'
-      'libssl1.1'
+      'libssl3'
       'libxmlsec1-openssl'
     )
     sudo apt-get update

@@ -56,8 +56,8 @@ impl Drop for ServerHandle {
 }
 
 impl ServerHandle {
-    pub fn local_address(&self) -> &SocketAddr {
-        &self.local_address
+    pub fn local_address(&self) -> SocketAddr {
+        self.local_address
     }
 }
 

@@ -13,6 +13,7 @@ use crate::http_entrypoints::CurrentRssUserConfigSensitive;
 use crate::RackV1Inventory;
 use anyhow::anyhow;
 use anyhow::bail;
+use anyhow::Context;
 use anyhow::Result;
 use bootstrap_agent_client::types::BootstrapAddressDiscovery;
 use bootstrap_agent_client::types::Certificate;
@@ -20,8 +21,9 @@ use bootstrap_agent_client::types::Name;
 use bootstrap_agent_client::types::RackInitializeRequest;
 use bootstrap_agent_client::types::RecoverySiloConfig;
 use bootstrap_agent_client::types::UserId;
+use display_error_chain::DisplayErrorChain;
 use gateway_client::types::SpType;
-use omicron_certificates::CertificateValidator;
+use omicron_certificates::CertificateError;
 use omicron_common::address;
 use omicron_common::address::Ipv4Range;
 use omicron_common::api::internal::shared::RackNetworkConfig;
@@ -72,6 +74,18 @@ pub(crate) struct CurrentRssConfig {
 }
 
 impl CurrentRssConfig {
+    pub(crate) fn dns_servers(&self) -> &[IpAddr] {
+        &self.dns_servers
+    }
+
+    pub(crate) fn ntp_servers(&self) -> &[String] {
+        &self.ntp_servers
+    }
+
+    pub(crate) fn rack_network_config(&self) -> Option<&RackNetworkConfig> {
+        self.rack_network_config.as_ref()
+    }
+
     pub(crate) fn update_with_inventory_and_bootstrap_peers(
         &mut self,
         inventory: &RackV1Inventory,
@@ -115,7 +129,7 @@ impl CurrentRssConfig {
     }
 
     pub(crate) fn start_rss_request(
-        &self,
+        &mut self,
         bootstrap_peers: &BootstrapPeers,
         log: &slog::Logger,
     ) -> Result<RackInitializeRequest> {
@@ -141,12 +155,35 @@ impl CurrentRssConfig {
         if self.external_certificates.is_empty() {
             bail!("at least one certificate/key pair is required");
         }
-        let Some(recovery_silo_password_hash)
-            = self.recovery_silo_password_hash.as_ref()
+
+        // We validated all the external certs as they were uploaded, but if we
+        // didn't yet have our `external_dns_zone_name` that validation would've
+        // skipped checking the hostname. Repeat validation on all certs now
+        // that we definitely have it.
+        let cert_validator =
+            CertificateValidator::new(Some(&self.external_dns_zone_name));
+        for (i, pair) in self.external_certificates.iter().enumerate() {
+            if let Err(err) = cert_validator
+                .validate(&pair.cert, &pair.key)
+                .with_context(|| {
+                    let i = i + 1;
+                    let tot = self.external_certificates.len();
+                    format!("certificate {i} of {tot} is invalid")
+                })
+            {
+                // Remove the invalid cert prior to returning.
+                self.external_certificates.remove(i);
+                return Err(err);
+            }
+        }
+
+        let Some(recovery_silo_password_hash) =
+            self.recovery_silo_password_hash.as_ref()
         else {
             bail!("recovery password not yet set");
         };
-        let Some(rack_network_config) = self.rack_network_config.as_ref() else {
+        let Some(rack_network_config) = self.rack_network_config.as_ref()
+        else {
             bail!("rack network config not set (have you uploaded a config?)");
         };
         let rack_network_config =
@@ -281,15 +318,25 @@ impl CurrentRssConfig {
             (None, None) => unreachable!(),
         };
 
-        let mut validator = CertificateValidator::default();
+        // We store `external_dns_zone_name` as a `String` for simpler TOML
+        // parsing, but we want to convert an empty string to an option here so
+        // we don't reject certs if the external DNS zone name hasn't been set
+        // yet.
+        let external_dns_zone_name = if self.external_dns_zone_name.is_empty() {
+            None
+        } else {
+            Some(self.external_dns_zone_name.as_str())
+        };
 
-        // We are running pre-NTP, so we can't check cert expirations; nexus
-        // will have to do that.
-        validator.danger_disable_expiration_validation();
-
-        validator
-            .validate(cert.as_bytes(), key.as_bytes())
-            .map_err(|err| err.to_string())?;
+        // If the certificate is invalid, clear out the cert and key before
+        // returning an error.
+        if let Err(err) = CertificateValidator::new(external_dns_zone_name)
+            .validate(cert, key)
+        {
+            self.partial_external_certificate.cert = None;
+            self.partial_external_certificate.key = None;
+            return Err(DisplayErrorChain::new(&err).to_string());
+        }
 
         // Cert and key appear to be valid; steal them out of
         // `partial_external_certificate` and promote them to
@@ -406,18 +453,21 @@ impl From<&'_ CurrentRssConfig> for CurrentRssUserConfig {
 
 fn validate_rack_network_config(
     config: &RackNetworkConfig,
-) -> Result<bootstrap_agent_client::types::RackNetworkConfig> {
+) -> Result<bootstrap_agent_client::types::RackNetworkConfigV1> {
+    use bootstrap_agent_client::types::BgpConfig as BaBgpConfig;
+    use bootstrap_agent_client::types::BgpPeerConfig as BaBgpPeerConfig;
+    use bootstrap_agent_client::types::PortConfigV1 as BaPortConfigV1;
     use bootstrap_agent_client::types::PortFec as BaPortFec;
     use bootstrap_agent_client::types::PortSpeed as BaPortSpeed;
+    use bootstrap_agent_client::types::RouteConfig as BaRouteConfig;
     use bootstrap_agent_client::types::SwitchLocation as BaSwitchLocation;
-    use bootstrap_agent_client::types::UplinkConfig as BaUplinkConfig;
     use omicron_common::api::internal::shared::PortFec;
     use omicron_common::api::internal::shared::PortSpeed;
     use omicron_common::api::internal::shared::SwitchLocation;
 
     // Ensure that there is at least one uplink
-    if config.uplinks.is_empty() {
-        return Err(anyhow!("Must have at least one uplink configured"));
+    if config.ports.is_empty() {
+        return Err(anyhow!("Must have at least one port configured"));
     }
 
     // Make sure `infra_ip_first`..`infra_ip_last` is a well-defined range...
@@ -428,34 +478,60 @@ fn validate_rack_network_config(
             },
         )?;
 
-    // iterate through each UplinkConfig
-    for uplink_config in &config.uplinks {
-        // ... and check that it contains `uplink_ip`.
-        if uplink_config.uplink_cidr.ip() < infra_ip_range.first
-            || uplink_config.uplink_cidr.ip() > infra_ip_range.last
-        {
-            bail!(
+    // TODO this implies a single contiguous range for port IPs which is over
+    // constraining
+    // iterate through each port config
+    for port_config in &config.ports {
+        for addr in &port_config.addresses {
+            // ... and check that it contains `uplink_ip`.
+            if addr.ip() < infra_ip_range.first
+                || addr.ip() > infra_ip_range.last
+            {
+                bail!(
                 "`uplink_cidr`'s IP address must be in the range defined by \
                 `infra_ip_first` and `infra_ip_last`"
             );
+            }
         }
     }
     // TODO Add more client side checks on `rack_network_config` contents?
 
-    Ok(bootstrap_agent_client::types::RackNetworkConfig {
+    Ok(bootstrap_agent_client::types::RackNetworkConfigV1 {
+        rack_subnet: config.rack_subnet,
         infra_ip_first: config.infra_ip_first,
         infra_ip_last: config.infra_ip_last,
-        uplinks: config
-            .uplinks
+        ports: config
+            .ports
             .iter()
-            .map(|config| BaUplinkConfig {
-                gateway_ip: config.gateway_ip,
+            .map(|config| BaPortConfigV1 {
+                port: config.port.clone(),
+                routes: config
+                    .routes
+                    .iter()
+                    .map(|r| BaRouteConfig {
+                        destination: r.destination,
+                        nexthop: r.nexthop,
+                    })
+                    .collect(),
+                addresses: config.addresses.clone(),
+                bgp_peers: config
+                    .bgp_peers
+                    .iter()
+                    .map(|p| BaBgpPeerConfig {
+                        addr: p.addr,
+                        asn: p.asn,
+                        port: p.port.clone(),
+                        hold_time: p.hold_time,
+                        connect_retry: p.connect_retry,
+                        delay_open: p.delay_open,
+                        idle_hold_time: p.idle_hold_time,
+                        keepalive: p.keepalive,
+                    })
+                    .collect(),
                 switch: match config.switch {
                     SwitchLocation::Switch0 => BaSwitchLocation::Switch0,
                     SwitchLocation::Switch1 => BaSwitchLocation::Switch1,
                 },
-                uplink_cidr: config.uplink_cidr,
-                uplink_port: config.uplink_port.clone(),
                 uplink_port_speed: match config.uplink_port_speed {
                     PortSpeed::Speed0G => BaPortSpeed::Speed0G,
                     PortSpeed::Speed1G => BaPortSpeed::Speed1G,
@@ -472,8 +548,59 @@ fn validate_rack_network_config(
                     PortFec::None => BaPortFec::None,
                     PortFec::Rs => BaPortFec::Rs,
                 },
-                uplink_vid: config.uplink_vid,
+                autoneg: config.autoneg,
+            })
+            .collect(),
+        bgp: config
+            .bgp
+            .iter()
+            .map(|config| BaBgpConfig {
+                asn: config.asn,
+                originate: config.originate.clone(),
             })
             .collect(),
     })
+}
+
+// Thin wrapper around an `omicron_certificates::CertificateValidator` that we
+// use both when certs are uploaded and when we start RSS.
+struct CertificateValidator {
+    inner: omicron_certificates::CertificateValidator,
+    silo_dns_name: Option<String>,
+}
+
+impl CertificateValidator {
+    fn new(external_dns_zone_name: Option<&str>) -> Self {
+        let mut inner = omicron_certificates::CertificateValidator::default();
+
+        // We are running in 1986! We're in the code path where the operator is
+        // giving us NTP servers so we can find out the actual time, but any
+        // validation we attempt now must ignore certificate expiration (and in
+        // particular, we don't want to fail a "not before" check because we
+        // think the cert is from the next century).
+        inner.danger_disable_expiration_validation();
+
+        // We validate certificates both when they are uploaded and just before
+        // beginning RSS. In the former case we may not yet know our external
+        // DNS name (e.g., if certs are uploaded before the config TOML that
+        // provides the DNS name), but in the latter case we do.
+        let silo_dns_name =
+            external_dns_zone_name.map(|external_dns_zone_name| {
+                format!("{RECOVERY_SILO_NAME}.sys.{external_dns_zone_name}",)
+            });
+
+        Self { inner, silo_dns_name }
+    }
+
+    fn validate(&self, cert: &str, key: &str) -> Result<(), CertificateError> {
+        // Cert validation accepts multiple possible silo DNS names, but at rack
+        // setup time we only have one. Stuff it into a Vec.
+        let silo_dns_names =
+            if let Some(silo_dns_name) = self.silo_dns_name.as_deref() {
+                vec![silo_dns_name]
+            } else {
+                vec![]
+            };
+        self.inner.validate(cert.as_bytes(), key.as_bytes(), &silo_dns_names)
+    }
 }

@@ -9,13 +9,13 @@ GATEWAY_IP=${GATEWAY_IP:=$(netstat -rn -f inet | grep default | awk -F ' ' '{pri
 echo "Using $GATEWAY_IP as gateway ip"
 
 if [[ ! -v GATEWAY_MAC ]]; then
-    ping $GATEWAY_IP
+    ping "$GATEWAY_IP"
     sleep 1
-    ping $GATEWAY_IP
+    ping "$GATEWAY_IP"
     sleep 1
-    ping $GATEWAY_IP
+    ping "$GATEWAY_IP"
     sleep 1
-    ping $GATEWAY_IP
+    ping "$GATEWAY_IP"
     sleep 1
 fi
 
@@ -52,16 +52,16 @@ z_scadm () {
         --server /softnpu/server \
         --client /softnpu/client \
         standalone \
-        $@
+        "$@"
 }
 
 
 # Configure upstream network gateway ARP entry
-z_scadm add-arp-entry $GATEWAY_IP $GATEWAY_MAC
+z_scadm add-arp-entry "$GATEWAY_IP" "$GATEWAY_MAC"
 
 PXA_MAC=${PXA_MAC:-a8:e1:de:01:70:1d}
 
 if [[ -v PXA_START ]]; then
-    z_scadm add-proxy-arp $PXA_START $PXA_END $PXA_MAC
+    z_scadm add-proxy-arp "$PXA_START" "$PXA_END" "$PXA_MAC"
 fi
 z_scadm dump-state

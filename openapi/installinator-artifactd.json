@@ -53,57 +53,6 @@
         }
       }
     },
-    "/artifacts/by-id/{kind}/{name}/{version}": {
-      "get": {
-        "summary": "Fetch an artifact from this server.",
-        "operationId": "get_artifact_by_id",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "kind",
-            "description": "The kind of artifact this is.",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "name",
-            "description": "The artifact's name.",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "version",
-            "description": "The artifact's version.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/SemverVersion"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "*/*": {
-                "schema": {}
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/report-progress/{update_id}": {
       "post": {
         "summary": "Report progress and completion to the server.",
@@ -146,18 +95,6 @@
     }
   },
   "components": {
-    "responses": {
-      "Error": {
-        "description": "Error",
-        "content": {
-          "application/json": {
-            "schema": {
-              "$ref": "#/components/schemas/Error"
-            }
-          }
-        }
-      }
-    },
     "schemas": {
       "Duration": {
         "type": "object",
@@ -2373,10 +2310,18 @@
           "slots_attempted",
           "slots_written"
         ]
-      },
-      "SemverVersion": {
-        "type": "string",
-        "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "Error",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
       }
     }
   }

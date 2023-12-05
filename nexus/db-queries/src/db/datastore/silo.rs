@@ -10,8 +10,7 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::datastore::RunnableQuery;
-use crate::db::error::diesel_pool_result_optional;
-use crate::db::error::public_error_from_diesel_pool;
+use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
 use crate::db::fixed_data::silo::{DEFAULT_SILO, INTERNAL_SILO};
@@ -24,7 +23,6 @@ use crate::db::pagination::paginated;
 use crate::db::pool::DbConnection;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
-use async_bb8_diesel::PoolError;
 use chrono::Utc;
 use diesel::prelude::*;
 use nexus_db_model::Certificate;
@@ -66,11 +64,9 @@ impl DataStore {
             .values([&*DEFAULT_SILO, &*INTERNAL_SILO])
             .on_conflict(dsl::id)
             .do_nothing()
-            .execute_async(self.pool_authorized(opctx).await?)
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
-            })?;
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
         info!(opctx.log, "created {} built-in silos", count);
 
         self.virtual_provisioning_collection_create(
@@ -123,39 +119,30 @@ impl DataStore {
         opctx: &OpContext,
         nexus_opctx: &OpContext,
         new_silo_params: params::SiloCreate,
+        new_silo_dns_names: &[String],
         dns_update: DnsVersionUpdateBuilder,
     ) -> CreateResult<Silo> {
-        let conn = self.pool_authorized(opctx).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
         self.silo_create_conn(
-            conn,
+            &conn,
             opctx,
             nexus_opctx,
             new_silo_params,
+            new_silo_dns_names,
             dns_update,
         )
         .await
     }
 
-    pub async fn silo_create_conn<ConnErr, CalleeConnErr>(
+    pub async fn silo_create_conn(
         &self,
-        conn: &(impl async_bb8_diesel::AsyncConnection<DbConnection, ConnErr>
-              + Sync),
+        conn: &async_bb8_diesel::Connection<DbConnection>,
         opctx: &OpContext,
         nexus_opctx: &OpContext,
         new_silo_params: params::SiloCreate,
+        new_silo_dns_names: &[String],
         dns_update: DnsVersionUpdateBuilder,
-    ) -> CreateResult<Silo>
-    where
-        ConnErr: From<diesel::result::Error> + Send + 'static,
-        PoolError: From<ConnErr>,
-        TransactionError<Error>: From<ConnErr>,
-
-        CalleeConnErr: From<diesel::result::Error> + Send + 'static,
-        PoolError: From<CalleeConnErr>,
-        TransactionError<Error>: From<CalleeConnErr>,
-        async_bb8_diesel::Connection<DbConnection>:
-            AsyncConnection<DbConnection, CalleeConnErr>,
-    {
+    ) -> CreateResult<Silo> {
         let silo_id = Uuid::new_v4();
         let silo_group_id = Uuid::new_v4();
 
@@ -217,8 +204,8 @@ impl DataStore {
                 .get_result_async(&conn)
                 .await
                 .map_err(|e| {
-                    public_error_from_diesel_pool(
-                        e.into(),
+                    public_error_from_diesel(
+                        e,
                         ErrorHandler::Conflict(
                             ResourceType::Silo,
                             new_silo_params.identity.name.as_str(),
@@ -253,6 +240,7 @@ impl DataStore {
                         Uuid::new_v4(),
                         ServiceKind::Nexus,
                         c,
+                        new_silo_dns_names,
                     )
                 })
                 .collect::<Result<Vec<_>, _>>()
@@ -272,8 +260,8 @@ impl DataStore {
         .await
         .map_err(|e| match e {
             TransactionError::CustomError(e) => e,
-            TransactionError::Pool(e) => {
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            TransactionError::Database(e) => {
+                public_error_from_diesel(e, ErrorHandler::Server)
             }
         })
     }
@@ -290,9 +278,9 @@ impl DataStore {
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::discoverable.eq(true))
             .select(Silo::as_select())
-            .load_async::<Silo>(self.pool_authorized(opctx).await?)
+            .load_async::<Silo>(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     pub async fn silos_list(
@@ -321,9 +309,9 @@ impl DataStore {
 
         query
             .select(Silo::as_select())
-            .load_async::<Silo>(self.pool_authorized(opctx).await?)
+            .load_async::<Silo>(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     pub async fn silo_delete(
@@ -344,19 +332,20 @@ impl DataStore {
         use db::schema::silo_user;
         use db::schema::silo_user_password_hash;
 
+        let conn = self.pool_connection_authorized(opctx).await?;
+
         // Make sure there are no projects present within this silo.
         let id = authz_silo.id();
         let rcgen = db_silo.rcgen;
-        let project_found = diesel_pool_result_optional(
-            project::dsl::project
-                .filter(project::dsl::silo_id.eq(id))
-                .filter(project::dsl::time_deleted.is_null())
-                .select(project::dsl::id)
-                .limit(1)
-                .first_async::<Uuid>(self.pool_authorized(opctx).await?)
-                .await,
-        )
-        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
+        let project_found = project::dsl::project
+            .filter(project::dsl::silo_id.eq(id))
+            .filter(project::dsl::time_deleted.is_null())
+            .select(project::dsl::id)
+            .limit(1)
+            .first_async::<Uuid>(&*conn)
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         if project_found.is_some() {
             return Err(Error::InvalidRequest {
@@ -367,48 +356,47 @@ impl DataStore {
         let now = Utc::now();
 
         type TxnError = TransactionError<Error>;
-        self.pool_authorized(opctx)
-            .await?
-            .transaction_async(|conn| async move {
-                let updated_rows = diesel::update(silo::dsl::silo)
-                    .filter(silo::dsl::time_deleted.is_null())
-                    .filter(silo::dsl::id.eq(id))
-                    .filter(silo::dsl::rcgen.eq(rcgen))
-                    .set(silo::dsl::time_deleted.eq(now))
-                    .execute_async(&conn)
-                    .await
-                    .map_err(|e| {
-                        public_error_from_diesel_pool(
-                            PoolError::from(e),
-                            ErrorHandler::NotFoundByResource(authz_silo),
-                        )
-                    })?;
+        conn.transaction_async(|conn| async move {
+            let updated_rows = diesel::update(silo::dsl::silo)
+                .filter(silo::dsl::time_deleted.is_null())
+                .filter(silo::dsl::id.eq(id))
+                .filter(silo::dsl::rcgen.eq(rcgen))
+                .set(silo::dsl::time_deleted.eq(now))
+                .execute_async(&conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(
+                        e,
+                        ErrorHandler::NotFoundByResource(authz_silo),
+                    )
+                })?;
 
-                if updated_rows == 0 {
-                    return Err(TxnError::CustomError(Error::InvalidRequest {
-                        message: "silo deletion failed due to concurrent modification"
+            if updated_rows == 0 {
+                return Err(TxnError::CustomError(Error::InvalidRequest {
+                    message:
+                        "silo deletion failed due to concurrent modification"
                             .to_string(),
-                    }));
-                }
+                }));
+            }
 
-                self.virtual_provisioning_collection_delete_on_connection(
-                    &conn,
-                    id,
-                ).await?;
+            self.virtual_provisioning_collection_delete_on_connection(
+                &conn, id,
+            )
+            .await?;
 
-                self.dns_update(dns_opctx, &conn, dns_update).await?;
+            self.dns_update(dns_opctx, &conn, dns_update).await?;
 
-                info!(opctx.log, "deleted silo {}", id);
+            info!(opctx.log, "deleted silo {}", id);
 
-                Ok(())
-            })
-            .await
-            .map_err(|e| match e {
-                TxnError::CustomError(e) => e,
-                TxnError::Pool(e) => {
-                    public_error_from_diesel_pool(e, ErrorHandler::Server)
-                }
-            })?;
+            Ok(())
+        })
+        .await
+        .map_err(|e| match e {
+            TxnError::CustomError(e) => e,
+            TxnError::Database(e) => {
+                public_error_from_diesel(e, ErrorHandler::Server)
+            }
+        })?;
 
         // TODO-correctness This needs to happen in a saga or some other
         // mechanism that ensures it happens even if we crash at this point.
@@ -425,9 +413,9 @@ impl DataStore {
                     .select(silo_user::dsl::id),
             ),
         )
-        .execute_async(self.pool_authorized(opctx).await?)
+        .execute_async(&*conn)
         .await
-        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         debug!(
             opctx.log,
@@ -438,11 +426,9 @@ impl DataStore {
             .filter(silo_user::dsl::silo_id.eq(id))
             .filter(silo_user::dsl::time_deleted.is_null())
             .set(silo_user::dsl::time_deleted.eq(now))
-            .execute_async(self.pool_authorized(opctx).await?)
+            .execute_async(&*conn)
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
-            })?;
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         debug!(
             opctx.log,
@@ -460,10 +446,10 @@ impl DataStore {
                             .select(silo_group::dsl::id),
                     ),
                 )
-                .execute_async(self.pool_authorized(opctx).await?)
+                .execute_async(&*conn)
                 .await
                 .map_err(|e| {
-                    public_error_from_diesel_pool(e, ErrorHandler::Server)
+                    public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
 
         debug!(
@@ -476,11 +462,9 @@ impl DataStore {
             .filter(silo_group::dsl::silo_id.eq(id))
             .filter(silo_group::dsl::time_deleted.is_null())
             .set(silo_group::dsl::time_deleted.eq(now))
-            .execute_async(self.pool_authorized(opctx).await?)
+            .execute_async(&*conn)
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
-            })?;
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         debug!(
             opctx.log,
@@ -494,11 +478,9 @@ impl DataStore {
             .filter(idp_dsl::silo_id.eq(id))
             .filter(idp_dsl::time_deleted.is_null())
             .set(idp_dsl::time_deleted.eq(Utc::now()))
-            .execute_async(self.pool_authorized(opctx).await?)
+            .execute_async(&*conn)
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
-            })?;
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         debug!(opctx.log, "deleted {} silo IdPs for silo {}", updated_rows, id);
 
@@ -508,11 +490,9 @@ impl DataStore {
             .filter(saml_idp_dsl::silo_id.eq(id))
             .filter(saml_idp_dsl::time_deleted.is_null())
             .set(saml_idp_dsl::time_deleted.eq(Utc::now()))
-            .execute_async(self.pool_authorized(opctx).await?)
+            .execute_async(&*conn)
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
-            })?;
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         debug!(
             opctx.log,
@@ -526,11 +506,9 @@ impl DataStore {
             .filter(cert_dsl::silo_id.eq(id))
             .filter(cert_dsl::time_deleted.is_null())
             .set(cert_dsl::time_deleted.eq(Utc::now()))
-            .execute_async(self.pool_authorized(opctx).await?)
+            .execute_async(&*conn)
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
-            })?;
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         debug!(opctx.log, "deleted {} silo IdPs for silo {}", updated_rows, id);
 

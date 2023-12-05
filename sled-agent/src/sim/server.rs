@@ -94,11 +94,11 @@ impl Server {
                     &config.id,
                     &NexusTypes::SledAgentStartupInfo {
                         sa_address: sa_address.to_string(),
-                        role: NexusTypes::SledRole::Gimlet,
+                        role: NexusTypes::SledRole::Scrimlet,
                         baseboard: NexusTypes::Baseboard {
                             serial_number: format!(
-                                "Simulated sled {}",
-                                config.id
+                                "sim-{}",
+                                &config.id.to_string()[0..8]
                             ),
                             part_number: String::from("Unknown"),
                             revision: 0,

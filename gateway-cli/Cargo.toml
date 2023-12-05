@@ -8,9 +8,7 @@ license = "MPL-2.0"
 anyhow.workspace = true
 clap.workspace = true
 futures.workspace = true
-hex.workspace = true
 omicron-common.workspace = true
-libc.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -24,3 +22,4 @@ uuid.workspace = true
 
 gateway-client.workspace = true
 gateway-messages.workspace = true
+omicron-workspace-hack.workspace = true

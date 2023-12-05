@@ -6,6 +6,7 @@
 
 use crate::opte::default_boundary_services;
 use crate::opte::opte_firewall_rules;
+use crate::opte::params::DeleteVirtualNetworkInterfaceHost;
 use crate::opte::params::SetVirtualNetworkInterfaceHost;
 use crate::opte::params::VpcFirewallRule;
 use crate::opte::Error;
@@ -18,6 +19,7 @@ use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::api::internal::shared::SourceNatConfig;
 use oxide_vpc::api::AddRouterEntryReq;
+use oxide_vpc::api::DhcpCfg;
 use oxide_vpc::api::IpCfg;
 use oxide_vpc::api::IpCidr;
 use oxide_vpc::api::Ipv4Cfg;
@@ -99,6 +101,7 @@ impl PortManager {
         source_nat: Option<SourceNatConfig>,
         external_ips: &[IpAddr],
         firewall_rules: &[VpcFirewallRule],
+        dhcp_config: DhcpCfg,
     ) -> Result<(Port, PortTicket), Error> {
         let mac = *nic.mac;
         let vni = Vni::new(nic.vni).unwrap();
@@ -204,8 +207,6 @@ impl PortManager {
             vni,
             phys_ip: self.inner.underlay_ip.into(),
             boundary_services,
-            // TODO-completeness (#2153): Plumb domain search list
-            domain_list: vec![],
         };
 
         // Create the xde device.
@@ -226,11 +227,17 @@ impl PortManager {
             "Creating xde device";
             "port_name" => &port_name,
             "vpc_cfg" => ?&vpc_cfg,
+            "dhcp_config" => ?&dhcp_config,
         );
         #[cfg(target_os = "illumos")]
         let hdl = {
             let hdl = opte_ioctl::OpteHdl::open(opte_ioctl::OpteHdl::XDE_CTL)?;
-            hdl.create_xde(&port_name, vpc_cfg, /* passthru = */ false)?;
+            hdl.create_xde(
+                &port_name,
+                vpc_cfg,
+                dhcp_config,
+                /* passthru = */ false,
+            )?;
             hdl
         };
 
@@ -480,9 +487,10 @@ impl PortManager {
     #[cfg(target_os = "illumos")]
     pub fn unset_virtual_nic_host(
         &self,
-        _mapping: &SetVirtualNetworkInterfaceHost,
+        _mapping: &DeleteVirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
         // TODO requires https://github.com/oxidecomputer/opte/issues/332
+
         slog::warn!(self.inner.log, "unset_virtual_nic_host unimplmented");
         Ok(())
     }
@@ -490,7 +498,7 @@ impl PortManager {
     #[cfg(not(target_os = "illumos"))]
     pub fn unset_virtual_nic_host(
         &self,
-        _mapping: &SetVirtualNetworkInterfaceHost,
+        _mapping: &DeleteVirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
         info!(self.inner.log, "Ignoring unset of virtual NIC mapping");
         Ok(())

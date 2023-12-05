@@ -63,8 +63,9 @@
 use crate::names::{ServiceName, DNS_ZONE};
 use anyhow::{anyhow, ensure};
 use dns_service_client::types::{DnsConfigParams, DnsConfigZone, DnsRecord};
+use omicron_common::api::internal::shared::SwitchLocation;
 use std::collections::BTreeMap;
-use std::net::Ipv6Addr;
+use std::net::{Ipv6Addr, SocketAddrV6};
 use uuid::Uuid;
 
 /// Zones that can be referenced within the internal DNS system.
@@ -136,6 +137,8 @@ pub struct DnsConfigBuilder {
     /// network
     sleds: BTreeMap<Sled, Ipv6Addr>,
 
+    scrimlets: BTreeMap<SwitchLocation, SocketAddrV6>,
+
     /// set of hosts of type "zone" that have been configured so far, mapping
     /// each zone's unique uuid to its sole IPv6 address on the control plane
     /// network
@@ -175,6 +178,7 @@ impl DnsConfigBuilder {
         DnsConfigBuilder {
             sleds: BTreeMap::new(),
             zones: BTreeMap::new(),
+            scrimlets: BTreeMap::new(),
             service_instances_zones: BTreeMap::new(),
             service_instances_sleds: BTreeMap::new(),
         }
@@ -203,6 +207,15 @@ impl DnsConfigBuilder {
                 addr,
             )),
         }
+    }
+
+    pub fn host_scrimlet(
+        &mut self,
+        switch_location: SwitchLocation,
+        addr: SocketAddrV6,
+    ) -> anyhow::Result<()> {
+        self.scrimlets.insert(switch_location, addr);
+        Ok(())
     }
 
     /// Add a new dendrite host of type "zone" to the configuration
@@ -281,7 +294,7 @@ impl DnsConfigBuilder {
 
         let set = self
             .service_instances_zones
-            .entry(service.clone())
+            .entry(service)
             .or_insert_with(BTreeMap::new);
         match set.insert(zone.clone(), port) {
             None => Ok(()),
@@ -320,7 +333,7 @@ impl DnsConfigBuilder {
 
         let set = self
             .service_instances_sleds
-            .entry(service.clone())
+            .entry(service)
             .or_insert_with(BTreeMap::new);
         let sled_id = sled.0;
         match set.insert(sled.clone(), port) {
@@ -350,6 +363,23 @@ impl DnsConfigBuilder {
         let zone_records = self.zones.into_iter().map(|(zone, zone_ip)| {
             (zone.dns_name(), vec![DnsRecord::Aaaa(zone_ip)])
         });
+
+        let scrimlet_srv_records =
+            self.scrimlets.clone().into_iter().map(|(location, addr)| {
+                let srv = DnsRecord::Srv(dns_service_client::types::Srv {
+                    prio: 0,
+                    weight: 0,
+                    port: addr.port(),
+                    target: format!("{location}.scrimlet.{}", DNS_ZONE),
+                });
+                (ServiceName::Scrimlet(location).dns_name(), vec![srv])
+            });
+
+        let scrimlet_aaaa_records =
+            self.scrimlets.into_iter().map(|(location, addr)| {
+                let aaaa = DnsRecord::Aaaa(*addr.ip());
+                (format!("{location}.scrimlet"), vec![aaaa])
+            });
 
         // Assemble the set of SRV records, which implicitly point back at
         // zones' AAAA records.
@@ -399,6 +429,8 @@ impl DnsConfigBuilder {
             .chain(zone_records)
             .chain(srv_records_sleds)
             .chain(srv_records_zones)
+            .chain(scrimlet_aaaa_records)
+            .chain(scrimlet_srv_records)
             .collect();
 
         DnsConfigParams {
@@ -422,6 +454,10 @@ mod test {
     #[test]
     fn display_srv_service() {
         assert_eq!(ServiceName::Clickhouse.dns_name(), "_clickhouse._tcp",);
+        assert_eq!(
+            ServiceName::ClickhouseKeeper.dns_name(),
+            "_clickhouse-keeper._tcp",
+        );
         assert_eq!(ServiceName::Cockroach.dns_name(), "_cockroach._tcp",);
         assert_eq!(ServiceName::InternalDns.dns_name(), "_nameservice._tcp",);
         assert_eq!(ServiceName::Nexus.dns_name(), "_nexus._tcp",);
@@ -578,7 +614,7 @@ mod test {
             error.to_string(),
             "multiple definitions for sled \
             001de000-51ed-4000-8000-000000000001 (previously ::1, \
-            now ::0.0.0.2)"
+            now ::2)"
         );
 
         // Duplicate zone, with both the same IP and a different one.
@@ -588,15 +624,15 @@ mod test {
         assert_eq!(
             error.to_string(),
             "multiple definitions for zone \
-            001de000-c04e-4000-8000-000000000001 (previously ::0.1.0.1, \
-            now ::0.1.0.1)"
+            001de000-c04e-4000-8000-000000000001 (previously ::1:1, \
+            now ::1:1)"
         );
         let error = builder.host_zone(zone1_uuid, ZONE2_IP).unwrap_err();
         assert_eq!(
             error.to_string(),
             "multiple definitions for zone \
-            001de000-c04e-4000-8000-000000000001 (previously ::0.1.0.1, \
-            now ::0.1.0.2)"
+            001de000-c04e-4000-8000-000000000001 (previously ::1:1, \
+            now ::1:2)"
         );
 
         // Specify an undefined zone or sled.  (This requires a second builder.)

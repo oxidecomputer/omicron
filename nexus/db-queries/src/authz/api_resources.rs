@@ -29,9 +29,7 @@
 use super::actor::AnyActor;
 use super::context::AuthorizedResource;
 use super::oso_generic::Init;
-use super::roles::{
-    load_roles_for_resource, load_roles_for_resource_tree, RoleSet,
-};
+use super::roles::{load_roles_for_resource_tree, RoleSet};
 use super::Action;
 use super::{actor::AuthenticatedActor, Authz};
 use crate::authn;
@@ -229,10 +227,10 @@ impl ApiResourceWithRoles for Fleet {
         // If the actor is associated with a Silo, and if that Silo has a policy
         // that grants fleet-level roles, then we must look up the actor's
         // Silo-level roles when looking up their roles on the Fleet.
-        let Some(silo_id) = authn
-                .actor()
-                .and_then(|actor| actor.silo_id())
-                else { return Ok(None); };
+        let Some(silo_id) = authn.actor().and_then(|actor| actor.silo_id())
+        else {
+            return Ok(None);
+        };
         let silo_authn_policy = authn.silo_authn_policy().ok_or_else(|| {
             Error::internal_error(&format!(
                 "actor had a Silo ({}) but no SiloAuthnPolicy",
@@ -290,15 +288,8 @@ impl AuthorizedResource for ConsoleSessionList {
         'd: 'f,
         'e: 'f,
     {
-        load_roles_for_resource(
-            opctx,
-            datastore,
-            authn,
-            ResourceType::Fleet,
-            *FLEET_ID,
-            roleset,
-        )
-        .boxed()
+        load_roles_for_resource_tree(&FLEET, opctx, datastore, authn, roleset)
+            .boxed()
     }
 
     fn on_unauthorized(
@@ -353,15 +344,8 @@ impl AuthorizedResource for DnsConfig {
         'd: 'f,
         'e: 'f,
     {
-        load_roles_for_resource(
-            opctx,
-            datastore,
-            authn,
-            ResourceType::Fleet,
-            *FLEET_ID,
-            roleset,
-        )
-        .boxed()
+        load_roles_for_resource_tree(&FLEET, opctx, datastore, authn, roleset)
+            .boxed()
     }
 
     fn on_unauthorized(
@@ -418,16 +402,9 @@ impl AuthorizedResource for IpPoolList {
     {
         // There are no roles on the IpPoolList, only permissions. But we still
         // need to load the Fleet-related roles to verify that the actor has the
-        // "admin" role on the Fleet.
-        load_roles_for_resource(
-            opctx,
-            datastore,
-            authn,
-            ResourceType::Fleet,
-            *FLEET_ID,
-            roleset,
-        )
-        .boxed()
+        // "admin" role on the Fleet (possibly conferred from a Silo role).
+        load_roles_for_resource_tree(&FLEET, opctx, datastore, authn, roleset)
+            .boxed()
     }
 
     fn on_unauthorized(
@@ -477,15 +454,63 @@ impl AuthorizedResource for DeviceAuthRequestList {
         // There are no roles on the DeviceAuthRequestList, only permissions. But we
         // still need to load the Fleet-related roles to verify that the actor has the
         // "admin" role on the Fleet.
-        load_roles_for_resource(
-            opctx,
-            datastore,
-            authn,
-            ResourceType::Fleet,
-            *FLEET_ID,
-            roleset,
-        )
-        .boxed()
+        load_roles_for_resource_tree(&FLEET, opctx, datastore, authn, roleset)
+            .boxed()
+    }
+
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        error
+    }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
+    }
+}
+
+/// Synthetic resource used for modeling access to low-level hardware inventory
+/// data
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Inventory;
+pub const INVENTORY: Inventory = Inventory {};
+
+impl oso::PolarClass for Inventory {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        // Roles are not directly attached to Inventory
+        oso::Class::builder()
+            .with_equality_check()
+            .add_method(
+                "has_role",
+                |_: &Inventory, _actor: AuthenticatedActor, _role: String| {
+                    false
+                },
+            )
+            .add_attribute_getter("fleet", |_| FLEET)
+    }
+}
+
+impl AuthorizedResource for Inventory {
+    fn load_roles<'a, 'b, 'c, 'd, 'e, 'f>(
+        &'a self,
+        opctx: &'b OpContext,
+        datastore: &'c DataStore,
+        authn: &'d authn::Context,
+        roleset: &'e mut RoleSet,
+    ) -> futures::future::BoxFuture<'f, Result<(), Error>>
+    where
+        'a: 'f,
+        'b: 'f,
+        'c: 'f,
+        'd: 'f,
+        'e: 'f,
+    {
+        load_roles_for_resource_tree(&FLEET, opctx, datastore, authn, roleset)
+            .boxed()
     }
 
     fn on_unauthorized(
@@ -929,6 +954,14 @@ authz_resource! {
 
 authz_resource! {
     name = "Sled",
+    parent = "Fleet",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = FleetChild,
+}
+
+authz_resource! {
+    name = "Zpool",
     parent = "Fleet",
     primary_key = Uuid,
     roles_allowed = false,

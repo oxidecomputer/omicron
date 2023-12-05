@@ -5,7 +5,7 @@
 //! Volumes
 
 use crate::app::sagas;
-use crate::authn;
+use nexus_db_queries::authn;
 use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::DeleteResult;
 use std::sync::Arc;
@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 impl super::Nexus {
     /// Start a saga to remove a read only parent from a volume.
-    pub async fn volume_remove_read_only_parent(
+    pub(crate) async fn volume_remove_read_only_parent(
         self: &Arc<Self>,
         opctx: &OpContext,
         volume_id: Uuid,

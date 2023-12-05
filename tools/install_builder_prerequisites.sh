@@ -131,6 +131,8 @@ function install_packages {
       "library/libxmlsec1"
       # "bindgen leverages libclang to preprocess, parse, and type check C and C++ header files."
       "pkg:/ooce/developer/clang-$CLANGVER"
+      "system/library/gcc-runtime"
+      "system/library/g++-runtime"
     )
 
     # Install/update the set of packages.
@@ -196,6 +198,10 @@ retry ./tools/ci_download_dendrite_openapi
 # Download dendrite-stub. This is required to run tests without a live
 # asic and running dendrite instance
 retry ./tools/ci_download_dendrite_stub
+
+# Download mgd. This is required to run tests that invovle dynamic external
+# routing
+retry ./tools/ci_download_maghemite_mgd
 
 # Download transceiver-control. This is used as the source for the
 # xcvradm binary which is bundled with the switch zone.

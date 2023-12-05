@@ -3,7 +3,7 @@
 #: name = "clippy (helios)"
 #: variety = "basic"
 #: target = "helios-2.0"
-#: rust_toolchain = "1.70.0"
+#: rust_toolchain = "1.72.1"
 #: output_rules = []
 
 # Run clippy on illumos (not just other systems) because a bunch of our code
@@ -28,4 +28,6 @@ banner prerequisites
 ptime -m bash ./tools/install_builder_prerequisites.sh -y
 
 banner clippy
+export CARGO_INCREMENTAL=0
 ptime -m cargo xtask clippy
+ptime -m cargo doc

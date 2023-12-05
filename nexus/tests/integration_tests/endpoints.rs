@@ -7,15 +7,24 @@
 //! This is used for various authz-related tests.
 //! THERE ARE NO TESTS IN THIS FILE.
 
-use crate::integration_tests::certificates::CertificateChain;
 use crate::integration_tests::unauthorized::HTTP_SERVER;
 use chrono::Utc;
 use http::method::Method;
+use internal_dns::names::DNS_ZONE_EXTERNAL_TESTING;
 use lazy_static::lazy_static;
+use nexus_db_queries::authn;
+use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
+use nexus_db_queries::db::identity::Resource;
 use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils::RACK_UUID;
 use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils::SWITCH_UUID;
+use nexus_types::external_api::params;
+use nexus_types::external_api::shared;
+use nexus_types::external_api::shared::Baseboard;
+use nexus_types::external_api::shared::IpRange;
+use nexus_types::external_api::shared::Ipv4Range;
+use nexus_types::external_api::shared::UninitializedSled;
 use omicron_common::api::external::AddressLotKind;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -28,22 +37,25 @@ use omicron_common::api::external::RouteDestination;
 use omicron_common::api::external::RouteTarget;
 use omicron_common::api::external::SemverVersion;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
-use omicron_nexus::authn;
-use omicron_nexus::db::fixed_data::silo::DEFAULT_SILO;
-use omicron_nexus::db::identity::Resource;
-use omicron_nexus::external_api::params;
-use omicron_nexus::external_api::shared;
-use omicron_nexus::external_api::shared::IpRange;
-use omicron_nexus::external_api::shared::Ipv4Range;
+use omicron_test_utils::certificates::CertificateChain;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::str::FromStr;
+use uuid::Uuid;
 
 lazy_static! {
     pub static ref HARDWARE_RACK_URL: String =
         format!("/v1/system/hardware/racks/{}", RACK_UUID);
+    pub static ref HARDWARE_UNINITIALIZED_SLEDS: String =
+        format!("/v1/system/hardware/uninitialized-sleds");
     pub static ref HARDWARE_SLED_URL: String =
         format!("/v1/system/hardware/sleds/{}", SLED_AGENT_UUID);
+    pub static ref HARDWARE_SLED_PROVISION_STATE_URL: String =
+        format!("/v1/system/hardware/sleds/{}/provision-state", SLED_AGENT_UUID);
+    pub static ref DEMO_SLED_PROVISION_STATE: params::SledProvisionStateParams =
+        params::SledProvisionStateParams {
+            state: nexus_types::external_api::views::SledProvisionState::NonProvisionable,
+        };
     pub static ref HARDWARE_SWITCH_URL: String =
         format!("/v1/system/hardware/switches/{}", SWITCH_UUID);
     pub static ref HARDWARE_DISK_URL: String =
@@ -53,6 +65,16 @@ lazy_static! {
 
     pub static ref SLED_INSTANCES_URL: String =
         format!("/v1/system/hardware/sleds/{}/instances", SLED_AGENT_UUID);
+
+    pub static ref DEMO_UNINITIALIZED_SLED: UninitializedSled = UninitializedSled {
+        baseboard: Baseboard {
+            serial: "demo-serial".to_string(),
+            part: "demo-part".to_string(),
+            revision: 6
+        },
+        rack_id: Uuid::new_v4(),
+        cubby: 1
+    };
 
     // Global policy
     pub static ref SYSTEM_POLICY_URL: &'static str = "/v1/system/policy";
@@ -334,7 +356,8 @@ lazy_static! {
     pub static ref DEMO_CERTIFICATES_URL: String = format!("/v1/certificates");
     pub static ref DEMO_CERTIFICATE_URL: String =
         format!("/v1/certificates/demo-certificate");
-    pub static ref DEMO_CERTIFICATE: CertificateChain = CertificateChain::new();
+    pub static ref DEMO_CERTIFICATE: CertificateChain =
+        CertificateChain::new(format!("*.sys.{DNS_ZONE_EXTERNAL_TESTING}"));
     pub static ref DEMO_CERTIFICATE_CREATE: params::CertificateCreate =
         params::CertificateCreate {
             identity: IdentityMetadataCreateParams {
@@ -419,6 +442,40 @@ lazy_static! {
 }
 
 lazy_static! {
+    pub static ref DEMO_BGP_CONFIG_CREATE_URL: String =
+        format!("/v1/system/networking/bgp?name_or_id=as47");
+    pub static ref DEMO_BGP_CONFIG: params::BgpConfigCreate =
+        params::BgpConfigCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "as47".parse().unwrap(),
+                description: "BGP config for AS47".into(),
+            },
+            bgp_announce_set_id: NameOrId::Name("instances".parse().unwrap()),
+            asn: 47,
+            vrf: None,
+        };
+    pub static ref DEMO_BGP_ANNOUNCE_SET_URL: String =
+        format!("/v1/system/networking/bgp-announce?name_or_id=a-bag-of-addrs");
+    pub static ref DEMO_BGP_ANNOUNCE: params::BgpAnnounceSetCreate =
+        params::BgpAnnounceSetCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "a-bag-of-addrs".parse().unwrap(),
+                description: "a bag of addrs".into(),
+            },
+            announcement: vec![params::BgpAnnouncementCreate {
+                address_lot_block: NameOrId::Name(
+                    "some-block".parse().unwrap(),
+                ),
+                network: "10.0.0.0/16".parse().unwrap(),
+            }],
+        };
+    pub static ref DEMO_BGP_STATUS_URL: String =
+        format!("/v1/system/networking/bgp-status");
+    pub static ref DEMO_BGP_ROUTES_IPV4_URL: String =
+        format!("/v1/system/networking/bgp-routes-ipv4?asn=47");
+}
+
+lazy_static! {
     // Project Images
     pub static ref DEMO_IMAGE_NAME: Name = "demo-image".parse().unwrap();
     pub static ref DEMO_PROJECT_IMAGES_URL: String =
@@ -454,6 +511,8 @@ lazy_static! {
                 name: DEMO_IP_POOL_NAME.clone(),
                 description: String::from("an IP pool"),
             },
+            silo: None,
+            is_default: true,
         };
     pub static ref DEMO_IP_POOL_PROJ_URL: String =
         format!("/v1/ip-pools/{}?project={}", *DEMO_IP_POOL_NAME, *DEMO_PROJECT_NAME);
@@ -802,7 +861,7 @@ lazy_static! {
         // IP Pool endpoint (Oxide services)
         VerifyEndpoint {
             url: &DEMO_IP_POOL_SERVICE_URL,
-            visibility: Visibility::Protected,
+            visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Get
@@ -812,7 +871,7 @@ lazy_static! {
         // IP Pool ranges endpoint (Oxide services)
         VerifyEndpoint {
             url: &DEMO_IP_POOL_SERVICE_RANGES_URL,
-            visibility: Visibility::Protected,
+            visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Get
@@ -822,7 +881,7 @@ lazy_static! {
         // IP Pool ranges/add endpoint (Oxide services)
         VerifyEndpoint {
             url: &DEMO_IP_POOL_SERVICE_RANGES_ADD_URL,
-            visibility: Visibility::Protected,
+            visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Post(
@@ -834,7 +893,7 @@ lazy_static! {
         // IP Pool ranges/delete endpoint (Oxide services)
         VerifyEndpoint {
             url: &DEMO_IP_POOL_SERVICE_RANGES_DEL_URL,
-            visibility: Visibility::Protected,
+            visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Post(
@@ -1527,10 +1586,19 @@ lazy_static! {
         },
 
         VerifyEndpoint {
-            url: "/v1/system/hardware/sleds",
+            url: &HARDWARE_UNINITIALIZED_SLEDS,
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Get],
+        },
+
+        VerifyEndpoint {
+            url: "/v1/system/hardware/sleds",
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![AllowedMethod::Get, AllowedMethod::Post(
+                serde_json::to_value(&*DEMO_UNINITIALIZED_SLED).unwrap()
+            )],
         },
 
         VerifyEndpoint {
@@ -1545,6 +1613,15 @@ lazy_static! {
             visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Get],
+        },
+
+        VerifyEndpoint {
+            url: &HARDWARE_SLED_PROVISION_STATE_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![AllowedMethod::Put(
+                serde_json::to_value(&*DEMO_SLED_PROVISION_STATE).unwrap()
+            )],
         },
 
         VerifyEndpoint {
@@ -1872,6 +1949,48 @@ lazy_static! {
                 AllowedMethod::GetNonexistent
             ],
         },
+        VerifyEndpoint {
+            url: &DEMO_BGP_CONFIG_CREATE_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_BGP_CONFIG).unwrap(),
+                ),
+                AllowedMethod::Get,
+                AllowedMethod::Delete
+            ],
+        },
 
+        VerifyEndpoint {
+            url: &DEMO_BGP_ANNOUNCE_SET_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_BGP_ANNOUNCE).unwrap(),
+                ),
+                AllowedMethod::GetNonexistent,
+                AllowedMethod::Delete
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_BGP_STATUS_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::GetNonexistent,
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_BGP_ROUTES_IPV4_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::GetNonexistent,
+            ],
+        }
     ];
 }
