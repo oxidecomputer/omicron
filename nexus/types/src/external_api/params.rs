@@ -294,15 +294,25 @@ pub struct SiloCreate {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SiloQuotasCreate {
     pub cpus: i64,
-    pub memory: i64,
-    pub storage: i64,
+    pub memory: ByteCount,
+    pub storage: ByteCount,
+}
+
+impl SiloQuotasCreate {
+    pub fn empty() -> Self {
+        Self {
+            cpus: 0,
+            memory: ByteCount::from(0),
+            storage: ByteCount::from(0),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SiloQuotasUpdate {
     pub cpus: Option<i64>,
-    pub memory: Option<i64>,
-    pub storage: Option<i64>,
+    pub memory: Option<ByteCount>,
+    pub storage: Option<ByteCount>,
 }
 
 /// Create-time parameters for a `User`

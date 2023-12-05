@@ -263,8 +263,8 @@ impl DataStore {
                 SiloQuotas::new(
                     authz_silo.id(),
                     new_silo_params.quotas.cpus,
-                    new_silo_params.quotas.memory,
-                    new_silo_params.quotas.storage,
+                    new_silo_params.quotas.memory.into(),
+                    new_silo_params.quotas.storage.into(),
                 ),
             )
             .await?;

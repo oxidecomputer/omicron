@@ -91,6 +91,11 @@ lazy_static! {
                 name: DEMO_SILO_NAME.clone(),
                 description: String::from(""),
             },
+            quotas: params::SiloQuotasCreate {
+                cpus: 100,
+                memory: ByteCount::from_gibibytes_u32(100),
+                storage: ByteCount::from_gibibytes_u32(100),
+            },
             discoverable: true,
             identity_mode: shared::SiloIdentityMode::SamlJit,
             admin_group_name: None,

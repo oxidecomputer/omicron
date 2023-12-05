@@ -827,6 +827,7 @@ mod test {
                 name: name.parse().unwrap(),
                 description: String::new(),
             },
+            quotas: params::SiloQuotasCreate::empty(),
             discoverable: false,
             identity_mode,
             admin_group_name: None,

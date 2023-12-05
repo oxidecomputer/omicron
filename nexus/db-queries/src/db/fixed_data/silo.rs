@@ -25,11 +25,7 @@ lazy_static! {
                     description: "default silo".to_string(),
                 },
                 // TODO: Should the default silo have a quota? If so, what should the defaults be?
-                quotas: params::SiloQuotasCreate {
-                    cpus: 0,
-                    memory: 0,
-                    storage: 0,
-                },
+                quotas: params::SiloQuotasCreate::empty(),
                 discoverable: false,
                 identity_mode: shared::SiloIdentityMode::LocalOnly,
                 admin_group_name: None,
@@ -56,11 +52,7 @@ lazy_static! {
                     description: "Built-in internal Silo.".to_string(),
                 },
                 // The internal silo contains no virtual resources, so it has no allotted capacity.
-                quotas: params::SiloQuotasCreate {
-                    cpus: 0,
-                    memory: 0,
-                    storage: 0,
-                },
+                quotas: params::SiloQuotasCreate::empty(),
                 discoverable: false,
                 identity_mode: shared::SiloIdentityMode::LocalOnly,
                 admin_group_name: None,

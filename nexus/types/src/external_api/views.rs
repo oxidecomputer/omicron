@@ -53,8 +53,8 @@ pub struct Silo {
 pub struct SiloQuotas {
     pub silo_id: Uuid,
     pub cpus: i64,
-    pub memory: i64,
-    pub storage: i64,
+    pub memory: ByteCount,
+    pub storage: ByteCount,
 }
 
 // IDENTITY PROVIDER

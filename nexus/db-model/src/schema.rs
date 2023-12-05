@@ -415,8 +415,8 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         cpus -> Int8,
-        memory -> Int8,
-        storage -> Int8,
+        memory_bytes -> Int8,
+        storage_bytes -> Int8,
     }
 }
 
