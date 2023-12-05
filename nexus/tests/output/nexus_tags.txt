@@ -6,7 +6,6 @@ disk_bulk_write_import_stop              POST     /v1/disks/{disk}/bulk-write-st
 disk_create                              POST     /v1/disks
 disk_delete                              DELETE   /v1/disks/{disk}
 disk_finalize_import                     POST     /v1/disks/{disk}/finalize
-disk_import_blocks_from_url              POST     /v1/disks/{disk}/import
 disk_list                                GET      /v1/disks
 disk_metrics_list                        GET      /v1/disks/{disk}/metrics/{metric}
 disk_view                                GET      /v1/disks/{disk}

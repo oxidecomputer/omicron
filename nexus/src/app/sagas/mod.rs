@@ -23,7 +23,6 @@ pub mod disk_create;
 pub mod disk_delete;
 pub mod finalize_disk;
 pub mod image_delete;
-pub mod import_blocks_from_url;
 mod instance_common;
 pub mod instance_create;
 pub mod instance_delete;
@@ -125,7 +124,6 @@ fn make_action_registry() -> ActionRegistry {
     <finalize_disk::SagaFinalizeDisk as NexusSaga>::register_actions(
         &mut registry,
     );
-    <import_blocks_from_url::SagaImportBlocksFromUrl as NexusSaga>::register_actions(&mut registry);
     <instance_create::SagaInstanceCreate as NexusSaga>::register_actions(
         &mut registry,
     );

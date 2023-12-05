@@ -1189,15 +1189,6 @@ pub enum ExpectedDigest {
     Sha256(String),
 }
 
-/// Parameters for importing blocks from a URL to a disk
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct ImportBlocksFromUrl {
-    /// the source to pull blocks from
-    pub url: String,
-    /// Expected digest of all blocks when importing from a URL
-    pub expected_digest: Option<ExpectedDigest>,
-}
-
 /// Parameters for importing blocks with a bulk write
 // equivalent to crucible_pantry_client::types::BulkWriteRequest
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -1706,12 +1697,6 @@ pub struct SwitchPortApplySettings {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ImageSource {
-    Url {
-        url: String,
-
-        /// The block size in bytes
-        block_size: BlockSize,
-    },
     Snapshot {
         id: Uuid,
     },

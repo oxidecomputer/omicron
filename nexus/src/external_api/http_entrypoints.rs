@@ -149,7 +149,6 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(disk_bulk_write_import_start)?;
         api.register(disk_bulk_write_import)?;
         api.register(disk_bulk_write_import_stop)?;
-        api.register(disk_import_blocks_from_url)?;
         api.register(disk_finalize_import)?;
 
         api.register(instance_list)?;
@@ -1785,39 +1784,6 @@ async fn disk_bulk_write_import_stop(
         let disk_lookup = nexus.disk_lookup(&opctx, disk_selector)?;
 
         nexus.disk_manual_import_stop(&opctx, &disk_lookup).await?;
-
-        Ok(HttpResponseUpdatedNoContent())
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Request to import blocks from URL
-#[endpoint {
-    method = POST,
-    path = "/v1/disks/{disk}/import",
-    tags = ["disks"],
-}]
-async fn disk_import_blocks_from_url(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<params::DiskPath>,
-    query_params: Query<params::OptionalProjectSelector>,
-    import_params: TypedBody<params::ImportBlocksFromUrl>,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let query = query_params.into_inner();
-        let params = import_params.into_inner();
-
-        let disk_selector =
-            params::DiskSelector { disk: path.disk, project: query.project };
-        let disk_lookup = nexus.disk_lookup(&opctx, disk_selector)?;
-
-        nexus
-            .import_blocks_from_url_for_disk(&opctx, &disk_lookup, params)
-            .await?;
 
         Ok(HttpResponseUpdatedNoContent())
     };

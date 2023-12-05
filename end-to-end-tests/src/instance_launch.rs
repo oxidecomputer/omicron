@@ -47,12 +47,8 @@ async fn instance_launch() -> Result<()> {
             description: String::new(),
             os: "debian".try_into().map_err(anyhow::Error::msg)?,
             version: "propolis-blob".into(),
-            source: ImageSource::Url {
-                url:
-                    "http://[fd00:1122:3344:101::1]:54321/debian-11-genericcloud-amd64.raw"
-                        .into(),
-                block_size: 512.try_into().map_err(anyhow::Error::msg)?,
-            },
+            /// XXX this won't work, it needs cloud-init
+            source: ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
         })
         .send()
         .await?
