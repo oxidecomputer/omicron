@@ -132,9 +132,6 @@ system_metric                            GET      /v1/system/metrics/{metric_nam
 
 API operations found with tag "system/networking"
 OPERATION ID                             METHOD   URL PATH
-ip_pool_association_create               POST     /v1/system/ip-pools/{pool}/associations
-ip_pool_association_delete               DELETE   /v1/system/ip-pools/{pool}/associations
-ip_pool_association_list                 GET      /v1/system/ip-pools/{pool}/associations
 ip_pool_create                           POST     /v1/system/ip-pools
 ip_pool_delete                           DELETE   /v1/system/ip-pools/{pool}
 ip_pool_list                             GET      /v1/system/ip-pools
@@ -145,6 +142,9 @@ ip_pool_service_range_add                POST     /v1/system/ip-pools-service/ra
 ip_pool_service_range_list               GET      /v1/system/ip-pools-service/ranges
 ip_pool_service_range_remove             POST     /v1/system/ip-pools-service/ranges/remove
 ip_pool_service_view                     GET      /v1/system/ip-pools-service
+ip_pool_silo_link                        POST     /v1/system/ip-pools/{pool}/silos
+ip_pool_silo_list                        GET      /v1/system/ip-pools/{pool}/silos
+ip_pool_silo_unlink                      DELETE   /v1/system/ip-pools/{pool}/silos
 ip_pool_update                           PUT      /v1/system/ip-pools/{pool}
 ip_pool_view                             GET      /v1/system/ip-pools/{pool}
 networking_address_lot_block_list        GET      /v1/system/networking/address-lot/{address_lot}/blocks

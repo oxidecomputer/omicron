@@ -353,13 +353,11 @@ impl DataStore {
                 &pagparams.map_name(|n| Name::ref_cast(n)),
             ),
         }
-        // TODO: make sure this join is compatible with pagination logic
         .inner_join(ip_pool_resource::table)
         .filter(
-            (ip_pool_resource::resource_type
+            ip_pool_resource::resource_type
                 .eq(IpPoolResourceType::Silo)
-                .and(ip_pool_resource::resource_id.eq(silo_id)))
-            .or(ip_pool_resource::resource_type.eq(IpPoolResourceType::Fleet)),
+                .and(ip_pool_resource::resource_id.eq(silo_id)),
         )
         .filter(ip_pool::time_deleted.is_null())
         .select(db::model::IpPool::as_select())

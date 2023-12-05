@@ -245,13 +245,6 @@ pub enum UpdateableComponentType {
     HostOmicron,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum IpPoolResourceType {
-    Fleet,
-    Silo,
-}
-
 /// Properties that uniquely identify an Oxide hardware component
 #[derive(
     Clone,

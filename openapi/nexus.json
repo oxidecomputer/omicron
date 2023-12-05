@@ -4685,164 +4685,6 @@
         }
       }
     },
-    "/v1/system/ip-pools/{pool}/associations": {
-      "get": {
-        "tags": [
-          "system/networking"
-        ],
-        "summary": "List IP pool resource associations",
-        "operationId": "ip_pool_association_list",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "pool",
-            "description": "Name or ID of the IP pool",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/IdSortMode"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IpPoolResourceResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-dropshot-pagination": {
-          "required": []
-        }
-      },
-      "post": {
-        "tags": [
-          "system/networking"
-        ],
-        "summary": "Associate an IP Pool with a silo or the fleet",
-        "operationId": "ip_pool_association_create",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "pool",
-            "description": "Name or ID of the IP pool",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/IpPoolAssociationCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "successful creation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IpPoolResource"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "system/networking"
-        ],
-        "summary": "Remove an IP pool's association with a silo or project",
-        "operationId": "ip_pool_association_delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "pool",
-            "description": "Name or ID of the IP pool",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "resource_type",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/IpPoolResourceType"
-            }
-          },
-          {
-            "in": "query",
-            "name": "silo",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/v1/system/ip-pools/{pool}/ranges": {
       "get": {
         "tags": [
@@ -4981,6 +4823,157 @@
           },
           "required": true
         },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/ip-pools/{pool}/silos": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "List an IP pool's linked silos",
+        "operationId": "ip_pool_silo_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool",
+            "description": "Name or ID of the IP pool",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPoolSiloResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      },
+      "post": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Make an IP pool available within a silo",
+        "operationId": "ip_pool_silo_link",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool",
+            "description": "Name or ID of the IP pool",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IpPoolSiloLink"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPoolSilo"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Remove an IP pool's association with a silo or project",
+        "operationId": "ip_pool_silo_unlink",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool",
+            "description": "Name or ID of the IP pool",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "silo",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
         "responses": {
           "204": {
             "description": "resource updated"
@@ -11902,51 +11895,6 @@
           "time_modified"
         ]
       },
-      "IpPoolAssociationCreate": {
-        "description": "Parameters for associating an IP pool with a resource (fleet, silo)",
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "is_default": {
-                "type": "boolean"
-              },
-              "resource_type": {
-                "type": "string",
-                "enum": [
-                  "silo"
-                ]
-              },
-              "silo": {
-                "$ref": "#/components/schemas/NameOrId"
-              }
-            },
-            "required": [
-              "is_default",
-              "resource_type",
-              "silo"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "is_default": {
-                "type": "boolean"
-              },
-              "resource_type": {
-                "type": "string",
-                "enum": [
-                  "fleet"
-                ]
-              }
-            },
-            "required": [
-              "is_default",
-              "resource_type"
-            ]
-          }
-        ]
-      },
       "IpPoolCreate": {
         "description": "Create-time parameters for an `IpPool`",
         "type": "object",
@@ -12010,32 +11958,7 @@
           "items"
         ]
       },
-      "IpPoolResource": {
-        "type": "object",
-        "properties": {
-          "ip_pool_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "is_default": {
-            "type": "boolean"
-          },
-          "resource_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "resource_type": {
-            "$ref": "#/components/schemas/IpPoolResourceType"
-          }
-        },
-        "required": [
-          "ip_pool_id",
-          "is_default",
-          "resource_id",
-          "resource_type"
-        ]
-      },
-      "IpPoolResourceResultsPage": {
+      "IpPoolResultsPage": {
         "description": "A single page of results",
         "type": "object",
         "properties": {
@@ -12043,7 +11966,7 @@
             "description": "list of items on this page of results",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/IpPoolResource"
+              "$ref": "#/components/schemas/IpPool"
             }
           },
           "next_page": {
@@ -12056,14 +11979,43 @@
           "items"
         ]
       },
-      "IpPoolResourceType": {
-        "type": "string",
-        "enum": [
-          "fleet",
+      "IpPoolSilo": {
+        "type": "object",
+        "properties": {
+          "ip_pool_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "is_default": {
+            "type": "boolean"
+          },
+          "silo_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "ip_pool_id",
+          "is_default",
+          "silo_id"
+        ]
+      },
+      "IpPoolSiloLink": {
+        "type": "object",
+        "properties": {
+          "is_default": {
+            "type": "boolean"
+          },
+          "silo": {
+            "$ref": "#/components/schemas/NameOrId"
+          }
+        },
+        "required": [
+          "is_default",
           "silo"
         ]
       },
-      "IpPoolResultsPage": {
+      "IpPoolSiloResultsPage": {
         "description": "A single page of results",
         "type": "object",
         "properties": {
@@ -12071,7 +12023,7 @@
             "description": "list of items on this page of results",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/IpPool"
+              "$ref": "#/components/schemas/IpPoolSilo"
             }
           },
           "next_page": {

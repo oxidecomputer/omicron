@@ -16,7 +16,7 @@ use db_macros::Resource;
 use diesel::Selectable;
 use ipnetwork::IpNetwork;
 use nexus_types::external_api::params;
-use nexus_types::external_api::shared::{self, IpRange};
+use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::views;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
@@ -85,7 +85,6 @@ impl_enum_type!(
      #[diesel(sql_type = IpPoolResourceTypeEnum)]
      pub enum IpPoolResourceType;
 
-     Fleet => b"fleet"
      Silo => b"silo"
 );
 
@@ -98,15 +97,6 @@ pub struct IpPoolResource {
     pub is_default: bool,
 }
 
-impl From<IpPoolResourceType> for shared::IpPoolResourceType {
-    fn from(typ: IpPoolResourceType) -> Self {
-        match typ {
-            IpPoolResourceType::Fleet => Self::Fleet,
-            IpPoolResourceType::Silo => Self::Silo,
-        }
-    }
-}
-
 /// Information required to delete an IP pool association. Comes from request
 /// params -- silo is a NameOrId and must be resolved to ID.
 pub struct IpPoolResourceDelete {
@@ -115,12 +105,11 @@ pub struct IpPoolResourceDelete {
     pub resource_id: Uuid,
 }
 
-impl From<IpPoolResource> for views::IpPoolResource {
+impl From<IpPoolResource> for views::IpPoolSilo {
     fn from(assoc: IpPoolResource) -> Self {
         Self {
             ip_pool_id: assoc.ip_pool_id,
-            resource_type: assoc.resource_type.into(),
-            resource_id: assoc.resource_id,
+            silo_id: assoc.resource_id,
             is_default: assoc.is_default,
         }
     }

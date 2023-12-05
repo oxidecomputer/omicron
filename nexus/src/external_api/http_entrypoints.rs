@@ -122,9 +122,9 @@ pub(crate) fn external_api() -> NexusApiDescription {
         // Operator-Accessible IP Pools API
         api.register(ip_pool_list)?;
         api.register(ip_pool_create)?;
-        api.register(ip_pool_association_list)?;
-        api.register(ip_pool_association_create)?;
-        api.register(ip_pool_association_delete)?;
+        api.register(ip_pool_silo_list)?;
+        api.register(ip_pool_silo_link)?;
+        api.register(ip_pool_silo_unlink)?;
         api.register(ip_pool_view)?;
         api.register(ip_pool_delete)?;
         api.register(ip_pool_update)?;
@@ -1323,24 +1323,20 @@ async fn ip_pool_update(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-// TODO: associate just seems like the wrong word and I'd like to change it
-// across the board. What I really mean is "make available to" or "make availale
-// for use in"
-
-/// List IP pool resource associations
+/// List an IP pool's linked silos
 #[endpoint {
     method = GET,
-    path = "/v1/system/ip-pools/{pool}/associations",
+    path = "/v1/system/ip-pools/{pool}/silos",
     tags = ["system/networking"],
 }]
-async fn ip_pool_association_list(
+async fn ip_pool_silo_list(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::IpPoolPath>,
     // paginating by resource_id because they're unique per pool. most robust
     // option would be to paginate by a composite key representing the (pool,
     // resource_type, resource)
     query_params: Query<PaginatedById>,
-) -> Result<HttpResponseOk<ResultsPage<views::IpPoolResource>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<views::IpPoolSilo>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
@@ -1362,23 +1358,23 @@ async fn ip_pool_association_list(
         Ok(HttpResponseOk(ScanById::results_page(
             &query,
             assocs,
-            &|_, x: &views::IpPoolResource| x.resource_id,
+            &|_, x: &views::IpPoolSilo| x.silo_id,
         )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Associate an IP Pool with a silo or the fleet
+/// Make an IP pool available within a silo
 #[endpoint {
     method = POST,
-    path = "/v1/system/ip-pools/{pool}/associations",
+    path = "/v1/system/ip-pools/{pool}/silos",
     tags = ["system/networking"],
 }]
-async fn ip_pool_association_create(
+async fn ip_pool_silo_link(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::IpPoolPath>,
-    resource_assoc: TypedBody<params::IpPoolAssociationCreate>,
-) -> Result<HttpResponseCreated<views::IpPoolResource>, HttpError> {
+    resource_assoc: TypedBody<params::IpPoolSiloLink>,
+) -> Result<HttpResponseCreated<views::IpPoolSilo>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
@@ -1397,13 +1393,13 @@ async fn ip_pool_association_create(
 /// Remove an IP pool's association with a silo or project
 #[endpoint {
     method = DELETE,
-    path = "/v1/system/ip-pools/{pool}/associations",
+    path = "/v1/system/ip-pools/{pool}/silos",
     tags = ["system/networking"],
 }]
-async fn ip_pool_association_delete(
+async fn ip_pool_silo_unlink(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::IpPoolPath>,
-    query_params: Query<params::IpPoolAssociationDelete>,
+    query_params: Query<params::IpPoolSiloUnlink>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
@@ -1412,17 +1408,10 @@ async fn ip_pool_association_delete(
         let path = path_params.into_inner();
         let query = query_params.into_inner();
 
-        let validated_params =
-            params::IpPoolAssociationDeleteValidated::try_from(query)
-                .map_err(|e| HttpError::for_bad_request(None, e))?;
-
         let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
+        let silo_lookup = nexus.silo_lookup(&opctx, query.silo)?;
         nexus
-            .ip_pool_dissociate_resource(
-                &opctx,
-                &pool_lookup,
-                &validated_params,
-            )
+            .ip_pool_dissociate_resource(&opctx, &pool_lookup, &silo_lookup)
             .await?;
         Ok(HttpResponseUpdatedNoContent())
     };

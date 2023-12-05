@@ -12,11 +12,9 @@ use nexus_db_model::IpPoolResourceType;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
-use nexus_db_queries::db::fixed_data::FLEET_ID;
 use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::model::Name;
-use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -93,40 +91,22 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pool_lookup: &lookup::IpPool<'_>,
-        assoc_create: &params::IpPoolAssociationCreate,
+        silo_link: &params::IpPoolSiloLink,
     ) -> CreateResult<db::model::IpPoolResource> {
-        // TODO: check for perms on specified resource? or unnecessary because this is an operator action?
         let (.., authz_pool) =
             pool_lookup.lookup_for(authz::Action::Modify).await?;
-        let (resource_type, resource_id, is_default) = match assoc_create {
-            params::IpPoolAssociationCreate::Silo(assoc_silo) => {
-                let (silo,) = self
-                    .silo_lookup(&opctx, assoc_silo.silo.clone())?
-                    .lookup_for(authz::Action::Read)
-                    .await?;
-                (
-                    db::model::IpPoolResourceType::Silo,
-                    silo.id(),
-                    assoc_silo.is_default,
-                )
-            }
-            params::IpPoolAssociationCreate::Fleet(assoc_fleet) => {
-                // we don't need to be assured of the fleet's existence
-                (
-                    db::model::IpPoolResourceType::Fleet,
-                    *FLEET_ID,
-                    assoc_fleet.is_default,
-                )
-            }
-        };
+        let (silo,) = self
+            .silo_lookup(&opctx, silo_link.silo.clone())?
+            .lookup_for(authz::Action::Read)
+            .await?;
         self.db_datastore
             .ip_pool_associate_resource(
                 opctx,
                 db::model::IpPoolResource {
                     ip_pool_id: authz_pool.id(),
-                    resource_type,
-                    resource_id,
-                    is_default,
+                    resource_type: db::model::IpPoolResourceType::Silo,
+                    resource_id: silo.id(),
+                    is_default: silo_link.is_default,
                 },
             )
             .await
@@ -136,31 +116,20 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pool_lookup: &lookup::IpPool<'_>,
-        ip_pool_dissoc: &params::IpPoolAssociationDeleteValidated,
+        silo_lookup: &lookup::Silo<'_>,
     ) -> DeleteResult {
         let (.., authz_pool) =
             pool_lookup.lookup_for(authz::Action::Modify).await?;
-
-        let (resource_type, resource_id) = match ip_pool_dissoc {
-            params::IpPoolAssociationDeleteValidated::Silo(assoc) => {
-                let (.., silo) = self
-                    .silo_lookup(opctx, assoc.silo.clone())?
-                    .fetch()
-                    .await?;
-                (IpPoolResourceType::Silo, silo.id())
-            }
-            params::IpPoolAssociationDeleteValidated::Fleet => {
-                (IpPoolResourceType::Fleet, *FLEET_ID)
-            }
-        };
+        let (.., authz_silo) =
+            silo_lookup.lookup_for(authz::Action::Modify).await?;
 
         self.db_datastore
             .ip_pool_dissociate_resource(
                 opctx,
                 &IpPoolResourceDelete {
                     ip_pool_id: authz_pool.id(),
-                    resource_id,
-                    resource_type,
+                    resource_id: authz_silo.id(),
+                    resource_type: IpPoolResourceType::Silo,
                 },
             )
             .await

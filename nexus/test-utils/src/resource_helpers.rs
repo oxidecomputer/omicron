@@ -145,14 +145,14 @@ pub async fn create_ip_pool(
     .await;
 
     // make pool available for use anywhere in fleet
-    let _assoc: views::IpPoolResource = object_create(
-        client,
-        &format!("/v1/system/ip-pools/{pool_name}/associations"),
-        &params::IpPoolAssociationCreate::Fleet(params::IpPoolAssociateFleet {
-            is_default: false,
-        }),
-    )
-    .await;
+    // let _assoc: views::IpPoolSilo = object_create(
+    //     client,
+    //     &format!("/v1/system/ip-pools/{pool_name}/associations"),
+    //     &params::IpPoolAssociationCreate::Fleet(params::IpPoolAssociateFleet {
+    //         is_default: false,
+    //     }),
+    // )
+    // .await;
 
     // TODO: associate with fleet as a non-default like before?
     let range = populate_ip_pool(client, pool_name, ip_range).await;

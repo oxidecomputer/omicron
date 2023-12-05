@@ -95,11 +95,9 @@ impl DataStore {
         ip_pool::table
             .inner_join(ip_pool_resource::table)
             .filter(
-                (ip_pool_resource::resource_type
+                ip_pool_resource::resource_type
                     .eq(IpPoolResourceType::Silo)
-                    .and(ip_pool_resource::resource_id.eq(authz_silo.id())))
-                .or(ip_pool_resource::resource_type
-                    .eq(IpPoolResourceType::Fleet)),
+                    .and(ip_pool_resource::resource_id.eq(authz_silo.id())),
             )
             .filter(ip_pool::id.eq(authz_pool.id()))
             .filter(ip_pool::time_deleted.is_null())
@@ -139,11 +137,9 @@ impl DataStore {
         ip_pool::table
             .inner_join(ip_pool_resource::table)
             .filter(
-                (ip_pool_resource::resource_type
+                ip_pool_resource::resource_type
                     .eq(IpPoolResourceType::Silo)
-                    .and(ip_pool_resource::resource_id.eq(authz_silo_id)))
-                .or(ip_pool_resource::resource_type
-                    .eq(IpPoolResourceType::Fleet)),
+                    .and(ip_pool_resource::resource_id.eq(authz_silo_id)),
             )
             .filter(ip_pool_resource::is_default.eq(true))
             .filter(ip_pool::time_deleted.is_null())
@@ -429,57 +425,35 @@ impl DataStore {
         // We can only delete the association if there are no IPs allocated
         // from this pool in the associated resource.
 
-        // most of the query is the same between silo and fleet
-        let base_query = |table: external_ip::table| {
-            table
-                .inner_join(
-                    instance::table
-                        .on(external_ip::parent_id.eq(instance::id.nullable())),
-                )
-                .filter(external_ip::is_service.eq(false))
-                .filter(external_ip::parent_id.is_not_null())
-                .filter(external_ip::time_deleted.is_null())
-                .filter(external_ip::ip_pool_id.eq(association.ip_pool_id))
-                .filter(instance::time_deleted.is_not_null())
-                .select(ExternalIp::as_select())
-                .limit(1)
-        };
-
-        let existing_ips = match association.resource_type {
-            IpPoolResourceType::Silo => {
-
-            // if it's a silo association, we also have to join through IPs to instances
-            // to projects to get the silo ID
-            base_query(external_ip::table)
-                .inner_join(
-                    project::table.on(instance::project_id.eq(project::id)),
-                )
-                .filter(project::silo_id.eq(association.resource_id))
-                .load_async::<ExternalIp>(
-                    &*self.pool_connection_authorized(opctx).await?,
-                )
-                .await
-        },
-            IpPoolResourceType::Fleet => {
-            // If it's a fleet association, we can't delete it if there are any IPs
-            // allocated from the pool anywhere
-            base_query(external_ip::table)
-                .load_async::<ExternalIp>(
-                    &*self.pool_connection_authorized(opctx).await?,
-                )
-                .await
-                }
-        }
-        .map_err(|e| {
-            Error::internal_error(&format!(
-                "error checking for outstanding IPs before deleting IP pool association to resource: {:?}",
-                e
-            ))
-        })?;
+        let existing_ips = external_ip::table
+            .inner_join(
+                instance::table
+                    .on(external_ip::parent_id.eq(instance::id.nullable())),
+            )
+            .filter(external_ip::is_service.eq(false))
+            .filter(external_ip::parent_id.is_not_null())
+            .filter(external_ip::time_deleted.is_null())
+            .filter(external_ip::ip_pool_id.eq(association.ip_pool_id))
+            .filter(instance::time_deleted.is_not_null())
+            .select(ExternalIp::as_select())
+            .limit(1)
+            // we have to join through IPs to instances to projects to get the silo ID
+            .inner_join(project::table.on(instance::project_id.eq(project::id)))
+            .filter(project::silo_id.eq(association.resource_id))
+            .load_async::<ExternalIp>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await 
+            .map_err(|e| {
+                Error::internal_error(&format!(
+                    "error checking for outstanding IPs before deleting IP pool association to resource: {:?}",
+                    e
+                ))
+            })?;
 
         if !existing_ips.is_empty() {
             return Err(Error::InvalidRequest {
-                message: "IP addresses from this pool are in use in the associated silo/fleet".to_string()
+                message: "IP addresses from this pool are in use in the associated silo".to_string()
             });
         }
 
@@ -487,8 +461,7 @@ impl DataStore {
     }
 
     /// Delete IP pool assocation with resource unless there are outstanding
-    /// IPs allocated from the pool in the associated silo (or the fleet, if
-    /// it's a fleet association).
+    /// IPs allocated from the pool in the associated silo
     pub async fn ip_pool_dissociate_resource(
         &self,
         opctx: &OpContext,
@@ -684,7 +657,6 @@ impl DataStore {
 #[cfg(test)]
 mod test {
     use crate::db::datastore::datastore_test;
-    use crate::db::fixed_data::FLEET_ID;
     use crate::db::model::{IpPool, IpPoolResource, IpPoolResourceType};
     use assert_matches::assert_matches;
     use nexus_db_model::IpPoolResourceDelete;
@@ -708,29 +680,29 @@ mod test {
 
         assert_eq!(fleet_default_pool.identity.name.as_str(), "default");
 
-        // unique index prevents second fleet-level default
-        let identity = IdentityMetadataCreateParams {
-            name: "another-fleet-default".parse().unwrap(),
-            description: "".to_string(),
-        };
-        let second_default = datastore
-            .ip_pool_create(&opctx, IpPool::new(&identity))
-            .await
-            .expect("Failed to create pool");
-        let err = datastore
-            .ip_pool_associate_resource(
-                &opctx,
-                IpPoolResource {
-                    ip_pool_id: second_default.id(),
-                    resource_type: IpPoolResourceType::Fleet,
-                    resource_id: *FLEET_ID,
-                    is_default: true,
-                },
-            )
-            .await
-            .expect_err("Failed to fail to make IP pool fleet default");
+        // // unique index prevents second fleet-level default
+        // let identity = IdentityMetadataCreateParams {
+        //     name: "another-fleet-default".parse().unwrap(),
+        //     description: "".to_string(),
+        // };
+        // let second_default = datastore
+        //     .ip_pool_create(&opctx, IpPool::new(&identity))
+        //     .await
+        //     .expect("Failed to create pool");
+        // let err = datastore
+        //     .ip_pool_associate_resource(
+        //         &opctx,
+        //         IpPoolResource {
+        //             ip_pool_id: second_default.id(),
+        //             resource_type: IpPoolResourceType::Fleet,
+        //             resource_id: *FLEET_ID,
+        //             is_default: true,
+        //         },
+        //     )
+        //     .await
+        //     .expect_err("Failed to fail to make IP pool fleet default");
 
-        assert_matches!(err, Error::ObjectAlreadyExists { .. });
+        // assert_matches!(err, Error::ObjectAlreadyExists { .. });
 
         // now test logic preferring most specific available default
 
