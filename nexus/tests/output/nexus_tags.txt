@@ -99,7 +99,6 @@ group_list                               GET      /v1/groups
 group_view                               GET      /v1/groups/{group_id}
 policy_update                            PUT      /v1/policy
 policy_view                              GET      /v1/policy
-quotas_view                              GET      /v1/quotas
 user_list                                GET      /v1/users
 
 API operations found with tag "snapshots"

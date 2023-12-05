@@ -268,8 +268,6 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(networking_bgp_announce_set_list)?;
         api.register(networking_bgp_announce_set_delete)?;
 
-        api.register(quotas_view)?;
-
         // Fleet-wide API operations
         api.register(silo_list)?;
         api.register(silo_create)?;
@@ -509,29 +507,6 @@ async fn policy_update(
         let policy =
             nexus.silo_update_policy(&opctx, &silo_lookup, &new_policy).await?;
         Ok(HttpResponseOk(policy))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// View the resource quotas of the user's current silo
-#[endpoint {
-    method = GET,
-    path = "/v1/quotas",
-    tags = ["silos"],
-}]
-async fn quotas_view(
-    rqctx: RequestContext<Arc<ServerContext>>,
-) -> Result<HttpResponseOk<SiloQuotas>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let nexus = &apictx.nexus;
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let authz_silo =
-            opctx.authn.silo_required().internal_context("listing quotas")?;
-        let silo_lookup = nexus.silo_lookup(&opctx, authz_silo.id().into())?;
-        let quotas = nexus.silo_quotas_view(&opctx, &silo_lookup).await?;
-
-        Ok(HttpResponseOk(quotas.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

@@ -3197,33 +3197,6 @@
         }
       }
     },
-    "/v1/quotas": {
-      "get": {
-        "tags": [
-          "silos"
-        ],
-        "summary": "View the resource quotas of the user's current silo",
-        "operationId": "quotas_view",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SiloQuotas"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/v1/snapshots": {
       "get": {
         "tags": [
@@ -13168,6 +13141,14 @@
           "name": {
             "$ref": "#/components/schemas/Name"
           },
+          "quotas": {
+            "description": "Initial quotas for the new Silo",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SiloQuotasCreate"
+              }
+            ]
+          },
           "tls_certificates": {
             "description": "Initial TLS certificates to be used for the new Silo's console and API endpoints.  These should be valid for the Silo's DNS name(s).",
             "type": "array",
@@ -13181,6 +13162,7 @@
           "discoverable",
           "identity_mode",
           "name",
+          "quotas",
           "tls_certificates"
         ]
       },
@@ -13211,22 +13193,40 @@
             "format": "int64"
           },
           "memory": {
-            "type": "integer",
-            "format": "int64"
+            "$ref": "#/components/schemas/ByteCount"
           },
           "silo_id": {
             "type": "string",
             "format": "uuid"
           },
           "storage": {
-            "type": "integer",
-            "format": "int64"
+            "$ref": "#/components/schemas/ByteCount"
           }
         },
         "required": [
           "cpus",
           "memory",
           "silo_id",
+          "storage"
+        ]
+      },
+      "SiloQuotasCreate": {
+        "type": "object",
+        "properties": {
+          "cpus": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "memory": {
+            "$ref": "#/components/schemas/ByteCount"
+          },
+          "storage": {
+            "$ref": "#/components/schemas/ByteCount"
+          }
+        },
+        "required": [
+          "cpus",
+          "memory",
           "storage"
         ]
       },
@@ -13255,23 +13255,27 @@
         "type": "object",
         "properties": {
           "cpus": {
+            "nullable": true,
             "type": "integer",
             "format": "int64"
           },
           "memory": {
-            "type": "integer",
-            "format": "int64"
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
           },
           "storage": {
-            "type": "integer",
-            "format": "int64"
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
           }
-        },
-        "required": [
-          "cpus",
-          "memory",
-          "storage"
-        ]
+        }
       },
       "SiloResultsPage": {
         "description": "A single page of results",
