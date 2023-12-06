@@ -32,6 +32,9 @@ const NOT_ENOUGH_CPUS_SENTINEL: &'static str = "Not enough cpus";
 const NOT_ENOUGH_MEMORY_SENTINEL: &'static str = "Not enough memory";
 const NOT_ENOUGH_STORAGE_SENTINEL: &'static str = "Not enough storage";
 
+/// Translates a generic pool error to an external error based
+/// on messages which may be emitted when provisioning virtual resources
+/// such as instances and disks.
 pub fn from_diesel(e: DieselError) -> external::Error {
     use crate::db::error;
 
