@@ -2477,7 +2477,7 @@ async fn cmd_db_inventory_collections_show(
         eprintln!(
             "warning: {} collection error{} {} reported above",
             nerrors,
-            if nerrors == 1 { "" } else { "s" }
+            if nerrors == 1 { "" } else { "s" },
             if nerrors == 1 { "was" } else { "were" },
         );
     }
