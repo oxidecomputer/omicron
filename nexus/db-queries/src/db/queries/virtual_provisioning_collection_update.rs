@@ -122,6 +122,14 @@ impl DoUpdate {
     ) -> Self {
         use virtual_provisioning_resource::dsl;
 
+        let cpus_provisioned_delta =
+            resource.cpus_provisioned.into_sql::<sql_types::BigInt>();
+        let memory_provisioned_delta =
+            i64::from(resource.ram_provisioned).into_sql::<sql_types::BigInt>();
+        let storage_provisioned_delta =
+            i64::from(resource.virtual_disk_bytes_provisioned)
+                .into_sql::<sql_types::BigInt>();
+
         let not_allocted = dsl::virtual_provisioning_resource
             .find(resource.id)
             .count()
@@ -139,7 +147,7 @@ impl DoUpdate {
                 .select(silo_provisioned::cpus_provisioned)
                 .single_value()
                 .assume_not_null()
-                + resource.cpus_provisioned.into());
+                + cpus_provisioned_delta);
 
         let has_sufficient_memory = quotas
             .query_source()
@@ -151,7 +159,7 @@ impl DoUpdate {
                 .select(silo_provisioned::ram_provisioned)
                 .single_value()
                 .assume_not_null()
-                + resource.ram_provisioned.into());
+                + memory_provisioned_delta);
 
         let has_sufficient_storage = quotas
             .query_source()
@@ -163,7 +171,7 @@ impl DoUpdate {
                 .select(silo_provisioned::virtual_disk_bytes_provisioned)
                 .single_value()
                 .assume_not_null()
-                + resource.virtual_disk_bytes_provisioned.into());
+                + storage_provisioned_delta);
 
         Self {
             query: Box::new(diesel::select((ExpressionAlias::new::<
@@ -255,7 +263,8 @@ struct Quotas {
 }
 
 impl Quotas {
-    fn new(parent_silo: &ParentSilo, update_kind: UpdateKind) -> Self {
+    // TODO: We could potentially skip this in cases where we know we're removing a resource instead of inserting
+    fn new(parent_silo: &ParentSilo) -> Self {
         use crate::db::schema::silo_quotas::dsl;
         Self {
             query: Box::new(
@@ -396,7 +405,7 @@ impl VirtualProvisioningCollectionUpdate {
             *crate::db::fixed_data::FLEET_ID,
         );
 
-        let quotas = Quotas::new(&parent_silo, update_kind);
+        let quotas = Quotas::new(&parent_silo);
         let silo_provisioned = SiloProvisioned::new(&parent_silo);
 
         let do_update = match update_kind {
@@ -444,7 +453,7 @@ impl VirtualProvisioningCollectionUpdate {
         provision.virtual_disk_bytes_provisioned = disk_byte_diff;
 
         Self::apply_update(
-            UpdateKind::Insert(provision),
+            UpdateKind::Insert(provision.clone()),
             // The query to actually insert the record.
             UnreferenceableSubquery(
                 diesel::insert_into(
@@ -511,7 +520,7 @@ impl VirtualProvisioningCollectionUpdate {
         provision.ram_provisioned = ram_diff;
 
         Self::apply_update(
-            UpdateKind::Insert(provision),
+            UpdateKind::Insert(provision.clone()),
             // The query to actually insert the record.
             UnreferenceableSubquery(
                 diesel::insert_into(
