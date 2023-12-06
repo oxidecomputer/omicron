@@ -912,6 +912,7 @@ mod test {
                         name: "test-silo".parse().unwrap(),
                         description: String::new(),
                     },
+                    quotas: external_params::SiloQuotasCreate::empty(),
                     discoverable: false,
                     identity_mode: SiloIdentityMode::LocalOnly,
                     admin_group_name: None,
