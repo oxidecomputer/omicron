@@ -153,7 +153,7 @@ impl<K: Eq + Ord, W: std::io::Write, S: StepSpec> GroupDisplay<K, W, S> {
             self.stats.apply_result(result);
 
             if result.before != result.after {
-                slog::info!(
+                slog::debug!(
                     self.log,
                     "add_event_report caused state transition";
                     "prefix" => &state.prefix,

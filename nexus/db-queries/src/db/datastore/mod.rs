@@ -148,6 +148,7 @@ pub type DataStoreConnection<'a> =
 pub struct DataStore {
     pool: Arc<Pool>,
     virtual_provisioning_collection_producer: crate::provisioning::Producer,
+    transaction_retry_producer: crate::transaction_retry::Producer,
 }
 
 // The majority of `DataStore`'s methods live in our submodules as a concession
@@ -164,6 +165,8 @@ impl DataStore {
             pool,
             virtual_provisioning_collection_producer:
                 crate::provisioning::Producer::new(),
+            transaction_retry_producer: crate::transaction_retry::Producer::new(
+            ),
         };
         Ok(datastore)
     }
@@ -210,6 +213,29 @@ impl DataStore {
                 self.virtual_provisioning_collection_producer.clone(),
             )
             .unwrap();
+        registry
+            .register_producer(self.transaction_retry_producer.clone())
+            .unwrap();
+    }
+
+    /// Constructs a transaction retry helper
+    ///
+    /// Automatically wraps the underlying producer
+    pub fn transaction_retry_wrapper(
+        &self,
+        name: &'static str,
+    ) -> crate::transaction_retry::RetryHelper {
+        crate::transaction_retry::RetryHelper::new(
+            &self.transaction_retry_producer,
+            name,
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn transaction_retry_producer(
+        &self,
+    ) -> &crate::transaction_retry::Producer {
+        &self.transaction_retry_producer
     }
 
     /// Returns a connection to a connection from the database connection pool.

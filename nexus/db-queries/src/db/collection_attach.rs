@@ -563,12 +563,9 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::db::{
-        self, error::TransactionError, identity::Resource as IdentityResource,
-    };
+    use crate::db::{self, identity::Resource as IdentityResource};
     use async_bb8_diesel::{
-        AsyncConnection, AsyncRunQueryDsl, AsyncSimpleConnection,
-        ConnectionManager,
+        AsyncRunQueryDsl, AsyncSimpleConnection, ConnectionManager,
     };
     use chrono::Utc;
     use db_macros::Resource;
@@ -999,22 +996,12 @@ mod test {
                 .set(resource::dsl::collection_id.eq(collection_id)),
         );
 
-        type TxnError =
-            TransactionError<AttachError<Resource, Collection, DieselError>>;
-        let result = conn
-            .transaction_async(|conn| async move {
-                attach_query.attach_and_get_result_async(&conn).await.map_err(
-                    |e| match e {
-                        AttachError::DatabaseError(e) => TxnError::from(e),
-                        e => TxnError::CustomError(e),
-                    },
-                )
-            })
-            .await;
-
         // "attach_and_get_result" should return the "attached" resource.
-        let (returned_collection, returned_resource) =
-            result.expect("Attach should have worked");
+        let (returned_collection, returned_resource) = attach_query
+            .attach_and_get_result_async(&conn)
+            .await
+            .expect("Attach should have worked");
+
         assert_eq!(
             returned_resource.collection_id.expect("Expected a collection ID"),
             collection_id

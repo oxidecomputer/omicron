@@ -48,10 +48,18 @@ pub struct TestHistogram {
     pub datum: Histogram<f64>,
 }
 
+const ID: Uuid = uuid::uuid!("e00ced4d-39d1-446a-ae85-a67f05c9750b");
+
 pub fn make_sample() -> Sample {
     let target = TestTarget::default();
-    let metric = TestMetric { id: Uuid::new_v4(), good: true, datum: 1 };
+    let metric = TestMetric { id: ID, good: true, datum: 1 };
     Sample::new(&target, &metric).unwrap()
+}
+
+pub fn make_missing_sample() -> Sample {
+    let target = TestTarget::default();
+    let metric = TestMetric { id: ID, good: true, datum: 1 };
+    Sample::new_missing(&target, &metric).unwrap()
 }
 
 pub fn make_hist_sample() -> Sample {
@@ -60,7 +68,7 @@ pub fn make_hist_sample() -> Sample {
     hist.sample(1.0).unwrap();
     hist.sample(2.0).unwrap();
     hist.sample(6.0).unwrap();
-    let metric = TestHistogram { id: Uuid::new_v4(), good: true, datum: hist };
+    let metric = TestHistogram { id: ID, good: true, datum: hist };
     Sample::new(&target, &metric).unwrap()
 }
 
