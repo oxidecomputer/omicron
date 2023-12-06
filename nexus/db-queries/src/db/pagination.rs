@@ -573,4 +573,48 @@ mod test {
         let _ = db.cleanup().await;
         logctx.cleanup_successful();
     }
+
+    #[test]
+    fn test_paginator() {
+        // The doctest exercises a basic case for Paginator.  Here we test some
+        // edge cases.
+        let batch_size = std::num::NonZeroU32::new(3).unwrap();
+
+        type Marker = u32;
+        #[derive(Debug, PartialEq, Eq)]
+        struct Item {
+            value: String,
+            marker: Marker,
+        }
+
+        let do_list =
+            |query: &dyn Fn(&DataPageParams<'_, Marker>) -> Vec<Item>| {
+                let mut all_records = Vec::new();
+                let mut paginator = Paginator::new(batch_size);
+                while let Some(p) = paginator.next() {
+                    let records_batch = query(&p.current_pagparams());
+                    paginator =
+                        p.found_batch(&records_batch, &|i: &Item| i.marker);
+                    all_records.extend(records_batch.into_iter());
+                }
+                all_records
+            };
+
+        fn mkitem(v: u32) -> Item {
+            Item { value: v.to_string(), marker: v }
+        }
+
+        // Trivial case: first page is empty
+        assert_eq!(Vec::<Item>::new(), do_list(&|_| Vec::new()));
+
+        // Exactly one batch-size worth of items
+        // (exercises the cases where the last non-empty batch is full, and
+        // where any batch is empty)
+        let my_query =
+            |pagparams: &DataPageParams<'_, Marker>| match &pagparams.marker {
+                None => (0..batch_size.get()).map(mkitem).collect(),
+                Some(_) => Vec::new(),
+            };
+        assert_eq!(vec![mkitem(0), mkitem(1), mkitem(2)], do_list(&my_query));
+    }
 }
