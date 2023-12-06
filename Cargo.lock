@@ -250,7 +250,7 @@ checksum = "9b34d609dfbaf33d6889b2b7106d3ca345eacad44200913df5ba02bfd31d2ba9"
 [[package]]
 name = "async-bb8-diesel"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/async-bb8-diesel?rev=1446f7e0c1f05f33a0581abd51fa873c7652ab61#1446f7e0c1f05f33a0581abd51fa873c7652ab61"
+source = "git+https://github.com/oxidecomputer/async-bb8-diesel?rev=ed7ab5ef0513ba303d33efd41d3e9e381169d59b#ed7ab5ef0513ba303d33efd41d3e9e381169d59b"
 dependencies = [
  "async-trait",
  "bb8",
@@ -4047,6 +4047,7 @@ dependencies = [
  "pem 1.1.1",
  "petgraph",
  "pq-sys",
+ "rand 0.8.5",
  "rcgen",
  "ref-cast",
  "regex",

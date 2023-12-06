@@ -232,7 +232,7 @@ impl SledUpdate {
 }
 
 /// A set of constraints that can be placed on operations that select a sled.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct SledReservationConstraints {
     must_select_from: Vec<Uuid>,
 }
