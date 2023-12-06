@@ -791,6 +791,14 @@ authz_resource! {
     polar_snippet = InProject,
 }
 
+authz_resource! {
+    name = "FloatingIp",
+    parent = "Project",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = InProject,
+}
+
 // Customer network integration resources nested below "Fleet"
 
 authz_resource! {
