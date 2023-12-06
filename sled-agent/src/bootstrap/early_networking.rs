@@ -22,8 +22,8 @@ use mg_admin_client::Client as MgdClient;
 use omicron_common::address::{Ipv6Subnet, MGD_PORT, MGS_PORT};
 use omicron_common::address::{DDMD_PORT, DENDRITE_PORT};
 use omicron_common::api::internal::shared::{
-    PortConfigV1, PortFec, PortSpeed, RackNetworkConfig, RackNetworkConfigV1,
-    SwitchLocation, UplinkConfig,
+    BgpConfig, PortConfigV1, PortFec, PortSpeed, RackNetworkConfig,
+    RackNetworkConfigV1, SwitchLocation, UplinkConfig,
 };
 use omicron_common::backoff::{
     retry_notify, retry_policy_local, BackoffError, ExponentialBackoff,
@@ -472,23 +472,37 @@ impl<'a> EarlyNetworkSetup<'a> {
             ))
         })?;
 
+        let mut config: Option<BgpConfig> = None;
+        let mut bgp_peer_configs = HashMap::<String, Vec<BgpPeerConfig>>::new();
+
         // Iterate through ports and apply BGP config.
         for port in &our_ports {
-            let mut bgp_peer_configs = Vec::new();
             for peer in &port.bgp_peers {
-                let config = rack_network_config
-                    .bgp
-                    .iter()
-                    .find(|x| x.asn == peer.asn)
-                    .ok_or(EarlyNetworkSetupError::BgpConfigurationError(
-                        format!(
-                            "asn {} referenced by peer undefined",
-                            peer.asn
-                        ),
-                    ))?;
+                if let Some(config) = &config {
+                    if peer.asn != config.asn {
+                        return Err(EarlyNetworkSetupError::BadConfig(
+                            "only one ASN per switch is supported".into(),
+                        ));
+                    }
+                } else {
+                    config = Some(
+                        rack_network_config
+                            .bgp
+                            .iter()
+                            .find(|x| x.asn == peer.asn)
+                            .ok_or(
+                                EarlyNetworkSetupError::BgpConfigurationError(
+                                    format!(
+                                        "asn {} referenced by peer undefined",
+                                        peer.asn
+                                    ),
+                                ),
+                            )?
+                            .clone(),
+                    );
+                }
 
                 let bpc = BgpPeerConfig {
-                    asn: peer.asn,
                     name: format!("{}", peer.addr),
                     host: format!("{}:179", peer.addr),
                     hold_time: peer.hold_time.unwrap_or(6),
@@ -497,30 +511,41 @@ impl<'a> EarlyNetworkSetup<'a> {
                     connect_retry: peer.connect_retry.unwrap_or(3),
                     keepalive: peer.keepalive.unwrap_or(2),
                     resolution: BGP_SESSION_RESOLUTION,
-                    originate: config
-                        .originate
-                        .iter()
-                        .map(|x| Prefix4 { length: x.prefix(), value: x.ip() })
-                        .collect(),
+                    passive: false,
                 };
-                bgp_peer_configs.push(bpc);
+                match bgp_peer_configs.get_mut(&port.port) {
+                    Some(peers) => {
+                        peers.push(bpc);
+                    }
+                    None => {
+                        bgp_peer_configs.insert(port.port.clone(), vec![bpc]);
+                    }
+                }
             }
+        }
 
-            if bgp_peer_configs.is_empty() {
-                continue;
+        if !bgp_peer_configs.is_empty() {
+            if let Some(config) = &config {
+                mgd.inner
+                    .bgp_apply(&ApplyRequest {
+                        asn: config.asn,
+                        peers: bgp_peer_configs,
+                        originate: config
+                            .originate
+                            .iter()
+                            .map(|x| Prefix4 {
+                                length: x.prefix(),
+                                value: x.ip(),
+                            })
+                            .collect(),
+                    })
+                    .await
+                    .map_err(|e| {
+                        EarlyNetworkSetupError::BgpConfigurationError(format!(
+                            "BGP peer configuration failed: {e}",
+                        ))
+                    })?;
             }
-
-            mgd.inner
-                .bgp_apply(&ApplyRequest {
-                    peer_group: port.port.clone(),
-                    peers: bgp_peer_configs,
-                })
-                .await
-                .map_err(|e| {
-                    EarlyNetworkSetupError::BgpConfigurationError(format!(
-                        "BGP peer configuration failed: {e}",
-                    ))
-                })?;
         }
 
         Ok(our_ports)

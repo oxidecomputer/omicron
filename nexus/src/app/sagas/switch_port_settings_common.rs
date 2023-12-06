@@ -444,7 +444,9 @@ pub(crate) async fn ensure_switch_port_bgp_settings(
             |e| ActionError::action_failed(format!("select mg client: {e}")),
         )?;
 
-    let mut bgp_peer_configs = Vec::new();
+    let mut bgp_peer_configs = HashMap::<String, Vec<BgpPeerConfig>>::new();
+
+    let mut cfg: Option<nexus_db_model::BgpConfig> = None;
 
     for peer in settings.bgp_peers {
         let config = nexus
@@ -454,11 +456,44 @@ pub(crate) async fn ensure_switch_port_bgp_settings(
                 ActionError::action_failed(format!("get bgp config: {e}"))
             })?;
 
+        if let Some(cfg) = &cfg {
+            if config.asn != cfg.asn {
+                return Err(ActionError::action_failed(
+                    "bad request: only one AS allowed per switch".to_string(),
+                ));
+            }
+        } else {
+            cfg = Some(config);
+        }
+
+        let bpc = BgpPeerConfig {
+            name: format!("{}", peer.addr.ip()), //TODO user defined name?
+            host: format!("{}:179", peer.addr.ip()),
+            hold_time: peer.hold_time.0.into(),
+            idle_hold_time: peer.idle_hold_time.0.into(),
+            delay_open: peer.delay_open.0.into(),
+            connect_retry: peer.connect_retry.0.into(),
+            keepalive: peer.keepalive.0.into(),
+            resolution: BGP_SESSION_RESOLUTION,
+            passive: false,
+        };
+
+        match bgp_peer_configs.get_mut(&switch_port_name) {
+            Some(peers) => {
+                peers.push(bpc);
+            }
+            None => {
+                bgp_peer_configs.insert(switch_port_name.clone(), vec![bpc]);
+            }
+        }
+    }
+
+    if let Some(cfg) = &cfg {
         let announcements = nexus
             .bgp_announce_list(
                 &opctx,
                 &params::BgpAnnounceSetSelector {
-                    name_or_id: NameOrId::Id(config.bgp_announce_set_id),
+                    name_or_id: NameOrId::Id(cfg.bgp_announce_set_id),
                 },
             )
             .await
@@ -473,38 +508,24 @@ pub(crate) async fn ensure_switch_port_bgp_settings(
             let value = match a.network.ip() {
                 IpAddr::V4(value) => Ok(value),
                 IpAddr::V6(_) => Err(ActionError::action_failed(
-                    "IPv6 announcement not yet supported".to_string(),
+                    "bad request: IPv6 announcement not yet supported"
+                        .to_string(),
                 )),
             }?;
             prefixes.push(Prefix4 { value, length: a.network.prefix() });
         }
-
-        let bpc = BgpPeerConfig {
-            asn: *config.asn,
-            name: format!("{}", peer.addr.ip()), //TODO user defined name?
-            host: format!("{}:179", peer.addr.ip()),
-            hold_time: peer.hold_time.0.into(),
-            idle_hold_time: peer.idle_hold_time.0.into(),
-            delay_open: peer.delay_open.0.into(),
-            connect_retry: peer.connect_retry.0.into(),
-            keepalive: peer.keepalive.0.into(),
-            resolution: BGP_SESSION_RESOLUTION,
-            originate: prefixes,
-        };
-
-        bgp_peer_configs.push(bpc);
+        mg_client
+            .inner
+            .bgp_apply(&ApplyRequest {
+                asn: cfg.asn.0,
+                peers: bgp_peer_configs,
+                originate: prefixes,
+            })
+            .await
+            .map_err(|e| {
+                ActionError::action_failed(format!("apply bgp settings: {e}"))
+            })?;
     }
-
-    mg_client
-        .inner
-        .bgp_apply(&ApplyRequest {
-            peer_group: switch_port_name,
-            peers: bgp_peer_configs,
-        })
-        .await
-        .map_err(|e| {
-            ActionError::action_failed(format!("apply bgp settings: {e}"))
-        })?;
 
     Ok(())
 }
