@@ -1563,8 +1563,8 @@ mod test {
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
     use nexus_db_queries::db::DataStore;
+    use nexus_test_utils::resource_helpers::create_default_ip_pool;
     use nexus_test_utils::resource_helpers::create_disk;
-    use nexus_test_utils::resource_helpers::create_ip_pool;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils::resource_helpers::delete_disk;
     use nexus_test_utils::resource_helpers::object_create;
@@ -1785,8 +1785,10 @@ mod test {
     const DISK_NAME: &str = "disky-mcdiskface";
     const INSTANCE_NAME: &str = "base-instance";
 
-    async fn create_org_project_and_disk(client: &ClientTestContext) -> Uuid {
-        create_ip_pool(&client, "p0", None, None).await;
+    async fn create_project_and_disk_and_pool(
+        client: &ClientTestContext,
+    ) -> Uuid {
+        create_default_ip_pool(&client).await;
         create_project(client, PROJECT_NAME).await;
         create_disk(client, PROJECT_NAME, DISK_NAME).await.identity.id
     }
@@ -1833,7 +1835,7 @@ mod test {
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.apictx().nexus;
-        let disk_id = create_org_project_and_disk(&client).await;
+        let disk_id = create_project_and_disk_and_pool(&client).await;
 
         // Build the saga DAG with the provided test parameters
         let opctx = test_opctx(cptestctx);
@@ -2022,7 +2024,7 @@ mod test {
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.apictx().nexus;
-        let disk_id = create_org_project_and_disk(&client).await;
+        let disk_id = create_project_and_disk_and_pool(&client).await;
 
         // Build the saga DAG with the provided test parameters
         let opctx = test_opctx(&cptestctx);
@@ -2047,13 +2049,11 @@ mod test {
             populate_ip_pool(
                 &client,
                 "default",
-                Some(
-                    IpRange::try_from((
-                        Ipv4Addr::new(10, 1, 0, 0),
-                        Ipv4Addr::new(10, 1, 255, 255),
-                    ))
-                    .unwrap(),
-                ),
+                IpRange::try_from((
+                    Ipv4Addr::new(10, 1, 0, 0),
+                    Ipv4Addr::new(10, 1, 255, 255),
+                ))
+                .unwrap(),
             )
             .await;
         }
@@ -2182,7 +2182,7 @@ mod test {
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.apictx().nexus;
-        let disk_id = create_org_project_and_disk(&client).await;
+        let disk_id = create_project_and_disk_and_pool(&client).await;
 
         // Build the saga DAG with the provided test parameters
         let opctx = test_opctx(cptestctx);
@@ -2291,7 +2291,7 @@ mod test {
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.apictx().nexus;
-        let disk_id = create_org_project_and_disk(&client).await;
+        let disk_id = create_project_and_disk_and_pool(&client).await;
 
         // Build the saga DAG with the provided test parameters
         let opctx = test_opctx(cptestctx);
@@ -2355,13 +2355,11 @@ mod test {
         populate_ip_pool(
             &client,
             "default",
-            Some(
-                IpRange::try_from((
-                    Ipv4Addr::new(10, 1, 0, 0),
-                    Ipv4Addr::new(10, 1, 255, 255),
-                ))
-                .unwrap(),
-            ),
+            IpRange::try_from((
+                Ipv4Addr::new(10, 1, 0, 0),
+                Ipv4Addr::new(10, 1, 255, 255),
+            ))
+            .unwrap(),
         )
         .await;
 

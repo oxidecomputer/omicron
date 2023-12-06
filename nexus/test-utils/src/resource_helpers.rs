@@ -12,6 +12,7 @@ use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use dropshot::Method;
 use http::StatusCode;
+use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_test_interface::NexusServer;
 use nexus_types::external_api::params;
 use nexus_types::external_api::params::PhysicalDiskKind;
@@ -25,6 +26,7 @@ use nexus_types::external_api::views::IpPool;
 use nexus_types::external_api::views::IpPoolRange;
 use nexus_types::external_api::views::User;
 use nexus_types::external_api::views::{Project, Silo, Vpc, VpcRouter};
+use nexus_types::identity::Resource;
 use nexus_types::internal_api::params as internal_params;
 use nexus_types::internal_api::params::Baseboard;
 use omicron_common::api::external::ByteCount;
@@ -32,6 +34,7 @@ use omicron_common::api::external::Disk;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
+use omicron_common::api::external::NameOrId;
 // use omicron_common::api::external::Name;
 // use omicron_common::api::external::NameOrId;
 use omicron_sled_agent::sim::SledAgent;
@@ -105,23 +108,10 @@ pub async fn object_delete(client: &ClientTestContext, path: &str) {
 pub async fn populate_ip_pool(
     client: &ClientTestContext,
     pool_name: &str,
-    ip_range: Option<IpRange>,
+    ip_range: IpRange,
 ) -> IpPoolRange {
-    let ip_range = ip_range.unwrap_or_else(|| {
-        use std::net::Ipv4Addr;
-        IpRange::try_from((
-            Ipv4Addr::new(10, 0, 0, 0),
-            Ipv4Addr::new(10, 0, 255, 255),
-        ))
-        .unwrap()
-    });
-    let range = object_create(
-        client,
-        format!("/v1/system/ip-pools/{}/ranges/add", pool_name).as_str(),
-        &ip_range,
-    )
-    .await;
-    range
+    let url = format!("/v1/system/ip-pools/{}/ranges/add", pool_name);
+    object_create(client, &url, &ip_range).await
 }
 
 /// Create an IP pool with a single range for testing.
@@ -157,8 +147,27 @@ pub async fn create_ip_pool(
         .await;
     }
 
+    let ip_range = ip_range.unwrap_or_else(|| {
+        use std::net::Ipv4Addr;
+        IpRange::try_from((
+            Ipv4Addr::new(10, 0, 0, 0),
+            Ipv4Addr::new(10, 0, 255, 255),
+        ))
+        .unwrap()
+    });
     let range = populate_ip_pool(client, pool_name, ip_range).await;
     (pool, range)
+}
+
+pub async fn create_default_ip_pool(
+    client: &ClientTestContext,
+) -> views::IpPool {
+    let link = params::IpPoolSiloLink {
+        silo: NameOrId::Id(DEFAULT_SILO.id()),
+        is_default: true,
+    };
+    let (pool, ..) = create_ip_pool(&client, "default", None, Some(link)).await;
+    pool
 }
 
 pub async fn create_certificate(

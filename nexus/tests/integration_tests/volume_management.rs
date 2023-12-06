@@ -12,9 +12,9 @@ use nexus_db_queries::db::DataStore;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
+use nexus_test_utils::resource_helpers::create_default_ip_pool;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::object_create;
-use nexus_test_utils::resource_helpers::populate_ip_pool;
 use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
@@ -53,14 +53,14 @@ fn get_snapshot_url(snapshot: &str) -> String {
     format!("/v1/snapshots/{}?project={}", snapshot, PROJECT_NAME)
 }
 
-async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
+async fn create_project_and_pool(client: &ClientTestContext) -> Uuid {
+    create_default_ip_pool(client).await;
     let project = create_project(client, PROJECT_NAME).await;
     project.identity.id
 }
 
 async fn create_image(client: &ClientTestContext) -> views::Image {
-    populate_ip_pool(&client, "default", None).await;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
 
     // Define a global image
     let server = ServerBuilder::new().run().unwrap();
@@ -427,8 +427,7 @@ async fn test_multiple_disks_multiple_snapshots_order_1(
     // Test multiple disks with multiple snapshots
     let client = &cptestctx.external_client;
     let disk_test = DiskTest::new(&cptestctx).await;
-    populate_ip_pool(&client, "default", None).await;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
     let disks_url = get_disks_url();
 
     // Create a blank disk
@@ -563,8 +562,7 @@ async fn test_multiple_disks_multiple_snapshots_order_2(
     // Test multiple disks with multiple snapshots, varying the delete order
     let client = &cptestctx.external_client;
     let disk_test = DiskTest::new(&cptestctx).await;
-    populate_ip_pool(&client, "default", None).await;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
     let disks_url = get_disks_url();
 
     // Create a blank disk
@@ -833,8 +831,7 @@ async fn test_multiple_layers_of_snapshots_delete_all_disks_first(
     // delete all disks, then delete all snapshots
     let client = &cptestctx.external_client;
     let disk_test = DiskTest::new(&cptestctx).await;
-    populate_ip_pool(&client, "default", None).await;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
 
     prepare_for_test_multiple_layers_of_snapshots(&client).await;
 
@@ -872,8 +869,7 @@ async fn test_multiple_layers_of_snapshots_delete_all_snapshots_first(
     // delete all snapshots, then delete all disks
     let client = &cptestctx.external_client;
     let disk_test = DiskTest::new(&cptestctx).await;
-    populate_ip_pool(&client, "default", None).await;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
 
     prepare_for_test_multiple_layers_of_snapshots(&client).await;
 
@@ -911,8 +907,7 @@ async fn test_multiple_layers_of_snapshots_random_delete_order(
     // delete snapshots and disks in a random order
     let client = &cptestctx.external_client;
     let disk_test = DiskTest::new(&cptestctx).await;
-    populate_ip_pool(&client, "default", None).await;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
 
     prepare_for_test_multiple_layers_of_snapshots(&client).await;
 
@@ -1132,8 +1127,7 @@ async fn delete_image_test(
     let disk_test = DiskTest::new(&cptestctx).await;
 
     let client = &cptestctx.external_client;
-    populate_ip_pool(&client, "default", None).await;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
 
     let disks_url = get_disks_url();
 
@@ -2361,8 +2355,7 @@ async fn test_disk_create_saga_unwinds_correctly(
     // created.
 
     let client = &cptestctx.external_client;
-    populate_ip_pool(&client, "default", None).await;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
 
     let disk_test = DiskTest::new(&cptestctx).await;
     let disks_url = get_disks_url();
@@ -2414,8 +2407,7 @@ async fn test_snapshot_create_saga_unwinds_correctly(
     // created.
 
     let client = &cptestctx.external_client;
-    populate_ip_pool(&client, "default", None).await;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
 
     let disk_test = DiskTest::new(&cptestctx).await;
     let disks_url = get_disks_url();

@@ -17,6 +17,7 @@ use nexus_test_interface::NexusServer;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
+use nexus_test_utils::resource_helpers::create_default_ip_pool;
 use nexus_test_utils::resource_helpers::create_disk;
 use nexus_test_utils::resource_helpers::create_ip_pool;
 use nexus_test_utils::resource_helpers::create_local_user;
@@ -97,15 +98,6 @@ fn get_disks_url() -> String {
 
 fn default_vpc_subnets_url() -> String {
     format!("/v1/vpc-subnets?{}&vpc=default", get_project_selector())
-}
-
-async fn create_default_ip_pool(client: &ClientTestContext) -> views::IpPool {
-    let link = params::IpPoolSiloLink {
-        silo: NameOrId::Id(DEFAULT_SILO.id()),
-        is_default: true,
-    };
-    let (pool, ..) = create_ip_pool(&client, "default", None, Some(link)).await;
-    pool
 }
 
 async fn create_project_and_pool(client: &ClientTestContext) -> views::Project {
@@ -3612,7 +3604,7 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
     // make pool2 default and create instance with default pool. check that it now it comes from pool2
     let _: views::IpPoolSilo = object_create(
         client,
-        "/v1/system/ip-pools/pool2/make_default",
+        "/v1/system/ip-pools/pool2/make-default",
         &params::SiloSelector { silo: silo.clone() },
     )
     .await;
@@ -3674,7 +3666,7 @@ async fn test_instance_ephemeral_ip_from_orphan_pool(
         )
         .unwrap(),
     );
-    populate_ip_pool(client, pool_name, Some(orphan_pool_range)).await;
+    populate_ip_pool(client, pool_name, orphan_pool_range).await;
 
     // this should 404
     let instance_name = "orphan-pool-inst";

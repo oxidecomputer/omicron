@@ -1425,7 +1425,7 @@ async fn ip_pool_silo_unlink(
 /// Make an IP pool the default for a silo
 #[endpoint {
     method = POST,
-    path = "/v1/system/ip-pools/{pool}/make_default",
+    path = "/v1/system/ip-pools/{pool}/make-default",
     tags = ["system/networking"],
 }]
 async fn ip_pool_make_default(

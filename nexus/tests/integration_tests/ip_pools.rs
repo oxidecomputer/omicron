@@ -427,11 +427,11 @@ async fn test_ip_pool_with_silo(cptestctx: &ControlPlaneTestContext) {
     // make p0's pool default and show that it changes
     let params = SiloSelector { silo: silo.clone() };
     let _: IpPoolSilo =
-        object_create(client, "/v1/system/ip-pools/p0/make_default", &params)
+        object_create(client, "/v1/system/ip-pools/p0/make-default", &params)
             .await;
     // making the same one default again is not an error
     let _: IpPoolSilo =
-        object_create(client, "/v1/system/ip-pools/p0/make_default", &params)
+        object_create(client, "/v1/system/ip-pools/p0/make-default", &params)
             .await;
 
     let silos_p0 = silos_for_pool(client, "p0").await;

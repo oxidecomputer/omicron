@@ -135,6 +135,7 @@ OPERATION ID                             METHOD   URL PATH
 ip_pool_create                           POST     /v1/system/ip-pools
 ip_pool_delete                           DELETE   /v1/system/ip-pools/{pool}
 ip_pool_list                             GET      /v1/system/ip-pools
+ip_pool_make_default                     POST     /v1/system/ip-pools/{pool}/make-default
 ip_pool_range_add                        POST     /v1/system/ip-pools/{pool}/ranges/add
 ip_pool_range_list                       GET      /v1/system/ip-pools/{pool}/ranges
 ip_pool_range_remove                     POST     /v1/system/ip-pools/{pool}/ranges/remove
