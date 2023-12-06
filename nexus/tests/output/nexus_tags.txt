@@ -11,6 +11,13 @@ disk_list                                GET      /v1/disks
 disk_metrics_list                        GET      /v1/disks/{disk}/metrics/{metric}
 disk_view                                GET      /v1/disks/{disk}
 
+API operations found with tag "floating-ips"
+OPERATION ID                             METHOD   URL PATH
+floating_ip_create                       POST     /v1/floating-ips
+floating_ip_delete                       DELETE   /v1/floating-ips/{floating_ip}
+floating_ip_list                         GET      /v1/floating-ips
+floating_ip_view                         GET      /v1/floating-ips/{floating_ip}
+
 API operations found with tag "hidden"
 OPERATION ID                             METHOD   URL PATH
 device_access_token                      POST     /device/token

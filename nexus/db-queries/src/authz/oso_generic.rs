@@ -131,6 +131,7 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
         VpcRouter::init(),
         RouterRoute::init(),
         VpcSubnet::init(),
+        FloatingIp::init(),
         // Silo-level resources
         Image::init(),
         SiloImage::init(),
