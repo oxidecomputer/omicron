@@ -709,11 +709,13 @@ mod tests {
     // dealing with a hung test.
     const TEST_TIMEOUT: Duration = Duration::from_secs(30);
 
+    #[derive(Debug, Clone, PartialEq, Eq)]
     struct InMemoryDiskContents {
         path: PathBuf,
         data: Vec<u8>,
     }
 
+    #[derive(Debug, Clone)]
     struct InMemoryDiskInterface {
         semaphore: Arc<Semaphore>,
         finalized_writes: Arc<Mutex<Vec<InMemoryDiskContents>>>,
@@ -938,6 +940,11 @@ mod tests {
             // request.
             mem::drop(upload_tx);
 
+            // We expect to see an upload hash mismatch error with these hex
+            // strings.
+            let expected_hash = hex::encode(claimed_sha3_digest);
+            let got_hash = hex::encode(actual_data_hasher.finalize());
+
             let start_update_result = start_update_task.await.unwrap();
             let error = start_update_result.unwrap_err();
             match &*error {
@@ -945,13 +952,31 @@ mod tests {
                     expected,
                     got,
                 } => {
-                    assert_eq!(
-                        *got,
-                        hex::encode(actual_data_hasher.finalize())
-                    );
-                    assert_eq!(*expected, hex::encode(claimed_sha3_digest));
+                    assert_eq!(*got, got_hash);
+                    assert_eq!(*expected, expected_hash);
                 }
                 _ => panic!("unexpected error {error:?}"),
+            }
+
+            // The same error should be present in the current update status.
+            let expected_error =
+                BootDiskOsWriteError::UploadedImageHashMismatch {
+                    expected: expected_hash.clone(),
+                    got: got_hash.clone(),
+                };
+            let status = writer.status(boot_disk);
+            match status {
+                BootDiskOsWriteStatus::Failed { message, .. } => {
+                    assert_eq!(
+                        message,
+                        DisplayErrorChain::new(&expected_error).to_string()
+                    );
+                }
+                BootDiskOsWriteStatus::NoUpdateRunning
+                | BootDiskOsWriteStatus::InProgress { .. }
+                | BootDiskOsWriteStatus::Complete { .. } => {
+                    panic!("unexpected status {status:?}")
+                }
             }
         })
         .await
@@ -1163,6 +1188,214 @@ mod tests {
             failure_message,
             DisplayErrorChain::new(&expected_error).to_string()
         );
+
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn boot_disk_os_writer_can_update_both_slots_simultaneously() {
+        let logctx = test_setup_log(
+            "boot_disk_os_writer_can_update_both_slots_simultaneously",
+        );
+
+        // generate two small, random "OS image"s consisting of 10 "blocks" each
+        let num_data_blocks = 10;
+        let data_len = num_data_blocks * InMemoryDiskInterface::BLOCK_SIZE;
+        let mut data_a = vec![0; data_len];
+        let mut data_b = vec![0; data_len];
+        rand::thread_rng().fill_bytes(&mut data_a);
+        rand::thread_rng().fill_bytes(&mut data_b);
+        let data_hash_a = Sha3_256::digest(&data_a);
+        let data_hash_b = Sha3_256::digest(&data_b);
+
+        // generate a disk writer with no semaphore permits so the updates block
+        // until we get a chance to start both of them
+        let inject_disk_interface =
+            InMemoryDiskInterface::new(Semaphore::new(0));
+        let shared_semaphore = Arc::clone(&inject_disk_interface.semaphore);
+
+        let writer = Arc::new(BootDiskOsWriter::new(&logctx.log));
+        let disk_devfs_path_a = "/unit-test/disk/a";
+        let disk_devfs_path_b = "/unit-test/disk/b";
+
+        let update_id_a = Uuid::new_v4();
+        let update_id_b = Uuid::new_v4();
+
+        writer
+            .start_update_impl(
+                M2Slot::A,
+                disk_devfs_path_a.into(),
+                update_id_a,
+                data_hash_a.into(),
+                stream::once(future::ready(Ok(Bytes::from(data_a.clone())))),
+                inject_disk_interface.clone(),
+            )
+            .await
+            .unwrap();
+
+        writer
+            .start_update_impl(
+                M2Slot::B,
+                disk_devfs_path_b.into(),
+                update_id_b,
+                data_hash_b.into(),
+                stream::once(future::ready(Ok(Bytes::from(data_b.clone())))),
+                inject_disk_interface.clone(),
+            )
+            .await
+            .unwrap();
+
+        // Both updates have successfully started; unblock the "disks".
+        shared_semaphore.add_permits(Semaphore::MAX_PERMITS);
+
+        // Wait for both updates to complete successfully.
+        for boot_disk in [M2Slot::A, M2Slot::B] {
+            tokio::time::timeout(TEST_TIMEOUT, async {
+                loop {
+                    let status = writer.status(boot_disk);
+                    match status {
+                        BootDiskOsWriteStatus::InProgress { .. } => {
+                            println!("saw irrelevant status {status:?}");
+                            tokio::time::sleep(Duration::from_millis(50)).await;
+                            continue;
+                        }
+                        BootDiskOsWriteStatus::Complete { update_id } => {
+                            match boot_disk {
+                                M2Slot::A => assert_eq!(update_id, update_id_a),
+                                M2Slot::B => assert_eq!(update_id, update_id_b),
+                            }
+                            break;
+                        }
+                        BootDiskOsWriteStatus::Failed { .. }
+                        | BootDiskOsWriteStatus::NoUpdateRunning => {
+                            panic!("unexpected status {status:?}");
+                        }
+                    }
+                }
+            })
+            .await
+            .unwrap();
+        }
+
+        // Ensure each "disk" saw the expected contents.
+        let expected_disks = [
+            InMemoryDiskContents {
+                path: disk_devfs_path_a.into(),
+                data: data_a,
+            },
+            InMemoryDiskContents {
+                path: disk_devfs_path_b.into(),
+                data: data_b,
+            },
+        ];
+        let written_disks =
+            inject_disk_interface.finalized_writes.lock().unwrap();
+        assert_eq!(written_disks.len(), expected_disks.len());
+        for expected in expected_disks {
+            assert!(
+                written_disks.contains(&expected),
+                "written disks missing expected contents for {}",
+                expected.path.display(),
+            );
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn boot_disk_os_writer_rejects_new_updates_while_old_running() {
+        let logctx = test_setup_log(
+            "boot_disk_os_writer_rejects_new_updates_while_old_running",
+        );
+
+        // generate two small, random "OS image"s consisting of 10 "blocks" each
+        let num_data_blocks = 10;
+        let data_len = num_data_blocks * InMemoryDiskInterface::BLOCK_SIZE;
+        let mut data_a = vec![0; data_len];
+        let mut data_b = vec![0; data_len];
+        rand::thread_rng().fill_bytes(&mut data_a);
+        rand::thread_rng().fill_bytes(&mut data_b);
+        let data_hash_a = Sha3_256::digest(&data_a);
+        let data_hash_b = Sha3_256::digest(&data_b);
+
+        // generate a disk writer with no semaphore permits so the updates block
+        // until we get a chance to (try to) start both of them
+        let inject_disk_interface =
+            InMemoryDiskInterface::new(Semaphore::new(0));
+        let shared_semaphore = Arc::clone(&inject_disk_interface.semaphore);
+
+        let writer = Arc::new(BootDiskOsWriter::new(&logctx.log));
+        let disk_devfs_path = "/unit-test/disk";
+        let boot_disk = M2Slot::A;
+
+        let update_id_a = Uuid::new_v4();
+        let update_id_b = Uuid::new_v4();
+
+        writer
+            .start_update_impl(
+                boot_disk,
+                disk_devfs_path.into(),
+                update_id_a,
+                data_hash_a.into(),
+                stream::once(future::ready(Ok(Bytes::from(data_a.clone())))),
+                inject_disk_interface.clone(),
+            )
+            .await
+            .unwrap();
+
+        let error = writer
+            .start_update_impl(
+                boot_disk,
+                disk_devfs_path.into(),
+                update_id_b,
+                data_hash_b.into(),
+                stream::once(future::ready(Ok(Bytes::from(data_b.clone())))),
+                inject_disk_interface.clone(),
+            )
+            .await
+            .unwrap_err();
+        match &*error {
+            BootDiskOsWriteError::AnotherUpdateRunning(running_id) => {
+                assert_eq!(*running_id, update_id_a);
+            }
+            _ => panic!("unexpected error {error}"),
+        }
+
+        // Both update attempts started; unblock the "disk".
+        shared_semaphore.add_permits(Semaphore::MAX_PERMITS);
+
+        // Wait for the first update to complete successfully.
+        tokio::time::timeout(TEST_TIMEOUT, async {
+            loop {
+                let status = writer.status(boot_disk);
+                match status {
+                    BootDiskOsWriteStatus::InProgress { .. } => {
+                        println!("saw irrelevant status {status:?}");
+                        tokio::time::sleep(Duration::from_millis(50)).await;
+                        continue;
+                    }
+                    BootDiskOsWriteStatus::Complete { update_id } => {
+                        assert_eq!(update_id, update_id_a);
+                        break;
+                    }
+                    BootDiskOsWriteStatus::Failed { .. }
+                    | BootDiskOsWriteStatus::NoUpdateRunning => {
+                        panic!("unexpected status {status:?}");
+                    }
+                }
+            }
+        })
+        .await
+        .unwrap();
+
+        // Ensure we wrote the contents of the first update.
+        let expected_disks = [InMemoryDiskContents {
+            path: disk_devfs_path.into(),
+            data: data_a,
+        }];
+        let written_disks =
+            inject_disk_interface.finalized_writes.lock().unwrap();
+        assert_eq!(*written_disks, expected_disks);
 
         logctx.cleanup_successful();
     }
