@@ -189,7 +189,7 @@ pub(crate) mod test {
     const PROJECT_NAME: &str = "springfield-squidport";
 
     async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
-        create_ip_pool(&client, "p0", None).await;
+        create_ip_pool(&client, "p0", None, None).await;
         let project = create_project(client, PROJECT_NAME).await;
         project.identity.id
     }

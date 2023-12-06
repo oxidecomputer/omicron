@@ -32,8 +32,8 @@ use omicron_common::api::external::Disk;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
-use omicron_common::api::external::Name;
-use omicron_common::api::external::NameOrId;
+// use omicron_common::api::external::Name;
+// use omicron_common::api::external::NameOrId;
 use omicron_sled_agent::sim::SledAgent;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -133,6 +133,9 @@ pub async fn create_ip_pool(
     client: &ClientTestContext,
     pool_name: &str,
     ip_range: Option<IpRange>,
+    // TODO: could change this to is_default -- always associate with default
+    // silo, let caller decide whether it's the default
+    silo_link: Option<params::IpPoolSiloLink>,
 ) -> (IpPool, IpPoolRange) {
     let pool = object_create(
         client,
@@ -146,15 +149,13 @@ pub async fn create_ip_pool(
     )
     .await;
 
-    // let _assoc: views::IpPoolSilo = object_create(
-    //     client,
-    //     &format!("/v1/system/ip-pools/{pool_name}/associations"),
-    //     &params::IpPoolSiloLink {
-    //         silo: NameOrId::Id(DEFAULT_SILO.id()),
-    //         is_default: false,
-    //     },
-    // )
-    // .await;
+    if let Some(silo_link) = silo_link {
+        let url = format!("/v1/system/ip-pools/{pool_name}/silos");
+        object_create::<params::IpPoolSiloLink, views::IpPoolSilo>(
+            client, &url, &silo_link,
+        )
+        .await;
+    }
 
     let range = populate_ip_pool(client, pool_name, ip_range).await;
     (pool, range)
