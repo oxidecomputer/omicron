@@ -46,6 +46,7 @@ inventory.period_secs = 600
 inventory.nkeep = 3
 # Disable inventory collection altogether (for emergencies)
 inventory.disable = false
+phantom_disks.period_secs = 30
 
 [default_region_allocation_strategy]
 # by default, allocate across 3 distinct sleds

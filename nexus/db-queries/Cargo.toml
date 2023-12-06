@@ -32,6 +32,7 @@ oso.workspace = true
 paste.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
+rand.workspace = true
 ref-cast.workspace = true
 samael.workspace = true
 serde.workspace = true

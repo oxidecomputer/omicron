@@ -339,6 +339,8 @@ pub struct BackgroundTaskConfig {
     pub nat_cleanup: NatCleanupConfig,
     /// configuration for inventory tasks
     pub inventory: InventoryConfig,
+    /// configuration for phantom disks task
+    pub phantom_disks: PhantomDiskConfig,
 }
 
 #[serde_as]
@@ -386,7 +388,7 @@ pub struct NatCleanupConfig {
 pub struct InventoryConfig {
     /// period (in seconds) for periodic activations of this background task
     ///
-    /// Each activation fetches information about all harware and software in
+    /// Each activation fetches information about all hardware and software in
     /// the system and inserts it into the database.  This generates a moderate
     /// amount of data.
     #[serde_as(as = "DurationSeconds<u64>")]
@@ -403,6 +405,14 @@ pub struct InventoryConfig {
     /// This is an emergency lever for support / operations.  It should never be
     /// necessary.
     pub disable: bool,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct PhantomDiskConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
 }
 
 /// Configuration for a nexus server
@@ -508,8 +518,9 @@ mod test {
         BackgroundTaskConfig, Config, ConfigDropshotWithTls, ConsoleConfig,
         Database, DeploymentConfig, DnsTasksConfig, DpdConfig,
         ExternalEndpointsConfig, InternalDns, InventoryConfig, LoadError,
-        LoadErrorKind, MgdConfig, NatCleanupConfig, PackageConfig, SchemeName,
-        TimeseriesDbConfig, Tunables, UpdatesConfig,
+        LoadErrorKind, MgdConfig, NatCleanupConfig, PackageConfig,
+        PhantomDiskConfig, SchemeName, TimeseriesDbConfig, Tunables,
+        UpdatesConfig,
     };
     use crate::address::{Ipv6Subnet, RACK_PREFIX};
     use crate::api::internal::shared::SwitchLocation;
@@ -663,6 +674,7 @@ mod test {
             inventory.period_secs = 10
             inventory.nkeep = 11
             inventory.disable = false
+            phantom_disks.period_secs = 30
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -764,7 +776,10 @@ mod test {
                             period_secs: Duration::from_secs(10),
                             nkeep: 11,
                             disable: false,
-                        }
+                        },
+                        phantom_disks: PhantomDiskConfig {
+                            period_secs: Duration::from_secs(30),
+                        },
                     },
                     default_region_allocation_strategy:
                         crate::nexus_config::RegionAllocationStrategy::Random {
@@ -822,6 +837,7 @@ mod test {
             inventory.period_secs = 10
             inventory.nkeep = 3
             inventory.disable = false
+            phantom_disks.period_secs = 30
             [default_region_allocation_strategy]
             type = "random"
             "##,

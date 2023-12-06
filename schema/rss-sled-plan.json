@@ -366,7 +366,6 @@
       "type": "object",
       "required": [
         "addresses",
-        "autoneg",
         "bgp_peers",
         "port",
         "routes",
@@ -384,6 +383,7 @@
         },
         "autoneg": {
           "description": "Whether or not to set autonegotiation",
+          "default": false,
           "type": "boolean"
         },
         "bgp_peers": {
