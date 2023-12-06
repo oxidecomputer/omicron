@@ -23,9 +23,9 @@ use nexus_test_utils::resource_helpers::create_ip_pool;
 use nexus_test_utils::resource_helpers::create_local_user;
 use nexus_test_utils::resource_helpers::create_silo;
 use nexus_test_utils::resource_helpers::grant_iam;
+use nexus_test_utils::resource_helpers::link_ip_pool;
 use nexus_test_utils::resource_helpers::object_create;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
-use nexus_test_utils::resource_helpers::populate_ip_pool;
 use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils::start_sled_agent;
 use nexus_types::external_api::shared::IpKind;
@@ -3575,14 +3575,12 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
     );
 
     // make first pool the default for the priv user's silo
-    dbg!(DEFAULT_SILO.id());
-    let silo = NameOrId::Id(DEFAULT_SILO.id());
-    let link = params::IpPoolSiloLink { silo: silo.clone(), is_default: true };
-    create_ip_pool(&client, "pool1", Some(range1), Some(link)).await;
+    create_ip_pool(&client, "pool1", Some(range1)).await;
+    link_ip_pool(&client, "pool1", &DEFAULT_SILO.id(), /*default*/ true).await;
 
     // second pool is associated with the silo but not default
-    let link = params::IpPoolSiloLink { silo: silo.clone(), is_default: false };
-    create_ip_pool(&client, "pool2", Some(range2), Some(link)).await;
+    create_ip_pool(&client, "pool2", Some(range2)).await;
+    link_ip_pool(&client, "pool2", &DEFAULT_SILO.id(), /*default*/ false).await;
 
     // Create an instance with pool name blank, expect IP from default pool
     create_instance_with_pool(client, "pool1-inst", None).await;
@@ -3605,7 +3603,7 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
     let _: views::IpPoolSilo = object_create(
         client,
         "/v1/system/ip-pools/pool2/make-default",
-        &params::SiloSelector { silo: silo.clone() },
+        &params::SiloSelector { silo: NameOrId::Id(DEFAULT_SILO.id()) },
     )
     .await;
 
@@ -3627,37 +3625,9 @@ async fn test_instance_ephemeral_ip_from_orphan_pool(
 
     let _ = create_project(&client, PROJECT_NAME).await;
 
-    // have to give default pool a range or snat IP allocation fails before it
-    // can get to failing on ephemeral IP allocation
-    let default_pool_range = IpRange::V4(
-        Ipv4Range::new(
-            std::net::Ipv4Addr::new(10, 0, 0, 1),
-            std::net::Ipv4Addr::new(10, 0, 0, 5),
-        )
-        .unwrap(),
-    );
-
     // make first pool the default for the priv user's silo
-    let link = params::IpPoolSiloLink {
-        silo: NameOrId::Id(DEFAULT_SILO.id()),
-        is_default: true,
-    };
-    create_ip_pool(&client, "default", Some(default_pool_range), Some(link))
-        .await;
-
-    // don't use create_ip_pool because it automatically associates with a pool
-    let pool_name = "orphan-pool";
-    let _: views::IpPool = object_create(
-        client,
-        "/v1/system/ip-pools",
-        &params::IpPoolCreate {
-            identity: IdentityMetadataCreateParams {
-                name: String::from(pool_name).parse().unwrap(),
-                description: String::from("an ip pool"),
-            },
-        },
-    )
-    .await;
+    create_ip_pool(&client, "default", None).await;
+    link_ip_pool(&client, "default", &DEFAULT_SILO.id(), true).await;
 
     let orphan_pool_range = IpRange::V4(
         Ipv4Range::new(
@@ -3666,7 +3636,7 @@ async fn test_instance_ephemeral_ip_from_orphan_pool(
         )
         .unwrap(),
     );
-    populate_ip_pool(client, pool_name, orphan_pool_range).await;
+    create_ip_pool(&client, "orphan-pool", Some(orphan_pool_range)).await;
 
     // this should 404
     let instance_name = "orphan-pool-inst";
@@ -3794,11 +3764,8 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
     .await;
 
     // can't use create_default_ip_pool because we need to link to the silo we just made
-    let link = params::IpPoolSiloLink {
-        silo: NameOrId::Id(silo.identity.id),
-        is_default: true,
-    };
-    create_ip_pool(&client, "default", None, Some(link)).await;
+    create_ip_pool(&client, "default", None).await;
+    link_ip_pool(&client, "default", &silo.identity.id, true).await;
 
     // Create test projects
     NexusRequest::objects_post(

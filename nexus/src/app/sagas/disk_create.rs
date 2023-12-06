@@ -836,10 +836,8 @@ pub(crate) mod test {
     use diesel::{
         ExpressionMethods, OptionalExtension, QueryDsl, SelectableHelper,
     };
-    use dropshot::test_util::ClientTestContext;
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::{authn::saga::Serialized, db::datastore::DataStore};
-    use nexus_test_utils::resource_helpers::create_ip_pool;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils::resource_helpers::DiskTest;
     use nexus_test_utils_macros::nexus_test;
@@ -854,12 +852,6 @@ pub(crate) mod test {
 
     const DISK_NAME: &str = "my-disk";
     const PROJECT_NAME: &str = "springfield-squidport";
-
-    async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
-        create_ip_pool(&client, "p0", None, None).await;
-        let project = create_project(client, PROJECT_NAME).await;
-        project.identity.id
-    }
 
     pub fn new_disk_create_params() -> params::DiskCreate {
         params::DiskCreate {
@@ -898,7 +890,8 @@ pub(crate) mod test {
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.apictx().nexus;
-        let project_id = create_org_and_project(&client).await;
+        let project_id =
+            create_project(&client, PROJECT_NAME).await.identity.id;
 
         // Build the saga DAG with the provided test parameters
         let opctx = test_opctx(cptestctx);
@@ -1069,7 +1062,8 @@ pub(crate) mod test {
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.apictx().nexus;
-        let project_id = create_org_and_project(&client).await;
+        let project_id =
+            create_project(&client, PROJECT_NAME).await.identity.id;
         let opctx = test_opctx(cptestctx);
 
         crate::app::sagas::test_helpers::action_failure_can_unwind::<
@@ -1098,7 +1092,8 @@ pub(crate) mod test {
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.apictx.nexus;
-        let project_id = create_org_and_project(&client).await;
+        let project_id =
+            create_project(&client, PROJECT_NAME).await.identity.id;
         let opctx = test_opctx(&cptestctx);
 
         crate::app::sagas::test_helpers::action_failure_can_unwind_idempotently::<
@@ -1138,7 +1133,8 @@ pub(crate) mod test {
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.apictx.nexus;
-        let project_id = create_org_and_project(&client).await;
+        let project_id =
+            create_project(&client, PROJECT_NAME).await.identity.id;
 
         // Build the saga DAG with the provided test parameters
         let opctx = test_opctx(&cptestctx);

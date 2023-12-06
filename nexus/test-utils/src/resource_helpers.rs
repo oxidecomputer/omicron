@@ -105,15 +105,6 @@ pub async fn object_delete(client: &ClientTestContext, path: &str) {
         });
 }
 
-pub async fn populate_ip_pool(
-    client: &ClientTestContext,
-    pool_name: &str,
-    ip_range: IpRange,
-) -> IpPoolRange {
-    let url = format!("/v1/system/ip-pools/{}/ranges/add", pool_name);
-    object_create(client, &url, &ip_range).await
-}
-
 /// Create an IP pool with a single range for testing.
 ///
 /// The IP range may be specified if it's important for testing the behavior
@@ -123,9 +114,6 @@ pub async fn create_ip_pool(
     client: &ClientTestContext,
     pool_name: &str,
     ip_range: Option<IpRange>,
-    // TODO: could change this to is_default -- always associate with default
-    // silo, let caller decide whether it's the default
-    silo_link: Option<params::IpPoolSiloLink>,
 ) -> (IpPool, IpPoolRange) {
     let pool = object_create(
         client,
@@ -139,14 +127,6 @@ pub async fn create_ip_pool(
     )
     .await;
 
-    if let Some(silo_link) = silo_link {
-        let url = format!("/v1/system/ip-pools/{pool_name}/silos");
-        object_create::<params::IpPoolSiloLink, views::IpPoolSilo>(
-            client, &url, &silo_link,
-        )
-        .await;
-    }
-
     let ip_range = ip_range.unwrap_or_else(|| {
         use std::net::Ipv4Addr;
         IpRange::try_from((
@@ -155,18 +135,32 @@ pub async fn create_ip_pool(
         ))
         .unwrap()
     });
-    let range = populate_ip_pool(client, pool_name, ip_range).await;
+    let url = format!("/v1/system/ip-pools/{}/ranges/add", pool_name);
+    let range = object_create(client, &url, &ip_range).await;
     (pool, range)
 }
 
+pub async fn link_ip_pool(
+    client: &ClientTestContext,
+    pool_name: &str,
+    silo_id: &Uuid,
+    is_default: bool,
+) {
+    let link =
+        params::IpPoolSiloLink { silo: NameOrId::Id(*silo_id), is_default };
+    let url = format!("/v1/system/ip-pools/{pool_name}/silos");
+    object_create::<params::IpPoolSiloLink, views::IpPoolSilo>(
+        client, &url, &link,
+    )
+    .await;
+}
+
+/// What you want for any test that is not testing IP logic specifically
 pub async fn create_default_ip_pool(
     client: &ClientTestContext,
 ) -> views::IpPool {
-    let link = params::IpPoolSiloLink {
-        silo: NameOrId::Id(DEFAULT_SILO.id()),
-        is_default: true,
-    };
-    let (pool, ..) = create_ip_pool(&client, "default", None, Some(link)).await;
+    let (pool, ..) = create_ip_pool(&client, "default", None).await;
+    link_ip_pool(&client, "default", &DEFAULT_SILO.id(), true).await;
     pool
 }
 

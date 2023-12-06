@@ -1554,7 +1554,6 @@ mod test {
 
     use crate::app::saga::create_saga_dag;
     use crate::app::sagas::test_helpers;
-    use crate::external_api::shared::IpRange;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use diesel::{
         ExpressionMethods, OptionalExtension, QueryDsl, SelectableHelper,
@@ -1568,7 +1567,6 @@ mod test {
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils::resource_helpers::delete_disk;
     use nexus_test_utils::resource_helpers::object_create;
-    use nexus_test_utils::resource_helpers::populate_ip_pool;
     use nexus_test_utils::resource_helpers::DiskTest;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::external_api::params::InstanceDiskAttachment;
@@ -1580,7 +1578,6 @@ mod test {
     use omicron_common::api::external::NameOrId;
     use sled_agent_client::types::CrucibleOpts;
     use sled_agent_client::TestInterfaces as SledAgentTestInterfaces;
-    use std::net::Ipv4Addr;
     use std::str::FromStr;
 
     #[test]
@@ -2042,22 +2039,6 @@ mod test {
         // before the first attempt to run the saga recreates it.
         delete_disk(client, PROJECT_NAME, DISK_NAME).await;
 
-        // The no-pantry variant of the test needs to see the disk attached to
-        // an instance. Set up an IP pool so that instances can be created
-        // against it.
-        if !use_the_pantry {
-            populate_ip_pool(
-                &client,
-                "default",
-                IpRange::try_from((
-                    Ipv4Addr::new(10, 1, 0, 0),
-                    Ipv4Addr::new(10, 1, 255, 255),
-                ))
-                .unwrap(),
-            )
-            .await;
-        }
-
         crate::app::sagas::test_helpers::action_failure_can_unwind::<
             SagaSnapshotCreate,
             _,
@@ -2352,17 +2333,6 @@ mod test {
         assert!(output.is_err());
 
         // Attach the disk to an instance, then rerun the saga
-        populate_ip_pool(
-            &client,
-            "default",
-            IpRange::try_from((
-                Ipv4Addr::new(10, 1, 0, 0),
-                Ipv4Addr::new(10, 1, 255, 255),
-            ))
-            .unwrap(),
-        )
-        .await;
-
         let instance_state = setup_test_instance(
             cptestctx,
             client,
