@@ -144,9 +144,7 @@ api_identity = { path = "api_identity" }
 approx = "0.5.1"
 assert_matches = "1.5.0"
 assert_cmd = "2.0.12"
-# TODO: Patch before merging
-# async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "1446f7e0c1f05f33a0581abd51fa873c7652ab61" }
-async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", branch = "txn-retry" }
+async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "ed7ab5ef0513ba303d33efd41d3e9e381169d59b" }
 async-trait = "0.1.74"
 atomicwrites = "0.4.2"
 authz-macros = { path = "nexus/authz-macros" }
