@@ -237,19 +237,53 @@ struct QuotaCheck {
 }
 
 impl QuotaCheck {
-    fn new(silo_provisioned: &SiloProvisioned, quotas: &Quotas) -> Self {
+    fn new(
+        silo_provisioned: &SiloProvisioned,
+        quotas: &Quotas,
+        resource: VirtualProvisioningResource,
+    ) -> Self {
+        let has_sufficient_cpus =
+            quotas.query_source().select(quotas::cpus).single_value().ge(
+                silo_provisioned
+                    .query_source()
+                    .select(silo_provisioned::cpus_provisioned)
+                    .single_value()
+                    + resource.cpus_provisioned,
+            );
+
+        let has_sufficient_memory =
+            quotas.query_source().select(quotas::memory).single_value().ge(
+                silo_provisioned
+                    .query_source()
+                    .select(silo_provisioned::ram_provisioned)
+                    .single_value()
+                    + resource.ram_provisioned,
+            );
+
+        let has_sufficient_storage =
+            quotas.query_source().select(quotas::storage).single_value().ge(
+                silo_provisioned
+                    .query_source()
+                    .select(silo_provisioned::virtual_disk_bytes_provisioned)
+                    .single_value()
+                    + resource.virtual_disk_bytes_provisioned,
+            );
+
         Self {
             query: Box::new(diesel::select(
                 (ExpressionAlias::new::<quota_check::passed>(
-                    TrueOrCastError::new(enough_cpus, NOT_ENOUGH_CPUS_SENTINEL)
-                        .and(TrueOrCastError::new(
-                            enough_memory,
-                            NOT_ENOUGH_MEMORY_SENTINEL,
-                        ))
-                        .and(TrueOrCastError::new(
-                            enough_storage,
-                            NOT_ENOUGH_STORAGE_SENTINEL,
-                        )),
+                    TrueOrCastError::new(
+                        has_sufficient_cpus,
+                        NOT_ENOUGH_CPUS_SENTINEL,
+                    )
+                    .and(TrueOrCastError::new(
+                        has_sufficient_memory,
+                        NOT_ENOUGH_MEMORY_SENTINEL,
+                    ))
+                    .and(TrueOrCastError::new(
+                        has_sufficient_storage,
+                        NOT_ENOUGH_STORAGE_SENTINEL,
+                    )),
                 )),
             )),
         }
@@ -350,7 +384,7 @@ impl VirtualProvisioningCollectionUpdate {
             UpdatedProvisions::new(&all_collections, &do_update, values);
         let quotas = Quotas::new(&parent_silo, update_kind);
         let silo_provisioned = SiloProvisioned::new(&parent_silo);
-        let quota_check = QuotaCheck::new(&silo_provisioned, &quotas);
+        let quota_check = QuotaCheck::new(&silo_provisioned, &quotas, resource);
 
         // TODO: Do we want to select from "all_collections" instead? Seems more
         // idempotent; it'll work even when we don't update anything...
