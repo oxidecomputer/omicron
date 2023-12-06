@@ -2,7 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! TODO FIXME
+//! This module provides `BootDiskOsWriter`, via which sled-agent can write new
+//! OS images to its boot disks.
 
 use crate::http_entrypoints::BootDiskOsWriteProgress;
 use crate::http_entrypoints::BootDiskOsWriteStatus;
@@ -154,6 +155,28 @@ impl BootDiskOsWriter {
         }
     }
 
+    /// Attempt to start a new update to the given disk (identified by both its
+    /// slot and the path to its devfs device).
+    ///
+    /// This method will return after the `image_upload` stream has been saved
+    /// to a local temporary file, but before the update has completed. Callers
+    /// must poll `status()` to discover when the running update completes (or
+    /// fails).
+    ///
+    /// # Errors
+    ///
+    /// This method will return an error and not start an update if any of the
+    /// following are true:
+    ///
+    /// * A previously-started update of this same `boot_disk` is still running
+    /// * The `image_upload` stream returns an error
+    /// * The hash of the data provided by `image_upload` does not match
+    ///   `sha3_256_digest`
+    /// * Any of a variety of I/O errors occurs while copying from
+    ///   `image_upload` to a temporary file
+    ///
+    /// In all but the first case, the error returned will also be saved and
+    /// returned when `status()` is called (until another update is started).
     pub(crate) async fn start_update<S>(
         &self,
         boot_disk: M2Slot,
@@ -261,6 +284,11 @@ impl BootDiskOsWriter {
                             }
                         }
                     }
+                    // TODO-correctness Should we separate require callers to
+                    // explicitly clear out the results of a completed update
+                    // before starting a new update? (Answer could be different
+                    // depending on whether the most recent update succeeded or
+                    // failed.)
                     WriterState::Complete(_) => {
                         let (uploaded_image_rx, running) = spawn_update_task();
                         slot.insert(WriterState::TaskRunning(running));
@@ -275,15 +303,18 @@ impl BootDiskOsWriter {
         uploaded_image_rx.await.map_err(|_| BootDiskOsWriteError::TaskPanic)?
     }
 
+    /// Get the status of any update running that targets `boot_disk`.
     pub(crate) fn status(&self, boot_disk: M2Slot) -> BootDiskOsWriteStatus {
         let mut states = self.states.lock().unwrap();
         let mut slot = match states.entry(boot_disk) {
-            Entry::Vacant(_) => return BootDiskOsWriteStatus::NoUpdateRunning,
+            Entry::Vacant(_) => return BootDiskOsWriteStatus::NoUpdateStarted,
             Entry::Occupied(slot) => slot,
         };
 
         match slot.get_mut() {
             WriterState::TaskRunning(running) => {
+                // Is the task actually still running? Check and see if it's
+                // sent us a result that we just haven't noticed yet.
                 match running.complete_rx.try_recv() {
                     Ok(result) => {
                         let update_id = running.update_id;
@@ -874,7 +905,7 @@ mod tests {
             // image".
             loop {
                 match writer.status(boot_disk) {
-                    BootDiskOsWriteStatus::NoUpdateRunning => {
+                    BootDiskOsWriteStatus::NoUpdateStarted => {
                         tokio::time::sleep(Duration::from_millis(50)).await;
                         continue;
                     }
@@ -972,7 +1003,7 @@ mod tests {
                         DisplayErrorChain::new(&expected_error).to_string()
                     );
                 }
-                BootDiskOsWriteStatus::NoUpdateRunning
+                BootDiskOsWriteStatus::NoUpdateStarted
                 | BootDiskOsWriteStatus::InProgress { .. }
                 | BootDiskOsWriteStatus::Complete { .. } => {
                     panic!("unexpected status {status:?}")
@@ -1091,7 +1122,7 @@ mod tests {
                         tokio::time::sleep(Duration::from_millis(50)).await;
                         continue;
                     }
-                    BootDiskOsWriteStatus::NoUpdateRunning
+                    BootDiskOsWriteStatus::NoUpdateStarted
                     | BootDiskOsWriteStatus::Failed { .. } => {
                         panic!("unexpected status {status:?}")
                     }
@@ -1165,7 +1196,7 @@ mod tests {
                         continue;
                     }
                     BootDiskOsWriteStatus::Complete { .. }
-                    | BootDiskOsWriteStatus::NoUpdateRunning => {
+                    | BootDiskOsWriteStatus::NoUpdateStarted => {
                         panic!("unexpected status {status:?}");
                     }
                 }
@@ -1267,7 +1298,7 @@ mod tests {
                             break;
                         }
                         BootDiskOsWriteStatus::Failed { .. }
-                        | BootDiskOsWriteStatus::NoUpdateRunning => {
+                        | BootDiskOsWriteStatus::NoUpdateStarted => {
                             panic!("unexpected status {status:?}");
                         }
                     }
@@ -1379,7 +1410,7 @@ mod tests {
                         break;
                     }
                     BootDiskOsWriteStatus::Failed { .. }
-                    | BootDiskOsWriteStatus::NoUpdateRunning => {
+                    | BootDiskOsWriteStatus::NoUpdateStarted => {
                         panic!("unexpected status {status:?}");
                     }
                 }

@@ -854,22 +854,31 @@ async fn host_os_write_start(
     Ok(HttpResponseUpdatedNoContent())
 }
 
+/// Current progress of an OS image being written to disk.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema, Serialize,
 )]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum BootDiskOsWriteProgress {
+    /// The image is still being uploaded.
     ReceivingUploadedImage { bytes_received: usize },
+    /// The image is being written to disk.
     WritingImageToDisk { bytes_written: usize },
+    /// The image is being read back from disk for validation.
     ValidatingWrittenImage { bytes_read: usize },
 }
 
+/// Status of an update to a boot disk OS.
 #[derive(Debug, Clone, Deserialize, JsonSchema, Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum BootDiskOsWriteStatus {
-    NoUpdateRunning,
+    /// No update has been started for this disk since this server started.
+    NoUpdateStarted,
+    /// An update is currently running.
     InProgress { update_id: Uuid, progress: BootDiskOsWriteProgress },
+    /// The most recent update completed successfully.
     Complete { update_id: Uuid },
+    /// The most recent update failed.
     Failed { update_id: Uuid, message: String },
 }
 
