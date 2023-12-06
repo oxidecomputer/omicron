@@ -21,7 +21,8 @@ use diesel::query_builder::{AstPass, Query, QueryFragment, QueryId};
 use diesel::result::Error as DieselError;
 use diesel::{
     sql_types, BoolExpressionMethods, CombineDsl, ExpressionMethods, IntoSql,
-    NullableExpressionMethods, QueryDsl, RunQueryDsl, SelectableHelper,
+    JoinOnDsl, NullableExpressionMethods, QueryDsl, RunQueryDsl,
+    SelectableHelper,
 };
 use nexus_db_model::queries::virtual_provisioning_collection_update::{
     all_collections, do_update, parent_silo, quotas, silo_provisioned,
@@ -272,12 +273,10 @@ impl Quotas {
         Self {
             query: Box::new(
                 dsl::silo_quotas
-                    .filter(
-                        dsl::silo_id.eq(parent_silo
+                    .inner_join(
+                        parent_silo
                             .query_source()
-                            .select(parent_silo::id)
-                            .single_value()
-                            .assume_not_null()),
+                            .on(dsl::silo_id.eq(parent_silo::id)),
                     )
                     .select((
                         dsl::silo_id,
@@ -306,12 +305,10 @@ impl SiloProvisioned {
         Self {
             query: Box::new(
                 dsl::virtual_provisioning_collection
-                    .filter(
-                        dsl::id.eq(parent_silo
+                    .inner_join(
+                        parent_silo
                             .query_source()
-                            .select(parent_silo::id)
-                            .single_value()
-                            .assume_not_null()),
+                            .on(dsl::id.eq(parent_silo::id)),
                     )
                     .select((
                         dsl::id,
