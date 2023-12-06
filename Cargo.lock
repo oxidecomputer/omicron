@@ -4044,7 +4044,7 @@ dependencies = [
  "oso",
  "oximeter",
  "paste",
- "pem 1.1.1",
+ "pem",
  "petgraph",
  "pq-sys",
  "rand 0.8.5",
@@ -4652,7 +4652,7 @@ dependencies = [
  "oximeter-producer",
  "parse-display",
  "paste",
- "pem 1.1.1",
+ "pem",
  "petgraph",
  "pq-sys",
  "pretty_assertions",
@@ -4896,7 +4896,7 @@ dependencies = [
  "libc",
  "omicron-common",
  "omicron-workspace-hack",
- "pem 1.1.1",
+ "pem",
  "rcgen",
  "regex",
  "reqwest",
@@ -5590,15 +5590,6 @@ name = "peeking_take_while"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "19b17cddbe7ec3f8bc800887bab5e717348c95ea2ca0b1bf0837fb964dc67099"
-
-[[package]]
-name = "pem"
-version = "1.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a8835c273a76a90455d7344889b0964598e3316e2a79ede8e36f16bdcf2228b8"
-dependencies = [
- "base64 0.13.1",
-]
 
 [[package]]
 name = "pem"
@@ -6382,7 +6373,7 @@ version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52c4f3084aa3bc7dfbba4eff4fab2a54db4324965d8872ab933565e6fbd83bc6"
 dependencies = [
- "pem 3.0.2",
+ "pem",
  "ring 0.16.20",
  "time",
  "yasna",
@@ -8656,7 +8647,7 @@ dependencies = [
  "hex",
  "log",
  "olpc-cjson",
- "pem 3.0.2",
+ "pem",
  "percent-encoding",
  "reqwest",
  "ring 0.16.20",

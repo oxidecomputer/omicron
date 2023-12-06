@@ -283,7 +283,7 @@ parse-display = "0.8.2"
 partial-io = { version = "0.5.4", features = ["proptest1", "tokio1"] }
 paste = "1.0.14"
 percent-encoding = "2.3.1"
-pem = "1.1"
+pem = "3.0"
 petgraph = "0.6.4"
 postgres-protocol = "0.6.6"
 predicates = "3.0.4"
