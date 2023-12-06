@@ -659,7 +659,10 @@ async fn read_network_bootstore_config_cache(
     })?;
 
     let config = match config {
-        Some(config) => EarlyNetworkConfig::try_from(config).map_err(|e| {
+        Some(config) => EarlyNetworkConfig::deserialize_bootstore_config(
+            &rqctx.log, &config,
+        )
+        .map_err(|e| {
             HttpError::for_internal_error(format!(
                 "deserialize early network config: {e}"
             ))

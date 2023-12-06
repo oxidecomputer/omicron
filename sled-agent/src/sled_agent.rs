@@ -445,8 +445,11 @@ impl SledAgent {
                 })?;
 
             let early_network_config =
-                EarlyNetworkConfig::try_from(serialized_config)
-                    .map_err(|err| BackoffError::transient(err.to_string()))?;
+                EarlyNetworkConfig::deserialize_bootstore_config(
+                    &log,
+                    &serialized_config,
+                )
+                .map_err(|err| BackoffError::transient(err.to_string()))?;
 
             Ok(early_network_config.body.rack_network_config)
         };
