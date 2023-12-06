@@ -28,6 +28,30 @@ table! {
     }
 }
 
+table! {
+    quotas (silo_id) {
+        silo_id -> Uuid,
+        cpus -> Int8,
+        memory -> Int8,
+        storage -> Int8,
+    }
+}
+
+table! {
+    silo_provisioned {
+        id -> Uuid,
+        virtual_disk_bytes_provisioned -> Int8,
+        cpus_provisioned -> Int8,
+        ram_provisioned -> Int8,
+    }
+}
+
+table! {
+    quota_check (passed) {
+        passed -> Bool,
+    }
+}
+
 diesel::allow_tables_to_appear_in_same_query!(silo, parent_silo,);
 
 diesel::allow_tables_to_appear_in_same_query!(
@@ -35,4 +59,5 @@ diesel::allow_tables_to_appear_in_same_query!(
     parent_silo,
     all_collections,
     do_update,
+    quotas
 );
