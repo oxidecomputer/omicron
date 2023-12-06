@@ -21,6 +21,7 @@ use slog::Logger;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::io;
+use std::io::Read;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -68,7 +69,7 @@ pub(crate) enum BootDiskOsWriteError {
     #[error("hash mismatch in image from HTTP client: expected {expected} but got {got}")]
     UploadedImageHashMismatch { expected: String, got: String },
     #[error("failed to open disk for writing {path}")]
-    FailedOpenDisk {
+    FailedOpenDiskForWrite {
         #[source]
         error: io::Error,
         path: Utf8PathBuf,
@@ -86,6 +87,24 @@ pub(crate) enum BootDiskOsWriteError {
         error: io::Error,
         path: Utf8PathBuf,
     },
+    #[error("failed to open disk for reading {path}")]
+    FailedOpenDiskForRead {
+        #[source]
+        error: io::Error,
+        path: Utf8PathBuf,
+    },
+    #[error("failed reading from disk {path}")]
+    FailedReadingDisk {
+        #[source]
+        error: io::Error,
+        path: Utf8PathBuf,
+    },
+    #[error("hash mismatch after writing disk {path}: expected {expected} but got {got}")]
+    WrittenImageHashMismatch {
+        path: Utf8PathBuf,
+        expected: String,
+        got: String,
+    },
 }
 
 impl From<&BootDiskOsWriteError> for HttpError {
@@ -102,13 +121,18 @@ impl From<&BootDiskOsWriteError> for HttpError {
             | BootDiskOsWriteError::FailedCreatingTempfile(_)
             | BootDiskOsWriteError::FailedWritingTempfile(_)
             | BootDiskOsWriteError::FailedReadingTempfile(_)
-            | BootDiskOsWriteError::FailedOpenDisk { .. }
-            | BootDiskOsWriteError::FailedWritingDisk { .. } => HttpError {
-                status_code: http::StatusCode::SERVICE_UNAVAILABLE,
-                error_code: None,
-                external_message: message.clone(),
-                internal_message: message,
-            },
+            | BootDiskOsWriteError::FailedOpenDiskForWrite { .. }
+            | BootDiskOsWriteError::FailedOpenDiskForRead { .. }
+            | BootDiskOsWriteError::FailedWritingDisk { .. }
+            | BootDiskOsWriteError::FailedReadingDisk { .. }
+            | BootDiskOsWriteError::WrittenImageHashMismatch { .. } => {
+                HttpError {
+                    status_code: http::StatusCode::SERVICE_UNAVAILABLE,
+                    error_code: None,
+                    external_message: message.clone(),
+                    internal_message: message,
+                }
+            }
         }
     }
 }
@@ -147,7 +171,7 @@ impl BootDiskOsWriter {
             update_id,
             sha3_256_digest,
             image_upload,
-            InjectRawDiskWriter,
+            RealDiskInterface {},
         )
         .await
     }
@@ -163,7 +187,7 @@ impl BootDiskOsWriter {
     ) -> Result<(), Arc<BootDiskOsWriteError>>
     where
         S: Stream<Item = Result<Bytes, HttpError>> + Send + 'static,
-        Writer: InjectDiskWriter + Send + Sync + 'static,
+        Writer: DiskInterface + Send + Sync + 'static,
     {
         // Construct a closure that will spawn a task to drive this update, but
         // don't actually start it yet: we only allow an update to start if
@@ -184,10 +208,13 @@ impl BootDiskOsWriter {
                 disk_devfs_path,
                 sha3_256_digest,
                 progress_tx,
-                complete_tx,
-                disk_writer,
+                disk_interface: disk_writer,
             };
-            tokio::spawn(task.run(image_upload, uploaded_image_tx));
+            tokio::spawn(task.run(
+                image_upload,
+                uploaded_image_tx,
+                complete_tx,
+            ));
             (
                 uploaded_image_rx,
                 TaskRunningState { update_id, progress_rx, complete_rx },
@@ -328,17 +355,17 @@ struct BootDiskOsWriteTask<W> {
     sha3_256_digest: [u8; 32],
     disk_devfs_path: Utf8PathBuf,
     progress_tx: watch::Sender<BootDiskOsWriteProgress>,
-    complete_tx: oneshot::Sender<Result<(), Arc<BootDiskOsWriteError>>>,
-    disk_writer: W,
+    disk_interface: W,
 }
 
-impl<W: InjectDiskWriter> BootDiskOsWriteTask<W> {
+impl<W: DiskInterface> BootDiskOsWriteTask<W> {
     async fn run<S>(
         self,
         image_upload: S,
         uploaded_image_tx: oneshot::Sender<
             Result<(), Arc<BootDiskOsWriteError>>,
         >,
+        complete_tx: oneshot::Sender<Result<(), Arc<BootDiskOsWriteError>>>,
     ) where
         S: Stream<Item = Result<Bytes, HttpError>> + Send + 'static,
     {
@@ -346,11 +373,11 @@ impl<W: InjectDiskWriter> BootDiskOsWriteTask<W> {
 
         // It's possible (albeit unlikely) our caller has discarded the receive
         // half of this channel; ignore any send error.
-        _ = self.complete_tx.send(result);
+        _ = complete_tx.send(result);
     }
 
     async fn run_impl<S>(
-        &self,
+        self,
         image_upload: S,
         uploaded_image_tx: oneshot::Sender<
             Result<(), Arc<BootDiskOsWriteError>>,
@@ -446,9 +473,9 @@ impl<W: InjectDiskWriter> BootDiskOsWriteTask<W> {
         // Ensure the data the client sent us matches the hash they also sent
         // us. A failure here means either the client lied or something has gone
         // horribly wrong.
-        let hash: [u8; 32] = hasher.finalize().into();
+        let hash = hasher.finalize();
         let expected_hash_str = hex::encode(&self.sha3_256_digest);
-        if hash == self.sha3_256_digest {
+        if hash == self.sha3_256_digest.into() {
             info!(
                 self.log, "received uploaded image";
                 "bytes_received" => bytes_received,
@@ -479,15 +506,14 @@ impl<W: InjectDiskWriter> BootDiskOsWriteTask<W> {
         image_tempfile: File,
         image_size: usize,
     ) -> Result<usize, BootDiskOsWriteError> {
-        let disk_writer = self
-            .disk_writer
-            .open(self.disk_devfs_path.as_std_path())
+        let mut disk_writer = self
+            .disk_interface
+            .open_writer(self.disk_devfs_path.as_std_path())
             .await
-            .map_err(|error| BootDiskOsWriteError::FailedOpenDisk {
+            .map_err(|error| BootDiskOsWriteError::FailedOpenDiskForWrite {
                 error,
                 path: self.disk_devfs_path.clone(),
             })?;
-        tokio::pin!(disk_writer);
 
         let disk_block_size = disk_writer.block_size();
 
@@ -524,29 +550,106 @@ impl<W: InjectDiskWriter> BootDiskOsWriteTask<W> {
             });
         }
 
+        disk_writer.finalize().await.map_err(|error| {
+            BootDiskOsWriteError::FailedWritingDisk {
+                error,
+                path: self.disk_devfs_path.clone(),
+            }
+        })?;
+
+        info!(
+            self.log, "copied OS image to disk";
+            "path" => %self.disk_devfs_path,
+            "bytes_written" => image_size,
+        );
+
         Ok(disk_block_size)
     }
 
     async fn validate_written_image(
-        &self,
+        self,
         image_size: usize,
         disk_block_size: usize,
     ) -> Result<(), BootDiskOsWriteError> {
-        // TODO
-        Ok(())
+        // We're reading the OS image back from disk and hashing it; this can
+        // all be synchronous inside a spawn_blocking.
+        tokio::task::spawn_blocking(move || {
+            let mut f = self
+                .disk_interface
+                .open_reader(self.disk_devfs_path.as_std_path())
+                .map_err(|error| {
+                    BootDiskOsWriteError::FailedOpenDiskForRead {
+                        error,
+                        path: self.disk_devfs_path.clone(),
+                    }
+                })?;
+
+            let mut buf = vec![0; disk_block_size];
+            let mut hasher = Sha3_256::default();
+            let mut bytes_read = 0;
+
+            while bytes_read < image_size {
+                // We already confirmed while writing the image that the image
+                // size is an exact multiple of the disk block size, so we can
+                // always read a full `buf` here.
+                f.read_exact(&mut buf).map_err(|error| {
+                    BootDiskOsWriteError::FailedReadingDisk {
+                        error,
+                        path: self.disk_devfs_path.clone(),
+                    }
+                })?;
+
+                hasher.update(&buf);
+                bytes_read += buf.len();
+                self.progress_tx.send_modify(|progress| {
+                    *progress =
+                        BootDiskOsWriteProgress::ValidatingWrittenImage {
+                            bytes_read,
+                        };
+                });
+            }
+
+            let expected_hash_str = hex::encode(&self.sha3_256_digest);
+            let hash = hasher.finalize();
+            if hash == self.sha3_256_digest.into() {
+                info!(
+                    self.log, "validated OS image written to disk";
+                    "path" => %self.disk_devfs_path,
+                    "hash" => expected_hash_str,
+                );
+                Ok(())
+            } else {
+                let computed_hash_str = hex::encode(&hash);
+                error!(
+                    self.log, "failed to validate written OS image";
+                    "bytes_hashed" => image_size,
+                    "computed_hash" => &computed_hash_str,
+                    "expected_hash" => &expected_hash_str,
+                );
+                Err(BootDiskOsWriteError::WrittenImageHashMismatch {
+                    path: self.disk_devfs_path,
+                    expected: expected_hash_str,
+                    got: computed_hash_str,
+                })
+            }
+        })
+        .await
+        .expect("blocking task panicked")
     }
 }
 
 // Utility traits to allow injecting an in-memory "disk" for unit tests.
 #[async_trait]
-trait DiskWriter: AsyncWrite + Send + Sized {
+trait DiskWriter: AsyncWrite + Send + Sized + Unpin {
     fn block_size(&self) -> usize;
     async fn finalize(self) -> io::Result<()>;
 }
 #[async_trait]
-trait InjectDiskWriter {
+trait DiskInterface: Send + Sync + 'static {
     type Writer: DiskWriter;
-    async fn open(&self, path: &Path) -> io::Result<Self::Writer>;
+    type Reader: io::Read + Send;
+    async fn open_writer(&self, path: &Path) -> io::Result<Self::Writer>;
+    fn open_reader(&self, path: &Path) -> io::Result<Self::Reader>;
 }
 
 #[async_trait]
@@ -560,14 +663,19 @@ impl DiskWriter for RawDiskWriter {
     }
 }
 
-struct InjectRawDiskWriter;
+struct RealDiskInterface {}
 
 #[async_trait]
-impl InjectDiskWriter for InjectRawDiskWriter {
+impl DiskInterface for RealDiskInterface {
     type Writer = RawDiskWriter;
+    type Reader = std::fs::File;
 
-    async fn open(&self, path: &Path) -> io::Result<Self::Writer> {
+    async fn open_writer(&self, path: &Path) -> io::Result<Self::Writer> {
         RawDiskWriter::open(path).await
+    }
+
+    fn open_reader(&self, path: &Path) -> io::Result<Self::Reader> {
+        std::fs::File::open(path)
     }
 }
 
@@ -591,20 +699,27 @@ mod tests {
     use tokio_stream::wrappers::UnboundedReceiverStream;
     use tokio_util::sync::PollSemaphore;
 
-    // TODO DOCUMENT AND BUMP TO 30
-    const TEST_TIMEOUT: Duration = Duration::from_secs(5);
+    // Most of the tests below end up looping while calling
+    // `BootDiskOsWriter::status()` waiting for a specific status message to
+    // arrive. If we get that wrong (or the code under test is wrong!), that
+    // could end up looping forever, so we run all the relevant bits of the
+    // tests under a tokio timeout. We expect all the tests to complete very
+    // quickly in general (< 1 second), so we'll pick something
+    // outrageously-long-enough that if we hit it, we're almost certainly
+    // dealing with a hung test.
+    const TEST_TIMEOUT: Duration = Duration::from_secs(30);
 
     struct InMemoryDiskContents {
         path: PathBuf,
         data: Vec<u8>,
     }
 
-    struct InjectInMemoryDiskWriter {
+    struct InMemoryDiskInterface {
         semaphore: Arc<Semaphore>,
         finalized_writes: Arc<Mutex<Vec<InMemoryDiskContents>>>,
     }
 
-    impl InjectInMemoryDiskWriter {
+    impl InMemoryDiskInterface {
         const BLOCK_SIZE: usize = 16;
 
         fn new(semaphore: Semaphore) -> Self {
@@ -616,10 +731,11 @@ mod tests {
     }
 
     #[async_trait]
-    impl InjectDiskWriter for InjectInMemoryDiskWriter {
+    impl DiskInterface for InMemoryDiskInterface {
         type Writer = InMemoryDiskWriter;
+        type Reader = io::Cursor<Vec<u8>>;
 
-        async fn open(&self, path: &Path) -> io::Result<Self::Writer> {
+        async fn open_writer(&self, path: &Path) -> io::Result<Self::Writer> {
             Ok(InMemoryDiskWriter {
                 opened_path: path.into(),
                 data: BlockSizeBufWriter::with_block_size(
@@ -629,6 +745,19 @@ mod tests {
                 semaphore: PollSemaphore::new(Arc::clone(&self.semaphore)),
                 finalized_writes: Arc::clone(&self.finalized_writes),
             })
+        }
+
+        fn open_reader(&self, path: &Path) -> io::Result<Self::Reader> {
+            let written_files = self.finalized_writes.lock().unwrap();
+            for contents in written_files.iter() {
+                if contents.path == path {
+                    return Ok(io::Cursor::new(contents.data.clone()));
+                }
+            }
+            Err(io::Error::new(
+                io::ErrorKind::Other,
+                format!("no written file for {}", path.display()),
+            ))
         }
     }
 
@@ -837,7 +966,7 @@ mod tests {
 
         // generate a small, random "OS image" consisting of 10 "blocks"
         let num_data_blocks = 10;
-        let data_len = num_data_blocks * InjectInMemoryDiskWriter::BLOCK_SIZE;
+        let data_len = num_data_blocks * InMemoryDiskInterface::BLOCK_SIZE;
         let mut data = vec![0; data_len];
         rand::thread_rng().fill_bytes(&mut data);
         let data_hash = Sha3_256::digest(&data);
@@ -845,9 +974,9 @@ mod tests {
         // generate a disk writer with a 0-permit semaphore; we'll inject
         // permits in the main loop below to force single-stepping through
         // writing the data
-        let inject_disk_writer =
-            InjectInMemoryDiskWriter::new(Semaphore::new(0));
-        let shared_semaphore = Arc::clone(&inject_disk_writer.semaphore);
+        let inject_disk_interface =
+            InMemoryDiskInterface::new(Semaphore::new(0));
+        let shared_semaphore = Arc::clone(&inject_disk_interface.semaphore);
 
         let writer = Arc::new(BootDiskOsWriter::new(&logctx.log));
         let boot_disk = M2Slot::A;
@@ -860,7 +989,7 @@ mod tests {
                 Uuid::new_v4(),
                 data_hash.into(),
                 stream::once(future::ready(Ok(Bytes::from(data.clone())))),
-                inject_disk_writer,
+                inject_disk_interface,
             )
             .await
             .unwrap();
@@ -893,69 +1022,147 @@ mod tests {
                 // data to be written to the "disk".
                 shared_semaphore.add_permits(1);
 
-                // Wait until we see the status we expect
+                // Did we just release the write of the final block? If so,
+                // break; we'll wait for completion below.
+                if i + 1 == num_data_blocks {
+                    break;
+                }
+
+                // Wait until we see the status we expect for a not-yet-last
+                // block (i.e., that the disk is still being written).
                 loop {
-                    let status = writer.status(boot_disk);
-                    if i + 1 < num_data_blocks {
-                        // not the last block - we should see progress that
-                        // matches the amount of data being copied
-                        let progress = expect_in_progress(status);
-                        match progress {
-                            BootDiskOsWriteProgress::WritingImageToDisk {
-                                bytes_written,
-                            } if (i + 1)
-                                * InjectInMemoryDiskWriter::BLOCK_SIZE
-                                == bytes_written =>
-                            {
-                                println!("saw expected progress for block {i}");
-                                break;
-                            }
-                            _ => {
-                                // This is not an error: we could still be in
-                                // `ReceivingUploadedImage` or the previous
-                                // block's `WritingImageToDisk`
-                                println!(
-                                    "saw irrelevant progress {progress:?}"
-                                );
-                                tokio::time::sleep(Duration::from_millis(50))
-                                    .await;
-                                continue;
-                            }
+                    let progress = expect_in_progress(writer.status(boot_disk));
+                    match progress {
+                        BootDiskOsWriteProgress::WritingImageToDisk {
+                            bytes_written,
+                        } if (i + 1) * InMemoryDiskInterface::BLOCK_SIZE
+                            == bytes_written =>
+                        {
+                            println!("saw expected progress for block {i}");
+                            break;
                         }
-                    } else {
-                        // On the last block, we may see an "in progress" with
-                        // all data written, or we may skip straight to
-                        // "complete". Either is fine and signals all data has
-                        // been written.
-                        match status {
-                            BootDiskOsWriteStatus::Complete { .. } => break,
-                            BootDiskOsWriteStatus::InProgress {
-                                progress: BootDiskOsWriteProgress::WritingImageToDisk {
-                                    bytes_written,
-                                },
-                                ..
-                            } if bytes_written == data_len => break,
-                            BootDiskOsWriteStatus::InProgress {
-                                progress, ..
-                            } => {
-                                println!(
-                                    "saw irrelevant progress {progress:?}"
-                                );
-                                tokio::time::sleep(Duration::from_millis(50))
-                                    .await;
-                                continue;
-                            }
-                            BootDiskOsWriteStatus::NoUpdateRunning
-                            | BootDiskOsWriteStatus::Failed {..} => {
-                                panic!("unexpected status {status:?}");
-                            }
+                        _ => {
+                            // This is not an error: we could still be in
+                            // `ReceivingUploadedImage` or the previous
+                            // block's `WritingImageToDisk`
+                            println!("saw irrelevant progress {progress:?}");
+                            tokio::time::sleep(Duration::from_millis(50)).await;
+                            continue;
                         }
+                    }
+                }
+            }
+
+            // The last block is being or has been written, and after that the
+            // writer will reread it to validate the hash. We won't bother
+            // repeating the same machinery to check each step of that process;
+            // we'll just wait for the eventual successful completion.
+            loop {
+                let status = writer.status(boot_disk);
+                match status {
+                    BootDiskOsWriteStatus::Complete { .. } => break,
+                    BootDiskOsWriteStatus::InProgress { .. } => {
+                        println!("saw irrelevant progress {status:?}");
+                        tokio::time::sleep(Duration::from_millis(50)).await;
+                        continue;
+                    }
+                    BootDiskOsWriteStatus::NoUpdateRunning
+                    | BootDiskOsWriteStatus::Failed { .. } => {
+                        panic!("unexpected status {status:?}")
                     }
                 }
             }
         })
         .await
         .unwrap();
+
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn boot_disk_os_writer_fails_if_reading_from_disk_doesnt_match() {
+        let logctx = test_setup_log(
+            "boot_disk_os_writer_fails_if_reading_from_disk_doesnt_match",
+        );
+
+        // generate a small, random "OS image" consisting of 10 "blocks"
+        let num_data_blocks = 10;
+        let data_len = num_data_blocks * InMemoryDiskInterface::BLOCK_SIZE;
+        let mut data = vec![0; data_len];
+        rand::thread_rng().fill_bytes(&mut data);
+        let original_data_hash = Sha3_256::digest(&data);
+
+        // generate a disk writer with (effectively) unlimited semaphore
+        // permits, since we don't need to throttle the "disk writing"
+        let inject_disk_interface =
+            InMemoryDiskInterface::new(Semaphore::new(Semaphore::MAX_PERMITS));
+
+        let writer = Arc::new(BootDiskOsWriter::new(&logctx.log));
+        let boot_disk = M2Slot::A;
+        let disk_devfs_path = "/unit-test/disk";
+
+        // copy the data and corrupt it, then stage this in
+        // `inject_disk_interface` so that it returns this corrupted data when
+        // "reading" the disk
+        let mut bad_data = data.clone();
+        bad_data[0] ^= 1; // bit flip
+        let bad_data_hash = Sha3_256::digest(&bad_data);
+        inject_disk_interface.finalized_writes.lock().unwrap().push(
+            InMemoryDiskContents {
+                path: disk_devfs_path.into(),
+                data: bad_data,
+            },
+        );
+
+        writer
+            .start_update_impl(
+                boot_disk,
+                disk_devfs_path.into(),
+                Uuid::new_v4(),
+                original_data_hash.into(),
+                stream::once(future::ready(Ok(Bytes::from(data.clone())))),
+                inject_disk_interface,
+            )
+            .await
+            .unwrap();
+
+        // We expect the update to eventually fail; wait for it to do so.
+        let failure_message = tokio::time::timeout(TEST_TIMEOUT, async move {
+            loop {
+                let status = writer.status(boot_disk);
+                match status {
+                    BootDiskOsWriteStatus::Failed { message, .. } => {
+                        return message;
+                    }
+                    BootDiskOsWriteStatus::InProgress { .. } => {
+                        println!("saw irrelevant status {status:?}");
+                        tokio::time::sleep(Duration::from_millis(50)).await;
+                        continue;
+                    }
+                    BootDiskOsWriteStatus::Complete { .. }
+                    | BootDiskOsWriteStatus::NoUpdateRunning => {
+                        panic!("unexpected status {status:?}");
+                    }
+                }
+            }
+        })
+        .await
+        .unwrap();
+
+        // Confirm that the update fails for the reason we expect: when
+        // re-reading what had been written to disk, it got our corrupt data
+        // (which hashes to `bad_data_hash`) instead of the expected
+        // `original_data_hash`.
+        let expected_error = BootDiskOsWriteError::WrittenImageHashMismatch {
+            path: disk_devfs_path.into(),
+            expected: hex::encode(&original_data_hash),
+            got: hex::encode(&bad_data_hash),
+        };
+
+        assert_eq!(
+            failure_message,
+            DisplayErrorChain::new(&expected_error).to_string()
+        );
 
         logctx.cleanup_successful();
     }

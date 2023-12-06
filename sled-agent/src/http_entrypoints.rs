@@ -861,6 +861,7 @@ async fn host_os_write_start(
 pub enum BootDiskOsWriteProgress {
     ReceivingUploadedImage { bytes_received: usize },
     WritingImageToDisk { bytes_written: usize },
+    ValidatingWrittenImage { bytes_read: usize },
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema, Serialize)]
