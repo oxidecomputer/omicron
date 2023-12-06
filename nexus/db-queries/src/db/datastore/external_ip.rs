@@ -210,8 +210,8 @@ impl DataStore {
         let name = data.name().clone();
         let explicit_ip = data.explicit_ip().is_some();
         NextExternalIp::new(data).get_result_async(conn).await.map_err(|e| {
-            use diesel::result::Error::NotFound;
             use diesel::result::Error::DatabaseError;
+            use diesel::result::Error::NotFound;
             match e {
                 NotFound => {
                     if explicit_ip {
