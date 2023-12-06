@@ -8,6 +8,7 @@
 //! for the construction of this query.
 
 use crate::schema::silo;
+use crate::schema::silo_quotas;
 use crate::schema::virtual_provisioning_collection;
 
 table! {
@@ -50,6 +51,7 @@ diesel::allow_tables_to_appear_in_same_query!(silo, parent_silo,);
 
 diesel::allow_tables_to_appear_in_same_query!(
     virtual_provisioning_collection,
+    silo_quotas,
     parent_silo,
     all_collections,
     do_update,

@@ -250,7 +250,18 @@ impl Quotas {
         use crate::db::schema::silo_quotas::dsl;
         Self {
             query: Box::new(
-                dsl::silo_quotas.filter(dsl::silo_id.eq(parent_silo::id)),
+                dsl::silo_quotas
+                    .filter(dsl::silo_id.eq(parent_silo::id))
+                    .select((
+                        dsl::silo_id,
+                        dsl::cpus,
+                        ExpressionAlias::new::<quotas::dsl::memory>(
+                            dsl::memory_bytes,
+                        ),
+                        ExpressionAlias::new::<quotas::dsl::storage>(
+                            dsl::storage_bytes,
+                        ),
+                    )),
             ),
         }
     }
@@ -269,7 +280,12 @@ impl SiloProvisioned {
             query: Box::new(
                 dsl::virtual_provisioning_collection
                     .filter(dsl::id.eq(parent_silo::id))
-                    .select(silo_provisioned::all_columns),
+                    .select((
+                        dsl::id,
+                        dsl::cpus_provisioned,
+                        dsl::ram_provisioned,
+                        dsl::virtual_disk_bytes_provisioned,
+                    )),
             ),
         }
     }
