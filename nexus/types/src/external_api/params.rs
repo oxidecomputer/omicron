@@ -763,11 +763,6 @@ pub struct IpPoolSiloLink {
     pub is_default: bool,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct IpPoolSiloUnlink {
-    pub silo: NameOrId,
-}
-
 // INSTANCES
 
 /// Describes an attachment of an `InstanceNetworkInterface` to an `Instance`,

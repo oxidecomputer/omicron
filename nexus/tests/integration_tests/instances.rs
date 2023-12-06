@@ -3583,35 +3583,45 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
     );
 
     // make first pool the default for the priv user's silo
-    let link = params::IpPoolSiloLink {
-        silo: NameOrId::Id(DEFAULT_SILO.id()),
-        is_default: true,
-    };
-    create_ip_pool(&client, "default", Some(range1), Some(link)).await;
+    dbg!(DEFAULT_SILO.id());
+    let silo = NameOrId::Id(DEFAULT_SILO.id());
+    let link = params::IpPoolSiloLink { silo: silo.clone(), is_default: true };
+    create_ip_pool(&client, "pool1", Some(range1), Some(link)).await;
 
     // second pool is associated with the silo but not default
-    let link = params::IpPoolSiloLink {
-        silo: NameOrId::Id(DEFAULT_SILO.id()),
-        is_default: false,
-    };
-    create_ip_pool(&client, "other-pool", Some(range2), Some(link)).await;
+    let link = params::IpPoolSiloLink { silo: silo.clone(), is_default: false };
+    create_ip_pool(&client, "pool2", Some(range2), Some(link)).await;
 
     // Create an instance with pool name blank, expect IP from default pool
-    create_instance_with_pool(client, "default-pool-inst", None).await;
+    create_instance_with_pool(client, "pool1-inst", None).await;
 
-    let ip = fetch_instance_ephemeral_ip(client, "default-pool-inst").await;
+    let ip = fetch_instance_ephemeral_ip(client, "pool1-inst").await;
     assert!(
         ip.ip >= range1.first_address() && ip.ip <= range1.last_address(),
-        "Expected ephemeral IP to come from default pool"
+        "Expected ephemeral IP to come from pool1"
     );
 
     // Create an instance explicitly using the non-default "other-pool".
-    create_instance_with_pool(client, "other-pool-inst", Some("other-pool"))
-        .await;
-    let ip = fetch_instance_ephemeral_ip(client, "other-pool-inst").await;
+    create_instance_with_pool(client, "pool2-inst", Some("pool2")).await;
+    let ip = fetch_instance_ephemeral_ip(client, "pool2-inst").await;
     assert!(
         ip.ip >= range2.first_address() && ip.ip <= range2.last_address(),
-        "Expected ephemeral IP to come from other pool"
+        "Expected ephemeral IP to come from pool2"
+    );
+
+    // make pool2 default and create instance with default pool. check that it now it comes from pool2
+    let _: views::IpPoolSilo = object_create(
+        client,
+        "/v1/system/ip-pools/pool2/make_default",
+        &params::SiloSelector { silo: silo.clone() },
+    )
+    .await;
+
+    create_instance_with_pool(client, "pool2-inst2", None).await;
+    let ip = fetch_instance_ephemeral_ip(client, "pool2-inst2").await;
+    assert!(
+        ip.ip >= range2.first_address() && ip.ip <= range2.last_address(),
+        "Expected ephemeral IP to come from pool2"
     );
 }
 

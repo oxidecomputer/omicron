@@ -125,6 +125,7 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(ip_pool_silo_list)?;
         api.register(ip_pool_silo_link)?;
         api.register(ip_pool_silo_unlink)?;
+        api.register(ip_pool_make_default)?;
         api.register(ip_pool_view)?;
         api.register(ip_pool_delete)?;
         api.register(ip_pool_update)?;
@@ -1399,7 +1400,7 @@ async fn ip_pool_silo_link(
 async fn ip_pool_silo_unlink(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::IpPoolPath>,
-    query_params: Query<params::IpPoolSiloUnlink>,
+    query_params: Query<params::SiloSelector>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
@@ -1414,6 +1415,36 @@ async fn ip_pool_silo_unlink(
             .ip_pool_dissociate_resource(&opctx, &pool_lookup, &silo_lookup)
             .await?;
         Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+// TODO: change this to PUT /ip-pools/{pool}/silos/{silo} so
+// it can be used for both set default true and false
+
+/// Make an IP pool the default for a silo
+#[endpoint {
+    method = POST,
+    path = "/v1/system/ip-pools/{pool}/make_default",
+    tags = ["system/networking"],
+}]
+async fn ip_pool_make_default(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::IpPoolPath>,
+    silo_selector: TypedBody<params::SiloSelector>,
+) -> Result<HttpResponseCreated<views::IpPoolSilo>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let silo_selector = silo_selector.into_inner();
+        let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
+        let silo_lookup = nexus.silo_lookup(&opctx, silo_selector.silo)?;
+        let assoc = nexus
+            .ip_pool_make_default(&opctx, &pool_lookup, &silo_lookup)
+            .await?;
+        Ok(HttpResponseCreated(assoc.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

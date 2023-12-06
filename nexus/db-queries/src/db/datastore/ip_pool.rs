@@ -21,9 +21,11 @@ use crate::db::model::{
 use crate::db::pagination::paginated;
 use crate::db::pool::DbConnection;
 use crate::db::queries::ip_pool::FilterOverlappingIpRanges;
-use async_bb8_diesel::AsyncRunQueryDsl;
+use crate::db::TransactionError;
+use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl};
 use chrono::Utc;
 use diesel::prelude::*;
+use diesel::result::Error as DieselError;
 use ipnetwork::IpNetwork;
 use nexus_db_model::ExternalIp;
 use nexus_db_model::IpPoolResourceType;
@@ -362,6 +364,8 @@ impl DataStore {
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
+    // TODO: separate this operation from update so that we can have /link 409
+    // or whatever when the association already exists?
     pub async fn ip_pool_associate_resource(
         &self,
         opctx: &OpContext,
@@ -406,6 +410,84 @@ impl DataStore {
                     ),
                 )
             })
+    }
+
+    // TODO: make default should fail when the association doesn't exist.
+    // should it also fail when it's already default? probably not?
+    pub async fn ip_pool_make_default(
+        &self,
+        opctx: &OpContext,
+        authz_ip_pool: &authz::IpPool,
+        authz_silo: &authz::Silo,
+    ) -> UpdateResult<IpPoolResource> {
+        use db::schema::ip_pool_resource::dsl;
+
+        // TODO: correct auth check
+        opctx
+            .authorize(authz::Action::CreateChild, &authz::IP_POOL_LIST)
+            .await?;
+
+        let ip_pool_id = authz_ip_pool.id();
+        let silo_id = authz_silo.id();
+
+        // Errors returned from the below transactions.
+        #[derive(Debug)]
+        enum IpPoolResourceUpdateError {
+            FailedToUnsetDefault(DieselError),
+        }
+        type TxnError = TransactionError<IpPoolResourceUpdateError>;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+        conn.transaction_async(|conn| async move {
+            // note this is matching the specified silo, but could be any pool
+            let existing_default_for_silo = dsl::ip_pool_resource
+                .filter(dsl::resource_type.eq(IpPoolResourceType::Silo))
+                .filter(dsl::resource_id.eq(silo_id))
+                .filter(dsl::is_default.eq(true))
+                .select(IpPoolResource::as_select())
+                .get_result_async(&conn)
+                .await;
+
+            // if there is an existing default, we need to unset it before we can
+            // set the new default
+            if let Ok(existing_default) = existing_default_for_silo {
+                // if the pool we're making default is already default for this
+                // silo, don't error: just noop
+                if existing_default.ip_pool_id == ip_pool_id {
+                    return Ok(existing_default);
+                }
+
+                let unset_default = diesel::update(dsl::ip_pool_resource)
+                    .filter(dsl::resource_id.eq(existing_default.resource_id))
+                    .filter(dsl::ip_pool_id.eq(existing_default.ip_pool_id))
+                    .filter(
+                        dsl::resource_type.eq(existing_default.resource_type),
+                    )
+                    .set(dsl::is_default.eq(false))
+                    .execute_async(&conn)
+                    .await;
+                if let Err(e) = unset_default {
+                    return Err(TxnError::CustomError(
+                        IpPoolResourceUpdateError::FailedToUnsetDefault(e),
+                    ));
+                }
+            }
+
+            // TODO: test that this errors if the link doesn't exist already
+            let updated_link = diesel::update(dsl::ip_pool_resource)
+                .filter(dsl::resource_id.eq(silo_id))
+                .filter(dsl::ip_pool_id.eq(ip_pool_id))
+                .filter(dsl::resource_type.eq(IpPoolResourceType::Silo))
+                .set(dsl::is_default.eq(true))
+                .returning(IpPoolResource::as_returning())
+                .get_result_async(&conn)
+                .await?;
+            Ok(updated_link)
+        })
+        .await
+        .map_err(|e| {
+            Error::internal_error(&format!("Transaction error: {:?}", e))
+        })
     }
 
     // TODO: write a test for this

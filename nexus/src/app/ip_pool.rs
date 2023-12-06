@@ -135,6 +135,21 @@ impl super::Nexus {
             .await
     }
 
+    pub(crate) async fn ip_pool_make_default(
+        &self,
+        opctx: &OpContext,
+        pool_lookup: &lookup::IpPool<'_>,
+        silo_lookup: &lookup::Silo<'_>,
+    ) -> CreateResult<db::model::IpPoolResource> {
+        let (.., authz_pool) =
+            pool_lookup.lookup_for(authz::Action::Modify).await?;
+        let (.., authz_silo) =
+            silo_lookup.lookup_for(authz::Action::Read).await?;
+        self.db_datastore
+            .ip_pool_make_default(opctx, &authz_pool, &authz_silo)
+            .await
+    }
+
     pub(crate) async fn ip_pools_list(
         &self,
         opctx: &OpContext,

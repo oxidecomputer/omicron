@@ -886,7 +886,7 @@ mod tests {
             self.db_datastore
                 .ip_pool_associate_resource(&self.opctx, association)
                 .await
-                .expect("Failed to associate IP dool with silo");
+                .expect("Failed to associate IP pool with silo");
 
             self.initialize_ip_pool(name, range).await;
         }
@@ -1712,6 +1712,8 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 6),
         ))
         .unwrap();
+        // TODO: failing because I changed create_ip_pool to make it
+        // default for the silo, and there is already a default
         context.create_ip_pool("p1", second_range).await;
 
         // Allocating an address on an instance in the second pool should be
