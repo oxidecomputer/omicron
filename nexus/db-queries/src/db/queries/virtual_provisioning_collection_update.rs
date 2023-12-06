@@ -20,7 +20,7 @@ use diesel::pg::Pg;
 use diesel::query_builder::{AstPass, Query, QueryFragment, QueryId};
 use diesel::result::Error as DieselError;
 use diesel::{
-    sql_types, CombineDsl, ExpressionMethods, IntoSql,
+    sql_types, BoolExpressionMethods, CombineDsl, ExpressionMethods, IntoSql,
     NullableExpressionMethods, QueryDsl, RunQueryDsl, SelectableHelper,
 };
 use nexus_db_model::queries::virtual_provisioning_collection_update::{
@@ -129,32 +129,41 @@ impl DoUpdate {
             .assume_not_null()
             .eq(0);
 
-        let has_sufficient_cpus =
-            quotas.query_source().select(quotas::cpus).single_value().ge(
-                silo_provisioned
-                    .query_source()
-                    .select(silo_provisioned::cpus_provisioned)
-                    .single_value()
-                    + resource.cpus_provisioned,
-            );
+        let has_sufficient_cpus = quotas
+            .query_source()
+            .select(quotas::cpus)
+            .single_value()
+            .assume_not_null()
+            .ge(silo_provisioned
+                .query_source()
+                .select(silo_provisioned::cpus_provisioned)
+                .single_value()
+                .assume_not_null()
+                + resource.cpus_provisioned.into());
 
-        let has_sufficient_memory =
-            quotas.query_source().select(quotas::memory).single_value().ge(
-                silo_provisioned
-                    .query_source()
-                    .select(silo_provisioned::ram_provisioned)
-                    .single_value()
-                    + resource.ram_provisioned,
-            );
+        let has_sufficient_memory = quotas
+            .query_source()
+            .select(quotas::memory)
+            .single_value()
+            .assume_not_null()
+            .ge(silo_provisioned
+                .query_source()
+                .select(silo_provisioned::ram_provisioned)
+                .single_value()
+                .assume_not_null()
+                + resource.ram_provisioned.into());
 
-        let has_sufficient_storage =
-            quotas.query_source().select(quotas::storage).single_value().ge(
-                silo_provisioned
-                    .query_source()
-                    .select(silo_provisioned::virtual_disk_bytes_provisioned)
-                    .single_value()
-                    + resource.virtual_disk_bytes_provisioned,
-            );
+        let has_sufficient_storage = quotas
+            .query_source()
+            .select(quotas::storage)
+            .single_value()
+            .assume_not_null()
+            .ge(silo_provisioned
+                .query_source()
+                .select(silo_provisioned::virtual_disk_bytes_provisioned)
+                .single_value()
+                .assume_not_null()
+                + resource.virtual_disk_bytes_provisioned.into());
 
         Self {
             query: Box::new(diesel::select((ExpressionAlias::new::<
@@ -251,7 +260,13 @@ impl Quotas {
         Self {
             query: Box::new(
                 dsl::silo_quotas
-                    .filter(dsl::silo_id.eq(parent_silo::id))
+                    .filter(
+                        dsl::silo_id.eq(parent_silo
+                            .query_source()
+                            .select(parent_silo::id)
+                            .single_value()
+                            .assume_not_null()),
+                    )
                     .select((
                         dsl::silo_id,
                         dsl::cpus,
@@ -279,7 +294,13 @@ impl SiloProvisioned {
         Self {
             query: Box::new(
                 dsl::virtual_provisioning_collection
-                    .filter(dsl::id.eq(parent_silo::id))
+                    .filter(
+                        dsl::id.eq(parent_silo
+                            .query_source()
+                            .select(parent_silo::id)
+                            .single_value()
+                            .assume_not_null()),
+                    )
                     .select((
                         dsl::id,
                         dsl::cpus_provisioned,
