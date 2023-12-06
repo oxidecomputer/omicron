@@ -24,8 +24,7 @@ use diesel::{
     NullableExpressionMethods, QueryDsl, RunQueryDsl, SelectableHelper,
 };
 use nexus_db_model::queries::virtual_provisioning_collection_update::{
-    all_collections, do_update, parent_silo, quota_check, quotas,
-    silo_provisioned,
+    all_collections, do_update, parent_silo, quotas, silo_provisioned,
 };
 use omicron_common::api::external;
 
@@ -116,20 +115,65 @@ struct DoUpdate {
 }
 
 impl DoUpdate {
-    fn new_for_insert(id: uuid::Uuid) -> Self {
+    fn new_for_insert(
+        silo_provisioned: &SiloProvisioned,
+        quotas: &Quotas,
+        resource: VirtualProvisioningResource,
+    ) -> Self {
         use virtual_provisioning_resource::dsl;
 
         let not_allocted = dsl::virtual_provisioning_resource
-            .find(id)
+            .find(resource.id)
             .count()
             .single_value()
             .assume_not_null()
             .eq(0);
 
+        let has_sufficient_cpus =
+            quotas.query_source().select(quotas::cpus).single_value().ge(
+                silo_provisioned
+                    .query_source()
+                    .select(silo_provisioned::cpus_provisioned)
+                    .single_value()
+                    + resource.cpus_provisioned,
+            );
+
+        let has_sufficient_memory =
+            quotas.query_source().select(quotas::memory).single_value().ge(
+                silo_provisioned
+                    .query_source()
+                    .select(silo_provisioned::ram_provisioned)
+                    .single_value()
+                    + resource.ram_provisioned,
+            );
+
+        let has_sufficient_storage =
+            quotas.query_source().select(quotas::storage).single_value().ge(
+                silo_provisioned
+                    .query_source()
+                    .select(silo_provisioned::virtual_disk_bytes_provisioned)
+                    .single_value()
+                    + resource.virtual_disk_bytes_provisioned,
+            );
+
         Self {
             query: Box::new(diesel::select((ExpressionAlias::new::<
                 do_update::update,
-            >(not_allocted),))),
+            >(
+                not_allocted
+                    .and(TrueOrCastError::new(
+                        has_sufficient_cpus,
+                        NOT_ENOUGH_CPUS_SENTINEL,
+                    ))
+                    .and(TrueOrCastError::new(
+                        has_sufficient_memory,
+                        NOT_ENOUGH_MEMORY_SENTINEL,
+                    ))
+                    .and(TrueOrCastError::new(
+                        has_sufficient_storage,
+                        NOT_ENOUGH_STORAGE_SENTINEL,
+                    )),
+            ),))),
         }
     }
 
@@ -224,68 +268,9 @@ impl SiloProvisioned {
         Self {
             query: Box::new(
                 dsl::virtual_provisioning_collection
-                    .filter(dsl::id.eq(parent_silo::id)),
+                    .filter(dsl::id.eq(parent_silo::id))
+                    .select(silo_provisioned::all_columns),
             ),
-        }
-    }
-}
-
-#[derive(Subquery, QueryId)]
-#[subquery(name = quota_check)]
-struct QuotaCheck {
-    query: Box<dyn CteQuery<SqlType = quota_check::SqlType>>,
-}
-
-impl QuotaCheck {
-    fn new(
-        silo_provisioned: &SiloProvisioned,
-        quotas: &Quotas,
-        resource: VirtualProvisioningResource,
-    ) -> Self {
-        let has_sufficient_cpus =
-            quotas.query_source().select(quotas::cpus).single_value().ge(
-                silo_provisioned
-                    .query_source()
-                    .select(silo_provisioned::cpus_provisioned)
-                    .single_value()
-                    + resource.cpus_provisioned,
-            );
-
-        let has_sufficient_memory =
-            quotas.query_source().select(quotas::memory).single_value().ge(
-                silo_provisioned
-                    .query_source()
-                    .select(silo_provisioned::ram_provisioned)
-                    .single_value()
-                    + resource.ram_provisioned,
-            );
-
-        let has_sufficient_storage =
-            quotas.query_source().select(quotas::storage).single_value().ge(
-                silo_provisioned
-                    .query_source()
-                    .select(silo_provisioned::virtual_disk_bytes_provisioned)
-                    .single_value()
-                    + resource.virtual_disk_bytes_provisioned,
-            );
-
-        Self {
-            query: Box::new(diesel::select(
-                (ExpressionAlias::new::<quota_check::passed>(
-                    TrueOrCastError::new(
-                        has_sufficient_cpus,
-                        NOT_ENOUGH_CPUS_SENTINEL,
-                    )
-                    .and(TrueOrCastError::new(
-                        has_sufficient_memory,
-                        NOT_ENOUGH_MEMORY_SENTINEL,
-                    ))
-                    .and(TrueOrCastError::new(
-                        has_sufficient_storage,
-                        NOT_ENOUGH_STORAGE_SENTINEL,
-                    )),
-                )),
-            )),
         }
     }
 }
@@ -367,12 +352,6 @@ impl VirtualProvisioningCollectionUpdate {
         <V as diesel::AsChangeset>::Changeset:
             QueryFragment<Pg> + Send + 'static,
     {
-        let do_update = match update_kind {
-            UpdateKind::Insert(resource) => {
-                DoUpdate::new_for_insert(resource.id)
-            }
-            UpdateKind::Delete(id) => DoUpdate::new_for_delete(id),
-        };
         let parent_silo = ParentSilo::new(project_id);
         let all_collections = AllCollections::new(
             project_id,
@@ -380,11 +359,18 @@ impl VirtualProvisioningCollectionUpdate {
             *crate::db::fixed_data::FLEET_ID,
         );
 
-        let updated_collections =
-            UpdatedProvisions::new(&all_collections, &do_update, values);
         let quotas = Quotas::new(&parent_silo, update_kind);
         let silo_provisioned = SiloProvisioned::new(&parent_silo);
-        let quota_check = QuotaCheck::new(&silo_provisioned, &quotas, resource);
+
+        let do_update = match update_kind {
+            UpdateKind::Insert(resource) => {
+                DoUpdate::new_for_insert(&silo_provisioned, &quotas, resource)
+            }
+            UpdateKind::Delete(id) => DoUpdate::new_for_delete(id),
+        };
+
+        let updated_collections =
+            UpdatedProvisions::new(&all_collections, &do_update, values);
 
         // TODO: Do we want to select from "all_collections" instead? Seems more
         // idempotent; it'll work even when we don't update anything...
@@ -399,7 +385,6 @@ impl VirtualProvisioningCollectionUpdate {
             .add_subquery(all_collections)
             .add_subquery(quotas)
             .add_subquery(silo_provisioned)
-            .add_subquery(quota_check)
             .add_subquery(do_update)
             .add_subquery(update)
             .add_subquery(updated_collections)

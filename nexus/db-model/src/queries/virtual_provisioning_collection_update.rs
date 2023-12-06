@@ -46,12 +46,6 @@ table! {
     }
 }
 
-table! {
-    quota_check (passed) {
-        passed -> Bool,
-    }
-}
-
 diesel::allow_tables_to_appear_in_same_query!(silo, parent_silo,);
 
 diesel::allow_tables_to_appear_in_same_query!(
@@ -59,5 +53,6 @@ diesel::allow_tables_to_appear_in_same_query!(
     parent_silo,
     all_collections,
     do_update,
-    quotas
+    quotas,
+    silo_provisioned
 );
