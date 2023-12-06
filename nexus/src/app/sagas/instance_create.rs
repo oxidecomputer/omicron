@@ -866,9 +866,7 @@ pub mod test {
         app::sagas::instance_create::SagaInstanceCreate,
         app::sagas::test_helpers, external_api::params,
     };
-    use async_bb8_diesel::{
-        AsyncConnection, AsyncRunQueryDsl, AsyncSimpleConnection,
-    };
+    use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
     use diesel::{
         BoolExpressionMethods, ExpressionMethods, OptionalExtension, QueryDsl,
         SelectableHelper,
@@ -1013,30 +1011,28 @@ pub mod test {
         use nexus_db_queries::db::model::SledResource;
         use nexus_db_queries::db::schema::sled_resource::dsl;
 
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
         datastore
-            .pool_connection_for_tests()
-            .await
-            .unwrap()
-            .transaction_async(|conn| async move {
+            .transaction_retry_wrapper(
+                "no_sled_resource_instance_records_exist",
+            )
+            .transaction(&conn, |conn| async move {
                 conn.batch_execute_async(
                     nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL,
                 )
                 .await
                 .unwrap();
 
-                Ok::<_, nexus_db_queries::db::TransactionError<()>>(
-                    dsl::sled_resource
-                        .filter(
-                            dsl::kind.eq(
-                                nexus_db_queries::db::model::SledResourceKind::Instance,
-                            ),
-                        )
-                        .select(SledResource::as_select())
-                        .get_results_async::<SledResource>(&conn)
-                        .await
-                        .unwrap()
-                        .is_empty(),
-                )
+                Ok(dsl::sled_resource
+                    .filter(dsl::kind.eq(
+                        nexus_db_queries::db::model::SledResourceKind::Instance,
+                    ))
+                    .select(SledResource::as_select())
+                    .get_results_async::<SledResource>(&conn)
+                    .await
+                    .unwrap()
+                    .is_empty())
             })
             .await
             .unwrap()
@@ -1048,16 +1044,17 @@ pub mod test {
         use nexus_db_queries::db::model::VirtualProvisioningResource;
         use nexus_db_queries::db::schema::virtual_provisioning_resource::dsl;
 
-        datastore.pool_connection_for_tests()
-            .await
-            .unwrap()
-            .transaction_async(|conn| async move {
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        datastore
+            .transaction_retry_wrapper("no_virtual_provisioning_resource_records_exist")
+            .transaction(&conn, |conn| async move {
                 conn
                     .batch_execute_async(nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL)
                     .await
                     .unwrap();
 
-                Ok::<_, nexus_db_queries::db::TransactionError<()>>(
+                Ok(
                     dsl::virtual_provisioning_resource
                         .filter(dsl::resource_type.eq(nexus_db_queries::db::model::ResourceTypeProvisioned::Instance.to_string()))
                         .select(VirtualProvisioningResource::as_select())
@@ -1075,31 +1072,29 @@ pub mod test {
         use nexus_db_queries::db::model::VirtualProvisioningCollection;
         use nexus_db_queries::db::schema::virtual_provisioning_collection::dsl;
 
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
         datastore
-            .pool_connection_for_tests()
-            .await
-            .unwrap()
-            .transaction_async(|conn| async move {
+            .transaction_retry_wrapper(
+                "no_virtual_provisioning_collection_records_using_instances",
+            )
+            .transaction(&conn, |conn| async move {
                 conn.batch_execute_async(
                     nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL,
                 )
                 .await
                 .unwrap();
-                Ok::<_, nexus_db_queries::db::TransactionError<()>>(
-                    dsl::virtual_provisioning_collection
-                        .filter(
-                            dsl::cpus_provisioned
-                                .ne(0)
-                                .or(dsl::ram_provisioned.ne(0)),
-                        )
-                        .select(VirtualProvisioningCollection::as_select())
-                        .get_results_async::<VirtualProvisioningCollection>(
-                            &conn,
-                        )
-                        .await
-                        .unwrap()
-                        .is_empty(),
-                )
+                Ok(dsl::virtual_provisioning_collection
+                    .filter(
+                        dsl::cpus_provisioned
+                            .ne(0)
+                            .or(dsl::ram_provisioned.ne(0)),
+                    )
+                    .select(VirtualProvisioningCollection::as_select())
+                    .get_results_async::<VirtualProvisioningCollection>(&conn)
+                    .await
+                    .unwrap()
+                    .is_empty())
             })
             .await
             .unwrap()
