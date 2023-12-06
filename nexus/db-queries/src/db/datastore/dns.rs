@@ -208,17 +208,17 @@ impl DataStore {
         .await
     }
 
-    async fn paginated_read<T, QueryFn, QueryFnOutput, MarkerFn, NameType>(
+    async fn paginated_read<'a, T, QueryFn, QueryFnOutput, MarkerFn, NameType>(
         batch_size: NonZeroU32,
         item2marker: MarkerFn,
         do_query: QueryFn,
     ) -> Result<Vec<T>, Error>
     where
-        QueryFn:
-            for<'a> Fn(DataPageParams<'a, NameType>, usize) -> QueryFnOutput,
-        QueryFnOutput: futures::Future<Output = Result<Vec<T>, Error>>,
+        QueryFn: Fn(&'a DataPageParams<'a, NameType>, usize) -> QueryFnOutput,
+        QueryFnOutput: futures::Future<Output = Result<Vec<T>, Error>> + 'a,
         MarkerFn: Fn(&T) -> &NameType,
-        NameType: Clone,
+        NameType: Clone + 'static,
+        T: 'static,
     {
         let mut results = Vec::new();
         let mut marker = None;
@@ -229,7 +229,7 @@ impl DataStore {
                 direction: dropshot::PaginationOrder::Ascending,
                 limit: batch_size,
             };
-            let results_batch = do_query(pagparams, results.len()).await?;
+            let results_batch = do_query(&pagparams, results.len()).await?;
             let done = results_batch.len()
                 < usize::try_from(batch_size.get()).unwrap();
             if let Some(last_record) = results_batch.last() {
