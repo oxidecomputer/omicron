@@ -144,7 +144,7 @@ api_identity = { path = "api_identity" }
 approx = "0.5.1"
 assert_matches = "1.5.0"
 assert_cmd = "2.0.12"
-async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "1446f7e0c1f05f33a0581abd51fa873c7652ab61" }
+async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "ed7ab5ef0513ba303d33efd41d3e9e381169d59b" }
 async-trait = "0.1.74"
 atomicwrites = "0.4.2"
 authz-macros = { path = "nexus/authz-macros" }
@@ -191,7 +191,7 @@ dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main",
 either = "1.9.0"
 expectorate = "1.1.0"
 fatfs = "0.3.6"
-filetime = "0.2.22"
+filetime = "0.2.23"
 flate2 = "1.0.28"
 flume = "0.11.0"
 foreign-types = "0.3.2"

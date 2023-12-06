@@ -17,7 +17,7 @@ mod config;
 mod cte_utils;
 // This is marked public for use by the integration tests
 pub mod datastore;
-mod error;
+pub(crate) mod error;
 mod explain;
 pub mod fixed_data;
 pub mod lookup;
@@ -42,7 +42,7 @@ pub use nexus_db_model::schema;
 pub use crate::db::error::TransactionError;
 pub use config::Config;
 pub use datastore::DataStore;
-pub use pool::Pool;
+pub use pool::{DbConnection, Pool};
 pub use saga_recovery::{recover, CompletionTask, RecoveryTask};
 pub use saga_types::SecId;
 pub use sec_store::CockroachDbSecStore;
