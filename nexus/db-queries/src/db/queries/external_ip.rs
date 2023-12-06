@@ -864,7 +864,7 @@ mod tests {
             Self { logctx, opctx, db, db_datastore }
         }
 
-        /// Create pool and associate with current silo
+        /// Create pool, associate with current silo
         async fn create_ip_pool(&self, name: &str, range: IpRange) {
             let pool = IpPool::new(&IdentityMetadataCreateParams {
                 name: String::from(name).parse().unwrap(),
@@ -949,7 +949,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 1),
         ))
         .unwrap();
-        context.initialize_ip_pool("default", range).await;
+        context.create_ip_pool("default", range).await;
         for first_port in
             (0..super::MAX_PORT).step_by(NUM_SOURCE_NAT_PORTS.into())
         {
@@ -1003,7 +1003,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 1),
         ))
         .unwrap();
-        context.initialize_ip_pool("default", range).await;
+        context.create_ip_pool("default", range).await;
 
         // Allocate an Ephemeral IP, which should take the entire port range of
         // the only address in the pool.
@@ -1084,7 +1084,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 3),
         ))
         .unwrap();
-        context.initialize_ip_pool("default", range).await;
+        context.create_ip_pool("default", range).await;
 
         // TODO-completeness: Implementing Iterator for IpRange would be nice.
         let addresses = [
@@ -1185,7 +1185,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 3),
         ))
         .unwrap();
-        context.initialize_ip_pool("default", range).await;
+        context.create_ip_pool("default", range).await;
 
         let instance_id = Uuid::new_v4();
         let id = Uuid::new_v4();
@@ -1644,7 +1644,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 3),
         ))
         .unwrap();
-        context.initialize_ip_pool("default", range).await;
+        context.create_ip_pool("default", range).await;
 
         // Create one SNAT IP address.
         let instance_id = Uuid::new_v4();
@@ -1706,7 +1706,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 3),
         ))
         .unwrap();
-        context.initialize_ip_pool("default", first_range).await;
+        context.create_ip_pool("default", first_range).await;
         let second_range = IpRange::try_from((
             Ipv4Addr::new(10, 0, 0, 4),
             Ipv4Addr::new(10, 0, 0, 6),
@@ -1750,7 +1750,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 3),
         ))
         .unwrap();
-        context.initialize_ip_pool("default", first_range).await;
+        context.create_ip_pool("default", first_range).await;
         let first_address = Ipv4Addr::new(10, 0, 0, 4);
         let last_address = Ipv4Addr::new(10, 0, 0, 6);
         let second_range =

@@ -672,38 +672,9 @@ mod test {
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
-        // we start out with the default fleet-level pool already created,
-        // so when we ask for a default silo, we get it back
-        let fleet_default_pool =
-            datastore.ip_pools_fetch_default(&opctx).await.unwrap();
-
-        assert_eq!(fleet_default_pool.identity.name.as_str(), "default");
-
-        // // unique index prevents second fleet-level default
-        // let identity = IdentityMetadataCreateParams {
-        //     name: "another-fleet-default".parse().unwrap(),
-        //     description: "".to_string(),
-        // };
-        // let second_default = datastore
-        //     .ip_pool_create(&opctx, IpPool::new(&identity))
-        //     .await
-        //     .expect("Failed to create pool");
-        // let err = datastore
-        //     .ip_pool_associate_resource(
-        //         &opctx,
-        //         IpPoolResource {
-        //             ip_pool_id: second_default.id(),
-        //             resource_type: IpPoolResourceType::Fleet,
-        //             resource_id: *FLEET_ID,
-        //             is_default: true,
-        //         },
-        //     )
-        //     .await
-        //     .expect_err("Failed to fail to make IP pool fleet default");
-
-        // assert_matches!(err, Error::ObjectAlreadyExists { .. });
-
-        // now test logic preferring most specific available default
+        // we start out with no default pool, so we expect not found
+        let error = datastore.ip_pools_fetch_default(&opctx).await.unwrap_err();
+        assert_matches!(error, Error::InternalError { .. });
 
         let silo_id = opctx.authn.silo_required().unwrap().id();
 
@@ -730,12 +701,9 @@ mod test {
             .expect("Failed to associate IP pool with silo");
 
         // because that one was not a default, when we ask for the silo default
-        // pool, we still get the fleet default
-        let ip_pool = datastore
-            .ip_pools_fetch_default(&opctx)
-            .await
-            .expect("Failed to get default IP pool");
-        assert_eq!(ip_pool.id(), fleet_default_pool.id());
+        // pool, we still get nothing
+        let error = datastore.ip_pools_fetch_default(&opctx).await.unwrap_err();
+        assert_matches!(error, Error::InternalError { .. });
 
         // now we can change that association to is_default=true and
         // it should update rather than erroring out
@@ -752,7 +720,7 @@ mod test {
             .await
             .expect("Failed to make IP pool default for silo");
 
-        // now when we ask for the default pool again, we get the one we just changed
+        // now when we ask for the default pool again, we get that one
         let ip_pool = datastore
             .ip_pools_fetch_default(&opctx)
             .await
@@ -782,7 +750,7 @@ mod test {
             .expect_err("Failed to fail to set a second default pool for silo");
         assert_matches!(err, Error::ObjectAlreadyExists { .. });
 
-        // now remove the association and we should get the default fleet pool again
+        // now remove the association and we should get nothing again
         datastore
             .ip_pool_dissociate_resource(
                 &opctx,
@@ -795,11 +763,8 @@ mod test {
             .await
             .expect("Failed to dissociate IP pool from silo");
 
-        let ip_pool = datastore
-            .ip_pools_fetch_default(&opctx)
-            .await
-            .expect("Failed to get default IP pool");
-        assert_eq!(ip_pool.id(), fleet_default_pool.id());
+        let error = datastore.ip_pools_fetch_default(&opctx).await.unwrap_err();
+        assert_matches!(error, Error::InternalError { .. });
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
