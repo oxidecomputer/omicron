@@ -58,10 +58,10 @@ pub enum Error {
 
     /// There is insufficient capacity to perform the requested operation.
     ///
-    /// This variant is translated to 400 Bad Request, and it carries both an
-    /// external and an internal message. The external message is intended for
-    /// operator consumption and is intended to not leak any implementation
-    /// details.
+    /// This variant is translated to 507 Insufficient Storage, and it carries
+    /// both an external and an internal message. The external message is
+    /// intended for operator consumption and is intended to not leak any
+    /// implementation details.
     #[error("Insufficient Capacity: {}", .message.display_internal())]
     InsufficientCapacity { message: MessagePair },
 
