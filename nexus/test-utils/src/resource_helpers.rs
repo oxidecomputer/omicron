@@ -263,9 +263,9 @@ pub async fn create_silo(
                 description: "a silo".to_string(),
             },
             quotas: params::SiloQuotasCreate {
-                cpus: 36,
+                cpus: 128,
                 memory: ByteCount::from_gibibytes_u32(1000),
-                storage: ByteCount::from_gibibytes_u32(100000),
+                storage: ByteCount::from_gibibytes_u32(1000000),
             },
             discoverable,
             identity_mode,

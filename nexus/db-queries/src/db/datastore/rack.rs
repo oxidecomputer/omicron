@@ -874,7 +874,7 @@ mod test {
     };
     use omicron_common::api::external::http_pagination::PaginatedBy;
     use omicron_common::api::external::{
-        IdentityMetadataCreateParams, MacAddr,
+        ByteCount, IdentityMetadataCreateParams, MacAddr,
     };
     use omicron_common::api::internal::shared::SourceNatConfig;
     use omicron_common::nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
@@ -912,7 +912,11 @@ mod test {
                         name: "test-silo".parse().unwrap(),
                         description: String::new(),
                     },
-                    quotas: external_params::SiloQuotasCreate::empty(),
+                    quotas: external_params::SiloQuotasCreate {
+                        cpus: 128,
+                        memory: ByteCount::from_gibibytes_u32(1000),
+                        storage: ByteCount::from_gibibytes_u32(1000000),
+                    },
                     discoverable: false,
                     identity_mode: SiloIdentityMode::LocalOnly,
                     admin_group_name: None,

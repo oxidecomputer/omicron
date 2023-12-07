@@ -93,8 +93,8 @@ lazy_static! {
             },
             quotas: params::SiloQuotasCreate {
                 cpus: 100,
-                memory: ByteCount::from_gibibytes_u32(100),
-                storage: ByteCount::from_gibibytes_u32(100),
+                memory: ByteCount::from_gibibytes_u32(1000),
+                storage: ByteCount::from_gibibytes_u32(100000),
             },
             discoverable: true,
             identity_mode: shared::SiloIdentityMode::SamlJit,
