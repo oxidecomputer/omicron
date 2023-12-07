@@ -30,8 +30,6 @@ use sled_agent_client::types::{CrucibleOpts, VolumeConstructionRequest};
 use std::sync::Arc;
 use uuid::Uuid;
 
-use httptest::{matchers::*, responders::*, Expectation, ServerBuilder};
-
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
@@ -63,17 +61,6 @@ async fn create_image(client: &ClientTestContext) -> views::Image {
     create_org_and_project(client).await;
 
     // Define a global image
-    let server = ServerBuilder::new().run().unwrap();
-    server.expect(
-        Expectation::matching(request::method_path("HEAD", "/image.raw"))
-            .times(1..)
-            .respond_with(
-                status_code(200).append_header(
-                    "Content-Length",
-                    format!("{}", 4096 * 1000),
-                ),
-            ),
-    );
 
     let image_create_params = params::ImageCreate {
         identity: IdentityMetadataCreateParams {
@@ -82,10 +69,7 @@ async fn create_image(client: &ClientTestContext) -> views::Image {
                 "you can boot any image, as long as it's alpine",
             ),
         },
-        source: params::ImageSource::Url {
-            url: server.url("/image.raw").to_string(),
-            block_size: params::BlockSize::try_from(512).unwrap(),
-        },
+        source: params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
         os: "alpine".to_string(),
         version: "edge".to_string(),
     };

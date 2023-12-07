@@ -24,14 +24,10 @@ use nexus_types::identity::Resource;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::{ByteCount, IdentityMetadataCreateParams};
 
-use httptest::{matchers::*, responders::*, Expectation, ServerBuilder};
-
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
 const PROJECT_NAME: &str = "myproj";
-
-const BLOCK_SIZE: params::BlockSize = params::BlockSize(512);
 
 fn get_project_images_url(project_name: &str) -> String {
     format!("/v1/images?project={}", project_name)
@@ -55,18 +51,6 @@ fn get_image_create(source: params::ImageSource) -> params::ImageCreate {
 async fn test_image_create(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
-
-    let server = ServerBuilder::new().run().unwrap();
-    server.expect(
-        Expectation::matching(request::method_path("HEAD", "/image.raw"))
-            .times(1..)
-            .respond_with(
-                status_code(200).append_header(
-                    "Content-Length",
-                    format!("{}", 4096 * 1000),
-                ),
-            ),
-    );
 
     let images_url = get_project_images_url(PROJECT_NAME);
 
@@ -94,10 +78,9 @@ async fn test_image_create(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(images.len(), 0);
 
     // Create an image in the project
-    let image_create_params = get_image_create(params::ImageSource::Url {
-        url: server.url("/image.raw").to_string(),
-        block_size: BLOCK_SIZE,
-    });
+    let image_create_params = get_image_create(
+        params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
+    );
 
     NexusRequest::objects_post(client, &images_url, &image_create_params)
         .authn_as(AuthnMode::PrivilegedUser)
@@ -120,18 +103,6 @@ async fn test_silo_image_create(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
 
-    let server = ServerBuilder::new().run().unwrap();
-    server.expect(
-        Expectation::matching(request::method_path("HEAD", "/image.raw"))
-            .times(1..)
-            .respond_with(
-                status_code(200).append_header(
-                    "Content-Length",
-                    format!("{}", 4096 * 1000),
-                ),
-            ),
-    );
-
     let silo_images_url = "/v1/images";
 
     // Expect no images in the silo
@@ -144,10 +115,9 @@ async fn test_silo_image_create(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(images.len(), 0);
 
     // Create an image in the project
-    let image_create_params = get_image_create(params::ImageSource::Url {
-        url: server.url("/image.raw").to_string(),
-        block_size: BLOCK_SIZE,
-    });
+    let image_create_params = get_image_create(
+        params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
+    );
 
     // Create image
     NexusRequest::objects_post(client, &silo_images_url, &image_create_params)
@@ -166,162 +136,6 @@ async fn test_silo_image_create(cptestctx: &ControlPlaneTestContext) {
 }
 
 #[nexus_test]
-async fn test_image_create_url_404(cptestctx: &ControlPlaneTestContext) {
-    let client = &cptestctx.external_client;
-    DiskTest::new(&cptestctx).await;
-
-    // need a project to post to
-    create_project(client, PROJECT_NAME).await;
-
-    let server = ServerBuilder::new().run().unwrap();
-    server.expect(
-        Expectation::matching(request::method_path("HEAD", "/image.raw"))
-            .times(1..)
-            .respond_with(status_code(404)),
-    );
-
-    let image_create_params = get_image_create(params::ImageSource::Url {
-        url: server.url("/image.raw").to_string(),
-        block_size: BLOCK_SIZE,
-    });
-
-    let images_url = get_project_images_url(PROJECT_NAME);
-
-    let error = NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, &images_url)
-            .body(Some(&image_create_params))
-            .expect_status(Some(StatusCode::BAD_REQUEST)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("unexpected success")
-    .parsed_body::<dropshot::HttpErrorResponseBody>()
-    .unwrap();
-    assert_eq!(
-        error.message,
-        format!("unsupported value for \"url\": querying url returned: 404 Not Found")
-    );
-}
-
-#[nexus_test]
-async fn test_image_create_bad_url(cptestctx: &ControlPlaneTestContext) {
-    let client = &cptestctx.external_client;
-    DiskTest::new(&cptestctx).await;
-
-    // need a project to post to
-    create_project(client, PROJECT_NAME).await;
-
-    let image_create_params = get_image_create(params::ImageSource::Url {
-        url: "not_a_url".to_string(),
-        block_size: BLOCK_SIZE,
-    });
-
-    let images_url = get_project_images_url(PROJECT_NAME);
-
-    let error = NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, &images_url)
-            .body(Some(&image_create_params))
-            .expect_status(Some(StatusCode::BAD_REQUEST)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("unexpected success")
-    .parsed_body::<dropshot::HttpErrorResponseBody>()
-    .unwrap();
-    assert_eq!(
-        error.message,
-        format!("unsupported value for \"url\": error querying url: builder error: relative URL without a base")
-    );
-}
-
-#[nexus_test]
-async fn test_image_create_bad_content_length(
-    cptestctx: &ControlPlaneTestContext,
-) {
-    let client = &cptestctx.external_client;
-    DiskTest::new(&cptestctx).await;
-
-    // need a project to post to
-    create_project(client, PROJECT_NAME).await;
-
-    let server = ServerBuilder::new().run().unwrap();
-    server.expect(
-        Expectation::matching(request::method_path("HEAD", "/image.raw"))
-            .times(1..)
-            .respond_with(
-                status_code(200).append_header("Content-Length", "bad"),
-            ),
-    );
-
-    let image_create_params = get_image_create(params::ImageSource::Url {
-        url: server.url("/image.raw").to_string(),
-        block_size: BLOCK_SIZE,
-    });
-
-    let images_url = get_project_images_url(PROJECT_NAME);
-
-    let error = NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, &images_url)
-            .body(Some(&image_create_params))
-            .expect_status(Some(StatusCode::BAD_REQUEST)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("unexpected success")
-    .parsed_body::<dropshot::HttpErrorResponseBody>()
-    .unwrap();
-    assert_eq!(
-        error.message,
-        format!("unsupported value for \"url\": content length invalid: invalid digit found in string")
-    );
-}
-
-#[nexus_test]
-async fn test_image_create_bad_image_size(cptestctx: &ControlPlaneTestContext) {
-    let client = &cptestctx.external_client;
-    DiskTest::new(&cptestctx).await;
-
-    // need a project to post to
-    create_project(client, PROJECT_NAME).await;
-
-    let server = ServerBuilder::new().run().unwrap();
-    server.expect(
-        Expectation::matching(request::method_path("HEAD", "/image.raw"))
-            .times(1..)
-            .respond_with(status_code(200).append_header(
-                "Content-Length",
-                format!("{}", 4096 * 1000 + 100),
-            )),
-    );
-
-    let image_create_params = get_image_create(params::ImageSource::Url {
-        url: server.url("/image.raw").to_string(),
-        block_size: BLOCK_SIZE,
-    });
-
-    let images_url = get_project_images_url(PROJECT_NAME);
-
-    let error = NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, &images_url)
-            .body(Some(&image_create_params))
-            .expect_status(Some(StatusCode::BAD_REQUEST)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("unexpected success")
-    .parsed_body::<dropshot::HttpErrorResponseBody>()
-    .unwrap();
-    assert_eq!(
-        error.message,
-        format!("unsupported value for \"size\": total size {} must be divisible by block size {}", 4096*1000 + 100, 512)
-    );
-}
-
-#[nexus_test]
 async fn test_make_disk_from_image(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
@@ -329,23 +143,10 @@ async fn test_make_disk_from_image(cptestctx: &ControlPlaneTestContext) {
     // need a project to post both disk and image to
     create_project(client, PROJECT_NAME).await;
 
-    let server = ServerBuilder::new().run().unwrap();
-    server.expect(
-        Expectation::matching(request::method_path("HEAD", "/alpine/edge.raw"))
-            .times(1..)
-            .respond_with(
-                status_code(200).append_header(
-                    "Content-Length",
-                    format!("{}", 4096 * 1000),
-                ),
-            ),
-    );
-
     // Create an image in the project
-    let image_create_params = get_image_create(params::ImageSource::Url {
-        url: server.url("/alpine/edge.raw").to_string(),
-        block_size: BLOCK_SIZE,
-    });
+    let image_create_params = get_image_create(
+        params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
+    );
 
     let images_url = get_project_images_url(PROJECT_NAME);
 
@@ -384,23 +185,10 @@ async fn test_make_disk_from_other_project_image_fails(
     create_project(client, PROJECT_NAME).await;
     let another_project = create_project(client, "another-proj").await;
 
-    let server = ServerBuilder::new().run().unwrap();
-    server.expect(
-        Expectation::matching(request::method_path("HEAD", "/image.raw"))
-            .times(1..)
-            .respond_with(
-                status_code(200).append_header(
-                    "Content-Length",
-                    format!("{}", 4096 * 1000),
-                ),
-            ),
-    );
-
     let images_url = get_project_images_url(PROJECT_NAME);
-    let image_create_params = get_image_create(params::ImageSource::Url {
-        url: server.url("/image.raw").to_string(),
-        block_size: BLOCK_SIZE,
-    });
+    let image_create_params = get_image_create(
+        params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
+    );
     let image =
         NexusRequest::objects_post(client, &images_url, &image_create_params)
             .authn_as(AuthnMode::PrivilegedUser)
@@ -443,20 +231,10 @@ async fn test_make_disk_from_image_too_small(
     // need a project to post both disk and image to
     create_project(client, PROJECT_NAME).await;
 
-    let server = ServerBuilder::new().run().unwrap();
-    server.expect(
-        Expectation::matching(request::method_path("HEAD", "/alpine/edge.raw"))
-            .times(1..)
-            .respond_with(
-                status_code(200).append_header("Content-Length", "2147483648"),
-            ),
-    );
-
     // Create an image in the project
-    let image_create_params = get_image_create(params::ImageSource::Url {
-        url: server.url("/alpine/edge.raw").to_string(),
-        block_size: BLOCK_SIZE,
-    });
+    let image_create_params = get_image_create(
+        params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
+    );
 
     let images_url = get_project_images_url(PROJECT_NAME);
 
@@ -474,7 +252,9 @@ async fn test_make_disk_from_image_too_small(
         disk_source: params::DiskSource::Image {
             image_id: alpine_image.identity.id,
         },
-        size: ByteCount::from(1073741824),
+
+        // Nexus defines YouCanBootAnythingAsLongAsItsAlpine size as 100M
+        size: ByteCount::from(90 * 1024 * 1024),
     };
 
     let disks_url = format!("/v1/disks?project={}", PROJECT_NAME);
@@ -493,7 +273,7 @@ async fn test_make_disk_from_image_too_small(
         error.message,
         format!(
             "disk size {} must be greater than or equal to image size {}",
-            1073741824_u32, 2147483648_u32,
+            94371840_u32, 104857600_u32,
         )
     );
 }
@@ -502,18 +282,6 @@ async fn test_make_disk_from_image_too_small(
 async fn test_image_promotion(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
-
-    let server = ServerBuilder::new().run().unwrap();
-    server.expect(
-        Expectation::matching(request::method_path("HEAD", "/image.raw"))
-            .times(1..)
-            .respond_with(
-                status_code(200).append_header(
-                    "Content-Length",
-                    format!("{}", 4096 * 1000),
-                ),
-            ),
-    );
 
     let silo_images_url = "/v1/images";
     let images_url = get_project_images_url(PROJECT_NAME);
@@ -528,10 +296,9 @@ async fn test_image_promotion(cptestctx: &ControlPlaneTestContext) {
 
     assert_eq!(images.len(), 0);
 
-    let image_create_params = get_image_create(params::ImageSource::Url {
-        url: server.url("/image.raw").to_string(),
-        block_size: BLOCK_SIZE,
-    });
+    let image_create_params = get_image_create(
+        params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
+    );
 
     NexusRequest::objects_post(client, &images_url, &image_create_params)
         .authn_as(AuthnMode::PrivilegedUser)
@@ -631,28 +398,15 @@ async fn test_image_from_other_project_snapshot_fails(
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
 
-    let server = ServerBuilder::new().run().unwrap();
-    server.expect(
-        Expectation::matching(request::method_path("HEAD", "/image.raw"))
-            .times(1..)
-            .respond_with(
-                status_code(200).append_header(
-                    "Content-Length",
-                    format!("{}", 4096 * 1000),
-                ),
-            ),
-    );
-
     create_project(client, PROJECT_NAME).await;
     let images_url = get_project_images_url(PROJECT_NAME);
     let disks_url = format!("/v1/disks?project={}", PROJECT_NAME);
     let snapshots_url = format!("/v1/snapshots?project={}", PROJECT_NAME);
 
     // Create an image
-    let image_create_params = get_image_create(params::ImageSource::Url {
-        url: server.url("/image.raw").to_string(),
-        block_size: BLOCK_SIZE,
-    });
+    let image_create_params = get_image_create(
+        params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
+    );
     let image: views::Image =
         NexusRequest::objects_post(client, &images_url, &image_create_params)
             .authn_as(AuthnMode::PrivilegedUser)
@@ -749,25 +503,12 @@ async fn test_image_deletion_permissions(cptestctx: &ControlPlaneTestContext) {
 
     // Create an image in the default silo using the privileged user
 
-    let server = ServerBuilder::new().run().unwrap();
-    server.expect(
-        Expectation::matching(request::method_path("HEAD", "/image.raw"))
-            .times(1..)
-            .respond_with(
-                status_code(200).append_header(
-                    "Content-Length",
-                    format!("{}", 4096 * 1000),
-                ),
-            ),
-    );
-
     let silo_images_url = "/v1/images";
     let images_url = get_project_images_url(PROJECT_NAME);
 
-    let image_create_params = get_image_create(params::ImageSource::Url {
-        url: server.url("/image.raw").to_string(),
-        block_size: BLOCK_SIZE,
-    });
+    let image_create_params = get_image_create(
+        params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
+    );
 
     let image =
         NexusRequest::objects_post(client, &images_url, &image_create_params)
