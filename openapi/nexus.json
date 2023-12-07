@@ -699,55 +699,6 @@
         }
       }
     },
-    "/v1/disks/{disk}/import": {
-      "post": {
-        "tags": [
-          "disks"
-        ],
-        "summary": "Request to import blocks from URL",
-        "operationId": "disk_import_blocks_from_url",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "disk",
-            "description": "Name or ID of the disk",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "project",
-            "description": "Name or ID of the project",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ImportBlocksFromUrl"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/v1/disks/{disk}/metrics/{metric}": {
       "get": {
         "tags": [
@@ -10527,22 +10478,6 @@
           "request_id"
         ]
       },
-      "ExpectedDigest": {
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "sha256": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "sha256"
-            ],
-            "additionalProperties": false
-          }
-        ]
-      },
       "ExternalIp": {
         "type": "object",
         "properties": {
@@ -11297,11 +11232,6 @@
             "type": "string",
             "format": "date-time"
           },
-          "url": {
-            "nullable": true,
-            "description": "URL source of this image, if any",
-            "type": "string"
-          },
           "version": {
             "description": "Version of the operating system",
             "type": "string"
@@ -11381,33 +11311,6 @@
           {
             "type": "object",
             "properties": {
-              "block_size": {
-                "description": "The block size in bytes",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/BlockSize"
-                  }
-                ]
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "url"
-                ]
-              },
-              "url": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "block_size",
-              "type",
-              "url"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
               "id": {
                 "type": "string",
                 "format": "uuid"
@@ -11457,28 +11360,6 @@
         "required": [
           "base64_encoded_data",
           "offset"
-        ]
-      },
-      "ImportBlocksFromUrl": {
-        "description": "Parameters for importing blocks from a URL to a disk",
-        "type": "object",
-        "properties": {
-          "expected_digest": {
-            "nullable": true,
-            "description": "Expected digest of all blocks when importing from a URL",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ExpectedDigest"
-              }
-            ]
-          },
-          "url": {
-            "description": "the source to pull blocks from",
-            "type": "string"
-          }
-        },
-        "required": [
-          "url"
         ]
       },
       "Instance": {

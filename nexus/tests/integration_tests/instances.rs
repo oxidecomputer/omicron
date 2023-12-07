@@ -73,8 +73,6 @@ use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::shared::SiloRole;
 use omicron_sled_agent::sim;
 
-use httptest::{matchers::*, responders::*, Expectation, ServerBuilder};
-
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
@@ -1280,18 +1278,6 @@ async fn test_instance_using_image_from_other_project_fails(
     let client = &cptestctx.external_client;
     create_org_and_project(&client).await;
 
-    let server = ServerBuilder::new().run().unwrap();
-    server.expect(
-        Expectation::matching(request::method_path("HEAD", "/image.raw"))
-            .times(1..)
-            .respond_with(
-                status_code(200).append_header(
-                    "Content-Length",
-                    format!("{}", 4096 * 1000),
-                ),
-            ),
-    );
-
     // Create an image in springfield-squidport.
     let images_url = format!("/v1/images?project={}", PROJECT_NAME);
     let image_create_params = params::ImageCreate {
@@ -1303,10 +1289,7 @@ async fn test_instance_using_image_from_other_project_fails(
         },
         os: "alpine".to_string(),
         version: "edge".to_string(),
-        source: params::ImageSource::Url {
-            url: server.url("/image.raw").to_string(),
-            block_size: params::BlockSize::try_from(512).unwrap(),
-        },
+        source: params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
     };
     let image =
         NexusRequest::objects_post(client, &images_url, &image_create_params)

@@ -369,32 +369,6 @@ impl super::Nexus {
         Ok(())
     }
 
-    /// Import blocks from a URL into a disk
-    pub(crate) async fn import_blocks_from_url_for_disk(
-        self: &Arc<Self>,
-        opctx: &OpContext,
-        disk_lookup: &lookup::Disk<'_>,
-        params: params::ImportBlocksFromUrl,
-    ) -> UpdateResult<()> {
-        let authz_disk: authz::Disk;
-
-        (.., authz_disk) =
-            disk_lookup.lookup_for(authz::Action::Modify).await?;
-
-        let saga_params = sagas::import_blocks_from_url::Params {
-            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
-            disk_id: authz_disk.id(),
-
-            import_params: params.clone(),
-        };
-
-        self
-            .execute_saga::<sagas::import_blocks_from_url::SagaImportBlocksFromUrl>(saga_params)
-            .await?;
-
-        Ok(())
-    }
-
     /// Move a disk from the "ImportReady" state to the "Importing" state,
     /// blocking any import from URL jobs.
     pub(crate) async fn disk_manual_import_start(

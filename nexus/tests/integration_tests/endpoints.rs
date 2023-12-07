@@ -262,8 +262,6 @@ lazy_static! {
             ),
         };
 
-    pub static ref DEMO_IMPORT_DISK_IMPORT_FROM_URL_URL: String =
-        format!("/v1/disks/{}/import?{}", *DEMO_IMPORT_DISK_NAME, *DEMO_PROJECT_SELECTOR);
     pub static ref DEMO_IMPORT_DISK_BULK_WRITE_START_URL: String =
         format!("/v1/disks/{}/bulk-write-start?{}", *DEMO_IMPORT_DISK_NAME, *DEMO_PROJECT_SELECTOR);
     pub static ref DEMO_IMPORT_DISK_BULK_WRITE_URL: String =
@@ -493,10 +491,7 @@ lazy_static! {
                 name: DEMO_IMAGE_NAME.clone(),
                 description: String::from(""),
             },
-            source: params::ImageSource::Url {
-                url: HTTP_SERVER.url("/image.raw").to_string(),
-                block_size: params::BlockSize::try_from(4096).unwrap(),
-            },
+            source: params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
             os: "fake-os".to_string(),
             version: "1.0".to_string()
         };
@@ -1323,20 +1318,6 @@ lazy_static! {
                 AllowedMethod::Post(
                     serde_json::to_value(params::DiskPath {
                         disk: DEMO_DISK_NAME.clone().into()
-                    }).unwrap()
-                )
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_IMPORT_DISK_IMPORT_FROM_URL_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Post(
-                    serde_json::to_value(params::ImportBlocksFromUrl {
-                        url: "obviously-fake-url".into(),
-                        expected_digest: None,
                     }).unwrap()
                 )
             ],

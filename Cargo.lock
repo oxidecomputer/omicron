@@ -2089,6 +2089,7 @@ dependencies = [
  "base64",
  "chrono",
  "http",
+ "hyper",
  "omicron-sled-agent",
  "omicron-test-utils",
  "omicron-workspace-hack",
@@ -2097,9 +2098,12 @@ dependencies = [
  "reqwest",
  "russh",
  "russh-keys",
+ "serde",
+ "serde_json",
  "tokio",
  "toml 0.8.8",
  "trust-dns-resolver",
+ "uuid",
 ]
 
 [[package]]

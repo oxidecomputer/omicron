@@ -23,7 +23,6 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
-use std::str::FromStr;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -96,121 +95,6 @@ impl super::Nexus {
             }
         };
         let new_image = match &params.source {
-            params::ImageSource::Url { url, block_size } => {
-                let db_block_size = db::model::BlockSize::try_from(*block_size)
-                    .map_err(|e| Error::InvalidValue {
-                        label: String::from("block_size"),
-                        message: format!("block_size is invalid: {}", e),
-                    })?;
-
-                let image_id = Uuid::new_v4();
-
-                let volume_construction_request =
-                    sled_agent_client::types::VolumeConstructionRequest::Url {
-                        id: image_id,
-                        block_size: db_block_size.to_bytes().into(),
-                        url: url.clone(),
-                    };
-
-                let volume_data =
-                    serde_json::to_string(&volume_construction_request)?;
-
-                // use reqwest to query url for size
-                let dur = std::time::Duration::from_secs(5);
-                let client = reqwest::ClientBuilder::new()
-                    .connect_timeout(dur)
-                    .timeout(dur)
-                    .build()
-                    .map_err(|e| {
-                        Error::internal_error(&format!(
-                            "failed to build reqwest client: {}",
-                            e
-                        ))
-                    })?;
-
-                let response = client.head(url).send().await.map_err(|e| {
-                    Error::InvalidValue {
-                        label: String::from("url"),
-                        message: format!("error querying url: {}", e),
-                    }
-                })?;
-
-                if !response.status().is_success() {
-                    return Err(Error::InvalidValue {
-                        label: String::from("url"),
-                        message: format!(
-                            "querying url returned: {}",
-                            response.status()
-                        ),
-                    });
-                }
-
-                // grab total size from content length
-                let content_length = response
-                    .headers()
-                    .get(reqwest::header::CONTENT_LENGTH)
-                    .ok_or("no content length!")
-                    .map_err(|e| Error::InvalidValue {
-                        label: String::from("url"),
-                        message: format!("error querying url: {}", e),
-                    })?;
-
-                let total_size =
-                    u64::from_str(content_length.to_str().map_err(|e| {
-                        Error::InvalidValue {
-                            label: String::from("url"),
-                            message: format!("content length invalid: {}", e),
-                        }
-                    })?)
-                    .map_err(|e| {
-                        Error::InvalidValue {
-                            label: String::from("url"),
-                            message: format!("content length invalid: {}", e),
-                        }
-                    })?;
-
-                let size: external::ByteCount = total_size.try_into().map_err(
-                    |e: external::ByteCountRangeError| Error::InvalidValue {
-                        label: String::from("size"),
-                        message: format!("total size is invalid: {}", e),
-                    },
-                )?;
-
-                // validate total size is divisible by block size
-                let block_size: u64 = (*block_size).into();
-                if (size.to_bytes() % block_size) != 0 {
-                    return Err(Error::InvalidValue {
-                        label: String::from("size"),
-                        message: format!(
-                            "total size {} must be divisible by block size {}",
-                            size.to_bytes(),
-                            block_size
-                        ),
-                    });
-                }
-
-                let new_image_volume =
-                    db::model::Volume::new(Uuid::new_v4(), volume_data);
-                let volume =
-                    self.db_datastore.volume_create(new_image_volume).await?;
-
-                db::model::Image {
-                    identity: db::model::ImageIdentity::new(
-                        image_id,
-                        params.identity.clone(),
-                    ),
-                    silo_id: authz_silo.id(),
-                    project_id: maybe_authz_project.clone().map(|p| p.id()),
-                    volume_id: volume.id(),
-                    url: Some(url.clone()),
-                    os: params.os.clone(),
-                    version: params.version.clone(),
-                    digest: None, // not computed for URL type
-                    block_size: db_block_size,
-                    size: size.into(),
-                }
-            }
-
             params::ImageSource::Snapshot { id } => {
                 let image_id = Uuid::new_v4();
 
