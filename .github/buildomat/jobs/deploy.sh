@@ -335,9 +335,23 @@ export E2E_TLS_CERT IPPOOL_START IPPOOL_END
 eval "$(./tests/bootstrap)"
 export OXIDE_HOST OXIDE_TOKEN
 
-/usr/oxide/oxide --resolve "$OXIDE_RESOLVE" \
+#
+# The Nexus resolved in `$OXIDE_RESOLVE` is not necessarily the same one that we
+# successfully talked to in bootstrap, so wait a bit for it to fully come online.
+#
+retry=0
+while ! curl -sSf "$OXIDE_HOST/v1/ping" --resolve "$OXIDE_RESOLVE"; do
+	if [[ $retry -gt 60 ]]; then
+		echo "$OXIDE_RESOLVE failed to come up after 60 seconds"
+		exit 1
+	fi
+	sleep 1
+	retry=$((retry + 1))
+done
+
+/usr/oxide/oxide --resolve "$OXIDE_RESOLVE" --cacert "$E2E_TLS_CERT" \
 	project create --name images --description "some images"
-/usr/oxide/oxide --resolve "$OXIDE_RESOLVE" \
+/usr/oxide/oxide --resolve "$OXIDE_RESOLVE" --cacert "$E2E_TLS_CERT" \
 	disk import \
 	--path debian-11-genericcloud-amd64.raw \
 	--disk debian11-boot \
@@ -348,7 +362,7 @@ export OXIDE_HOST OXIDE_TOKEN
 	--image-description "debian 11 original base image" \
 	--image-os debian \
 	--image-version "11"
-/usr/oxide/oxide --resolve "$OXIDE_RESOLVE" \
+/usr/oxide/oxide --resolve "$OXIDE_RESOLVE" --cacert "$E2E_TLS_CERT" \
 	image promote --project images --image debian11
 
 rm ./tests/bootstrap
