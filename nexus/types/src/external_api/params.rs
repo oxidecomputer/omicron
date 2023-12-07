@@ -758,8 +758,19 @@ pub struct IpPoolUpdate {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct IpPoolSiloPath {
+    pub pool: NameOrId,
+    pub silo: NameOrId,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct IpPoolSiloLink {
     pub silo: NameOrId,
+    pub is_default: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct IpPoolSiloUpdate {
     pub is_default: bool,
 }
 

@@ -4685,54 +4685,6 @@
         }
       }
     },
-    "/v1/system/ip-pools/{pool}/make-default": {
-      "post": {
-        "tags": [
-          "system/networking"
-        ],
-        "summary": "Make an IP pool the default for a silo",
-        "operationId": "ip_pool_make_default",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "pool",
-            "description": "Name or ID of the IP pool",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SiloSelector"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "successful creation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IpPoolSilo"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/v1/system/ip-pools/{pool}/ranges": {
       "get": {
         "tags": [
@@ -4996,6 +4948,61 @@
             "$ref": "#/components/responses/Error"
           }
         }
+      }
+    },
+    "/v1/system/ip-pools/{pool}/silos/{silo}": {
+      "put": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Make an IP pool the default for a silo",
+        "operationId": "ip_pool_silo_update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "silo",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IpPoolSiloUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPoolSilo"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       },
       "delete": {
         "tags": [
@@ -5007,16 +5014,14 @@
           {
             "in": "path",
             "name": "pool",
-            "description": "Name or ID of the IP pool",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
           },
           {
-            "in": "query",
+            "in": "path",
             "name": "silo",
-            "description": "Name or ID of the silo",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -12085,6 +12090,17 @@
           "items"
         ]
       },
+      "IpPoolSiloUpdate": {
+        "type": "object",
+        "properties": {
+          "is_default": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "is_default"
+        ]
+      },
       "IpPoolUpdate": {
         "description": "Parameters for updating an IP Pool",
         "type": "object",
@@ -13264,22 +13280,6 @@
           "identity_id",
           "identity_type",
           "role_name"
-        ]
-      },
-      "SiloSelector": {
-        "type": "object",
-        "properties": {
-          "silo": {
-            "description": "Name or ID of the silo",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/NameOrId"
-              }
-            ]
-          }
-        },
-        "required": [
-          "silo"
         ]
       },
       "Sled": {

@@ -405,8 +405,12 @@ impl DataStore {
                     e,
                     ErrorHandler::Conflict(
                         ResourceType::IpPoolResource,
-                        // TODO: make string more useful
-                        &ip_pool_resource.ip_pool_id.to_string(),
+                        &format!(
+                            "ip_pool_id: {:?}, resource_id: {:?}, resource_type: {:?}",
+                            ip_pool_resource.ip_pool_id,
+                            ip_pool_resource.resource_id,
+                            ip_pool_resource.resource_type,
+                        )
                     ),
                 )
             })
@@ -414,11 +418,12 @@ impl DataStore {
 
     // TODO: make default should fail when the association doesn't exist.
     // should it also fail when it's already default? probably not?
-    pub async fn ip_pool_make_default(
+    pub async fn ip_pool_set_default(
         &self,
         opctx: &OpContext,
         authz_ip_pool: &authz::IpPool,
         authz_silo: &authz::Silo,
+        is_default: bool,
     ) -> UpdateResult<IpPoolResource> {
         use db::schema::ip_pool_resource::dsl;
 
@@ -430,6 +435,28 @@ impl DataStore {
         let ip_pool_id = authz_ip_pool.id();
         let silo_id = authz_silo.id();
 
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        // if we're making is_default false, we can just do that without
+        // checking any other stuff
+        if !is_default {
+            let updated_link = diesel::update(dsl::ip_pool_resource)
+                .filter(dsl::resource_id.eq(silo_id))
+                .filter(dsl::ip_pool_id.eq(ip_pool_id))
+                .filter(dsl::resource_type.eq(IpPoolResourceType::Silo))
+                .set(dsl::is_default.eq(false))
+                .returning(IpPoolResource::as_returning())
+                .get_result_async(&*conn)
+                .await
+                .map_err(|e| {
+                    Error::internal_error(&format!(
+                        "Transaction error: {:?}",
+                        e
+                    ))
+                })?;
+            return Ok(updated_link);
+        }
+
         // Errors returned from the below transactions.
         #[derive(Debug)]
         enum IpPoolResourceUpdateError {
@@ -437,7 +464,6 @@ impl DataStore {
         }
         type TxnError = TransactionError<IpPoolResourceUpdateError>;
 
-        let conn = self.pool_connection_authorized(opctx).await?;
         conn.transaction_async(|conn| async move {
             // note this is matching the specified silo, but could be any pool
             let existing_default_for_silo = dsl::ip_pool_resource

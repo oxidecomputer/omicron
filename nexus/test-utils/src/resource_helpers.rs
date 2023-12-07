@@ -70,11 +70,33 @@ where
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
-        .unwrap_or_else(|_| {
-            panic!("failed to make \"create\" request to {path}")
-        })
+        .map_err(|e| panic!("failed to make \"POST\" request to {path}: {e}"))
+        .unwrap()
         .parsed_body()
         .unwrap()
+}
+
+/// Make a POST, assert status code, return error response body
+pub async fn object_create_error<InputType>(
+    client: &ClientTestContext,
+    path: &str,
+    input: &InputType,
+    status: StatusCode,
+) -> HttpErrorResponseBody
+where
+    InputType: serde::Serialize,
+{
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, path)
+            .body(Some(&input))
+            .expect_status(Some(status)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<HttpErrorResponseBody>()
+    .unwrap()
 }
 
 pub async fn object_put<InputType, OutputType>(
@@ -90,7 +112,8 @@ where
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
-        .unwrap_or_else(|_| panic!("failed to make \"PUT\" request to {path}"))
+        .map_err(|e| panic!("failed to make \"PUT\" request to {path}: {e}"))
+        .unwrap()
         .parsed_body()
         .unwrap()
 }
@@ -100,9 +123,8 @@ pub async fn object_delete(client: &ClientTestContext, path: &str) {
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
-        .unwrap_or_else(|_| {
-            panic!("failed to make \"delete\" request to {path}")
-        });
+        .map_err(|e| panic!("failed to make \"DELETE\" request to {path}: {e}"))
+        .unwrap();
 }
 
 /// Create an IP pool with a single range for testing.

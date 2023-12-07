@@ -18,6 +18,9 @@ use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::object_create;
+use nexus_test_utils::resource_helpers::object_create_error;
+use nexus_test_utils::resource_helpers::object_delete;
+use nexus_test_utils::resource_helpers::object_put;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::{
     create_instance, create_instance_with,
@@ -29,8 +32,8 @@ use nexus_types::external_api::params::InstanceDiskAttachment;
 use nexus_types::external_api::params::InstanceNetworkInterfaceAttachment;
 use nexus_types::external_api::params::IpPoolCreate;
 use nexus_types::external_api::params::IpPoolSiloLink;
+use nexus_types::external_api::params::IpPoolSiloUpdate;
 use nexus_types::external_api::params::IpPoolUpdate;
-use nexus_types::external_api::params::SiloSelector;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::shared::Ipv4Range;
 use nexus_types::external_api::shared::Ipv6Range;
@@ -345,7 +348,7 @@ async fn test_ip_pool_service_no_cud(cptestctx: &ControlPlaneTestContext) {
 }
 
 #[nexus_test]
-async fn test_ip_pool_with_silo(cptestctx: &ControlPlaneTestContext) {
+async fn test_ip_pool_silo_link(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     let p0 = create_pool(client, "p0").await;
@@ -362,21 +365,13 @@ async fn test_ip_pool_with_silo(cptestctx: &ControlPlaneTestContext) {
         is_default: false,
     };
 
-    let error = NexusRequest::new(
-        RequestBuilder::new(
-            client,
-            Method::POST,
-            "/v1/system/ip-pools/p0/silos",
-        )
-        .body(Some(&params))
-        .expect_status(Some(StatusCode::NOT_FOUND)),
+    let error = object_create_error(
+        client,
+        "/v1/system/ip-pools/p0/silos",
+        &params,
+        StatusCode::NOT_FOUND,
     )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap()
-    .parsed_body::<HttpErrorResponseBody>()
-    .unwrap();
+    .await;
 
     assert_eq!(
         error.message,
@@ -405,45 +400,117 @@ async fn test_ip_pool_with_silo(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(assocs_p0.items.len(), 1);
     assert_eq!(assocs_p0.items[0], silo_link);
 
-    // TODO: dissociate silo
-    // TODO: confirm dissociation
-
-    // associate same silo to other pool by ID
-    let params = params::IpPoolSiloLink {
+    // associate same silo to other pool by ID instead of name
+    let link_params = params::IpPoolSiloLink {
         silo: NameOrId::Id(silo_id),
-        is_default: false,
+        is_default: true,
     };
-    let _: IpPoolSilo =
-        object_create(client, "/v1/system/ip-pools/p1/silos", &params).await;
+    let url = "/v1/system/ip-pools/p1/silos";
+    let _: IpPoolSilo = object_create(client, &url, &link_params).await;
 
-    // association should look the same as the other one, except different pool ID
     let silos_p1 = silos_for_pool(client, "p1").await;
     assert_eq!(silos_p1.items.len(), 1);
     assert_eq!(
         silos_p1.items[0],
-        IpPoolSilo { ip_pool_id: p1.identity.id, ..silo_link }
+        IpPoolSilo { ip_pool_id: p1.identity.id, is_default: true, silo_id }
     );
 
-    // make p0's pool default and show that it changes
-    let params = SiloSelector { silo: silo.clone() };
-    let _: IpPoolSilo =
-        object_create(client, "/v1/system/ip-pools/p0/make-default", &params)
-            .await;
-    // making the same one default again is not an error
-    let _: IpPoolSilo =
-        object_create(client, "/v1/system/ip-pools/p0/make-default", &params)
-            .await;
+    // creating a third pool and trying to link it as default: true should fail
+    create_pool(client, "p2").await;
+    let url = "/v1/system/ip-pools/p2/silos";
+    let error = object_create_error(
+        client,
+        &url,
+        &link_params,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(error.error_code, Some("ObjectAlreadyExists".to_string()));
 
+    // unlink silo (doesn't matter that it's a default)
+    let url = format!("/v1/system/ip-pools/p1/silos/{}", cptestctx.silo_name);
+    object_delete(client, &url).await;
+
+    let silos_p1 = silos_for_pool(client, "p1").await;
+    assert_eq!(silos_p1.items.len(), 0);
+}
+
+#[nexus_test]
+async fn test_ip_pool_update_default(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+
+    create_pool(client, "p0").await;
+    create_pool(client, "p1").await;
+
+    // there should be no linked silos
+    let silos_p0 = silos_for_pool(client, "p0").await;
+    assert_eq!(silos_p0.items.len(), 0);
+
+    let silos_p1 = silos_for_pool(client, "p1").await;
+    assert_eq!(silos_p1.items.len(), 0);
+
+    // associated both pools with the test silo
+    let silo = NameOrId::Name(cptestctx.silo_name.clone());
+    let params =
+        params::IpPoolSiloLink { silo: silo.clone(), is_default: false };
+    let _: IpPoolSilo =
+        object_create(client, "/v1/system/ip-pools/p0/silos", &params).await;
+    let _: IpPoolSilo =
+        object_create(client, "/v1/system/ip-pools/p1/silos", &params).await;
+
+    // now both are linked to the silo, neither is marked default
+    let silos_p0 = silos_for_pool(client, "p0").await;
+    assert_eq!(silos_p0.items.len(), 1);
+    assert_eq!(silos_p0.items[0].is_default, false);
+
+    let silos_p1 = silos_for_pool(client, "p1").await;
+    assert_eq!(silos_p1.items.len(), 1);
+    assert_eq!(silos_p1.items[0].is_default, false);
+
+    // make p0 default
+    let params = IpPoolSiloUpdate { is_default: true };
+    let p0_silo_url =
+        format!("/v1/system/ip-pools/p0/silos/{}", cptestctx.silo_name);
+    let _: IpPoolSilo = object_put(client, &p0_silo_url, &params).await;
+
+    // making the same one default again is not an error
+    let _: IpPoolSilo = object_put(client, &p0_silo_url, &params).await;
+
+    // now p0 is default
     let silos_p0 = silos_for_pool(client, "p0").await;
     assert_eq!(silos_p0.items.len(), 1);
     assert_eq!(silos_p0.items[0].is_default, true);
 
-    // TODO: unset default
+    // p1 still not default
+    let silos_p1 = silos_for_pool(client, "p1").await;
+    assert_eq!(silos_p1.items.len(), 1);
+    assert_eq!(silos_p1.items[0].is_default, false);
 
-    // TODO: associating a resource that is already associated should be a noop
-    // and return a success message
+    // making p1 the default pool for the silo unsets it on p0
 
-    // TODO: trying to set a second default for a resource should fail
+    // set p1 default
+    let params = IpPoolSiloUpdate { is_default: true };
+    let p1_silo_url =
+        format!("/v1/system/ip-pools/p1/silos/{}", cptestctx.silo_name);
+    let _: IpPoolSilo = object_put(client, &p1_silo_url, &params).await;
+
+    // p1 is now default
+    let silos_p1 = silos_for_pool(client, "p1").await;
+    assert_eq!(silos_p1.items.len(), 1);
+    assert_eq!(silos_p1.items[0].is_default, true);
+
+    // p0 is no longer default
+    let silos_p0 = silos_for_pool(client, "p0").await;
+    assert_eq!(silos_p0.items.len(), 1);
+    assert_eq!(silos_p0.items[0].is_default, false);
+
+    // we can also unset default
+    let params = IpPoolSiloUpdate { is_default: false };
+    let _: IpPoolSilo = object_put(client, &p1_silo_url, &params).await;
+
+    let silos_p1 = silos_for_pool(client, "p1").await;
+    assert_eq!(silos_p1.items.len(), 1);
+    assert_eq!(silos_p1.items[0].is_default, false);
 }
 
 // IP pool list fetch logic includes a join to ip_pool_resource, which is

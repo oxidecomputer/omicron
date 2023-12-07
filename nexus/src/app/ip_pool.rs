@@ -135,18 +135,25 @@ impl super::Nexus {
             .await
     }
 
-    pub(crate) async fn ip_pool_make_default(
+    pub(crate) async fn ip_pool_silo_update(
         &self,
         opctx: &OpContext,
         pool_lookup: &lookup::IpPool<'_>,
         silo_lookup: &lookup::Silo<'_>,
+        update: &params::IpPoolSiloUpdate,
     ) -> CreateResult<db::model::IpPoolResource> {
         let (.., authz_pool) =
             pool_lookup.lookup_for(authz::Action::Modify).await?;
         let (.., authz_silo) =
             silo_lookup.lookup_for(authz::Action::Read).await?;
+
         self.db_datastore
-            .ip_pool_make_default(opctx, &authz_pool, &authz_silo)
+            .ip_pool_set_default(
+                opctx,
+                &authz_pool,
+                &authz_silo,
+                update.is_default,
+            )
             .await
     }
 

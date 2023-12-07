@@ -125,7 +125,7 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(ip_pool_silo_list)?;
         api.register(ip_pool_silo_link)?;
         api.register(ip_pool_silo_unlink)?;
-        api.register(ip_pool_make_default)?;
+        api.register(ip_pool_silo_update)?;
         api.register(ip_pool_view)?;
         api.register(ip_pool_delete)?;
         api.register(ip_pool_update)?;
@@ -1394,23 +1394,20 @@ async fn ip_pool_silo_link(
 /// Remove an IP pool's association with a silo or project
 #[endpoint {
     method = DELETE,
-    path = "/v1/system/ip-pools/{pool}/silos",
+    path = "/v1/system/ip-pools/{pool}/silos/{silo}",
     tags = ["system/networking"],
 }]
 async fn ip_pool_silo_unlink(
     rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<params::IpPoolPath>,
-    query_params: Query<params::SiloSelector>,
+    path_params: Path<params::IpPoolSiloPath>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let nexus = &apictx.nexus;
         let path = path_params.into_inner();
-        let query = query_params.into_inner();
-
         let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
-        let silo_lookup = nexus.silo_lookup(&opctx, query.silo)?;
+        let silo_lookup = nexus.silo_lookup(&opctx, path.silo)?;
         nexus
             .ip_pool_dissociate_resource(&opctx, &pool_lookup, &silo_lookup)
             .await?;
@@ -1424,27 +1421,27 @@ async fn ip_pool_silo_unlink(
 
 /// Make an IP pool the default for a silo
 #[endpoint {
-    method = POST,
-    path = "/v1/system/ip-pools/{pool}/make-default",
+    method = PUT,
+    path = "/v1/system/ip-pools/{pool}/silos/{silo}",
     tags = ["system/networking"],
 }]
-async fn ip_pool_make_default(
+async fn ip_pool_silo_update(
     rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<params::IpPoolPath>,
-    silo_selector: TypedBody<params::SiloSelector>,
-) -> Result<HttpResponseCreated<views::IpPoolSilo>, HttpError> {
+    path_params: Path<params::IpPoolSiloPath>,
+    update: TypedBody<params::IpPoolSiloUpdate>,
+) -> Result<HttpResponseOk<views::IpPoolSilo>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let nexus = &apictx.nexus;
         let path = path_params.into_inner();
-        let silo_selector = silo_selector.into_inner();
+        let update = update.into_inner();
         let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
-        let silo_lookup = nexus.silo_lookup(&opctx, silo_selector.silo)?;
+        let silo_lookup = nexus.silo_lookup(&opctx, path.silo)?;
         let assoc = nexus
-            .ip_pool_make_default(&opctx, &pool_lookup, &silo_lookup)
+            .ip_pool_silo_update(&opctx, &pool_lookup, &silo_lookup, &update)
             .await?;
-        Ok(HttpResponseCreated(assoc.into()))
+        Ok(HttpResponseOk(assoc.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
