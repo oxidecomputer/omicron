@@ -184,7 +184,7 @@ pub trait Ledgerable: DeserializeOwned + Serialize + Send + Sync {
                 err,
             })
         } else {
-            warn!(log, "No ledger in {path}");
+            info!(log, "No ledger in {path}");
             Err(Error::NotFound)
         }
     }
