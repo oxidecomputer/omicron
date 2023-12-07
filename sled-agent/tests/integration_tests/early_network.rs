@@ -19,6 +19,8 @@ use omicron_sled_agent::bootstrap::early_networking::{
 };
 use omicron_test_utils::dev::test_setup_log;
 
+const BLOB_PATH: &str = "tests/data/early_network_blobs.txt";
+
 /// Test that previous and current versions of `EarlyNetworkConfig` blobs
 /// deserialize correctly.
 #[test]
@@ -32,9 +34,8 @@ fn early_network_blobs_deserialize() {
     );
 
     // Read old blobs as newline-delimited JSON.
-    let mut known_blobs =
-        std::fs::read_to_string("tests/data/early_network_blobs.txt")
-            .expect("error reading early_network_blobs.txt");
+    let mut known_blobs = std::fs::read_to_string(BLOB_PATH)
+        .expect("error reading early_network_blobs.txt");
     let mut current_blob_is_known = false;
     for (blob_idx, line) in known_blobs.lines().enumerate() {
         let blob_lineno = blob_idx + 1;
@@ -96,10 +97,7 @@ fn early_network_blobs_deserialize() {
         known_blobs.push('\n');
     }
 
-    expectorate::assert_contents(
-        "tests/data/early_network_blobs.txt",
-        &known_blobs,
-    );
+    expectorate::assert_contents(BLOB_PATH, &known_blobs);
 
     logctx.cleanup_successful();
 }
