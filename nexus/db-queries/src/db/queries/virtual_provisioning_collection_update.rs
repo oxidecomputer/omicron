@@ -183,15 +183,19 @@ impl DoUpdate {
             >(
                 not_allocted
                     .and(TrueOrCastError::new(
-                        has_sufficient_cpus,
+                        cpus_provisioned_delta.eq(0).or(has_sufficient_cpus),
                         NOT_ENOUGH_CPUS_SENTINEL,
                     ))
                     .and(TrueOrCastError::new(
-                        has_sufficient_memory,
+                        memory_provisioned_delta
+                            .eq(0)
+                            .or(has_sufficient_memory),
                         NOT_ENOUGH_MEMORY_SENTINEL,
                     ))
                     .and(TrueOrCastError::new(
-                        has_sufficient_storage,
+                        storage_provisioned_delta
+                            .eq(0)
+                            .or(has_sufficient_storage),
                         NOT_ENOUGH_STORAGE_SENTINEL,
                     )),
             ),))),
