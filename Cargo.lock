@@ -4712,7 +4712,7 @@ dependencies = [
  "ref-cast",
  "regex",
  "reqwest",
- "ring 0.16.20",
+ "ring 0.17.7",
  "rustls",
  "samael",
  "schemars",
@@ -4803,7 +4803,7 @@ dependencies = [
  "petgraph",
  "rayon",
  "reqwest",
- "ring 0.16.20",
+ "ring 0.17.7",
  "semver 1.0.20",
  "serde",
  "sled-hardware",
@@ -4949,7 +4949,7 @@ dependencies = [
  "rcgen",
  "regex",
  "reqwest",
- "ring 0.16.20",
+ "ring 0.17.7",
  "rustls",
  "slog",
  "subprocess",
@@ -5038,7 +5038,7 @@ dependencies = [
  "regex-automata 0.4.3",
  "regex-syntax 0.8.2",
  "reqwest",
- "ring 0.16.20",
+ "ring 0.17.7",
  "rustix 0.38.25",
  "schemars",
  "semver 1.0.20",
@@ -6694,9 +6694,9 @@ dependencies = [
 
 [[package]]
 name = "ring"
-version = "0.17.5"
+version = "0.17.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb0205304757e5d899b9c2e448b867ffd03ae7f988002e47cd24954391394d0b"
+checksum = "688c63d65483050968b2a8937f7995f443e27041a0f7700aa59b0822aedebb74"
 dependencies = [
  "cc",
  "getrandom 0.2.10",
@@ -6964,7 +6964,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "629648aced5775d558af50b2b4c7b02983a04b312126d45eeead26e7caa498b9"
 dependencies = [
  "log",
- "ring 0.17.5",
+ "ring 0.17.7",
  "rustls-webpki",
  "sct",
 ]
@@ -6996,7 +6996,7 @@ version = "0.101.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b6275d1ee7a1cd780b64aca7726599a1dbc893b1e64144529e55c3c2f745765"
 dependencies = [
- "ring 0.17.5",
+ "ring 0.17.7",
  "untrusted 0.9.0",
 ]
 
@@ -8730,9 +8730,9 @@ checksum = "ea68304e134ecd095ac6c3574494fc62b909f416c4fca77e440530221e549d3d"
 
 [[package]]
 name = "tough"
-version = "0.15.0"
+version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d16dc5f42fc7ce7cb51eebc7a6ef91f4d69a6d41bb13f34a09674ec47e454d9b"
+checksum = "49455926f64001de53ef047c2053e2f17440e412b8b1e958d4ad8a6008db7128"
 dependencies = [
  "async-recursion",
  "async-trait",
@@ -8748,7 +8748,7 @@ dependencies = [
  "pem",
  "percent-encoding",
  "reqwest",
- "ring 0.16.20",
+ "ring 0.17.7",
  "serde",
  "serde_json",
  "serde_plain",
@@ -8757,7 +8757,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "typed-path",
- "untrusted 0.7.1",
+ "untrusted 0.9.0",
  "url",
  "walkdir",
 ]
@@ -8958,7 +8958,7 @@ dependencies = [
  "omicron-test-utils",
  "omicron-workspace-hack",
  "rand 0.8.5",
- "ring 0.16.20",
+ "ring 0.17.7",
  "serde",
  "serde_json",
  "serde_path_to_error",
@@ -9003,9 +9003,9 @@ dependencies = [
 
 [[package]]
 name = "typed-path"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bbb9d13b8242894ff21f9990082b90a6410a43dcc6029ac4227a1467853ba781"
+checksum = "4a90726108dab678edab76459751e1cc7c597c3484a6384d6423191255fa641b"
 
 [[package]]
 name = "typenum"
