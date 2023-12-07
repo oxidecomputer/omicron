@@ -58,16 +58,12 @@ pub enum Error {
 
     /// There is insufficient capacity to perform the requested operation.
     ///
-    /// This variant is translated to 503 Service Unavailable, and it carries
-    /// both an external and an internal message. The external message is
-    /// intended for operator consumption and is intended to not leak any
-    /// implementation details.
+    /// This variant is translated to 400 Bad Request, and it carries both an
+    /// external and an internal message. The external message is intended for
+    /// operator consumption and is intended to not leak any implementation
+    /// details.
     #[error("Insufficient Capacity: {}", .message.display_internal())]
     InsufficientCapacity { message: MessagePair },
-
-    /// Method Not Allowed
-    #[error("Method Not Allowed: {}", .message.display_internal())]
-    MethodNotAllowed { message: MessagePair },
 
     #[error("Type version mismatch! {internal_message}")]
     TypeVersionMismatch { internal_message: String },
@@ -194,7 +190,6 @@ impl Error {
             | Error::InvalidRequest { .. }
             | Error::InvalidValue { .. }
             | Error::Forbidden
-            | Error::MethodNotAllowed { .. }
             | Error::InsufficientCapacity { .. }
             | Error::InternalError { .. }
             | Error::TypeVersionMismatch { .. }
@@ -275,11 +270,6 @@ impl Error {
         }
     }
 
-    /// Generates an [`Error::MethodNotAllowed`] error with an external message.
-    pub fn method_not_allowed(message: impl Into<String>) -> Error {
-        Error::MethodNotAllowed { message: MessagePair::new(message.into()) }
-    }
-
     /// Generates an [`Error::TypeVersionMismatch`] with a specific message.
     ///
     /// TypeVersionMismatch errors are a specific type of error arising from differences
@@ -347,9 +337,6 @@ impl Error {
                     message: message.with_internal_context(context),
                 }
             }
-            Error::MethodNotAllowed { message } => Error::MethodNotAllowed {
-                message: message.with_internal_context(context),
-            },
             Error::TypeVersionMismatch { internal_message } => {
                 Error::TypeVersionMismatch {
                     internal_message: format!(
@@ -436,19 +423,6 @@ impl From<Error> for HttpError {
                 }
             }
 
-            // TODO: RFC-7231 requires that 405s generate an Accept header to describe
-            // what methods are available in the response
-            Error::MethodNotAllowed { message } => {
-                let (internal_message, external_message) =
-                    message.into_internal_external();
-                HttpError {
-                    status_code: http::StatusCode::METHOD_NOT_ALLOWED,
-                    error_code: Some(String::from("MethodNotAllowed")),
-                    external_message,
-                    internal_message,
-                }
-            }
-
             Error::Forbidden => HttpError::for_client_error(
                 Some(String::from("Forbidden")),
                 http::StatusCode::FORBIDDEN,
@@ -467,12 +441,12 @@ impl From<Error> for HttpError {
             }
 
             Error::InsufficientCapacity { message } => {
-                // Must create an HttpError explicitly to provide an external
-                // message for 503.
                 let (internal_message, external_message) =
                     message.into_internal_external();
+                // Need to construct an `HttpError` explicitly to present both
+                // an internal and an external message.
                 HttpError {
-                    status_code: http::StatusCode::SERVICE_UNAVAILABLE,
+                    status_code: http::StatusCode::INSUFFICIENT_STORAGE,
                     error_code: Some(String::from("InsufficientCapacity")),
                     external_message: format!(
                         "Insufficient capacity: {}",

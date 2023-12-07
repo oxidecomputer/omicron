@@ -46,7 +46,7 @@ pub fn from_diesel(e: DieselError) -> external::Error {
         NOT_ENOUGH_UNIQUE_ZPOOLS_SENTINEL,
     ];
     if let Some(sentinel) = matches_sentinel(&e, &sentinels) {
-        let external_message = "Not enough disk space";
+        let external_message = "Not enough storage";
         match sentinel {
             NOT_ENOUGH_DATASETS_SENTINEL => {
                 return external::Error::insufficient_capacity(

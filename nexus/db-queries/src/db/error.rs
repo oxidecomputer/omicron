@@ -17,7 +17,7 @@ pub enum TransactionError<T> {
     /// The customizable error type.
     ///
     /// This error should be used for all non-Diesel transaction failures.
-    #[error("Custom transaction error; {0}")]
+    #[error("Custom transaction error: {0}")]
     CustomError(T),
 
     /// The Diesel error type.
@@ -28,31 +28,61 @@ pub enum TransactionError<T> {
     Database(#[from] DieselError),
 }
 
+pub fn retryable(error: &DieselError) -> bool {
+    match error {
+        DieselError::DatabaseError(kind, boxed_error_information) => match kind
+        {
+            DieselErrorKind::SerializationFailure => {
+                return boxed_error_information
+                    .message()
+                    .starts_with("restart transaction");
+            }
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+/// Identifies if the error is retryable or not.
+pub enum MaybeRetryable<T> {
+    /// The error isn't retryable.
+    NotRetryable(T),
+    /// The error is retryable.
+    Retryable(DieselError),
+}
+
+impl<T> TransactionError<T> {
+    /// Identifies that the error could be returned from a Diesel transaction.
+    ///
+    /// Allows callers to propagate arbitrary errors out of transaction contexts
+    /// without losing information that might be valuable to the calling context,
+    /// such as "does this particular error indicate that the entire transaction
+    /// should retry?".
+    pub fn retryable(self) -> MaybeRetryable<Self> {
+        use MaybeRetryable::*;
+
+        match self {
+            TransactionError::Database(err) if retryable(&err) => {
+                Retryable(err)
+            }
+            _ => NotRetryable(self),
+        }
+    }
+}
+
 impl From<PublicError> for TransactionError<PublicError> {
     fn from(err: PublicError) -> Self {
         TransactionError::CustomError(err)
     }
 }
 
-impl<T> TransactionError<T> {
-    /// Based on [the CRDB][1] docs, return true if this transaction must be
-    /// retried.
-    ///
-    /// [1]: https://www.cockroachlabs.com/docs/v23.1/transaction-retry-error-reference#client-side-retry-handling
-    pub fn retry_transaction(&self) -> bool {
-        match &self {
-            Self::Database(DieselError::DatabaseError(
-                kind,
-                boxed_error_information,
-            )) => match kind {
-                DieselErrorKind::SerializationFailure => {
-                    return boxed_error_information
-                        .message()
-                        .starts_with("restart transaction");
-                }
-                _ => false,
-            },
-            _ => false,
+impl From<TransactionError<PublicError>> for PublicError {
+    fn from(err: TransactionError<PublicError>) -> Self {
+        match err {
+            TransactionError::CustomError(err) => err,
+            TransactionError::Database(err) => {
+                public_error_from_diesel(err, ErrorHandler::Server)
+            }
         }
     }
 }

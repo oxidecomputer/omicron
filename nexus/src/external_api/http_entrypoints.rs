@@ -140,6 +140,11 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(ip_pool_service_range_add)?;
         api.register(ip_pool_service_range_remove)?;
 
+        api.register(floating_ip_list)?;
+        api.register(floating_ip_create)?;
+        api.register(floating_ip_view)?;
+        api.register(floating_ip_delete)?;
+
         api.register(disk_list)?;
         api.register(disk_create)?;
         api.register(disk_view)?;
@@ -1517,6 +1522,126 @@ async fn ip_pool_service_range_remove(
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         nexus.ip_pool_service_delete_range(&opctx, &range).await?;
         Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+// Floating IP Addresses
+
+/// List all Floating IPs
+#[endpoint {
+    method = GET,
+    path = "/v1/floating-ips",
+    tags = ["floating-ips"],
+}]
+async fn floating_ip_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
+) -> Result<HttpResponseOk<ResultsPage<views::FloatingIp>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let query = query_params.into_inner();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+        let project_lookup =
+            nexus.project_lookup(&opctx, scan_params.selector.clone())?;
+        let ips = nexus
+            .floating_ips_list(&opctx, &project_lookup, &paginated_by)
+            .await?;
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
+            ips,
+            &marker_for_name_or_id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Create a Floating IP
+#[endpoint {
+    method = POST,
+    path = "/v1/floating-ips",
+    tags = ["floating-ips"],
+}]
+async fn floating_ip_create(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<params::ProjectSelector>,
+    floating_params: TypedBody<params::FloatingIpCreate>,
+) -> Result<HttpResponseCreated<views::FloatingIp>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let floating_params = floating_params.into_inner();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let project_lookup =
+            nexus.project_lookup(&opctx, query_params.into_inner())?;
+        let ip = nexus
+            .floating_ip_create(&opctx, &project_lookup, floating_params)
+            .await?;
+        Ok(HttpResponseCreated(ip))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Delete a Floating IP
+#[endpoint {
+    method = DELETE,
+    path = "/v1/floating-ips/{floating_ip}",
+    tags = ["floating-ips"],
+}]
+async fn floating_ip_delete(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::FloatingIpPath>,
+    query_params: Query<params::OptionalProjectSelector>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let floating_ip_selector = params::FloatingIpSelector {
+            floating_ip: path.floating_ip,
+            project: query.project,
+        };
+        let fip_lookup =
+            nexus.floating_ip_lookup(&opctx, floating_ip_selector)?;
+
+        nexus.floating_ip_delete(&opctx, fip_lookup).await?;
+        Ok(HttpResponseDeleted())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch a floating IP
+#[endpoint {
+    method = GET,
+    path = "/v1/floating-ips/{floating_ip}",
+    tags = ["floating-ips"]
+}]
+async fn floating_ip_view(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::FloatingIpPath>,
+    query_params: Query<params::OptionalProjectSelector>,
+) -> Result<HttpResponseOk<views::FloatingIp>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let floating_ip_selector = params::FloatingIpSelector {
+            floating_ip: path.floating_ip,
+            project: query.project,
+        };
+        let (.., fip) = nexus
+            .floating_ip_lookup(&opctx, floating_ip_selector)?
+            .fetch()
+            .await?;
+        Ok(HttpResponseOk(fip.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -4504,10 +4629,7 @@ async fn sled_set_provision_state(
 
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         // Convert the external `SledProvisionState` into our internal data model.
-        let new_state =
-            db::model::SledProvisionState::try_from(provision_state).map_err(
-                |error| HttpError::for_bad_request(None, format!("{error}")),
-            )?;
+        let new_state = db::model::SledProvisionState::from(provision_state);
 
         let sled_lookup = nexus.sled_lookup(&opctx, &path.sled_id)?;
 
