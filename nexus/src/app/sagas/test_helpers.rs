@@ -10,9 +10,7 @@ use crate::{
     app::{saga::create_saga_dag, test_interfaces::TestInterfaces as _},
     Nexus,
 };
-use async_bb8_diesel::{
-    AsyncConnection, AsyncRunQueryDsl, AsyncSimpleConnection,
-};
+use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use futures::future::BoxFuture;
 use nexus_db_queries::{
@@ -434,11 +432,10 @@ pub(crate) async fn assert_no_failed_undo_steps(
 ) {
     use nexus_db_queries::db::model::saga_types::SagaNodeEvent;
 
+    let conn = datastore.pool_connection_for_tests().await.unwrap();
     let saga_node_events: Vec<SagaNodeEvent> = datastore
-        .pool_connection_for_tests()
-        .await
-        .unwrap()
-        .transaction_async(|conn| async move {
+        .transaction_retry_wrapper("assert_no_failed_undo_steps")
+        .transaction(&conn, |conn| async move {
             use nexus_db_queries::db::schema::saga_node_event::dsl;
 
             conn.batch_execute_async(
@@ -447,14 +444,12 @@ pub(crate) async fn assert_no_failed_undo_steps(
             .await
             .unwrap();
 
-            Ok::<_, nexus_db_queries::db::TransactionError<()>>(
-                dsl::saga_node_event
-                    .filter(dsl::event_type.eq(String::from("undo_failed")))
-                    .select(SagaNodeEvent::as_select())
-                    .load_async::<SagaNodeEvent>(&conn)
-                    .await
-                    .unwrap(),
-            )
+            Ok(dsl::saga_node_event
+                .filter(dsl::event_type.eq(String::from("undo_failed")))
+                .select(SagaNodeEvent::as_select())
+                .load_async::<SagaNodeEvent>(&conn)
+                .await
+                .unwrap())
         })
         .await
         .unwrap();

@@ -869,7 +869,17 @@ impl super::Nexus {
     ) -> ListResultVec<UninitializedSled> {
         debug!(self.log, "Getting latest collection");
         // Grab the SPs from the last collection
-        let limit = NonZeroU32::new(50).unwrap();
+        //
+        // We set a limit of 200 here to give us some breathing room when
+        // querying for cabooses and RoT pages, each of which is "4 per SP/RoT",
+        // which in a single fully populated rack works out to (32 sleds + 2
+        // switches + 1 psc) * 4 = 140.
+        //
+        // This feels bad and probably needs more thought; see
+        // https://github.com/oxidecomputer/omicron/issues/4621 where this limit
+        // being too low bit us, and it will link to a more general followup
+        // issue.
+        let limit = NonZeroU32::new(200).unwrap();
         let collection = self
             .db_datastore
             .inventory_get_latest_collection(opctx, limit)

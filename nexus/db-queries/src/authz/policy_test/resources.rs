@@ -319,6 +319,13 @@ async fn make_project(
         Uuid::new_v4(),
         LookupType::ByName(image_name),
     ));
+
+    let floating_ip_name = format!("{project_name}-fip1");
+    builder.new_resource(authz::FloatingIp::new(
+        project.clone(),
+        Uuid::new_v4(),
+        LookupType::ByName(floating_ip_name),
+    ));
 }
 
 /// Returns the set of authz classes exempted from the coverage test

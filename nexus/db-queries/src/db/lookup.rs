@@ -231,6 +231,11 @@ impl<'a> LookupPath<'a> {
         RouterRoute::PrimaryKey(Root { lookup_root: self }, id)
     }
 
+    /// Select a resource of type FloatingIp, identified by its id
+    pub fn floating_ip_id(self, id: Uuid) -> FloatingIp<'a> {
+        FloatingIp::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
     // Fleet-level resources
 
     /// Select a resource of type ConsoleSession, identified by its `token`
@@ -632,7 +637,7 @@ lookup_resource! {
 lookup_resource! {
     name = "Project",
     ancestors = [ "Silo" ],
-    children = [ "Disk", "Instance", "Vpc", "Snapshot", "ProjectImage" ],
+    children = [ "Disk", "Instance", "Vpc", "Snapshot", "ProjectImage", "FloatingIp" ],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -723,6 +728,15 @@ lookup_resource! {
     name = "VpcSubnet",
     ancestors = [ "Silo", "Project", "Vpc" ],
     children = [ ],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "FloatingIp",
+    ancestors = [ "Silo", "Project" ],
+    children = [],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]

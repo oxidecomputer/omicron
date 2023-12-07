@@ -11,7 +11,9 @@ use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::error::public_error_from_diesel;
+use crate::db::error::retryable;
 use crate::db::error::ErrorHandler;
+use crate::db::error::TransactionError;
 use crate::db::identity::Asset;
 use crate::db::model::Service;
 use crate::db::model::Sled;
@@ -38,7 +40,12 @@ impl DataStore {
         service: Service,
     ) -> CreateResult<Service> {
         let conn = self.pool_connection_authorized(opctx).await?;
-        self.service_upsert_conn(&conn, service).await
+        self.service_upsert_conn(&conn, service).await.map_err(|e| match e {
+            TransactionError::CustomError(err) => err,
+            TransactionError::Database(err) => {
+                public_error_from_diesel(err, ErrorHandler::Server)
+            }
+        })
     }
 
     /// Stores a new service in the database (using an existing db connection).
@@ -46,7 +53,7 @@ impl DataStore {
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         service: Service,
-    ) -> CreateResult<Service> {
+    ) -> Result<Service, TransactionError<Error>> {
         use db::schema::service::dsl;
 
         let service_id = service.id();
@@ -68,17 +75,24 @@ impl DataStore {
         .insert_and_get_result_async(conn)
         .await
         .map_err(|e| match e {
-            AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
-                type_name: ResourceType::Sled,
-                lookup_type: LookupType::ById(sled_id),
-            },
-            AsyncInsertError::DatabaseError(e) => public_error_from_diesel(
-                e,
-                ErrorHandler::Conflict(
-                    ResourceType::Service,
-                    &service_id.to_string(),
-                ),
-            ),
+            AsyncInsertError::CollectionNotFound => {
+                TransactionError::CustomError(Error::ObjectNotFound {
+                    type_name: ResourceType::Sled,
+                    lookup_type: LookupType::ById(sled_id),
+                })
+            }
+            AsyncInsertError::DatabaseError(e) => {
+                if retryable(&e) {
+                    return TransactionError::Database(e);
+                }
+                TransactionError::CustomError(public_error_from_diesel(
+                    e,
+                    ErrorHandler::Conflict(
+                        ResourceType::Service,
+                        &service_id.to_string(),
+                    ),
+                ))
+            }
         })
     }
 

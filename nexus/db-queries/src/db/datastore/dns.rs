@@ -15,6 +15,7 @@ use crate::db::model::DnsZone;
 use crate::db::model::Generation;
 use crate::db::model::InitialDnsGroup;
 use crate::db::pagination::paginated;
+use crate::db::pagination::Paginator;
 use crate::db::pool::DbConnection;
 use crate::db::TransactionError;
 use async_bb8_diesel::AsyncConnection;
@@ -67,7 +68,9 @@ impl DataStore {
         dns_group: DnsGroup,
     ) -> ListResultVec<DnsZone> {
         let conn = self.pool_connection_authorized(opctx).await?;
-        self.dns_zones_list_all_on_connection(opctx, &conn, dns_group).await
+        Ok(self
+            .dns_zones_list_all_on_connection(opctx, &conn, dns_group)
+            .await?)
     }
 
     /// Variant of [`Self::dns_zones_list_all`] which may be called from a
@@ -77,7 +80,7 @@ impl DataStore {
         opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         dns_group: DnsGroup,
-    ) -> ListResultVec<DnsZone> {
+    ) -> Result<Vec<DnsZone>, TransactionError<Error>> {
         use db::schema::dns_zone::dsl;
         const LIMIT: usize = 5;
 
@@ -88,8 +91,7 @@ impl DataStore {
             .limit(i64::try_from(LIMIT).unwrap())
             .select(DnsZone::as_select())
             .load_async(conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+            .await?;
 
         bail_unless!(
             list.len() < LIMIT,
@@ -106,12 +108,14 @@ impl DataStore {
         opctx: &OpContext,
         dns_group: DnsGroup,
     ) -> LookupResult<DnsVersion> {
-        self.dns_group_latest_version_conn(
-            opctx,
-            &*self.pool_connection_authorized(opctx).await?,
-            dns_group,
-        )
-        .await
+        let version = self
+            .dns_group_latest_version_conn(
+                opctx,
+                &*self.pool_connection_authorized(opctx).await?,
+                dns_group,
+            )
+            .await?;
+        Ok(version)
     }
 
     pub async fn dns_group_latest_version_conn(
@@ -119,7 +123,7 @@ impl DataStore {
         opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         dns_group: DnsGroup,
-    ) -> LookupResult<DnsVersion> {
+    ) -> Result<DnsVersion, TransactionError<Error>> {
         opctx.authorize(authz::Action::Read, &authz::DNS_CONFIG).await?;
         use db::schema::dns_version::dsl;
         let versions = dsl::dns_version
@@ -128,8 +132,7 @@ impl DataStore {
             .limit(1)
             .select(DnsVersion::as_select())
             .load_async(conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+            .await?;
 
         bail_unless!(
             versions.len() == 1,
@@ -240,9 +243,8 @@ impl DataStore {
         let mut zones = Vec::with_capacity(dns_zones.len());
         for zone in dns_zones {
             let mut zone_records = Vec::new();
-            let mut marker = None;
-
-            loop {
+            let mut paginator = Paginator::new(batch_size);
+            while let Some(p) = paginator.next() {
                 debug!(log, "listing DNS names for zone";
                     "dns_zone_id" => zone.id.to_string(),
                     "dns_zone_name" => &zone.zone_name,
@@ -250,25 +252,16 @@ impl DataStore {
                     "found_so_far" => zone_records.len(),
                     "batch_size" => batch_size.get(),
                 );
-                let pagparams = DataPageParams {
-                    marker: marker.as_ref(),
-                    direction: dropshot::PaginationOrder::Ascending,
-                    limit: batch_size,
-                };
                 let names_batch = self
-                    .dns_names_list(opctx, zone.id, version.version, &pagparams)
+                    .dns_names_list(
+                        opctx,
+                        zone.id,
+                        version.version,
+                        &p.current_pagparams(),
+                    )
                     .await?;
-                let done = names_batch.len()
-                    < usize::try_from(batch_size.get()).unwrap();
-                if let Some((last_name, _)) = names_batch.last() {
-                    marker = Some(last_name.clone());
-                } else {
-                    assert!(done);
-                }
+                paginator = p.found_batch(&names_batch, &|(n, _)| n.clone());
                 zone_records.extend(names_batch.into_iter());
-                if done {
-                    break;
-                }
             }
 
             debug!(log, "found all DNS names for zone";
@@ -377,28 +370,17 @@ impl DataStore {
         opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         update: DnsVersionUpdateBuilder,
-    ) -> Result<(), Error> {
+    ) -> Result<(), TransactionError<Error>> {
         opctx.authorize(authz::Action::Modify, &authz::DNS_CONFIG).await?;
 
         let zones = self
             .dns_zones_list_all_on_connection(opctx, conn, update.dns_group)
             .await?;
 
-        let result = conn
-            .transaction_async(|c| async move {
-                self.dns_update_internal(opctx, &c, update, zones)
-                    .await
-                    .map_err(TransactionError::CustomError)
-            })
-            .await;
-
-        match result {
-            Ok(()) => Ok(()),
-            Err(TransactionError::CustomError(e)) => Err(e),
-            Err(TransactionError::Database(e)) => {
-                Err(public_error_from_diesel(e, ErrorHandler::Server))
-            }
-        }
+        conn.transaction_async(|c| async move {
+            self.dns_update_internal(opctx, &c, update, zones).await
+        })
+        .await
     }
 
     // This must only be used inside a transaction.  Otherwise, it may make
@@ -409,7 +391,7 @@ impl DataStore {
         conn: &async_bb8_diesel::Connection<DbConnection>,
         update: DnsVersionUpdateBuilder,
         zones: Vec<DnsZone>,
-    ) -> Result<(), Error> {
+    ) -> Result<(), TransactionError<Error>> {
         // TODO-scalability TODO-performance This would be much better as a CTE
         // for all the usual reasons described in RFD 192.  Using an interactive
         // transaction here means that either we wind up holding database locks
@@ -455,10 +437,7 @@ impl DataStore {
             diesel::insert_into(dsl::dns_version)
                 .values(new_version)
                 .execute_async(conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .await?;
         }
 
         {
@@ -480,8 +459,7 @@ impl DataStore {
             )
             .set(dsl::version_removed.eq(new_version_num))
             .execute_async(conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+            .await?;
 
             bail_unless!(
                 nremoved == ntoremove,
@@ -495,10 +473,7 @@ impl DataStore {
             let nadded = diesel::insert_into(dsl::dns_name)
                 .values(new_names)
                 .execute_async(conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .await?;
 
             bail_unless!(
                 nadded == ntoadd,
@@ -1684,6 +1659,10 @@ mod test {
             let conn = datastore.pool_connection_for_tests().await.unwrap();
             let error =
                 datastore.dns_update(&opctx, &conn, update).await.unwrap_err();
+            let error = match error {
+                TransactionError::CustomError(err) => err,
+                _ => panic!("Unexpected error: {:?}", error),
+            };
             assert_eq!(
                 error.to_string(),
                 "Internal Error: updated wrong number of dns_name \
@@ -1707,11 +1686,15 @@ mod test {
             update.add_name(String::from("n2"), records1.clone()).unwrap();
 
             let conn = datastore.pool_connection_for_tests().await.unwrap();
-            let error =
-                datastore.dns_update(&opctx, &conn, update).await.unwrap_err();
+            let error = Error::from(
+                datastore.dns_update(&opctx, &conn, update).await.unwrap_err(),
+            );
             let msg = error.to_string();
-            assert!(msg.starts_with("Internal Error: "));
-            assert!(msg.contains("violates unique constraint"));
+            assert!(msg.starts_with("Internal Error: "), "Message: {msg:}");
+            assert!(
+                msg.contains("violates unique constraint"),
+                "Message: {msg:}"
+            );
         }
 
         let dns_config = datastore

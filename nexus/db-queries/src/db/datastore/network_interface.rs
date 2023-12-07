@@ -13,7 +13,6 @@ use crate::db::collection_insert::DatastoreCollection;
 use crate::db::cte_utils::BoxedQuery;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
-use crate::db::error::TransactionError;
 use crate::db::model::IncompleteNetworkInterface;
 use crate::db::model::Instance;
 use crate::db::model::InstanceNetworkInterface;
@@ -25,7 +24,7 @@ use crate::db::model::VpcSubnet;
 use crate::db::pagination::paginated;
 use crate::db::pool::DbConnection;
 use crate::db::queries::network_interface;
-use async_bb8_diesel::AsyncConnection;
+use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
@@ -466,77 +465,91 @@ impl DataStore {
             InstanceNotStopped,
             FailedToUnsetPrimary(DieselError),
         }
-        type TxnError = TransactionError<NetworkInterfaceUpdateError>;
+
+        let err = OptionalError::new();
 
         let conn = self.pool_connection_authorized(opctx).await?;
         if primary {
-            conn.transaction_async(|conn| async move {
-                let instance_runtime =
-                    instance_query.get_result_async(&conn).await?.runtime_state;
-                if instance_runtime.propolis_id.is_some()
-                    || instance_runtime.nexus_state != stopped
-                {
-                    return Err(TxnError::CustomError(
-                        NetworkInterfaceUpdateError::InstanceNotStopped,
-                    ));
-                }
+            self.transaction_retry_wrapper("instance_update_network_interface")
+                .transaction(&conn, |conn| {
+                    let err = err.clone();
+                    let stopped = stopped.clone();
+                    let update_target_query = update_target_query.clone();
+                    async move {
+                        let instance_runtime =
+                            instance_query.get_result_async(&conn).await?.runtime_state;
+                        if instance_runtime.propolis_id.is_some()
+                            || instance_runtime.nexus_state != stopped
+                        {
+                            return Err(err.bail(NetworkInterfaceUpdateError::InstanceNotStopped));
+                        }
 
-                // First, get the primary interface
-                let primary_interface =
-                    find_primary_query.get_result_async(&conn).await?;
-                // If the target and primary are different, we need to toggle
-                // the primary into a secondary.
-                if primary_interface.identity.id != interface_id {
-                    use crate::db::schema::network_interface::dsl;
-                    if let Err(e) = diesel::update(dsl::network_interface)
-                        .filter(dsl::id.eq(primary_interface.identity.id))
-                        .filter(dsl::kind.eq(NetworkInterfaceKind::Instance))
-                        .filter(dsl::time_deleted.is_null())
-                        .set(dsl::is_primary.eq(false))
-                        .execute_async(&conn)
-                        .await
-                    {
-                        return Err(TxnError::CustomError(
-                            NetworkInterfaceUpdateError::FailedToUnsetPrimary(
-                                e,
-                            ),
-                        ));
+                        // First, get the primary interface
+                        let primary_interface =
+                            find_primary_query.get_result_async(&conn).await?;
+                        // If the target and primary are different, we need to toggle
+                        // the primary into a secondary.
+                        if primary_interface.identity.id != interface_id {
+                            use crate::db::schema::network_interface::dsl;
+                            if let Err(e) = diesel::update(dsl::network_interface)
+                                .filter(dsl::id.eq(primary_interface.identity.id))
+                                .filter(dsl::kind.eq(NetworkInterfaceKind::Instance))
+                                .filter(dsl::time_deleted.is_null())
+                                .set(dsl::is_primary.eq(false))
+                                .execute_async(&conn)
+                                .await
+                            {
+                                return Err(err.bail_retryable_or_else(
+                                    e,
+                                    |e| NetworkInterfaceUpdateError::FailedToUnsetPrimary(e)
+                                ));
+                            }
+                        }
+
+                        // In any case, update the actual target
+                        update_target_query.get_result_async(&conn).await
                     }
-                }
-
-                // In any case, update the actual target
-                Ok(update_target_query.get_result_async(&conn).await?)
-            })
+                }).await
         } else {
             // In this case, we can just directly apply the updates. By
             // construction, `updates.primary` is `None`, so nothing will
             // be done there. The other columns always need to be updated, and
             // we're only hitting a single row. Note that we still need to
             // verify the instance is stopped.
-            conn.transaction_async(|conn| async move {
-                let instance_state =
-                    instance_query.get_result_async(&conn).await?.runtime_state;
-                if instance_state.propolis_id.is_some()
-                    || instance_state.nexus_state != stopped
-                {
-                    return Err(TxnError::CustomError(
-                        NetworkInterfaceUpdateError::InstanceNotStopped,
-                    ));
-                }
-                Ok(update_target_query.get_result_async(&conn).await?)
-            })
+            self.transaction_retry_wrapper("instance_update_network_interface")
+                .transaction(&conn, |conn| {
+                    let err = err.clone();
+                    let stopped = stopped.clone();
+                    let update_target_query = update_target_query.clone();
+                    async move {
+                        let instance_state =
+                            instance_query.get_result_async(&conn).await?.runtime_state;
+                        if instance_state.propolis_id.is_some()
+                            || instance_state.nexus_state != stopped
+                        {
+                            return Err(err.bail(NetworkInterfaceUpdateError::InstanceNotStopped));
+                        }
+                        update_target_query.get_result_async(&conn).await
+                    }
+                }).await
         }
-        .await
         // Convert to `InstanceNetworkInterface` before returning, we know
         // this is valid as we've filtered appropriately above.
         .map(NetworkInterface::as_instance)
-        .map_err(|e| match e {
-            TxnError::CustomError(
-                NetworkInterfaceUpdateError::InstanceNotStopped,
-            ) => Error::invalid_request(
-                "Instance must be stopped to update its network interfaces",
-            ),
-            _ => Error::internal_error(&format!("Transaction error: {:?}", e)),
+        .map_err(|e| {
+            if let Some(err) = err.take() {
+                match err {
+                    NetworkInterfaceUpdateError::InstanceNotStopped => {
+                        return Error::invalid_request(
+                            "Instance must be stopped to update its network interfaces",
+                        );
+                    },
+                    NetworkInterfaceUpdateError::FailedToUnsetPrimary(err) => {
+                        return public_error_from_diesel(err, ErrorHandler::Server);
+                    },
+                }
+            }
+            public_error_from_diesel(e, ErrorHandler::Server)
         })
     }
 }
