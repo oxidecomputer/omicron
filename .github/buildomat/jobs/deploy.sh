@@ -340,7 +340,7 @@ export OXIDE_HOST OXIDE_TOKEN
 # successfully talked to in bootstrap, so wait a bit for it to fully come online.
 #
 retry=0
-while ! curl -sSf "$OXIDE_HOST/v1/ping" --resolve "$OXIDE_RESOLVE"; do
+while ! curl -sSf "$OXIDE_HOST/v1/ping" --resolve "$OXIDE_RESOLVE" --cacert "$E2E_TLS_CERT"; do
 	if [[ $retry -gt 60 ]]; then
 		echo "$OXIDE_RESOLVE failed to come up after 60 seconds"
 		exit 1
