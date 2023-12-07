@@ -5,13 +5,11 @@ use anyhow::{ensure, Context as _, Result};
 use async_trait::async_trait;
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use oxide_client::types::{
-    ByteCount, DiskCreate, DiskSource, ExternalIpCreate, ImageCreate,
-    ImageSource, InstanceCpuCount, InstanceCreate, InstanceDiskAttachment,
-    InstanceNetworkInterfaceAttachment, SshKeyCreate,
+    ByteCount, DiskCreate, DiskSource, ExternalIpCreate, InstanceCpuCount,
+    InstanceCreate, InstanceDiskAttachment, InstanceNetworkInterfaceAttachment,
+    SshKeyCreate,
 };
-use oxide_client::{
-    ClientDisksExt, ClientImagesExt, ClientInstancesExt, ClientSessionExt,
-};
+use oxide_client::{ClientDisksExt, ClientInstancesExt, ClientSessionExt};
 use russh::{ChannelMsg, Disconnect};
 use russh_keys::key::{KeyPair, PublicKey};
 use russh_keys::PublicKeyBase64;
@@ -38,22 +36,6 @@ async fn instance_launch() -> Result<()> {
         .send()
         .await?;
 
-    eprintln!("create system image");
-    let image_id = ctx
-        .client
-        .image_create()
-        .body(ImageCreate {
-            name: generate_name("debian")?,
-            description: String::new(),
-            os: "debian".try_into().map_err(anyhow::Error::msg)?,
-            version: "propolis-blob".into(),
-            /// XXX this won't work, it needs cloud-init
-            source: ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
-        })
-        .send()
-        .await?
-        .id;
-
     eprintln!("create disk");
     let disk_name = generate_name("disk")?;
     let disk_name = ctx
@@ -63,7 +45,9 @@ async fn instance_launch() -> Result<()> {
         .body(DiskCreate {
             name: disk_name.clone(),
             description: String::new(),
-            disk_source: DiskSource::Image { image_id },
+            disk_source: DiskSource::Image {
+                image_id: ctx.get_silo_image_id("debian11").await?,
+            },
             size: ByteCount(2048 * 1024 * 1024),
         })
         .send()

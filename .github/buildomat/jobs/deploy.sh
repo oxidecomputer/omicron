@@ -281,19 +281,15 @@ rmdir pkg
 E2E_TLS_CERT="/opt/oxide/sled-agent/pkg/initial-tls-cert.pem"
 
 #
-# Image-related tests use images served by catacomb. The lab network is
-# IPv4-only; the propolis zones are IPv6-only. These steps set up tcpproxy
-# configured to proxy to catacomb via port 54321 in the global zone.
+# Download the Oxide CLI and images from catacomb.
 #
 pfexec mkdir -p /usr/oxide
-pfexec rm -f /usr/oxide/tcpproxy
-pfexec curl -sSfL -o /usr/oxide/tcpproxy \
-	http://catacomb.eng.oxide.computer:12346/tcpproxy
-pfexec chmod +x /usr/oxide/tcpproxy
-pfexec rm -f /var/svc/manifest/site/tcpproxy.xml
-pfexec curl -sSfL -o /var/svc/manifest/site/tcpproxy.xml \
-	http://catacomb.eng.oxide.computer:12346/tcpproxy.xml
-pfexec svccfg import /var/svc/manifest/site/tcpproxy.xml
+pfexec curl -sSfL -o /usr/oxide/oxide \
+	http://catacomb.eng.oxide.computer:12346/oxide-v0.1.0
+pfexec chmod +x /usr/oxide/oxide
+
+curl -sSfL -o debian-11-genericcloud-amd64.raw \
+	http://catacomb.eng.oxide.computer:12346/debian-11-genericcloud-amd64.raw
 
 #
 # The lab-netdev target is a ramdisk system that is always cleared
@@ -336,7 +332,24 @@ echo "Waited for chrony: ${retry}s"
 
 export RUST_BACKTRACE=1
 export E2E_TLS_CERT IPPOOL_START IPPOOL_END
-./tests/bootstrap
+eval "$(./tests/bootstrap)"
+export OXIDE_HOST OXIDE_TOKEN
+
+/usr/oxide/oxide --resolve "$OXIDE_RESOLVE" \
+	project create --name images --description "some images"
+/usr/oxide/oxide --resolve "$OXIDE_RESOLVE" \
+	disk import \
+	--path debian-11-genericcloud-amd64.raw \
+	--disk debian11-boot \
+	--project images \
+	--description "debian 11 cloud image from distros" \
+	--snapshot debian11-snapshot \
+	--image debian11 \
+	--image-description "debian 11 original base image" \
+	--image-os debian \
+	--image-version "11"
+/usr/oxide/oxide --resolve "$OXIDE_RESOLVE" \
+	image promote --project images --image debian11
 
 rm ./tests/bootstrap
 for test_bin in tests/*; do
