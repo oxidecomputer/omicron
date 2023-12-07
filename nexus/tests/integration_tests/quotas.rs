@@ -1,18 +1,23 @@
 use anyhow::Error;
 use dropshot::test_util::ClientTestContext;
+use http::Method;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
+use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::http_testing::TestResponse;
 use nexus_test_utils::resource_helpers::create_local_user;
 use nexus_test_utils::resource_helpers::grant_iam;
 use nexus_test_utils::resource_helpers::object_create;
+use nexus_test_utils::resource_helpers::populate_ip_pool;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::SiloRole;
+use nexus_types::external_api::views::SiloQuotas;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::InstanceCpuCount;
+use semver::Op;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -24,6 +29,34 @@ struct ResourceAllocator {
 impl ResourceAllocator {
     fn new(auth: AuthnMode) -> Self {
         Self { auth }
+    }
+
+    async fn set_quotas(
+        &self,
+        client: &ClientTestContext,
+        quotas: params::SiloQuotasUpdate,
+    ) -> Result<TestResponse, Error> {
+        NexusRequest::object_put(
+            client,
+            "/v1/system/silos/quota-test-silo/quotas",
+            Some(&quotas),
+        )
+        .authn_as(self.auth.clone())
+        .execute()
+        .await
+    }
+
+    async fn get_quotas(&self, client: &ClientTestContext) -> SiloQuotas {
+        NexusRequest::object_get(
+            client,
+            "/v1/system/silos/quota-test-silo/quotas",
+        )
+        .authn_as(self.auth.clone())
+        .execute()
+        .await
+        .expect("failed to fetch quotas")
+        .parsed_body()
+        .expect("failed to parse quotas")
     }
 
     async fn provision_instance(
@@ -49,12 +82,54 @@ impl ResourceAllocator {
                 network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
                 external_ips: Vec::<params::ExternalIpCreate>::new(),
                 disks: Vec::<params::InstanceDiskAttachment>::new(),
-                start: true,
+                start: false,
             },
         )
         .authn_as(self.auth.clone())
         .execute()
         .await
+        .expect("Instance should be created regardless of quotas");
+
+        NexusRequest::new(
+            RequestBuilder::new(
+                client,
+                Method::POST,
+                format!("/v1/instances/{}/start?project=project", name)
+                    .as_str(),
+            )
+            .body(None as Option<&serde_json::Value>),
+        )
+        .authn_as(self.auth.clone())
+        .execute()
+        .await
+    }
+
+    async fn cleanup_instance(
+        &self,
+        client: &ClientTestContext,
+        name: &str,
+    ) -> TestResponse {
+        // Stop instance if it's started... can probably ignore errors here
+        NexusRequest::new(
+            RequestBuilder::new(
+                client,
+                Method::POST,
+                format!("/v1/instances/{}/stop?project=project", name).as_str(),
+            )
+            .body(None as Option<&serde_json::Value>),
+        )
+        .authn_as(self.auth.clone())
+        .execute()
+        .await;
+
+        NexusRequest::object_delete(
+            client,
+            format!("/v1/instances/{}?project=project", name).as_str(),
+        )
+        .authn_as(self.auth.clone())
+        .execute()
+        .await
+        .expect("failed to delete instance")
     }
 
     async fn provision_disk(
@@ -106,6 +181,8 @@ async fn setup_silo_with_quota(
     )
     .await;
 
+    populate_ip_pool(&client, "default", None).await;
+
     // Create a silo user
     let user = create_local_user(
         client,
@@ -139,7 +216,8 @@ async fn setup_silo_with_quota(
     )
     .authn_as(auth_mode.clone())
     .execute()
-    .await?;
+    .await
+    .unwrap();
 
     ResourceAllocator::new(auth_mode)
 }
@@ -147,13 +225,68 @@ async fn setup_silo_with_quota(
 #[nexus_test]
 async fn test_quotas(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    // let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.apictx().nexus;
 
     let system = setup_silo_with_quota(
         &client,
-        "rationed_silo",
+        "quota-test-silo",
         params::SiloQuotasCreate::empty(),
     )
     .await;
-    system.provision_instance(client, "instance", 1, 1).await;
+
+    // Ensure trying to provision an instance with empty quotas fails
+    system
+        .provision_instance(client, "instance", 1, 1)
+        .await
+        .expect_err("should've failed with insufficient CPU quota");
+    system.cleanup_instance(client, "instance").await;
+
+    // Up the storage quota
+    system
+        .set_quotas(
+            client,
+            params::SiloQuotasUpdate {
+                cpus: None,
+                memory: None,
+                storage: Some(ByteCount::from_gibibytes_u32(100)),
+            },
+        )
+        .await
+        .expect("failed to set quotas");
+
+    let quotas = system.get_quotas(client).await;
+    assert_eq!(quotas.cpus, 0);
+    assert_eq!(quotas.memory, ByteCount::from(0));
+    assert_eq!(quotas.storage, ByteCount::from_gibibytes_u32(100));
+
+    // Ensure trying to provision an instance still fails with only storage quota updated
+    system
+        .provision_instance(client, "instance", 1, 1)
+        .await
+        .expect_err("should've failed with insufficient CPU quota");
+    system.cleanup_instance(client, "instance").await;
+
+    // Up the CPU, memory quotas
+    system
+        .set_quotas(
+            client,
+            params::SiloQuotasUpdate {
+                cpus: Some(4),
+                memory: Some(ByteCount::from_gibibytes_u32(100)),
+                storage: Some(ByteCount::from_gibibytes_u32(0)),
+            },
+        )
+        .await
+        .expect("failed to set quotas");
+
+    let quotas = system.get_quotas(client).await;
+    assert_eq!(quotas.cpus, 4);
+    assert_eq!(quotas.memory, ByteCount::from_gibibytes_u32(100));
+    assert_eq!(quotas.storage, ByteCount::from(0));
+
+    // Allocating instance should now succeed
+    system
+        .provision_instance(client, "instance", 2, 80)
+        .await
+        .expect("Instance should've had enough resources to be provisioned");
 }
