@@ -845,12 +845,7 @@ impl ServiceManager {
                 None,
                 omicron_zones_config.clone(),
                 |z: &OmicronZoneConfig| {
-                    matches!(
-                        z.zone_type,
-                        OmicronZoneType::InternalDns { .. }
-                            | OmicronZoneType::BoundaryNtp { .. }
-                            | OmicronZoneType::InternalNtp { .. }
-                    )
+                    matches!(z.zone_type, OmicronZoneType::InternalDns { .. })
                 },
             )
             .await?;
@@ -859,8 +854,6 @@ impl ServiceManager {
         // synchronization, which is a pre-requisite for the other services. We
         // keep `OmicronZoneType::InternalDns` because
         // `ensure_all_omicron_zones` is additive.
-        // TODO This looks like a duplicate of the block above -- why do we do
-        // this?
         let all_zones_request = self
             .ensure_all_omicron_zones(
                 &mut existing_zones,
