@@ -141,8 +141,8 @@ impl<W: AsyncWrite + Unpin> AsyncWrite for BlockSizeBufWriter<W> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_helpers::with_test_runtime;
     use anyhow::Result;
+    use std::future::Future;
     use test_strategy::proptest;
     use tokio::io::AsyncWriteExt;
 
@@ -178,6 +178,19 @@ mod tests {
         ) -> Poll<Result<(), io::Error>> {
             Poll::Ready(Ok(()))
         }
+    }
+
+    fn with_test_runtime<F, Fut, T>(f: F) -> T
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = T>,
+    {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .start_paused(true)
+            .build()
+            .expect("tokio Runtime built successfully");
+        runtime.block_on(f())
     }
 
     #[proptest]

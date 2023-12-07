@@ -17,3 +17,7 @@ thiserror.workspace = true
 tokio.workspace = true
 update-engine.workspace = true
 omicron-workspace-hack.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+test-strategy.workspace = true
