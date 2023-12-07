@@ -23,6 +23,7 @@ mod oximeter;
 mod pantry;
 mod password_login;
 mod projects;
+mod quotas;
 mod rack;
 mod role_assignments;
 mod roles_builtin;
