@@ -333,7 +333,7 @@ task: "nat_v4_garbage_collector"
   currently executing: no
   last completed activation: iter 2, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: failed to read generation of dpd: Error Response: status: 404 Not Found; headers: {"content-type": "application/json", "x-request-id": "REDACTED_UUID_REDACTED_UUID_REDACTED", "content-length": "84", "date": "Wed, 06 Dec 2023 18:36:02 GMT"}; value: Error { error_code: None, message: "Not Found", request_id: "REDACTED_UUID_REDACTED_UUID_REDACTED" }
+warning: unknown background task: "nat_v4_garbage_collector" (don't know how to interpret details: Null)
 
 task: "external_endpoints"
   configured period: every 1m
