@@ -133,9 +133,6 @@ pub struct Image {
     /// ID of the parent project if the image is a project image
     pub project_id: Option<Uuid>,
 
-    /// URL source of this image, if any
-    pub url: Option<String>,
-
     /// The family of the operating system like Debian, Ubuntu, etc.
     pub os: String,
 

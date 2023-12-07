@@ -10905,11 +10905,6 @@
             "type": "string",
             "format": "date-time"
           },
-          "url": {
-            "nullable": true,
-            "description": "URL source of this image, if any",
-            "type": "string"
-          },
           "version": {
             "description": "Version of the operating system",
             "type": "string"
