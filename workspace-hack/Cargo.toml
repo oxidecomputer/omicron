@@ -83,8 +83,7 @@ regex = { version = "1.10.2" }
 regex-automata = { version = "0.4.3", default-features = false, features = ["dfa-onepass", "hybrid", "meta", "nfa-backtrack", "perf-inline", "perf-literal", "unicode"] }
 regex-syntax = { version = "0.8.2" }
 reqwest = { version = "0.11.22", features = ["blocking", "json", "rustls-tls", "stream"] }
-ring-9067fe90e8c1f593 = { package = "ring", version = "0.17.5", features = ["std"] }
-ring-986da7b5efc2b80e = { package = "ring", version = "0.16.20", features = ["std"] }
+ring = { version = "0.17.7", features = ["std"] }
 schemars = { version = "0.8.13", features = ["bytes", "chrono", "uuid1"] }
 semver = { version = "1.0.20", features = ["serde"] }
 serde = { version = "1.0.192", features = ["alloc", "derive", "rc"] }
@@ -185,8 +184,7 @@ regex = { version = "1.10.2" }
 regex-automata = { version = "0.4.3", default-features = false, features = ["dfa-onepass", "hybrid", "meta", "nfa-backtrack", "perf-inline", "perf-literal", "unicode"] }
 regex-syntax = { version = "0.8.2" }
 reqwest = { version = "0.11.22", features = ["blocking", "json", "rustls-tls", "stream"] }
-ring-9067fe90e8c1f593 = { package = "ring", version = "0.17.5", features = ["std"] }
-ring-986da7b5efc2b80e = { package = "ring", version = "0.16.20", features = ["std"] }
+ring = { version = "0.17.7", features = ["std"] }
 schemars = { version = "0.8.13", features = ["bytes", "chrono", "uuid1"] }
 semver = { version = "1.0.20", features = ["serde"] }
 serde = { version = "1.0.192", features = ["alloc", "derive", "rc"] }
