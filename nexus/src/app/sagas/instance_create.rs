@@ -598,35 +598,55 @@ async fn sic_allocate_instance_snat_ip_undo(
 async fn sic_allocate_instance_external_ip(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
+    // XXX: may wish to restructure partially: we have at most one ephemeral
+    //      and then at most $n$ floating.
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
     let repeat_saga_params = sagactx.saga_params::<NetParams>()?;
     let saga_params = repeat_saga_params.saga_params;
     let ip_index = repeat_saga_params.which;
-    let ip_params = saga_params.create_params.external_ips.get(ip_index);
-    let ip_params = match ip_params {
-        None => {
-            return Ok(());
-        }
-        Some(ref prs) => prs,
+    let Some(ip_params) = saga_params.create_params.external_ips.get(ip_index)
+    else {
+        return Ok(());
     };
     let opctx = crate::context::op_context_for_saga_action(
         &sagactx,
         &saga_params.serialized_authn,
     );
     let instance_id = repeat_saga_params.instance_id;
-    let ip_id = repeat_saga_params.new_id;
 
-    // Collect the possible pool name for this IP address
-    let pool_name = match ip_params {
+    match ip_params {
+        // Allocate a new IP address from the target, possibly default, pool
         params::ExternalIpCreate::Ephemeral { ref pool_name } => {
-            pool_name.as_ref().map(|name| db::model::Name(name.clone()))
+            let pool_name =
+                pool_name.as_ref().map(|name| db::model::Name(name.clone()));
+            let ip_id = repeat_saga_params.new_id;
+            datastore
+                .allocate_instance_ephemeral_ip(
+                    &opctx,
+                    ip_id,
+                    instance_id,
+                    pool_name,
+                )
+                .await
+                .map_err(ActionError::action_failed)?;
         }
-    };
-    datastore
-        .allocate_instance_ephemeral_ip(&opctx, ip_id, instance_id, pool_name)
-        .await
-        .map_err(ActionError::action_failed)?;
+        // Set the parent of an existing floating IP to the new instance's ID.
+        params::ExternalIpCreate::Floating { ref floating_ip_name } => {
+            let floating_ip_name = db::model::Name(floating_ip_name.clone());
+            let (.., authz_fip, db_fip) = LookupPath::new(&opctx, &datastore)
+                .project_id(saga_params.project_id)
+                .floating_ip_name(&floating_ip_name)
+                .fetch_for(authz::Action::Modify)
+                .await
+                .map_err(ActionError::action_failed)?;
+
+            datastore
+                .floating_ip_attach(&opctx, &authz_fip, &db_fip, instance_id)
+                .await
+                .map_err(ActionError::action_failed)?;
+        }
+    }
     Ok(())
 }
 
@@ -638,16 +658,31 @@ async fn sic_allocate_instance_external_ip_undo(
     let repeat_saga_params = sagactx.saga_params::<NetParams>()?;
     let saga_params = repeat_saga_params.saga_params;
     let ip_index = repeat_saga_params.which;
-    if ip_index >= saga_params.create_params.external_ips.len() {
-        return Ok(());
-    }
-
     let opctx = crate::context::op_context_for_saga_action(
         &sagactx,
         &saga_params.serialized_authn,
     );
-    let ip_id = repeat_saga_params.new_id;
-    datastore.deallocate_external_ip(&opctx, ip_id).await?;
+    let Some(ip_params) = saga_params.create_params.external_ips.get(ip_index)
+    else {
+        return Ok(());
+    };
+
+    match ip_params {
+        params::ExternalIpCreate::Ephemeral { .. } => {
+            let ip_id = repeat_saga_params.new_id;
+            datastore.deallocate_external_ip(&opctx, ip_id).await?;
+        }
+        params::ExternalIpCreate::Floating { floating_ip_name } => {
+            let floating_ip_name = db::model::Name(floating_ip_name.clone());
+            let (.., authz_fip, db_fip) = LookupPath::new(&opctx, &datastore)
+                .project_id(saga_params.project_id)
+                .floating_ip_name(&floating_ip_name)
+                .fetch_for(authz::Action::Modify)
+                .await?;
+
+            datastore.floating_ip_detach(&opctx, &authz_fip, &db_fip).await?;
+        }
+    }
     Ok(())
 }
 
@@ -866,9 +901,7 @@ pub mod test {
         app::sagas::instance_create::SagaInstanceCreate,
         app::sagas::test_helpers, external_api::params,
     };
-    use async_bb8_diesel::{
-        AsyncConnection, AsyncRunQueryDsl, AsyncSimpleConnection,
-    };
+    use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
     use diesel::{
         BoolExpressionMethods, ExpressionMethods, OptionalExtension, QueryDsl,
         SelectableHelper,
@@ -1013,30 +1046,28 @@ pub mod test {
         use nexus_db_queries::db::model::SledResource;
         use nexus_db_queries::db::schema::sled_resource::dsl;
 
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
         datastore
-            .pool_connection_for_tests()
-            .await
-            .unwrap()
-            .transaction_async(|conn| async move {
+            .transaction_retry_wrapper(
+                "no_sled_resource_instance_records_exist",
+            )
+            .transaction(&conn, |conn| async move {
                 conn.batch_execute_async(
                     nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL,
                 )
                 .await
                 .unwrap();
 
-                Ok::<_, nexus_db_queries::db::TransactionError<()>>(
-                    dsl::sled_resource
-                        .filter(
-                            dsl::kind.eq(
-                                nexus_db_queries::db::model::SledResourceKind::Instance,
-                            ),
-                        )
-                        .select(SledResource::as_select())
-                        .get_results_async::<SledResource>(&conn)
-                        .await
-                        .unwrap()
-                        .is_empty(),
-                )
+                Ok(dsl::sled_resource
+                    .filter(dsl::kind.eq(
+                        nexus_db_queries::db::model::SledResourceKind::Instance,
+                    ))
+                    .select(SledResource::as_select())
+                    .get_results_async::<SledResource>(&conn)
+                    .await
+                    .unwrap()
+                    .is_empty())
             })
             .await
             .unwrap()
@@ -1048,16 +1079,17 @@ pub mod test {
         use nexus_db_queries::db::model::VirtualProvisioningResource;
         use nexus_db_queries::db::schema::virtual_provisioning_resource::dsl;
 
-        datastore.pool_connection_for_tests()
-            .await
-            .unwrap()
-            .transaction_async(|conn| async move {
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        datastore
+            .transaction_retry_wrapper("no_virtual_provisioning_resource_records_exist")
+            .transaction(&conn, |conn| async move {
                 conn
                     .batch_execute_async(nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL)
                     .await
                     .unwrap();
 
-                Ok::<_, nexus_db_queries::db::TransactionError<()>>(
+                Ok(
                     dsl::virtual_provisioning_resource
                         .filter(dsl::resource_type.eq(nexus_db_queries::db::model::ResourceTypeProvisioned::Instance.to_string()))
                         .select(VirtualProvisioningResource::as_select())
@@ -1075,31 +1107,29 @@ pub mod test {
         use nexus_db_queries::db::model::VirtualProvisioningCollection;
         use nexus_db_queries::db::schema::virtual_provisioning_collection::dsl;
 
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
         datastore
-            .pool_connection_for_tests()
-            .await
-            .unwrap()
-            .transaction_async(|conn| async move {
+            .transaction_retry_wrapper(
+                "no_virtual_provisioning_collection_records_using_instances",
+            )
+            .transaction(&conn, |conn| async move {
                 conn.batch_execute_async(
                     nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL,
                 )
                 .await
                 .unwrap();
-                Ok::<_, nexus_db_queries::db::TransactionError<()>>(
-                    dsl::virtual_provisioning_collection
-                        .filter(
-                            dsl::cpus_provisioned
-                                .ne(0)
-                                .or(dsl::ram_provisioned.ne(0)),
-                        )
-                        .select(VirtualProvisioningCollection::as_select())
-                        .get_results_async::<VirtualProvisioningCollection>(
-                            &conn,
-                        )
-                        .await
-                        .unwrap()
-                        .is_empty(),
-                )
+                Ok(dsl::virtual_provisioning_collection
+                    .filter(
+                        dsl::cpus_provisioned
+                            .ne(0)
+                            .or(dsl::ram_provisioned.ne(0)),
+                    )
+                    .select(VirtualProvisioningCollection::as_select())
+                    .get_results_async::<VirtualProvisioningCollection>(&conn)
+                    .await
+                    .unwrap()
+                    .is_empty())
             })
             .await
             .unwrap()

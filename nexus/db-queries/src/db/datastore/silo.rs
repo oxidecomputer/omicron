@@ -11,6 +11,7 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::datastore::RunnableQuery;
 use crate::db::error::public_error_from_diesel;
+use crate::db::error::retryable;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
 use crate::db::fixed_data::silo::{DEFAULT_SILO, INTERNAL_SILO};
@@ -123,15 +124,17 @@ impl DataStore {
         dns_update: DnsVersionUpdateBuilder,
     ) -> CreateResult<Silo> {
         let conn = self.pool_connection_authorized(opctx).await?;
-        self.silo_create_conn(
-            &conn,
-            opctx,
-            nexus_opctx,
-            new_silo_params,
-            new_silo_dns_names,
-            dns_update,
-        )
-        .await
+        let silo = self
+            .silo_create_conn(
+                &conn,
+                opctx,
+                nexus_opctx,
+                new_silo_params,
+                new_silo_dns_names,
+                dns_update,
+            )
+            .await?;
+        Ok(silo)
     }
 
     pub async fn silo_create_conn(
@@ -142,7 +145,7 @@ impl DataStore {
         new_silo_params: params::SiloCreate,
         new_silo_dns_names: &[String],
         dns_update: DnsVersionUpdateBuilder,
-    ) -> CreateResult<Silo> {
+    ) -> Result<Silo, TransactionError<Error>> {
         let silo_id = Uuid::new_v4();
         let silo_group_id = Uuid::new_v4();
 
@@ -199,71 +202,71 @@ impl DataStore {
                 None
             };
 
-        conn.transaction_async(|conn| async move {
-            let silo = silo_create_query
-                .get_result_async(&conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(
-                        e,
-                        ErrorHandler::Conflict(
-                            ResourceType::Silo,
-                            new_silo_params.identity.name.as_str(),
-                        ),
-                    )
-                })?;
-            self.virtual_provisioning_collection_create_on_connection(
-                &conn,
-                VirtualProvisioningCollection::new(
-                    silo.id(),
-                    CollectionTypeProvisioned::Silo,
-                ),
-            )
-            .await?;
-
-            if let Some(query) = silo_admin_group_ensure_query {
-                query.get_result_async(&conn).await?;
-            }
-
-            if let Some(queries) = silo_admin_group_role_assignment_queries {
-                let (delete_old_query, insert_new_query) = queries;
-                delete_old_query.execute_async(&conn).await?;
-                insert_new_query.execute_async(&conn).await?;
-            }
-
-            let certificates = new_silo_params
-                .tls_certificates
-                .into_iter()
-                .map(|c| {
-                    Certificate::new(
+        let silo = conn
+            .transaction_async(|conn| async move {
+                let silo = silo_create_query
+                    .get_result_async(&conn)
+                    .await
+                    .map_err(|e| {
+                        if retryable(&e) {
+                            return TransactionError::Database(e);
+                        }
+                        TransactionError::CustomError(public_error_from_diesel(
+                            e,
+                            ErrorHandler::Conflict(
+                                ResourceType::Silo,
+                                new_silo_params.identity.name.as_str(),
+                            ),
+                        ))
+                    })?;
+                self.virtual_provisioning_collection_create_on_connection(
+                    &conn,
+                    VirtualProvisioningCollection::new(
                         silo.id(),
-                        Uuid::new_v4(),
-                        ServiceKind::Nexus,
-                        c,
-                        new_silo_dns_names,
-                    )
-                })
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(Error::from)?;
-            {
-                use db::schema::certificate::dsl;
-                diesel::insert_into(dsl::certificate)
-                    .values(certificates)
-                    .execute_async(&conn)
-                    .await?;
-            }
+                        CollectionTypeProvisioned::Silo,
+                    ),
+                )
+                .await?;
 
-            self.dns_update(nexus_opctx, &conn, dns_update).await?;
+                if let Some(query) = silo_admin_group_ensure_query {
+                    query.get_result_async(&conn).await?;
+                }
 
-            Ok(silo)
-        })
-        .await
-        .map_err(|e| match e {
-            TransactionError::CustomError(e) => e,
-            TransactionError::Database(e) => {
-                public_error_from_diesel(e, ErrorHandler::Server)
-            }
-        })
+                if let Some(queries) = silo_admin_group_role_assignment_queries
+                {
+                    let (delete_old_query, insert_new_query) = queries;
+                    delete_old_query.execute_async(&conn).await?;
+                    insert_new_query.execute_async(&conn).await?;
+                }
+
+                let certificates = new_silo_params
+                    .tls_certificates
+                    .into_iter()
+                    .map(|c| {
+                        Certificate::new(
+                            silo.id(),
+                            Uuid::new_v4(),
+                            ServiceKind::Nexus,
+                            c,
+                            new_silo_dns_names,
+                        )
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(Error::from)?;
+                {
+                    use db::schema::certificate::dsl;
+                    diesel::insert_into(dsl::certificate)
+                        .values(certificates)
+                        .execute_async(&conn)
+                        .await?;
+                }
+
+                self.dns_update(nexus_opctx, &conn, dns_update).await?;
+
+                Ok::<Silo, TransactionError<Error>>(silo)
+            })
+            .await?;
+        Ok(silo)
     }
 
     pub async fn silos_list_by_id(
@@ -380,7 +383,7 @@ impl DataStore {
             }
 
             self.virtual_provisioning_collection_delete_on_connection(
-                &conn, id,
+                &opctx.log, &conn, id,
             )
             .await?;
 

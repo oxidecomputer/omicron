@@ -5,6 +5,7 @@
 //! Virtual Machine Instances
 
 use super::MAX_DISKS_PER_INSTANCE;
+use super::MAX_EPHEMERAL_IPS_PER_INSTANCE;
 use super::MAX_EXTERNAL_IPS_PER_INSTANCE;
 use super::MAX_MEMORY_BYTES_PER_INSTANCE;
 use super::MAX_NICS_PER_INSTANCE;
@@ -52,6 +53,7 @@ use sled_agent_client::types::InstanceProperties;
 use sled_agent_client::types::InstancePutMigrationIdsBody;
 use sled_agent_client::types::InstancePutStateBody;
 use sled_agent_client::types::SourceNatConfig;
+use std::matches;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -166,6 +168,18 @@ impl super::Nexus {
             return Err(Error::invalid_request(&format!(
                 "An instance may not have more than {} external IP addresses",
                 MAX_EXTERNAL_IPS_PER_INSTANCE,
+            )));
+        }
+        if params
+            .external_ips
+            .iter()
+            .filter(|v| matches!(v, params::ExternalIpCreate::Ephemeral { .. }))
+            .count()
+            > MAX_EPHEMERAL_IPS_PER_INSTANCE
+        {
+            return Err(Error::invalid_request(&format!(
+                "An instance may not have more than {} ephemeral IP address",
+                MAX_EPHEMERAL_IPS_PER_INSTANCE,
             )));
         }
         if let params::InstanceNetworkInterfaceAttachment::Create(ref ifaces) =
@@ -885,8 +899,6 @@ impl super::Nexus {
             .await?;
 
         // Collect the external IPs for the instance.
-        // TODO-correctness: Handle Floating IPs, see
-        //  https://github.com/oxidecomputer/omicron/issues/1334
         let (snat_ip, external_ips): (Vec<_>, Vec<_>) = self
             .db_datastore
             .instance_lookup_external_ips(&opctx, authz_instance.id())
@@ -895,8 +907,6 @@ impl super::Nexus {
             .partition(|ip| ip.kind == IpKind::SNat);
 
         // Sanity checks on the number and kind of each IP address.
-        // TODO-correctness: Handle multiple IP addresses, see
-        //  https://github.com/oxidecomputer/omicron/issues/1467
         if external_ips.len() > MAX_EXTERNAL_IPS_PER_INSTANCE {
             return Err(Error::internal_error(
                 format!(
@@ -908,8 +918,28 @@ impl super::Nexus {
                 .as_str(),
             ));
         }
-        let external_ips =
-            external_ips.into_iter().map(|model| model.ip.ip()).collect();
+
+        // Partition remaining external IPs by class: we can have at most
+        // one ephemeral ip.
+        let (ephemeral_ips, floating_ips): (Vec<_>, Vec<_>) = external_ips
+            .into_iter()
+            .partition(|ip| ip.kind == IpKind::Ephemeral);
+
+        if ephemeral_ips.len() > MAX_EPHEMERAL_IPS_PER_INSTANCE {
+            return Err(Error::internal_error(
+                format!(
+                "Expected at most {} ephemeral IP for an instance, found {}",
+                MAX_EPHEMERAL_IPS_PER_INSTANCE,
+                ephemeral_ips.len()
+            )
+                .as_str(),
+            ));
+        }
+
+        let ephemeral_ip = ephemeral_ips.get(0).map(|model| model.ip.ip());
+
+        let floating_ips =
+            floating_ips.into_iter().map(|model| model.ip.ip()).collect();
         if snat_ip.len() != 1 {
             return Err(Error::internal_error(
                 "Expected exactly one SNAT IP address for an instance",
@@ -985,7 +1015,8 @@ impl super::Nexus {
             },
             nics,
             source_nat,
-            external_ips,
+            ephemeral_ip,
+            floating_ips,
             firewall_rules,
             dhcp_config: sled_agent_client::types::DhcpConfig {
                 dns_servers: self.external_dns_servers.clone(),
