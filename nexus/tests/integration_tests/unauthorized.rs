@@ -69,9 +69,8 @@ async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
                     .authn_as(AuthnMode::PrivilegedUser)
                     .execute()
                     .await
-                    .unwrap_or_else(|_| {
-                        panic!("Failed to GET from URL: {url}")
-                    }),
+                    .map_err(|e| panic!("Failed to GET from URL: {url}, {e}"))
+                    .unwrap(),
                 id_routes,
             ),
             SetupReq::Post { url, body, id_routes } => (
@@ -80,7 +79,8 @@ async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
                     .authn_as(AuthnMode::PrivilegedUser)
                     .execute()
                     .await
-                    .unwrap_or_else(|_| panic!("Failed to POST to URL: {url}")),
+                    .map_err(|e| panic!("Failed to POST to URL: {url}, {e}"))
+                    .unwrap(),
                 id_routes,
             ),
         };
@@ -202,15 +202,22 @@ lazy_static! {
                 &*DEMO_SILO_USER_ID_SET_PASSWORD_URL,
             ],
         },
-        // Get the default IP pool
-        SetupReq::Get {
-            url: &DEMO_IP_POOL_URL,
-            id_routes: vec![],
+        // Create the default IP pool
+        SetupReq::Post {
+            url: &DEMO_IP_POOLS_URL,
+            body: serde_json::to_value(&*DEMO_IP_POOL_CREATE).unwrap(),
+            id_routes: vec!["/v1/ip-pools/{id}"],
         },
         // Create an IP pool range
         SetupReq::Post {
             url: &DEMO_IP_POOL_RANGES_ADD_URL,
             body: serde_json::to_value(&*DEMO_IP_POOL_RANGE).unwrap(),
+            id_routes: vec![],
+        },
+        // Link default pool to default silo
+        SetupReq::Post {
+            url: &DEMO_IP_POOL_SILOS_URL,
+            body: serde_json::to_value(&*DEMO_IP_POOL_SILOS_BODY).unwrap(),
             id_routes: vec![],
         },
         // Create a Project in the Organization

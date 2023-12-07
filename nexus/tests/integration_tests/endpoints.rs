@@ -522,12 +522,19 @@ lazy_static! {
                 description: Some(String::from("a new IP pool")),
             },
         };
-    pub static ref DEMO_IP_POOL_ASSOC_URL: String = format!("{}/silos", *DEMO_IP_POOL_URL);
-    pub static ref DEMO_IP_POOL_ASSOC_BODY: params::IpPoolSiloLink =
+    pub static ref DEMO_IP_POOL_SILOS_URL: String = format!("{}/silos", *DEMO_IP_POOL_URL);
+    pub static ref DEMO_IP_POOL_SILOS_BODY: params::IpPoolSiloLink =
         params::IpPoolSiloLink {
             silo: NameOrId::Id(DEFAULT_SILO.identity().id),
+            is_default: true, // necessary for demo instance create to go through
+        };
+
+    pub static ref DEMO_IP_POOL_SILO_URL: String = format!("{}/silos/{}", *DEMO_IP_POOL_URL, *DEMO_SILO_NAME);
+    pub static ref DEMO_IP_POOL_SILO_UPDATE_BODY: params::IpPoolSiloUpdate =
+        params::IpPoolSiloUpdate {
             is_default: false,
         };
+
     pub static ref DEMO_IP_POOL_RANGE: IpRange = IpRange::V4(Ipv4Range::new(
         std::net::Ipv4Addr::new(10, 0, 0, 0),
         std::net::Ipv4Addr::new(10, 0, 0, 255),
@@ -828,13 +835,23 @@ lazy_static! {
             ],
         },
 
-        // IP pool resource association endpoint
+        // IP pool silos endpoint
         VerifyEndpoint {
-            url: &DEMO_IP_POOL_ASSOC_URL,
+            url: &DEMO_IP_POOL_SILOS_URL,
             visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
-                AllowedMethod::Post(serde_json::to_value(&*DEMO_IP_POOL_ASSOC_BODY).unwrap())
+                AllowedMethod::Get,
+                AllowedMethod::Post(serde_json::to_value(&*DEMO_IP_POOL_SILOS_BODY).unwrap()),
+            ],
+        },
+        VerifyEndpoint {
+            url: &DEMO_IP_POOL_SILO_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Delete,
+                AllowedMethod::Put(serde_json::to_value(&*DEMO_IP_POOL_SILO_UPDATE_BODY).unwrap()),
             ],
         },
 
