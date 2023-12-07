@@ -138,6 +138,13 @@ impl From<&BootDiskOsWriteError> for HttpError {
     }
 }
 
+// Note to future maintainers: `installinator` uses the `update_engine` crate to
+// drive its process (which includes writing the boot disk). We could also use
+// `update_engine` inside `BootDiskOsWriter`; instead, we've hand-rolled a state
+// machine with manual progress reporting. The current implementation is
+// _probably_ simple enough that this was a reasonable choice, but if it becomes
+// more complex (or if additional work needs to be done that `update_engine`
+// would make easier), consider switching it over.
 #[derive(Debug)]
 pub(crate) struct BootDiskOsWriter {
     // Note: We use a std Mutex here to avoid cancellation issues with tokio
@@ -424,7 +431,8 @@ impl<W: DiskInterface> BootDiskOsWriteTask<W> {
         // `StreamingBody` attached to their request.
         //
         // If this step fails, we will send the error to the client who sent the
-        // request _and_ a copy of the same error in our current update state.
+        // request _and_ store a copy of the same error in our current update
+        // state.
         let (image_tempfile, image_size) = match self
             .download_body_to_tempfile(image_upload)
             .await
@@ -465,7 +473,7 @@ impl<W: DiskInterface> BootDiskOsWriteTask<W> {
         let mut tempfile =
             tokio::io::BufWriter::new(tokio::fs::File::from_std(tempfile));
 
-        let mut image_upload = std::pin::pin!(image_upload.into_stream());
+        let mut image_upload = std::pin::pin!(image_upload);
         let mut hasher = Sha3_256::default();
         let mut bytes_received = 0;
 
@@ -719,7 +727,6 @@ mod tests {
     use omicron_test_utils::dev::test_setup_log;
     use rand::RngCore;
     use std::mem;
-    use std::path::PathBuf;
     use std::pin::Pin;
     use std::task::ready;
     use std::task::Context;
@@ -742,7 +749,7 @@ mod tests {
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     struct InMemoryDiskContents {
-        path: PathBuf,
+        path: Utf8PathBuf,
         data: Vec<u8>,
     }
 
@@ -770,7 +777,10 @@ mod tests {
 
         async fn open_writer(&self, path: &Path) -> io::Result<Self::Writer> {
             Ok(InMemoryDiskWriter {
-                opened_path: path.into(),
+                opened_path: path
+                    .to_owned()
+                    .try_into()
+                    .expect("non-utf8 test path"),
                 data: BlockSizeBufWriter::with_block_size(
                     Self::BLOCK_SIZE,
                     Vec::new(),
@@ -795,7 +805,7 @@ mod tests {
     }
 
     struct InMemoryDiskWriter {
-        opened_path: PathBuf,
+        opened_path: Utf8PathBuf,
         data: BlockSizeBufWriter<Vec<u8>>,
         semaphore: PollSemaphore,
         finalized_writes: Arc<Mutex<Vec<InMemoryDiskContents>>>,
@@ -1326,7 +1336,7 @@ mod tests {
             assert!(
                 written_disks.contains(&expected),
                 "written disks missing expected contents for {}",
-                expected.path.display(),
+                expected.path,
             );
         }
 

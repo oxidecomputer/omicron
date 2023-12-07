@@ -94,7 +94,7 @@ impl RawDiskWriter {
             }
         })
         .await
-        .unwrap()
+        .expect("task panicked")
     }
 }
 
