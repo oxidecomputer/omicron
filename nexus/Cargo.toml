@@ -85,6 +85,7 @@ oximeter.workspace = true
 oximeter-instruments = { workspace = true, features = ["http-instruments"] }
 oximeter-producer.workspace = true
 rustls = { workspace = true }
+rustls-pki-types.workspace = true
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]

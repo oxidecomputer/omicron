@@ -47,6 +47,8 @@ use omicron_common::bail_unless;
 use openssl::pkey::PKey;
 use openssl::x509::X509;
 use rustls::sign::CertifiedKey;
+use rustls_pki_types::CertificateDer;
+use rustls_pki_types::PrivateKeyDer;
 use serde::Serialize;
 use serde_with::SerializeDisplay;
 use std::collections::btree_map::Entry;
@@ -432,16 +434,20 @@ impl TryFrom<Certificate> for TlsCertificate {
             let private_key_der = private_key
                 .private_key_to_der()
                 .context("serializing private key to DER")?;
-            let rustls_private_key = rustls::PrivateKey(private_key_der);
+            // XXX: Is PKCS#8 correct?
+            let rustls_private_key =
+                PrivateKeyDer::Pkcs8(private_key_der.into());
             let rustls_signing_key =
-                rustls::sign::any_supported_type(&rustls_private_key)
-                    .context("parsing DER private key")?;
+                rustls::crypto::ring::sign::any_supported_type(
+                    &rustls_private_key,
+                )
+                .context("parsing DER private key")?;
             let rustls_certs = certs_pem
                 .iter()
                 .map(|x509| {
                     x509.to_der()
                         .context("serializing cert to DER")
-                        .map(rustls::Certificate)
+                        .map(CertificateDer::from)
                 })
                 .collect::<Result<_, _>>()?;
             Arc::new(CertifiedKey::new(rustls_certs, rustls_signing_key))
@@ -563,6 +569,7 @@ pub(crate) async fn read_all_endpoints(
 /// session.
 ///
 /// See the module-level comment for more details.
+#[derive(Debug)]
 pub struct NexusCertResolver {
     log: slog::Logger,
     config_rx: watch::Receiver<Option<ExternalEndpoints>>,
