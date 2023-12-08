@@ -865,7 +865,12 @@ mod tests {
         }
 
         /// Create pool, associate with current silo
-        async fn create_ip_pool(&self, name: &str, range: IpRange) {
+        async fn create_ip_pool(
+            &self,
+            name: &str,
+            range: IpRange,
+            is_default: bool,
+        ) {
             let pool = IpPool::new(&IdentityMetadataCreateParams {
                 name: String::from(name).parse().unwrap(),
                 description: format!("ip pool {}", name),
@@ -881,7 +886,7 @@ mod tests {
                 resource_id: silo_id,
                 resource_type: IpPoolResourceType::Silo,
                 ip_pool_id: pool.id(),
-                is_default: false,
+                is_default,
             };
             self.db_datastore
                 .ip_pool_associate_resource(&self.opctx, association)
@@ -949,7 +954,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 1),
         ))
         .unwrap();
-        context.create_ip_pool("default", range).await;
+        context.create_ip_pool("default", range, true).await;
         for first_port in
             (0..super::MAX_PORT).step_by(NUM_SOURCE_NAT_PORTS.into())
         {
@@ -1003,7 +1008,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 1),
         ))
         .unwrap();
-        context.create_ip_pool("default", range).await;
+        context.create_ip_pool("default", range, true).await;
 
         // Allocate an Ephemeral IP, which should take the entire port range of
         // the only address in the pool.
@@ -1084,7 +1089,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 3),
         ))
         .unwrap();
-        context.create_ip_pool("default", range).await;
+        context.create_ip_pool("default", range, true).await;
 
         // TODO-completeness: Implementing Iterator for IpRange would be nice.
         let addresses = [
@@ -1185,7 +1190,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 3),
         ))
         .unwrap();
-        context.create_ip_pool("default", range).await;
+        context.create_ip_pool("default", range, true).await;
 
         let instance_id = Uuid::new_v4();
         let id = Uuid::new_v4();
@@ -1644,7 +1649,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 3),
         ))
         .unwrap();
-        context.create_ip_pool("default", range).await;
+        context.create_ip_pool("default", range, true).await;
 
         // Create one SNAT IP address.
         let instance_id = Uuid::new_v4();
@@ -1706,15 +1711,13 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 3),
         ))
         .unwrap();
-        context.create_ip_pool("default", first_range).await;
+        context.create_ip_pool("default", first_range, true).await;
         let second_range = IpRange::try_from((
             Ipv4Addr::new(10, 0, 0, 4),
             Ipv4Addr::new(10, 0, 0, 6),
         ))
         .unwrap();
-        // TODO: failing because I changed create_ip_pool to make it
-        // default for the silo, and there is already a default
-        context.create_ip_pool("p1", second_range).await;
+        context.create_ip_pool("p1", second_range, false).await;
 
         // Allocating an address on an instance in the second pool should be
         // respected, even though there are IPs available in the first.
@@ -1752,12 +1755,12 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 3),
         ))
         .unwrap();
-        context.create_ip_pool("default", first_range).await;
+        context.create_ip_pool("default", first_range, true).await;
         let first_address = Ipv4Addr::new(10, 0, 0, 4);
         let last_address = Ipv4Addr::new(10, 0, 0, 6);
         let second_range =
             IpRange::try_from((first_address, last_address)).unwrap();
-        context.create_ip_pool("p1", second_range).await;
+        context.create_ip_pool("p1", second_range, false).await;
 
         // Allocate all available addresses in the second pool.
         let instance_id = Uuid::new_v4();

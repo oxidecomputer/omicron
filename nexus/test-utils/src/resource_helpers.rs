@@ -70,8 +70,7 @@ where
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
-        .map_err(|e| panic!("failed to make \"POST\" request to {path}: {e}"))
-        .unwrap()
+        .expect(&format!("failed to make \"POST\" request to {path}"))
         .parsed_body()
         .unwrap()
 }
@@ -112,8 +111,7 @@ where
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
-        .map_err(|e| panic!("failed to make \"PUT\" request to {path}: {e}"))
-        .unwrap()
+        .expect(&format!("failed to make \"PUT\" request to {path}"))
         .parsed_body()
         .unwrap()
 }
@@ -123,8 +121,7 @@ pub async fn object_delete(client: &ClientTestContext, path: &str) {
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
-        .map_err(|e| panic!("failed to make \"DELETE\" request to {path}: {e}"))
-        .unwrap();
+        .expect(&format!("failed to make \"DELETE\" request to {path}"));
 }
 
 /// Create an IP pool with a single range for testing.

@@ -25,6 +25,7 @@ use nexus_test_utils::resource_helpers::create_silo;
 use nexus_test_utils::resource_helpers::grant_iam;
 use nexus_test_utils::resource_helpers::link_ip_pool;
 use nexus_test_utils::resource_helpers::object_create;
+use nexus_test_utils::resource_helpers::object_put;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils::start_sled_agent;
@@ -3600,10 +3601,10 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
     );
 
     // make pool2 default and create instance with default pool. check that it now it comes from pool2
-    let _: views::IpPoolSilo = object_create(
+    let _: views::IpPoolSilo = object_put(
         client,
-        "/v1/system/ip-pools/pool2/make-default",
-        &params::SiloSelector { silo: NameOrId::Id(DEFAULT_SILO.id()) },
+        &format!("/v1/system/ip-pools/pool2/silos/{}", DEFAULT_SILO.id()),
+        &params::IpPoolSiloUpdate { is_default: true },
     )
     .await;
 
