@@ -3884,7 +3884,6 @@ mod test {
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_ensure_service() {
         let logctx =
             omicron_test_utils::dev::test_setup_log("test_ensure_service");
@@ -3916,7 +3915,6 @@ mod test {
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_ensure_service_which_already_exists() {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_ensure_service_which_already_exists",
@@ -3944,7 +3942,6 @@ mod test {
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_services_are_recreated_on_reboot() {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_services_are_recreated_on_reboot",
@@ -3981,7 +3978,6 @@ mod test {
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_services_do_not_persist_without_config() {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_services_do_not_persist_without_config",
@@ -4023,7 +4019,6 @@ mod test {
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_bad_generations() {
         // Start like the normal tests.
         let logctx =
@@ -4128,7 +4123,6 @@ mod test {
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_old_ledger_migration() {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_old_ledger_migration",
@@ -4193,7 +4187,6 @@ mod test {
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_old_ledger_migration_continue() {
         // This test is just like "test_old_ledger_migration", except that we
         // deploy a new zone after migration and before shutting down the
@@ -4271,7 +4264,6 @@ mod test {
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_old_ledger_migration_bad() {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_old_ledger_migration_bad",

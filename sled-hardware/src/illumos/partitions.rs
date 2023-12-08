@@ -207,7 +207,6 @@ mod test {
     }
 
     #[test]
-    #[serial_test::serial]
     fn ensure_partition_layout_u2_format_with_dev_path() {
         let logctx =
             test_setup_log("ensure_partition_layout_u2_format_with_dev_path");
