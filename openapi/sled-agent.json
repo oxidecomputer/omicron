@@ -69,7 +69,7 @@
     "/boot-disk/{boot_disk}/os/write/status": {
       "get": {
         "summary": "Get the status of writing a new host OS",
-        "operationId": "host_os_write_status",
+        "operationId": "host_os_write_status_get",
         "parameters": [
           {
             "in": "path",
@@ -90,6 +90,42 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/boot-disk/{boot_disk}/os/write/status/{update_id}": {
+      "delete": {
+        "summary": "Clear the status of a completed write of a new host OS",
+        "operationId": "host_os_write_status_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "boot_disk",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/M2Slot"
+            }
+          },
+          {
+            "in": "path",
+            "name": "update_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -2297,7 +2333,7 @@
         "description": "Status of an update to a boot disk OS.",
         "oneOf": [
           {
-            "description": "No update has been started for this disk since this server started.",
+            "description": "No update has been started for this disk, or any previously-started update has completed and had its status cleared.",
             "type": "object",
             "properties": {
               "status": {

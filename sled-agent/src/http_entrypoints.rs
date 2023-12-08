@@ -80,7 +80,8 @@ pub fn api() -> SledApiDescription {
         api.register(add_sled_to_initialized_rack)?;
         api.register(metrics_collect)?;
         api.register(host_os_write_start)?;
-        api.register(host_os_write_status)?;
+        api.register(host_os_write_status_get)?;
+        api.register(host_os_write_status_delete)?;
 
         Ok(())
     }
@@ -765,6 +766,12 @@ pub struct BootDiskPathParams {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct BootDiskUpdatePathParams {
+    pub boot_disk: M2Slot,
+    pub update_id: Uuid,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct BootDiskWriteStartQueryParams {
     pub update_id: Uuid,
     // TODO do we already have sha2-256 hashes of the OS images, and if so
@@ -872,7 +879,8 @@ pub enum BootDiskOsWriteProgress {
 #[derive(Debug, Clone, Deserialize, JsonSchema, Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum BootDiskOsWriteStatus {
-    /// No update has been started for this disk since this server started.
+    /// No update has been started for this disk, or any previously-started
+    /// update has completed and had its status cleared.
     NoUpdateStarted,
     /// An update is currently running.
     InProgress { update_id: Uuid, progress: BootDiskOsWriteProgress },
@@ -887,7 +895,7 @@ pub enum BootDiskOsWriteStatus {
     method = GET,
     path = "/boot-disk/{boot_disk}/os/write/status",
 }]
-async fn host_os_write_status(
+async fn host_os_write_status_get(
     request_context: RequestContext<SledAgent>,
     path_params: Path<BootDiskPathParams>,
 ) -> Result<HttpResponseOk<BootDiskOsWriteStatus>, HttpError> {
@@ -895,4 +903,22 @@ async fn host_os_write_status(
     let boot_disk = path_params.into_inner().boot_disk;
     let status = sa.boot_disk_os_writer().status(boot_disk);
     Ok(HttpResponseOk(status))
+}
+
+/// Clear the status of a completed write of a new host OS
+#[endpoint {
+    method = DELETE,
+    path = "/boot-disk/{boot_disk}/os/write/status/{update_id}",
+}]
+async fn host_os_write_status_delete(
+    request_context: RequestContext<SledAgent>,
+    path_params: Path<BootDiskUpdatePathParams>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let sa = request_context.context();
+    let BootDiskUpdatePathParams { boot_disk, update_id } =
+        path_params.into_inner();
+    sa.boot_disk_os_writer()
+        .clear_terminal_status(boot_disk, update_id)
+        .map_err(|err| HttpError::from(&err))?;
+    Ok(HttpResponseUpdatedNoContent())
 }

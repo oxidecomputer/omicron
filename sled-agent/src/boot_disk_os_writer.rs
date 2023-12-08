@@ -59,8 +59,10 @@ pub(crate) enum BootDiskOsWriteError {
     // shutdown).
     #[error("internal error (task panic)")]
     TaskPanic,
-    #[error("another update is still running ({0})")]
-    AnotherUpdateRunning(Uuid),
+    #[error("an update is still running ({0})")]
+    UpdateRunning(Uuid),
+    #[error("a previous update completed ({0}); clear its status before starting a new update")]
+    CannotStartWithoutClearingPreviousStatus(Uuid),
     #[error("failed to create temporary file")]
     FailedCreatingTempfile(#[source] io::Error),
     #[error("failed writing to temporary file")]
@@ -106,18 +108,26 @@ pub(crate) enum BootDiskOsWriteError {
         expected: String,
         got: String,
     },
+    #[error("unexpected update ID {0}: cannot clear status")]
+    WrongUpdateIdClearingStatus(Uuid),
 }
 
 impl From<&BootDiskOsWriteError> for HttpError {
     fn from(error: &BootDiskOsWriteError) -> Self {
         let message = DisplayErrorChain::new(error).to_string();
         match error {
-            BootDiskOsWriteError::AnotherUpdateRunning(_)
+            BootDiskOsWriteError::UpdateRunning(_)
+            | BootDiskOsWriteError::CannotStartWithoutClearingPreviousStatus(
+                _,
+            )
             | BootDiskOsWriteError::FailedDownloadingImage(_)
             | BootDiskOsWriteError::UploadedImageHashMismatch { .. }
             | BootDiskOsWriteError::ImageSizeNotMultipleOfBlockSize {
                 ..
-            } => HttpError::for_bad_request(None, message),
+            }
+            | BootDiskOsWriteError::WrongUpdateIdClearingStatus(_) => {
+                HttpError::for_bad_request(None, message)
+            }
             BootDiskOsWriteError::TaskPanic
             | BootDiskOsWriteError::FailedCreatingTempfile(_)
             | BootDiskOsWriteError::FailedWritingTempfile(_)
@@ -176,6 +186,7 @@ impl BootDiskOsWriter {
     /// following are true:
     ///
     /// * A previously-started update of this same `boot_disk` is still running
+    /// * A previously-completed update has not had its status cleared
     /// * The `image_upload` stream returns an error
     /// * The hash of the data provided by `image_upload` does not match
     ///   `sha3_256_digest`
@@ -264,42 +275,25 @@ impl BootDiskOsWriter {
                 }
                 Entry::Occupied(mut slot) => match slot.get_mut() {
                     WriterState::TaskRunning(running) => {
-                        // Check whether the task is _actually_ still running,
-                        // or whether it's done and just waiting for us to
-                        // realize it.
-                        match running.complete_rx.try_recv() {
-                            Ok(_prev_result) => {
-                                // A previous write is done, but we're
-                                // immedately starting a new one, so discard the
-                                // previous result.
-                                let (uploaded_image_rx, running) =
-                                    spawn_update_task();
-                                slot.insert(WriterState::TaskRunning(running));
-                                uploaded_image_rx
-                            }
-                            Err(TryRecvError::Empty) => {
-                                return Err(Arc::new(
-                                    BootDiskOsWriteError::AnotherUpdateRunning(
-                                        running.update_id,
-                                    ),
-                                ));
-                            }
-                            Err(TryRecvError::Closed) => {
-                                return Err(Arc::new(
-                                    BootDiskOsWriteError::TaskPanic,
-                                ));
-                            }
-                        }
+                        // It's possible this task is actually complete and a
+                        // result is sitting in the `running.complete_rx`
+                        // oneshot, but for the purposes of starting a new
+                        // update it doesn't matter either way: we'll refuse to
+                        // start. Return the "another update running" error; the
+                        // caller will have to check the `status()`, which will
+                        // trigger a "see if it's actually done after all"
+                        // check.
+                        return Err(Arc::new(
+                            BootDiskOsWriteError::UpdateRunning(
+                                running.update_id,
+                            ),
+                        ));
                     }
-                    // TODO-correctness Should we separate require callers to
-                    // explicitly clear out the results of a completed update
-                    // before starting a new update? (Answer could be different
-                    // depending on whether the most recent update succeeded or
-                    // failed.)
-                    WriterState::Complete(_) => {
-                        let (uploaded_image_rx, running) = spawn_update_task();
-                        slot.insert(WriterState::TaskRunning(running));
-                        uploaded_image_rx
+                    WriterState::Complete(complete) => {
+                        return Err(Arc::new(
+                            BootDiskOsWriteError::CannotStartWithoutClearingPreviousStatus(
+                                complete.update_id,
+                        )));
                     }
                 },
             }
@@ -308,6 +302,80 @@ impl BootDiskOsWriter {
         // We've now spawned a task to drive the update, and we want to wait for
         // it to finish copying from `image_upload`.
         uploaded_image_rx.await.map_err(|_| BootDiskOsWriteError::TaskPanic)?
+    }
+
+    /// Clear the status of a finished or failed update with the given ID
+    /// targetting `boot_disk`.
+    ///
+    /// If no update has ever been started for this `boot_disk`, returns
+    /// `Ok(())`.
+    ///
+    /// # Errors
+    ///
+    /// Fails if an update to `boot_disk` is currently running; only terminal
+    /// statuses can be cleared. Fails if the most recent terminal status
+    /// targetting `boot_disk` had a different update ID.
+    pub(crate) fn clear_terminal_status(
+        &self,
+        boot_disk: M2Slot,
+        update_id: Uuid,
+    ) -> Result<(), BootDiskOsWriteError> {
+        let mut states = self.states.lock().unwrap();
+        let mut slot = match states.entry(boot_disk) {
+            // No status; nothing to clear.
+            Entry::Vacant(_slot) => return Ok(()),
+            Entry::Occupied(slot) => slot,
+        };
+
+        match slot.get_mut() {
+            WriterState::Complete(complete) => {
+                if complete.update_id == update_id {
+                    slot.remove();
+                    Ok(())
+                } else {
+                    Err(BootDiskOsWriteError::WrongUpdateIdClearingStatus(
+                        complete.update_id,
+                    ))
+                }
+            }
+            WriterState::TaskRunning(running) => {
+                // Check whether the task is _actually_ still running,
+                // or whether it's done and just waiting for us to
+                // realize it.
+                match running.complete_rx.try_recv() {
+                    Ok(result) => {
+                        if running.update_id == update_id {
+                            // This is a little surprising but legal: we've been
+                            // asked to clear the terminal status of this
+                            // update_id, even though we just realized it
+                            // finished.
+                            slot.remove();
+                            Ok(())
+                        } else {
+                            let running_update_id = running.update_id;
+                            // A different update just finished; store the
+                            // result we got from the oneshot and don't remove
+                            // the status.
+                            slot.insert(WriterState::Complete(
+                                TaskCompleteState {
+                                    update_id: running_update_id,
+                                    result,
+                                },
+                            ));
+                            Err(BootDiskOsWriteError::WrongUpdateIdClearingStatus(
+                                running_update_id
+                            ))
+                        }
+                    }
+                    Err(TryRecvError::Empty) => Err(
+                        BootDiskOsWriteError::UpdateRunning(running.update_id),
+                    ),
+                    Err(TryRecvError::Closed) => {
+                        Err(BootDiskOsWriteError::TaskPanic)
+                    }
+                }
+            }
+        }
     }
 
     /// Get the status of any update running that targets `boot_disk`.
@@ -1396,7 +1464,7 @@ mod tests {
             .await
             .unwrap_err();
         match &*error {
-            BootDiskOsWriteError::AnotherUpdateRunning(running_id) => {
+            BootDiskOsWriteError::UpdateRunning(running_id) => {
                 assert_eq!(*running_id, update_id_a);
             }
             _ => panic!("unexpected error {error}"),
@@ -1437,6 +1505,164 @@ mod tests {
         let written_disks =
             inject_disk_interface.finalized_writes.lock().unwrap();
         assert_eq!(*written_disks, expected_disks);
+
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn boot_disk_os_writer_rejects_new_updates_while_old_completed() {
+        let logctx = test_setup_log(
+            "boot_disk_os_writer_rejects_new_updates_while_old_completed",
+        );
+
+        // generate two small, random "OS image"s consisting of 10 "blocks" each
+        let num_data_blocks = 10;
+        let data_len = num_data_blocks * InMemoryDiskInterface::BLOCK_SIZE;
+        let mut data_a = vec![0; data_len];
+        let mut data_b = vec![0; data_len];
+        rand::thread_rng().fill_bytes(&mut data_a);
+        rand::thread_rng().fill_bytes(&mut data_b);
+        let data_hash_a = Sha3_256::digest(&data_a);
+        let data_hash_b = Sha3_256::digest(&data_b);
+
+        // generate a disk writer with effectively infinite semaphore permits
+        let inject_disk_interface =
+            InMemoryDiskInterface::new(Semaphore::new(Semaphore::MAX_PERMITS));
+
+        let writer = Arc::new(BootDiskOsWriter::new(&logctx.log));
+        let disk_devfs_path = "/unit-test/disk";
+        let boot_disk = M2Slot::A;
+
+        let update_id_a = Uuid::new_v4();
+        let update_id_b = Uuid::new_v4();
+
+        writer
+            .start_update_impl(
+                boot_disk,
+                disk_devfs_path.into(),
+                update_id_a,
+                data_hash_a.into(),
+                stream::once(future::ready(Ok(Bytes::from(data_a.clone())))),
+                inject_disk_interface.clone(),
+            )
+            .await
+            .unwrap();
+
+        // Wait for the first update to complete successfully.
+        tokio::time::timeout(TEST_TIMEOUT, async {
+            loop {
+                let status = writer.status(boot_disk);
+                match status {
+                    BootDiskOsWriteStatus::InProgress { update_id, .. } => {
+                        assert_eq!(update_id, update_id_a);
+                        println!("saw irrelevant status {status:?}");
+                        tokio::time::sleep(Duration::from_millis(50)).await;
+                        continue;
+                    }
+                    BootDiskOsWriteStatus::Complete { update_id } => {
+                        assert_eq!(update_id, update_id_a);
+                        break;
+                    }
+                    BootDiskOsWriteStatus::Failed { .. }
+                    | BootDiskOsWriteStatus::NoUpdateStarted => {
+                        panic!("unexpected status {status:?}");
+                    }
+                }
+            }
+        })
+        .await
+        .unwrap();
+
+        // Ensure we wrote the contents of the first update.
+        let expected_disks = [InMemoryDiskContents {
+            path: disk_devfs_path.into(),
+            data: data_a,
+        }];
+        {
+            let mut written_disks =
+                inject_disk_interface.finalized_writes.lock().unwrap();
+            assert_eq!(*written_disks, expected_disks);
+            written_disks.clear();
+        }
+
+        // Check that we get the expected error when attempting to start another
+        // update to this same disk.
+        let expected_error =
+            BootDiskOsWriteError::CannotStartWithoutClearingPreviousStatus(
+                update_id_a,
+            );
+        let error = writer
+            .start_update_impl(
+                boot_disk,
+                disk_devfs_path.into(),
+                update_id_b,
+                data_hash_b.into(),
+                stream::once(future::ready(Ok(Bytes::from(data_b.clone())))),
+                inject_disk_interface.clone(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.to_string(), expected_error.to_string());
+
+        // We should not be able to clear the status with an incorrect update
+        // ID.
+        let expected_error =
+            BootDiskOsWriteError::WrongUpdateIdClearingStatus(update_id_a);
+        let error =
+            writer.clear_terminal_status(boot_disk, update_id_b).unwrap_err();
+        assert_eq!(error.to_string(), expected_error.to_string());
+
+        // We should be able to clear the status with the correct update ID, and
+        // then start the new one.
+        writer.clear_terminal_status(boot_disk, update_id_a).unwrap();
+        writer
+            .start_update_impl(
+                boot_disk,
+                disk_devfs_path.into(),
+                update_id_b,
+                data_hash_b.into(),
+                stream::once(future::ready(Ok(Bytes::from(data_b.clone())))),
+                inject_disk_interface.clone(),
+            )
+            .await
+            .unwrap();
+
+        // Wait for the second update to complete successfully.
+        tokio::time::timeout(TEST_TIMEOUT, async {
+            loop {
+                let status = writer.status(boot_disk);
+                match status {
+                    BootDiskOsWriteStatus::InProgress { update_id, .. } => {
+                        assert_eq!(update_id, update_id_b);
+                        println!("saw irrelevant status {status:?}");
+                        tokio::time::sleep(Duration::from_millis(50)).await;
+                        continue;
+                    }
+                    BootDiskOsWriteStatus::Complete { update_id } => {
+                        assert_eq!(update_id, update_id_b);
+                        break;
+                    }
+                    BootDiskOsWriteStatus::Failed { .. }
+                    | BootDiskOsWriteStatus::NoUpdateStarted => {
+                        panic!("unexpected status {status:?}");
+                    }
+                }
+            }
+        })
+        .await
+        .unwrap();
+
+        // Ensure we wrote the contents of the second update.
+        let expected_disks = [InMemoryDiskContents {
+            path: disk_devfs_path.into(),
+            data: data_b,
+        }];
+        {
+            let mut written_disks =
+                inject_disk_interface.finalized_writes.lock().unwrap();
+            assert_eq!(*written_disks, expected_disks);
+            written_disks.clear();
+        }
 
         logctx.cleanup_successful();
     }
