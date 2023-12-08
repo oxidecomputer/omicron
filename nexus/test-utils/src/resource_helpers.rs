@@ -262,11 +262,7 @@ pub async fn create_silo(
                 name: silo_name.parse().unwrap(),
                 description: "a silo".to_string(),
             },
-            quotas: params::SiloQuotasCreate {
-                cpus: 128,
-                memory: ByteCount::from_gibibytes_u32(1000),
-                storage: ByteCount::from_gibibytes_u32(1000000),
-            },
+            quotas: params::SiloQuotasCreate::half_rack(),
             discoverable,
             identity_mode,
             admin_group_name: None,

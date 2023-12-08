@@ -912,11 +912,7 @@ mod test {
                         name: "test-silo".parse().unwrap(),
                         description: String::new(),
                     },
-                    quotas: external_params::SiloQuotasCreate {
-                        cpus: 128,
-                        memory: ByteCount::from_gibibytes_u32(1000),
-                        storage: ByteCount::from_gibibytes_u32(1000000),
-                    },
+                    quotas: external_params::SiloQuotasCreate::half_rack(),
                     discoverable: false,
                     identity_mode: SiloIdentityMode::LocalOnly,
                     admin_group_name: None,
