@@ -874,7 +874,7 @@ mod test {
     };
     use omicron_common::api::external::http_pagination::PaginatedBy;
     use omicron_common::api::external::{
-        ByteCount, IdentityMetadataCreateParams, MacAddr,
+        IdentityMetadataCreateParams, MacAddr,
     };
     use omicron_common::api::internal::shared::SourceNatConfig;
     use omicron_common::nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;

@@ -11,6 +11,7 @@ use diesel::prelude::*;
 use nexus_db_model::SiloQuotas;
 use nexus_db_model::SiloQuotasUpdate;
 use omicron_common::api::external::DataPageParams;
+use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::ResourceType;
@@ -45,6 +46,26 @@ impl DataStore {
                 )
             })
             .map(|_| ())
+    }
+
+    pub async fn silo_quotas_delete(
+        &self,
+        opctx: &OpContext,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        authz_silo: &authz::Silo,
+    ) -> DeleteResult {
+        // Given that the quotas right now are somewhat of an extension of the
+        // Silo we just check for delete permission on the silo itself.
+        opctx.authorize(authz::Action::Delete, authz_silo).await?;
+
+        use db::schema::silo_quotas::dsl;
+        diesel::delete(dsl::silo_quotas)
+            .filter(dsl::silo_id.eq(authz_silo.id()))
+            .execute_async(conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(())
     }
 
     pub async fn silo_update_quota(

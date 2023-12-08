@@ -413,6 +413,8 @@ impl DataStore {
                 }));
             }
 
+            self.silo_quotas_delete(opctx, &conn, &authz_silo).await?;
+
             self.virtual_provisioning_collection_delete_on_connection(
                 &opctx.log, &conn, id,
             )
