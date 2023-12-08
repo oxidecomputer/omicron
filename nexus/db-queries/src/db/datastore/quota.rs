@@ -6,8 +6,6 @@ use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::pagination::paginated;
 use crate::db::pool::DbConnection;
-use crate::db::TransactionError;
-use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use nexus_db_model::SiloQuotas;
@@ -33,32 +31,20 @@ impl DataStore {
         let silo_id = authz_silo.id();
         use db::schema::silo_quotas::dsl;
 
-        let result = conn
-            .transaction_async(|c| async move {
-                diesel::insert_into(dsl::silo_quotas)
-                    .values(quotas)
-                    .execute_async(&c)
-                    .await
-                    .map_err(TransactionError::CustomError)
-            })
-            .await;
-
-        match result {
-            Ok(_) => Ok(()),
-            Err(TransactionError::CustomError(e)) => {
-                // TODO: Is this the right error handler?
-                Err(public_error_from_diesel(e, ErrorHandler::Server))
-            }
-            Err(TransactionError::Database(e)) => {
-                Err(public_error_from_diesel(
+        diesel::insert_into(dsl::silo_quotas)
+            .values(quotas)
+            .execute_async(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
                     e,
                     ErrorHandler::Conflict(
                         ResourceType::SiloQuotas,
                         &silo_id.to_string(),
                     ),
-                ))
-            }
-        }
+                )
+            })
+            .map(|_| ())
     }
 
     pub async fn silo_update_quota(
