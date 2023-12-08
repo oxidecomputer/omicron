@@ -85,17 +85,15 @@ lazy_static! {
         format!("/v1/system/silos/{}", *DEMO_SILO_NAME);
     pub static ref DEMO_SILO_POLICY_URL: String =
         format!("/v1/system/silos/{}/policy", *DEMO_SILO_NAME);
+    pub static ref DEMO_SILO_QUOTAS_URL: String =
+        format!("/v1/system/silos/{}/quotas", *DEMO_SILO_NAME);
     pub static ref DEMO_SILO_CREATE: params::SiloCreate =
         params::SiloCreate {
             identity: IdentityMetadataCreateParams {
                 name: DEMO_SILO_NAME.clone(),
                 description: String::from(""),
             },
-            quotas: params::SiloQuotasCreate {
-                cpus: 100,
-                memory: ByteCount::from_gibibytes_u32(1000),
-                storage: ByteCount::from_gibibytes_u32(100000),
-            },
+            quotas: params::SiloQuotasCreate::half_rack(),
             discoverable: true,
             identity_mode: shared::SiloIdentityMode::SamlJit,
             admin_group_name: None,
@@ -941,6 +939,27 @@ lazy_static! {
                         }
                     ).unwrap()
                 ),
+            ],
+        },
+        VerifyEndpoint {
+            url: &DEMO_SILO_QUOTAS_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Put(
+                    serde_json::to_value(
+                        params::SiloQuotasCreate::empty()
+                    ).unwrap()
+                )
+            ],
+        },
+        VerifyEndpoint {
+            url: "/v1/system/silo-quotas",
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get
             ],
         },
         VerifyEndpoint {
