@@ -117,7 +117,6 @@ impl super::Nexus {
             .map_err(|e| {
                     let msg = e.to_string();
                     if msg.contains("bad request") {
-                        //return HttpError::for_client_error(None, StatusCode::BAD_REQUEST, msg.to_string())
                         external::Error::invalid_request(&msg.to_string())
                     } else {
                         e
@@ -255,7 +254,15 @@ impl super::Nexus {
         >(
             saga_params,
         )
-        .await?;
+        .await
+        .map_err(|e| {
+                let msg = e.to_string();
+                if msg.contains("bad request") {
+                    external::Error::invalid_request(&msg.to_string())
+                } else {
+                    e
+                }
+            })?;
 
         Ok(())
     }

@@ -536,6 +536,7 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
+
         ip_pool_id -> Uuid,
         ip_pool_range_id -> Uuid,
         is_service -> Bool,
@@ -544,6 +545,26 @@ table! {
         ip -> Inet,
         first_port -> Int4,
         last_port -> Int4,
+
+        project_id -> Nullable<Uuid>,
+    }
+}
+
+table! {
+    floating_ip (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+
+        ip_pool_id -> Uuid,
+        ip_pool_range_id -> Uuid,
+        is_service -> Bool,
+        parent_id -> Nullable<Uuid>,
+        ip -> Inet,
+        project_id -> Uuid,
     }
 }
 
@@ -1312,7 +1333,7 @@ table! {
 ///
 /// This should be updated whenever the schema is changed. For more details,
 /// refer to: schema/crdb/README.adoc
-pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(18, 0, 0);
+pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(19, 0, 0);
 
 allow_tables_to_appear_in_same_query!(
     system_update,

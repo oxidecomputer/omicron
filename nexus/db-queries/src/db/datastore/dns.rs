@@ -15,6 +15,7 @@ use crate::db::model::DnsZone;
 use crate::db::model::Generation;
 use crate::db::model::InitialDnsGroup;
 use crate::db::pagination::paginated;
+use crate::db::pagination::Paginator;
 use crate::db::pool::DbConnection;
 use crate::db::TransactionError;
 use async_bb8_diesel::AsyncConnection;
@@ -242,9 +243,8 @@ impl DataStore {
         let mut zones = Vec::with_capacity(dns_zones.len());
         for zone in dns_zones {
             let mut zone_records = Vec::new();
-            let mut marker = None;
-
-            loop {
+            let mut paginator = Paginator::new(batch_size);
+            while let Some(p) = paginator.next() {
                 debug!(log, "listing DNS names for zone";
                     "dns_zone_id" => zone.id.to_string(),
                     "dns_zone_name" => &zone.zone_name,
@@ -252,25 +252,16 @@ impl DataStore {
                     "found_so_far" => zone_records.len(),
                     "batch_size" => batch_size.get(),
                 );
-                let pagparams = DataPageParams {
-                    marker: marker.as_ref(),
-                    direction: dropshot::PaginationOrder::Ascending,
-                    limit: batch_size,
-                };
                 let names_batch = self
-                    .dns_names_list(opctx, zone.id, version.version, &pagparams)
+                    .dns_names_list(
+                        opctx,
+                        zone.id,
+                        version.version,
+                        &p.current_pagparams(),
+                    )
                     .await?;
-                let done = names_batch.len()
-                    < usize::try_from(batch_size.get()).unwrap();
-                if let Some((last_name, _)) = names_batch.last() {
-                    marker = Some(last_name.clone());
-                } else {
-                    assert!(done);
-                }
+                paginator = p.found_batch(&names_batch, &|(n, _)| n.clone());
                 zone_records.extend(names_batch.into_iter());
-                if done {
-                    break;
-                }
             }
 
             debug!(log, "found all DNS names for zone";

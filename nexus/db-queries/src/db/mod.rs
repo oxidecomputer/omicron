@@ -21,7 +21,8 @@ pub(crate) mod error;
 mod explain;
 pub mod fixed_data;
 pub mod lookup;
-mod pagination;
+// Public for doctests.
+pub mod pagination;
 mod pool;
 // This is marked public because the error types are used elsewhere, e.g., in
 // sagas.

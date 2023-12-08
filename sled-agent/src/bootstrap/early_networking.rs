@@ -22,8 +22,8 @@ use mg_admin_client::Client as MgdClient;
 use omicron_common::address::{Ipv6Subnet, MGD_PORT, MGS_PORT};
 use omicron_common::address::{DDMD_PORT, DENDRITE_PORT};
 use omicron_common::api::internal::shared::{
-    PortConfigV1, PortFec, PortSpeed, RackNetworkConfig, RackNetworkConfigV1,
-    SwitchLocation, UplinkConfig,
+    BgpConfig, PortConfigV1, PortFec, PortSpeed, RackNetworkConfig,
+    RackNetworkConfigV1, SwitchLocation, UplinkConfig,
 };
 use omicron_common::backoff::{
     retry_notify, retry_policy_local, BackoffError, ExponentialBackoff,
@@ -472,23 +472,37 @@ impl<'a> EarlyNetworkSetup<'a> {
             ))
         })?;
 
+        let mut config: Option<BgpConfig> = None;
+        let mut bgp_peer_configs = HashMap::<String, Vec<BgpPeerConfig>>::new();
+
         // Iterate through ports and apply BGP config.
         for port in &our_ports {
-            let mut bgp_peer_configs = Vec::new();
             for peer in &port.bgp_peers {
-                let config = rack_network_config
-                    .bgp
-                    .iter()
-                    .find(|x| x.asn == peer.asn)
-                    .ok_or(EarlyNetworkSetupError::BgpConfigurationError(
-                        format!(
-                            "asn {} referenced by peer undefined",
-                            peer.asn
-                        ),
-                    ))?;
+                if let Some(config) = &config {
+                    if peer.asn != config.asn {
+                        return Err(EarlyNetworkSetupError::BadConfig(
+                            "only one ASN per switch is supported".into(),
+                        ));
+                    }
+                } else {
+                    config = Some(
+                        rack_network_config
+                            .bgp
+                            .iter()
+                            .find(|x| x.asn == peer.asn)
+                            .ok_or(
+                                EarlyNetworkSetupError::BgpConfigurationError(
+                                    format!(
+                                        "asn {} referenced by peer undefined",
+                                        peer.asn
+                                    ),
+                                ),
+                            )?
+                            .clone(),
+                    );
+                }
 
                 let bpc = BgpPeerConfig {
-                    asn: peer.asn,
                     name: format!("{}", peer.addr),
                     host: format!("{}:179", peer.addr),
                     hold_time: peer.hold_time.unwrap_or(6),
@@ -497,30 +511,41 @@ impl<'a> EarlyNetworkSetup<'a> {
                     connect_retry: peer.connect_retry.unwrap_or(3),
                     keepalive: peer.keepalive.unwrap_or(2),
                     resolution: BGP_SESSION_RESOLUTION,
-                    originate: config
-                        .originate
-                        .iter()
-                        .map(|x| Prefix4 { length: x.prefix(), value: x.ip() })
-                        .collect(),
+                    passive: false,
                 };
-                bgp_peer_configs.push(bpc);
+                match bgp_peer_configs.get_mut(&port.port) {
+                    Some(peers) => {
+                        peers.push(bpc);
+                    }
+                    None => {
+                        bgp_peer_configs.insert(port.port.clone(), vec![bpc]);
+                    }
+                }
             }
+        }
 
-            if bgp_peer_configs.is_empty() {
-                continue;
+        if !bgp_peer_configs.is_empty() {
+            if let Some(config) = &config {
+                mgd.inner
+                    .bgp_apply(&ApplyRequest {
+                        asn: config.asn,
+                        peers: bgp_peer_configs,
+                        originate: config
+                            .originate
+                            .iter()
+                            .map(|x| Prefix4 {
+                                length: x.prefix(),
+                                value: x.ip(),
+                            })
+                            .collect(),
+                    })
+                    .await
+                    .map_err(|e| {
+                        EarlyNetworkSetupError::BgpConfigurationError(format!(
+                            "BGP peer configuration failed: {e}",
+                        ))
+                    })?;
             }
-
-            mgd.inner
-                .bgp_apply(&ApplyRequest {
-                    peer_group: port.port.clone(),
-                    peers: bgp_peer_configs,
-                })
-                .await
-                .map_err(|e| {
-                    EarlyNetworkSetupError::BgpConfigurationError(format!(
-                        "BGP peer configuration failed: {e}",
-                    ))
-                })?;
         }
 
         Ok(our_ports)
@@ -682,6 +707,65 @@ pub struct EarlyNetworkConfig {
     pub body: EarlyNetworkConfigBody,
 }
 
+impl EarlyNetworkConfig {
+    // Note: This currently only converts between v0 and v1 or deserializes v1 of
+    // `EarlyNetworkConfig`.
+    pub fn deserialize_bootstore_config(
+        log: &Logger,
+        config: &bootstore::NetworkConfig,
+    ) -> Result<Self, serde_json::Error> {
+        // Try to deserialize the latest version of the data structure (v1). If
+        // that succeeds we are done.
+        let v1_error =
+            match serde_json::from_slice::<EarlyNetworkConfig>(&config.blob) {
+                Ok(val) => return Ok(val),
+                Err(error) => {
+                    // Log this error and continue trying to deserialize older
+                    // versions.
+                    warn!(
+                        log,
+                        "Failed to deserialize EarlyNetworkConfig \
+                         as v1, trying next as v0: {}",
+                        error,
+                    );
+                    error
+                }
+            };
+
+        match serde_json::from_slice::<EarlyNetworkConfigV0>(&config.blob) {
+            Ok(val) => {
+                // Convert from v0 to v1
+                return Ok(EarlyNetworkConfig {
+                    generation: val.generation,
+                    schema_version: 1,
+                    body: EarlyNetworkConfigBody {
+                        ntp_servers: val.ntp_servers,
+                        rack_network_config: val.rack_network_config.map(
+                            |v0_config| {
+                                RackNetworkConfigV0::to_v1(
+                                    val.rack_subnet,
+                                    v0_config,
+                                )
+                            },
+                        ),
+                    },
+                });
+            }
+            Err(error) => {
+                // Log this error.
+                warn!(
+                    log,
+                    "Failed to deserialize EarlyNetworkConfig as v0: {}", error,
+                );
+            }
+        };
+
+        // Return the v1 error preferentially over the v0 error as it's more
+        // likely to be useful.
+        Err(v1_error)
+    }
+}
+
 /// This is the actual configuration of EarlyNetworking.
 ///
 /// We nest it below the "header" of `generation` and `schema_version` so that
@@ -708,39 +792,6 @@ impl From<EarlyNetworkConfig> for bootstore::NetworkConfig {
         let generation = value.generation;
 
         bootstore::NetworkConfig { generation, blob }
-    }
-}
-
-// Note: This currently only converts between v0 and v1 or deserializes v1 of
-// `EarlyNetworkConfig`.
-impl TryFrom<bootstore::NetworkConfig> for EarlyNetworkConfig {
-    type Error = serde_json::Error;
-
-    fn try_from(
-        value: bootstore::NetworkConfig,
-    ) -> std::result::Result<Self, Self::Error> {
-        // Try to deserialize the latest version of the data structure (v1). If
-        // that succeeds we are done.
-        if let Ok(val) =
-            serde_json::from_slice::<EarlyNetworkConfig>(&value.blob)
-        {
-            return Ok(val);
-        }
-
-        // We don't have the latest version. Try to deserialize v0 and then
-        // convert it to the latest version.
-        let v0 = serde_json::from_slice::<EarlyNetworkConfigV0>(&value.blob)?;
-
-        Ok(EarlyNetworkConfig {
-            generation: v0.generation,
-            schema_version: 1,
-            body: EarlyNetworkConfigBody {
-                ntp_servers: v0.ntp_servers,
-                rack_network_config: v0.rack_network_config.map(|v0_config| {
-                    RackNetworkConfigV0::to_v1(v0.rack_subnet, v0_config)
-                }),
-            },
-        })
     }
 }
 
@@ -815,9 +866,13 @@ fn convert_fec(fec: &PortFec) -> dpd_client::types::PortFec {
 mod tests {
     use super::*;
     use omicron_common::api::internal::shared::RouteConfig;
+    use omicron_test_utils::dev::test_setup_log;
 
     #[test]
     fn serialized_early_network_config_v0_to_v1_conversion() {
+        let logctx = test_setup_log(
+            "serialized_early_network_config_v0_to_v1_conversion",
+        );
         let v0 = EarlyNetworkConfigV0 {
             generation: 1,
             rack_subnet: Ipv6Addr::UNSPECIFIED,
@@ -841,7 +896,11 @@ mod tests {
         let bootstore_conf =
             bootstore::NetworkConfig { generation: 1, blob: v0_serialized };
 
-        let v1 = EarlyNetworkConfig::try_from(bootstore_conf).unwrap();
+        let v1 = EarlyNetworkConfig::deserialize_bootstore_config(
+            &logctx.log,
+            &bootstore_conf,
+        )
+        .unwrap();
         let v0_rack_network_config = v0.rack_network_config.unwrap();
         let uplink = v0_rack_network_config.uplinks[0].clone();
         let expected = EarlyNetworkConfig {
@@ -872,5 +931,7 @@ mod tests {
         };
 
         assert_eq!(expected, v1);
+
+        logctx.cleanup_successful();
     }
 }
