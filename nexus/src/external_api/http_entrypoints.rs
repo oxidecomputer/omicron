@@ -514,8 +514,8 @@ async fn policy_update(
 /// Lists resource quotas for all silos
 #[endpoint {
     method = GET,
-    path = "/v1/system/quotas",
-    tags = ["system/quotas"],
+    path = "/v1/system/silo-quotas",
+    tags = ["system/silos"],
 }]
 async fn system_quotas_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -549,7 +549,7 @@ async fn system_quotas_list(
 #[endpoint {
     method = GET,
     path = "/v1/system/silos/{silo}/quotas",
-    tags = ["system/quotas"],
+    tags = ["system/silos"],
 }]
 async fn silo_quotas_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -572,7 +572,7 @@ async fn silo_quotas_view(
 #[endpoint {
     method = PUT,
     path = "/v1/system/silos/{silo}/quotas",
-    tags = ["system/quotas"],
+    tags = ["system/silos"],
 }]
 async fn silo_quotas_update(
     rqctx: RequestContext<Arc<ServerContext>>,

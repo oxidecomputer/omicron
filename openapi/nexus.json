@@ -5971,65 +5971,6 @@
         }
       }
     },
-    "/v1/system/quotas": {
-      "get": {
-        "tags": [
-          "system/quotas"
-        ],
-        "summary": "Lists resource quotas for all silos",
-        "operationId": "system_quotas_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/IdSortMode"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SiloQuotasResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-dropshot-pagination": {
-          "required": []
-        }
-      }
-    },
     "/v1/system/roles": {
       "get": {
         "tags": [
@@ -6117,6 +6058,65 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
+        }
+      }
+    },
+    "/v1/system/silo-quotas": {
+      "get": {
+        "tags": [
+          "system/silos"
+        ],
+        "summary": "Lists resource quotas for all silos",
+        "operationId": "system_quotas_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiloQuotasResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
         }
       }
     },
@@ -6371,7 +6371,7 @@
     "/v1/system/silos/{silo}/quotas": {
       "get": {
         "tags": [
-          "system/quotas"
+          "system/silos"
         ],
         "summary": "View the resource quotas of a given silo",
         "operationId": "silo_quotas_view",
@@ -6407,7 +6407,7 @@
       },
       "put": {
         "tags": [
-          "system/quotas"
+          "system/silos"
         ],
         "summary": "Update the resource quotas of a given silo",
         "operationId": "silo_quotas_update",

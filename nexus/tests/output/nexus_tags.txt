@@ -164,12 +164,6 @@ networking_switch_port_settings_delete   DELETE   /v1/system/networking/switch-p
 networking_switch_port_settings_list     GET      /v1/system/networking/switch-port-settings
 networking_switch_port_settings_view     GET      /v1/system/networking/switch-port-settings/{port}
 
-API operations found with tag "system/quotas"
-OPERATION ID                             METHOD   URL PATH
-silo_quotas_update                       PUT      /v1/system/silos/{silo}/quotas
-silo_quotas_view                         GET      /v1/system/silos/{silo}/quotas
-system_quotas_list                       GET      /v1/system/quotas
-
 API operations found with tag "system/silos"
 OPERATION ID                             METHOD   URL PATH
 local_idp_user_create                    POST     /v1/system/identity-providers/local/users
@@ -183,9 +177,12 @@ silo_identity_provider_list              GET      /v1/system/identity-providers
 silo_list                                GET      /v1/system/silos
 silo_policy_update                       PUT      /v1/system/silos/{silo}/policy
 silo_policy_view                         GET      /v1/system/silos/{silo}/policy
+silo_quotas_update                       PUT      /v1/system/silos/{silo}/quotas
+silo_quotas_view                         GET      /v1/system/silos/{silo}/quotas
 silo_user_list                           GET      /v1/system/users
 silo_user_view                           GET      /v1/system/users/{user_id}
 silo_view                                GET      /v1/system/silos/{silo}
+system_quotas_list                       GET      /v1/system/silo-quotas
 user_builtin_list                        GET      /v1/system/users-builtin
 user_builtin_view                        GET      /v1/system/users-builtin/{user}
 
