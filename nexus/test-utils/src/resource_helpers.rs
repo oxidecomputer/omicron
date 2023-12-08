@@ -70,7 +70,9 @@ where
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
-        .expect(&format!("failed to make \"POST\" request to {path}"))
+        .unwrap_or_else(|e| {
+            panic!("failed to make \"POST\" request to {path}: {e}")
+        })
         .parsed_body()
         .unwrap()
 }
@@ -98,6 +100,23 @@ where
     .unwrap()
 }
 
+pub async fn object_delete_error(
+    client: &ClientTestContext,
+    path: &str,
+    status: StatusCode,
+) -> HttpErrorResponseBody {
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::DELETE, path)
+            .expect_status(Some(status)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<HttpErrorResponseBody>()
+    .unwrap()
+}
+
 pub async fn object_put<InputType, OutputType>(
     client: &ClientTestContext,
     path: &str,
@@ -111,7 +130,9 @@ where
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
-        .expect(&format!("failed to make \"PUT\" request to {path}"))
+        .unwrap_or_else(|e| {
+            panic!("failed to make \"PUT\" request to {path}: {e}")
+        })
         .parsed_body()
         .unwrap()
 }
@@ -121,7 +142,9 @@ pub async fn object_delete(client: &ClientTestContext, path: &str) {
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
-        .expect(&format!("failed to make \"DELETE\" request to {path}"));
+        .unwrap_or_else(|e| {
+            panic!("failed to make \"DELETE\" request to {path}: {e}")
+        });
 }
 
 /// Create an IP pool with a single range for testing.

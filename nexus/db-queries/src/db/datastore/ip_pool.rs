@@ -537,16 +537,17 @@ impl DataStore {
                 instance::table
                     .on(external_ip::parent_id.eq(instance::id.nullable())),
             )
+            .inner_join(project::table.on(instance::project_id.eq(project::id)))
             .filter(external_ip::is_service.eq(false))
             .filter(external_ip::parent_id.is_not_null())
             .filter(external_ip::time_deleted.is_null())
             .filter(external_ip::ip_pool_id.eq(association.ip_pool_id))
-            .filter(instance::time_deleted.is_not_null())
+            // TODO: filter by type? i.e., ephemeral and snat?
+            .filter(instance::time_deleted.is_null())
+            // we have to join through IPs to instances to projects to get the silo ID
+            .filter(project::silo_id.eq(association.resource_id))
             .select(ExternalIp::as_select())
             .limit(1)
-            // we have to join through IPs to instances to projects to get the silo ID
-            .inner_join(project::table.on(instance::project_id.eq(project::id)))
-            .filter(project::silo_id.eq(association.resource_id))
             .load_async::<ExternalIp>(
                 &*self.pool_connection_authorized(opctx).await?,
             )
@@ -560,7 +561,9 @@ impl DataStore {
 
         if !existing_ips.is_empty() {
             return Err(Error::InvalidRequest {
-                message: "IP addresses from this pool are in use in the associated silo".to_string()
+                message:
+                    "IP addresses from this pool are in use in the linked silo"
+                        .to_string(),
             });
         }
 

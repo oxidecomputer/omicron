@@ -25,6 +25,9 @@ use nexus_test_utils::resource_helpers::create_silo;
 use nexus_test_utils::resource_helpers::grant_iam;
 use nexus_test_utils::resource_helpers::link_ip_pool;
 use nexus_test_utils::resource_helpers::object_create;
+use nexus_test_utils::resource_helpers::object_create_error;
+use nexus_test_utils::resource_helpers::object_delete;
+use nexus_test_utils::resource_helpers::object_delete_error;
 use nexus_test_utils::resource_helpers::object_put;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::DiskTest;
@@ -3614,6 +3617,71 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
         ip.ip >= range2.first_address() && ip.ip <= range2.last_address(),
         "Expected ephemeral IP to come from pool2"
     );
+
+    // try to delete association with pool1, but it fails because there is an
+    // instance with an IP from the pool in this silo
+    let pool1_silo_url =
+        format!("/v1/system/ip-pools/pool1/silos/{}", DEFAULT_SILO.id());
+    let error =
+        object_delete_error(client, &pool1_silo_url, StatusCode::BAD_REQUEST)
+            .await;
+    assert_eq!(
+        error.message,
+        "IP addresses from this pool are in use in the linked silo"
+    );
+
+    // stop and delete instances with IPs from pool1. perhaps surprisingly, that
+    // includes pool2-inst also because the SNAT IP comes from the default pool
+    // even when different pool is specified for the ephemeral IP
+    stop_instance(&cptestctx, "pool1-inst").await;
+    stop_instance(&cptestctx, "pool2-inst").await;
+
+    // TODO: this still doesn't working because the SNAT IP is always created
+    // with the default pool, so even when pool2-inst was created by specifying
+    // pool2, the SNAT IP came from pool1
+    object_delete(client, &pool1_silo_url).await;
+
+    // create instance with pool1, expecting allocation to fail
+    let instance_name = "pool1-inst-fail";
+    let url = format!("/v1/instances?project={}", PROJECT_NAME);
+    let instance_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: instance_name.parse().unwrap(),
+            description: format!("instance {:?}", instance_name),
+        },
+        ncpus: InstanceCpuCount(4),
+        memory: ByteCount::from_gibibytes_u32(1),
+        hostname: String::from("the_host"),
+        user_data: vec![],
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![params::ExternalIpCreate::Ephemeral {
+            pool_name: Some("pool1".parse().unwrap()),
+        }],
+        disks: vec![],
+        start: true,
+    };
+    let error = object_create_error(
+        client,
+        &url,
+        &instance_params,
+        StatusCode::NOT_FOUND,
+    )
+    .await;
+    assert_eq!(error.message, "not found: ip-pool with name \"pool1\"");
+}
+
+async fn stop_instance(
+    cptestctx: &ControlPlaneTestContext,
+    instance_name: &str,
+) {
+    let client = &cptestctx.external_client;
+    let instance =
+        instance_post(&client, instance_name, InstanceOp::Stop).await;
+    let nexus = &cptestctx.server.apictx().nexus;
+    instance_simulate(nexus, &instance.identity.id).await;
+    let url =
+        format!("/v1/instances/{}?project={}", instance_name, PROJECT_NAME);
+    object_delete(client, &url).await;
 }
 
 // IP pool that exists but is not associated with any silo (or with a silo other
