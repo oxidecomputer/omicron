@@ -9,6 +9,7 @@ use nexus_test_utils::resource_helpers::create_local_user;
 use nexus_test_utils::resource_helpers::grant_iam;
 use nexus_test_utils::resource_helpers::object_create;
 use nexus_test_utils::resource_helpers::populate_ip_pool;
+use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
 use nexus_types::external_api::shared;
@@ -17,7 +18,6 @@ use nexus_types::external_api::views::SiloQuotas;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::InstanceCpuCount;
-use semver::Op;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -97,7 +97,8 @@ impl ResourceAllocator {
                 format!("/v1/instances/{}/start?project=project", name)
                     .as_str(),
             )
-            .body(None as Option<&serde_json::Value>),
+            .body(None as Option<&serde_json::Value>)
+            .expect_status(Some(http::StatusCode::ACCEPTED)),
         )
         .authn_as(self.auth.clone())
         .execute()
@@ -120,7 +121,8 @@ impl ResourceAllocator {
         )
         .authn_as(self.auth.clone())
         .execute()
-        .await;
+        .await
+        .expect("failed to stop instance");
 
         NexusRequest::object_delete(
             client,
@@ -225,7 +227,9 @@ async fn setup_silo_with_quota(
 #[nexus_test]
 async fn test_quotas(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
+
+    // Simulate space for disks
+    DiskTest::new(&cptestctx).await;
 
     let system = setup_silo_with_quota(
         &client,
@@ -241,39 +245,14 @@ async fn test_quotas(cptestctx: &ControlPlaneTestContext) {
         .expect_err("should've failed with insufficient CPU quota");
     system.cleanup_instance(client, "instance").await;
 
-    // Up the storage quota
-    system
-        .set_quotas(
-            client,
-            params::SiloQuotasUpdate {
-                cpus: None,
-                memory: None,
-                storage: Some(ByteCount::from_gibibytes_u32(100)),
-            },
-        )
-        .await
-        .expect("failed to set quotas");
-
-    let quotas = system.get_quotas(client).await;
-    assert_eq!(quotas.cpus, 0);
-    assert_eq!(quotas.memory, ByteCount::from(0));
-    assert_eq!(quotas.storage, ByteCount::from_gibibytes_u32(100));
-
-    // Ensure trying to provision an instance still fails with only storage quota updated
-    system
-        .provision_instance(client, "instance", 1, 1)
-        .await
-        .expect_err("should've failed with insufficient CPU quota");
-    system.cleanup_instance(client, "instance").await;
-
     // Up the CPU, memory quotas
     system
         .set_quotas(
             client,
             params::SiloQuotasUpdate {
                 cpus: Some(4),
-                memory: Some(ByteCount::from_gibibytes_u32(100)),
-                storage: Some(ByteCount::from_gibibytes_u32(0)),
+                memory: Some(ByteCount::from_gibibytes_u32(15)),
+                storage: Some(ByteCount::from_gibibytes_u32(2)),
             },
         )
         .await
@@ -281,12 +260,21 @@ async fn test_quotas(cptestctx: &ControlPlaneTestContext) {
 
     let quotas = system.get_quotas(client).await;
     assert_eq!(quotas.cpus, 4);
-    assert_eq!(quotas.memory, ByteCount::from_gibibytes_u32(100));
-    assert_eq!(quotas.storage, ByteCount::from(0));
+    assert_eq!(quotas.memory, ByteCount::from_gibibytes_u32(15));
+    assert_eq!(quotas.storage, ByteCount::from_gibibytes_u32(2));
 
     // Allocating instance should now succeed
     system
-        .provision_instance(client, "instance", 2, 80)
+        .provision_instance(client, "instance", 2, 10)
         .await
         .expect("Instance should've had enough resources to be provisioned");
+
+    system.provision_disk(client, "disk", 3).await.expect_err(
+        "Disk should not be provisioned because it exceeds the quota",
+    );
+
+    system
+        .provision_disk(client, "disk", 1)
+        .await
+        .expect("Disk should be provisioned");
 }
