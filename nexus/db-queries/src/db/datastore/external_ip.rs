@@ -220,7 +220,6 @@ impl DataStore {
                         ))
                     } else {
                         TransactionError::CustomError(
-                            // XXX Should this be insufficient_capacity?
                             Error::insufficient_capacity(
                                 "No external IP addresses available",
                                 "NextExternalIp::new returned NotFound",
