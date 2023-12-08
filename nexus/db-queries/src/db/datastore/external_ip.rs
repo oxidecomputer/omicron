@@ -219,9 +219,12 @@ impl DataStore {
                             "Requested external IP address not available",
                         ))
                     } else {
-                        TransactionError::CustomError(Error::invalid_request(
-                            "No external IP addresses available",
-                        ))
+                        TransactionError::CustomError(
+                            Error::insufficient_capacity(
+                                "No external IP addresses available",
+                                "NextExternalIp::new returned NotFound",
+                            ),
+                        )
                     }
                 }
                 DatabaseError(UniqueViolation, ..) if name.is_some() => {
@@ -450,10 +453,9 @@ impl DataStore {
             })?;
 
         if updated_rows == 0 {
-            return Err(Error::InvalidRequest {
-                message: "deletion failed due to concurrent modification"
-                    .to_string(),
-            });
+            return Err(Error::invalid_request(
+                "deletion failed due to concurrent modification",
+            ));
         }
         Ok(())
     }

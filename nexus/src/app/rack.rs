@@ -211,10 +211,9 @@ impl super::Nexus {
         };
 
         let rack_network_config = request.rack_network_config.as_ref().ok_or(
-            Error::InvalidRequest {
-                message: "cannot initialize a rack without a network config"
-                    .into(),
-            },
+            Error::invalid_request(
+                "cannot initialize a rack without a network config",
+            ),
         )?;
 
         self.db_datastore

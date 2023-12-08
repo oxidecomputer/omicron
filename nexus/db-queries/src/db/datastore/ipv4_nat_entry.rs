@@ -124,9 +124,7 @@ impl DataStore {
         if let Some(nat_entry) = result.first() {
             Ok(nat_entry.clone())
         } else {
-            Err(Error::InvalidRequest {
-                message: "no matching records".to_string(),
-            })
+            Err(Error::invalid_request("no matching records"))
         }
     }
 
@@ -185,9 +183,7 @@ impl DataStore {
         if let Some(nat_entry) = result.first() {
             Ok(nat_entry.clone())
         } else {
-            Err(Error::InvalidRequest {
-                message: "no matching records".to_string(),
-            })
+            Err(Error::invalid_request("no matching records"))
         }
     }
 
@@ -241,9 +237,7 @@ impl DataStore {
 
         match latest {
             Some(value) => Ok(value),
-            None => Err(Error::InvalidRequest {
-                message: "sequence table is empty!".to_string(),
-            }),
+            None => Err(Error::invalid_request("sequence table is empty!")),
         }
     }
 

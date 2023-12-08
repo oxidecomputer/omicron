@@ -793,7 +793,7 @@ async fn test_cannot_snapshot_if_no_space(cptestctx: &ControlPlaneTestContext) {
                 },
                 disk: base_disk_name.into(),
             }))
-            .expect_status(Some(StatusCode::SERVICE_UNAVAILABLE)),
+            .expect_status(Some(StatusCode::INSUFFICIENT_STORAGE)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()

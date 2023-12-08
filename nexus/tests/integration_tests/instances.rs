@@ -3190,7 +3190,7 @@ async fn test_instances_memory_greater_than_max_size(
     assert!(error.message.contains("memory must be less than"));
 }
 
-async fn expect_instance_start_fail_unavailable(
+async fn expect_instance_start_fail_507(
     client: &ClientTestContext,
     instance_name: &str,
 ) {
@@ -3199,13 +3199,15 @@ async fn expect_instance_start_fail_unavailable(
         http::Method::POST,
         &get_instance_start_url(instance_name),
     )
-    .expect_status(Some(http::StatusCode::SERVICE_UNAVAILABLE));
+    .expect_status(Some(http::StatusCode::INSUFFICIENT_STORAGE));
 
     NexusRequest::new(builder)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
-        .expect("Expected instance start to fail with SERVICE_UNAVAILABLE");
+        .expect(
+            "Expected instance start to fail with 507 Insufficient Storage",
+        );
 }
 
 async fn expect_instance_start_ok(
@@ -3296,9 +3298,7 @@ async fn test_cannot_provision_instance_beyond_cpu_capacity(
     for config in &configs {
         match config.2 {
             Ok(_) => expect_instance_start_ok(client, config.0).await,
-            Err(_) => {
-                expect_instance_start_fail_unavailable(client, config.0).await
-            }
+            Err(_) => expect_instance_start_fail_507(client, config.0).await,
         }
     }
 
@@ -3404,9 +3404,7 @@ async fn test_cannot_provision_instance_beyond_ram_capacity(
     for config in &configs {
         match config.2 {
             Ok(_) => expect_instance_start_ok(client, config.0).await,
-            Err(_) => {
-                expect_instance_start_fail_unavailable(client, config.0).await
-            }
+            Err(_) => expect_instance_start_fail_507(client, config.0).await,
         }
     }
 

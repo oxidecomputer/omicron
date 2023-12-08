@@ -822,25 +822,24 @@ impl super::Nexus {
                     })?;
 
                 let response = client.get(url).send().await.map_err(|e| {
-                    Error::InvalidValue {
-                        label: String::from("url"),
-                        message: format!("error querying url: {}", e),
-                    }
+                    Error::invalid_value(
+                        "url",
+                        format!("error querying url: {e}"),
+                    )
                 })?;
 
                 if !response.status().is_success() {
-                    return Err(Error::InvalidValue {
-                        label: String::from("url"),
-                        message: format!(
-                            "querying url returned: {}",
-                            response.status()
-                        ),
-                    });
+                    return Err(Error::invalid_value(
+                        "url",
+                        format!("querying url returned: {}", response.status()),
+                    ));
                 }
 
-                response.text().await.map_err(|e| Error::InvalidValue {
-                    label: String::from("url"),
-                    message: format!("error getting text from url: {}", e),
+                response.text().await.map_err(|e| {
+                    Error::invalid_value(
+                        "url",
+                        format!("error getting text from url: {e}"),
+                    )
                 })?
             }
 
@@ -849,12 +848,11 @@ impl super::Nexus {
                     &base64::engine::general_purpose::STANDARD,
                     data,
                 )
-                .map_err(|e| Error::InvalidValue {
-                    label: String::from("data"),
-                    message: format!(
-                        "error getting decoding base64 data: {}",
-                        e
-                    ),
+                .map_err(|e| {
+                    Error::invalid_value(
+                        "data",
+                        format!("error getting decoding base64 data: {e}"),
+                    )
                 })?;
                 String::from_utf8_lossy(&bytes).into_owned()
             }
