@@ -438,6 +438,7 @@ impl super::Nexus {
     pub(crate) async fn instance_delete_dpd_config(
         &self,
         opctx: &OpContext,
+        opctx_alloc: &OpContext,
         authz_instance: &authz::Instance,
     ) -> Result<(), Error> {
         let log = &self.log;
@@ -450,8 +451,6 @@ impl super::Nexus {
             .db_datastore
             .instance_lookup_external_ips(opctx, instance_id)
             .await?;
-
-        let boundary_switches = self.boundary_switches(opctx).await?;
 
         let mut errors = vec![];
         for entry in external_ips {
@@ -477,6 +476,8 @@ impl super::Nexus {
                 },
             }?;
         }
+
+        let boundary_switches = self.boundary_switches(opctx_alloc).await?;
 
         for switch in &boundary_switches {
             debug!(&self.log, "notifying dendrite of updates";
