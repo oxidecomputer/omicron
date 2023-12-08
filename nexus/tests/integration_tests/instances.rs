@@ -3914,10 +3914,23 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
     let instance = instance_get_as(&client, &instance_url, authn).await;
     assert_eq!(instance.runtime.run_state, InstanceState::Running);
 
-    // Delete the instance.
-    instance_post(&client, instance_name, InstanceOp::Stop).await;
+    // Stop the instance
+    NexusRequest::new(
+        RequestBuilder::new(
+            client,
+            Method::POST,
+            &format!("/v1/instances/{}/stop", instance.identity.id),
+        )
+        .body(None as Option<&serde_json::Value>)
+        .expect_status(Some(StatusCode::ACCEPTED)),
+    )
+    .authn_as(AuthnMode::SiloUser(user_id))
+    .execute()
+    .await
+    .expect("Failed to stop the instance");
     instance_simulate(nexus, &instance.identity.id).await;
 
+    // Delete the instance
     NexusRequest::object_delete(client, &instance_url)
         .authn_as(AuthnMode::SiloUser(user_id))
         .execute()
