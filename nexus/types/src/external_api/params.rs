@@ -306,6 +306,16 @@ impl SiloQuotasCreate {
             storage: ByteCount::from(0),
         }
     }
+
+    /// 30% of CPUs and memory reserved for internal usage.
+    /// Storage calculated at (total / 3.5) to account for redundancy / bookkeeping.
+    pub fn half_rack() -> Self {
+        Self {
+            cpus: 90,
+            memory: ByteCount::from_gibibytes_u32(708),
+            storage: ByteCount::from_gibibytes_u32(850),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]

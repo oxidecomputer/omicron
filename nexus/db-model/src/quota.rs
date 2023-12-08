@@ -49,6 +49,16 @@ impl SiloQuotas {
             storage,
         }
     }
+
+    pub fn half_rack(silo_id: Uuid) -> Self {
+        let count = params::SiloQuotasCreate::half_rack();
+        Self::new(
+            silo_id,
+            count.cpus,
+            count.memory.into(),
+            count.storage.into(),
+        )
+    }
 }
 
 impl From<SiloQuotas> for views::SiloQuotas {

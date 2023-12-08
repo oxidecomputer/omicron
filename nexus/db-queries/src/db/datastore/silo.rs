@@ -62,13 +62,30 @@ impl DataStore {
         debug!(opctx.log, "attempting to create built-in silos");
 
         use db::schema::silo::dsl;
-        let count = diesel::insert_into(dsl::silo)
-            .values([&*DEFAULT_SILO, &*INTERNAL_SILO])
-            .on_conflict(dsl::id)
-            .do_nothing()
-            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+        use db::schema::silo_quotas::dsl as quotas_dsl;
+        let count = self
+            .pool_connection_authorized(opctx)
+            .await?
+            .transaction_async(|conn| async move {
+                diesel::insert_into(quotas_dsl::silo_quotas)
+                    .values(SiloQuotas::half_rack(DEFAULT_SILO.id()))
+                    .on_conflict(quotas_dsl::silo_id)
+                    .do_nothing()
+                    .execute_async(&conn)
+                    .await
+                    .map_err(TransactionError::CustomError)
+                    .unwrap();
+                diesel::insert_into(dsl::silo)
+                    .values([&*DEFAULT_SILO, &*INTERNAL_SILO])
+                    .on_conflict(dsl::id)
+                    .do_nothing()
+                    .execute_async(&conn)
+                    .await
+                    .map_err(TransactionError::CustomError)
+            })
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+            .unwrap();
+
         info!(opctx.log, "created {} built-in silos", count);
 
         self.virtual_provisioning_collection_create(

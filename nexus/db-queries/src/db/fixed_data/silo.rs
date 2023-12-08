@@ -5,7 +5,7 @@
 use crate::db;
 use lazy_static::lazy_static;
 use nexus_types::external_api::{params, shared};
-use omicron_common::api::external::{ByteCount, IdentityMetadataCreateParams};
+use omicron_common::api::external::IdentityMetadataCreateParams;
 
 lazy_static! {
     pub static ref SILO_ID: uuid::Uuid = "001de000-5110-4000-8000-000000000000"
@@ -24,11 +24,9 @@ lazy_static! {
                     name: "default-silo".parse().unwrap(),
                     description: "default silo".to_string(),
                 },
-                quotas: params::SiloQuotasCreate {
-                    cpus: 128,
-                    memory: ByteCount::from_gibibytes_u32(1000),
-                    storage: ByteCount::from_gibibytes_u32(1000000),
-                },
+                // This quota is actually _unused_ because the default silo
+                // isn't constructed in the same way a normal silo would be.
+                quotas: params::SiloQuotasCreate::empty(),
                 discoverable: false,
                 identity_mode: shared::SiloIdentityMode::LocalOnly,
                 admin_group_name: None,
