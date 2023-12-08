@@ -92,7 +92,6 @@ openapi-lint.workspace = true
 openapiv3.workspace = true
 pretty_assertions.workspace = true
 rcgen.workspace = true
-serial_test.workspace = true
 subprocess.workspace = true
 slog-async.workspace = true
 slog-term.workspace = true
