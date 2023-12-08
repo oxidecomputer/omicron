@@ -279,7 +279,10 @@ pub struct SiloCreate {
     /// endpoints.  These should be valid for the Silo's DNS name(s).
     pub tls_certificates: Vec<CertificateCreate>,
 
-    /// Initial quotas for the new Silo
+    /// Limits the amount of provisionable CPU, memory, and storage in the Silo.
+    /// CPU and memory are only consumed by running instances, while storage is
+    /// consumed by any disk or snapshot. A value of 0 means that resource is
+    /// *not* provisionable.
     pub quotas: SiloQuotasCreate,
 
     /// Mapping of which Fleet roles are conferred by each Silo role
@@ -291,14 +294,19 @@ pub struct SiloCreate {
         BTreeMap<shared::SiloRole, BTreeSet<shared::FleetRole>>,
 }
 
+/// The amount of provisionable resources for a Silo
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SiloQuotasCreate {
+    /// The amount of virtual CPUs available for running instances in the Silo
     pub cpus: i64,
+    /// The amount of RAM (in bytes) available for running instances in the Silo
     pub memory: ByteCount,
+    /// The amount of storage (in bytes) available for disks or snapshots
     pub storage: ByteCount,
 }
 
 impl SiloQuotasCreate {
+    /// All quotas set to 0
     pub fn empty() -> Self {
         Self {
             cpus: 0,
@@ -318,10 +326,15 @@ impl SiloQuotasCreate {
     }
 }
 
+/// Updateable properties of a Silo's resource limits.
+/// If a value is omitted it will not be updated.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SiloQuotasUpdate {
+    /// The amount of virtual CPUs available for running instances in the Silo
     pub cpus: Option<i64>,
+    /// The amount of RAM (in bytes) available for running instances in the Silo
     pub memory: Option<ByteCount>,
+    /// The amount of storage (in bytes) available for disks or snapshots
     pub storage: Option<ByteCount>,
 }
 

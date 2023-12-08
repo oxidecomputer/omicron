@@ -569,6 +569,8 @@ async fn silo_quotas_view(
 }
 
 /// Update the resource quotas of a given silo
+///
+/// If a quota value is not specified, it will remain unchanged.
 #[endpoint {
     method = PUT,
     path = "/v1/system/silos/{silo}/quotas",

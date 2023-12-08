@@ -6410,6 +6410,7 @@
           "system/silos"
         ],
         "summary": "Update the resource quotas of a given silo",
+        "description": "If a quota value is not specified, it will remain unchanged.",
         "operationId": "silo_quotas_update",
         "parameters": [
           {
@@ -13142,7 +13143,7 @@
             "$ref": "#/components/schemas/Name"
           },
           "quotas": {
-            "description": "Initial quotas for the new Silo",
+            "description": "Limits the amount of provisionable CPU, memory, and storage in the Silo. CPU and memory are only consumed by running instances, while storage is consumed by any disk or snapshot. A value of 0 means that resource is *not* provisionable.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/SiloQuotasCreate"
@@ -13211,17 +13212,29 @@
         ]
       },
       "SiloQuotasCreate": {
+        "description": "The amount of provisionable resources for a Silo",
         "type": "object",
         "properties": {
           "cpus": {
+            "description": "The amount of virtual CPUs available for running instances in the Silo",
             "type": "integer",
             "format": "int64"
           },
           "memory": {
-            "$ref": "#/components/schemas/ByteCount"
+            "description": "The amount of RAM (in bytes) available for running instances in the Silo",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
           },
           "storage": {
-            "$ref": "#/components/schemas/ByteCount"
+            "description": "The amount of storage (in bytes) available for disks or snapshots",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
           }
         },
         "required": [
@@ -13252,15 +13265,18 @@
         ]
       },
       "SiloQuotasUpdate": {
+        "description": "Updateable properties of a Silo's resource limits. If a value is omitted it will not be updated.",
         "type": "object",
         "properties": {
           "cpus": {
             "nullable": true,
+            "description": "The amount of virtual CPUs available for running instances in the Silo",
             "type": "integer",
             "format": "int64"
           },
           "memory": {
             "nullable": true,
+            "description": "The amount of RAM (in bytes) available for running instances in the Silo",
             "allOf": [
               {
                 "$ref": "#/components/schemas/ByteCount"
@@ -13269,6 +13285,7 @@
           },
           "storage": {
             "nullable": true,
+            "description": "The amount of storage (in bytes) available for disks or snapshots",
             "allOf": [
               {
                 "$ref": "#/components/schemas/ByteCount"
@@ -15606,13 +15623,6 @@
       "description": "This provides rack-level network configuration.",
       "externalDocs": {
         "url": "http://docs.oxide.computer/api/system-networking"
-      }
-    },
-    {
-      "name": "system/quotas",
-      "description": "Quotas set resource allocation limits for a silo allowing operators to control the amount of resources a silo can consume.",
-      "externalDocs": {
-        "url": "http://docs.oxide.computer/api/system-quotas"
       }
     },
     {
