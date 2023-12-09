@@ -2,9 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-mod artifacts_with_plan;
-mod server;
-mod store;
+//! Types to represent update artifacts.
 
-pub(crate) use self::server::WicketdArtifactServer;
-pub(crate) use self::store::WicketdArtifactStore;
+mod artifact_types;
+mod extracted_artifacts;
+mod update_plan;
+
+pub use artifact_types::*;
+pub use extracted_artifacts::*;
+pub use update_plan::*;

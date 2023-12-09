@@ -2,6 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+//! Error types for this crate.
+
 use camino::Utf8PathBuf;
 use display_error_chain::DisplayErrorChain;
 use dropshot::HttpError;
@@ -12,7 +14,7 @@ use slog::error;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
-pub(super) enum RepositoryError {
+pub enum RepositoryError {
     #[error("error opening archive")]
     OpenArchive(#[source] anyhow::Error),
 
@@ -129,7 +131,7 @@ pub(super) enum RepositoryError {
 }
 
 impl RepositoryError {
-    pub(super) fn to_http_error(&self) -> HttpError {
+    pub fn to_http_error(&self) -> HttpError {
         let message = DisplayErrorChain::new(self).to_string();
 
         match self {

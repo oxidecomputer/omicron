@@ -9123,6 +9123,32 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
+name = "update-common"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "camino",
+ "camino-tempfile",
+ "display-error-chain",
+ "dropshot",
+ "futures",
+ "hex",
+ "hubtools",
+ "omicron-common",
+ "omicron-test-utils",
+ "omicron-workspace-hack",
+ "rand 0.8.5",
+ "sha2",
+ "slog",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+ "tough",
+ "tufaceous-lib",
+]
+
+[[package]]
 name = "update-engine"
 version = "0.1.0"
 dependencies = [
@@ -9624,6 +9650,7 @@ dependencies = [
  "trust-dns-resolver",
  "tufaceous",
  "tufaceous-lib",
+ "update-common",
  "update-engine",
  "uuid",
  "wicket",

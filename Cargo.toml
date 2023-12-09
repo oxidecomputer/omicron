@@ -62,6 +62,7 @@ members = [
     "test-utils",
     "tufaceous-lib",
     "tufaceous",
+    "update-common",
     "update-engine",
     "wicket-common",
     "wicket-dbg",
@@ -130,6 +131,7 @@ default-members = [
     "test-utils",
     "tufaceous-lib",
     "tufaceous",
+    "update-common",
     "update-engine",
     "wicket-common",
     "wicket-dbg",
@@ -381,6 +383,7 @@ trybuild = "1.0.85"
 tufaceous = { path = "tufaceous" }
 tufaceous-lib = { path = "tufaceous-lib" }
 unicode-width = "0.1.11"
+update-common = { path = "update-common" }
 update-engine = { path = "update-engine" }
 usdt = "0.3"
 uuid = { version = "1.6.1", features = ["serde", "v4"] }
