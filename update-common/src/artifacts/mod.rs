@@ -5,9 +5,11 @@
 //! Types to represent update artifacts.
 
 mod artifact_types;
+mod artifacts_with_plan;
 mod extracted_artifacts;
 mod update_plan;
 
 pub use artifact_types::*;
+pub use artifacts_with_plan::*;
 pub use extracted_artifacts::*;
 pub use update_plan::*;

@@ -9130,6 +9130,8 @@ dependencies = [
  "bytes",
  "camino",
  "camino-tempfile",
+ "clap 4.4.3",
+ "debug-ignore",
  "display-error-chain",
  "dropshot",
  "futures",
@@ -9145,6 +9147,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tough",
+ "tufaceous",
  "tufaceous-lib",
 ]
 

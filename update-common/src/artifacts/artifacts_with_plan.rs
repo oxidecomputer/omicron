@@ -2,6 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use super::ExtractedArtifactDataHandle;
+use super::UpdatePlan;
+use super::UpdatePlanBuilder;
+use crate::errors::RepositoryError;
 use camino_tempfile::Utf8TempDir;
 use debug_ignore::DebugIgnore;
 use omicron_common::update::ArtifactHash;
@@ -15,14 +19,10 @@ use std::io;
 use tough::TargetName;
 use tufaceous_lib::ArchiveExtractor;
 use tufaceous_lib::OmicronRepo;
-use update_common::artifacts::ExtractedArtifactDataHandle;
-use update_common::artifacts::UpdatePlan;
-use update_common::artifacts::UpdatePlanBuilder;
-use update_common::errors::RepositoryError;
 
 /// A collection of artifacts along with an update plan using those artifacts.
 #[derive(Debug)]
-pub(super) struct ArtifactsWithPlan {
+pub struct ArtifactsWithPlan {
     // Map of top-level artifact IDs (present in the TUF repo) to the actual
     // artifacts we're serving (e.g., a top-level RoT artifact will map to two
     // artifact hashes: one for each of the A and B images).
@@ -50,7 +50,7 @@ pub(super) struct ArtifactsWithPlan {
 }
 
 impl ArtifactsWithPlan {
-    pub(super) async fn from_zip<T>(
+    pub async fn from_zip<T>(
         zip_data: T,
         log: &Logger,
     ) -> Result<Self, RepositoryError>
@@ -164,7 +164,7 @@ impl ArtifactsWithPlan {
         Ok(Self { by_id, by_hash: by_hash.into(), plan: artifacts })
     }
 
-    pub(super) fn by_id(&self) -> &BTreeMap<ArtifactId, Vec<ArtifactHashId>> {
+    pub fn by_id(&self) -> &BTreeMap<ArtifactId, Vec<ArtifactHashId>> {
         &self.by_id
     }
 
@@ -175,11 +175,11 @@ impl ArtifactsWithPlan {
         &self.by_hash
     }
 
-    pub(super) fn plan(&self) -> &UpdatePlan {
+    pub fn plan(&self) -> &UpdatePlan {
         &self.plan
     }
 
-    pub(super) fn get_by_hash(
+    pub fn get_by_hash(
         &self,
         id: &ArtifactHashId,
     ) -> Option<ExtractedArtifactDataHandle> {

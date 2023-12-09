@@ -2,7 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::artifacts_with_plan::ArtifactsWithPlan;
 use crate::http_entrypoints::InstallableArtifacts;
 use dropshot::HttpError;
 use omicron_common::api::external::SemverVersion;
@@ -11,6 +10,7 @@ use slog::Logger;
 use std::io;
 use std::sync::Arc;
 use std::sync::Mutex;
+use update_common::artifacts::ArtifactsWithPlan;
 use update_common::artifacts::ExtractedArtifactDataHandle;
 use update_common::artifacts::UpdatePlan;
 
