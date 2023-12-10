@@ -30,7 +30,6 @@ use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::{DhcpCfg, PortManager};
 use illumos_utils::running_zone::{RunningZone, ZoneBuilderFactory};
 use illumos_utils::svc::wait_for_service;
-use illumos_utils::zone::Zones;
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use omicron_common::address::NEXUS_INTERNAL_PORT;
 use omicron_common::api::internal::nexus::{
@@ -51,6 +50,11 @@ use std::net::{SocketAddr, SocketAddrV6};
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
+
+#[cfg(test)]
+use illumos_utils::zone::MockZones as Zones;
+#[cfg(not(test))]
+use illumos_utils::zone::Zones;
 
 // The depth of the request queue for the instance.
 const QUEUE_SIZE: usize = 32;
@@ -411,7 +415,9 @@ impl InstanceRunner {
                         },
                         Some(PutState{ state, tx }) => {
                              tx.send(self.put_state(state).await
-                                .map(|r| InstancePutStateResponse { updated_runtime: Some(r) })
+                                .map(|r| InstancePutStateResponse {
+                                    updated_runtime: Some(r),
+                                })
                                 .map_err(|e| e.into()))
                                 .map_err(|_| Error::FailedSendClientClosed)
                         },
@@ -1544,21 +1550,29 @@ mod tests {
     use internal_dns::resolver::Resolver;
     use internal_dns::ServiceName;
     use omicron_common::api::external::{
-        ByteCount, Generation, InstanceCpuCount, InstanceState,
+        ByteCount, Generation, Hostname, InstanceCpuCount, InstanceState,
     };
     use omicron_common::api::internal::nexus::InstanceProperties;
     use sled_storage::disk::{RawDisk, SyntheticDisk};
     use sled_storage::manager::FakeStorageManager;
     use std::net::Ipv6Addr;
+    use std::str::FromStr;
     use tokio::sync::watch::Receiver;
     use tokio::time::timeout;
 
     const TIMEOUT_DURATION: tokio::time::Duration =
         tokio::time::Duration::from_secs(3);
 
+    #[derive(Default, Clone)]
+    enum ReceivedInstanceState {
+        #[default]
+        None,
+        InstancePut(SledInstanceState),
+    }
+
     struct NexusServer {
         observed_runtime_state:
-            tokio::sync::watch::Sender<Option<SledInstanceState>>,
+            tokio::sync::watch::Sender<ReceivedInstanceState>,
     }
     impl FakeNexusServer for NexusServer {
         fn cpapi_instances_put(
@@ -1566,30 +1580,38 @@ mod tests {
             _instance_id: Uuid,
             new_runtime_state: SledInstanceState,
         ) -> Result<(), omicron_common::api::external::Error> {
-            self.observed_runtime_state.send(Some(new_runtime_state))
-                .map_err(|_| omicron_common::api::external::Error::internal_error("couldn't send updated SledInstanceState to test driver"))
+            self.observed_runtime_state
+                .send(ReceivedInstanceState::InstancePut(new_runtime_state))
+                .map_err(|_| {
+                    omicron_common::api::external::Error::internal_error(
+                        "couldn't send SledInstanceState to test driver",
+                    )
+                })
         }
     }
 
-    fn fake_nexus_server(
-        logctx: &LogContext,
-    ) -> (
-        NexusClient,
-        HttpServer<ServerContext>,
-        Receiver<Option<SledInstanceState>>,
-    ) {
-        let (state_tx, state_rx) = tokio::sync::watch::channel(None);
+    struct FakeNexusParts {
+        nexus_client: NexusClient,
+        nexus_server: HttpServer<ServerContext>,
+        state_rx: Receiver<ReceivedInstanceState>,
+    }
 
-        let nexus_server = crate::fakes::nexus::start_test_server(
-            logctx.log.new(o!("component" => "FakeNexusServer")),
-            Box::new(NexusServer { observed_runtime_state: state_tx }),
-        );
-        let nexus_client = NexusClient::new(
-            &format!("http://{}", nexus_server.local_addr()),
-            logctx.log.new(o!("component" => "NexusClient")),
-        );
+    impl FakeNexusParts {
+        fn new(logctx: &LogContext) -> Self {
+            let (state_tx, state_rx) =
+                tokio::sync::watch::channel(ReceivedInstanceState::None);
 
-        (nexus_client, nexus_server, state_rx)
+            let nexus_server = crate::fakes::nexus::start_test_server(
+                logctx.log.new(o!("component" => "FakeNexusServer")),
+                Box::new(NexusServer { observed_runtime_state: state_tx }),
+            );
+            let nexus_client = NexusClient::new(
+                &format!("http://{}", nexus_server.local_addr()),
+                logctx.log.new(o!("component" => "NexusClient")),
+            );
+
+            Self { nexus_client, nexus_server, state_rx }
+        }
     }
 
     fn mock_vnic_contexts(
@@ -1610,7 +1632,7 @@ mod tests {
     //  which calls Instance::propolis_ensure,
     //   which spawns Instance::monitor_state_task,
     //    which calls cpapi_instances_put
-    //   and calls Instance::setup_propolis_locked,
+    //   and calls Instance::setup_propolis_inner,
     //    which creates the zone (which isn't real in these tests, of course)
     fn mock_zone_contexts(
     ) -> (MockZonesBootContext, MockWaitForServiceContext, MockZonesIdContext)
@@ -1740,12 +1762,38 @@ mod tests {
     ) -> Instance {
         let id = Uuid::new_v4();
         let propolis_id = Uuid::new_v4();
+
         let ticket = InstanceTicket::new_without_manager_for_test(id);
+
+        let initial_state =
+            fake_instance_initial_state(propolis_id, propolis_addr);
+
+        let services = fake_instance_manager_services(
+            logctx,
+            storage_handle,
+            nexus_client_with_resolver,
+        );
+
+        Instance::new(
+            logctx.log.new(o!("component" => "Instance")),
+            id,
+            propolis_id,
+            ticket,
+            initial_state,
+            services,
+        )
+        .unwrap()
+    }
+
+    fn fake_instance_initial_state(
+        propolis_id: Uuid,
+        propolis_addr: SocketAddr,
+    ) -> InstanceInitialState {
         let hardware = InstanceHardware {
             properties: InstanceProperties {
                 ncpus: InstanceCpuCount(1),
                 memory: ByteCount::from_gibibytes_u32(1),
-                hostname: "bert".to_string(),
+                hostname: Hostname::from_str("bert").unwrap(),
             },
             nics: vec![],
             source_nat: SourceNatConfig {
@@ -1765,7 +1813,7 @@ mod tests {
             cloud_init_bytes: None,
         };
 
-        let initial_state = InstanceInitialState {
+        InstanceInitialState {
             hardware,
             instance_runtime: InstanceRuntimeState {
                 propolis_id: Some(propolis_id),
@@ -1780,8 +1828,14 @@ mod tests {
                 time_updated: Default::default(),
             },
             propolis_addr,
-        };
+        }
+    }
 
+    fn fake_instance_manager_services(
+        logctx: &LogContext,
+        storage_handle: StorageHandle,
+        nexus_client_with_resolver: NexusClientWithResolver,
+    ) -> InstanceManagerServices {
         let vnic_allocator =
             VnicAllocator::new("Foo", Etherstub("mystub".to_string()));
         let port_manager = PortManager::new(
@@ -1796,24 +1850,14 @@ mod tests {
             cleanup_context,
         );
 
-        let services = InstanceManagerServices {
+        InstanceManagerServices {
             nexus_client: nexus_client_with_resolver,
             vnic_allocator,
             port_manager,
             storage: storage_handle,
             zone_bundler,
             zone_builder_factory: ZoneBuilderFactory::fake(),
-        };
-
-        Instance::new(
-            logctx.log.new(o!("component" => "Instance")),
-            id,
-            propolis_id,
-            ticket,
-            initial_state,
-            services,
-        )
-        .unwrap()
+        }
     }
 
     #[tokio::test]
@@ -1830,8 +1874,8 @@ mod tests {
         let _mock_vnic_contexts = mock_vnic_contexts();
         let _mock_zone_contexts = mock_zone_contexts();
 
-        let (nexus_client, nexus_server, mut state_rx) =
-            fake_nexus_server(&logctx);
+        let FakeNexusParts { nexus_client, nexus_server, mut state_rx } =
+            FakeNexusParts::new(&logctx);
 
         let (_dns_server, resolver, _dns_config_dir) =
             timeout(TIMEOUT_DURATION, dns_server(&logctx, &nexus_server))
@@ -1855,29 +1899,30 @@ mod tests {
         .await
         .expect("timed out creating Instance struct");
 
-        timeout(
-            TIMEOUT_DURATION,
-            inst.put_state(InstanceStateRequested::Running),
-        )
-        .await
-        .expect("timed out waiting for Instance::put_state")
-        .unwrap();
+        let (put_tx, put_rx) = oneshot::channel();
+
+        inst.put_state(put_tx, InstanceStateRequested::Running)
+            .await
+            .expect("failed to send Instance::put_state");
+
+        timeout(TIMEOUT_DURATION, put_rx)
+            .await
+            .expect("timed out waiting for Instance::put_state result")
+            .expect("failed to receive Instance::put_state result")
+            .expect("Instance::put_state failed");
 
         timeout(
             TIMEOUT_DURATION,
-            state_rx.wait_for(|maybe_state| {
-                maybe_state
-                    .as_ref()
-                    .map(|sled_inst_state| {
-                        sled_inst_state.vmm_state.state
-                            == InstanceState::Running
-                    })
-                    .unwrap_or(false)
+            state_rx.wait_for(|maybe_state| match maybe_state {
+                ReceivedInstanceState::InstancePut(sled_inst_state) => {
+                    sled_inst_state.vmm_state.state == InstanceState::Running
+                }
+                _ => false,
             }),
         )
         .await
         .expect("timed out waiting for InstanceState::Running in FakeNexus")
-        .unwrap();
+        .expect("failed to receive FakeNexus' InstanceState");
 
         logctx.cleanup_successful();
     }
@@ -1893,7 +1938,8 @@ mod tests {
         let _mock_vnic_contexts = mock_vnic_contexts();
         let _mock_zone_contexts = mock_zone_contexts();
 
-        let (nexus_client, nexus_server, state_rx) = fake_nexus_server(&logctx);
+        let FakeNexusParts { nexus_client, nexus_server, state_rx } =
+            FakeNexusParts::new(&logctx);
 
         let (_dns_server, resolver, _dns_config_dir) =
             timeout(TIMEOUT_DURATION, dns_server(&logctx, &nexus_server))
@@ -1918,11 +1964,17 @@ mod tests {
         .await
         .expect("timed out creating Instance struct");
 
-        timeout(TIMEOUT_DURATION, inst.put_state(InstanceStateRequested::Running))
+        let (put_tx, put_rx) = oneshot::channel();
+
+        inst.put_state(put_tx, InstanceStateRequested::Running)
+            .await
+            .expect("failed to send Instance::put_state");
+
+        timeout(TIMEOUT_DURATION, put_rx)
             .await
             .expect_err("*should've* timed out waiting for Instance::put_state, but didn't?");
 
-        if let Some(SledInstanceState {
+        if let ReceivedInstanceState::InstancePut(SledInstanceState {
             vmm_state: VmmRuntimeState { state: InstanceState::Running, .. },
             ..
         }) = state_rx.borrow().to_owned()
@@ -1949,13 +2001,12 @@ mod tests {
             Ok(())
         });
         let wait_ctx = illumos_utils::svc::wait_for_service_context();
-        wait_ctx.expect().times(..).returning(|_, _, _| Ok(()));
+        wait_ctx.expect().times(1..).returning(|_, _, _| Ok(()));
         let zone_id_ctx = MockZones::id_context();
-        zone_id_ctx.expect().times(..).returning(|_| Ok(Some(1)));
-        let halt_rm_ctx = MockZones::halt_and_remove_logged_context();
-        halt_rm_ctx.expect().times(..).returning(|_, _| Ok(()));
+        zone_id_ctx.expect().times(1..).returning(|_| Ok(Some(1)));
 
-        let (nexus_client, nexus_server, state_rx) = fake_nexus_server(&logctx);
+        let FakeNexusParts { nexus_client, nexus_server, state_rx } =
+            FakeNexusParts::new(&logctx);
 
         let (_dns_server, resolver, _dns_config_dir) =
             timeout(TIMEOUT_DURATION, dns_server(&logctx, &nexus_server))
@@ -1980,17 +2031,116 @@ mod tests {
         .await
         .expect("timed out creating Instance struct");
 
-        timeout(TIMEOUT_DURATION, inst.put_state(InstanceStateRequested::Running))
+        let (put_tx, put_rx) = oneshot::channel();
+
+        inst.put_state(put_tx, InstanceStateRequested::Running)
+            .await
+            .expect("failed to send Instance::put_state");
+
+        timeout(TIMEOUT_DURATION, put_rx)
             .await
             .expect_err("*should've* timed out waiting for Instance::put_state, but didn't?");
 
-        if let Some(SledInstanceState {
+        if let ReceivedInstanceState::InstancePut(SledInstanceState {
             vmm_state: VmmRuntimeState { state: InstanceState::Running, .. },
             ..
         }) = state_rx.borrow().to_owned()
         {
             panic!("Nexus's InstanceState should never have reached running if zone creation timed out");
         }
+
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_instance_manager_creation() {
+        let logctx = omicron_test_utils::dev::test_setup_log(
+            "test_instance_manager_creation",
+        );
+
+        // automock'd things used during this test
+        let _mock_vnic_contexts = mock_vnic_contexts();
+        let _mock_zone_contexts = mock_zone_contexts();
+
+        let storage_handle = fake_storage_manager_with_u2().await;
+
+        let FakeNexusParts { nexus_client, nexus_server, mut state_rx } =
+            FakeNexusParts::new(&logctx);
+
+        let (_dns_server, resolver, _dns_config_dir) =
+            timeout(TIMEOUT_DURATION, dns_server(&logctx, &nexus_server))
+                .await
+                .expect("timed out making DNS server and Resolver");
+
+        let nexus_client_with_resolver =
+            NexusClientWithResolver::new_with_client(nexus_client, resolver);
+
+        let InstanceManagerServices {
+            nexus_client,
+            vnic_allocator: _,
+            port_manager,
+            storage,
+            zone_bundler,
+            zone_builder_factory,
+        } = fake_instance_manager_services(
+            &logctx,
+            storage_handle,
+            nexus_client_with_resolver,
+        );
+
+        let etherstub = Etherstub("mystub".to_string());
+
+        let mgr = crate::instance_manager::InstanceManager::new(
+            logctx.log.new(o!("component" => "InstanceManager")),
+            nexus_client,
+            etherstub,
+            port_manager,
+            storage,
+            zone_bundler,
+            zone_builder_factory,
+        )
+        .unwrap();
+
+        let (propolis_server, _propolis_client) =
+            propolis_mock_server(&logctx.log);
+        let propolis_addr = propolis_server.local_addr();
+
+        let instance_id = Uuid::new_v4();
+        let propolis_id = Uuid::new_v4();
+        let InstanceInitialState {
+            hardware,
+            instance_runtime,
+            vmm_runtime,
+            propolis_addr,
+        } = fake_instance_initial_state(propolis_id, propolis_addr);
+
+        mgr.ensure_registered(
+            instance_id,
+            propolis_id,
+            hardware,
+            instance_runtime,
+            vmm_runtime,
+            propolis_addr,
+        )
+        .await
+        .unwrap();
+
+        mgr.ensure_state(instance_id, InstanceStateRequested::Running)
+            .await
+            .unwrap();
+
+        timeout(
+            TIMEOUT_DURATION,
+            state_rx.wait_for(|maybe_state| match maybe_state {
+                ReceivedInstanceState::InstancePut(sled_inst_state) => {
+                    sled_inst_state.vmm_state.state == InstanceState::Running
+                }
+                _ => false,
+            }),
+        )
+        .await
+        .expect("timed out waiting for InstanceState::Running in FakeNexus")
+        .expect("failed to receive FakeNexus' InstanceState");
 
         logctx.cleanup_successful();
     }

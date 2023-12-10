@@ -121,7 +121,6 @@ async fn sled_agent_put(
 struct InstancePathParam {
     instance_id: Uuid,
 }
-
 #[endpoint {
     method = PUT,
     path = "/instances/{instance_id}",

@@ -67,6 +67,7 @@ use sled_agent_client::TestInterfaces as _;
 use std::convert::TryFrom;
 use std::net::Ipv4Addr;
 use std::sync::Arc;
+use std::time::Duration;
 use uuid::Uuid;
 
 use dropshot::test_util::ClientTestContext;
@@ -80,6 +81,8 @@ use nexus_test_utils::resource_helpers::{
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::shared::SiloRole;
 use omicron_sled_agent::sim;
+use omicron_test_utils::dev::poll;
+use omicron_test_utils::dev::poll::CondCheckError;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -3794,10 +3797,22 @@ async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
 
     // Create an instance and poke it to ensure it's running.
     let instance = create_instance(client, PROJECT_NAME, instance_name).await;
-    instance_simulate(nexus, &instance.identity.id).await;
-    let instance_next = instance_get(&client, &instance_url).await;
+    let instance_next = poll::wait_for_condition(
+        || async {
+            instance_simulate(nexus, &instance.identity.id).await;
+            let instance_next = instance_get(&client, &instance_url).await;
+            if instance_next.runtime.run_state == InstanceState::Running {
+                Ok(instance_next)
+            } else {
+                Err(CondCheckError::<()>::NotYet)
+            }
+        },
+        &Duration::from_secs(5),
+        &Duration::from_secs(60),
+    )
+    .await
+    .unwrap();
     identity_eq(&instance.identity, &instance_next.identity);
-    assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
     assert!(
         instance_next.runtime.time_run_state_updated
             > instance.runtime.time_run_state_updated

@@ -185,6 +185,7 @@ impl InstanceManager {
         target: InstanceStateRequested,
     ) -> Result<InstancePutStateResponse, Error> {
         let (tx, rx) = oneshot::channel();
+
         self.inner
             .tx
             .send(InstanceManagerRequest::EnsureState {
@@ -194,7 +195,20 @@ impl InstanceManager {
             })
             .await
             .map_err(|_| Error::FailedSendInstanceManagerClosed)?;
-        rx.await?
+
+        match target {
+            // these may involve a long-running zone creation, so avoid HTTP
+            // request timeouts by decoupling the response
+            // (see InstanceRunner::put_state)
+            InstanceStateRequested::MigrationTarget(_)
+            | InstanceStateRequested::Running => {
+                // don't error on channel being closed
+                tokio::spawn(rx);
+                Ok(InstancePutStateResponse { updated_runtime: None })
+            }
+            InstanceStateRequested::Stopped
+            | InstanceStateRequested::Reboot => rx.await?,
+        }
     }
 
     pub async fn put_migration_ids(
@@ -736,7 +750,7 @@ impl InstanceTicket {
 
     #[cfg(test)]
     pub(crate) fn new_without_manager_for_test(id: Uuid) -> Self {
-        Self { id, inner: None }
+        Self { id, terminate_tx: None }
     }
 
     /// Idempotently removes this instance from the tracked set of
