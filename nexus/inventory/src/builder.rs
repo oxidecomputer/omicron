@@ -27,7 +27,39 @@ use nexus_types::inventory::ServiceProcessor;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::sync::Arc;
+use thiserror::Error;
 use uuid::Uuid;
+
+/// Describes an operational error encountered during the collection process
+///
+/// Examples include a down MGS instance, failure to parse a response from some
+/// other service, etc.  We currently don't need to distinguish these
+/// programmatically.
+#[derive(Debug, Error)]
+pub struct InventoryError(#[from] anyhow::Error);
+
+impl std::fmt::Display for InventoryError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:#}", self.0)
+    }
+}
+
+/// Describes a mis-use of the [`Builder`] object
+///
+/// Example: reporting information about a caboose when the caller has not
+/// already reported information about the corresopnding baseboard.
+///
+/// Unlike `InventoryError`s, which can always happen in a real system, these
+/// errors are not ever expected.  Ideally, all of these problems would be
+/// compile errors.
+#[derive(Debug, Error)]
+pub struct CollectorBug(#[from] anyhow::Error);
+
+impl std::fmt::Display for CollectorBug {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:#}", self.0)
+    }
+}
 
 /// Build an inventory [`Collection`]
 ///
@@ -37,7 +69,7 @@ use uuid::Uuid;
 #[derive(Debug)]
 pub struct CollectionBuilder {
     // For field documentation, see the corresponding fields in `Collection`.
-    errors: Vec<anyhow::Error>,
+    errors: Vec<InventoryError>,
     time_started: DateTime<Utc>,
     collector: String,
     baseboards: BTreeSet<Arc<BaseboardId>>,
@@ -79,7 +111,7 @@ impl CollectionBuilder {
             errors: self
                 .errors
                 .into_iter()
-                .map(|e| format!("{:#}", e))
+                .map(|e| e.to_string())
                 .collect(),
             time_started: self.time_started,
             time_done: now(),
@@ -115,12 +147,12 @@ impl CollectionBuilder {
         // can stick it into a u16 (which still seems generous).  This will
         // allow us to store it into an Int32 in the database.
         let Ok(sp_slot) = u16::try_from(slot) else {
-            self.found_error(anyhow!(
+            self.found_error(InventoryError::from(anyhow!(
                 "MGS {:?}: SP {:?} slot {}: slot number did not fit into u16",
                 source,
                 sp_type,
                 slot
-            ));
+            )));
             return None;
         };
 
@@ -177,12 +209,12 @@ impl CollectionBuilder {
             gateway_client::types::RotState::CommunicationFailed {
                 message,
             } => {
-                self.found_error(anyhow!(
+                self.found_error(InventoryError::from(anyhow!(
                     "MGS {:?}: reading RoT state for {:?}: {}",
                     source,
                     baseboard,
                     message
-                ));
+                )));
             }
         }
 
@@ -218,7 +250,7 @@ impl CollectionBuilder {
         which: CabooseWhich,
         source: &str,
         caboose: SpComponentCaboose,
-    ) -> Result<(), anyhow::Error> {
+    ) -> Result<(), CollectorBug> {
         // Normalize the caboose contents: i.e., if we've seen this exact
         // caboose contents before, use the same record from before.  Otherwise,
         // make a new one.
@@ -243,7 +275,7 @@ impl CollectionBuilder {
             },
         ) {
             let error = if *previous.caboose == *sw_caboose {
-                anyhow!("reported multiple times (same value)",)
+                anyhow!("reported multiple times (same value)")
             } else {
                 anyhow!(
                     "reported caboose multiple times (previously {:?}, \
@@ -252,10 +284,10 @@ impl CollectionBuilder {
                     sw_caboose
                 )
             };
-            Err(error.context(format!(
+            Err(CollectorBug::from(error.context(format!(
                 "baseboard {:?} caboose {:?}",
                 baseboard, which
-            )))
+            ))))
         } else {
             Ok(())
         }
@@ -290,7 +322,7 @@ impl CollectionBuilder {
         which: RotPageWhich,
         source: &str,
         page: RotPage,
-    ) -> Result<(), anyhow::Error> {
+    ) -> Result<(), CollectorBug> {
         // Normalize the page contents: i.e., if we've seen this exact page
         // before, use the same record from before.  Otherwise, make a new one.
         let sw_rot_page = Self::normalize_item(&mut self.rot_pages, page);
@@ -321,10 +353,10 @@ impl CollectionBuilder {
                     sw_rot_page
                 )
             };
-            Err(error.context(format!(
+            Err(CollectorBug::from(error.context(format!(
                 "baseboard {:?} rot page {:?}",
                 baseboard, which
-            )))
+            ))))
         } else {
             Ok(())
         }
@@ -351,11 +383,12 @@ impl CollectionBuilder {
 
     /// Record a collection error
     ///
-    /// This is used for operational errors encountered during the collection
-    /// process (e.g., a down MGS instance).  It's not intended for mis-uses of
-    /// this API, which are conveyed instead through returned errors (and should
-    /// probably cause the caller to stop collection altogether).
-    pub fn found_error(&mut self, error: anyhow::Error) {
+    /// See [`InventoryError`] for more on what kinds of errors are reported
+    /// this way.  These errors are stored as part of the collection so that
+    /// future readers can see what problems might make the collection
+    /// incomplete.  By contrast, [`CollectorBug`]s are not reported and stored
+    /// this way.
+    pub fn found_error(&mut self, error: InventoryError) {
         self.errors.push(error);
     }
 }

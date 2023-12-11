@@ -4142,6 +4142,7 @@ dependencies = [
  "regex",
  "slog",
  "strum",
+ "thiserror",
  "tokio",
  "uuid",
 ]
