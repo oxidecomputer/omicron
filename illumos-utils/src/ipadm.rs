@@ -1,0 +1,113 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! Utilities for managing IP interfaces.
+
+use std::net::Ipv6Addr;
+// TODO: Make sure this is the correct location when running the binary
+use crate::zone::IPADM;
+use crate::{execute, ExecutionError, PFEXEC};
+
+/// Wraps commands for interacting with interfaces.
+pub struct Ipadm {}
+
+impl Ipadm {
+    // Remove current IP interface and create a new temporary one.
+    pub fn set_temp_interface_for_datalink(
+        datalink: &str,
+    ) -> Result<(), ExecutionError> {
+        let mut cmd = std::process::Command::new(PFEXEC);
+        let cmd = cmd.args(&[IPADM, "delete-if", datalink]);
+        // First we remove IP interface if it already exists. If it doesn't
+        // exists and the command returns an error we continue anyway as
+        // the next step is to create it.
+        match execute(cmd) {
+            _ => (),
+        };
+
+        let mut cmd = std::process::Command::new(PFEXEC);
+        let cmd = cmd.args(&[IPADM, "create-if", "-t", datalink]);
+        execute(cmd)?;
+        Ok(())
+    }
+
+    // Set MTU to 9000 on both IPv4 and IPv6
+    pub fn set_interface_mtu(datalink: &str) -> Result<(), ExecutionError> {
+        let mut cmd = std::process::Command::new(PFEXEC);
+        let cmd = cmd.args(&[
+            IPADM,
+            "set-ifprop",
+            "-t",
+            "-p",
+            "mtu=9000",
+            "-m",
+            "ipv4",
+            datalink,
+        ]);
+        execute(cmd)?;
+
+        let mut cmd = std::process::Command::new(PFEXEC);
+        let cmd = cmd.args(&[
+            IPADM,
+            "set-ifprop",
+            "-t",
+            "-p",
+            "mtu=9000",
+            "-m",
+            "ipv6",
+            datalink,
+        ]);
+        execute(cmd)?;
+        Ok(())
+    }
+
+    // TODO: Return a struct with the configured addresses
+    pub fn create_static_and_autoconfigured_addrs(
+        datalink: &str,
+        listen_addr: &Ipv6Addr,
+    ) -> Result<(), ExecutionError> {
+        // Create auto-configured address on the IP interface if it doesn't already exist
+        let addrobj = format!("{}/ll", datalink);
+        let mut cmd = std::process::Command::new(PFEXEC);
+        let cmd = cmd.args(&[IPADM, "show-addr", &addrobj]);
+        match execute(cmd) {
+            Err(_) => {
+                let mut cmd = std::process::Command::new(PFEXEC);
+                let cmd = cmd.args(&[
+                    IPADM,
+                    "create-addr",
+                    "-t",
+                    "-T",
+                    "addrconf",
+                    &addrobj,
+                ]);
+                execute(cmd)?;
+            }
+            Ok(_) => (),
+        };
+
+        // Create static address on the IP interface if it doesn't already exist
+        let addrobj = format!("{}/omicron6", datalink);
+        let mut cmd = std::process::Command::new(PFEXEC);
+        let cmd = cmd.args(&[IPADM, "show-addr", &addrobj]);
+        match execute(cmd) {
+            Err(_) => {
+                let mut cmd = std::process::Command::new(PFEXEC);
+                let cmd = cmd.args(&[
+                    IPADM,
+                    "create-addr",
+                    "-t",
+                    "-T",
+                    "static",
+                    "-a",
+                    &listen_addr.to_string(),
+                    &addrobj,
+                ]);
+                execute(cmd)?;
+            }
+            Ok(_) => (),
+        };
+        Ok(())
+    }
+}
