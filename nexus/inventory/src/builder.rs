@@ -108,11 +108,7 @@ impl CollectionBuilder {
     pub fn build(self) -> Collection {
         Collection {
             id: Uuid::new_v4(),
-            errors: self
-                .errors
-                .into_iter()
-                .map(|e| e.to_string())
-                .collect(),
+            errors: self.errors.into_iter().map(|e| e.to_string()).collect(),
             time_started: self.time_started,
             time_done: now(),
             collector: self.collector,
