@@ -72,6 +72,10 @@ impl Server {
 
         let dropshot_config = dropshot::ConfigDropshot {
             bind_address: SocketAddr::V6(sled_address),
+
+            // bump up size to handle large POSTs
+            request_body_max_bytes: 1024 * 1024,
+
             ..config.dropshot
         };
         let dropshot_log = log.new(o!("component" => "dropshot (SledAgent)"));
