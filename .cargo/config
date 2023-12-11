@@ -27,7 +27,7 @@ rustdocflags = "--document-private-items"
 #
 # Note that other runtime paths should not be added here, but should instead
 # reuse the infrastructure found in the `rpaths` crate which can be found in
-# this repo. Those paths are usually platform specific and will vary based on
+# this repo. Those paths are usually platform specific and will vary based on a
 # variety of things such as host OS.
 [target.x86_64-unknown-illumos]
 rustflags = [
