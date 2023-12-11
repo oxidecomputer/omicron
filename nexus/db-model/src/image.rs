@@ -202,7 +202,6 @@ impl From<Image> for views::Image {
         Self {
             identity: image.identity(),
             project_id: image.project_id,
-            url: image.url,
             os: image.os,
             version: image.version,
             digest: image.digest.map(|x| x.into()),

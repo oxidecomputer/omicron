@@ -296,7 +296,9 @@ impl FromStr for ArtifactHash {
     }
 }
 
-fn hex_schema<const N: usize>(gen: &mut SchemaGenerator) -> Schema {
+/// Produce an OpenAPI schema describing a hex array of a specific length (e.g.,
+/// a hash digest).
+pub fn hex_schema<const N: usize>(gen: &mut SchemaGenerator) -> Schema {
     let mut schema: SchemaObject = <String>::json_schema(gen).into();
     schema.format = Some(format!("hex string ({N} bytes)"));
     schema.into()

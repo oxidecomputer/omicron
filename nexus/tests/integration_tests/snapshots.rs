@@ -35,8 +35,6 @@ use omicron_common::api::external::Name;
 use omicron_nexus::app::MIN_DISK_SIZE_BYTES;
 use uuid::Uuid;
 
-use httptest::{matchers::*, responders::*, Expectation, ServerBuilder};
-
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
@@ -64,18 +62,6 @@ async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
     let disks_url = get_disks_url();
 
     // Define a global image
-    let server = ServerBuilder::new().run().unwrap();
-    server.expect(
-        Expectation::matching(request::method_path("HEAD", "/image.raw"))
-            .times(1..)
-            .respond_with(
-                status_code(200).append_header(
-                    "Content-Length",
-                    format!("{}", 4096 * 1000),
-                ),
-            ),
-    );
-
     let image_create_params = params::ImageCreate {
         identity: IdentityMetadataCreateParams {
             name: "alpine-edge".parse().unwrap(),
@@ -83,10 +69,7 @@ async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
                 "you can boot any image, as long as it's alpine",
             ),
         },
-        source: params::ImageSource::Url {
-            url: server.url("/image.raw").to_string(),
-            block_size: params::BlockSize::try_from(512).unwrap(),
-        },
+        source: params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
         os: "alpine".to_string(),
         version: "edge".to_string(),
     };
@@ -183,18 +166,6 @@ async fn test_snapshot_without_instance(cptestctx: &ControlPlaneTestContext) {
     let disks_url = get_disks_url();
 
     // Define a global image
-    let server = ServerBuilder::new().run().unwrap();
-    server.expect(
-        Expectation::matching(request::method_path("HEAD", "/image.raw"))
-            .times(1..)
-            .respond_with(
-                status_code(200).append_header(
-                    "Content-Length",
-                    format!("{}", 4096 * 1000),
-                ),
-            ),
-    );
-
     let image_create_params = params::ImageCreate {
         identity: IdentityMetadataCreateParams {
             name: "alpine-edge".parse().unwrap(),
@@ -202,10 +173,7 @@ async fn test_snapshot_without_instance(cptestctx: &ControlPlaneTestContext) {
                 "you can boot any image, as long as it's alpine",
             ),
         },
-        source: params::ImageSource::Url {
-            url: server.url("/image.raw").to_string(),
-            block_size: params::BlockSize::try_from(512).unwrap(),
-        },
+        source: params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
         os: "alpine".to_string(),
         version: "edge".to_string(),
     };
@@ -822,7 +790,7 @@ async fn test_cannot_snapshot_if_no_space(cptestctx: &ControlPlaneTestContext) {
                 },
                 disk: base_disk_name.into(),
             }))
-            .expect_status(Some(StatusCode::SERVICE_UNAVAILABLE)),
+            .expect_status(Some(StatusCode::INSUFFICIENT_STORAGE)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -838,18 +806,6 @@ async fn test_snapshot_unwind(cptestctx: &ControlPlaneTestContext) {
     let disks_url = get_disks_url();
 
     // Define a global image
-    let server = ServerBuilder::new().run().unwrap();
-    server.expect(
-        Expectation::matching(request::method_path("HEAD", "/image.raw"))
-            .times(1..)
-            .respond_with(
-                status_code(200).append_header(
-                    "Content-Length",
-                    format!("{}", 4096 * 1000),
-                ),
-            ),
-    );
-
     let image_create_params = params::ImageCreate {
         identity: IdentityMetadataCreateParams {
             name: "alpine-edge".parse().unwrap(),
@@ -857,10 +813,7 @@ async fn test_snapshot_unwind(cptestctx: &ControlPlaneTestContext) {
                 "you can boot any image, as long as it's alpine",
             ),
         },
-        source: params::ImageSource::Url {
-            url: server.url("/image.raw").to_string(),
-            block_size: params::BlockSize::try_from(512).unwrap(),
-        },
+        source: params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
         os: "alpine".to_string(),
         version: "edge".to_string(),
     };

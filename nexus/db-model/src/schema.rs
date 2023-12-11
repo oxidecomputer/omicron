@@ -539,6 +539,7 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
+
         ip_pool_id -> Uuid,
         ip_pool_range_id -> Uuid,
         is_service -> Bool,
@@ -547,6 +548,26 @@ table! {
         ip -> Inet,
         first_port -> Int4,
         last_port -> Int4,
+
+        project_id -> Nullable<Uuid>,
+    }
+}
+
+table! {
+    floating_ip (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+
+        ip_pool_id -> Uuid,
+        ip_pool_range_id -> Uuid,
+        is_service -> Bool,
+        parent_id -> Nullable<Uuid>,
+        ip -> Inet,
+        project_id -> Uuid,
     }
 }
 
@@ -1383,3 +1404,7 @@ allow_tables_to_appear_in_same_query!(
     switch_port,
     switch_port_settings_bgp_peer_config
 );
+
+allow_tables_to_appear_in_same_query!(disk, virtual_provisioning_resource);
+
+allow_tables_to_appear_in_same_query!(volume, virtual_provisioning_resource);

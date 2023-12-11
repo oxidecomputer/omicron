@@ -25,14 +25,17 @@ derive_more.workspace = true
 dns-server.workspace = true
 dns-service-client.workspace = true
 dpd-client.workspace = true
+display-error-chain.workspace = true
 dropshot.workspace = true
 flate2.workspace = true
 futures.workspace = true
 glob.workspace = true
+hex.workspace = true
 http.workspace = true
 hyper-staticfile.workspace = true
 gateway-client.workspace = true
 illumos-utils.workspace = true
+installinator-common.workspace = true
 internal-dns.workspace = true
 ipnetwork.workspace = true
 itertools.workspace = true
@@ -53,6 +56,7 @@ reqwest = { workspace = true, features = ["rustls-tls", "stream"] }
 schemars = { workspace = true, features = [ "chrono", "uuid1" ] }
 semver.workspace = true
 serde.workspace = true
+serde_human_bytes.workspace = true
 serde_json = {workspace = true, features = ["raw_value"]}
 sha3.workspace = true
 sled-agent-client.workspace = true
@@ -88,11 +92,12 @@ openapi-lint.workspace = true
 openapiv3.workspace = true
 pretty_assertions.workspace = true
 rcgen.workspace = true
-serial_test.workspace = true
 subprocess.workspace = true
 slog-async.workspace = true
 slog-term.workspace = true
 tempfile.workspace = true
+tokio-stream.workspace = true
+tokio-util.workspace = true
 
 illumos-utils = { workspace = true, features = ["testing", "tmp_keypath"] }
 sled-storage = { workspace = true, features = ["testing"] }

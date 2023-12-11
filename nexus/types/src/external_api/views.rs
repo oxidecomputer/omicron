@@ -17,7 +17,6 @@ use omicron_common::api::external::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_with::rust::deserialize_ignore_any;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::net::IpAddr;
@@ -133,9 +132,6 @@ pub struct Image {
 
     /// ID of the parent project if the image is a project image
     pub project_id: Option<Uuid>,
-
-    /// URL source of this image, if any
-    pub url: Option<String>,
 
     /// The family of the operating system like Debian, Ubuntu, etc.
     pub os: String,
@@ -271,6 +267,22 @@ pub struct ExternalIp {
     pub kind: IpKind,
 }
 
+/// A Floating IP is a well-known IP address which can be attached
+/// and detached from instances.
+#[derive(ObjectIdentity, Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct FloatingIp {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    /// The IP address held by this resource.
+    pub ip: IpAddr,
+    /// The project this resource exists within.
+    pub project_id: Uuid,
+    /// The ID of the instance that this Floating IP is attached to,
+    /// if it is presently in use.
+    pub instance_id: Option<Uuid>,
+}
+
 // RACKS
 
 /// View of an Rack
@@ -316,12 +328,6 @@ pub enum SledProvisionState {
     /// resources will continue to be on this sled unless manually migrated
     /// off.
     NonProvisionable,
-
-    /// This is a state that isn't known yet.
-    ///
-    /// This is defined to avoid API breakage.
-    #[serde(other, deserialize_with = "deserialize_ignore_any")]
-    Unknown,
 }
 
 /// An operator's view of an instance running on a given sled

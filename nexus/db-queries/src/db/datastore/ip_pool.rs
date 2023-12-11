@@ -250,11 +250,9 @@ impl DataStore {
             .optional()
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
         if range.is_some() {
-            return Err(Error::InvalidRequest {
-                message:
-                    "IP Pool cannot be deleted while it contains IP ranges"
-                        .to_string(),
-            });
+            return Err(Error::invalid_request(
+                "IP Pool cannot be deleted while it contains IP ranges",
+            ));
         }
 
         // Delete the pool, conditional on the rcgen not having changed. This
@@ -276,10 +274,9 @@ impl DataStore {
             })?;
 
         if updated_rows == 0 {
-            return Err(Error::InvalidRequest {
-                message: "deletion failed due to concurrent modification"
-                    .to_string(),
-            });
+            return Err(Error::invalid_request(
+                "deletion failed due to concurrent modification",
+            ));
         }
         Ok(())
     }

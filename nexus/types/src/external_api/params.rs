@@ -54,6 +54,7 @@ path_param!(VpcPath, vpc, "VPC");
 path_param!(SubnetPath, subnet, "subnet");
 path_param!(RouterPath, router, "router");
 path_param!(RoutePath, route, "route");
+path_param!(FloatingIpPath, floating_ip, "Floating IP");
 path_param!(DiskPath, disk, "disk");
 path_param!(SnapshotPath, snapshot, "snapshot");
 path_param!(ImagePath, image, "image");
@@ -144,6 +145,14 @@ pub struct ProjectSelector {
 pub struct OptionalProjectSelector {
     /// Name or ID of the project
     pub project: Option<NameOrId>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct FloatingIpSelector {
+    /// Name or ID of the project, only required if `floating_ip` is provided as a `Name`
+    pub project: Option<NameOrId>,
+    /// Name or ID of the Floating IP
+    pub floating_ip: NameOrId,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -774,6 +783,23 @@ pub struct IpPoolSiloUpdate {
     pub is_default: bool,
 }
 
+// Floating IPs
+/// Parameters for creating a new floating IP address for instances.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct FloatingIpCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+
+    /// An IP address to reserve for use as a floating IP. This field is
+    /// optional: when not set, an address will be automatically chosen from
+    /// `pool`. If set, then the IP must be available in the resolved `pool`.
+    pub address: Option<IpAddr>,
+
+    /// The parent IP pool that a floating IP is pulled from. If unset, the
+    /// default pool is selected.
+    pub pool: Option<NameOrId>,
+}
+
 // INSTANCES
 
 /// Describes an attachment of an `InstanceNetworkInterface` to an `Instance`,
@@ -841,7 +867,11 @@ pub enum ExternalIpCreate {
     /// automatically-assigned from the provided IP Pool, or all available pools
     /// if not specified.
     Ephemeral { pool_name: Option<Name> },
-    // TODO: Add floating IPs: https://github.com/oxidecomputer/omicron/issues/1334
+    /// An IP address providing both inbound and outbound access. The address is
+    /// an existing Floating IP object assigned to the current project.
+    ///
+    /// The floating IP must not be in use by another instance or service.
+    Floating { floating_ip_name: Name },
 }
 
 /// Create-time parameters for an `Instance`
@@ -1193,15 +1223,6 @@ pub struct DiskCreate {
 #[serde(rename_all = "snake_case")]
 pub enum ExpectedDigest {
     Sha256(String),
-}
-
-/// Parameters for importing blocks from a URL to a disk
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct ImportBlocksFromUrl {
-    /// the source to pull blocks from
-    pub url: String,
-    /// Expected digest of all blocks when importing from a URL
-    pub expected_digest: Option<ExpectedDigest>,
 }
 
 /// Parameters for importing blocks with a bulk write
@@ -1712,12 +1733,6 @@ pub struct SwitchPortApplySettings {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ImageSource {
-    Url {
-        url: String,
-
-        /// The block size in bytes
-        block_size: BlockSize,
-    },
     Snapshot {
         id: Uuid,
     },

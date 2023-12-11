@@ -12,7 +12,6 @@ use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
-use crate::db::error::TransactionError;
 use crate::db::fixed_data::vpc::SERVICES_VPC_ID;
 use crate::db::identity::Resource;
 use crate::db::model::IncompleteVpc;
@@ -37,7 +36,7 @@ use crate::db::queries::vpc::InsertVpcQuery;
 use crate::db::queries::vpc::VniSearchIter;
 use crate::db::queries::vpc_subnet::FilterConflictingVpcSubnetRangesQuery;
 use crate::db::queries::vpc_subnet::SubnetError;
-use async_bb8_diesel::AsyncConnection;
+use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
@@ -340,7 +339,10 @@ impl DataStore {
             opctx.log,
             "failed to find a VNI after searching entire range";
         );
-        Err(Error::unavail("Failed to find a free VNI for this VPC"))
+        Err(Error::insufficient_capacity(
+            "No free virtual network was found",
+            "Failed to find a free VNI for this VPC",
+        ))
     }
 
     // Internal implementation for creating a VPC.
@@ -470,11 +472,9 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
             .is_some()
         {
-            return Err(Error::InvalidRequest {
-                message: String::from(
-                    "VPC cannot be deleted while VPC Subnets exist",
-                ),
-            });
+            return Err(Error::invalid_request(
+                "VPC cannot be deleted while VPC Subnets exist",
+            ));
         }
 
         // Delete the VPC, conditional on the subnet_gen not having changed.
@@ -493,11 +493,9 @@ impl DataStore {
                 )
             })?;
         if updated_rows == 0 {
-            Err(Error::InvalidRequest {
-                message: String::from(
-                    "deletion failed to to concurrent modification",
-                ),
-            })
+            Err(Error::invalid_request(
+                "deletion failed due to concurrent modification",
+            ))
         } else {
             Ok(())
         }
@@ -580,53 +578,65 @@ impl DataStore {
             .set(dsl::time_deleted.eq(now));
 
         let rules_is_empty = rules.is_empty();
-        let insert_new_query = Vpc::insert_resource(
-            authz_vpc.id(),
-            diesel::insert_into(dsl::vpc_firewall_rule).values(rules),
-        );
-
         #[derive(Debug)]
         enum FirewallUpdateError {
             CollectionNotFound,
         }
-        type TxnError = TransactionError<FirewallUpdateError>;
+
+        let err = OptionalError::new();
 
         // TODO-scalability: Ideally this would be a CTE so we don't need to
         // hold a transaction open across multiple roundtrips from the database,
         // but for now we're using a transaction due to the severely decreased
         // legibility of CTEs via diesel right now.
-        self.pool_connection_authorized(opctx)
-            .await?
-            .transaction_async(|conn| async move {
-                delete_old_query.execute_async(&conn).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
 
-                // The generation count update on the vpc table row will take a
-                // write lock on the row, ensuring that the vpc was not deleted
-                // concurently.
-                if rules_is_empty {
-                    return Ok(vec![]);
-                }
-                insert_new_query
+        self.transaction_retry_wrapper("vpc_update_firewall_rules")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                let delete_old_query = delete_old_query.clone();
+                let rules = rules.clone();
+                async move {
+                    delete_old_query.execute_async(&conn).await?;
+
+                    // The generation count update on the vpc table row will take a
+                    // write lock on the row, ensuring that the vpc was not deleted
+                    // concurently.
+                    if rules_is_empty {
+                        return Ok(vec![]);
+                    }
+                    Vpc::insert_resource(
+                        authz_vpc.id(),
+                        diesel::insert_into(dsl::vpc_firewall_rule)
+                            .values(rules),
+                    )
                     .insert_and_get_results_async(&conn)
                     .await
                     .map_err(|e| match e {
                         AsyncInsertError::CollectionNotFound => {
-                            TxnError::CustomError(
-                                FirewallUpdateError::CollectionNotFound,
-                            )
+                            err.bail(FirewallUpdateError::CollectionNotFound)
                         }
-                        AsyncInsertError::DatabaseError(e) => e.into(),
+                        AsyncInsertError::DatabaseError(e) => e,
                     })
+                }
             })
             .await
-            .map_err(|e| match e {
-                TxnError::CustomError(
-                    FirewallUpdateError::CollectionNotFound,
-                ) => Error::not_found_by_id(ResourceType::Vpc, &authz_vpc.id()),
-                TxnError::Database(e) => public_error_from_diesel(
-                    e,
-                    ErrorHandler::NotFoundByResource(authz_vpc),
-                ),
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    match err {
+                        FirewallUpdateError::CollectionNotFound => {
+                            Error::not_found_by_id(
+                                ResourceType::Vpc,
+                                &authz_vpc.id(),
+                            )
+                        }
+                    }
+                } else {
+                    public_error_from_diesel(
+                        e,
+                        ErrorHandler::NotFoundByResource(authz_vpc),
+                    )
+                }
             })
     }
 
@@ -783,12 +793,10 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
             .is_some()
         {
-            return Err(Error::InvalidRequest {
-                message: String::from(
-                    "VPC Subnet cannot be deleted while \
-                    network interfaces in the subnet exist",
-                ),
-            });
+            return Err(Error::invalid_request(
+                "VPC Subnet cannot be deleted while network interfaces in the \
+                subnet exist",
+            ));
         }
 
         // Delete the subnet, conditional on the rcgen not having changed.
@@ -807,11 +815,9 @@ impl DataStore {
                 )
             })?;
         if updated_rows == 0 {
-            return Err(Error::InvalidRequest {
-                message: String::from(
-                    "deletion failed to to concurrent modification",
-                ),
-            });
+            return Err(Error::invalid_request(
+                "deletion failed due to concurrent modification",
+            ));
         } else {
             Ok(())
         }

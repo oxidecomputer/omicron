@@ -1026,6 +1026,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_disk_by_instance ON omicron.public.disk
 ) WHERE
     time_deleted IS NULL AND attach_instance_id IS NOT NULL;
 
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_deleted_disk ON omicron.public.disk (
+    id
+) WHERE
+    time_deleted IS NOT NULL;
+
 CREATE TABLE IF NOT EXISTS omicron.public.image (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
@@ -1664,6 +1669,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.external_ip (
     /* The last port in the allowed range, also inclusive. */
     last_port INT4 NOT NULL,
 
+    /* FK to the `project` table. */
+    project_id UUID,
+
     /* The name must be non-NULL iff this is a floating IP. */
     CONSTRAINT null_fip_name CHECK (
         (kind != 'floating' AND name IS NULL) OR
@@ -1674,6 +1682,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.external_ip (
     CONSTRAINT null_fip_description CHECK (
         (kind != 'floating' AND description IS NULL) OR
         (kind = 'floating' AND description IS NOT NULL)
+    ),
+
+    /* Only floating IPs can be attached to a project, and
+     * they must have a parent project if they are instance FIPs.
+     */
+    CONSTRAINT null_project_id CHECK (
+        (kind = 'floating' AND is_service = FALSE AND project_id is NOT NULL) OR
+        ((kind != 'floating' OR is_service = TRUE) AND project_id IS NULL)
     ),
 
     /*
@@ -1718,6 +1734,43 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_external_ip_by_parent ON omicron.public
     id
 )
     WHERE parent_id IS NOT NULL AND time_deleted IS NULL;
+
+/* Enforce name-uniqueness of floating (service) IPs at fleet level. */
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_floating_ip_by_name on omicron.public.external_ip (
+    name
+) WHERE
+    kind = 'floating' AND
+    time_deleted is NULL AND
+    project_id is NULL;
+
+/* Enforce name-uniqueness of floating IPs at project level. */
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_floating_ip_by_name_and_project on omicron.public.external_ip (
+    project_id,
+    name
+) WHERE
+    kind = 'floating' AND
+    time_deleted is NULL AND
+    project_id is NOT NULL;
+
+CREATE VIEW IF NOT EXISTS omicron.public.floating_ip AS
+SELECT
+    id,
+    name,
+    description,
+    time_created,
+    time_modified,
+    time_deleted,
+    ip_pool_id,
+    ip_pool_range_id,
+    is_service,
+    parent_id,
+    ip,
+    project_id
+FROM
+    omicron.public.external_ip
+WHERE
+    omicron.public.external_ip.kind = 'floating' AND
+    project_id IS NOT NULL;
 
 /*******************************************************************/
 

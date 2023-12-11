@@ -87,8 +87,8 @@ impl DataStore {
 
         match result.status {
             UpdateStatus::Updated => Ok(()),
-            UpdateStatus::NotUpdatedButExists => Err(Error::InvalidRequest {
-                message: format!(
+            UpdateStatus::NotUpdatedButExists => Err(Error::invalid_request(
+                format!(
                     "failed to update saga {:?} with state {:?}: preconditions not met: \
                     expected current_sec = {:?}, adopt_generation = {:?}, \
                     but found current_sec = {:?}, adopt_generation = {:?}, state = {:?}",
@@ -100,7 +100,7 @@ impl DataStore {
                     result.found.adopt_generation,
                     result.found.saga_state,
                 )
-            }),
+            )),
         }
     }
 

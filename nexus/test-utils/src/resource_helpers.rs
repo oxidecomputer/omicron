@@ -22,6 +22,7 @@ use nexus_types::external_api::shared::IdentityType;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::views;
 use nexus_types::external_api::views::Certificate;
+use nexus_types::external_api::views::FloatingIp;
 use nexus_types::external_api::views::IpPool;
 use nexus_types::external_api::views::IpPoolRange;
 use nexus_types::external_api::views::User;
@@ -35,9 +36,8 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::NameOrId;
-// use omicron_common::api::external::Name;
-// use omicron_common::api::external::NameOrId;
 use omicron_sled_agent::sim::SledAgent;
+use std::net::IpAddr;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -204,6 +204,28 @@ pub async fn create_default_ip_pool(
     let (pool, ..) = create_ip_pool(&client, "default", None).await;
     link_ip_pool(&client, "default", &DEFAULT_SILO.id(), true).await;
     pool
+}
+
+pub async fn create_floating_ip(
+    client: &ClientTestContext,
+    fip_name: &str,
+    project: &str,
+    address: Option<IpAddr>,
+    parent_pool_name: Option<&str>,
+) -> FloatingIp {
+    object_create(
+        client,
+        &format!("/v1/floating-ips?project={project}"),
+        &params::FloatingIpCreate {
+            identity: IdentityMetadataCreateParams {
+                name: fip_name.parse().unwrap(),
+                description: String::from("a floating ip"),
+            },
+            address,
+            pool: parent_pool_name.map(|v| NameOrId::Name(v.parse().unwrap())),
+        },
+    )
+    .await
 }
 
 pub async fn create_certificate(

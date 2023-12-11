@@ -1539,7 +1539,7 @@ mod test {
                     Err(Error::InvalidRequest { message }) => {
                         assert_eq!(rx_label, "empty");
                         assert_eq!(
-                            message,
+                            message.external_message(),
                             format!(
                                 "HTTP request for unknown server name {:?}",
                                 authority.host()
