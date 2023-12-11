@@ -6,8 +6,8 @@
 
 //! An interface to libipcc (inter-processor communications channel) which
 //! currently supports looking up values stored in the SP by key. These
-//! values are passed from the control plane to the SP (through MGS) or
-//! are maniuplated through the `ipcc` command found on Helios.
+//! values are variously static, passed from the control plane to the SP
+//! (through MGS) or set from userland via libipcc.
 
 use cfg_if::cfg_if;
 use omicron_common::update::ArtifactHash;
