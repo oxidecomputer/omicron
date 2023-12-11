@@ -3928,7 +3928,8 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
     .execute()
     .await
     .expect("Failed to stop the instance");
-    instance_simulate(nexus, &instance.identity.id).await;
+
+    instance_simulate_with_opctx(nexus, &instance.identity.id, &opctx).await;
 
     // Delete the instance
     NexusRequest::object_delete(client, &instance_url)
