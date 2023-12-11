@@ -776,6 +776,9 @@ mod test {
                             new_db_instance.runtime().nexus_state.0,
                             InstanceState::Stopped
                         );
+
+                        assert!(test_helpers::no_virtual_provisioning_resource_records_exist(cptestctx).await);
+                        assert!(test_helpers::no_virtual_provisioning_collection_records_using_instances(cptestctx).await);
                     }
                 })
             },
