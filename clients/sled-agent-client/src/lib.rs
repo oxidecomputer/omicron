@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 progenitor::generate_api!(
     spec = "../../openapi/sled-agent.json",
-    derives = [ schemars::JsonSchema ],
+    derives = [ schemars::JsonSchema, PartialEq ],
     inner_type = slog::Logger,
     pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
         slog::debug!(log, "client request";
@@ -33,6 +33,14 @@ progenitor::generate_api!(
         PortSpeed = omicron_common::api::internal::shared::PortSpeed,
     }
 );
+
+// XXX-dap could derive this if there were a way to do it on a per-type basis.
+// But we can't impl this for all types in sled-agent-client (there are some f32
+// and f64 in the API).
+impl Eq for types::OmicronZonesConfig {}
+impl Eq for types::OmicronZoneConfig {}
+impl Eq for types::OmicronZoneType {}
+impl Eq for types::OmicronZoneDataset {}
 
 impl omicron_common::api::external::ClientError for types::Error {
     fn message(&self) -> String {
@@ -76,17 +84,17 @@ impl From<omicron_common::api::external::InstanceState>
     }
 }
 
+impl From<omicron_common::api::external::ByteCount> for types::ByteCount {
+    fn from(s: omicron_common::api::external::ByteCount) -> Self {
+        Self(s.to_bytes())
+    }
+}
+
 impl From<omicron_common::api::external::InstanceCpuCount>
     for types::InstanceCpuCount
 {
     fn from(s: omicron_common::api::external::InstanceCpuCount) -> Self {
         Self(s.0)
-    }
-}
-
-impl From<omicron_common::api::external::ByteCount> for types::ByteCount {
-    fn from(s: omicron_common::api::external::ByteCount) -> Self {
-        Self(s.to_bytes())
     }
 }
 

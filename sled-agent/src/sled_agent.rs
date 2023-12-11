@@ -18,8 +18,8 @@ use crate::nexus::{ConvertInto, NexusClientWithResolver, NexusRequestQueue};
 use crate::params::{
     DiskStateRequested, InstanceHardware, InstanceMigrationSourceParams,
     InstancePutStateResponse, InstanceStateRequested,
-    InstanceUnregisterResponse, OmicronZonesConfig, SledRole, TimeSync,
-    VpcFirewallRule, ZoneBundleMetadata, Zpool,
+    InstanceUnregisterResponse, Inventory, OmicronZonesConfig, SledRole,
+    TimeSync, VpcFirewallRule, ZoneBundleMetadata, Zpool,
 };
 use crate::services::{self, ServiceManager};
 use crate::storage_monitor::UnderlayAccess;
@@ -42,7 +42,7 @@ use illumos_utils::zone::ZONE_PREFIX;
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
 };
-use omicron_common::api::external::Vni;
+use omicron_common::api::external::{ByteCount, Vni};
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::ProducerKind;
 use omicron_common::api::internal::nexus::{
@@ -1055,6 +1055,39 @@ impl SledAgent {
 
     pub(crate) fn boot_disk_os_writer(&self) -> &BootDiskOsWriter {
         &self.inner.boot_disk_os_writer
+    }
+
+    /// Return basic information about ourselves: identity and status
+    ///
+    /// This is basically a GET version of the information we push to Nexus on
+    /// startup.
+    pub(crate) fn inventory(&self) -> Inventory {
+        let sled_id = self.inner.id;
+        let sled_agent_address = self.inner.sled_address();
+        let is_scrimlet = self.inner.hardware.is_scrimlet();
+        let baseboard = self.inner.hardware.baseboard();
+        let usable_hardware_threads =
+            self.inner.hardware.online_processor_count();
+        let usable_physical_ram =
+            self.inner.hardware.usable_physical_ram_bytes();
+        let reservoir_size = self.inner.instances.reservoir_size();
+        let role = if is_scrimlet {
+            crate::params::SledRole::Scrimlet
+        } else {
+            crate::params::SledRole::Gimlet
+        };
+
+        Inventory {
+            sled_id,
+            sled_agent_address,
+            role,
+            baseboard,
+            usable_hardware_threads,
+            // XXX-dap remove unwrap
+            usable_physical_ram: ByteCount::try_from(usable_physical_ram)
+                .unwrap(),
+            reservoir_size,
+        }
     }
 }
 

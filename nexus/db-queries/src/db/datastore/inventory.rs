@@ -1313,6 +1313,8 @@ impl DataStore {
                 rots,
                 cabooses_found,
                 rot_pages_found,
+                sleds: BTreeMap::new(), // XXX-dap
+                omicron_zones: BTreeMap::new(), // XXX-dap
             },
             limit_reached,
         ))

@@ -508,7 +508,9 @@ impl JsonSchema for RoleName {
 // to serialize the value.
 //
 // TODO: custom JsonSchema and Deserialize impls to enforce i64::MAX limit
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[derive(
+    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq,
+)]
 pub struct ByteCount(u64);
 
 #[allow(non_upper_case_globals)]

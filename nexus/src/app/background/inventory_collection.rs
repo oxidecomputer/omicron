@@ -127,6 +127,7 @@ async fn inventory_activate(
     let inventory = nexus_inventory::Collector::new(
         creator,
         &mgs_clients,
+        &[], // XXX-dap
         opctx.log.clone(),
     );
     let collection =

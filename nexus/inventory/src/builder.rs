@@ -8,6 +8,9 @@
 //! from sources like MGS) from assembling a representation of what was
 //! collected.
 
+// XXX-dap instead of anyhow::Error, create CollectorBug or something? for
+// clarity in distinguishing collector bugs from inventory errors
+
 use anyhow::anyhow;
 use chrono::DateTime;
 use chrono::Utc;
@@ -19,11 +22,14 @@ use nexus_types::inventory::Caboose;
 use nexus_types::inventory::CabooseFound;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
+use nexus_types::inventory::OmicronZonesConfig;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageFound;
 use nexus_types::inventory::RotPageWhich;
 use nexus_types::inventory::RotState;
 use nexus_types::inventory::ServiceProcessor;
+use nexus_types::inventory::Sled;
+use omicron_common::api::external::ByteCount;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -81,6 +87,8 @@ pub struct CollectionBuilder {
         BTreeMap<CabooseWhich, BTreeMap<Arc<BaseboardId>, CabooseFound>>,
     rot_pages_found:
         BTreeMap<RotPageWhich, BTreeMap<Arc<BaseboardId>, RotPageFound>>,
+    sleds: BTreeMap<Uuid, Sled>,
+    omicron_zones: BTreeMap<Uuid, OmicronZonesConfig>,
 }
 
 impl CollectionBuilder {
@@ -101,6 +109,8 @@ impl CollectionBuilder {
             rots: BTreeMap::new(),
             cabooses_found: BTreeMap::new(),
             rot_pages_found: BTreeMap::new(),
+            sleds: BTreeMap::new(),
+            omicron_zones: BTreeMap::new(),
         }
     }
 
@@ -119,6 +129,8 @@ impl CollectionBuilder {
             rots: self.rots,
             cabooses_found: self.cabooses_found,
             rot_pages_found: self.rot_pages_found,
+            sleds: self.sleds,
+            omicron_zones: self.omicron_zones,
         }
     }
 
@@ -386,6 +398,90 @@ impl CollectionBuilder {
     /// this way.
     pub fn found_error(&mut self, error: InventoryError) {
         self.errors.push(error);
+    }
+
+    /// Record information about a sled that's part of the control plane
+    pub fn found_sled_inventory(
+        &mut self,
+        source: &str,
+        inventory: sled_agent_client::types::Inventory,
+    ) -> Result<(), anyhow::Error> {
+        let sled_id = inventory.sled_id;
+
+        // Normalize the baseboard id, if any.
+        use sled_agent_client::types::Baseboard;
+        let baseboard = match inventory.baseboard {
+            Baseboard::Pc { .. } => None,
+            Baseboard::Gimlet { identifier, model, revision: _ } => {
+                Some(Self::normalize_item(
+                    &mut self.baseboards,
+                    BaseboardId {
+                        serial_number: identifier,
+                        part_number: model,
+                    },
+                ))
+            }
+            Baseboard::Unknown => {
+                self.found_error(anyhow!(
+                    "sled {:?}: reported unknown baseboard",
+                    sled_id
+                ));
+                None
+            }
+        };
+
+        // Socket addresses come through the OpenAPI spec as strings, which
+        // means they don't get validated when everything else does.  This
+        // error is an operational error in collecting the data, not a collector
+        // bug.
+        let sled_agent_address = match inventory.sled_agent_address.parse() {
+            Ok(addr) => addr,
+            Err(error) => {
+                self.found_error(anyhow!(
+                    "sled {:?}: bad sled agent address: {:?}: {:#}",
+                    sled_id,
+                    inventory.sled_agent_address,
+                    error,
+                ));
+                return Ok(())
+            }
+        };
+        let sled = Sled {
+            source: source.to_string(),
+            sled_agent_address,
+            role: inventory.role,
+            baseboard,
+            usable_hardware_threads: inventory.usable_hardware_threads,
+            usable_physical_ram: ByteCount::from(inventory.usable_physical_ram),
+            reservoir_size: ByteCount::from(inventory.reservoir_size),
+        };
+
+        if let Some(previous) = self.sleds.get(&sled_id) {
+            let error = if *previous == sled {
+                anyhow!("reported multiple times (same value)",)
+            } else {
+                anyhow!(
+                    "reported sled multiple times (previously {:?}, now {:?})",
+                    previous,
+                    sled,
+                )
+            };
+            Err(error.context(format!("sled {:?}", sled_id,)))
+        } else {
+            self.sleds.insert(sled_id, sled);
+            Ok(())
+        }
+    }
+
+    /// Record information about Omicron zones found on a sled
+    pub fn found_sled_omicron_zones(
+        &mut self,
+        source: &str,
+        sled_id: Uuid,
+        zones: sled_agent_client::types::OmicronZonesConfig,
+    ) -> Result<(), anyhow::Error> {
+        // XXX-dap
+        todo!();
     }
 }
 
