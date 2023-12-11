@@ -5488,10 +5488,7 @@ async fn role_list(
             WhichPage::First(..) => None,
             WhichPage::Next(RolePage { last_seen }) => {
                 Some(last_seen.split_once('.').ok_or_else(|| {
-                    Error::InvalidValue {
-                        label: last_seen.clone(),
-                        message: String::from("bad page token"),
-                    }
+                    Error::invalid_value(last_seen.clone(), "bad page token")
                 })?)
                 .map(|(s1, s2)| (s1.to_string(), s2.to_string()))
             }

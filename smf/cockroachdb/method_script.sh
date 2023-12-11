@@ -44,6 +44,7 @@ fi
 args=(
   '--insecure'
   '--listen-addr' "[$LISTEN_ADDR]:$LISTEN_PORT"
+  '--http-addr' '127.0.0.1:8080'
   '--store' "$DATASTORE"
   '--join' "$JOIN_ADDRS"
 )

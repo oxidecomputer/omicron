@@ -710,7 +710,7 @@ impl Client {
         &self,
         sample: &Sample,
     ) -> Result<Option<(TimeseriesName, String)>, Error> {
-        let sample_schema = model::schema_for(sample);
+        let sample_schema = TimeseriesSchema::from(sample);
         let name = sample_schema.timeseries_name.clone();
         let mut schema = self.schema.lock().await;
 
@@ -1873,7 +1873,7 @@ mod tests {
         client.insert_samples(&[sample.clone()]).await.unwrap();
 
         // The internal map should now contain both the new timeseries schema
-        let actual_schema = model::schema_for(&sample);
+        let actual_schema = TimeseriesSchema::from(&sample);
         let timeseries_name =
             TimeseriesName::try_from(sample.timeseries_name.as_str()).unwrap();
         let expected_schema = client

@@ -60,14 +60,14 @@ impl From<CertificateError> for Error {
             | InvalidValidationHostname(_)
             | ErrorValidatingHostname(_)
             | NoDnsNameMatchingHostname { .. }
-            | UnsupportedPurpose => Error::InvalidValue {
-                label: String::from("certificate"),
-                message: DisplayErrorChain::new(&error).to_string(),
-            },
-            BadPrivateKey(_) => Error::InvalidValue {
-                label: String::from("private-key"),
-                message: DisplayErrorChain::new(&error).to_string(),
-            },
+            | UnsupportedPurpose => Error::invalid_value(
+                "certificate",
+                DisplayErrorChain::new(&error).to_string(),
+            ),
+            BadPrivateKey(_) => Error::invalid_value(
+                "private-key",
+                DisplayErrorChain::new(&error).to_string(),
+            ),
             Unexpected(_) => Error::InternalError {
                 internal_message: DisplayErrorChain::new(&error).to_string(),
             },

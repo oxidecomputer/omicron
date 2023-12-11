@@ -3190,7 +3190,7 @@ async fn test_instances_memory_greater_than_max_size(
     assert!(error.message.contains("memory must be less than"));
 }
 
-async fn expect_instance_start_fail_unavailable(
+async fn expect_instance_start_fail_507(
     client: &ClientTestContext,
     instance_name: &str,
 ) {
@@ -3199,13 +3199,15 @@ async fn expect_instance_start_fail_unavailable(
         http::Method::POST,
         &get_instance_start_url(instance_name),
     )
-    .expect_status(Some(http::StatusCode::SERVICE_UNAVAILABLE));
+    .expect_status(Some(http::StatusCode::INSUFFICIENT_STORAGE));
 
     NexusRequest::new(builder)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
-        .expect("Expected instance start to fail with SERVICE_UNAVAILABLE");
+        .expect(
+            "Expected instance start to fail with 507 Insufficient Storage",
+        );
 }
 
 async fn expect_instance_start_ok(
@@ -3296,9 +3298,7 @@ async fn test_cannot_provision_instance_beyond_cpu_capacity(
     for config in &configs {
         match config.2 {
             Ok(_) => expect_instance_start_ok(client, config.0).await,
-            Err(_) => {
-                expect_instance_start_fail_unavailable(client, config.0).await
-            }
+            Err(_) => expect_instance_start_fail_507(client, config.0).await,
         }
     }
 
@@ -3404,9 +3404,7 @@ async fn test_cannot_provision_instance_beyond_ram_capacity(
     for config in &configs {
         match config.2 {
             Ok(_) => expect_instance_start_ok(client, config.0).await,
-            Err(_) => {
-                expect_instance_start_fail_unavailable(client, config.0).await
-            }
+            Err(_) => expect_instance_start_fail_507(client, config.0).await,
         }
     }
 
@@ -3913,6 +3911,30 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
     instance_simulate_with_opctx(nexus, &instance.identity.id, &opctx).await;
     let instance = instance_get_as(&client, &instance_url, authn).await;
     assert_eq!(instance.runtime.run_state, InstanceState::Running);
+
+    // Stop the instance
+    NexusRequest::new(
+        RequestBuilder::new(
+            client,
+            Method::POST,
+            &format!("/v1/instances/{}/stop", instance.identity.id),
+        )
+        .body(None as Option<&serde_json::Value>)
+        .expect_status(Some(StatusCode::ACCEPTED)),
+    )
+    .authn_as(AuthnMode::SiloUser(user_id))
+    .execute()
+    .await
+    .expect("Failed to stop the instance");
+
+    instance_simulate_with_opctx(nexus, &instance.identity.id, &opctx).await;
+
+    // Delete the instance
+    NexusRequest::object_delete(client, &instance_url)
+        .authn_as(AuthnMode::SiloUser(user_id))
+        .execute()
+        .await
+        .expect("Failed to delete the instance");
 }
 
 /// Test that appropriate OPTE V2P mappings are created and deleted.

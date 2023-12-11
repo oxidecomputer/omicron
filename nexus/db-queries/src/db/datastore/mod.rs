@@ -1047,7 +1047,7 @@ mod test {
                 "Saw error: \'{err}\', but expected \'{expected}\'"
             );
 
-            assert!(matches!(err, Error::ServiceUnavailable { .. }));
+            assert!(matches!(err, Error::InsufficientCapacity { .. }));
         }
 
         let _ = db.cleanup().await;
@@ -1192,7 +1192,7 @@ mod test {
             "Saw error: \'{err}\', but expected \'{expected}\'"
         );
 
-        assert!(matches!(err, Error::ServiceUnavailable { .. }));
+        assert!(matches!(err, Error::InsufficientCapacity { .. }));
 
         let _ = db.cleanup().await;
         logctx.cleanup_successful();

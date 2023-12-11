@@ -154,8 +154,15 @@ impl CollectionTaskStats {
 
 #[cfg(test)]
 mod tests {
+    use super::Collections;
+    use super::Cumulative;
+    use super::FailedCollections;
     use super::FailureReason;
+    use super::OximeterCollector;
     use super::StatusCode;
+    use oximeter::schema::SchemaSet;
+    use std::net::IpAddr;
+    use std::net::Ipv6Addr;
 
     #[test]
     fn test_failure_reason_serialization() {
@@ -167,5 +174,51 @@ mod tests {
         for (variant, as_str) in data.iter() {
             assert_eq!(variant.to_string(), *as_str);
         }
+    }
+
+    const fn collector() -> OximeterCollector {
+        OximeterCollector {
+            collector_id: uuid::uuid!("cfebaa5f-3ba9-4bb5-9145-648d287df78a"),
+            collector_ip: IpAddr::V6(Ipv6Addr::LOCALHOST),
+            collector_port: 12345,
+        }
+    }
+
+    fn collections() -> Collections {
+        Collections {
+            producer_id: uuid::uuid!("718452ab-7cca-42f6-b8b1-1aaaa1b09104"),
+            producer_ip: IpAddr::V6(Ipv6Addr::LOCALHOST),
+            producer_port: 12345,
+            base_route: String::from("/"),
+            datum: Cumulative::new(0),
+        }
+    }
+
+    fn failed_collections() -> FailedCollections {
+        FailedCollections {
+            producer_id: uuid::uuid!("718452ab-7cca-42f6-b8b1-1aaaa1b09104"),
+            producer_ip: IpAddr::V6(Ipv6Addr::LOCALHOST),
+            producer_port: 12345,
+            base_route: String::from("/"),
+            reason: FailureReason::Unreachable.to_string(),
+            datum: Cumulative::new(0),
+        }
+    }
+
+    // Check that the self-stat timeseries schema have not changed.
+    #[test]
+    fn test_no_schema_changes() {
+        let collector = collector();
+        let collections = collections();
+        let failed = failed_collections();
+        let mut set = SchemaSet::default();
+        assert!(set.insert_checked(&collector, &collections).is_none());
+        assert!(set.insert_checked(&collector, &failed).is_none());
+
+        const PATH: &'static str = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/output/self-stat-schema.json"
+        );
+        set.assert_contents(PATH);
     }
 }

@@ -37,6 +37,11 @@ swap_device_size_gb = 256
 
 data_links = ["cxgbe0", "cxgbe1"]
 
+[dropshot]
+# Host OS images are just over 800 MiB currently; set this to 2 GiB to give some
+# breathing room.
+request_body_max_bytes = 2_147_483_648
+
 [log]
 level = "info"
 mode = "file"

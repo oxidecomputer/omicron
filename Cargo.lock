@@ -452,7 +452,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=3e1d129151c3621d28ead5c6e5760693ba6e7fec#3e1d129151c3621d28ead5c6e5760693ba6e7fec"
+source = "git+https://github.com/oxidecomputer/propolis?rev=f1571ce141421cff3d3328f43e7722f5df96fdda#f1571ce141421cff3d3328f43e7722f5df96fdda"
 dependencies = [
  "bhyve_api_sys",
  "libc",
@@ -462,7 +462,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=3e1d129151c3621d28ead5c6e5760693ba6e7fec#3e1d129151c3621d28ead5c6e5760693ba6e7fec"
+source = "git+https://github.com/oxidecomputer/propolis?rev=f1571ce141421cff3d3328f43e7722f5df96fdda#f1571ce141421cff3d3328f43e7722f5df96fdda"
 dependencies = [
  "libc",
  "strum",
@@ -1275,7 +1275,7 @@ dependencies = [
 [[package]]
 name = "crucible-agent-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=945f040d259ca8013d3fb26f510453da7cd7b1a6#945f040d259ca8013d3fb26f510453da7cd7b1a6"
+source = "git+https://github.com/oxidecomputer/crucible?rev=fab27994d0bd12725c17d6b478a9bfc2673ad6f4#fab27994d0bd12725c17d6b478a9bfc2673ad6f4"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1291,7 +1291,7 @@ dependencies = [
 [[package]]
 name = "crucible-pantry-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=945f040d259ca8013d3fb26f510453da7cd7b1a6#945f040d259ca8013d3fb26f510453da7cd7b1a6"
+source = "git+https://github.com/oxidecomputer/crucible?rev=fab27994d0bd12725c17d6b478a9bfc2673ad6f4#fab27994d0bd12725c17d6b478a9bfc2673ad6f4"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1308,7 +1308,7 @@ dependencies = [
 [[package]]
 name = "crucible-smf"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=945f040d259ca8013d3fb26f510453da7cd7b1a6#945f040d259ca8013d3fb26f510453da7cd7b1a6"
+source = "git+https://github.com/oxidecomputer/crucible?rev=fab27994d0bd12725c17d6b478a9bfc2673ad6f4#fab27994d0bd12725c17d6b478a9bfc2673ad6f4"
 dependencies = [
  "crucible-workspace-hack",
  "libc",
@@ -1468,19 +1468,6 @@ dependencies = [
  "darling_core 0.20.3",
  "quote",
  "syn 2.0.32",
-]
-
-[[package]]
-name = "dashmap"
-version = "5.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "edd72493923899c6f10c641bdbdeddc7183d6396641d99c1a0d1597f37f92e28"
-dependencies = [
- "cfg-if",
- "hashbrown 0.14.2",
- "lock_api",
- "once_cell",
- "parking_lot_core 0.9.8",
 ]
 
 [[package]]
@@ -3314,12 +3301,16 @@ dependencies = [
  "anyhow",
  "camino",
  "illumos-utils",
+ "libc",
  "omicron-workspace-hack",
+ "proptest",
  "schemars",
  "serde",
  "serde_json",
  "serde_with",
+ "test-strategy",
  "thiserror",
+ "tokio",
  "update-engine",
 ]
 
@@ -4867,6 +4858,7 @@ dependencies = [
  "crucible-agent-client",
  "ddm-admin-client",
  "derive_more",
+ "display-error-chain",
  "dns-server",
  "dns-service-client",
  "dpd-client",
@@ -4876,10 +4868,12 @@ dependencies = [
  "futures",
  "gateway-client",
  "glob",
+ "hex",
  "http",
  "hyper",
  "hyper-staticfile",
  "illumos-utils",
+ "installinator-common",
  "internal-dns",
  "ipnetwork",
  "itertools 0.12.0",
@@ -4907,8 +4901,8 @@ dependencies = [
  "schemars",
  "semver 1.0.20",
  "serde",
+ "serde_human_bytes",
  "serde_json",
- "serial_test",
  "sha3",
  "sled-agent-client",
  "sled-hardware",
@@ -4925,6 +4919,8 @@ dependencies = [
  "thiserror",
  "tofino",
  "tokio",
+ "tokio-stream",
+ "tokio-util",
  "toml 0.8.8",
  "usdt",
  "uuid",
@@ -5136,9 +5132,9 @@ dependencies = [
 
 [[package]]
 name = "openapiv3"
-version = "2.0.0-rc.1"
+version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25316406f0191559189c56d99731b63130775de7284d98df5e976ce67882ca8a"
+checksum = "cc02deea53ffe807708244e5914f6b099ad7015a207ee24317c22112e17d9c5c"
 dependencies = [
  "indexmap 2.1.0",
  "serde",
@@ -5314,6 +5310,7 @@ dependencies = [
  "omicron-common",
  "omicron-workspace-hack",
  "oximeter-macro-impl",
+ "regex",
  "rstest",
  "schemars",
  "serde",
@@ -6165,7 +6162,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=3e1d129151c3621d28ead5c6e5760693ba6e7fec#3e1d129151c3621d28ead5c6e5760693ba6e7fec"
+source = "git+https://github.com/oxidecomputer/propolis?rev=f1571ce141421cff3d3328f43e7722f5df96fdda#f1571ce141421cff3d3328f43e7722f5df96fdda"
 dependencies = [
  "async-trait",
  "base64",
@@ -6186,7 +6183,7 @@ dependencies = [
 [[package]]
 name = "propolis-mock-server"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=3e1d129151c3621d28ead5c6e5760693ba6e7fec#3e1d129151c3621d28ead5c6e5760693ba6e7fec"
+source = "git+https://github.com/oxidecomputer/propolis?rev=f1571ce141421cff3d3328f43e7722f5df96fdda#f1571ce141421cff3d3328f43e7722f5df96fdda"
 dependencies = [
  "anyhow",
  "atty",
@@ -6216,7 +6213,7 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=3e1d129151c3621d28ead5c6e5760693ba6e7fec#3e1d129151c3621d28ead5c6e5760693ba6e7fec"
+source = "git+https://github.com/oxidecomputer/propolis?rev=f1571ce141421cff3d3328f43e7722f5df96fdda#f1571ce141421cff3d3328f43e7722f5df96fdda"
 dependencies = [
  "schemars",
  "serde",
@@ -7429,31 +7426,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "serial_test"
-version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1c789ec87f4687d022a2405cf46e0cd6284889f1839de292cadeb6c6019506f2"
-dependencies = [
- "dashmap",
- "futures",
- "lazy_static",
- "log",
- "parking_lot 0.12.1",
- "serial_test_derive",
-]
-
-[[package]]
-name = "serial_test_derive"
-version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b64f9e531ce97c88b4778aad0ceee079216071cffec6ac9b904277f8f92e7fe3"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
-]
-
-[[package]]
 name = "sha1"
 version = "0.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7557,9 +7529,9 @@ dependencies = [
 
 [[package]]
 name = "similar"
-version = "2.2.1"
+version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "420acb44afdae038210c99e69aae24109f32f15500aa708e81d46c9f29d55fcf"
+checksum = "2aeaf503862c419d66959f5d7ca015337d864e9c49485d771b732e2a20453597"
 dependencies = [
  "bstr 0.2.17",
  "unicode-segmentation",
@@ -7644,7 +7616,6 @@ dependencies = [
  "rand 0.8.5",
  "schemars",
  "serde",
- "serial_test",
  "slog",
  "thiserror",
  "tofino",
@@ -8534,9 +8505,9 @@ dependencies = [
 
 [[package]]
 name = "tokio"
-version = "1.34.0"
+version = "1.35.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d0c014766411e834f7af5b8f4cf46257aab4036ca95e9d2c144a10f59ad6f5b9"
+checksum = "841d45b238a16291a4e1584e61820b8ae57d696cc5015c459c229ccc6990cc1c"
 dependencies = [
  "backtrace",
  "bytes",

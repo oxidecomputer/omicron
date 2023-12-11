@@ -629,6 +629,8 @@ pub enum MetricsError {
 
     #[error("Missing datum of type {datum_type} cannot have a start time")]
     MissingDatumCannotHaveStartTime { datum_type: DatumType },
+    #[error("Invalid timeseries name")]
+    InvalidTimeseriesName,
 }
 
 impl From<MetricsError> for omicron_common::api::external::Error {
