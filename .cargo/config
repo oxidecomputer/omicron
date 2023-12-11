@@ -7,10 +7,28 @@
 [build]
 rustdocflags = "--document-private-items"
 
-# On illumos, use `-znocompstrtab` to reduce link time.
+# On illumos, use `-znocompstrtab` to reduce link time. We also add the Oxide
+# specific platform directory to the RPATH where additional libraries can be
+# found such as libipcc.
 #
-# Note that these flags are overridden by a user's environment variable, so
-# things critical to correctness probably don't belong here.
+# As documented at:
+# https://doc.rust-lang.org/cargo/reference/config.html#buildrustflags
+#
+# There are four mutually exclusive sources of extra flags. They are checked in
+# order, with the first one being used:
+#   1. `CARGO_ENCODED_RUSTFLAGS` environment variable.
+#   2. `RUSTFLAGS` environment variable.
+#   3. All matching target.<triple>.rustflags and target.<cfg>.rustflags config
+#      entries joined together.
+#   4. build.rustflags config value.
+#
+# When overriding the defaults in this config by environment variable the user
+# may need to manually pass the additional options found below.
+#
+# Note that other runtime paths should not be added here, but should instead
+# reuse the infrastructure found in the `rpaths` crate which can be found in
+# this repo. Those paths are usually platform specific and will vary based on
+# variety of things such as host OS.
 [target.x86_64-unknown-illumos]
 rustflags = [
     "-C", "link-arg=-Wl,-znocompstrtab,-R/usr/platform/oxide/lib/amd64"
