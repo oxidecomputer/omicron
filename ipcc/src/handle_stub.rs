@@ -6,6 +6,8 @@
 
 use crate::IpccError;
 
+/// This stub and it's implementation are used for non-illumos platforms which
+/// lack libipcc.
 pub struct IpccHandle;
 
 impl IpccHandle {

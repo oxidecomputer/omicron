@@ -43,7 +43,7 @@ fn ipcc_fatal_error<C: Into<String>>(
         LIBIPCC_ERR_NO_MEM => IpccError::NoMem(inner),
         LIBIPCC_ERR_INVALID_PARAM => IpccError::InvalidParam(inner),
         LIBIPCC_ERR_INTERNAL => IpccError::Internal(inner),
-        LIBIPCC_ERR_KEY_UNKNOWN => IpccError::Internal(inner),
+        LIBIPCC_ERR_KEY_UNKNOWN => IpccError::KeyUnknown(inner),
         LIBIPCC_ERR_KEY_BUFTOOSMALL => IpccError::KeyBufTooSmall(inner),
         LIBIPCC_ERR_KEY_READONLY => IpccError::KeyReadonly(inner),
         LIBIPCC_ERR_KEY_VALTOOLONG => IpccError::KeyValTooLong(inner),
@@ -55,6 +55,8 @@ fn ipcc_fatal_error<C: Into<String>>(
 impl IpccHandle {
     pub fn new() -> Result<Self, IpccError> {
         let mut ipcc_handle: *mut libipcc_handle_t = ptr::null_mut();
+        // Safety: Unwrapped because we guarantee that the supplied bytes
+        // contain no 0 bytes up front.
         let errmsg = CString::new(vec![1; LIBIPCC_ERR_LEN]).unwrap();
         let errmsg_len = errmsg.as_bytes().len();
         let errmsg_ptr = errmsg.into_raw();
@@ -69,6 +71,9 @@ impl IpccHandle {
                 errmsg_len,
             )
         } {
+            // Safety: CString::from_raw retakes ownership of a CString
+            // transferred to C via CString::into_raw. We are calling into_raw()
+            // above so it is safe to turn this back into it's owned variant.
             let errmsg = unsafe { CString::from_raw(errmsg_ptr) };
             return Err(ipcc_fatal_error(
                 "Could not init libipcc handle",
@@ -84,6 +89,21 @@ impl IpccHandle {
     fn fatal<C: Into<String>>(&self, context: C) -> IpccError {
         let lerr = unsafe { libipcc_err(self.0) };
         let errmsg = unsafe { libipcc_errmsg(self.0) };
+        // Safety: CStr::from_ptr is documented as safe if:
+        //   1. The pointer contains a valid null terminator at the end of
+        //      the string
+        //   2. The pointer is valid for reads of bytes up to and including
+        //      the null terminator
+        //   3. The memory referenced by the return CStr is not mutated for
+        //      the duration of lifetime 'a
+        //
+        // (1) is true because this crate initializes space for an error message
+        // via CString::new which adds a terminator on our behalf.
+        // (2) should be guaranteed by libipcc itself since it is writing error
+        // messages into the CString backed buffer that we gave it.
+        // (3) We aren't currently mutating the memory referenced by the
+        // CStr, and we are creating an owned copy of the data immediately so
+        // that it can outlive the lifetime of the libipcc handle if needed.
         let errmsg = unsafe { CStr::from_ptr(errmsg) }.to_owned();
         let syserr = unsafe { libipcc_syserr(self.0) };
         ipcc_fatal_error(context, lerr, syserr, errmsg)
