@@ -134,11 +134,7 @@ async fn sid_delete_nat(
 
     osagactx
         .nexus()
-        .instance_delete_dpd_config(
-            &opctx,
-            &osagactx.nexus().opctx_alloc,
-            &authz_instance,
-        )
+        .instance_delete_dpd_config(&opctx, &authz_instance)
         .await
         .map_err(ActionError::action_failed)?;
 

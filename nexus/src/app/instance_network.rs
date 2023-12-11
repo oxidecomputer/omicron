@@ -438,7 +438,6 @@ impl super::Nexus {
     pub(crate) async fn instance_delete_dpd_config(
         &self,
         opctx: &OpContext,
-        opctx_alloc: &OpContext,
         authz_instance: &authz::Instance,
     ) -> Result<(), Error> {
         let log = &self.log;
@@ -477,7 +476,8 @@ impl super::Nexus {
             }?;
         }
 
-        let boundary_switches = self.boundary_switches(opctx_alloc).await?;
+        let boundary_switches =
+            self.boundary_switches(&self.opctx_alloc).await?;
 
         for switch in &boundary_switches {
             debug!(&self.log, "notifying dendrite of updates";
