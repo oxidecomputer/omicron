@@ -280,3 +280,101 @@ async fn detach(
 
     Ok(HttpResponseDeleted())
 }
+
+#[cfg(test)]
+mod tests {
+    use guppy::graph::ExternalSource;
+    use guppy::graph::GitReq;
+    use guppy::graph::PackageGraph;
+    use guppy::MetadataCommand;
+    use serde_json::Value;
+    use std::path::Path;
+
+    fn load_real_api_as_json() -> serde_json::Value {
+        let manifest_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("Cargo.toml");
+        let mut cmd = MetadataCommand::new();
+        cmd.manifest_path(&manifest_path);
+        let graph = PackageGraph::from_command(&mut cmd).unwrap();
+        let package = graph
+            .packages()
+            .find(|pkg| pkg.name() == "crucible-pantry-client")
+            .unwrap();
+        let ExternalSource::Git { req, .. } =
+            package.source().parse_external().unwrap()
+        else {
+            panic!("This should be a Git dependency");
+        };
+        let part = match req {
+            GitReq::Branch(inner) => inner,
+            GitReq::Rev(inner) => inner,
+            GitReq::Tag(inner) => inner,
+            GitReq::Default => "main",
+            _ => unreachable!(),
+        };
+        let raw_url = format!(
+            "https://raw.githubusercontent.com/oxidecomputer/crucible/{part}/openapi/crucible-pantry.json",
+        );
+        let raw_json =
+            reqwest::blocking::get(&raw_url).unwrap().text().unwrap();
+        serde_json::from_str(&raw_json).unwrap()
+    }
+
+    // Regression test for https://github.com/oxidecomputer/omicron/issues/4599.
+    #[test]
+    fn test_simulated_api_matches_real() {
+        let real_api = load_real_api_as_json();
+        let Value::String(ref title) = real_api["info"]["title"] else {
+            unreachable!();
+        };
+        let Value::String(ref version) = real_api["info"]["version"] else {
+            unreachable!();
+        };
+        let sim_api = super::api().openapi(title, version).json().unwrap();
+
+        // We'll assert that anything which apppears in the simulated API must
+        // appear exactly as-is in the real API. I.e., the simulated is a subset
+        // (possibly non-strict) of the real API.
+        compare_json_values(&sim_api, &real_api, String::new());
+    }
+
+    fn compare_json_values(lhs: &Value, rhs: &Value, path: String) {
+        match lhs {
+            Value::Array(values) => {
+                let Value::Array(rhs_values) = &rhs else {
+                    panic!(
+                        "Expected an array in the real API JSON at \
+                        path \"{path}\", found {rhs:?}",
+                    );
+                };
+                assert_eq!(values.len(), rhs_values.len());
+                for (i, (left, right)) in
+                    values.iter().zip(rhs_values.iter()).enumerate()
+                {
+                    let new_path = format!("{path}[{i}]");
+                    compare_json_values(left, right, new_path);
+                }
+            }
+            Value::Object(map) => {
+                let Value::Object(rhs_map) = &rhs else {
+                    panic!(
+                        "Expected a map in the real API JSON at \
+                        path \"{path}\", found {rhs:?}",
+                    );
+                };
+                for (key, value) in map.iter() {
+                    let new_path = format!("{path}/{key}");
+                    let rhs_value = rhs_map.get(key).unwrap_or_else(|| {
+                        panic!("Real API JSON missing key: \"{new_path}\"")
+                    });
+                    compare_json_values(value, rhs_value, new_path);
+                }
+            }
+            _ => {
+                assert_eq!(lhs, rhs, "Mismatched keys at JSON path \"{path}\"")
+            }
+        }
+    }
+}
