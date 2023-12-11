@@ -997,9 +997,10 @@ mod tests {
             );
         assert_eq!(
             err,
-            Error::InvalidRequest {
-                message: String::from("No external IP addresses available"),
-            }
+            Error::insufficient_capacity(
+                "No external IP addresses available",
+                "NextExternalIp::new returned NotFound",
+            ),
         );
         context.success().await;
     }
@@ -1053,9 +1054,10 @@ mod tests {
         );
         assert_eq!(
             res.unwrap_err(),
-            Error::InvalidRequest {
-                message: String::from("No external IP addresses available"),
-            }
+            Error::insufficient_capacity(
+                "No external IP addresses available",
+                "NextExternalIp::new returned NotFound",
+            ),
         );
 
         let res = context
@@ -1075,9 +1077,10 @@ mod tests {
         );
         assert_eq!(
             res.unwrap_err(),
-            Error::InvalidRequest {
-                message: String::from("No external IP addresses available"),
-            }
+            Error::insufficient_capacity(
+                "No external IP addresses available",
+                "NextExternalIp::new returned NotFound",
+            ),
         );
         context.success().await;
     }
@@ -1306,9 +1309,10 @@ mod tests {
             .expect_err("Should have failed to allocate after pool exhausted");
         assert_eq!(
             err,
-            Error::InvalidRequest {
-                message: String::from("No external IP addresses available"),
-            }
+            Error::insufficient_capacity(
+                "No external IP addresses available",
+                "NextExternalIp::new returned NotFound",
+            ),
         );
 
         // But we should be able to allocate another SNat IP

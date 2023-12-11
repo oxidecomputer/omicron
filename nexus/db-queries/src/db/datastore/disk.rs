@@ -633,16 +633,12 @@ impl DataStore {
                     // destroyed, don't throw an error.
                     return Ok(disk);
                 } else if !ok_to_delete_states.contains(disk_state.state()) {
-                    return Err(Error::InvalidRequest {
-                        message: format!(
-                            "disk cannot be deleted in state \"{}\"",
-                            disk.runtime_state.disk_state
-                        ),
-                    });
+                    return Err(Error::invalid_request(format!(
+                        "disk cannot be deleted in state \"{}\"",
+                        disk.runtime_state.disk_state
+                    )));
                 } else if disk_state.is_attached() {
-                    return Err(Error::InvalidRequest {
-                        message: String::from("disk is attached"),
-                    });
+                    return Err(Error::invalid_request("disk is attached"));
                 } else {
                     // NOTE: This is a "catch-all" error case, more specific
                     // errors should be preferred as they're more actionable.

@@ -363,7 +363,7 @@ async fn test_snapshot_prevents_other_disk(
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &disks_url)
             .body(Some(&next_disk))
-            .expect_status(Some(StatusCode::SERVICE_UNAVAILABLE)),
+            .expect_status(Some(StatusCode::INSUFFICIENT_STORAGE)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()

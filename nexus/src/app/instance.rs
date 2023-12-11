@@ -211,13 +211,13 @@ impl super::Nexus {
         // Reject instances where the memory is not at least
         // MIN_MEMORY_BYTES_PER_INSTANCE
         if params.memory.to_bytes() < MIN_MEMORY_BYTES_PER_INSTANCE as u64 {
-            return Err(Error::InvalidValue {
-                label: String::from("size"),
-                message: format!(
+            return Err(Error::invalid_value(
+                "size",
+                format!(
                     "memory must be at least {}",
                     ByteCount::from(MIN_MEMORY_BYTES_PER_INSTANCE)
                 ),
-            });
+            ));
         }
 
         // Reject instances where the memory is not divisible by
@@ -225,24 +225,24 @@ impl super::Nexus {
         if (params.memory.to_bytes() % MIN_MEMORY_BYTES_PER_INSTANCE as u64)
             != 0
         {
-            return Err(Error::InvalidValue {
-                label: String::from("size"),
-                message: format!(
+            return Err(Error::invalid_value(
+                "size",
+                format!(
                     "memory must be divisible by {}",
                     ByteCount::from(MIN_MEMORY_BYTES_PER_INSTANCE)
                 ),
-            });
+            ));
         }
 
         // Reject instances where the memory is greater than the limit
         if params.memory.to_bytes() > MAX_MEMORY_BYTES_PER_INSTANCE {
-            return Err(Error::InvalidValue {
-                label: String::from("size"),
-                message: format!(
+            return Err(Error::invalid_value(
+                "size",
+                format!(
                     "memory must be less than or equal to {}",
                     ByteCount::try_from(MAX_MEMORY_BYTES_PER_INSTANCE).unwrap()
                 ),
-            });
+            ));
         }
 
         let saga_params = sagas::instance_create::Params {
@@ -376,7 +376,7 @@ impl super::Nexus {
         }
 
         if instance.runtime().migration_id.is_some() {
-            return Err(Error::unavail("instance is already migrating"));
+            return Err(Error::conflict("instance is already migrating"));
         }
 
         // Kick off the migration saga
@@ -785,12 +785,10 @@ impl super::Nexus {
         if allowed {
             Ok(InstanceStateChangeRequestAction::SendToSled(sled_id))
         } else {
-            Err(Error::InvalidRequest {
-                message: format!(
-                    "instance state cannot be changed from state \"{}\"",
-                    effective_state
-                ),
-            })
+            Err(Error::invalid_request(format!(
+                "instance state cannot be changed from state \"{}\"",
+                effective_state
+            )))
         }
     }
 
@@ -1231,10 +1229,9 @@ impl super::Nexus {
         // permissions on both) without verifying the shared hierarchy. To
         // mitigate that we verify that their parent projects have the same ID.
         if authz_project.id() != authz_project_disk.id() {
-            return Err(Error::InvalidRequest {
-                message: "disk must be in the same project as the instance"
-                    .to_string(),
-            });
+            return Err(Error::invalid_request(
+                "disk must be in the same project as the instance",
+            ));
         }
 
         // TODO(https://github.com/oxidecomputer/omicron/issues/811):
@@ -1614,28 +1611,22 @@ impl super::Nexus {
                 | InstanceState::Starting
                 | InstanceState::Stopping
                 | InstanceState::Stopped
-                | InstanceState::Failed => Err(Error::ServiceUnavailable {
-                    internal_message: format!(
-                        "cannot connect to serial console of instance in state \
-                            {:?}",
-                        vmm.runtime.state.0
-                    ),
-                }),
-                InstanceState::Destroyed => Err(Error::ServiceUnavailable {
-                    internal_message: format!(
-                        "cannot connect to serial console of instance in state \
-                        {:?}",
-                        InstanceState::Stopped),
-                }),
+                | InstanceState::Failed => {
+                    Err(Error::invalid_request(format!(
+                        "cannot connect to serial console of instance in state \"{}\"",
+                        vmm.runtime.state.0,
+                    )))
+                }
+                InstanceState::Destroyed => Err(Error::invalid_request(
+                    "cannot connect to serial console of destroyed instance",
+                )),
             }
         } else {
-            Err(Error::ServiceUnavailable {
-                internal_message: format!(
-                    "instance is in state {:?} and has no active serial console \
+            Err(Error::invalid_request(format!(
+                "instance is {} and has no active serial console \
                     server",
-                    instance.runtime().nexus_state
-                )
-            })
+                instance.runtime().nexus_state
+            )))
         }
     }
 

@@ -168,9 +168,11 @@ impl super::Nexus {
                 // disk created from this image has to be larger than it.
                 let size: u64 = 100 * 1024 * 1024;
                 let size: external::ByteCount =
-                    size.try_into().map_err(|e| Error::InvalidValue {
-                        label: String::from("size"),
-                        message: format!("size is invalid: {}", e),
+                    size.try_into().map_err(|e| {
+                        Error::invalid_value(
+                            "size",
+                            format!("size is invalid: {}", e),
+                        )
                     })?;
 
                 let new_image_volume =
@@ -293,9 +295,9 @@ impl super::Nexus {
                     )
                     .await
             }
-            ImageLookup::SiloImage(_) => Err(Error::InvalidRequest {
-                message: "Cannot promote a silo image".to_string(),
-            }),
+            ImageLookup::SiloImage(_) => {
+                Err(Error::invalid_request("Cannot promote a silo image"))
+            }
         }
     }
 
@@ -321,9 +323,9 @@ impl super::Nexus {
                     )
                     .await
             }
-            ImageLookup::ProjectImage(_) => Err(Error::InvalidRequest {
-                message: "Cannot demote a project image".to_string(),
-            }),
+            ImageLookup::ProjectImage(_) => {
+                Err(Error::invalid_request("Cannot demote a project image"))
+            }
         }
     }
 }
