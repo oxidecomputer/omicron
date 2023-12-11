@@ -93,7 +93,7 @@ lazy_static! {
                 name: DEMO_SILO_NAME.clone(),
                 description: String::from(""),
             },
-            quotas: params::SiloQuotasCreate::half_rack(),
+            quotas: params::SiloQuotasCreate::from_sled_count(16),
             discoverable: true,
             identity_mode: shared::SiloIdentityMode::SamlJit,
             admin_group_name: None,

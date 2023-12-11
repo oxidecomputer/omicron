@@ -912,7 +912,10 @@ mod test {
                         name: "test-silo".parse().unwrap(),
                         description: String::new(),
                     },
-                    quotas: external_params::SiloQuotasCreate::half_rack(),
+                    // Set a default quota of a half rack's worth of resources
+                    quotas: external_params::SiloQuotasCreate::from_sled_count(
+                        16,
+                    ),
                     discoverable: false,
                     identity_mode: SiloIdentityMode::LocalOnly,
                     admin_group_name: None,

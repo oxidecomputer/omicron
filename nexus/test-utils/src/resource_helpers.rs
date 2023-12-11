@@ -287,7 +287,7 @@ pub async fn create_silo(
                 name: silo_name.parse().unwrap(),
                 description: "a silo".to_string(),
             },
-            quotas: params::SiloQuotasCreate::half_rack(),
+            quotas: params::SiloQuotasCreate::from_sled_count(16),
             discoverable,
             identity_mode,
             admin_group_name: None,

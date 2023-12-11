@@ -324,13 +324,17 @@ impl SiloQuotasCreate {
         }
     }
 
+    /// Generates a conservative maximum set of quotas for a Silo with the
+    /// given number of sleds. Useful for situations where a non-zero quota
+    /// must be set, but the actual value is not known.
+    ///
     /// 30% of CPUs and memory reserved for internal usage.
     /// Storage calculated at (total / 3.5) to account for redundancy / bookkeeping.
-    pub fn half_rack() -> Self {
+    pub fn from_sled_count(num_sleds: u32) -> Self {
         Self {
-            cpus: 90,
-            memory: ByteCount::from_gibibytes_u32(708),
-            storage: ByteCount::from_gibibytes_u32(850),
+            cpus: 90 * i64::from(num_sleds),
+            memory: ByteCount::from_gibibytes_u32(708 * num_sleds),
+            storage: ByteCount::from_gibibytes_u32(850 * num_sleds),
         }
     }
 }
