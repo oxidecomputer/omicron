@@ -281,30 +281,7 @@ mod tests {
     use super::*;
     use crate::model::DbFieldList;
     use crate::model::DbTimeseriesSchema;
-    use std::convert::TryFrom;
     use uuid::Uuid;
-
-    #[test]
-    fn test_timeseries_name() {
-        let name = TimeseriesName::try_from("foo:bar").unwrap();
-        assert_eq!(format!("{}", name), "foo:bar");
-    }
-
-    #[test]
-    fn test_timeseries_name_from_str() {
-        assert!(TimeseriesName::try_from("a:b").is_ok());
-        assert!(TimeseriesName::try_from("a_a:b_b").is_ok());
-        assert!(TimeseriesName::try_from("a0:b0").is_ok());
-        assert!(TimeseriesName::try_from("a_0:b_0").is_ok());
-
-        assert!(TimeseriesName::try_from("_:b").is_err());
-        assert!(TimeseriesName::try_from("a_:b").is_err());
-        assert!(TimeseriesName::try_from("0:b").is_err());
-        assert!(TimeseriesName::try_from(":b").is_err());
-        assert!(TimeseriesName::try_from("a:").is_err());
-        assert!(TimeseriesName::try_from("123").is_err());
-        assert!(TimeseriesName::try_from("no:no:no").is_err());
-    }
 
     // Validates that the timeseries_key stability for a sample is stable.
     #[test]

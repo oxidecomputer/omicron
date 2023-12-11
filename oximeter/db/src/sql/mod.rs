@@ -756,6 +756,23 @@ impl RestrictedQuery {
         }
     }
 
+    // Verify that the identifier is a single, concrete timeseries name.
+    fn extract_timeseries_name(
+        from: &[Ident],
+    ) -> Result<IndexSet<TimeseriesName>, OxdbError> {
+        if from.len() != 1 {
+            return unsupported!(
+                "Query must select from single named \
+                timeseries, with no database"
+            );
+        }
+        from[0]
+            .value
+            .parse()
+            .map(|n| indexmap::indexset! { n })
+            .map_err(|_| MetricsError::InvalidTimeseriesName.into())
+    }
+
     // Process a single "table factor", the <object> in `FROM <object>` to
     // extract the names of the timeseries it refers to.
     //
@@ -770,17 +787,7 @@ impl RestrictedQuery {
                         "Table functions and hints are not supported"
                     );
                 }
-                if name.0.len() != 1 {
-                    return unsupported!(
-                        "Query must select from single named \
-                        table, with no database"
-                    );
-                }
-                let timeseries_name = name.0[0]
-                    .value
-                    .parse()
-                    .map(|n| indexmap::indexset! { n })
-                    .map_err(|_| MetricsError::InvalidTimeseriesName)?;
+                let timeseries_name = Self::extract_timeseries_name(&name.0)?;
                 // Rewrite the quote style to be backticks, so that the
                 // resulting actual query translates into a valid identifier for
                 // ClickHouse, naming the CTE's well generate later.
