@@ -26,7 +26,7 @@ use futures::lock::{Mutex, MutexGuard};
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::{DhcpCfg, PortManager};
-use illumos_utils::running_zone::{InstalledZone, RunningZone};
+use illumos_utils::running_zone::{RunningZone, ZoneBuilderFactory};
 use illumos_utils::svc::wait_for_service;
 use illumos_utils::zone::Zones;
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
@@ -208,7 +208,8 @@ struct InstanceInner {
     // Guest NIC and OPTE port information
     requested_nics: Vec<NetworkInterface>,
     source_nat: SourceNatConfig,
-    external_ips: Vec<IpAddr>,
+    ephemeral_ip: Option<IpAddr>,
+    floating_ips: Vec<IpAddr>,
     firewall_rules: Vec<VpcFirewallRule>,
     dhcp_config: DhcpCfg,
 
@@ -225,6 +226,9 @@ struct InstanceInner {
 
     // Storage resources
     storage: StorageHandle,
+
+    // Used to create propolis zones
+    zone_builder_factory: ZoneBuilderFactory,
 
     // Object used to collect zone bundles from this instance when terminated.
     zone_bundler: ZoneBundler,
@@ -611,6 +615,7 @@ impl Instance {
             port_manager,
             storage,
             zone_bundler,
+            zone_builder_factory,
         } = services;
 
         let mut dhcp_config = DhcpCfg {
@@ -665,7 +670,8 @@ impl Instance {
             port_manager,
             requested_nics: hardware.nics,
             source_nat: hardware.source_nat,
-            external_ips: hardware.external_ips,
+            ephemeral_ip: hardware.ephemeral_ip,
+            floating_ips: hardware.floating_ips,
             firewall_rules: hardware.firewall_rules,
             dhcp_config,
             requested_disks: hardware.disks,
@@ -678,6 +684,7 @@ impl Instance {
             running_state: None,
             nexus_client,
             storage,
+            zone_builder_factory,
             zone_bundler,
             instance_ticket: ticket,
         };
@@ -856,13 +863,11 @@ impl Instance {
             }
 
             return Err(Error::Transition(
-                omicron_common::api::external::Error::Conflict {
-                    internal_message: format!(
-                        "wrong instance state generation: expected {}, got {}",
-                        inner.state.instance().gen,
-                        old_runtime.gen
-                    ),
-                },
+                omicron_common::api::external::Error::conflict(format!(
+                    "wrong instance state generation: expected {}, got {}",
+                    inner.state.instance().gen,
+                    old_runtime.gen
+                )),
             ));
         }
 
@@ -877,15 +882,20 @@ impl Instance {
         // Create OPTE ports for the instance
         let mut opte_ports = Vec::with_capacity(inner.requested_nics.len());
         for nic in inner.requested_nics.iter() {
-            let (snat, external_ips) = if nic.primary {
-                (Some(inner.source_nat), &inner.external_ips[..])
+            let (snat, ephemeral_ip, floating_ips) = if nic.primary {
+                (
+                    Some(inner.source_nat),
+                    inner.ephemeral_ip,
+                    &inner.floating_ips[..],
+                )
             } else {
-                (None, &[][..])
+                (None, None, &[][..])
             };
             let port = inner.port_manager.create_port(
                 nic,
                 snat,
-                external_ips,
+                ephemeral_ip,
+                floating_ips,
                 &inner.firewall_rules,
                 inner.dhcp_config.clone(),
             )?;
@@ -904,31 +914,28 @@ impl Instance {
             .choose(&mut rng)
             .ok_or_else(|| Error::U2NotFound)?
             .clone();
-        let installed_zone = InstalledZone::install(
-            &inner.log,
-            &inner.vnic_allocator,
-            &root,
-            &["/opt/oxide".into()],
-            "propolis-server",
-            Some(*inner.propolis_id()),
-            // dataset=
-            &[],
-            // filesystems=
-            &[],
-            // data_links=
-            &[],
-            &[
+        let installed_zone = inner
+            .zone_builder_factory
+            .builder()
+            .with_log(inner.log.clone())
+            .with_underlay_vnic_allocator(&inner.vnic_allocator)
+            .with_zone_root_path(&root)
+            .with_zone_image_paths(&["/opt/oxide".into()])
+            .with_zone_type("propolis-server")
+            .with_unique_name(*inner.propolis_id())
+            .with_datasets(&[])
+            .with_filesystems(&[])
+            .with_data_links(&[])
+            .with_devices(&[
                 zone::Device { name: "/dev/vmm/*".to_string() },
                 zone::Device { name: "/dev/vmmctl".to_string() },
                 zone::Device { name: "/dev/viona".to_string() },
-            ],
-            opte_ports,
-            // physical_nic=
-            None,
-            vec![],
-            vec![],
-        )
-        .await?;
+            ])
+            .with_opte_ports(opte_ports)
+            .with_links(vec![])
+            .with_limit_priv(vec![])
+            .install()
+            .await?;
 
         let gateway = inner.port_manager.underlay_ip();
 

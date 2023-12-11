@@ -41,7 +41,6 @@ use installinator_common::InstallinatorSpec;
 use installinator_common::M2Slot;
 use installinator_common::WriteOutput;
 use omicron_common::api::external::SemverVersion;
-use omicron_common::backoff;
 use omicron_common::update::ArtifactHash;
 use slog::error;
 use slog::info;
@@ -103,12 +102,22 @@ struct SpUpdateData {
 }
 
 #[derive(Debug)]
-struct UploadTrampolinePhase2ToMgsStatus {
-    hash: ArtifactHash,
-    // The upload task retries forever until it succeeds, so we don't need to
-    // keep a "tried but failed" variant here; we just need to know the ID of
-    // the uploaded image once it's done.
-    uploaded_image_id: Option<HostPhase2RecoveryImageId>,
+enum UploadTrampolinePhase2ToMgsStatus {
+    Running { hash: ArtifactHash },
+    Done { hash: ArtifactHash, uploaded_image_id: HostPhase2RecoveryImageId },
+    Failed(Arc<anyhow::Error>),
+}
+
+impl UploadTrampolinePhase2ToMgsStatus {
+    fn hash(&self) -> Option<ArtifactHash> {
+        match self {
+            UploadTrampolinePhase2ToMgsStatus::Running { hash }
+            | UploadTrampolinePhase2ToMgsStatus::Done { hash, .. } => {
+                Some(*hash)
+            }
+            UploadTrampolinePhase2ToMgsStatus::Failed(_) => None,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -172,14 +181,19 @@ impl UpdateTracker {
     }
 
     /// Starts a fake update that doesn't perform any steps, but simply waits
-    /// for a watch receiver to resolve.
+    /// for a receiver to resolve.
+    ///
+    /// The inner sender will resolve once the update is completed.
     #[doc(hidden)]
     pub async fn start_fake_update(
         &self,
         sps: BTreeSet<SpIdentifier>,
-        watch_receiver: watch::Receiver<()>,
+        fake_step_receiver: oneshot::Receiver<oneshot::Sender<()>>,
     ) -> Result<(), Vec<StartUpdateError>> {
-        let imp = FakeUpdateDriver { watch_receiver, log: self.log.clone() };
+        let imp = FakeUpdateDriver {
+            fake_step_receiver: Some(fake_step_receiver),
+            log: self.log.clone(),
+        };
         self.start_impl(sps, Some(imp)).await
     }
 
@@ -308,9 +322,8 @@ impl UpdateTracker {
     ) -> UploadTrampolinePhase2ToMgs {
         let artifact = plan.trampoline_phase_2.clone();
         let (status_tx, status_rx) =
-            watch::channel(UploadTrampolinePhase2ToMgsStatus {
+            watch::channel(UploadTrampolinePhase2ToMgsStatus::Running {
                 hash: artifact.data.hash(),
-                uploaded_image_id: None,
             });
         let task = tokio::spawn(upload_trampoline_phase_2_to_mgs(
             self.mgs_client.clone(),
@@ -426,8 +439,8 @@ impl<'tr> SpawnUpdateDriver for RealSpawnUpdateDriver<'tr> {
                 // this artifact? If not, cancel the old task (which
                 // might still be trying to upload) and start a new one
                 // with our current image.
-                if prev.status.borrow().hash
-                    != plan.trampoline_phase_2.data.hash()
+                if prev.status.borrow().hash()
+                    != Some(plan.trampoline_phase_2.data.hash())
                 {
                     // It does _not_ match - we have a new plan with a
                     // different trampoline image. If the old task is
@@ -507,7 +520,7 @@ impl<'tr> SpawnUpdateDriver for RealSpawnUpdateDriver<'tr> {
 /// waits for a [`watch::Receiver`] to resolve.
 #[derive(Debug)]
 struct FakeUpdateDriver {
-    watch_receiver: watch::Receiver<()>,
+    fake_step_receiver: Option<oneshot::Receiver<oneshot::Sender<()>>>,
     log: Logger,
 }
 
@@ -531,22 +544,24 @@ impl SpawnUpdateDriver for FakeUpdateDriver {
         let engine = UpdateEngine::new(&log, sender);
         let abort_handle = engine.abort_handle();
 
-        let mut watch_receiver = self.watch_receiver.clone();
+        let fake_step_receiver = self
+            .fake_step_receiver
+            .take()
+            .expect("fake step receiver is only taken once");
 
         let task = tokio::spawn(async move {
             // The step component and ID have been chosen arbitrarily here --
             // they aren't important.
-            engine
+            let final_sender_handle = engine
                 .new_step(
                     UpdateComponent::Host,
                     UpdateStepId::RunningInstallinator,
                     "Fake step that waits for receiver to resolve",
                     move |_cx| async move {
-                        // This will resolve as soon as the watch sender
-                        // (typically a test) sends a value over the watch
-                        // channel.
-                        _ = watch_receiver.changed().await;
-                        StepSuccess::new(()).into()
+                        // This will resolve as soon as the sender (typically a
+                        // test) sends a value over the channel.
+                        let ret = fake_step_receiver.await;
+                        StepSuccess::new(ret).into()
                     },
                 )
                 .register();
@@ -558,16 +573,36 @@ impl SpawnUpdateDriver for FakeUpdateDriver {
                 }
             });
 
-            match engine.execute().await {
-                Ok(_cx) => (),
-                Err(err) => {
-                    error!(log, "update failed"; "err" => %err);
-                }
-            }
+            let engine_res = engine.execute().await;
 
             // Wait for all events to be received and written to the event
             // buffer.
             event_receiving_task.await.expect("event receiving task panicked");
+
+            // Finally, notify the receiving end of the inner sender: this
+            // indicates that the update is done.
+            match engine_res {
+                Ok(cx) => {
+                    info!(log, "fake update completed successfully");
+                    let final_sender =
+                        final_sender_handle.into_value(cx.token()).await;
+                    match final_sender {
+                        Ok(sender) => {
+                            if let Err(_) = sender.send(()) {
+                                warn!(log, "failed to send final value");
+                            }
+                        }
+                        Err(error) => {
+                            // This occurs if the fake_step_receiver's sender
+                            // side was closed. Nothing to do here but warn.
+                            warn!(log, "failed to get final sender: {}", error);
+                        }
+                    }
+                }
+                Err(error) => {
+                    error!(log, "fake update failed: {}", error);
+                }
+            }
         });
 
         SpUpdateData { task, abort_handle, event_buffer }
@@ -1147,19 +1182,38 @@ impl UpdateDriver {
                 // We expect this loop to run just once, but iterate just in
                 // case the image ID doesn't get populated the first time.
                 loop {
+                    match &*upload_trampoline_phase_2_to_mgs.borrow_and_update()
+                    {
+                        UploadTrampolinePhase2ToMgsStatus::Running { .. } => {
+                            // fall through to `.changed()` below
+                        },
+                        UploadTrampolinePhase2ToMgsStatus::Done {
+                            uploaded_image_id,
+                            ..
+                        } => {
+                            return StepSuccess::new(
+                                uploaded_image_id.clone(),
+                            ).into();
+                        }
+                        UploadTrampolinePhase2ToMgsStatus::Failed(error) => {
+                            let error = Arc::clone(error);
+                            return Err(UpdateTerminalError::TrampolinePhase2UploadFailed {
+                                error,
+                            });
+                        }
+                    }
+
+                    // `upload_trampoline_phase_2_to_mgs` holds onto the sending
+                    // half of this channel until all receivers are gone, so the
+                    // only way we can fail to receive here is if that task
+                    // panicked (which would abort our process) or was cancelled
+                    // (because a new TUF repo has been uploaded), in which case
+                    // we should fail the current update.
                     upload_trampoline_phase_2_to_mgs.changed().await.map_err(
                         |_recv_err| {
-                            UpdateTerminalError::TrampolinePhase2UploadFailed
+                            UpdateTerminalError::TrampolinePhase2UploadCancelled
                         }
                     )?;
-
-                    if let Some(image_id) = upload_trampoline_phase_2_to_mgs
-                        .borrow()
-                        .uploaded_image_id
-                        .as_ref()
-                    {
-                        return StepSuccess::new(image_id.clone()).into();
-                    }
                 }
             },
         ).register();
@@ -2149,59 +2203,68 @@ async fn upload_trampoline_phase_2_to_mgs(
     status: watch::Sender<UploadTrampolinePhase2ToMgsStatus>,
     log: Logger,
 ) {
-    let data = artifact.data;
-    let hash = data.hash();
-    let upload_task = move || {
-        let mgs_client = mgs_client.clone();
-        let data = data.clone();
+    // We make at most 3 attempts to upload the trampoline to our local MGS,
+    // sleeping briefly between attempts if we fail.
+    const MAX_ATTEMPTS: usize = 3;
+    const SLEEP_BETWEEN_ATTEMPTS: Duration = Duration::from_secs(1);
 
-        async move {
-            let image_stream = data.reader_stream().await.map_err(|e| {
-                // TODO-correctness If we get an I/O error opening the file
-                // associated with `data`, is it actually a transient error? If
-                // we change this to `permanent` we'll have to do some different
-                // error handling below and at our call site to retry. We
-                // _shouldn't_ get errors from `reader_stream()` in general, so
-                // it's probably okay either way?
-                backoff::BackoffError::transient(format!("{e:#}"))
-            })?;
-            mgs_client
-                .recovery_host_phase2_upload(reqwest::Body::wrap_stream(
-                    image_stream,
-                ))
-                .await
-                .map_err(|e| backoff::BackoffError::transient(e.to_string()))
+    let mut attempt = 1;
+    let final_status = loop {
+        let image_stream = match artifact.data.reader_stream().await {
+            Ok(stream) => stream,
+            Err(err) => {
+                error!(
+                    log, "failed to read trampoline phase 2";
+                    "err" => #%err,
+                );
+                break UploadTrampolinePhase2ToMgsStatus::Failed(Arc::new(
+                    err.context("failed to read trampoline phase 2"),
+                ));
+            }
+        };
+
+        match mgs_client
+            .recovery_host_phase2_upload(reqwest::Body::wrap_stream(
+                image_stream,
+            ))
+            .await
+        {
+            Ok(response) => {
+                break UploadTrampolinePhase2ToMgsStatus::Done {
+                    hash: artifact.data.hash(),
+                    uploaded_image_id: response.into_inner(),
+                };
+            }
+            Err(err) => {
+                if attempt < MAX_ATTEMPTS {
+                    error!(
+                        log, "failed to upload trampoline phase 2 to MGS; \
+                              will retry after {SLEEP_BETWEEN_ATTEMPTS:?}";
+                        "attempt" => attempt,
+                        "err" => %DisplayErrorChain::new(&err),
+                    );
+                    tokio::time::sleep(SLEEP_BETWEEN_ATTEMPTS).await;
+                    attempt += 1;
+                    continue;
+                } else {
+                    error!(
+                        log, "failed to upload trampoline phase 2 to MGS; \
+                              giving up";
+                        "attempt" => attempt,
+                        "err" => %DisplayErrorChain::new(&err),
+                    );
+                    break UploadTrampolinePhase2ToMgsStatus::Failed(Arc::new(
+                        anyhow::Error::new(err)
+                            .context("failed to upload trampoline phase 2"),
+                    ));
+                }
+            }
         }
     };
 
-    let log_failure = move |err, delay| {
-        warn!(
-            log,
-            "failed to upload trampoline phase 2 to MGS, will retry in {:?}",
-            delay;
-            "err" => %err,
-        );
-    };
-
-    // retry_policy_internal_service_aggressive() retries forever, so we can
-    // unwrap this call to retry_notify
-    let uploaded_image_id = backoff::retry_notify(
-        backoff::retry_policy_internal_service_aggressive(),
-        upload_task,
-        log_failure,
-    )
-    .await
-    .unwrap()
-    .into_inner();
-
-    // Notify all receivers that we've uploaded the image.
-    _ = status.send(UploadTrampolinePhase2ToMgsStatus {
-        hash,
-        uploaded_image_id: Some(uploaded_image_id),
-    });
-
-    // Wait for all receivers to be gone before we exit, so they don't get recv
-    // errors unless we're cancelled.
+    // Send our final status, then wait for all receivers to be gone before we
+    // exit, so they don't get recv errors unless we're cancelled.
+    status.send_replace(final_status);
     status.closed().await;
 }
 

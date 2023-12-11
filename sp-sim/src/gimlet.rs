@@ -14,6 +14,7 @@ use crate::server::UdpServer;
 use crate::update::SimSpUpdate;
 use crate::Responsiveness;
 use crate::SimulatedSp;
+use crate::SIM_ROT_BOARD;
 use anyhow::{anyhow, bail, Context, Result};
 use async_trait::async_trait;
 use futures::future;
@@ -21,8 +22,11 @@ use futures::Future;
 use gateway_messages::ignition::{self, LinkEvents};
 use gateway_messages::sp_impl::SpHandler;
 use gateway_messages::sp_impl::{BoundsChecked, DeviceDescription};
+use gateway_messages::CfpaPage;
 use gateway_messages::ComponentAction;
 use gateway_messages::Header;
+use gateway_messages::RotRequest;
+use gateway_messages::RotResponse;
 use gateway_messages::RotSlotId;
 use gateway_messages::SpComponent;
 use gateway_messages::SpError;
@@ -107,10 +111,25 @@ impl SimulatedSp for Gimlet {
         self.rot.lock().unwrap().handle_deserialized(request)
     }
 
-    async fn last_update_data(&self) -> Option<Box<[u8]>> {
+    async fn last_sp_update_data(&self) -> Option<Box<[u8]>> {
         let handler = self.handler.as_ref()?;
         let handler = handler.lock().await;
-        handler.update_state.last_update_data()
+        handler.update_state.last_sp_update_data()
+    }
+
+    async fn last_rot_update_data(&self) -> Option<Box<[u8]>> {
+        let handler = self.handler.as_ref()?;
+        let handler = handler.lock().await;
+        handler.update_state.last_rot_update_data()
+    }
+
+    async fn last_host_phase1_update_data(
+        &self,
+        slot: u16,
+    ) -> Option<Box<[u8]>> {
+        let handler = self.handler.as_ref()?;
+        let handler = handler.lock().await;
+        handler.update_state.last_host_phase1_update_data(slot)
     }
 
     async fn current_update_status(&self) -> gateway_messages::UpdateStatus {
@@ -573,7 +592,7 @@ struct Handler {
     power_state: PowerState,
     startup_options: StartupOptions,
     update_state: SimSpUpdate,
-    reset_pending: bool,
+    reset_pending: Option<SpComponent>,
 
     // To simulate an SP reset, we should (after doing whatever housekeeping we
     // need to track the reset) intentionally _fail_ to respond to the request,
@@ -615,7 +634,7 @@ impl Handler {
             power_state: PowerState::A2,
             startup_options: StartupOptions::empty(),
             update_state: SimSpUpdate::default(),
-            reset_pending: false,
+            reset_pending: None,
             should_fail_to_respond_signal: None,
         }
     }
@@ -1065,8 +1084,9 @@ impl SpHandler for Handler {
             "port" => ?port,
             "component" => ?component,
         );
-        if component == SpComponent::SP_ITSELF {
-            self.reset_pending = true;
+        if component == SpComponent::SP_ITSELF || component == SpComponent::ROT
+        {
+            self.reset_pending = Some(component);
             Ok(())
         } else {
             Err(SpError::RequestUnsupportedForComponent)
@@ -1086,15 +1106,23 @@ impl SpHandler for Handler {
             "component" => ?component,
         );
         if component == SpComponent::SP_ITSELF {
-            if self.reset_pending {
+            if self.reset_pending == Some(SpComponent::SP_ITSELF) {
                 self.update_state.sp_reset();
-                self.reset_pending = false;
+                self.reset_pending = None;
                 if let Some(signal) = self.should_fail_to_respond_signal.take()
                 {
                     // Instruct `server::handle_request()` to _not_ respond to
                     // this request at all, simulating an SP actually resetting.
                     signal();
                 }
+                Ok(())
+            } else {
+                Err(SpError::ResetComponentTriggerWithoutPrepare)
+            }
+        } else if component == SpComponent::ROT {
+            if self.reset_pending == Some(SpComponent::ROT) {
+                self.update_state.rot_reset();
+                self.reset_pending = None;
                 Ok(())
             } else {
                 Err(SpError::ResetComponentTriggerWithoutPrepare)
@@ -1169,7 +1197,7 @@ impl SpHandler for Handler {
         port: SpPort,
         component: SpComponent,
     ) -> Result<u16, SpError> {
-        warn!(
+        debug!(
             &self.log, "asked for component active slot";
             "sender" => %sender,
             "port" => ?port,
@@ -1192,7 +1220,7 @@ impl SpHandler for Handler {
         slot: u16,
         persist: bool,
     ) -> Result<(), SpError> {
-        warn!(
+        debug!(
             &self.log, "asked to set component active slot";
             "sender" => %sender,
             "port" => ?port,
@@ -1203,9 +1231,12 @@ impl SpHandler for Handler {
         if component == SpComponent::ROT {
             self.rot_active_slot = rot_slot_id_from_u16(slot)?;
             Ok(())
+        } else if component == SpComponent::HOST_CPU_BOOT_FLASH {
+            self.update_state.set_active_host_slot(slot);
+            Ok(())
         } else {
             // The real SP returns `RequestUnsupportedForComponent` for anything
-            // other than the RoT, including SP_ITSELF.
+            // other than the RoT and host boot flash, including SP_ITSELF.
             Err(SpError::RequestUnsupportedForComponent)
         }
     }
@@ -1322,7 +1353,7 @@ impl SpHandler for Handler {
         static SP_VERS: &[u8] = b"0.0.1";
 
         static ROT_GITC: &[u8] = b"eeeeeeee";
-        static ROT_BORD: &[u8] = b"SimGimletRot";
+        static ROT_BORD: &[u8] = SIM_ROT_BOARD.as_bytes();
         static ROT_NAME: &[u8] = b"SimGimlet";
         static ROT_VERS: &[u8] = b"0.0.1";
 
@@ -1355,10 +1386,18 @@ impl SpHandler for Handler {
 
     fn read_rot(
         &mut self,
-        _request: gateway_messages::RotRequest,
-        _buf: &mut [u8],
-    ) -> std::result::Result<gateway_messages::RotResponse, SpError> {
-        Err(SpError::RequestUnsupportedForSp)
+        request: RotRequest,
+        buf: &mut [u8],
+    ) -> std::result::Result<RotResponse, SpError> {
+        let dummy_page = match request {
+            RotRequest::ReadCmpa => "gimlet-cmpa",
+            RotRequest::ReadCfpa(CfpaPage::Active) => "gimlet-cfpa-active",
+            RotRequest::ReadCfpa(CfpaPage::Inactive) => "gimlet-cfpa-inactive",
+            RotRequest::ReadCfpa(CfpaPage::Scratch) => "gimlet-cfpa-scratch",
+        };
+        buf[..dummy_page.len()].copy_from_slice(dummy_page.as_bytes());
+        buf[dummy_page.len()..].fill(0);
+        Ok(RotResponse::Ok)
     }
 }
 

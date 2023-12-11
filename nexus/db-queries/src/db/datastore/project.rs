@@ -13,7 +13,6 @@ use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
-use crate::db::error::TransactionError;
 use crate::db::fixed_data::project::SERVICES_PROJECT;
 use crate::db::fixed_data::silo::INTERNAL_SILO_ID;
 use crate::db::identity::Resource;
@@ -24,7 +23,8 @@ use crate::db::model::ProjectUpdate;
 use crate::db::model::Silo;
 use crate::db::model::VirtualProvisioningCollection;
 use crate::db::pagination::paginated;
-use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl};
+use crate::transaction_retry::OptionalError;
+use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -78,9 +78,9 @@ macro_rules! generate_fn_to_ensure_none_in_project {
                         "a"
                     };
 
-                    return Err(Error::InvalidRequest {
-                        message: format!("project to be deleted contains {article} {object}: {label}"),
-                    });
+                    return Err(Error::invalid_request(
+                        format!("project to be deleted contains {article} {object}: {label}")
+                    ));
                 }
 
                 Ok(())
@@ -151,49 +151,62 @@ impl DataStore {
 
         use db::schema::project::dsl;
 
+        let err = OptionalError::new();
         let name = project.name().as_str().to_string();
-        let db_project = self
-            .pool_connection_authorized(opctx)
-            .await?
-            .transaction_async(|conn| async move {
-                let project: Project = Silo::insert_resource(
-                    silo_id,
-                    diesel::insert_into(dsl::project).values(project),
-                )
-                .insert_and_get_result_async(&conn)
-                .await
-                .map_err(|e| match e {
-                    AsyncInsertError::CollectionNotFound => {
-                        authz_silo_inner.not_found()
-                    }
-                    AsyncInsertError::DatabaseError(e) => {
-                        public_error_from_diesel(
-                            e,
-                            ErrorHandler::Conflict(
-                                ResourceType::Project,
-                                &name,
-                            ),
-                        )
-                    }
-                })?;
+        let conn = self.pool_connection_authorized(opctx).await?;
 
-                // Create resource provisioning for the project.
-                self.virtual_provisioning_collection_create_on_connection(
-                    &conn,
-                    VirtualProvisioningCollection::new(
-                        project.id(),
-                        CollectionTypeProvisioned::Project,
-                    ),
-                )
-                .await?;
-                Ok(project)
+        let db_project = self
+            .transaction_retry_wrapper("project_create_in_silo")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+
+                let authz_silo_inner = authz_silo_inner.clone();
+                let name = name.clone();
+                let project = project.clone();
+                async move {
+                    let project: Project = Silo::insert_resource(
+                        silo_id,
+                        diesel::insert_into(dsl::project).values(project),
+                    )
+                    .insert_and_get_result_async(&conn)
+                    .await
+                    .map_err(|e| match e {
+                        AsyncInsertError::CollectionNotFound => {
+                            err.bail(authz_silo_inner.not_found())
+                        }
+                        AsyncInsertError::DatabaseError(diesel_error) => err
+                            .bail_retryable_or_else(
+                                diesel_error,
+                                |diesel_error| {
+                                    public_error_from_diesel(
+                                        diesel_error,
+                                        ErrorHandler::Conflict(
+                                            ResourceType::Project,
+                                            &name,
+                                        ),
+                                    )
+                                },
+                            ),
+                    })?;
+
+                    // Create resource provisioning for the project.
+                    self.virtual_provisioning_collection_create_on_connection(
+                        &conn,
+                        VirtualProvisioningCollection::new(
+                            project.id(),
+                            CollectionTypeProvisioned::Project,
+                        ),
+                    )
+                    .await?;
+                    Ok(project)
+                }
             })
             .await
-            .map_err(|e| match e {
-                TransactionError::CustomError(e) => e,
-                TransactionError::Database(e) => {
-                    public_error_from_diesel(e, ErrorHandler::Server)
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    return err;
                 }
+                public_error_from_diesel(e, ErrorHandler::Server)
             })?;
 
         Ok((
@@ -230,47 +243,54 @@ impl DataStore {
 
         use db::schema::project::dsl;
 
-        type TxnError = TransactionError<Error>;
-        self.pool_connection_authorized(opctx)
-            .await?
-            .transaction_async(|conn| async move {
-                let now = Utc::now();
-                let updated_rows = diesel::update(dsl::project)
-                    .filter(dsl::time_deleted.is_null())
-                    .filter(dsl::id.eq(authz_project.id()))
-                    .filter(dsl::rcgen.eq(db_project.rcgen))
-                    .set(dsl::time_deleted.eq(now))
-                    .returning(Project::as_returning())
-                    .execute_async(&conn)
-                    .await
-                    .map_err(|e| {
-                        public_error_from_diesel(
-                            e,
-                            ErrorHandler::NotFoundByResource(authz_project),
-                        )
-                    })?;
+        let err = OptionalError::new();
+        let conn = self.pool_connection_authorized(opctx).await?;
 
-                if updated_rows == 0 {
-                    return Err(TxnError::CustomError(Error::InvalidRequest {
-                        message:
-                            "deletion failed due to concurrent modification"
-                                .to_string(),
-                    }));
+        self.transaction_retry_wrapper("project_delete")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                async move {
+                    let now = Utc::now();
+                    let updated_rows = diesel::update(dsl::project)
+                        .filter(dsl::time_deleted.is_null())
+                        .filter(dsl::id.eq(authz_project.id()))
+                        .filter(dsl::rcgen.eq(db_project.rcgen))
+                        .set(dsl::time_deleted.eq(now))
+                        .returning(Project::as_returning())
+                        .execute_async(&conn)
+                        .await
+                        .map_err(|e| {
+                            err.bail_retryable_or_else(e, |e| {
+                                public_error_from_diesel(
+                                    e,
+                                    ErrorHandler::NotFoundByResource(
+                                        authz_project,
+                                    ),
+                                )
+                            })
+                        })?;
+
+                    if updated_rows == 0 {
+                        return Err(err.bail(Error::invalid_request(
+                            "deletion failed due to concurrent modification",
+                        )));
+                    }
+
+                    self.virtual_provisioning_collection_delete_on_connection(
+                        &opctx.log,
+                        &conn,
+                        db_project.id(),
+                    )
+                    .await?;
+                    Ok(())
                 }
-
-                self.virtual_provisioning_collection_delete_on_connection(
-                    &conn,
-                    db_project.id(),
-                )
-                .await?;
-                Ok(())
             })
             .await
-            .map_err(|e| match e {
-                TxnError::CustomError(e) => e,
-                TxnError::Database(e) => {
-                    public_error_from_diesel(e, ErrorHandler::Server)
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    return err;
                 }
+                public_error_from_diesel(e, ErrorHandler::Server)
             })?;
         Ok(())
     }

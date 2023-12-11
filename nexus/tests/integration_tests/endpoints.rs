@@ -21,8 +21,10 @@ use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils::SWITCH_UUID;
 use nexus_types::external_api::params;
 use nexus_types::external_api::shared;
+use nexus_types::external_api::shared::Baseboard;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::shared::Ipv4Range;
+use nexus_types::external_api::shared::UninitializedSled;
 use omicron_common::api::external::AddressLotKind;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -39,6 +41,7 @@ use omicron_test_utils::certificates::CertificateChain;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::str::FromStr;
+use uuid::Uuid;
 
 lazy_static! {
     pub static ref HARDWARE_RACK_URL: String =
@@ -47,6 +50,12 @@ lazy_static! {
         format!("/v1/system/hardware/uninitialized-sleds");
     pub static ref HARDWARE_SLED_URL: String =
         format!("/v1/system/hardware/sleds/{}", SLED_AGENT_UUID);
+    pub static ref HARDWARE_SLED_PROVISION_STATE_URL: String =
+        format!("/v1/system/hardware/sleds/{}/provision-state", SLED_AGENT_UUID);
+    pub static ref DEMO_SLED_PROVISION_STATE: params::SledProvisionStateParams =
+        params::SledProvisionStateParams {
+            state: nexus_types::external_api::views::SledProvisionState::NonProvisionable,
+        };
     pub static ref HARDWARE_SWITCH_URL: String =
         format!("/v1/system/hardware/switches/{}", SWITCH_UUID);
     pub static ref HARDWARE_DISK_URL: String =
@@ -56,6 +65,16 @@ lazy_static! {
 
     pub static ref SLED_INSTANCES_URL: String =
         format!("/v1/system/hardware/sleds/{}/instances", SLED_AGENT_UUID);
+
+    pub static ref DEMO_UNINITIALIZED_SLED: UninitializedSled = UninitializedSled {
+        baseboard: Baseboard {
+            serial: "demo-serial".to_string(),
+            part: "demo-part".to_string(),
+            revision: 6
+        },
+        rack_id: Uuid::new_v4(),
+        cubby: 1
+    };
 
     // Global policy
     pub static ref SYSTEM_POLICY_URL: &'static str = "/v1/system/policy";
@@ -115,6 +134,7 @@ lazy_static! {
     pub static ref DEMO_PROJECT_URL_INSTANCES: String = format!("/v1/instances?project={}", *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_URL_SNAPSHOTS: String = format!("/v1/snapshots?project={}", *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_URL_VPCS: String = format!("/v1/vpcs?project={}", *DEMO_PROJECT_NAME);
+    pub static ref DEMO_PROJECT_URL_FIPS: String = format!("/v1/floating-ips?project={}", *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_CREATE: params::ProjectCreate =
         params::ProjectCreate {
             identity: IdentityMetadataCreateParams {
@@ -242,8 +262,6 @@ lazy_static! {
             ),
         };
 
-    pub static ref DEMO_IMPORT_DISK_IMPORT_FROM_URL_URL: String =
-        format!("/v1/disks/{}/import?{}", *DEMO_IMPORT_DISK_NAME, *DEMO_PROJECT_SELECTOR);
     pub static ref DEMO_IMPORT_DISK_BULK_WRITE_START_URL: String =
         format!("/v1/disks/{}/bulk-write-start?{}", *DEMO_IMPORT_DISK_NAME, *DEMO_PROJECT_SELECTOR);
     pub static ref DEMO_IMPORT_DISK_BULK_WRITE_URL: String =
@@ -473,10 +491,7 @@ lazy_static! {
                 name: DEMO_IMAGE_NAME.clone(),
                 description: String::from(""),
             },
-            source: params::ImageSource::Url {
-                url: HTTP_SERVER.url("/image.raw").to_string(),
-                block_size: params::BlockSize::try_from(4096).unwrap(),
-            },
+            source: params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
             os: "fake-os".to_string(),
             version: "1.0".to_string()
         };
@@ -552,6 +567,22 @@ lazy_static! {
     pub static ref DEMO_SYSTEM_UPDATE_PARAMS: params::SystemUpdatePath = params::SystemUpdatePath {
         version: SemverVersion::new(1,0,0),
     };
+}
+
+lazy_static! {
+    // Project Floating IPs
+    pub static ref DEMO_FLOAT_IP_NAME: Name = "float-ip".parse().unwrap();
+    pub static ref DEMO_FLOAT_IP_URL: String =
+        format!("/v1/floating-ips/{}?project={}", *DEMO_FLOAT_IP_NAME, *DEMO_PROJECT_NAME);
+    pub static ref DEMO_FLOAT_IP_CREATE: params::FloatingIpCreate =
+        params::FloatingIpCreate {
+            identity: IdentityMetadataCreateParams {
+                name: DEMO_FLOAT_IP_NAME.clone(),
+                description: String::from("a new IP pool"),
+            },
+            address: Some(std::net::Ipv4Addr::new(10, 0, 0, 141).into()),
+            pool: None,
+        };
 }
 
 lazy_static! {
@@ -1293,20 +1324,6 @@ lazy_static! {
         },
 
         VerifyEndpoint {
-            url: &DEMO_IMPORT_DISK_IMPORT_FROM_URL_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Post(
-                    serde_json::to_value(params::ImportBlocksFromUrl {
-                        url: "obviously-fake-url".into(),
-                        expected_digest: None,
-                    }).unwrap()
-                )
-            ],
-        },
-
-        VerifyEndpoint {
             url: &DEMO_IMPORT_DISK_BULK_WRITE_START_URL,
             visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
@@ -1577,7 +1594,9 @@ lazy_static! {
             url: "/v1/system/hardware/sleds",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Get],
+            allowed_methods: vec![AllowedMethod::Get, AllowedMethod::Post(
+                serde_json::to_value(&*DEMO_UNINITIALIZED_SLED).unwrap()
+            )],
         },
 
         VerifyEndpoint {
@@ -1592,6 +1611,15 @@ lazy_static! {
             visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Get],
+        },
+
+        VerifyEndpoint {
+            url: &HARDWARE_SLED_PROVISION_STATE_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![AllowedMethod::Put(
+                serde_json::to_value(&*DEMO_SLED_PROVISION_STATE).unwrap()
+            )],
         },
 
         VerifyEndpoint {
@@ -1960,6 +1988,29 @@ lazy_static! {
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::GetNonexistent,
+            ],
+        },
+
+        // Floating IPs
+        VerifyEndpoint {
+            url: &DEMO_PROJECT_URL_FIPS,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_FLOAT_IP_CREATE).unwrap(),
+                ),
+                AllowedMethod::Get,
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_FLOAT_IP_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Delete,
             ],
         }
     ];

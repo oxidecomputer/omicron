@@ -44,7 +44,7 @@ impl OmicronRepoAssembler {
         self
     }
 
-    pub fn build(&self) -> Result<()> {
+    pub async fn build(&self) -> Result<()> {
         let (build_dir, is_temp) = match &self.build_dir {
             Some(dir) => (dir.clone(), false),
             None => {
@@ -61,7 +61,7 @@ impl OmicronRepoAssembler {
 
         slog::info!(self.log, "assembling repository in `{build_dir}`");
 
-        match self.build_impl(&build_dir) {
+        match self.build_impl(&build_dir).await {
             Ok(()) => {
                 if is_temp {
                     slog::debug!(self.log, "assembly successful, cleaning up");
@@ -92,15 +92,17 @@ impl OmicronRepoAssembler {
         Ok(())
     }
 
-    fn build_impl(&self, build_dir: &Utf8Path) -> Result<()> {
+    async fn build_impl(&self, build_dir: &Utf8Path) -> Result<()> {
         let mut repository = OmicronRepo::initialize(
             &self.log,
             build_dir,
             self.manifest.system_version.clone(),
             self.keys.clone(),
             self.expiry,
-        )?
-        .into_editor()?;
+        )
+        .await?
+        .into_editor()
+        .await?;
 
         // Add all the artifacts.
         for (kind, entries) in &self.manifest.artifacts {
@@ -118,10 +120,11 @@ impl OmicronRepoAssembler {
         }
 
         // Write out the repository.
-        repository.sign_and_finish(self.keys.clone(), self.expiry)?;
+        repository.sign_and_finish(self.keys.clone(), self.expiry).await?;
 
         // Now reopen the repository to archive it into a zip file.
         let repo2 = OmicronRepo::load_untrusted(&self.log, build_dir)
+            .await
             .context("error reopening repository to archive")?;
         repo2
             .archive(&self.output_path)

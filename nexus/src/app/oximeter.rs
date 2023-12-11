@@ -127,6 +127,7 @@ impl super::Nexus {
             for producer in producers.into_iter() {
                 let producer_info = oximeter_client::types::ProducerEndpoint {
                     id: producer.id(),
+                    kind: nexus::ProducerKind::from(producer.kind).into(),
                     address: SocketAddr::new(
                         producer.ip.ip(),
                         producer.port.try_into().unwrap(),
@@ -149,6 +150,7 @@ impl super::Nexus {
     pub(crate) async fn register_as_producer(&self, address: SocketAddr) {
         let producer_endpoint = nexus::ProducerEndpoint {
             id: self.id,
+            kind: nexus::ProducerKind::Service,
             address,
             base_route: String::from("/metrics/collect"),
             interval: Duration::from_secs(10),

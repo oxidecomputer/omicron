@@ -110,6 +110,8 @@ port = "qsfp0"
 uplink_port_speed = "40G"
 # The forward error correction mode for this port.
 uplink_port_fec="none"
+# Do not use autonegotiation
+autoneg = false
 # Switch to use for the uplink. For single-rack deployments this can be
 # "switch0" (upper slot) or "switch1" (lower slot). For single-node softnpu
 # and dendrite stub environments, use "switch0"

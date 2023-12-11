@@ -9,6 +9,7 @@ pub mod authz;
 pub mod context;
 pub mod db;
 pub mod provisioning;
+pub mod transaction_retry;
 
 #[macro_use]
 extern crate slog;

@@ -10,7 +10,7 @@ use crate::bootstrap::params::AddSledRequest;
 use crate::params::{
     CleanupContextUpdate, DiskEnsureBody, InstanceEnsureBody,
     InstancePutMigrationIdsBody, InstancePutStateBody,
-    InstancePutStateResponse, InstanceUnregisterResponse, ServiceEnsureBody,
+    InstancePutStateResponse, InstanceUnregisterResponse, OmicronZonesConfig,
     SledRole, TimeSync, VpcFirewallRulesEnsureBody, ZoneBundleId,
     ZoneBundleMetadata, Zpool,
 };
@@ -18,14 +18,17 @@ use crate::sled_agent::Error as SledAgentError;
 use crate::zone_bundle;
 use bootstore::schemes::v0::NetworkConfig;
 use camino::Utf8PathBuf;
+use display_error_chain::DisplayErrorChain;
 use dropshot::{
     endpoint, ApiDescription, FreeformBody, HttpError, HttpResponseCreated,
     HttpResponseDeleted, HttpResponseHeaders, HttpResponseOk,
-    HttpResponseUpdatedNoContent, Path, Query, RequestContext, TypedBody,
+    HttpResponseUpdatedNoContent, Path, Query, RequestContext, StreamingBody,
+    TypedBody,
 };
 use illumos_utils::opte::params::{
     DeleteVirtualNetworkInterfaceHost, SetVirtualNetworkInterfaceHost,
 };
+use installinator_common::M2Slot;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::{
     DiskRuntimeState, SledInstanceState, UpdateArtifactId,
@@ -36,6 +39,7 @@ use oximeter_producer::collect;
 use oximeter_producer::ProducerIdPathParams;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sled_hardware::DiskVariant;
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
@@ -51,7 +55,8 @@ pub fn api() -> SledApiDescription {
         api.register(instance_put_state)?;
         api.register(instance_register)?;
         api.register(instance_unregister)?;
-        api.register(services_put)?;
+        api.register(omicron_zones_get)?;
+        api.register(omicron_zones_put)?;
         api.register(zones_list)?;
         api.register(zone_bundle_list)?;
         api.register(zone_bundle_list_all)?;
@@ -74,6 +79,9 @@ pub fn api() -> SledApiDescription {
         api.register(write_network_bootstore_config)?;
         api.register(add_sled_to_initialized_rack)?;
         api.register(metrics_collect)?;
+        api.register(host_os_write_start)?;
+        api.register(host_os_write_status_get)?;
+        api.register(host_os_write_status_delete)?;
 
         Ok(())
     }
@@ -316,43 +324,27 @@ async fn zones_list(
 }
 
 #[endpoint {
-    method = PUT,
-    path = "/services",
+    method = GET,
+    path = "/omicron-zones",
 }]
-async fn services_put(
+async fn omicron_zones_get(
     rqctx: RequestContext<SledAgent>,
-    body: TypedBody<ServiceEnsureBody>,
+) -> Result<HttpResponseOk<OmicronZonesConfig>, HttpError> {
+    let sa = rqctx.context();
+    Ok(HttpResponseOk(sa.omicron_zones_list().await?))
+}
+
+#[endpoint {
+    method = PUT,
+    path = "/omicron-zones",
+}]
+async fn omicron_zones_put(
+    rqctx: RequestContext<SledAgent>,
+    body: TypedBody<OmicronZonesConfig>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let sa = rqctx.context().clone();
+    let sa = rqctx.context();
     let body_args = body.into_inner();
-
-    // Spawn a separate task to run `services_ensure`: cancellation of this
-    // endpoint's future (as might happen if the client abandons the request or
-    // times out) could result in leaving zones partially configured and the
-    // in-memory state of the service manager invalid. See:
-    // oxidecomputer/omicron#3098.
-    let handler = async move {
-        match sa.services_ensure(body_args).await {
-            Ok(()) => Ok(()),
-            Err(e) => {
-                // Log the error here to make things clear even if the client
-                // has already disconnected.
-                error!(sa.logger(), "failed to initialize services: {e}");
-                Err(e)
-            }
-        }
-    };
-    match tokio::spawn(handler).await {
-        Ok(result) => result.map_err(|e| Error::from(e))?,
-
-        Err(e) => {
-            return Err(HttpError::for_internal_error(format!(
-                "unexpected failure awaiting \"services_ensure\": {:#}",
-                e
-            )));
-        }
-    }
-
+    sa.omicron_zones_ensure(body_args).await?;
     Ok(HttpResponseUpdatedNoContent())
 }
 
@@ -674,7 +666,10 @@ async fn read_network_bootstore_config_cache(
     })?;
 
     let config = match config {
-        Some(config) => EarlyNetworkConfig::try_from(config).map_err(|e| {
+        Some(config) => EarlyNetworkConfig::deserialize_bootstore_config(
+            &rqctx.log, &config,
+        )
+        .map_err(|e| {
             HttpError::for_internal_error(format!(
                 "deserialize early network config: {e}"
             ))
@@ -766,4 +761,167 @@ async fn metrics_collect(
     let sa = request_context.context();
     let producer_id = path_params.into_inner().producer_id;
     collect(&sa.metrics_registry(), producer_id).await
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct BootDiskPathParams {
+    pub boot_disk: M2Slot,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct BootDiskUpdatePathParams {
+    pub boot_disk: M2Slot,
+    pub update_id: Uuid,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct BootDiskWriteStartQueryParams {
+    pub update_id: Uuid,
+    // TODO do we already have sha2-256 hashes of the OS images, and if so
+    // should we use that instead? Another option is to use the external API
+    // `Digest` type, although it predates `serde_human_bytes` so just stores
+    // the hash as a `String`.
+    #[serde(with = "serde_human_bytes::hex_array")]
+    #[schemars(schema_with = "omicron_common::hex_schema::<32>")]
+    pub sha3_256_digest: [u8; 32],
+}
+
+/// Write a new host OS image to the specified boot disk
+#[endpoint {
+    method = POST,
+    path = "/boot-disk/{boot_disk}/os/write",
+}]
+async fn host_os_write_start(
+    request_context: RequestContext<SledAgent>,
+    path_params: Path<BootDiskPathParams>,
+    query_params: Query<BootDiskWriteStartQueryParams>,
+    body: StreamingBody,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let sa = request_context.context();
+    let boot_disk = path_params.into_inner().boot_disk;
+
+    // Find our corresponding disk.
+    let maybe_disk_path =
+        sa.storage().get_latest_resources().await.disks().values().find_map(
+            |(disk, _pool)| {
+                // Synthetic disks panic if asked for their `slot()`, so filter
+                // them out first; additionally, filter out any non-M2 disks.
+                if disk.is_synthetic() || disk.variant() != DiskVariant::M2 {
+                    return None;
+                }
+
+                // Convert this M2 disk's slot to an M2Slot, and skip any that
+                // don't match the requested boot_disk.
+                let Ok(slot) = M2Slot::try_from(disk.slot()) else {
+                    return None;
+                };
+                if slot != boot_disk {
+                    return None;
+                }
+
+                let raw_devs_path = true;
+                Some(disk.boot_image_devfs_path(raw_devs_path))
+            },
+        );
+
+    let disk_path = match maybe_disk_path {
+        Some(Ok(path)) => path,
+        Some(Err(err)) => {
+            let message = format!(
+                "failed to find devfs path for {boot_disk:?}: {}",
+                DisplayErrorChain::new(&err)
+            );
+            return Err(HttpError {
+                status_code: http::StatusCode::SERVICE_UNAVAILABLE,
+                error_code: None,
+                external_message: message.clone(),
+                internal_message: message,
+            });
+        }
+        None => {
+            let message = format!("no disk found for slot {boot_disk:?}",);
+            return Err(HttpError {
+                status_code: http::StatusCode::SERVICE_UNAVAILABLE,
+                error_code: None,
+                external_message: message.clone(),
+                internal_message: message,
+            });
+        }
+    };
+
+    let BootDiskWriteStartQueryParams { update_id, sha3_256_digest } =
+        query_params.into_inner();
+    sa.boot_disk_os_writer()
+        .start_update(
+            boot_disk,
+            disk_path,
+            update_id,
+            sha3_256_digest,
+            body.into_stream(),
+        )
+        .await
+        .map_err(|err| HttpError::from(&*err))?;
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+/// Current progress of an OS image being written to disk.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema, Serialize,
+)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum BootDiskOsWriteProgress {
+    /// The image is still being uploaded.
+    ReceivingUploadedImage { bytes_received: usize },
+    /// The image is being written to disk.
+    WritingImageToDisk { bytes_written: usize },
+    /// The image is being read back from disk for validation.
+    ValidatingWrittenImage { bytes_read: usize },
+}
+
+/// Status of an update to a boot disk OS.
+#[derive(Debug, Clone, Deserialize, JsonSchema, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum BootDiskOsWriteStatus {
+    /// No update has been started for this disk, or any previously-started
+    /// update has completed and had its status cleared.
+    NoUpdateStarted,
+    /// An update is currently running.
+    InProgress { update_id: Uuid, progress: BootDiskOsWriteProgress },
+    /// The most recent update completed successfully.
+    Complete { update_id: Uuid },
+    /// The most recent update failed.
+    Failed { update_id: Uuid, message: String },
+}
+
+/// Get the status of writing a new host OS
+#[endpoint {
+    method = GET,
+    path = "/boot-disk/{boot_disk}/os/write/status",
+}]
+async fn host_os_write_status_get(
+    request_context: RequestContext<SledAgent>,
+    path_params: Path<BootDiskPathParams>,
+) -> Result<HttpResponseOk<BootDiskOsWriteStatus>, HttpError> {
+    let sa = request_context.context();
+    let boot_disk = path_params.into_inner().boot_disk;
+    let status = sa.boot_disk_os_writer().status(boot_disk);
+    Ok(HttpResponseOk(status))
+}
+
+/// Clear the status of a completed write of a new host OS
+#[endpoint {
+    method = DELETE,
+    path = "/boot-disk/{boot_disk}/os/write/status/{update_id}",
+}]
+async fn host_os_write_status_delete(
+    request_context: RequestContext<SledAgent>,
+    path_params: Path<BootDiskUpdatePathParams>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let sa = request_context.context();
+    let BootDiskUpdatePathParams { boot_disk, update_id } =
+        path_params.into_inner();
+    sa.boot_disk_os_writer()
+        .clear_terminal_status(boot_disk, update_id)
+        .map_err(|err| HttpError::from(&err))?;
+    Ok(HttpResponseUpdatedNoContent())
 }

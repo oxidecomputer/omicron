@@ -18,6 +18,7 @@ pub mod common;
 
 // Modules for the non-simulated sled agent.
 mod backing_fs;
+mod boot_disk_os_writer;
 pub mod bootstrap;
 pub mod config;
 pub(crate) mod dump_setup;
@@ -32,7 +33,8 @@ pub mod params;
 mod profile;
 pub mod rack_setup;
 pub mod server;
-mod services;
+pub mod services;
+pub mod services_migration;
 mod sled_agent;
 mod smf_helper;
 mod storage_monitor;

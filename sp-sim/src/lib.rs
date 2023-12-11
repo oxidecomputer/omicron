@@ -28,6 +28,8 @@ use std::net::SocketAddrV6;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
 
+pub const SIM_ROT_BOARD: &str = "SimRot";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Responsiveness {
     Responsive,
@@ -58,8 +60,19 @@ pub trait SimulatedSp {
 
     /// Get the last completed update delivered to this simulated SP.
     ///
-    /// Only returns data after a simulated reset.
-    async fn last_update_data(&self) -> Option<Box<[u8]>>;
+    /// Only returns data after a simulated reset of the SP.
+    async fn last_sp_update_data(&self) -> Option<Box<[u8]>>;
+
+    /// Get the last completed update delivered to this simulated RoT.
+    ///
+    /// Only returns data after a simulated reset of the RoT.
+    async fn last_rot_update_data(&self) -> Option<Box<[u8]>>;
+
+    /// Get the last completed update delivered to the host phase1 flash slot.
+    async fn last_host_phase1_update_data(
+        &self,
+        slot: u16,
+    ) -> Option<Box<[u8]>>;
 
     /// Get the current update status, just as would be returned by an MGS
     /// request to get the update status.

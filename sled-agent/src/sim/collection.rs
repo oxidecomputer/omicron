@@ -777,7 +777,7 @@ mod test {
         let error =
             disk.transition(DiskStateRequested::Attached(id2)).unwrap_err();
         if let Error::InvalidRequest { message } = error {
-            assert_eq!("disk is already attached", message);
+            assert_eq!("disk is already attached", message.external_message());
         } else {
             panic!("unexpected error type");
         }
@@ -829,7 +829,10 @@ mod test {
         let error =
             disk.transition(DiskStateRequested::Attached(id)).unwrap_err();
         if let Error::InvalidRequest { message } = error {
-            assert_eq!("cannot attach from detaching", message);
+            assert_eq!(
+                "cannot attach from detaching",
+                message.external_message()
+            );
         } else {
             panic!("unexpected error type");
         }

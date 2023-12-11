@@ -32,6 +32,7 @@ oso.workspace = true
 paste.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
+rand.workspace = true
 ref-cast.workspace = true
 samael.workspace = true
 serde.workspace = true
@@ -58,6 +59,7 @@ omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 assert_matches.workspace = true
+camino-tempfile.workspace = true
 expectorate.workspace = true
 hyper-rustls.workspace = true
 gateway-client.workspace = true
@@ -75,5 +77,4 @@ regex.workspace = true
 rustls.workspace = true
 strum.workspace = true
 subprocess.workspace = true
-tempfile.workspace = true
 term.workspace = true

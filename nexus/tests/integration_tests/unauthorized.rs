@@ -278,6 +278,12 @@ lazy_static! {
             body: serde_json::to_value(&*DEMO_IMAGE_CREATE).unwrap(),
             id_routes: vec!["/v1/images/{id}"],
         },
+        // Create a Floating IP in the project
+        SetupReq::Post {
+            url: &DEMO_PROJECT_URL_FIPS,
+            body: serde_json::to_value(&*DEMO_FLOAT_IP_CREATE).unwrap(),
+            id_routes: vec!["/v1/floating-ips/{id}"],
+        },
         // Create a SAML identity provider
         SetupReq::Post {
             url: &SAML_IDENTITY_PROVIDERS_URL,

@@ -143,8 +143,7 @@ where
             .await
         });
 
-        let mut completion_futures = vec![];
-        completion_futures.reserve(recovery_futures.len());
+        let mut completion_futures = Vec::with_capacity(recovery_futures.len());
         // Loads and resumes all sagas in serial.
         for recovery_future in recovery_futures {
             let saga_complete_future = recovery_future.await?;

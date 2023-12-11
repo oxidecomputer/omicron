@@ -10,7 +10,7 @@ use crate::external_api::params::CertificateCreate;
 use crate::external_api::shared::ServiceUsingCertificate;
 use crate::internal_api::params::RackInitializationRequest;
 use gateway_client::types::SpType;
-use ipnetwork::IpNetwork;
+use ipnetwork::{IpNetwork, Ipv6Network};
 use nexus_db_model::DnsGroup;
 use nexus_db_model::InitialDnsGroup;
 use nexus_db_model::{SwitchLinkFec, SwitchLinkSpeed};
@@ -23,19 +23,26 @@ use nexus_db_queries::db::lookup::LookupPath;
 use nexus_types::external_api::params::Address;
 use nexus_types::external_api::params::AddressConfig;
 use nexus_types::external_api::params::AddressLotBlockCreate;
+use nexus_types::external_api::params::BgpAnnounceSetCreate;
+use nexus_types::external_api::params::BgpAnnouncementCreate;
+use nexus_types::external_api::params::BgpConfigCreate;
+use nexus_types::external_api::params::BgpPeer;
+use nexus_types::external_api::params::LinkConfig;
+use nexus_types::external_api::params::LldpServiceConfig;
 use nexus_types::external_api::params::RouteConfig;
 use nexus_types::external_api::params::SwitchPortConfig;
 use nexus_types::external_api::params::{
-    AddressLotCreate, LoopbackAddressCreate, Route, SiloCreate,
+    AddressLotCreate, BgpPeerConfig, LoopbackAddressCreate, Route, SiloCreate,
     SwitchPortSettingsCreate,
 };
+use nexus_types::external_api::shared::Baseboard;
 use nexus_types::external_api::shared::FleetRole;
 use nexus_types::external_api::shared::SiloIdentityMode;
 use nexus_types::external_api::shared::SiloRole;
+use nexus_types::external_api::shared::UninitializedSled;
 use nexus_types::external_api::views;
-use nexus_types::external_api::views::Baseboard;
-use nexus_types::external_api::views::UninitializedSled;
 use nexus_types::internal_api::params::DnsRecord;
+use omicron_common::address::{get_64_subnet, Ipv6Subnet, RACK_PREFIX};
 use omicron_common::api::external::AddressLotKind;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -45,10 +52,13 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
+use sled_agent_client::types::AddSledRequest;
 use sled_agent_client::types::EarlyNetworkConfigBody;
+use sled_agent_client::types::StartSledAgentRequest;
+use sled_agent_client::types::StartSledAgentRequestBody;
 use sled_agent_client::types::{
-    BgpConfig, BgpPeerConfig, EarlyNetworkConfig, PortConfigV1,
-    RackNetworkConfigV1, RouteConfig as SledRouteConfig,
+    BgpConfig, BgpPeerConfig as SledBgpPeerConfig, EarlyNetworkConfig,
+    PortConfigV1, RackNetworkConfigV1, RouteConfig as SledRouteConfig,
 };
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -201,10 +211,9 @@ impl super::Nexus {
         };
 
         let rack_network_config = request.rack_network_config.as_ref().ok_or(
-            Error::InvalidRequest {
-                message: "cannot initialize a rack without a network config"
-                    .into(),
-            },
+            Error::invalid_request(
+                "cannot initialize a rack without a network config",
+            ),
         )?;
 
         self.db_datastore
@@ -402,6 +411,108 @@ impl super::Nexus {
                     Error::internal_error(&format!("unable to retrieve authz_address_lot for infra address_lot: {e}"))
                 })?;
 
+            let mut bgp_configs = HashMap::new();
+
+            for bgp_config in &rack_network_config.bgp {
+                bgp_configs.insert(bgp_config.asn, bgp_config.clone());
+
+                let bgp_config_name: Name =
+                    format!("as{}", bgp_config.asn).parse().unwrap();
+
+                let announce_set_name: Name =
+                    format!("as{}-announce", bgp_config.asn).parse().unwrap();
+
+                let address_lot_name: Name =
+                    format!("as{}-lot", bgp_config.asn).parse().unwrap();
+
+                self.db_datastore
+                    .address_lot_create(
+                        &opctx,
+                        &AddressLotCreate {
+                            identity: IdentityMetadataCreateParams {
+                                name: address_lot_name,
+                                description: format!(
+                                    "Address lot for announce set in as {}",
+                                    bgp_config.asn
+                                ),
+                            },
+                            kind: AddressLotKind::Infra,
+                            blocks: bgp_config
+                                .originate
+                                .iter()
+                                .map(|o| AddressLotBlockCreate {
+                                    first_address: o.network().into(),
+                                    last_address: o.broadcast().into(),
+                                })
+                                .collect(),
+                        },
+                    )
+                    .await
+                    .map_err(|e| {
+                        Error::internal_error(&format!(
+                            "unable to create address lot for BGP as {}: {}",
+                            bgp_config.asn, e
+                        ))
+                    })?;
+
+                self.db_datastore
+                    .bgp_create_announce_set(
+                        &opctx,
+                        &BgpAnnounceSetCreate {
+                            identity: IdentityMetadataCreateParams {
+                                name: announce_set_name.clone(),
+                                description: format!(
+                                    "Announce set for AS {}",
+                                    bgp_config.asn
+                                ),
+                            },
+                            announcement: bgp_config
+                                .originate
+                                .iter()
+                                .map(|x| BgpAnnouncementCreate {
+                                    address_lot_block: NameOrId::Name(
+                                        format!("as{}", bgp_config.asn)
+                                            .parse()
+                                            .unwrap(),
+                                    ),
+                                    network: IpNetwork::from(*x).into(),
+                                })
+                                .collect(),
+                        },
+                    )
+                    .await
+                    .map_err(|e| {
+                        Error::internal_error(&format!(
+                            "unable to create bgp announce set for as {}: {}",
+                            bgp_config.asn, e
+                        ))
+                    })?;
+
+                self.db_datastore
+                    .bgp_config_set(
+                        &opctx,
+                        &BgpConfigCreate {
+                            identity: IdentityMetadataCreateParams {
+                                name: bgp_config_name,
+                                description: format!(
+                                    "BGP config for AS {}",
+                                    bgp_config.asn
+                                ),
+                            },
+                            asn: bgp_config.asn,
+                            bgp_announce_set_id: announce_set_name.into(),
+                            vrf: None,
+                        },
+                    )
+                    .await
+                    .map_err(|e| {
+                        Error::internal_error(&format!(
+                            "unable to set bgp config for as {}: {}",
+                            bgp_config.asn, e
+                        ))
+                    })?;
+            }
+
             for (idx, uplink_config) in
                 rack_network_config.ports.iter().enumerate()
             {
@@ -499,6 +610,43 @@ impl super::Nexus {
                     .routes
                     .insert("phy0".to_string(), RouteConfig { routes });
 
+                let peers: Vec<BgpPeer> = uplink_config
+                    .bgp_peers
+                    .iter()
+                    .map(|r| BgpPeer {
+                        bgp_announce_set: NameOrId::Name(
+                            format!("as{}-announce", r.asn).parse().unwrap(),
+                        ),
+                        bgp_config: NameOrId::Name(
+                            format!("as{}", r.asn).parse().unwrap(),
+                        ),
+                        interface_name: "phy0".into(),
+                        addr: r.addr.into(),
+                        hold_time: r.hold_time.unwrap_or(6) as u32,
+                        idle_hold_time: r.idle_hold_time.unwrap_or(3) as u32,
+                        delay_open: r.delay_open.unwrap_or(0) as u32,
+                        connect_retry: r.connect_retry.unwrap_or(3) as u32,
+                        keepalive: r.keepalive.unwrap_or(2) as u32,
+                    })
+                    .collect();
+
+                port_settings_params
+                    .bgp_peers
+                    .insert("phy0".to_string(), BgpPeerConfig { peers });
+
+                let link = LinkConfig {
+                    mtu: 1500, //TODO https://github.com/oxidecomputer/omicron/issues/2274
+                    lldp: LldpServiceConfig {
+                        enabled: false,
+                        lldp_config: None,
+                    },
+                    fec: uplink_config.uplink_port_fec.into(),
+                    speed: uplink_config.uplink_port_speed.into(),
+                    autoneg: uplink_config.autoneg,
+                };
+
+                port_settings_params.links.insert("phy".to_string(), link);
+
                 match self
                     .db_datastore
                     .switch_port_settings_create(
@@ -584,20 +732,7 @@ impl super::Nexus {
         if rack.rack_subnet.is_some() {
             return Ok(());
         }
-        let addr = self
-            .sled_list(opctx, &DataPageParams::max_page())
-            .await?
-            .get(0)
-            .ok_or(Error::InternalError {
-                internal_message: "no sleds at time of bootstore sync".into(),
-            })?
-            .address();
-
-        let sa = sled_agent_client::Client::new(
-            &format!("http://{}", addr),
-            self.log.clone(),
-        );
-
+        let sa = self.get_any_sled_agent(opctx).await?;
         let result = sa
             .read_network_bootstore_config_cache()
             .await
@@ -619,7 +754,7 @@ impl super::Nexus {
         opctx: &OpContext,
     ) -> Result<EarlyNetworkConfig, Error> {
         let rack = self.rack_lookup(opctx, &self.rack_id).await?;
-        let subnet = rack.subnet()?;
+        let subnet = rack_subnet(rack.rack_subnet)?;
 
         let db_ports = self.active_port_settings(opctx).await?;
         let mut ports = Vec::new();
@@ -667,7 +802,7 @@ impl super::Nexus {
                 addresses: info.addresses.iter().map(|a| a.address).collect(),
                 bgp_peers: peer_info
                     .iter()
-                    .map(|(p, asn, addr)| BgpPeerConfig {
+                    .map(|(p, asn, addr)| SledBgpPeerConfig {
                         addr: *addr,
                         asn: *asn,
                         port: port.port_name.clone(),
@@ -682,16 +817,21 @@ impl super::Nexus {
                 port: port.port_name.clone(),
                 uplink_port_fec: info
                     .links
-                    .get(0) //TODO breakout support
+                    .get(0) //TODO https://github.com/oxidecomputer/omicron/issues/3062
                     .map(|l| l.fec)
                     .unwrap_or(SwitchLinkFec::None)
                     .into(),
                 uplink_port_speed: info
                     .links
-                    .get(0) //TODO breakout support
+                    .get(0) //TODO https://github.com/oxidecomputer/omicron/issues/3062
                     .map(|l| l.speed)
                     .unwrap_or(SwitchLinkSpeed::Speed100G)
                     .into(),
+                autoneg: info
+                    .links
+                    .get(0) //TODO breakout support
+                    .map(|l| l.autoneg)
+                    .unwrap_or(false),
             };
 
             ports.push(p);
@@ -726,18 +866,38 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
     ) -> ListResultVec<UninitializedSled> {
+        debug!(self.log, "Getting latest collection");
         // Grab the SPs from the last collection
-        let limit = NonZeroU32::new(50).unwrap();
+        //
+        // We set a limit of 200 here to give us some breathing room when
+        // querying for cabooses and RoT pages, each of which is "4 per SP/RoT",
+        // which in a single fully populated rack works out to (32 sleds + 2
+        // switches + 1 psc) * 4 = 140.
+        //
+        // This feels bad and probably needs more thought; see
+        // https://github.com/oxidecomputer/omicron/issues/4621 where this limit
+        // being too low bit us, and it will link to a more general followup
+        // issue.
+        let limit = NonZeroU32::new(200).unwrap();
         let collection = self
             .db_datastore
             .inventory_get_latest_collection(opctx, limit)
             .await?;
+
+        // There can't be any uninitialized sleds we know about
+        // if there is no inventory.
+        let Some(collection) = collection else {
+            return Ok(vec![]);
+        };
+
         let pagparams = DataPageParams {
             marker: None,
             direction: dropshot::PaginationOrder::Descending,
             // TODO: This limit is only suitable for a single sled cluster
             limit: NonZeroU32::new(32).unwrap(),
         };
+
+        debug!(self.log, "Listing sleds");
         let sleds = self.db_datastore.sled_list(opctx, &pagparams).await?;
 
         let mut uninitialized_sleds: Vec<UninitializedSled> = collection
@@ -766,5 +926,107 @@ impl super::Nexus {
         // Retain all sleds that exist but are not in the sled table
         uninitialized_sleds.retain(|s| !sled_baseboards.contains(&s.baseboard));
         Ok(uninitialized_sleds)
+    }
+
+    /// Add a sled to an intialized rack
+    pub(crate) async fn add_sled_to_initialized_rack(
+        &self,
+        opctx: &OpContext,
+        sled: UninitializedSled,
+    ) -> Result<(), Error> {
+        let baseboard_id = sled.baseboard.clone().into();
+        let hw_baseboard_id =
+            self.db_datastore.find_hw_baseboard_id(opctx, baseboard_id).await?;
+
+        let subnet = self.db_datastore.rack_subnet(opctx, sled.rack_id).await?;
+        let rack_subnet =
+            Ipv6Subnet::<RACK_PREFIX>::from(rack_subnet(Some(subnet))?);
+
+        let allocation = self
+            .db_datastore
+            .allocate_sled_underlay_subnet_octets(
+                opctx,
+                sled.rack_id,
+                hw_baseboard_id,
+            )
+            .await?;
+
+        // Convert the baseboard as necessary
+        let baseboard = sled_agent_client::types::Baseboard::Gimlet {
+            identifier: sled.baseboard.serial.clone(),
+            model: sled.baseboard.part.clone(),
+            revision: sled.baseboard.revision,
+        };
+
+        // Make the call to sled-agent
+        let req = AddSledRequest {
+            sled_id: baseboard,
+            start_request: StartSledAgentRequest {
+                generation: 0,
+                schema_version: 1,
+                body: StartSledAgentRequestBody {
+                    id: allocation.sled_id,
+                    rack_id: allocation.rack_id,
+                    use_trust_quorum: true,
+                    is_lrtq_learner: true,
+                    subnet: sled_agent_client::types::Ipv6Subnet {
+                        net: get_64_subnet(
+                            rack_subnet,
+                            allocation.subnet_octet.try_into().unwrap(),
+                        )
+                        .net()
+                        .into(),
+                    },
+                },
+            },
+        };
+        let sa = self.get_any_sled_agent(opctx).await?;
+        sa.add_sled_to_initialized_rack(&req).await.map_err(|e| {
+            Error::InternalError {
+                internal_message: format!(
+                    "failed to add sled with baseboard {:?} to rack {}: {e}",
+                    sled.baseboard, allocation.rack_id
+                ),
+            }
+        })?;
+
+        Ok(())
+    }
+
+    async fn get_any_sled_agent(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<sled_agent_client::Client, Error> {
+        let addr = self
+            .sled_list(opctx, &DataPageParams::max_page())
+            .await?
+            .get(0)
+            .ok_or(Error::InternalError {
+                internal_message: "no sled agents available".into(),
+            })?
+            .address();
+
+        Ok(sled_agent_client::Client::new(
+            &format!("http://{}", addr),
+            self.log.clone(),
+        ))
+    }
+}
+
+pub fn rack_subnet(
+    rack_subnet: Option<IpNetwork>,
+) -> Result<Ipv6Network, Error> {
+    match rack_subnet {
+        Some(IpNetwork::V6(subnet)) => Ok(subnet),
+        Some(IpNetwork::V4(_)) => {
+            return Err(Error::InternalError {
+                internal_message: "rack subnet not IPv6".into(),
+            })
+        }
+        None => {
+            return Err(Error::InternalError {
+                internal_message: "rack subnet not set".into(),
+            })
+        }
     }
 }

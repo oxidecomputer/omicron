@@ -101,7 +101,7 @@ impl SelectQueryBuilder {
         let field_name = field_name.as_ref().to_string();
         let field_schema = self
             .timeseries_schema
-            .field_schema(&field_name)
+            .schema_for_field(&field_name)
             .ok_or_else(|| Error::NoSuchField {
                 timeseries_name: self
                     .timeseries_schema
@@ -110,7 +110,7 @@ impl SelectQueryBuilder {
                 field_name: field_name.clone(),
             })?;
         let field_value: FieldValue = field_value.into();
-        let expected_type = field_schema.ty;
+        let expected_type = field_schema.field_type;
         let found_type = field_value.field_type();
         if expected_type != found_type {
             return Err(Error::IncorrectFieldType {
@@ -150,7 +150,7 @@ impl SelectQueryBuilder {
     ) -> Result<Self, Error> {
         let field_schema = self
             .timeseries_schema
-            .field_schema(&selector.name)
+            .schema_for_field(&selector.name)
             .ok_or_else(|| Error::NoSuchField {
                 timeseries_name: self
                     .timeseries_schema
@@ -158,13 +158,14 @@ impl SelectQueryBuilder {
                     .to_string(),
                 field_name: selector.name.clone(),
             })?;
-        if !selector.op.valid_for_type(field_schema.ty) {
+        let field_type = field_schema.field_type;
+        if !selector.op.valid_for_type(field_type) {
             return Err(Error::InvalidFieldCmp {
                 op: format!("{:?}", selector.op),
-                ty: field_schema.ty,
+                ty: field_schema.field_type,
             });
         }
-        let field_value = match field_schema.ty {
+        let field_value = match field_type {
             FieldType::String => FieldValue::from(&selector.value),
             FieldType::I8 => parse_selector_field_value::<i8>(
                 &field_schema,
@@ -214,9 +215,9 @@ impl SelectQueryBuilder {
         let comparison =
             FieldComparison { op: selector.op, value: field_value };
         let selector = FieldSelector {
-            name: field_schema.name.clone(),
+            name: field_schema.name.to_string(),
             comparison: Some(comparison),
-            ty: field_schema.ty,
+            ty: field_type,
         };
         self.field_selectors.insert(field_schema.clone(), selector);
         Ok(self)
@@ -248,7 +249,7 @@ impl SelectQueryBuilder {
         T: Target,
         M: Metric,
     {
-        let schema = crate::model::schema_for_parts(target, metric);
+        let schema = TimeseriesSchema::new(target, metric);
         let mut builder = Self::new(&schema);
         let target_fields =
             target.field_names().iter().zip(target.field_values());
@@ -279,9 +280,9 @@ impl SelectQueryBuilder {
         for field in timeseries_schema.field_schema.iter() {
             let key = field.clone();
             field_selectors.entry(key).or_insert_with(|| FieldSelector {
-                name: field.name.clone(),
+                name: field.name.to_string(),
                 comparison: None,
-                ty: field.ty,
+                ty: field.field_type,
             });
         }
         SelectQuery {
@@ -309,8 +310,8 @@ where
 {
     Ok(FieldValue::from(s.parse::<T>().map_err(|_| {
         Error::InvalidFieldValue {
-            field_name: field.name.clone(),
-            field_type: field.ty,
+            field_name: field.name.to_string(),
+            field_type: field.field_type,
             value: s.to_string(),
         }
     })?))
@@ -778,12 +779,12 @@ mod tests {
             field_schema: [
                 FieldSchema {
                     name: "f0".to_string(),
-                    ty: FieldType::I64,
+                    field_type: FieldType::I64,
                     source: FieldSource::Target,
                 },
                 FieldSchema {
                     name: "f1".to_string(),
-                    ty: FieldType::Bool,
+                    field_type: FieldType::Bool,
                     source: FieldSource::Target,
                 },
             ]
@@ -981,6 +982,7 @@ mod tests {
             "Expected an exact comparison when building a query from parts",
         );
 
+        println!("{builder:#?}");
         assert_eq!(
             builder.field_selector(FieldSource::Metric, "baz").unwrap(),
             &FieldSelector {
@@ -1002,12 +1004,12 @@ mod tests {
             field_schema: [
                 FieldSchema {
                     name: "f0".to_string(),
-                    ty: FieldType::I64,
+                    field_type: FieldType::I64,
                     source: FieldSource::Target,
                 },
                 FieldSchema {
                     name: "f1".to_string(),
-                    ty: FieldType::Bool,
+                    field_type: FieldType::Bool,
                     source: FieldSource::Target,
                 },
             ]
@@ -1065,12 +1067,12 @@ mod tests {
             field_schema: [
                 FieldSchema {
                     name: "f0".to_string(),
-                    ty: FieldType::I64,
+                    field_type: FieldType::I64,
                     source: FieldSource::Target,
                 },
                 FieldSchema {
                     name: "f1".to_string(),
-                    ty: FieldType::Bool,
+                    field_type: FieldType::Bool,
                     source: FieldSource::Target,
                 },
             ]
@@ -1116,12 +1118,12 @@ mod tests {
             field_schema: [
                 FieldSchema {
                     name: "f0".to_string(),
-                    ty: FieldType::I64,
+                    field_type: FieldType::I64,
                     source: FieldSource::Target,
                 },
                 FieldSchema {
                     name: "f1".to_string(),
-                    ty: FieldType::Bool,
+                    field_type: FieldType::Bool,
                     source: FieldSource::Target,
                 },
             ]

@@ -3,7 +3,7 @@
 #
 # The required version should be bumped up if we need new features, performance
 # improvements or bugfixes that are present in newer versions of nextest.
-nextest-version = { required = "0.9.59", recommended = "0.9.59" }
+nextest-version = { required = "0.9.59", recommended = "0.9.64" }
 
 experimental = ["setup-scripts"]
 
@@ -17,7 +17,9 @@ setup = 'crdb-seed'
 fail-fast = false
 
 [script.crdb-seed]
-command = 'cargo run -p crdb-seed'
+# Use the test profile for this executable since that's how almost all
+# invocations of nextest happen.
+command = 'cargo run -p crdb-seed --profile test'
 
 # The ClickHouse cluster tests currently rely on a hard-coded set of ports for
 # the nodes in the cluster. We would like to relax this in the future, at which

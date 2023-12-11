@@ -699,55 +699,6 @@
         }
       }
     },
-    "/v1/disks/{disk}/import": {
-      "post": {
-        "tags": [
-          "disks"
-        ],
-        "summary": "Request to import blocks from URL",
-        "operationId": "disk_import_blocks_from_url",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "disk",
-            "description": "Name or ID of the disk",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "project",
-            "description": "Name or ID of the project",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ImportBlocksFromUrl"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/v1/disks/{disk}/metrics/{metric}": {
       "get": {
         "tags": [
@@ -850,6 +801,204 @@
             "end_time",
             "start_time"
           ]
+        }
+      }
+    },
+    "/v1/floating-ips": {
+      "get": {
+        "tags": [
+          "floating-ips"
+        ],
+        "summary": "List all Floating IPs",
+        "operationId": "floating_ip_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FloatingIpResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": [
+            "project"
+          ]
+        }
+      },
+      "post": {
+        "tags": [
+          "floating-ips"
+        ],
+        "summary": "Create a Floating IP",
+        "operationId": "floating_ip_create",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FloatingIpCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FloatingIp"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/floating-ips/{floating_ip}": {
+      "get": {
+        "tags": [
+          "floating-ips"
+        ],
+        "summary": "Fetch a floating IP",
+        "operationId": "floating_ip_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "floating_ip",
+            "description": "Name or ID of the Floating IP",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FloatingIp"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "floating-ips"
+        ],
+        "summary": "Delete a Floating IP",
+        "operationId": "floating_ip_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "floating_ip",
+            "description": "Name or ID of the Floating IP",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
         }
       }
     },
@@ -3610,6 +3759,34 @@
         "x-dropshot-pagination": {
           "required": []
         }
+      },
+      "post": {
+        "tags": [
+          "system/hardware"
+        ],
+        "summary": "Add a sled to an initialized rack",
+        "operationId": "add_sled_to_initialized_rack",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UninitializedSled"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/v1/system/hardware/sleds/{sled_id}": {
@@ -3786,6 +3963,55 @@
         },
         "x-dropshot-pagination": {
           "required": []
+        }
+      }
+    },
+    "/v1/system/hardware/sleds/{sled_id}/provision-state": {
+      "put": {
+        "tags": [
+          "system/hardware"
+        ],
+        "summary": "Set the sled's provision state.",
+        "operationId": "sled_set_provision_state",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sled_id",
+            "description": "ID of the sled",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SledProvisionStateParams"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SledProvisionStateResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
         }
       }
     },
@@ -7788,7 +8014,7 @@
           "switch"
         ]
       },
-      "BgpPeerConfig": {
+      "BgpPeer": {
         "description": "A BGP peer configuration for an interface. Includes the set of announcements that will be advertised to the peer identified by `addr`. The `bgp_config` parameter is a reference to global BGP parameters. The `interface_name` indicates what interface the peer should be contacted on.",
         "type": "object",
         "properties": {
@@ -7858,6 +8084,20 @@
           "idle_hold_time",
           "interface_name",
           "keepalive"
+        ]
+      },
+      "BgpPeerConfig": {
+        "type": "object",
+        "properties": {
+          "peers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BgpPeer"
+            }
+          }
+        },
+        "required": [
+          "peers"
         ]
       },
       "BgpPeerState": {
@@ -9651,7 +9891,58 @@
               "datum",
               "type"
             ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "datum": {
+                "$ref": "#/components/schemas/MissingDatum"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "missing"
+                ]
+              }
+            },
+            "required": [
+              "datum",
+              "type"
+            ]
           }
+        ]
+      },
+      "DatumType": {
+        "description": "The type of an individual datum of a metric.",
+        "type": "string",
+        "enum": [
+          "bool",
+          "i8",
+          "u8",
+          "i16",
+          "u16",
+          "i32",
+          "u32",
+          "i64",
+          "u64",
+          "f32",
+          "f64",
+          "string",
+          "bytes",
+          "cumulative_i64",
+          "cumulative_u64",
+          "cumulative_f32",
+          "cumulative_f64",
+          "histogram_i8",
+          "histogram_u8",
+          "histogram_i16",
+          "histogram_u16",
+          "histogram_i32",
+          "histogram_u32",
+          "histogram_i64",
+          "histogram_u64",
+          "histogram_f32",
+          "histogram_f64"
         ]
       },
       "DerEncodedKeyPair": {
@@ -10187,22 +10478,6 @@
           "request_id"
         ]
       },
-      "ExpectedDigest": {
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "sha256": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "sha256"
-            ],
-            "additionalProperties": false
-          }
-        ]
-      },
       "ExternalIp": {
         "type": "object",
         "properties": {
@@ -10242,6 +10517,25 @@
               }
             },
             "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "An IP address providing both inbound and outbound access. The address is an existing Floating IP object assigned to the current project.\n\nThe floating IP must not be in use by another instance or service.",
+            "type": "object",
+            "properties": {
+              "floating_ip_name": {
+                "$ref": "#/components/schemas/Name"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "floating"
+                ]
+              }
+            },
+            "required": [
+              "floating_ip_name",
               "type"
             ]
           }
@@ -10326,6 +10620,116 @@
           "identity_id",
           "identity_type",
           "role_name"
+        ]
+      },
+      "FloatingIp": {
+        "description": "A Floating IP is a well-known IP address which can be attached and detached from instances.",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "instance_id": {
+            "nullable": true,
+            "description": "The ID of the instance that this Floating IP is attached to, if it is presently in use.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "ip": {
+            "description": "The IP address held by this resource.",
+            "type": "string",
+            "format": "ip"
+          },
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "project_id": {
+            "description": "The project this resource exists within.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "description",
+          "id",
+          "ip",
+          "name",
+          "project_id",
+          "time_created",
+          "time_modified"
+        ]
+      },
+      "FloatingIpCreate": {
+        "description": "Parameters for creating a new floating IP address for instances.",
+        "type": "object",
+        "properties": {
+          "address": {
+            "nullable": true,
+            "description": "An IP address to reserve for use as a floating IP. This field is optional: when not set, an address will be automatically chosen from `pool`. If set, then the IP must be available in the resolved `pool`.",
+            "type": "string",
+            "format": "ip"
+          },
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "pool": {
+            "nullable": true,
+            "description": "The parent IP pool that a floating IP is pulled from. If unset, the default pool is selected.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NameOrId"
+              }
+            ]
+          }
+        },
+        "required": [
+          "description",
+          "name"
+        ]
+      },
+      "FloatingIpResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FloatingIp"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
         ]
       },
       "Group": {
@@ -10828,11 +11232,6 @@
             "type": "string",
             "format": "date-time"
           },
-          "url": {
-            "nullable": true,
-            "description": "URL source of this image, if any",
-            "type": "string"
-          },
           "version": {
             "description": "Version of the operating system",
             "type": "string"
@@ -10912,33 +11311,6 @@
           {
             "type": "object",
             "properties": {
-              "block_size": {
-                "description": "The block size in bytes",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/BlockSize"
-                  }
-                ]
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "url"
-                ]
-              },
-              "url": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "block_size",
-              "type",
-              "url"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
               "id": {
                 "type": "string",
                 "format": "uuid"
@@ -10988,28 +11360,6 @@
         "required": [
           "base64_encoded_data",
           "offset"
-        ]
-      },
-      "ImportBlocksFromUrl": {
-        "description": "Parameters for importing blocks from a URL to a disk",
-        "type": "object",
-        "properties": {
-          "expected_digest": {
-            "nullable": true,
-            "description": "Expected digest of all blocks when importing from a URL",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ExpectedDigest"
-              }
-            ]
-          },
-          "url": {
-            "description": "the source to pull blocks from",
-            "type": "string"
-          }
-        },
-        "required": [
-          "url"
         ]
       },
       "Instance": {
@@ -11861,6 +12211,10 @@
         "description": "Switch link configuration.",
         "type": "object",
         "properties": {
+          "autoneg": {
+            "description": "Whether or not to set autonegotiation",
+            "type": "boolean"
+          },
           "fec": {
             "description": "The forward error correction mode of the link.",
             "allOf": [
@@ -11893,6 +12247,7 @@
           }
         },
         "required": [
+          "autoneg",
           "fec",
           "lldp",
           "mtu",
@@ -12171,6 +12526,22 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "MissingDatum": {
+        "type": "object",
+        "properties": {
+          "datum_type": {
+            "$ref": "#/components/schemas/DatumType"
+          },
+          "start_time": {
+            "nullable": true,
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "datum_type"
         ]
       },
       "Name": {
@@ -12948,6 +13319,14 @@
             "type": "string",
             "format": "uuid"
           },
+          "provision_state": {
+            "description": "The provision state of the sled.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SledProvisionState"
+              }
+            ]
+          },
           "rack_id": {
             "description": "The rack to which this Sled is currently attached",
             "type": "string",
@@ -12981,6 +13360,7 @@
         "required": [
           "baseboard",
           "id",
+          "provision_state",
           "rack_id",
           "time_created",
           "time_modified",
@@ -13069,6 +13449,68 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "SledProvisionState": {
+        "description": "The provision state of a sled.\n\nThis controls whether new resources are going to be provisioned on this sled.",
+        "oneOf": [
+          {
+            "description": "New resources will be provisioned on this sled.",
+            "type": "string",
+            "enum": [
+              "provisionable"
+            ]
+          },
+          {
+            "description": "New resources will not be provisioned on this sled. However, existing resources will continue to be on this sled unless manually migrated off.",
+            "type": "string",
+            "enum": [
+              "non_provisionable"
+            ]
+          }
+        ]
+      },
+      "SledProvisionStateParams": {
+        "description": "Parameters for `sled_set_provision_state`.",
+        "type": "object",
+        "properties": {
+          "state": {
+            "description": "The provision state.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SledProvisionState"
+              }
+            ]
+          }
+        },
+        "required": [
+          "state"
+        ]
+      },
+      "SledProvisionStateResponse": {
+        "description": "Response to `sled_set_provision_state`.",
+        "type": "object",
+        "properties": {
+          "new_state": {
+            "description": "The new provision state.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SledProvisionState"
+              }
+            ]
+          },
+          "old_state": {
+            "description": "The old provision state.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SledProvisionState"
+              }
+            ]
+          }
+        },
+        "required": [
+          "new_state",
+          "old_state"
         ]
       },
       "SledResultsPage": {
@@ -13971,7 +14413,7 @@
         ]
       },
       "UninitializedSled": {
-        "description": "View of a sled that has not been added to an initialized rack yet",
+        "description": "A sled that has not been added to an initialized rack yet",
         "type": "object",
         "properties": {
           "baseboard": {
@@ -15030,6 +15472,13 @@
       "description": "Virtual disks are used to store instance-local data which includes the operating system.",
       "externalDocs": {
         "url": "http://docs.oxide.computer/api/disks"
+      }
+    },
+    {
+      "name": "floating-ips",
+      "description": "Floating IPs allow a project to allocate well-known IPs to instances.",
+      "externalDocs": {
+        "url": "http://docs.oxide.computer/api/floating-ips"
       }
     },
     {

@@ -36,7 +36,7 @@ pub struct Args {
 
 impl Args {
     /// Executes these arguments.
-    pub fn exec(self, log: &slog::Logger) -> Result<()> {
+    pub async fn exec(self, log: &slog::Logger) -> Result<()> {
         let repo_path = match self.repo {
             Some(repo) => repo,
             None => std::env::current_dir()?.try_into()?,
@@ -52,7 +52,8 @@ impl Args {
                     system_version,
                     keys,
                     self.expiry,
-                )?;
+                )
+                .await?;
                 slog::info!(
                     log,
                     "Initialized TUF repository in {}",
@@ -87,8 +88,9 @@ impl Args {
 
                 let repo = OmicronRepo::load_untrusted_ignore_expiration(
                     &log, &repo_path,
-                )?;
-                let mut editor = repo.into_editor()?;
+                )
+                .await?;
+                let mut editor = repo.into_editor().await?;
 
                 let new_artifact =
                     AddArtifact::from_path(kind, name, version, path)?;
@@ -96,7 +98,7 @@ impl Args {
                 editor
                     .add_artifact(&new_artifact)
                     .context("error adding artifact")?;
-                editor.sign_and_finish(self.keys, self.expiry)?;
+                editor.sign_and_finish(self.keys, self.expiry).await?;
                 println!(
                     "added {} {}, version {}",
                     new_artifact.kind(),
@@ -113,7 +115,8 @@ impl Args {
 
                 let repo = OmicronRepo::load_untrusted_ignore_expiration(
                     &log, &repo_path,
-                )?;
+                )
+                .await?;
                 repo.archive(&output_path)?;
 
                 Ok(())
@@ -124,13 +127,14 @@ impl Args {
 
                 // Now load the repository and ensure it's valid.
                 let repo = OmicronRepo::load_untrusted(&log, &dest)
+                    .await
                     .with_context(|| {
                         format!(
                             "error loading extracted repository at `{dest}` \
                          (extracted files are still available)"
                         )
                     })?;
-                repo.read_artifacts().with_context(|| {
+                repo.read_artifacts().await.with_context(|| {
                     format!(
                         "error loading artifacts.json from extracted archive \
                          at `{dest}`"
@@ -169,7 +173,7 @@ impl Args {
                     assembler.set_build_dir(dir);
                 }
 
-                assembler.build()?;
+                assembler.build().await?;
 
                 Ok(())
             }

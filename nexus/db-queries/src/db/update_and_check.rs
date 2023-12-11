@@ -4,6 +4,7 @@
 
 //! CTE implementation for "UPDATE with extended return status".
 
+use super::column_walker::ColumnWalker;
 use super::pool::DbConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::associations::HasTable;
@@ -21,7 +22,7 @@ use std::marker::PhantomData;
 /// allows referencing generics with names (and extending usage
 /// without re-stating those generic parameters everywhere).
 pub trait UpdateStatementExt {
-    type Table: QuerySource;
+    type Table: Table + QuerySource;
     type WhereClause;
     type Changeset;
 
@@ -32,7 +33,7 @@ pub trait UpdateStatementExt {
 
 impl<T, U, V> UpdateStatementExt for UpdateStatement<T, U, V>
 where
-    T: QuerySource,
+    T: Table + QuerySource,
 {
     type Table = T;
     type WhereClause = U;
@@ -201,11 +202,11 @@ where
 ///
 /// ```text
 /// // WITH found   AS (SELECT <primary key> FROM T WHERE <primary key = value>)
-/// //      updated AS (UPDATE T SET <constraints> RETURNING *)
+/// //      updated AS (UPDATE T SET <constraints> RETURNING <primary key>)
 /// // SELECT
 /// //      found.<primary key>
 /// //      updated.<primary key>
-/// //      found.*
+/// //      found.<all columns>
 /// // FROM
 /// //      found
 /// // LEFT JOIN
@@ -217,41 +218,48 @@ impl<US, K, Q> QueryFragment<Pg> for UpdateAndQueryStatement<US, K, Q>
 where
     US: UpdateStatementExt,
     US::Table: HasTable<Table = US::Table> + Table,
+    ColumnWalker<<<US as UpdateStatementExt>::Table as Table>::AllColumns>:
+        IntoIterator<Item = &'static str>,
     PrimaryKey<US>: diesel::Column,
     UpdateStatement<US::Table, US::WhereClause, US::Changeset>:
         QueryFragment<Pg>,
 {
     fn walk_ast<'b>(&'b self, mut out: AstPass<'_, 'b, Pg>) -> QueryResult<()> {
+        let primary_key = <PrimaryKey<US> as Column>::NAME;
+
         out.push_sql("WITH found AS (");
         self.find_subquery.walk_ast(out.reborrow())?;
         out.push_sql("), updated AS (");
         self.update_statement.walk_ast(out.reborrow())?;
-        // TODO: Only need primary? Or would we actually want
-        // to pass the returned rows back through the result?
-        out.push_sql(" RETURNING *) ");
+        out.push_sql(" RETURNING ");
+        out.push_identifier(primary_key)?;
+        out.push_sql(") ");
 
         out.push_sql("SELECT");
 
-        let name = <PrimaryKey<US> as Column>::NAME;
         out.push_sql(" found.");
-        out.push_identifier(name)?;
+        out.push_identifier(primary_key)?;
         out.push_sql(", updated.");
-        out.push_identifier(name)?;
-        // TODO: I'd prefer to list all columns explicitly. But how?
-        // The types exist within Table::AllColumns, and each one
-        // has a name as "<C as Column>::Name".
-        // But Table::AllColumns is a tuple, which makes iteration
-        // a pain.
-        //
-        // TODO: Technically, we're repeating the PK here.
-        out.push_sql(", found.*");
+        out.push_identifier(primary_key)?;
+
+        // List all the "found" columns explicitly.
+        // This admittedly repeats the primary key, but that keeps the query
+        // "simple" since it returns all columns in the same order as
+        // AllColumns.
+        let all_columns = ColumnWalker::<
+            <<US as UpdateStatementExt>::Table as Table>::AllColumns,
+        >::new();
+        for column in all_columns.into_iter() {
+            out.push_sql(", found.");
+            out.push_identifier(column)?;
+        }
 
         out.push_sql(" FROM found LEFT JOIN updated ON");
         out.push_sql(" found.");
-        out.push_identifier(name)?;
+        out.push_identifier(primary_key)?;
         out.push_sql(" = ");
         out.push_sql("updated.");
-        out.push_identifier(name)?;
+        out.push_identifier(primary_key)?;
 
         Ok(())
     }

@@ -710,7 +710,7 @@ impl Client {
         &self,
         sample: &Sample,
     ) -> Result<Option<(TimeseriesName, String)>, Error> {
-        let sample_schema = model::schema_for(sample);
+        let sample_schema = TimeseriesSchema::from(sample);
         let name = sample_schema.timeseries_name.clone();
         let mut schema = self.schema.lock().await;
 
@@ -1190,7 +1190,7 @@ mod tests {
     use super::*;
     use crate::query;
     use crate::query::field_table_name;
-    use crate::query::measurement_table_name;
+    use bytes::Bytes;
     use chrono::Utc;
     use omicron_test_utils::dev::clickhouse::{
         ClickHouseCluster, ClickHouseInstance,
@@ -1198,8 +1198,10 @@ mod tests {
     use omicron_test_utils::dev::test_setup_log;
     use oximeter::histogram::Histogram;
     use oximeter::test_util;
+    use oximeter::types::MissingDatum;
     use oximeter::Datum;
     use oximeter::FieldValue;
+    use oximeter::Measurement;
     use oximeter::Metric;
     use oximeter::Target;
     use std::net::Ipv6Addr;
@@ -1871,7 +1873,7 @@ mod tests {
         client.insert_samples(&[sample.clone()]).await.unwrap();
 
         // The internal map should now contain both the new timeseries schema
-        let actual_schema = model::schema_for(&sample);
+        let actual_schema = TimeseriesSchema::from(&sample);
         let timeseries_name =
             TimeseriesName::try_from(sample.timeseries_name.as_str()).unwrap();
         let expected_schema = client
@@ -2957,76 +2959,102 @@ mod tests {
         Ok(())
     }
 
+    async fn test_recall_missing_scalar_measurement_impl(
+        measurement: Measurement,
+        client: &Client,
+    ) -> Result<(), Error> {
+        let start_time = if measurement.datum().is_cumulative() {
+            Some(Utc::now())
+        } else {
+            None
+        };
+        let missing_datum = Datum::from(
+            MissingDatum::new(measurement.datum_type(), start_time).unwrap(),
+        );
+        let missing_measurement = Measurement::new(Utc::now(), missing_datum);
+        test_recall_measurement_impl(missing_measurement, client).await?;
+        Ok(())
+    }
+
     async fn recall_measurement_bool_test(
         client: &Client,
     ) -> Result<(), Error> {
         let datum = Datum::Bool(true);
-        let as_json = serde_json::Value::from(1_u64);
-        test_recall_measurement_impl::<u8>(datum, None, as_json, client)
+        let measurement = Measurement::new(Utc::now(), datum);
+        test_recall_measurement_impl(measurement.clone(), client).await?;
+        test_recall_missing_scalar_measurement_impl(measurement, client)
             .await?;
         Ok(())
     }
 
     async fn recall_measurement_i8_test(client: &Client) -> Result<(), Error> {
         let datum = Datum::I8(1);
-        let as_json = serde_json::Value::from(1_i8);
-        test_recall_measurement_impl::<u8>(datum, None, as_json, client)
+        let measurement = Measurement::new(Utc::now(), datum);
+        test_recall_measurement_impl(measurement.clone(), client).await?;
+        test_recall_missing_scalar_measurement_impl(measurement, client)
             .await?;
         Ok(())
     }
 
     async fn recall_measurement_u8_test(client: &Client) -> Result<(), Error> {
         let datum = Datum::U8(1);
-        let as_json = serde_json::Value::from(1_u8);
-        test_recall_measurement_impl::<u8>(datum, None, as_json, client)
+        let measurement = Measurement::new(Utc::now(), datum);
+        test_recall_measurement_impl(measurement.clone(), client).await?;
+        test_recall_missing_scalar_measurement_impl(measurement, client)
             .await?;
         Ok(())
     }
 
     async fn recall_measurement_i16_test(client: &Client) -> Result<(), Error> {
         let datum = Datum::I16(1);
-        let as_json = serde_json::Value::from(1_i16);
-        test_recall_measurement_impl::<u8>(datum, None, as_json, client)
+        let measurement = Measurement::new(Utc::now(), datum);
+        test_recall_measurement_impl(measurement.clone(), client).await?;
+        test_recall_missing_scalar_measurement_impl(measurement, client)
             .await?;
         Ok(())
     }
 
     async fn recall_measurement_u16_test(client: &Client) -> Result<(), Error> {
         let datum = Datum::U16(1);
-        let as_json = serde_json::Value::from(1_u16);
-        test_recall_measurement_impl::<u8>(datum, None, as_json, client)
+        let measurement = Measurement::new(Utc::now(), datum);
+        test_recall_measurement_impl(measurement.clone(), client).await?;
+        test_recall_missing_scalar_measurement_impl(measurement, client)
             .await?;
         Ok(())
     }
 
     async fn recall_measurement_i32_test(client: &Client) -> Result<(), Error> {
         let datum = Datum::I32(1);
-        let as_json = serde_json::Value::from(1_i32);
-        test_recall_measurement_impl::<u8>(datum, None, as_json, client)
+        let measurement = Measurement::new(Utc::now(), datum);
+        test_recall_measurement_impl(measurement.clone(), client).await?;
+        test_recall_missing_scalar_measurement_impl(measurement, client)
             .await?;
         Ok(())
     }
 
     async fn recall_measurement_u32_test(client: &Client) -> Result<(), Error> {
         let datum = Datum::U32(1);
-        let as_json = serde_json::Value::from(1_u32);
-        test_recall_measurement_impl::<u8>(datum, None, as_json, client)
+        let measurement = Measurement::new(Utc::now(), datum);
+        test_recall_measurement_impl(measurement.clone(), client).await?;
+        test_recall_missing_scalar_measurement_impl(measurement, client)
             .await?;
         Ok(())
     }
 
     async fn recall_measurement_i64_test(client: &Client) -> Result<(), Error> {
         let datum = Datum::I64(1);
-        let as_json = serde_json::Value::from(1_i64);
-        test_recall_measurement_impl::<u8>(datum, None, as_json, client)
+        let measurement = Measurement::new(Utc::now(), datum);
+        test_recall_measurement_impl(measurement.clone(), client).await?;
+        test_recall_missing_scalar_measurement_impl(measurement, client)
             .await?;
         Ok(())
     }
 
     async fn recall_measurement_u64_test(client: &Client) -> Result<(), Error> {
         let datum = Datum::U64(1);
-        let as_json = serde_json::Value::from(1_u64);
-        test_recall_measurement_impl::<u8>(datum, None, as_json, client)
+        let measurement = Measurement::new(Utc::now(), datum);
+        test_recall_measurement_impl(measurement.clone(), client).await?;
+        test_recall_missing_scalar_measurement_impl(measurement, client)
             .await?;
         Ok(())
     }
@@ -3034,9 +3062,9 @@ mod tests {
     async fn recall_measurement_f32_test(client: &Client) -> Result<(), Error> {
         const VALUE: f32 = 1.1;
         let datum = Datum::F32(VALUE);
-        // NOTE: This is intentionally an f64.
-        let as_json = serde_json::Value::from(1.1_f64);
-        test_recall_measurement_impl::<u8>(datum, None, as_json, client)
+        let measurement = Measurement::new(Utc::now(), datum);
+        test_recall_measurement_impl(measurement.clone(), client).await?;
+        test_recall_missing_scalar_measurement_impl(measurement, client)
             .await?;
         Ok(())
     }
@@ -3044,9 +3072,33 @@ mod tests {
     async fn recall_measurement_f64_test(client: &Client) -> Result<(), Error> {
         const VALUE: f64 = 1.1;
         let datum = Datum::F64(VALUE);
-        let as_json = serde_json::Value::from(VALUE);
-        test_recall_measurement_impl::<u8>(datum, None, as_json, client)
+        let measurement = Measurement::new(Utc::now(), datum);
+        test_recall_measurement_impl(measurement.clone(), client).await?;
+        test_recall_missing_scalar_measurement_impl(measurement, client)
             .await?;
+        Ok(())
+    }
+
+    async fn recall_measurement_string_test(
+        client: &Client,
+    ) -> Result<(), Error> {
+        let value = String::from("foo");
+        let datum = Datum::String(value.clone());
+        let measurement = Measurement::new(Utc::now(), datum);
+        test_recall_measurement_impl(measurement.clone(), client).await?;
+        test_recall_missing_scalar_measurement_impl(measurement, client)
+            .await?;
+        Ok(())
+    }
+
+    async fn recall_measurement_bytes_test(
+        client: &Client,
+    ) -> Result<(), Error> {
+        let value = Bytes::from(vec![0, 1, 2]);
+        let datum = Datum::Bytes(value.clone());
+        let measurement = Measurement::new(Utc::now(), datum);
+        test_recall_measurement_impl(measurement.clone(), client).await?;
+        // NOTE: We don't currently support missing byte array samples.
         Ok(())
     }
 
@@ -3054,8 +3106,9 @@ mod tests {
         client: &Client,
     ) -> Result<(), Error> {
         let datum = Datum::CumulativeI64(1.into());
-        let as_json = serde_json::Value::from(1_i64);
-        test_recall_measurement_impl::<u8>(datum, None, as_json, client)
+        let measurement = Measurement::new(Utc::now(), datum);
+        test_recall_measurement_impl(measurement.clone(), client).await?;
+        test_recall_missing_scalar_measurement_impl(measurement, client)
             .await?;
         Ok(())
     }
@@ -3064,8 +3117,9 @@ mod tests {
         client: &Client,
     ) -> Result<(), Error> {
         let datum = Datum::CumulativeU64(1.into());
-        let as_json = serde_json::Value::from(1_u64);
-        test_recall_measurement_impl::<u8>(datum, None, as_json, client)
+        let measurement = Measurement::new(Utc::now(), datum);
+        test_recall_measurement_impl(measurement.clone(), client).await?;
+        test_recall_missing_scalar_measurement_impl(measurement, client)
             .await?;
         Ok(())
     }
@@ -3074,8 +3128,9 @@ mod tests {
         client: &Client,
     ) -> Result<(), Error> {
         let datum = Datum::CumulativeF64(1.1.into());
-        let as_json = serde_json::Value::from(1.1_f64);
-        test_recall_measurement_impl::<u8>(datum, None, as_json, client)
+        let measurement = Measurement::new(Utc::now(), datum);
+        test_recall_measurement_impl(measurement.clone(), client).await?;
+        test_recall_missing_scalar_measurement_impl(measurement, client)
             .await?;
         Ok(())
     }
@@ -3089,13 +3144,15 @@ mod tests {
         Datum: From<oximeter::histogram::Histogram<T>>,
         serde_json::Value: From<T>,
     {
-        let (bins, counts) = hist.to_arrays();
         let datum = Datum::from(hist);
-        let as_json = serde_json::Value::Array(
-            counts.into_iter().map(Into::into).collect(),
+        let measurement = Measurement::new(Utc::now(), datum);
+        let missing_datum = Datum::Missing(
+            MissingDatum::new(measurement.datum_type(), Some(Utc::now()))
+                .unwrap(),
         );
-        test_recall_measurement_impl(datum, Some(bins), as_json, client)
-            .await?;
+        let missing_measurement = Measurement::new(Utc::now(), missing_datum);
+        test_recall_measurement_impl(measurement, client).await?;
+        test_recall_measurement_impl(missing_measurement, client).await?;
         Ok(())
     }
 
@@ -3192,54 +3249,23 @@ mod tests {
         Ok(())
     }
 
-    async fn test_recall_measurement_impl<T: Into<serde_json::Value> + Copy>(
-        datum: Datum,
-        maybe_bins: Option<Vec<T>>,
-        json_datum: serde_json::Value,
+    async fn test_recall_measurement_impl(
+        measurement: Measurement,
         client: &Client,
     ) -> Result<(), Error> {
         // Insert a record from this datum.
         const TIMESERIES_NAME: &str = "foo:bar";
         const TIMESERIES_KEY: u64 = 101;
-        let mut inserted_row = serde_json::Map::new();
-        inserted_row
-            .insert("timeseries_name".to_string(), TIMESERIES_NAME.into());
-        inserted_row
-            .insert("timeseries_key".to_string(), TIMESERIES_KEY.into());
-        inserted_row.insert(
-            "timestamp".to_string(),
-            Utc::now()
-                .format(crate::DATABASE_TIMESTAMP_FORMAT)
-                .to_string()
-                .into(),
-        );
-
-        // Insert the start time and possibly bins.
-        if let Some(start_time) = datum.start_time() {
-            inserted_row.insert(
-                "start_time".to_string(),
-                start_time
-                    .format(crate::DATABASE_TIMESTAMP_FORMAT)
-                    .to_string()
-                    .into(),
+        let (measurement_table, inserted_row) =
+            crate::model::unroll_measurement_row_impl(
+                TIMESERIES_NAME.to_string(),
+                TIMESERIES_KEY,
+                &measurement,
             );
-        }
-        if let Some(bins) = &maybe_bins {
-            let bins = serde_json::Value::Array(
-                bins.iter().copied().map(Into::into).collect(),
-            );
-            inserted_row.insert("bins".to_string(), bins);
-            inserted_row.insert("counts".to_string(), json_datum);
-        } else {
-            inserted_row.insert("datum".to_string(), json_datum);
-        }
-        let inserted_row = serde_json::Value::from(inserted_row);
-
-        let measurement_table = measurement_table_name(datum.datum_type());
-        let row = serde_json::to_string(&inserted_row).unwrap();
         let insert_sql = format!(
-            "INSERT INTO oximeter.{measurement_table} FORMAT JSONEachRow {row}",
+            "INSERT INTO {measurement_table} FORMAT JSONEachRow {inserted_row}",
         );
+        println!("Inserted row: {}", inserted_row);
         client
             .execute(insert_sql)
             .await
@@ -3247,21 +3273,22 @@ mod tests {
 
         // Select it exactly back out.
         let select_sql = format!(
-            "SELECT * FROM oximeter.{} LIMIT 2 FORMAT {};",
+            "SELECT * FROM {} WHERE timestamp = '{}' FORMAT {};",
             measurement_table,
+            measurement.timestamp().format(crate::DATABASE_TIMESTAMP_FORMAT),
             crate::DATABASE_SELECT_FORMAT,
         );
         let body = client
             .execute_with_body(select_sql)
             .await
             .expect("Failed to select measurement row");
-        println!("{}", body);
-        let actual_row: serde_json::Value = serde_json::from_str(&body)
-            .expect("Failed to parse measurement row JSON");
-        println!("{actual_row:?}");
-        println!("{inserted_row:?}");
+        let (_, actual_row) = crate::model::parse_measurement_from_row(
+            &body,
+            measurement.datum_type(),
+        );
+        println!("Actual row: {actual_row:?}");
         assert_eq!(
-            actual_row, inserted_row,
+            actual_row, measurement,
             "Actual and expected measurement rows do not match"
         );
         Ok(())
@@ -3310,6 +3337,10 @@ mod tests {
         recall_measurement_f32_test(&client).await.unwrap();
 
         recall_measurement_f64_test(&client).await.unwrap();
+
+        recall_measurement_string_test(&client).await.unwrap();
+
+        recall_measurement_bytes_test(&client).await.unwrap();
 
         recall_measurement_cumulative_i64_test(&client).await.unwrap();
 

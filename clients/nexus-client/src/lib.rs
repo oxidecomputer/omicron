@@ -202,6 +202,19 @@ impl From<&types::InstanceState>
     }
 }
 
+impl From<omicron_common::api::internal::nexus::ProducerKind>
+    for types::ProducerKind
+{
+    fn from(kind: omicron_common::api::internal::nexus::ProducerKind) -> Self {
+        use omicron_common::api::internal::nexus::ProducerKind;
+        match kind {
+            ProducerKind::SledAgent => Self::SledAgent,
+            ProducerKind::Service => Self::Service,
+            ProducerKind::Instance => Self::Instance,
+        }
+    }
+}
+
 impl From<&omicron_common::api::internal::nexus::ProducerEndpoint>
     for types::ProducerEndpoint
 {
@@ -212,6 +225,7 @@ impl From<&omicron_common::api::internal::nexus::ProducerEndpoint>
             address: s.address.to_string(),
             base_route: s.base_route.clone(),
             id: s.id,
+            kind: s.kind.into(),
             interval: s.interval.into(),
         }
     }

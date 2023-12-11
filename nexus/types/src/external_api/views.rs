@@ -5,7 +5,7 @@
 //! Views are response bodies, most of which are public lenses onto DB models.
 
 use crate::external_api::shared::{
-    self, IpKind, IpRange, ServiceUsingCertificate,
+    self, Baseboard, IpKind, IpRange, ServiceUsingCertificate,
 };
 use crate::identity::AssetIdentityMetadata;
 use api_identity::ObjectIdentity;
@@ -132,9 +132,6 @@ pub struct Image {
 
     /// ID of the parent project if the image is a project image
     pub project_id: Option<Uuid>,
-
-    /// URL source of this image, if any
-    pub url: Option<String>,
 
     /// The family of the operating system like Debian, Ubuntu, etc.
     pub os: String,
@@ -265,6 +262,22 @@ pub struct ExternalIp {
     pub kind: IpKind,
 }
 
+/// A Floating IP is a well-known IP address which can be attached
+/// and detached from instances.
+#[derive(ObjectIdentity, Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct FloatingIp {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    /// The IP address held by this resource.
+    pub ip: IpAddr,
+    /// The project this resource exists within.
+    pub project_id: Uuid,
+    /// The ID of the instance that this Floating IP is attached to,
+    /// if it is presently in use.
+    pub instance_id: Option<Uuid>,
+}
+
 // RACKS
 
 /// View of an Rack
@@ -274,43 +287,7 @@ pub struct Rack {
     pub identity: AssetIdentityMetadata,
 }
 
-/// View of a sled that has not been added to an initialized rack yet
-#[derive(
-    Clone,
-    Debug,
-    Serialize,
-    Deserialize,
-    JsonSchema,
-    PartialOrd,
-    Ord,
-    PartialEq,
-    Eq,
-)]
-pub struct UninitializedSled {
-    pub baseboard: Baseboard,
-    pub rack_id: Uuid,
-    pub cubby: u16,
-}
-
 // FRUs
-
-/// Properties that uniquely identify an Oxide hardware component
-#[derive(
-    Clone,
-    Debug,
-    Serialize,
-    Deserialize,
-    JsonSchema,
-    PartialOrd,
-    Ord,
-    PartialEq,
-    Eq,
-)]
-pub struct Baseboard {
-    pub serial: String,
-    pub part: String,
-    pub revision: i64,
-}
 
 // SLEDS
 
@@ -322,10 +299,30 @@ pub struct Sled {
     pub baseboard: Baseboard,
     /// The rack to which this Sled is currently attached
     pub rack_id: Uuid,
+    /// The provision state of the sled.
+    pub provision_state: SledProvisionState,
     /// The number of hardware threads which can execute on this sled
     pub usable_hardware_threads: u32,
     /// Amount of RAM which may be used by the Sled's OS
     pub usable_physical_ram: ByteCount,
+}
+
+/// The provision state of a sled.
+///
+/// This controls whether new resources are going to be provisioned on this
+/// sled.
+#[derive(
+    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum SledProvisionState {
+    /// New resources will be provisioned on this sled.
+    Provisionable,
+
+    /// New resources will not be provisioned on this sled. However, existing
+    /// resources will continue to be on this sled unless manually migrated
+    /// off.
+    NonProvisionable,
 }
 
 /// An operator's view of an instance running on a given sled

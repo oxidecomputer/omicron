@@ -15,6 +15,7 @@ use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
 use dropshot::HandlerTaskMode;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
+use omicron_common::api::internal::nexus::ProducerKind;
 use oximeter::types::Cumulative;
 use oximeter::types::ProducerRegistry;
 use oximeter::types::Sample;
@@ -124,6 +125,7 @@ async fn main() -> anyhow::Result<()> {
     registry.register_producer(producer).unwrap();
     let server_info = ProducerEndpoint {
         id: registry.producer_id(),
+        kind: ProducerKind::Service,
         address: args.address,
         base_route: "/collect".to_string(),
         interval: Duration::from_secs(10),
