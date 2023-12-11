@@ -44,7 +44,7 @@ impl std::fmt::Display for InventoryError {
     }
 }
 
-/// Describes a mis-use of the [`Builder`] object
+/// Describes a mis-use of the [`CollectionBuilder`] object
 ///
 /// Example: reporting information about a caboose when the caller has not
 /// already reported information about the corresopnding baseboard.
