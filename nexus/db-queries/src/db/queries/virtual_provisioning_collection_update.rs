@@ -28,6 +28,7 @@ use nexus_db_model::queries::virtual_provisioning_collection_update::{
     all_collections, do_update, parent_silo, quotas, silo_provisioned,
 };
 use omicron_common::api::external;
+use omicron_common::api::external::MessagePair;
 
 const NOT_ENOUGH_CPUS_SENTINEL: &'static str = "Not enough cpus";
 const NOT_ENOUGH_MEMORY_SENTINEL: &'static str = "Not enough memory";
@@ -47,13 +48,28 @@ pub fn from_diesel(e: DieselError) -> external::Error {
     if let Some(sentinel) = matches_sentinel(&e, &sentinels) {
         match sentinel {
             NOT_ENOUGH_CPUS_SENTINEL => {
-                return external::Error::InvalidRequest { message: "Insufficient Capacity: Not enough CPUs to complete request. Either stop unused instances to free up resources or contact the rack operator to request a capacity increase.".to_string() }
+                return external::Error::InsufficientCapacity {
+                    message: MessagePair::new_full(
+                         "Insufficient Capacity: Not enough CPUs to complete request. Either stop unused instances to free up resources or contact the rack operator to request a capacity increase.".to_string(),
+                         "User tried to allocate an instance but the virtual provisioning resource table indicated that there were not enough CPUs available to satisfy the request.".to_string(),
+                    )
+                }
             }
             NOT_ENOUGH_MEMORY_SENTINEL => {
-                return external::Error::InvalidRequest { message: "Insufficient Capacity: Not enough memory to complete request. Either stop unused instances to free up resources or contact the rack operator to request a capacity increase.".to_string() }
+                return external::Error::InsufficientCapacity {
+                    message: MessagePair::new_full(
+                         "Insufficient Capacity: Not enough memory to complete request. Either stop unused instances to free up resources or contact the rack operator to request a capacity increase.".to_string(),
+                         "User tried to allocate an instance but the virtual provisioning resource table indicated that there were not enough RAM available to satisfy the request.".to_string(),
+                    )
+                }
             }
             NOT_ENOUGH_STORAGE_SENTINEL => {
-                return external::Error::InvalidRequest { message: "Insufficient Capacity: Not enough storage to complete request. Either remove unneeded disks and snapshots to free up resources or contact the rack operator to request a capacity increase.".to_string() }
+                return external::Error::InsufficientCapacity {
+                    message: MessagePair::new_full(
+                         "Insufficient Capacity: Not enough storage to complete request. Either remove unneeded disks and snapshots to free up resources or contact the rack operator to request a capacity increase.".to_string(),
+                         "User tried to allocate a disk or snapshot but the virtual provisioning resource table indicated that there were not enough storage available to satisfy the request.".to_string(),
+                    )
+                }
             }
             _ => {}
         }
