@@ -52,6 +52,7 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::io;
 use std::net::SocketAddrV6;
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::time::Duration;
@@ -93,17 +94,8 @@ use wicket_common::update_events::UpdateTerminalError;
 
 #[derive(Debug)]
 struct SpUpdateData {
-    // See the documentation for is_finished. This is Never because the only
-    // thing we care about is whether the other side of this handle has been
-    // dropped.
-    //
-    // A thing that might appear to be strange at first is why this is a
-    // `oneshot::Sender<Never>` and not a `Receiver<Never>`. The reason is that
-    // oneshot senders have an `is_closed` method which takes `&self`.
-    // Receivers only have a `try_recv` method, which takes `&mut self`. Using
-    // a `Sender` here ensures that `Self::is_finished` below takes `&self`.
-    // (This is somewhat galaxy brained but it works correctly.)
-    finished_handle: oneshot::Sender<Never>,
+    // See the documentation for is_finished.
+    finished: Arc<AtomicBool>,
     abort_handle: AbortHandle,
     // Note: Our mutex here is a standard mutex, not a tokio mutex. We generally
     // hold it only log enough to update its state or push a new update event
@@ -118,15 +110,12 @@ impl SpUpdateData {
     /// JoinHandle to the task and check `task.is_finished()`. However, there
     /// are some minor things we do after finishing the update (e.g. in the
     /// case of a fake update, sending a message indicating that the update has
-    /// finished). So instead, we use a handle as a flag to indicate when the
+    /// finished). So instead, we use a boolean as a flag to indicate when the
     /// task has finished doing the bulk of its work.
     fn is_finished(&self) -> bool {
-        self.finished_handle.is_closed()
+        self.finished.load(std::sync::atomic::Ordering::Acquire)
     }
 }
-
-#[derive(Debug)]
-enum Never {}
 
 #[derive(Debug)]
 enum UploadTrampolinePhase2ToMgsStatus {
@@ -515,11 +504,10 @@ impl<'tr> SpawnUpdateDriver for RealSpawnUpdateDriver<'tr> {
         // ideal, but it works and is the easiest way to send it without
         // restructuring this code.
         let (abort_handle_sender, abort_handle_receiver) = oneshot::channel();
-        // The sender side is called finished_handle and the receiver side is
-        // called finished_indicator. This is to avoid confusion with the fact
-        // that SpUpdateData stores and checks the sender, which is quite
-        // counterintuitive at first.
-        let (finished_handle, finished_indicator) = oneshot::channel();
+
+        let finished = Arc::new(AtomicBool::new(false));
+        let finished_indicator = SetTrueOnDrop(finished.clone());
+
         tokio::spawn(update_driver.run(
             plan,
             update_cx,
@@ -534,7 +522,7 @@ impl<'tr> SpawnUpdateDriver for RealSpawnUpdateDriver<'tr> {
             .await
             .expect("abort handle is sent immediately");
 
-        SpUpdateData { finished_handle, abort_handle, event_buffer }
+        SpUpdateData { finished, abort_handle, event_buffer }
     }
 }
 
@@ -573,7 +561,8 @@ impl SpawnUpdateDriver for FakeUpdateDriver {
             .take()
             .expect("fake step receiver is only taken once");
 
-        let (finished_handle, finished_indicator) = oneshot::channel();
+        let finished = Arc::new(AtomicBool::new(false));
+        let finished_indicator = SetTrueOnDrop(finished.clone());
 
         tokio::spawn(async move {
             // The step component and ID have been chosen arbitrarily here --
@@ -634,7 +623,7 @@ impl SpawnUpdateDriver for FakeUpdateDriver {
             }
         });
 
-        SpUpdateData { finished_handle, abort_handle, event_buffer }
+        SpUpdateData { finished, abort_handle, event_buffer }
     }
 }
 
@@ -814,6 +803,14 @@ impl AbortUpdateError {
     }
 }
 
+struct SetTrueOnDrop(Arc<AtomicBool>);
+
+impl Drop for SetTrueOnDrop {
+    fn drop(&mut self) {
+        self.0.store(true, std::sync::atomic::Ordering::Release);
+    }
+}
+
 #[derive(Debug)]
 struct UpdateDriver {}
 
@@ -827,7 +824,7 @@ impl UpdateDriver {
         ipr_start_receiver: IprStartReceiver,
         opts: StartUpdateOptions,
         abort_handle_sender: oneshot::Sender<AbortHandle>,
-        finished_indicator: oneshot::Receiver<Never>,
+        finished_indicator: SetTrueOnDrop,
     ) {
         let update_cx = &update_cx;
 
