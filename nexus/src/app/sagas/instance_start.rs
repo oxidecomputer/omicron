@@ -821,4 +821,80 @@ mod test {
 
         assert_eq!(vmm_state, InstanceState::Running);
     }
+
+    /// Tests that if a start saga unwinds because sled agent returned failure
+    /// from a call to ensure the instance was running, then the system returns
+    /// to the correct state.
+    ///
+    /// This is different from `test_action_failure_can_unwind` because that
+    /// test causes saga nodes to "fail" without actually executing anything,
+    /// whereas this test injects a failure into the normal operation of the
+    /// ensure-running node.
+    #[nexus_test(server = crate::Server)]
+    async fn test_ensure_running_unwind(cptestctx: &ControlPlaneTestContext) {
+        let client = &cptestctx.external_client;
+        let nexus = &cptestctx.server.apictx().nexus;
+        let _project_id = setup_test_project(&client).await;
+        let opctx = test_helpers::test_opctx(cptestctx);
+        let instance = create_instance(client).await;
+        let db_instance =
+            test_helpers::instance_fetch(cptestctx, instance.identity.id)
+                .await
+                .instance()
+                .clone();
+
+        let params = Params {
+            serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
+            db_instance,
+        };
+
+        let dag = create_saga_dag::<SagaInstanceStart>(params).unwrap();
+
+        // The ensure_running node is last in the saga. This should be the node
+        // where the failure ultimately occurs.
+        let last_node_name = dag
+            .get_nodes()
+            .last()
+            .expect("saga should have at least one node")
+            .name()
+            .clone();
+
+        // Inject failure at the simulated sled agent level. This allows the
+        // ensure-running node to attempt to change the instance's state, but
+        // forces this operation to fail and produce whatever side effects
+        // result from that failure.
+        let sled_agent = &cptestctx.sled_agent.sled_agent;
+        sled_agent
+            .set_instance_ensure_state_error(Some(Error::internal_error(
+                "injected by test_ensure_running_unwind",
+            )))
+            .await;
+
+        let saga = nexus.create_runnable_saga(dag).await.unwrap();
+        let saga_error = nexus
+            .run_saga_raw_result(saga)
+            .await
+            .expect("saga execution should have started")
+            .kind
+            .expect_err("saga should fail due to injected error");
+
+        assert_eq!(saga_error.error_node_name, last_node_name);
+
+        let db_instance =
+            test_helpers::instance_fetch(cptestctx, instance.identity.id).await;
+
+        assert_eq!(
+            db_instance.instance().runtime_state.nexus_state,
+            nexus_db_model::InstanceState(InstanceState::Stopped)
+        );
+        assert!(db_instance.vmm().is_none());
+
+        assert!(
+            test_helpers::no_virtual_provisioning_resource_records_exist(
+                cptestctx
+            )
+            .await
+        );
+        assert!(test_helpers::no_virtual_provisioning_collection_records_using_instances(cptestctx).await);
+    }
 }
