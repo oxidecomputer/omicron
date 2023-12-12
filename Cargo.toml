@@ -302,6 +302,7 @@ rand = "0.8.5"
 ratatui = "0.23.0"
 rayon = "1.8"
 rcgen = "0.11.3"
+reedline = "0.22.0"
 ref-cast = "1.0"
 regex = "1.10.2"
 regress = "0.7.1"
@@ -311,6 +312,7 @@ rpassword = "7.3.1"
 rstest = "0.18.2"
 rustfmt-wrapper = "0.2"
 rustls = "0.21.9"
+rustyline = "12.0.0"
 samael = { git = "https://github.com/njaremko/samael", features = ["xmlsec"], branch = "master" }
 schemars = "0.8.12"
 secrecy = "0.8.0"
@@ -344,6 +346,7 @@ sp-sim = { path = "sp-sim" }
 sprockets-common = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
 sprockets-host = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
 sprockets-rot = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
+sqlparser = { version = "0.36.1", features = [ "visitor" ] }
 static_assertions = "1.1.0"
 # Please do not change the Steno version to a Git dependency.  It makes it
 # harder than expected to make breaking changes (even if you specify a specific

@@ -330,6 +330,11 @@ impl DatumType {
                 | DatumType::HistogramF64
         )
     }
+
+    /// Return `true` if this datum type is a histogram, and `false` otherwise.
+    pub const fn is_histogram(&self) -> bool {
+        matches!(self, DatumType::HistogramF64 | DatumType::HistogramI64)
+    }
 }
 
 impl std::fmt::Display for DatumType {

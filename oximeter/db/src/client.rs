@@ -8,6 +8,7 @@
 
 use crate::model;
 use crate::query;
+use crate::sql::RestrictedQuery;
 use crate::Error;
 use crate::Metric;
 use crate::Target;
@@ -22,9 +23,11 @@ use dropshot::EmptyScanParams;
 use dropshot::PaginationOrder;
 use dropshot::ResultsPage;
 use dropshot::WhichPage;
+use indexmap::IndexMap;
 use oximeter::types::Sample;
 use regex::Regex;
 use regex::RegexBuilder;
+use reqwest::header::HeaderMap;
 use slog::debug;
 use slog::error;
 use slog::info;
@@ -41,6 +44,8 @@ use std::ops::Bound;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::OnceLock;
+use std::time::Duration;
+use std::time::Instant;
 use tokio::fs;
 use tokio::sync::Mutex;
 use uuid::Uuid;
@@ -49,6 +54,137 @@ use uuid::Uuid;
 mod probes {
     fn query__start(_: &usdt::UniqueId, sql: &str) {}
     fn query__done(_: &usdt::UniqueId) {}
+}
+
+/// A count of bytes / rows accessed during a query.
+#[derive(Clone, Copy, Debug)]
+pub struct IoCount {
+    pub bytes: u64,
+    pub rows: u64,
+}
+
+impl std::fmt::Display for IoCount {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{} rows ({} bytes)", self.rows, self.bytes)
+    }
+}
+
+/// Summary of the I/O and duration of a query.
+#[derive(Clone, Copy, Debug, serde::Deserialize)]
+#[serde(try_from = "serde_json::Value")]
+pub struct QuerySummary {
+    /// The bytes and rows read by the query.
+    pub read: IoCount,
+    /// The bytes and rows written by the query.
+    pub written: IoCount,
+}
+
+impl TryFrom<serde_json::Value> for QuerySummary {
+    type Error = Error;
+
+    fn try_from(j: serde_json::Value) -> Result<Self, Self::Error> {
+        use serde_json::Map;
+        use serde_json::Value;
+        use std::str::FromStr;
+
+        let Value::Object(map) = j else {
+            return Err(Error::Database(String::from(
+                "Expected a JSON object for a metadata summary",
+            )));
+        };
+
+        fn unpack_summary_value<T>(
+            map: &Map<String, Value>,
+            key: &str,
+        ) -> Result<T, Error>
+        where
+            T: FromStr,
+            <T as FromStr>::Err: std::error::Error,
+        {
+            let value = map.get(key).ok_or_else(|| {
+                Error::MissingHeaderKey { key: key.to_string() }
+            })?;
+            let Value::String(v) = value else {
+                return Err(Error::BadMetadata {
+                    key: key.to_string(),
+                    msg: String::from("Expected a string value"),
+                });
+            };
+            v.parse::<T>().map_err(|e| Error::BadMetadata {
+                key: key.to_string(),
+                msg: e.to_string(),
+            })
+        }
+        let rows_read: u64 = unpack_summary_value(&map, "read_rows")?;
+        let bytes_read: u64 = unpack_summary_value(&map, "read_bytes")?;
+        let rows_written: u64 = unpack_summary_value(&map, "written_rows")?;
+        let bytes_written: u64 = unpack_summary_value(&map, "written_bytes")?;
+        Ok(Self {
+            read: IoCount { bytes: bytes_read, rows: rows_read },
+            written: IoCount { bytes: bytes_written, rows: rows_written },
+        })
+    }
+}
+
+/// Basic metadata about the resource usage of a single SQL query.
+#[derive(Clone, Copy, Debug)]
+pub struct QueryMetadata {
+    /// The database-assigned query ID.
+    pub id: Uuid,
+    /// The total duration of the query (network plus execution).
+    pub elapsed: Duration,
+    /// Summary of the data read and written.
+    pub summary: QuerySummary,
+}
+
+impl QueryMetadata {
+    fn from_headers(
+        elapsed: Duration,
+        headers: &HeaderMap,
+    ) -> Result<Self, Error> {
+        fn get_header<'a>(
+            map: &'a HeaderMap,
+            key: &'a str,
+        ) -> Result<&'a str, Error> {
+            let hdr = map.get(key).ok_or_else(|| Error::MissingHeaderKey {
+                key: key.to_string(),
+            })?;
+            std::str::from_utf8(hdr.as_bytes())
+                .map_err(|err| Error::Database(err.to_string()))
+        }
+        let summary =
+            serde_json::from_str(get_header(headers, "X-ClickHouse-Summary")?)
+                .map_err(|err| Error::Database(err.to_string()))?;
+        let id = get_header(headers, "X-ClickHouse-Query-Id")?
+            .parse()
+            .map_err(|err: uuid::Error| Error::Database(err.to_string()))?;
+        Ok(Self { id, elapsed, summary })
+    }
+}
+
+/// A tabular result from a SQL query against a timeseries.
+#[derive(Clone, Debug, Default, serde::Serialize)]
+pub struct Table {
+    /// The name of each column in the result set.
+    pub column_names: Vec<String>,
+    /// The rows of the result set, one per column.
+    pub rows: Vec<Vec<serde_json::Value>>,
+}
+
+/// The full result of running a SQL query against a timeseries.
+#[derive(Clone, Debug)]
+pub struct QueryResult {
+    /// The query as written by the client.
+    pub original_query: String,
+    /// The rewritten query, run against the JOINed representation of the
+    /// timeseries.
+    ///
+    /// This is the query that is actually run in the database itself.
+    pub rewritten_query: String,
+    /// Metadata about the resource usage of the query.
+    pub metadata: QueryMetadata,
+    /// The result of the query, with column names and rows.
+    pub table: Table,
 }
 
 /// A `Client` to the ClickHouse metrics database.
@@ -87,6 +223,76 @@ impl Client {
         .await?;
         debug!(self.log, "successful ping of ClickHouse server");
         Ok(())
+    }
+
+    /// Transform a SQL query against a timeseries, but do not execute it.
+    pub async fn transform_query(
+        &self,
+        query: impl AsRef<str>,
+    ) -> Result<String, Error> {
+        let restricted = RestrictedQuery::new(query.as_ref())?;
+        restricted.to_oximeter_sql(&*self.schema.lock().await)
+    }
+
+    /// Run a SQL query against a timeseries.
+    pub async fn query(
+        &self,
+        query: impl AsRef<str>,
+    ) -> Result<QueryResult, Error> {
+        let original_query = query.as_ref().trim_end_matches(';');
+        let ox_sql = self.transform_query(original_query).await?;
+        let rewritten = format!("{ox_sql} FORMAT JSONEachRow");
+        debug!(
+            self.log,
+            "rewrote restricted query";
+            "original_sql" => &original_query,
+            "rewritten_sql" => &rewritten,
+        );
+        let request = self
+            .client
+            .post(&self.url)
+            .query(&[
+                ("output_format_json_quote_64bit_integers", "0"),
+                ("database", crate::DATABASE_NAME),
+            ])
+            .body(rewritten.clone());
+        let query_start = Instant::now();
+        let response = handle_db_response(
+            request
+                .send()
+                .await
+                .map_err(|err| Error::DatabaseUnavailable(err.to_string()))?,
+        )
+        .await?;
+        let metadata = QueryMetadata::from_headers(
+            query_start.elapsed(),
+            response.headers(),
+        )?;
+        let text = response.text().await.unwrap();
+        let mut table = Table::default();
+        for line in text.lines() {
+            let row =
+                serde_json::from_str::<IndexMap<String, serde_json::Value>>(
+                    line.trim(),
+                )
+                .unwrap();
+            if table.column_names.is_empty() {
+                table.column_names.extend(row.keys().cloned())
+            } else {
+                assert!(table
+                    .column_names
+                    .iter()
+                    .zip(row.keys())
+                    .all(|(k1, k2)| k1 == k2));
+            }
+            table.rows.push(row.into_values().collect());
+        }
+        Ok(QueryResult {
+            original_query: original_query.to_string(),
+            rewritten_query: rewritten,
+            metadata,
+            table,
+        })
     }
 
     /// Select timeseries from criteria on the fields and start/end timestamps.
@@ -271,7 +477,7 @@ impl Client {
         ResultsPage::new(schema, &dropshot::EmptyScanParams {}, |schema, _| {
             schema.timeseries_name.clone()
         })
-        .map_err(|e| Error::Database(e.to_string()))
+        .map_err(|err| Error::Database(err.to_string()))
     }
 
     /// Read the available schema versions in the provided directory.
@@ -1181,13 +1387,14 @@ async fn handle_db_response(
         // NOTE: ClickHouse returns 404 for all errors (so far encountered). We pull the text from
         // the body if possible, which contains the actual error from the database.
         let body = response.text().await.unwrap_or_else(|e| e.to_string());
-        Err(Error::Database(body))
+        Err(Error::Database(format!("Query failed: {body}")))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::OXIMETER_VERSION;
     use crate::query;
     use crate::query::field_table_name;
     use bytes::Bytes;
@@ -4265,6 +4472,89 @@ mod tests {
             assert_eq!(count, 0);
         }
         db.cleanup().await.expect("Failed to cleanup ClickHouse server");
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_sql_query_output() {
+        let logctx = test_setup_log("test_sql_query_output");
+        let log = &logctx.log;
+        let mut db = ClickHouseInstance::new_single_node(0)
+            .await
+            .expect("Failed to start ClickHouse");
+        let address = SocketAddr::new(Ipv6Addr::LOCALHOST.into(), db.port());
+        let client = Client::new(address, &log);
+        client
+            .initialize_db_with_version(false, OXIMETER_VERSION)
+            .await
+            .expect("Failed to initialize timeseries database");
+        let (_target, metrics, samples) = setup_select_test();
+        client.insert_samples(&samples).await.unwrap();
+
+        // Sanity check that we get exactly the number of samples we expected.
+        let res = client
+            .query("SELECT count() AS total FROM service:request_latency")
+            .await
+            .unwrap();
+        assert_eq!(res.table.rows.len(), 1);
+        let serde_json::Value::Number(n) = &res.table.rows[0][0] else {
+            panic!("Expected exactly 1 row with 1 item");
+        };
+        assert_eq!(n.as_u64().unwrap(), samples.len() as u64);
+
+        // Assert grouping by the keys results in exactly the number of samples
+        // expected for each timeseries.
+        let res = client
+            .query(
+                "SELECT count() AS total \
+                FROM service:request_latency \
+                GROUP BY timeseries_key; \
+            ",
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.table.rows.len(), metrics.len());
+        for row in res.table.rows.iter() {
+            assert_eq!(row.len(), 1);
+            let serde_json::Value::Number(n) = &row[0] else {
+                panic!("Expected a number in each row");
+            };
+            assert_eq!(
+                n.as_u64().unwrap(),
+                (samples.len() / metrics.len()) as u64
+            );
+        }
+
+        // Read test SQL and make sure we're getting expected results.
+        let sql_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("test-output")
+            .join("sql");
+        let mut rd = tokio::fs::read_dir(&sql_dir)
+            .await
+            .expect("failed to read SQL test directory");
+        while let Some(next_entry) =
+            rd.next_entry().await.expect("failed to read directory entry")
+        {
+            let sql_file = next_entry.path().join("query.sql");
+            let result_file = next_entry.path().join("result.txt");
+            let query = tokio::fs::read_to_string(&sql_file)
+                .await
+                .unwrap_or_else(|_| {
+                    panic!(
+                        "failed to read test SQL query in '{}",
+                        sql_file.display()
+                    )
+                });
+            let res = client
+                .query(&query)
+                .await
+                .expect("failed to execute test query");
+            expectorate::assert_contents(
+                result_file,
+                &serde_json::to_string_pretty(&res.table).unwrap(),
+            );
+        }
+        db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
 }
