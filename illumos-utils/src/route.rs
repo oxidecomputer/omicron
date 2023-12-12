@@ -4,14 +4,14 @@
 
 //! Utilities for manipulating the routing tables.
 
-use std::net::Ipv6Addr;
-// TODO: Make sure this is the correct location when running the binary
 use crate::zone::ROUTE;
 use crate::{execute, ExecutionError, PFEXEC};
+use std::net::Ipv6Addr;
 
 /// Wraps commands for interacting with routing tables.
 pub struct Route {}
 
+#[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
 impl Route {
     pub fn ensure_default_route_with_gateway(
         gateway: &Ipv6Addr,

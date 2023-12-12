@@ -18,15 +18,17 @@ if [[ $DATALINK == unknown ]] || [[ $GATEWAY == unknown ]]; then
 fi
 
 # TODO remove when https://github.com/oxidecomputer/stlouis/issues/435 is addressed
-ipadm delete-if "$DATALINK" || true
-ipadm create-if -t "$DATALINK"
+# Ensures a temporary IP interface is created with the given data link
+/opt/oxide/zone-networking-cli/bin/zone-networking ensure-if -d $DATALINK
 
-ipadm set-ifprop -t -p mtu=9000 -m ipv4 "$DATALINK"
-ipadm set-ifprop -t -p mtu=9000 -m ipv6 "$DATALINK"
+# Sets MTU to 9000 for IPv6 and IPv4 on the given data link
+/opt/oxide/zone-networking-cli/bin/zone-networking set-mtu -d $DATALINK
 
-ipadm show-addr "$DATALINK/ll" || ipadm create-addr -t -T addrconf "$DATALINK/ll"
-ipadm show-addr "$DATALINK/omicron6"  || ipadm create-addr -t -T static -a "$LISTEN_ADDR" "$DATALINK/omicron6"
-route get -inet6 default -inet6 "$GATEWAY" || route add -inet6 default -inet6 "$GATEWAY"
+# Sets static and auto-configured addresses on the given data link
+/opt/oxide/zone-networking-cli/bin/zone-networking set-addrs -d $DATALINK -l $LISTEN_ADDR
+
+# Ensures there is a default route with the given gateway
+/opt/oxide/zone-networking-cli/bin/zone-networking ensure-if -g $GATEWAY
 
 # We need to tell CockroachDB the DNS names or IP addresses of the other nodes
 # in the cluster.  Look these up in internal DNS.  Per the recommendations in

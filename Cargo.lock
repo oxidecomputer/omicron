@@ -10085,6 +10085,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap 4.4.3",
+ "dropshot",
  "illumos-utils",
  "omicron-common",
  "omicron-workspace-hack",

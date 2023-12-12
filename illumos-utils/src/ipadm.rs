@@ -4,14 +4,14 @@
 
 //! Utilities for managing IP interfaces.
 
-use std::net::Ipv6Addr;
-// TODO: Make sure this is the correct location when running the binary
 use crate::zone::IPADM;
 use crate::{execute, ExecutionError, PFEXEC};
+use std::net::Ipv6Addr;
 
 /// Wraps commands for interacting with interfaces.
 pub struct Ipadm {}
 
+#[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
 impl Ipadm {
     // Remove current IP interface and create a new temporary one.
     pub fn set_temp_interface_for_datalink(
@@ -20,11 +20,9 @@ impl Ipadm {
         let mut cmd = std::process::Command::new(PFEXEC);
         let cmd = cmd.args(&[IPADM, "delete-if", datalink]);
         // First we remove IP interface if it already exists. If it doesn't
-        // exists and the command returns an error we continue anyway as
+        // exist and the command returns an error we continue anyway as
         // the next step is to create it.
-        match execute(cmd) {
-            _ => (),
-        };
+        let _ = execute(cmd);
 
         let mut cmd = std::process::Command::new(PFEXEC);
         let cmd = cmd.args(&[IPADM, "create-if", "-t", datalink]);
