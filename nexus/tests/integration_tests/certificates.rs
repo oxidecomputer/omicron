@@ -394,7 +394,11 @@ async fn test_silo_certificates() {
                 .name(silo2.silo_name.clone())
                 .description("")
                 .discoverable(false)
-                .quotas(params::SiloQuotasCreate::empty())
+                .quotas(oxide_client::types::SiloQuotasCreate {
+                    cpus: 0,
+                    memory: oxide_client::types::ByteCount(0),
+                    storage: oxide_client::types::ByteCount(0),
+                })
                 .identity_mode(oxide_client::types::SiloIdentityMode::LocalOnly)
                 .tls_certificates(vec![silo2_cert.try_into().unwrap()]),
         )
@@ -455,7 +459,11 @@ async fn test_silo_certificates() {
                 .name(silo3.silo_name.clone())
                 .description("")
                 .discoverable(false)
-                .quotas(params::SiloQuotasCreate::empty())
+                .quotas(oxide_client::types::SiloQuotasCreate {
+                    cpus: 0,
+                    memory: oxide_client::types::ByteCount(0),
+                    storage: oxide_client::types::ByteCount(0),
+                })
                 .identity_mode(oxide_client::types::SiloIdentityMode::LocalOnly)
                 .tls_certificates(vec![silo3_cert.try_into().unwrap()]),
         )
