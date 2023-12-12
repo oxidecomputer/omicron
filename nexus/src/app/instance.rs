@@ -34,12 +34,14 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::nexus;
-use omicron_common::limits::MAX_DISKS_PER_INSTANCE;
 use omicron_common::limits::MAX_EXTERNAL_IPS_PER_INSTANCE;
 use omicron_common::limits::MAX_MEMORY_BYTES_PER_INSTANCE;
 use omicron_common::limits::MAX_NICS_PER_INSTANCE;
 use omicron_common::limits::MAX_VCPU_PER_INSTANCE;
 use omicron_common::limits::MIN_MEMORY_BYTES_PER_INSTANCE;
+use omicron_common::limits::{
+    MAX_DISKS_PER_INSTANCE, MAX_EPHEMERAL_IPS_PER_INSTANCE,
+};
 use propolis_client::support::tungstenite::protocol::frame::coding::CloseCode;
 use propolis_client::support::tungstenite::protocol::CloseFrame;
 use propolis_client::support::tungstenite::Message as WebSocketMessage;
