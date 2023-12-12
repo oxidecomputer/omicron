@@ -657,7 +657,10 @@ impl DataStore {
     /// If the disk delete saga unwinds, then the disk should _not_ remain
     /// deleted: disk delete saga should be triggered again in order to fully
     /// complete, and the only way to do that is to un-delete the disk. Set it
-    /// to faulted to ensure that it won't be used.
+    /// to faulted to ensure that it won't be used. Use the disk's UUID as part
+    /// of its new name to ensure that even if a user created another disk that
+    /// shadows this "phantom" disk the original can still be un-deleted and
+    /// faulted.
     pub async fn project_undelete_disk_set_faulted_no_auth(
         &self,
         disk_id: &Uuid,
@@ -667,12 +670,19 @@ impl DataStore {
 
         let faulted = api::external::DiskState::Faulted.label();
 
+        // If only the UUID is used, you will hit "name cannot be a UUID to
+        // avoid ambiguity with IDs". Add a small prefix to avoid this, and use
+        // "deleted" to be unambigious to the user about what they should do
+        // with this disk.
+        let new_name = format!("deleted-{disk_id}");
+
         let result = diesel::update(dsl::disk)
             .filter(dsl::time_deleted.is_not_null())
             .filter(dsl::id.eq(*disk_id))
             .set((
                 dsl::time_deleted.eq(None::<DateTime<Utc>>),
                 dsl::disk_state.eq(faulted),
+                dsl::name.eq(new_name),
             ))
             .check_if_exists::<Disk>(*disk_id)
             .execute_and_check(&conn)
