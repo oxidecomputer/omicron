@@ -57,6 +57,41 @@ where
         .unwrap()
 }
 
+pub async fn object_get<OutputType>(
+    client: &ClientTestContext,
+    path: &str,
+) -> OutputType
+where
+    OutputType: serde::de::DeserializeOwned,
+{
+    NexusRequest::object_get(client, path)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap_or_else(|e| {
+            panic!("failed to make \"GET\" request to {path}: {e}")
+        })
+        .parsed_body()
+        .unwrap()
+}
+
+pub async fn object_get_error(
+    client: &ClientTestContext,
+    path: &str,
+    status: StatusCode,
+) -> HttpErrorResponseBody {
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::DELETE, path)
+            .expect_status(Some(status)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<HttpErrorResponseBody>()
+    .unwrap()
+}
+
 pub async fn object_create<InputType, OutputType>(
     client: &ClientTestContext,
     path: &str,
@@ -100,23 +135,6 @@ where
     .unwrap()
 }
 
-pub async fn object_delete_error(
-    client: &ClientTestContext,
-    path: &str,
-    status: StatusCode,
-) -> HttpErrorResponseBody {
-    NexusRequest::new(
-        RequestBuilder::new(client, Method::DELETE, path)
-            .expect_status(Some(status)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap()
-    .parsed_body::<HttpErrorResponseBody>()
-    .unwrap()
-}
-
 pub async fn object_put<InputType, OutputType>(
     client: &ClientTestContext,
     path: &str,
@@ -145,6 +163,23 @@ pub async fn object_delete(client: &ClientTestContext, path: &str) {
         .unwrap_or_else(|e| {
             panic!("failed to make \"DELETE\" request to {path}: {e}")
         });
+}
+
+pub async fn object_delete_error(
+    client: &ClientTestContext,
+    path: &str,
+    status: StatusCode,
+) -> HttpErrorResponseBody {
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::DELETE, path)
+            .expect_status(Some(status)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<HttpErrorResponseBody>()
+    .unwrap()
 }
 
 /// Create an IP pool with a single range for testing.

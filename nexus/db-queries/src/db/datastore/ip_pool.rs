@@ -248,6 +248,7 @@ impl DataStore {
     ) -> DeleteResult {
         use db::schema::ip_pool::dsl;
         use db::schema::ip_pool_range;
+        use db::schema::ip_pool_resource;
         opctx.authorize(authz::Action::Delete, authz_pool).await?;
 
         // Verify there are no IP ranges still in this pool
@@ -265,6 +266,23 @@ impl DataStore {
         if range.is_some() {
             return Err(Error::invalid_request(
                 "IP Pool cannot be deleted while it contains IP ranges",
+            ));
+        }
+
+        // Verify there are no linked silos
+        let silo_link = ip_pool_resource::table
+            .filter(ip_pool_resource::ip_pool_id.eq(authz_pool.id()))
+            .select(ip_pool_resource::resource_id)
+            .limit(1)
+            .first_async::<Uuid>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        if silo_link.is_some() {
+            return Err(Error::invalid_request(
+                "IP Pool cannot be deleted while it is linked to a silo",
             ));
         }
 

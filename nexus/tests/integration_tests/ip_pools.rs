@@ -20,6 +20,9 @@ use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::object_create;
 use nexus_test_utils::resource_helpers::object_create_error;
 use nexus_test_utils::resource_helpers::object_delete;
+use nexus_test_utils::resource_helpers::object_delete_error;
+use nexus_test_utils::resource_helpers::object_get;
+use nexus_test_utils::resource_helpers::object_get_error;
 use nexus_test_utils::resource_helpers::object_put;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::{
@@ -76,34 +79,15 @@ async fn test_ip_pool_basic_crud(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(ip_pools.len(), 0, "Expected empty list of IP pools");
 
     // Verify 404 if the pool doesn't exist yet, both for creating or deleting
-    let error: HttpErrorResponseBody = NexusRequest::expect_failure(
-        client,
-        StatusCode::NOT_FOUND,
-        Method::GET,
-        &ip_pool_url,
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap()
-    .parsed_body()
-    .unwrap();
+    let error =
+        object_get_error(client, &ip_pool_url, StatusCode::NOT_FOUND).await;
     assert_eq!(
         error.message,
         format!("not found: ip-pool with name \"{}\"", pool_name),
     );
-    let error: HttpErrorResponseBody = NexusRequest::expect_failure(
-        client,
-        StatusCode::NOT_FOUND,
-        Method::DELETE,
-        &ip_pool_url,
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap()
-    .parsed_body()
-    .unwrap();
+
+    let error =
+        object_delete_error(client, &ip_pool_url, StatusCode::NOT_FOUND).await;
     assert_eq!(
         error.message,
         format!("not found: ip-pool with name \"{}\"", pool_name),
@@ -116,20 +100,11 @@ async fn test_ip_pool_basic_crud(cptestctx: &ControlPlaneTestContext) {
             name: String::from(pool_name).parse().unwrap(),
             description: String::from(description),
         },
-        // silo: None,
-        // is_default: false,
     };
     let created_pool: IpPool =
-        NexusRequest::objects_post(client, ip_pools_url, &params)
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .unwrap()
-            .parsed_body()
-            .unwrap();
+        object_create(client, ip_pools_url, &params).await;
     assert_eq!(created_pool.identity.name, pool_name);
     assert_eq!(created_pool.identity.description, description);
-    // assert_eq!(created_pool.silo_id, None);
 
     let list = NexusRequest::iter_collection_authn::<IpPool>(
         client,
@@ -143,27 +118,18 @@ async fn test_ip_pool_basic_crud(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(list.len(), 1, "Expected exactly 1 IP pool");
     assert_pools_eq(&created_pool, &list[0]);
 
-    let fetched_pool: IpPool = NexusRequest::object_get(client, &ip_pool_url)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .unwrap()
-        .parsed_body()
-        .unwrap();
+    let fetched_pool: IpPool = object_get(client, &ip_pool_url).await;
     assert_pools_eq(&created_pool, &fetched_pool);
 
     // Verify we get a conflict error if we insert it again
-    let error: HttpErrorResponseBody = NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, ip_pools_url)
-            .body(Some(&params))
-            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    let error = object_create_error(
+        client,
+        ip_pools_url,
+        &params,
+        StatusCode::BAD_REQUEST,
     )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap()
-    .parsed_body()
-    .unwrap();
+    .await;
+
     assert_eq!(
         error.message,
         format!("already exists: ip-pool \"{}\"", pool_name)
@@ -178,27 +144,13 @@ async fn test_ip_pool_basic_crud(cptestctx: &ControlPlaneTestContext) {
         .unwrap(),
     );
     let created_range: IpPoolRange =
-        NexusRequest::objects_post(client, &ip_pool_add_range_url, &range)
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .unwrap()
-            .parsed_body()
-            .unwrap();
+        object_create(client, &ip_pool_add_range_url, &range).await;
     assert_eq!(range.first_address(), created_range.range.first_address());
     assert_eq!(range.last_address(), created_range.range.last_address());
-    let error: HttpErrorResponseBody = NexusRequest::expect_failure(
-        client,
-        StatusCode::BAD_REQUEST,
-        Method::DELETE,
-        &ip_pool_url,
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap()
-    .parsed_body()
-    .unwrap();
+
+    let error: HttpErrorResponseBody =
+        object_delete_error(client, &ip_pool_url, StatusCode::BAD_REQUEST)
+            .await;
     assert_eq!(
         error.message,
         "IP Pool cannot be deleted while it contains IP ranges",
@@ -219,13 +171,7 @@ async fn test_ip_pool_basic_crud(cptestctx: &ControlPlaneTestContext) {
         },
     };
     let modified_pool: IpPool =
-        NexusRequest::object_put(client, &ip_pool_url, Some(&updates))
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .unwrap()
-            .parsed_body()
-            .unwrap();
+        object_put(client, &ip_pool_url, &updates).await;
     assert_eq!(modified_pool.identity.name, new_pool_name);
     assert_eq!(modified_pool.identity.id, created_pool.identity.id);
     assert_eq!(
@@ -242,27 +188,11 @@ async fn test_ip_pool_basic_crud(cptestctx: &ControlPlaneTestContext) {
     );
 
     let fetched_modified_pool: IpPool =
-        NexusRequest::object_get(client, &new_ip_pool_url)
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .unwrap()
-            .parsed_body()
-            .unwrap();
+        object_get(client, &new_ip_pool_url).await;
     assert_pools_eq(&modified_pool, &fetched_modified_pool);
 
-    let error: HttpErrorResponseBody = NexusRequest::expect_failure(
-        client,
-        StatusCode::NOT_FOUND,
-        Method::GET,
-        &ip_pool_url,
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap()
-    .parsed_body()
-    .unwrap();
+    let error: HttpErrorResponseBody =
+        object_get_error(client, &ip_pool_url, StatusCode::NOT_FOUND).await;
     assert_eq!(
         error.message,
         format!("not found: ip-pool with name \"{}\"", pool_name),
@@ -425,7 +355,19 @@ async fn test_ip_pool_silo_link(cptestctx: &ControlPlaneTestContext) {
         StatusCode::BAD_REQUEST,
     )
     .await;
-    assert_eq!(error.error_code, Some("ObjectAlreadyExists".to_string()));
+    assert_eq!(error.error_code.unwrap(), "ObjectAlreadyExists");
+
+    // pool delete fails because it is linked to a silo
+    let error = object_delete_error(
+        client,
+        "/v1/system/ip-pools/p1",
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(
+        error.message,
+        "IP Pool cannot be deleted while it is linked to a silo",
+    );
 
     // unlink silo (doesn't matter that it's a default)
     let url = format!("/v1/system/ip-pools/p1/silos/{}", cptestctx.silo_name);
@@ -433,6 +375,9 @@ async fn test_ip_pool_silo_link(cptestctx: &ControlPlaneTestContext) {
 
     let silos_p1 = silos_for_pool(client, "p1").await;
     assert_eq!(silos_p1.items.len(), 0);
+
+    // now we can delete the pool too
+    object_delete(client, "/v1/system/ip-pools/p1").await;
 }
 
 #[nexus_test]
