@@ -25,7 +25,7 @@ impl DataStore {
     /// An authz check _cannot_ be performed here because the authz initialization
     /// isn't complete and will lead to a db deadlock.
     ///
-    /// See https://github.com/oxidecomputer/omicron/blob/07eb7dafc20e35e44edf429fcbb759cbb33edd5f/nexus/db-queries/src/db/datastore/rack.rs#L407-L410
+    /// See <https://github.com/oxidecomputer/omicron/blob/07eb7dafc20e35e44edf429fcbb759cbb33edd5f/nexus/db-queries/src/db/datastore/rack.rs#L407-L410>
     pub async fn silo_quotas_create(
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
