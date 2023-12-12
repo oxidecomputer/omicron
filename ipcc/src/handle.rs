@@ -55,9 +55,11 @@ fn ipcc_fatal_error<C: Into<String>>(
 impl IpccHandle {
     pub fn new() -> Result<Self, IpccError> {
         let mut ipcc_handle: *mut libipcc_handle_t = ptr::null_mut();
+        // We subtract 1 from the length of the inital vector since CString::new
+        // will append a nul for us.
         // Safety: Unwrapped because we guarantee that the supplied bytes
         // contain no 0 bytes up front.
-        let errmsg = CString::new(vec![1; LIBIPCC_ERR_LEN]).unwrap();
+        let errmsg = CString::new(vec![1; LIBIPCC_ERR_LEN - 1]).unwrap();
         let errmsg_len = errmsg.as_bytes().len();
         let errmsg_ptr = errmsg.into_raw();
         let mut lerr = LIBIPCC_ERR_OK;
