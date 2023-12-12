@@ -8,7 +8,6 @@ use crate::builder::CollectionBuilder;
 use crate::builder::InventoryError;
 use crate::SledAgentEnumerator;
 use anyhow::Context;
-use futures::StreamExt;
 use gateway_client::types::GetCfpaParams;
 use gateway_client::types::RotCfpaSlot;
 use gateway_messages::SpComponent;
@@ -292,25 +291,22 @@ impl Collector {
     /// Collect inventory from all sled agent instances
     async fn collect_all_sled_agents(&mut self) {
         // XXX-dap consider doing this with a little bit of concurrency
-        let clients: Vec<Result<Arc<_>, _>> =
-            self.sled_agent_lister.list_sled_agents().collect().await;
-        for maybe_client in clients {
-            match maybe_client {
-                Err(error) => {
-                    self.in_progress.found_error(error);
-                }
-                Ok(client) => {
-                    if let Err(error) =
-                        self.collect_one_sled_agent(&client).await
-                    {
-                        error!(
-                            &self.log,
-                            "sled agent {:?}: {:#}",
-                            client.baseurl(),
-                            error
-                        );
-                    }
-                }
+        let clients = match self.sled_agent_lister.list_sled_agents().await {
+            Err(error) => {
+                self.in_progress.found_error(error);
+                return;
+            }
+            Ok(clients) => clients,
+        };
+
+        for client in clients {
+            if let Err(error) = self.collect_one_sled_agent(&client).await {
+                error!(
+                    &self.log,
+                    "sled agent {:?}: {:#}",
+                    client.baseurl(),
+                    error
+                );
             }
         }
     }

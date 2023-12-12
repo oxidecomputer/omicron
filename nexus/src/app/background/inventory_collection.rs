@@ -11,11 +11,14 @@ use futures::future::BoxFuture;
 use futures::FutureExt;
 use internal_dns::ServiceName;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
+use nexus_inventory::StaticSledAgentEnumerator;
+use nexus_types::identity::Asset;
 use nexus_types::inventory::Collection;
 use serde_json::json;
+use std::num::NonZeroU32;
 use std::sync::Arc;
-use nexus_inventory::StaticSledAgentEnumerator;
 
 /// Background task that reads inventory for the rack
 pub struct InventoryCollector {
@@ -141,6 +144,61 @@ async fn inventory_activate(
         .context("saving inventory to database")?;
 
     Ok(collection)
+}
+
+/// Determine which sleds to inventory based on what's in the database
+///
+/// We only want to inventory what's actually part of the control plane (i.e.,
+/// has a "sled" record).
+struct DbSledAgentEnumerator<'a> {
+    opctx: &'a OpContext,
+    datastore: &'a DataStore,
+    log: slog::Logger,
+}
+
+impl<'a> nexus_inventory::SledAgentEnumerator for DbSledAgentEnumerator<'a> {
+    fn list_sled_agents(
+        &self,
+    ) -> BoxFuture<
+        '_,
+        Result<Vec<Arc<sled_agent_client::Client>>, InventoryError>,
+    > {
+        async {
+            let mut all_sleds = Vec::new();
+            let mut paginator =
+                Paginator::new(NonZeroU32::new(10).unwrap() /* XXX-dap */);
+            while let Some(p) = paginator.next() {
+                let records_batch = self
+                    .datastore
+                    .sled_list(&self.opctx, &p.current_pagparams())
+                    .await
+                    .context("listing sleds")?;
+                paginator = p.found_batch(
+                    &records_batch,
+                    &|s: &nexus_db_model::Sled| s.id(),
+                );
+                all_sleds.extend(records_batch.into_iter().map(|sled| {
+                    let log =
+                        self.log.new(o!("SledAgent" => sled.id().to_string()));
+                    // XXX-dap
+                    let dur = std::time::Duration::from_secs(60);
+                    let client = reqwest::ClientBuilder::new()
+                        .connect_timeout(dur)
+                        .timeout(dur)
+                        .build()
+                        .unwrap();
+                    Arc::new(sled_agent_client::Client::new_with_client(
+                        &format!("http://{}", sled.address()),
+                        client,
+                        log,
+                    ))
+                }));
+            }
+
+            Ok(all_sleds)
+        }
+        .boxed()
+    }
 }
 
 #[cfg(test)]

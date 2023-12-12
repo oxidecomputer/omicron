@@ -3,15 +3,18 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::InventoryError;
-use futures::stream::BoxStream;
-use futures::StreamExt;
+use futures::future::BoxFuture;
+use futures::FutureExt;
 use std::sync::Arc;
 
 /// Describes how to find the list of sled agents to collect from
 pub trait SledAgentEnumerator {
     fn list_sled_agents(
         &self,
-    ) -> BoxStream<'_, Result<Arc<sled_agent_client::Client>, InventoryError>>;
+    ) -> BoxFuture<
+        '_,
+        Result<Vec<Arc<sled_agent_client::Client>>, InventoryError>,
+    >;
 }
 
 /// Used to provide an explicit list of sled agents to a `Collector`
@@ -38,8 +41,10 @@ impl StaticSledAgentEnumerator {
 impl SledAgentEnumerator for StaticSledAgentEnumerator {
     fn list_sled_agents(
         &self,
-    ) -> BoxStream<'_, Result<Arc<sled_agent_client::Client>, InventoryError>>
-    {
-        futures::stream::iter(self.agents.iter().cloned().map(Ok)).boxed()
+    ) -> BoxFuture<
+        '_,
+        Result<Vec<Arc<sled_agent_client::Client>>, InventoryError>,
+    > {
+        futures::future::ready(Ok(self.agents.clone())).boxed()
     }
 }
