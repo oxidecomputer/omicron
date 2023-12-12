@@ -376,7 +376,9 @@ where
 }
 
 /// The virtual resource collection is only updated when a resource is inserted
-/// or deleted from the resource provisioning table for idempotency.
+/// or deleted from the resource provisioning table. By probing for the presence
+/// or absence of a resource, we can update collections at the same time as we
+/// create or destroy the resource, which helps make the operation idempotent.
 enum UpdateKind {
     Insert(VirtualProvisioningResource),
     Delete(uuid::Uuid),
