@@ -3772,7 +3772,12 @@ async fn test_instance_attach_several_external_ips(
         )
         .unwrap(),
     );
-    populate_ip_pool(&client, "default", Some(default_pool_range)).await;
+    create_ip_pool(&client, "default", Some(default_pool_range)).await;
+    link_ip_pool(&client, "default", &DEFAULT_SILO.id(), true).await;
+
+    // this doesn't work as a replacement for the above. figure out why and
+    // probably delete it
+    // create_default_ip_pool(&client).await;
 
     // Create several floating IPs for the instance, totalling 8 IPs.
     let mut external_ip_create =
@@ -3842,47 +3847,35 @@ async fn test_instance_allow_only_one_ephemeral_ip(
 
     let _ = create_project(&client, PROJECT_NAME).await;
 
-    // Create one IP pool with space for two ephemerals.
-    let default_pool_range = IpRange::V4(
-        Ipv4Range::new(
-            std::net::Ipv4Addr::new(10, 0, 0, 1),
-            std::net::Ipv4Addr::new(10, 0, 0, 2),
-        )
-        .unwrap(),
-    );
-    populate_ip_pool(&client, "default", Some(default_pool_range)).await;
+    // don't need any IP pools because request fails at parse time
 
     let ephemeral_create = params::ExternalIpCreate::Ephemeral {
         pool_name: Some("default".parse().unwrap()),
     };
-    let error: HttpErrorResponseBody = NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, &get_instances_url())
-            .body(Some(&params::InstanceCreate {
-                identity: IdentityMetadataCreateParams {
-                    name: "default-pool-inst".parse().unwrap(),
-                    description: "instance default-pool-inst".into(),
-                },
-                ncpus: InstanceCpuCount(4),
-                memory: ByteCount::from_gibibytes_u32(1),
-                hostname: String::from("the_host"),
-                user_data:
-                    b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
-                        .to_vec(),
-                network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
-                external_ips: vec![
-                    ephemeral_create.clone(), ephemeral_create
-                ],
-                disks: vec![],
-                start: true,
-            }))
-            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    let create_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "default-pool-inst".parse().unwrap(),
+            description: "instance default-pool-inst".into(),
+        },
+        ncpus: InstanceCpuCount(4),
+        memory: ByteCount::from_gibibytes_u32(1),
+        hostname: String::from("the_host"),
+        user_data:
+            b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
+                .to_vec(),
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![ephemeral_create.clone(), ephemeral_create],
+        disks: vec![],
+        start: true,
+    };
+    let error = object_create_error(
+        client,
+        &get_instances_url(),
+        &create_params,
+        StatusCode::BAD_REQUEST,
     )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap()
-    .parsed_body()
-    .unwrap();
+    .await;
+
     assert_eq!(
         error.message,
         "An instance may not have more than 1 ephemeral IP address"

@@ -76,7 +76,7 @@ impl DataStore {
                     .fetch_for(authz::Action::CreateChild)
                     .await?;
 
-                // Is this pool associated with either the fleet or the silo? otherwise, 404
+                // Is this pool is not associated with the current silo, 404
                 if self
                     .ip_pool_fetch_association(opctx, &authz_pool)
                     .await

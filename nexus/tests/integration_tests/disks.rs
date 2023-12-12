@@ -1252,8 +1252,7 @@ async fn test_disk_virtual_provisioning_collection_failed_delete(
 
     let disk_test = DiskTest::new(&cptestctx).await;
 
-    populate_ip_pool(&client, "default", None).await;
-    let project_id1 = create_project(client, PROJECT_NAME).await.identity.id;
+    let project_id1 = create_project_and_pool(client).await;
 
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());

@@ -83,7 +83,7 @@ impl DataStore {
 
     /// Look up whether the given pool is available to users in the given silo,
     /// i.e., whether there is an entry in the association table associating the
-    /// pool with either that silo or the fleet
+    /// pool with that silo
     pub async fn ip_pool_fetch_association(
         &self,
         opctx: &OpContext,
@@ -557,11 +557,9 @@ impl DataStore {
             })?;
 
         if !existing_ips.is_empty() {
-            return Err(Error::InvalidRequest {
-                message:
-                    "IP addresses from this pool are in use in the linked silo"
-                        .to_string(),
-            });
+            return Err(Error::invalid_request(
+                "IP addresses from this pool are in use in the linked silo",
+            ));
         }
 
         Ok(())
