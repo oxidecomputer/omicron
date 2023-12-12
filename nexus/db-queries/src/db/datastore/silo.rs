@@ -68,7 +68,9 @@ impl DataStore {
             .await?
             .transaction_async(|conn| async move {
                 diesel::insert_into(quotas_dsl::silo_quotas)
-                    .values(SiloQuotas::from_sled_count(DEFAULT_SILO.id(), 16))
+                    .values(SiloQuotas::arbitrarily_high_default(
+                        DEFAULT_SILO.id(),
+                    ))
                     .on_conflict(quotas_dsl::silo_id)
                     .do_nothing()
                     .execute_async(&conn)

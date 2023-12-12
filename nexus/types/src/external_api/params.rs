@@ -324,17 +324,17 @@ impl SiloQuotasCreate {
         }
     }
 
-    /// Generates a conservative maximum set of quotas for a Silo with the
-    /// given number of sleds. Useful for situations where a non-zero quota
-    /// must be set, but the actual value is not known.
+    /// An arbitrarily high but identifiable default for quotas
+    /// that can be used for creating a Silo for testing
     ///
-    /// 30% of CPUs and memory reserved for internal usage.
-    /// Storage calculated at (total / 3.5) to account for redundancy / bookkeeping.
-    pub fn from_sled_count(num_sleds: u32) -> Self {
+    /// The only silo that customers will see that this should be set on is the default
+    /// silo. Ultimately the default silo should only be initialized with an empty quota,
+    /// but as tests currently relying on it having a quota, we need to set something.
+    pub fn arbitrarily_high_default() -> Self {
         Self {
-            cpus: 90 * i64::from(num_sleds),
-            memory: ByteCount::from_gibibytes_u32(708 * num_sleds),
-            storage: ByteCount::from_gibibytes_u32(850 * num_sleds),
+            cpus: 9999999999,
+            memory: ByteCount::try_from(9999999999999999999 as u64).unwrap(),
+            storage: ByteCount::try_from(9999999999999999999 as u64).unwrap(),
         }
     }
 }

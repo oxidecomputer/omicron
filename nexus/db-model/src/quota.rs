@@ -50,8 +50,8 @@ impl SiloQuotas {
         }
     }
 
-    pub fn from_sled_count(silo_id: Uuid, num_sleds: u32) -> Self {
-        let count = params::SiloQuotasCreate::from_sled_count(num_sleds);
+    pub fn arbitrarily_high_default(silo_id: Uuid) -> Self {
+        let count = params::SiloQuotasCreate::arbitrarily_high_default();
         Self::new(
             silo_id,
             count.cpus,
