@@ -2448,9 +2448,6 @@ async fn check_fleet_privileges(
 // `{silo_name}.{external_dns_zone_name}`), which silo admins may not have. We
 // have to use an alternate, elevated context to perform that check, and this
 // test confirms we do so.
-//
-// Ensures no regression on
-// https://github.com/oxidecomputer/omicron/issues/4532.
 #[nexus_test]
 async fn test_silo_admin_can_create_certs(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;

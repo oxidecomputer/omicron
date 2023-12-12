@@ -6,7 +6,6 @@
 
 use crate::external_api::params;
 use crate::external_api::shared;
-use nexus_db_queries::authn;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
@@ -21,7 +20,6 @@ use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::NameOrId;
 use ref_cast::RefCast;
-use std::sync::Arc;
 use uuid::Uuid;
 
 impl super::Nexus {
@@ -56,22 +54,15 @@ impl super::Nexus {
         // Looking up DNS names requires reading the DNS configuration of the
         // _rack_, which this user may not be able to do (even if they have
         // permission to upload new certs, which almost certainly implies a
-        // silo-level admin. We'll construct a new opctx here to allow this DNS
-        // config lookup, because we believe it does not leak any information
-        // that a silo admin doesn't already know (the external DNS name(s) of
-        // the rack, which leads to their silo's DNS name(s)).
-        //
-        // See https://github.com/oxidecomputer/omicron/issues/4532 for
-        // additional background.
-        let silo_fq_dns_names = {
-            let dns_opctx = OpContext::for_background(
-                opctx.log.clone(),
-                Arc::clone(&self.authz),
-                authn::Context::internal_service_balancer(),
-                Arc::clone(self.datastore()),
-            );
-            self.silo_fq_dns_names(&dns_opctx, authz_silo.id()).await?
-        };
+        // silo-level admin. We'll use our `opctx_external_authn()` context,
+        // which is the same context used to create a silo. This is a higher
+        // privelege than the current user may have, but we believe it does not
+        // leak any information that a silo admin doesn't already know (the
+        // external DNS name(s) of the rack, which leads to their silo's DNS
+        // name(s)).
+        let silo_fq_dns_names = self
+            .silo_fq_dns_names(self.opctx_external_authn(), authz_silo.id())
+            .await?;
 
         let kind = params.service;
         let new_certificate = db::model::Certificate::new(
