@@ -36,6 +36,7 @@ impl DataStore {
             .filter(dsl::sled_address.eq(nat_entry.sled_address))
             .filter(dsl::vni.eq(nat_entry.vni))
             .filter(dsl::mac.eq(nat_entry.mac))
+            .filter(dsl::version_removed.is_null())
             .select((
                 dsl::external_address,
                 dsl::first_port,
@@ -123,9 +124,7 @@ impl DataStore {
         if let Some(nat_entry) = result.first() {
             Ok(nat_entry.clone())
         } else {
-            Err(Error::InvalidRequest {
-                message: "no matching records".to_string(),
-            })
+            Err(Error::invalid_request("no matching records"))
         }
     }
 
@@ -184,9 +183,7 @@ impl DataStore {
         if let Some(nat_entry) = result.first() {
             Ok(nat_entry.clone())
         } else {
-            Err(Error::InvalidRequest {
-                message: "no matching records".to_string(),
-            })
+            Err(Error::invalid_request("no matching records"))
         }
     }
 
@@ -240,9 +237,7 @@ impl DataStore {
 
         match latest {
             Some(value) => Ok(value),
-            None => Err(Error::InvalidRequest {
-                message: "sequence table is empty!".to_string(),
-            }),
+            None => Err(Error::invalid_request("sequence table is empty!")),
         }
     }
 
@@ -275,7 +270,7 @@ mod test {
 
     use crate::db::datastore::datastore_test;
     use chrono::Utc;
-    use nexus_db_model::{Ipv4NatValues, MacAddr, Vni};
+    use nexus_db_model::{Ipv4NatEntry, Ipv4NatValues, MacAddr, Vni};
     use nexus_test_utils::db::test_setup_database;
     use omicron_common::api::external;
     use omicron_test_utils::dev;
@@ -427,11 +422,156 @@ mod test {
             datastore.ipv4_nat_list_since_version(&opctx, 0, 10).await.unwrap();
 
         assert_eq!(nat_entries.len(), 1);
-
         // version should be unchanged
         assert_eq!(
             datastore.ipv4_nat_current_version(&opctx).await.unwrap(),
             3
+        );
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    /// Table design and queries should only insert one active NAT entry for a given
+    /// set of properties, but allow multiple deleted nat entries for the same set
+    /// of properties.
+    async fn table_allows_unique_active_multiple_deleted() {
+        let logctx = dev::test_setup_log("test_nat_version_tracking");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        // We should not have any NAT entries at this moment
+        let initial_state =
+            datastore.ipv4_nat_list_since_version(&opctx, 0, 10).await.unwrap();
+
+        assert!(initial_state.is_empty());
+        assert_eq!(
+            datastore.ipv4_nat_current_version(&opctx).await.unwrap(),
+            0
+        );
+
+        // Each change (creation / deletion) to the NAT table should increment the
+        // version number of the row in the NAT table
+        let external_address = external::Ipv4Net(
+            ipnetwork::Ipv4Network::try_from("10.0.0.100").unwrap(),
+        );
+
+        let sled_address = external::Ipv6Net(
+            ipnetwork::Ipv6Network::try_from("fd00:1122:3344:104::1").unwrap(),
+        );
+
+        // Add a nat entry.
+        let nat1 = Ipv4NatValues {
+            external_address: external_address.into(),
+            first_port: 0.into(),
+            last_port: 999.into(),
+            sled_address: sled_address.into(),
+            vni: Vni(external::Vni::random()),
+            mac: MacAddr(
+                external::MacAddr::from_str("A8:40:25:F5:EB:2A").unwrap(),
+            ),
+        };
+
+        datastore.ensure_ipv4_nat_entry(&opctx, nat1.clone()).await.unwrap();
+
+        // Try to add it again. It should still only result in a single entry.
+        datastore.ensure_ipv4_nat_entry(&opctx, nat1.clone()).await.unwrap();
+        let first_entry = datastore
+            .ipv4_nat_find_by_values(&opctx, nat1.clone())
+            .await
+            .unwrap();
+
+        let nat_entries =
+            datastore.ipv4_nat_list_since_version(&opctx, 0, 10).await.unwrap();
+
+        // The NAT table has undergone one change. One entry has been added,
+        // none deleted, so we should be at version 1.
+        assert_eq!(nat_entries.len(), 1);
+        assert_eq!(nat_entries.last().unwrap().version_added, 1);
+        assert_eq!(
+            datastore.ipv4_nat_current_version(&opctx).await.unwrap(),
+            1
+        );
+
+        datastore.ipv4_nat_delete(&opctx, &first_entry).await.unwrap();
+
+        // The NAT table has undergone two changes. One entry has been added,
+        // then deleted, so we should be at version 2.
+        let nat_entries = datastore
+            .ipv4_nat_list_since_version(&opctx, 0, 10)
+            .await
+            .unwrap()
+            .into_iter();
+
+        let active: Vec<Ipv4NatEntry> = nat_entries
+            .clone()
+            .filter(|entry| entry.version_removed.is_none())
+            .collect();
+
+        let inactive: Vec<Ipv4NatEntry> = nat_entries
+            .filter(|entry| entry.version_removed.is_some())
+            .collect();
+
+        assert!(active.is_empty());
+        assert_eq!(inactive.len(), 1);
+        assert_eq!(
+            datastore.ipv4_nat_current_version(&opctx).await.unwrap(),
+            2
+        );
+
+        // Add the same entry back. This simulates the behavior we will see
+        // when stopping and then restarting an instance.
+        datastore.ensure_ipv4_nat_entry(&opctx, nat1.clone()).await.unwrap();
+
+        // The NAT table has undergone three changes.
+        let nat_entries = datastore
+            .ipv4_nat_list_since_version(&opctx, 0, 10)
+            .await
+            .unwrap()
+            .into_iter();
+
+        let active: Vec<Ipv4NatEntry> = nat_entries
+            .clone()
+            .filter(|entry| entry.version_removed.is_none())
+            .collect();
+
+        let inactive: Vec<Ipv4NatEntry> = nat_entries
+            .filter(|entry| entry.version_removed.is_some())
+            .collect();
+
+        assert_eq!(active.len(), 1);
+        assert_eq!(inactive.len(), 1);
+        assert_eq!(
+            datastore.ipv4_nat_current_version(&opctx).await.unwrap(),
+            3
+        );
+
+        let second_entry =
+            datastore.ipv4_nat_find_by_values(&opctx, nat1).await.unwrap();
+        datastore.ipv4_nat_delete(&opctx, &second_entry).await.unwrap();
+
+        // The NAT table has undergone four changes
+        let nat_entries = datastore
+            .ipv4_nat_list_since_version(&opctx, 0, 10)
+            .await
+            .unwrap()
+            .into_iter();
+
+        let active: Vec<Ipv4NatEntry> = nat_entries
+            .clone()
+            .filter(|entry| entry.version_removed.is_none())
+            .collect();
+
+        let inactive: Vec<Ipv4NatEntry> = nat_entries
+            .filter(|entry| entry.version_removed.is_some())
+            .collect();
+
+        assert_eq!(active.len(), 0);
+        assert_eq!(inactive.len(), 2);
+        assert_eq!(
+            datastore.ipv4_nat_current_version(&opctx).await.unwrap(),
+            4
         );
 
         db.cleanup().await.unwrap();

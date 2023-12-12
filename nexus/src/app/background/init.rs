@@ -247,14 +247,12 @@ fn init_dns(
 
 #[cfg(test)]
 pub mod test {
-    use async_bb8_diesel::AsyncConnection;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use dropshot::HandlerTaskMode;
     use nexus_db_model::DnsGroup;
     use nexus_db_model::Generation;
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db::DataStore;
-    use nexus_db_queries::db::TransactionError;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::internal_api::params as nexus_params;
     use nexus_types::internal_api::params::ServiceKind;
@@ -446,11 +444,11 @@ pub mod test {
         datastore: &DataStore,
         internal_dns_zone_id: Uuid,
     ) {
-        type TxnError = TransactionError<()>;
         {
             let conn = datastore.pool_connection_for_tests().await.unwrap();
-            let _: Result<(), TxnError> = conn
-                .transaction_async(|conn| async move {
+            let _: Result<(), _> = datastore
+                .transaction_retry_wrapper("write_test_dns_generation")
+                .transaction(&conn, |conn| async move {
                     {
                         use nexus_db_queries::db::model::DnsVersion;
                         use nexus_db_queries::db::schema::dns_version::dsl;

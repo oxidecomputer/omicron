@@ -5,6 +5,7 @@
 //! Collection of inventory from Omicron components
 
 use crate::builder::CollectionBuilder;
+use crate::builder::InventoryError;
 use anyhow::Context;
 use gateway_client::types::GetCfpaParams;
 use gateway_client::types::RotCfpaSlot;
@@ -93,7 +94,7 @@ impl Collector {
         // being able to identify this particular condition.
         let sps = match ignition_result {
             Err(error) => {
-                self.in_progress.found_error(error);
+                self.in_progress.found_error(InventoryError::from(error));
                 return;
             }
 
@@ -129,7 +130,7 @@ impl Collector {
                 });
             let sp_state = match result {
                 Err(error) => {
-                    self.in_progress.found_error(error);
+                    self.in_progress.found_error(InventoryError::from(error));
                     continue;
                 }
                 Ok(response) => response.into_inner(),
@@ -179,7 +180,8 @@ impl Collector {
                     });
                 let caboose = match result {
                     Err(error) => {
-                        self.in_progress.found_error(error);
+                        self.in_progress
+                            .found_error(InventoryError::from(error));
                         continue;
                     }
                     Ok(response) => response.into_inner(),
@@ -257,7 +259,8 @@ impl Collector {
 
                 let page = match result {
                     Err(error) => {
-                        self.in_progress.found_error(error);
+                        self.in_progress
+                            .found_error(InventoryError::from(error));
                         continue;
                     }
                     Ok(data_base64) => RotPage { data_base64 },

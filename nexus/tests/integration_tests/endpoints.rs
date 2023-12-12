@@ -134,6 +134,7 @@ lazy_static! {
     pub static ref DEMO_PROJECT_URL_INSTANCES: String = format!("/v1/instances?project={}", *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_URL_SNAPSHOTS: String = format!("/v1/snapshots?project={}", *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_URL_VPCS: String = format!("/v1/vpcs?project={}", *DEMO_PROJECT_NAME);
+    pub static ref DEMO_PROJECT_URL_FIPS: String = format!("/v1/floating-ips?project={}", *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_CREATE: params::ProjectCreate =
         params::ProjectCreate {
             identity: IdentityMetadataCreateParams {
@@ -261,8 +262,6 @@ lazy_static! {
             ),
         };
 
-    pub static ref DEMO_IMPORT_DISK_IMPORT_FROM_URL_URL: String =
-        format!("/v1/disks/{}/import?{}", *DEMO_IMPORT_DISK_NAME, *DEMO_PROJECT_SELECTOR);
     pub static ref DEMO_IMPORT_DISK_BULK_WRITE_START_URL: String =
         format!("/v1/disks/{}/bulk-write-start?{}", *DEMO_IMPORT_DISK_NAME, *DEMO_PROJECT_SELECTOR);
     pub static ref DEMO_IMPORT_DISK_BULK_WRITE_URL: String =
@@ -492,10 +491,7 @@ lazy_static! {
                 name: DEMO_IMAGE_NAME.clone(),
                 description: String::from(""),
             },
-            source: params::ImageSource::Url {
-                url: HTTP_SERVER.url("/image.raw").to_string(),
-                block_size: params::BlockSize::try_from(4096).unwrap(),
-            },
+            source: params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
             os: "fake-os".to_string(),
             version: "1.0".to_string()
         };
@@ -571,6 +567,22 @@ lazy_static! {
     pub static ref DEMO_SYSTEM_UPDATE_PARAMS: params::SystemUpdatePath = params::SystemUpdatePath {
         version: SemverVersion::new(1,0,0),
     };
+}
+
+lazy_static! {
+    // Project Floating IPs
+    pub static ref DEMO_FLOAT_IP_NAME: Name = "float-ip".parse().unwrap();
+    pub static ref DEMO_FLOAT_IP_URL: String =
+        format!("/v1/floating-ips/{}?project={}", *DEMO_FLOAT_IP_NAME, *DEMO_PROJECT_NAME);
+    pub static ref DEMO_FLOAT_IP_CREATE: params::FloatingIpCreate =
+        params::FloatingIpCreate {
+            identity: IdentityMetadataCreateParams {
+                name: DEMO_FLOAT_IP_NAME.clone(),
+                description: String::from("a new IP pool"),
+            },
+            address: Some(std::net::Ipv4Addr::new(10, 0, 0, 141).into()),
+            pool: None,
+        };
 }
 
 lazy_static! {
@@ -1312,20 +1324,6 @@ lazy_static! {
         },
 
         VerifyEndpoint {
-            url: &DEMO_IMPORT_DISK_IMPORT_FROM_URL_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Post(
-                    serde_json::to_value(params::ImportBlocksFromUrl {
-                        url: "obviously-fake-url".into(),
-                        expected_digest: None,
-                    }).unwrap()
-                )
-            ],
-        },
-
-        VerifyEndpoint {
             url: &DEMO_IMPORT_DISK_BULK_WRITE_START_URL,
             visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
@@ -1990,6 +1988,29 @@ lazy_static! {
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::GetNonexistent,
+            ],
+        },
+
+        // Floating IPs
+        VerifyEndpoint {
+            url: &DEMO_PROJECT_URL_FIPS,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_FLOAT_IP_CREATE).unwrap(),
+                ),
+                AllowedMethod::Get,
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_FLOAT_IP_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Delete,
             ],
         }
     ];

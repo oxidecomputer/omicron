@@ -68,14 +68,10 @@ impl super::Nexus {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
         let updates_config = self.updates_config.as_ref().ok_or_else(|| {
-            Error::InvalidRequest {
-                message: "updates system not configured".into(),
-            }
+            Error::invalid_request("updates system not configured")
         })?;
         let base_url = self.tuf_base_url(opctx).await?.ok_or_else(|| {
-            Error::InvalidRequest {
-                message: "updates system not configured".into(),
-            }
+            Error::invalid_request("updates system not configured")
         })?;
         let trusted_root = tokio::fs::read(&updates_config.trusted_root)
             .await
@@ -158,9 +154,7 @@ impl super::Nexus {
     ) -> Result<Vec<u8>, Error> {
         let mut base_url =
             self.tuf_base_url(opctx).await?.ok_or_else(|| {
-                Error::InvalidRequest {
-                    message: "updates system not configured".into(),
-                }
+                Error::invalid_request("updates system not configured")
             })?;
         if !base_url.ends_with('/') {
             base_url.push('/');

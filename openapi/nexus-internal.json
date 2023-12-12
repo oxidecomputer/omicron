@@ -4231,6 +4231,20 @@
               "content",
               "type"
             ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "invalid_timeseries_name"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
           }
         ]
       },

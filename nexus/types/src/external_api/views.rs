@@ -133,9 +133,6 @@ pub struct Image {
     /// ID of the parent project if the image is a project image
     pub project_id: Option<Uuid>,
 
-    /// URL source of this image, if any
-    pub url: Option<String>,
-
     /// The family of the operating system like Debian, Ubuntu, etc.
     pub os: String,
 
@@ -263,6 +260,22 @@ pub struct IpPoolRange {
 pub struct ExternalIp {
     pub ip: IpAddr,
     pub kind: IpKind,
+}
+
+/// A Floating IP is a well-known IP address which can be attached
+/// and detached from instances.
+#[derive(ObjectIdentity, Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct FloatingIp {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    /// The IP address held by this resource.
+    pub ip: IpAddr,
+    /// The project this resource exists within.
+    pub project_id: Uuid,
+    /// The ID of the instance that this Floating IP is attached to,
+    /// if it is presently in use.
+    pub instance_id: Option<Uuid>,
 }
 
 // RACKS

@@ -139,48 +139,48 @@ impl super::Nexus {
         // Reject disks where the block size doesn't evenly divide the
         // total size
         if (params.size.to_bytes() % block_size) != 0 {
-            return Err(Error::InvalidValue {
-                label: String::from("size and block_size"),
-                message: format!(
+            return Err(Error::invalid_value(
+                "size and block_size",
+                format!(
                     "total size must be a multiple of block size {}",
                     block_size,
                 ),
-            });
+            ));
         }
 
         // Reject disks where the size isn't at least
         // MIN_DISK_SIZE_BYTES
         if params.size.to_bytes() < MIN_DISK_SIZE_BYTES as u64 {
-            return Err(Error::InvalidValue {
-                label: String::from("size"),
-                message: format!(
+            return Err(Error::invalid_value(
+                "size",
+                format!(
                     "total size must be at least {}",
                     ByteCount::from(MIN_DISK_SIZE_BYTES)
                 ),
-            });
+            ));
         }
 
         // Reject disks where the MIN_DISK_SIZE_BYTES doesn't evenly
         // divide the size
         if (params.size.to_bytes() % MIN_DISK_SIZE_BYTES as u64) != 0 {
-            return Err(Error::InvalidValue {
-                label: String::from("size"),
-                message: format!(
+            return Err(Error::invalid_value(
+                "size",
+                format!(
                     "total size must be a multiple of {}",
                     ByteCount::from(MIN_DISK_SIZE_BYTES)
                 ),
-            });
+            ));
         }
 
         // Reject disks where the size is greated than MAX_DISK_SIZE_BYTES
         if params.size.to_bytes() > MAX_DISK_SIZE_BYTES {
-            return Err(Error::InvalidValue {
-                label: String::from("size"),
-                message: format!(
+            return Err(Error::invalid_value(
+                "size",
+                format!(
                     "total size must be less than {}",
                     ByteCount::try_from(MAX_DISK_SIZE_BYTES).unwrap()
                 ),
-            });
+            ));
         }
 
         Ok(())
@@ -364,32 +364,6 @@ impl super::Nexus {
             .await?;
 
         self.volume_remove_read_only_parent(&opctx, db_disk.volume_id).await?;
-
-        Ok(())
-    }
-
-    /// Import blocks from a URL into a disk
-    pub(crate) async fn import_blocks_from_url_for_disk(
-        self: &Arc<Self>,
-        opctx: &OpContext,
-        disk_lookup: &lookup::Disk<'_>,
-        params: params::ImportBlocksFromUrl,
-    ) -> UpdateResult<()> {
-        let authz_disk: authz::Disk;
-
-        (.., authz_disk) =
-            disk_lookup.lookup_for(authz::Action::Modify).await?;
-
-        let saga_params = sagas::import_blocks_from_url::Params {
-            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
-            disk_id: authz_disk.id(),
-
-            import_params: params.clone(),
-        };
-
-        self
-            .execute_saga::<sagas::import_blocks_from_url::SagaImportBlocksFromUrl>(saga_params)
-            .await?;
 
         Ok(())
     }

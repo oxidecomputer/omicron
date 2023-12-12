@@ -362,13 +362,11 @@ impl SimInstanceInner {
         }
 
         if self.state.instance().gen != old_runtime.gen {
-            return Err(Error::InvalidRequest {
-                message: format!(
-                    "wrong Propolis ID generation: expected {}, got {}",
-                    self.state.instance().gen,
-                    old_runtime.gen
-                ),
-            });
+            return Err(Error::invalid_request(format!(
+                "wrong Propolis ID generation: expected {}, got {}",
+                self.state.instance().gen,
+                old_runtime.gen
+            )));
         }
 
         self.state.set_migration_ids(ids, Utc::now());

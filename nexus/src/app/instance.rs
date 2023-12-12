@@ -52,6 +52,7 @@ use sled_agent_client::types::InstanceProperties;
 use sled_agent_client::types::InstancePutMigrationIdsBody;
 use sled_agent_client::types::InstancePutStateBody;
 use sled_agent_client::types::SourceNatConfig;
+use std::matches;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -168,6 +169,18 @@ impl super::Nexus {
                 MAX_EXTERNAL_IPS_PER_INSTANCE,
             )));
         }
+        if params
+            .external_ips
+            .iter()
+            .filter(|v| matches!(v, params::ExternalIpCreate::Ephemeral { .. }))
+            .count()
+            > MAX_EPHEMERAL_IPS_PER_INSTANCE
+        {
+            return Err(Error::invalid_request(&format!(
+                "An instance may not have more than {} ephemeral IP address",
+                MAX_EPHEMERAL_IPS_PER_INSTANCE,
+            )));
+        }
         if let params::InstanceNetworkInterfaceAttachment::Create(ref ifaces) =
             params.network_interfaces
         {
@@ -197,13 +210,13 @@ impl super::Nexus {
         // Reject instances where the memory is not at least
         // MIN_MEMORY_BYTES_PER_INSTANCE
         if params.memory.to_bytes() < MIN_MEMORY_BYTES_PER_INSTANCE as u64 {
-            return Err(Error::InvalidValue {
-                label: String::from("size"),
-                message: format!(
+            return Err(Error::invalid_value(
+                "size",
+                format!(
                     "memory must be at least {}",
                     ByteCount::from(MIN_MEMORY_BYTES_PER_INSTANCE)
                 ),
-            });
+            ));
         }
 
         // Reject instances where the memory is not divisible by
@@ -211,24 +224,24 @@ impl super::Nexus {
         if (params.memory.to_bytes() % MIN_MEMORY_BYTES_PER_INSTANCE as u64)
             != 0
         {
-            return Err(Error::InvalidValue {
-                label: String::from("size"),
-                message: format!(
+            return Err(Error::invalid_value(
+                "size",
+                format!(
                     "memory must be divisible by {}",
                     ByteCount::from(MIN_MEMORY_BYTES_PER_INSTANCE)
                 ),
-            });
+            ));
         }
 
         // Reject instances where the memory is greater than the limit
         if params.memory.to_bytes() > MAX_MEMORY_BYTES_PER_INSTANCE {
-            return Err(Error::InvalidValue {
-                label: String::from("size"),
-                message: format!(
+            return Err(Error::invalid_value(
+                "size",
+                format!(
                     "memory must be less than or equal to {}",
                     ByteCount::try_from(MAX_MEMORY_BYTES_PER_INSTANCE).unwrap()
                 ),
-            });
+            ));
         }
 
         let saga_params = sagas::instance_create::Params {
@@ -362,7 +375,7 @@ impl super::Nexus {
         }
 
         if instance.runtime().migration_id.is_some() {
-            return Err(Error::unavail("instance is already migrating"));
+            return Err(Error::conflict("instance is already migrating"));
         }
 
         // Kick off the migration saga
@@ -771,12 +784,10 @@ impl super::Nexus {
         if allowed {
             Ok(InstanceStateChangeRequestAction::SendToSled(sled_id))
         } else {
-            Err(Error::InvalidRequest {
-                message: format!(
-                    "instance state cannot be changed from state \"{}\"",
-                    effective_state
-                ),
-            })
+            Err(Error::invalid_request(format!(
+                "instance state cannot be changed from state \"{}\"",
+                effective_state
+            )))
         }
     }
 
@@ -885,8 +896,6 @@ impl super::Nexus {
             .await?;
 
         // Collect the external IPs for the instance.
-        // TODO-correctness: Handle Floating IPs, see
-        //  https://github.com/oxidecomputer/omicron/issues/1334
         let (snat_ip, external_ips): (Vec<_>, Vec<_>) = self
             .db_datastore
             .instance_lookup_external_ips(&opctx, authz_instance.id())
@@ -895,8 +904,6 @@ impl super::Nexus {
             .partition(|ip| ip.kind == IpKind::SNat);
 
         // Sanity checks on the number and kind of each IP address.
-        // TODO-correctness: Handle multiple IP addresses, see
-        //  https://github.com/oxidecomputer/omicron/issues/1467
         if external_ips.len() > MAX_EXTERNAL_IPS_PER_INSTANCE {
             return Err(Error::internal_error(
                 format!(
@@ -908,8 +915,28 @@ impl super::Nexus {
                 .as_str(),
             ));
         }
-        let external_ips =
-            external_ips.into_iter().map(|model| model.ip.ip()).collect();
+
+        // Partition remaining external IPs by class: we can have at most
+        // one ephemeral ip.
+        let (ephemeral_ips, floating_ips): (Vec<_>, Vec<_>) = external_ips
+            .into_iter()
+            .partition(|ip| ip.kind == IpKind::Ephemeral);
+
+        if ephemeral_ips.len() > MAX_EPHEMERAL_IPS_PER_INSTANCE {
+            return Err(Error::internal_error(
+                format!(
+                "Expected at most {} ephemeral IP for an instance, found {}",
+                MAX_EPHEMERAL_IPS_PER_INSTANCE,
+                ephemeral_ips.len()
+            )
+                .as_str(),
+            ));
+        }
+
+        let ephemeral_ip = ephemeral_ips.get(0).map(|model| model.ip.ip());
+
+        let floating_ips =
+            floating_ips.into_iter().map(|model| model.ip.ip()).collect();
         if snat_ip.len() != 1 {
             return Err(Error::internal_error(
                 "Expected exactly one SNAT IP address for an instance",
@@ -985,7 +1012,8 @@ impl super::Nexus {
             },
             nics,
             source_nat,
-            external_ips,
+            ephemeral_ip,
+            floating_ips,
             firewall_rules,
             dhcp_config: sled_agent_client::types::DhcpConfig {
                 dns_servers: self.external_dns_servers.clone(),
@@ -1200,10 +1228,9 @@ impl super::Nexus {
         // permissions on both) without verifying the shared hierarchy. To
         // mitigate that we verify that their parent projects have the same ID.
         if authz_project.id() != authz_project_disk.id() {
-            return Err(Error::InvalidRequest {
-                message: "disk must be in the same project as the instance"
-                    .to_string(),
-            });
+            return Err(Error::invalid_request(
+                "disk must be in the same project as the instance",
+            ));
         }
 
         // TODO(https://github.com/oxidecomputer/omicron/issues/811):
@@ -1583,28 +1610,22 @@ impl super::Nexus {
                 | InstanceState::Starting
                 | InstanceState::Stopping
                 | InstanceState::Stopped
-                | InstanceState::Failed => Err(Error::ServiceUnavailable {
-                    internal_message: format!(
-                        "cannot connect to serial console of instance in state \
-                            {:?}",
-                        vmm.runtime.state.0
-                    ),
-                }),
-                InstanceState::Destroyed => Err(Error::ServiceUnavailable {
-                    internal_message: format!(
-                        "cannot connect to serial console of instance in state \
-                        {:?}",
-                        InstanceState::Stopped),
-                }),
+                | InstanceState::Failed => {
+                    Err(Error::invalid_request(format!(
+                        "cannot connect to serial console of instance in state \"{}\"",
+                        vmm.runtime.state.0,
+                    )))
+                }
+                InstanceState::Destroyed => Err(Error::invalid_request(
+                    "cannot connect to serial console of destroyed instance",
+                )),
             }
         } else {
-            Err(Error::ServiceUnavailable {
-                internal_message: format!(
-                    "instance is in state {:?} and has no active serial console \
+            Err(Error::invalid_request(format!(
+                "instance is {} and has no active serial console \
                     server",
-                    instance.runtime().nexus_state
-                )
-            })
+                instance.runtime().nexus_state
+            )))
         }
     }
 

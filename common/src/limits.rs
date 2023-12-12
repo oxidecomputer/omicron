@@ -15,5 +15,10 @@ pub const MAX_DISK_SIZE_BYTES: u64 = 1023 * (1 << 30); // 1023 GiB
 
 pub const MAX_NICS_PER_INSTANCE: usize = 8;
 
-// TODO-completeness: Support multiple external IPs
-pub const MAX_EXTERNAL_IPS_PER_INSTANCE: usize = 1;
+// XXX: Might want to recast as max *floating* IPs, we have at most one
+//      ephemeral (so bounded in saga by design).
+//      The value here is arbitrary, but we need *a* limit for the instance
+//      create saga to have a bounded DAG. We might want to only enforce
+//      this during instance create (rather than live attach) in future.
+pub const MAX_EXTERNAL_IPS_PER_INSTANCE: usize = 32;
+pub const MAX_EPHEMERAL_IPS_PER_INSTANCE: usize = 1;
