@@ -99,6 +99,7 @@ pub struct IpPoolResource {
 
 /// Information required to delete an IP pool association. Comes from request
 /// params -- silo is a NameOrId and must be resolved to ID.
+#[derive(Clone, Debug)]
 pub struct IpPoolResourceDelete {
     pub ip_pool_id: Uuid,
     pub resource_type: IpPoolResourceType,

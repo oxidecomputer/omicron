@@ -28,6 +28,7 @@ use diesel::prelude::*;
 use diesel::result::Error as DieselError;
 use ipnetwork::IpNetwork;
 use nexus_db_model::ExternalIp;
+use nexus_db_model::IpKind;
 use nexus_db_model::IpPoolResourceType;
 use nexus_types::external_api::shared::IpRange;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -525,8 +526,10 @@ impl DataStore {
         })
     }
 
-    // TODO: write a test for this
-    async fn ensure_no_ips_outstanding(
+    /// Ephemeral and snat IPs are associated with a silo through an instance,
+    /// so in order to see if there are any such IPs outstanding in the given
+    /// silo, we have to join IP -> Instance -> Project -> Silo
+    async fn ensure_no_instance_ips_outstanding(
         &self,
         opctx: &OpContext,
         association: &IpPoolResourceDelete,
@@ -538,9 +541,6 @@ impl DataStore {
             .authorize(authz::Action::CreateChild, &authz::IP_POOL_LIST)
             .await?;
 
-        // We can only delete the association if there are no IPs allocated
-        // from this pool in the associated resource.
-
         let existing_ips = external_ip::table
             .inner_join(
                 instance::table
@@ -551,10 +551,57 @@ impl DataStore {
             .filter(external_ip::parent_id.is_not_null())
             .filter(external_ip::time_deleted.is_null())
             .filter(external_ip::ip_pool_id.eq(association.ip_pool_id))
-            // TODO: filter by type? i.e., ephemeral and snat?
+            // important, floating IPs are handled separately
+            .filter(external_ip::kind.eq(IpKind::Ephemeral).or(external_ip::kind.eq(IpKind::SNat)))
             .filter(instance::time_deleted.is_null())
             // we have to join through IPs to instances to projects to get the silo ID
             .filter(project::silo_id.eq(association.resource_id))
+            .select(ExternalIp::as_select())
+            .limit(1)
+            .load_async::<ExternalIp>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .map_err(|e| {
+                Error::internal_error(&format!(
+                    "error checking for outstanding IPs before deleting IP pool association to resource: {:?}",
+                    e
+                ))
+            })?;
+
+        if !existing_ips.is_empty() {
+            return Err(Error::invalid_request(
+                "IP addresses from this pool are in use in the linked silo",
+            ));
+        }
+
+        Ok(())
+    }
+
+    /// Floating IPs are associated with a silo through a project, so this one
+    /// is a little simpler than ephemeral. We join IP -> Project -> Silo.
+    async fn ensure_no_floating_ips_outstanding(
+        &self,
+        opctx: &OpContext,
+        association: &IpPoolResourceDelete,
+    ) -> Result<(), Error> {
+        use db::schema::external_ip;
+        use db::schema::project;
+        opctx
+            .authorize(authz::Action::CreateChild, &authz::IP_POOL_LIST)
+            .await?;
+
+        let existing_ips = external_ip::table
+            .inner_join(project::table.on(external_ip::project_id.eq(project::id.nullable())))
+            .filter(external_ip::is_service.eq(false))
+            .filter(external_ip::time_deleted.is_null())
+            // all floating IPs have a project
+            .filter(external_ip::project_id.is_not_null())
+            .filter(external_ip::ip_pool_id.eq(association.ip_pool_id))
+            .filter(external_ip::kind.eq(IpKind::Floating))
+            // we have to join through IPs to projects to get the silo ID
+            .filter(project::silo_id.eq(association.resource_id))
+            .filter(project::time_deleted.is_null())
             .select(ExternalIp::as_select())
             .limit(1)
             .load_async::<ExternalIp>(
@@ -591,7 +638,8 @@ impl DataStore {
 
         // We can only delete the association if there are no IPs allocated
         // from this pool in the associated resource.
-        self.ensure_no_ips_outstanding(opctx, association).await?;
+        self.ensure_no_instance_ips_outstanding(opctx, association).await?;
+        self.ensure_no_floating_ips_outstanding(opctx, association).await?;
 
         diesel::delete(ip_pool_resource::table)
             .filter(ip_pool_resource::ip_pool_id.eq(association.ip_pool_id))

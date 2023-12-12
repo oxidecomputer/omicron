@@ -24,6 +24,8 @@ use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::link_ip_pool;
 use nexus_test_utils::resource_helpers::object_create;
 use nexus_test_utils::resource_helpers::object_create_error;
+use nexus_test_utils::resource_helpers::object_delete;
+use nexus_test_utils::resource_helpers::object_delete_error;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
 use nexus_types::external_api::views::FloatingIp;
@@ -167,7 +169,8 @@ async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(error.message, "not found: ip-pool with name \"other-pool\"");
 
     // now link the pool and everything should work with the exact same params
-    link_ip_pool(&client, "other-pool", &DEFAULT_SILO.id(), false).await;
+    let silo_id = DEFAULT_SILO.id();
+    link_ip_pool(&client, "other-pool", &silo_id, false).await;
 
     // Create with no chosen IP from named pool.
     let fip: FloatingIp = object_create(client, &url, &params).await;
@@ -308,15 +311,24 @@ async fn test_floating_ip_delete(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
 
+    // unlink fails because there are outstanding IPs
+    let silo_id = DEFAULT_SILO.id();
+    let silo_link_url =
+        format!("/v1/system/ip-pools/default/silos/{}", silo_id);
+    let error =
+        object_delete_error(client, &silo_link_url, StatusCode::BAD_REQUEST)
+            .await;
+    assert_eq!(
+        error.message,
+        "IP addresses from this pool are in use in the linked silo"
+    );
+
     // Delete the floating IP.
-    NexusRequest::object_delete(
-        client,
-        &get_floating_ip_by_id_url(&fip.identity.id),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap();
+    let floating_ip_url = get_floating_ip_by_id_url(&fip.identity.id);
+    object_delete(client, &floating_ip_url).await;
+
+    // now unlink works
+    object_delete(client, &silo_link_url).await;
 }
 
 #[nexus_test]
