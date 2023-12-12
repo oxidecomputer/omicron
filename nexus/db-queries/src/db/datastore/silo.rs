@@ -282,7 +282,6 @@ impl DataStore {
                 self.dns_update(nexus_opctx, &conn, dns_update).await?;
 
                 self.silo_quotas_create(
-                    opctx,
                     &conn,
                     &authz_silo,
                     SiloQuotas::new(

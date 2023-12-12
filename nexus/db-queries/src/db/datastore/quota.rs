@@ -20,15 +20,18 @@ use uuid::Uuid;
 
 impl DataStore {
     /// Creates new quotas for a silo. This is grouped with silo creation
-    /// and shouldn't be called directly by the user.
+    /// and shouldn't be called outside of that flow.
+    ///
+    /// An authz check _cannot_ be performed here because the authz initialization
+    /// isn't complete and will lead to a db deadlock.
+    ///
+    /// See https://github.com/oxidecomputer/omicron/blob/07eb7dafc20e35e44edf429fcbb759cbb33edd5f/nexus/db-queries/src/db/datastore/rack.rs#L407-L410
     pub async fn silo_quotas_create(
         &self,
-        opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         authz_silo: &authz::Silo,
         quotas: SiloQuotas,
     ) -> Result<(), Error> {
-        opctx.authorize(authz::Action::Modify, authz_silo).await?;
         let silo_id = authz_silo.id();
         use db::schema::silo_quotas::dsl;
 
