@@ -93,13 +93,40 @@ use wicket_common::update_events::UpdateTerminalError;
 
 #[derive(Debug)]
 struct SpUpdateData {
-    task: JoinHandle<()>,
+    // See the documentation for is_finished. This is Never because the only
+    // thing we care about is whether the other side of this handle has been
+    // dropped.
+    //
+    // A thing that might appear to be strange at first is why this is a
+    // `oneshot::Sender<Never>` and not a `Receiver<Never>`. The reason is that
+    // oneshot senders have an `is_closed` method which takes `&self`.
+    // Receivers only have a `try_recv` method, which takes `&mut self`. Using
+    // a `Sender` here ensures that `Self::is_finished` below takes `&self`.
+    // (This is somewhat galaxy brained but it works correctly.)
+    finished_handle: oneshot::Sender<Never>,
     abort_handle: AbortHandle,
     // Note: Our mutex here is a standard mutex, not a tokio mutex. We generally
     // hold it only log enough to update its state or push a new update event
     // into its running log; occasionally we hold it long enough to clone it.
     event_buffer: Arc<StdMutex<EventBuffer>>,
 }
+
+impl SpUpdateData {
+    /// Returns true if the update has reached a terminal state.
+    ///
+    /// To check whether an update has finished, we used to store the
+    /// JoinHandle to the task and check `task.is_finished()`. However, there
+    /// are some minor things we do after finishing the update (e.g. in the
+    /// case of a fake update, sending a message indicating that the update has
+    /// finished). So instead, we use a handle as a flag to indicate when the
+    /// task has finished doing the bulk of its work.
+    fn is_finished(&self) -> bool {
+        self.finished_handle.is_closed()
+    }
+}
+
+#[derive(Debug)]
+enum Never {}
 
 #[derive(Debug)]
 enum UploadTrampolinePhase2ToMgsStatus {
@@ -294,19 +321,10 @@ impl UpdateTracker {
                         );
                     }
                     // Occupied: we've previously started an update to this sp.
-                    Entry::Occupied(mut slot) => {
-                        assert!(
-                            slot.get().task.is_finished(),
-                            "we just checked that the task was finished"
-                        );
-                        slot.insert(
-                            spawn_update_driver
-                                .spawn_update_driver(
-                                    sp,
-                                    plan.clone(),
-                                    &setup_data,
-                                )
-                                .await,
+                    Entry::Occupied(_) => {
+                        panic!(
+                            "we just checked that there was \
+                             no update data for this SP"
                         );
                     }
                 }
@@ -497,20 +515,26 @@ impl<'tr> SpawnUpdateDriver for RealSpawnUpdateDriver<'tr> {
         // ideal, but it works and is the easiest way to send it without
         // restructuring this code.
         let (abort_handle_sender, abort_handle_receiver) = oneshot::channel();
-        let task = tokio::spawn(update_driver.run(
+        // The sender side is called finished_handle and the receiver side is
+        // called finished_indicator. This is to avoid confusion with the fact
+        // that SpUpdateData stores and checks the sender, which is quite
+        // counterintuitive at first.
+        let (finished_handle, finished_indicator) = oneshot::channel();
+        tokio::spawn(update_driver.run(
             plan,
             update_cx,
             event_buffer.clone(),
             ipr_start_receiver,
             self.opts.clone(),
             abort_handle_sender,
+            finished_indicator,
         ));
 
         let abort_handle = abort_handle_receiver
             .await
             .expect("abort handle is sent immediately");
 
-        SpUpdateData { task, abort_handle, event_buffer }
+        SpUpdateData { finished_handle, abort_handle, event_buffer }
     }
 }
 
@@ -549,7 +573,9 @@ impl SpawnUpdateDriver for FakeUpdateDriver {
             .take()
             .expect("fake step receiver is only taken once");
 
-        let task = tokio::spawn(async move {
+        let (finished_handle, finished_indicator) = oneshot::channel();
+
+        tokio::spawn(async move {
             // The step component and ID have been chosen arbitrarily here --
             // they aren't important.
             let final_sender_handle = engine
@@ -579,6 +605,9 @@ impl SpawnUpdateDriver for FakeUpdateDriver {
             // buffer.
             event_receiving_task.await.expect("event receiving task panicked");
 
+            // Indicate to the outside world that the update is finished.
+            std::mem::drop(finished_indicator);
+
             // Finally, notify the receiving end of the inner sender: this
             // indicates that the update is done.
             match engine_res {
@@ -605,7 +634,7 @@ impl SpawnUpdateDriver for FakeUpdateDriver {
             }
         });
 
-        SpUpdateData { task, abort_handle, event_buffer }
+        SpUpdateData { finished_handle, abort_handle, event_buffer }
     }
 }
 
@@ -652,9 +681,7 @@ impl UpdateTrackerData {
             .filter_map(|sp| {
                 self.sp_update_data
                     .get(sp)
-                    .map_or(false, |update_data| {
-                        !update_data.task.is_finished()
-                    })
+                    .map_or(false, |update_data| !update_data.is_finished())
                     .then(|| *sp)
             })
             .collect::<Vec<_>>();
@@ -692,7 +719,7 @@ impl UpdateTrackerData {
         // There's a race possible here between the task finishing and this
         // check, but that's totally fine: the worst case is that the abort is
         // ignored.
-        if update_data.task.is_finished() {
+        if update_data.is_finished() {
             return Err(AbortUpdateError::UpdateFinished);
         }
 
@@ -719,13 +746,13 @@ impl UpdateTrackerData {
             .sp_update_data
             .iter()
             .filter_map(|(sp_identifier, update_data)| {
-                (!update_data.task.is_finished()).then(|| *sp_identifier)
+                (!update_data.is_finished()).then(|| *sp_identifier)
             })
             .collect::<Vec<_>>();
         if !running_sps.is_empty() {
             return Err(HttpError::for_bad_request(
                 None,
-                "Updates currently running for {running_sps:?}".to_owned(),
+                format!("Updates currently running for {running_sps:?}"),
             ));
         }
 
@@ -799,6 +826,7 @@ impl UpdateDriver {
         ipr_start_receiver: IprStartReceiver,
         opts: StartUpdateOptions,
         abort_handle_sender: oneshot::Sender<AbortHandle>,
+        finished_indicator: oneshot::Receiver<Never>,
     ) {
         let update_cx = &update_cx;
 
@@ -1066,6 +1094,8 @@ impl UpdateDriver {
 
         // Wait for all events to be received and written to the update log.
         event_receiving_task.await.expect("event receiving task panicked");
+        // This would happen anyway, but be explicit about the drop.
+        std::mem::drop(finished_indicator);
     }
 
     fn register_sled_steps<'a>(
