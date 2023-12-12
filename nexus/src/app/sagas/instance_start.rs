@@ -10,6 +10,7 @@ use super::{
     instance_common::allocate_sled_ipv6, NexusActionContext, NexusSaga,
     SagaInitError, ACTION_GENERATE_ID,
 };
+use crate::app::instance::InstanceStateChangeError;
 use crate::app::sagas::declare_saga_actions;
 use chrono::Utc;
 use nexus_db_queries::db::{identity::Resource, lookup::LookupPath};
@@ -52,11 +53,6 @@ declare_saga_actions! {
         - sis_move_to_starting_undo
     }
 
-    ADD_VIRTUAL_RESOURCES -> "virtual_resources" {
-        + sis_account_virtual_resources
-        - sis_account_virtual_resources_undo
-    }
-
     // TODO(#3879) This can be replaced with an action that triggers the NAT RPW
     // once such an RPW is available.
     DPD_ENSURE -> "dpd_ensure" {
@@ -72,6 +68,15 @@ declare_saga_actions! {
     ENSURE_REGISTERED -> "ensure_registered" {
         + sis_ensure_registered
         - sis_ensure_registered_undo
+    }
+
+    // Only account for the instance's resource consumption when the saga is on
+    // the brink of actually starting it. This allows prior steps' undo actions
+    // to mark an instance as Failed without affecting the instance's generation
+    // number (which needs to remain fixed
+    ADD_VIRTUAL_RESOURCES -> "virtual_resources" {
+        + sis_account_virtual_resources
+        - sis_account_virtual_resources_undo
     }
 
     ENSURE_RUNNING -> "ensure_running" {
@@ -103,10 +108,10 @@ impl NexusSaga for SagaInstanceStart {
         builder.append(alloc_propolis_ip_action());
         builder.append(create_vmm_record_action());
         builder.append(mark_as_starting_action());
-        builder.append(add_virtual_resources_action());
         builder.append(dpd_ensure_action());
         builder.append(v2p_ensure_action());
         builder.append(ensure_registered_action());
+        builder.append(add_virtual_resources_action());
         builder.append(ensure_running_action());
         Ok(builder.build()?)
     }
@@ -575,18 +580,80 @@ async fn sis_ensure_registered_undo(
         .await
         .map_err(ActionError::action_failed)?;
 
-    osagactx
+    // If the sled successfully unregistered the instance, allow the rest of
+    // saga unwind to restore the instance record to its prior state (without
+    // writing back the state returned from sled agent). Otherwise, try to
+    // reason about the next action from the specific kind of error that was
+    // returned.
+    if let Err(e) = osagactx
         .nexus()
-        .instance_ensure_unregistered(
-            &opctx,
-            &authz_instance,
-            &sled_id,
-            db_instance.runtime(),
-        )
+        .instance_ensure_unregistered(&opctx, &authz_instance, &sled_id)
         .await
-        .map_err(ActionError::action_failed)?;
+    {
+        error!(osagactx.log(),
+               "start saga: failed to unregister instance from sled";
+               "instance_id" => %instance_id,
+               "error" => ?e);
 
-    Ok(())
+        // If the failure came from talking to sled agent, and the error code
+        // indicates the instance or sled might be unhealthy, manual
+        // intervention is likely to be needed, so try to mark the instance as
+        // Failed and then bail on unwinding.
+        //
+        // If sled agent is in good shape but just doesn't know about the
+        // instance, this saga still owns the instance's state, so allow
+        // unwinding to continue.
+        //
+        // If some other Nexus error occurred, this saga is in bad shape, so
+        // return an error indicating that intervention is needed without trying
+        // to modify the instance further.
+        match e {
+            InstanceStateChangeError::SledAgent(inner)
+                if inner.instance_unhealthy() =>
+            {
+                error!(osagactx.log(),
+                       "start saga: failing instance after unregister failure";
+                       "instance_id" => %instance_id,
+                       "error" => ?inner);
+
+                if let Err(set_failed_error) = osagactx
+                    .nexus()
+                    .mark_instance_failed(
+                        &instance_id,
+                        db_instance.runtime(),
+                        &inner,
+                    )
+                    .await
+                {
+                    error!(osagactx.log(),
+                           "start saga: failed to mark instance as failed";
+                           "instance_id" => %instance_id,
+                           "error" => ?set_failed_error);
+
+                    Err(set_failed_error.into())
+                } else {
+                    Err(inner.0.into())
+                }
+            }
+            InstanceStateChangeError::SledAgent(_) => {
+                info!(osagactx.log(),
+                       "start saga: instance already unregistered from sled";
+                       "instance_id" => %instance_id);
+
+                Ok(())
+            }
+            InstanceStateChangeError::Other(inner) => {
+                error!(osagactx.log(),
+                       "start saga: internal error unregistering instance";
+                       "instance_id" => %instance_id,
+                       "error" => ?inner);
+
+                Err(inner.into())
+            }
+        }
+    } else {
+        Ok(())
+    }
 }
 
 async fn sis_ensure_running(
@@ -615,7 +682,7 @@ async fn sis_ensure_running(
         .await
         .map_err(ActionError::action_failed)?;
 
-    osagactx
+    match osagactx
         .nexus()
         .instance_request_state(
             &opctx,
@@ -625,9 +692,30 @@ async fn sis_ensure_running(
             crate::app::instance::InstanceStateChangeRequest::Run,
         )
         .await
-        .map_err(ActionError::action_failed)?;
+    {
+        Ok(_) => Ok(()),
+        Err(InstanceStateChangeError::SledAgent(inner)) => {
+            info!(osagactx.log(),
+                  "start saga: sled agent failed to set instance to running";
+                  "instance_id" => %instance_id,
+                  "sled_id" =>  %sled_id,
+                  "error" => ?inner);
 
-    Ok(())
+            // Don't set the instance to Failed in this case. Instead, allow
+            // the saga to unwind and restore the instance to the Stopped
+            // state (matching what would happen if there were a failure
+            // prior to this point).
+            Err(ActionError::action_failed(Error::from(inner)))
+        }
+        Err(InstanceStateChangeError::Other(inner)) => {
+            info!(osagactx.log(),
+                  "start saga: internal error changing instance state";
+                  "instance_id" => %instance_id,
+                  "error" => ?inner);
+
+            Err(ActionError::action_failed(inner))
+        }
+    }
 }
 
 #[cfg(test)]
