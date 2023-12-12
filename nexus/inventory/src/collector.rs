@@ -6,7 +6,9 @@
 
 use crate::builder::CollectionBuilder;
 use crate::builder::InventoryError;
+use crate::SledAgentEnumerator;
 use anyhow::Context;
+use futures::StreamExt;
 use gateway_client::types::GetCfpaParams;
 use gateway_client::types::RotCfpaSlot;
 use gateway_messages::SpComponent;
@@ -18,36 +20,25 @@ use slog::{debug, error};
 use std::sync::Arc;
 use strum::IntoEnumIterator;
 
+/// Collect all inventory data from an Oxide system
 pub struct Collector {
     log: slog::Logger,
     mgs_clients: Vec<Arc<gateway_client::Client>>,
-    sled_agent_clients: Vec<Arc<sled_agent_client::Client>>,
+    sled_agent_lister: Box<dyn SledAgentEnumerator + Send>,
     in_progress: CollectionBuilder,
 }
 
 impl Collector {
-    // XXX-dap where should the sled agent clients come from?
-    // Maybe instead, we should accept a "db" client and do the db lookup as
-    // part of the inventory process?
-    // We may want a db client anyway to "inventory" the schema version
-    // On the other hand, though, might that make this harder to simulate for
-    // test purposes because we have to populate a database?
-    // Crazy idea: rework the collection process as a pipeline of stages?  The
-    // individual stages could be tested independently, as could the composition
-    // of stages.  Unclear how we'd deal with dependencies between stages,
-    // though, if we wanted to say that "inventorying sleds from the database"
-    // is a dependency of "collecting Omicron zones".  Maybe each one can just
-    // access data directly from the builder
     pub fn new(
         creator: &str,
         mgs_clients: &[Arc<gateway_client::Client>],
-        sled_agent_clients: &[Arc<sled_agent_client::Client>],
+        sled_agent_lister: Box<dyn SledAgentEnumerator + Send>,
         log: slog::Logger,
     ) -> Self {
         Collector {
             log,
             mgs_clients: mgs_clients.to_vec(),
-            sled_agent_clients: sled_agent_clients.to_vec(),
+            sled_agent_lister,
             in_progress: CollectionBuilder::new(creator),
         }
     }
@@ -301,15 +292,25 @@ impl Collector {
     /// Collect inventory from all sled agent instances
     async fn collect_all_sled_agents(&mut self) {
         // XXX-dap consider doing this with a little bit of concurrency
-        let clients = self.sled_agent_clients.clone();
-        for client in &clients {
-            if let Err(error) = self.collect_one_sled_agent(&client).await {
-                error!(
-                    &self.log,
-                    "sled agent {:?}: {:#}",
-                    client.baseurl(),
-                    error
-                );
+        let clients: Vec<Result<Arc<_>, _>> =
+            self.sled_agent_lister.list_sled_agents().collect().await;
+        for maybe_client in clients {
+            match maybe_client {
+                Err(error) => {
+                    self.in_progress.found_error(error);
+                }
+                Ok(client) => {
+                    if let Err(error) =
+                        self.collect_one_sled_agent(&client).await
+                    {
+                        error!(
+                            &self.log,
+                            "sled agent {:?}: {:#}",
+                            client.baseurl(),
+                            error
+                        );
+                    }
+                }
             }
         }
     }
@@ -358,6 +359,7 @@ impl Collector {
 #[cfg(test)]
 mod test {
     use super::Collector;
+    use crate::StaticSledAgentEnumerator;
     use gateway_messages::SpPort;
     use nexus_types::inventory::Collection;
     use std::fmt::Write;
@@ -483,9 +485,12 @@ mod test {
         let mgs_url = format!("http://{}/", gwtestctx.client.bind_address);
         let mgs_client =
             Arc::new(gateway_client::Client::new(&mgs_url, log.clone()));
-        // XXX-dap fix tests
-        let collector =
-            Collector::new("test-suite", &[mgs_client], &[], log.clone());
+        let collector = Collector::new(
+            "test-suite",
+            &[mgs_client],
+            StaticSledAgentEnumerator::empty(), // XXX-dap
+            log.clone(),
+        );
         let collection = collector
             .collect_all()
             .await
@@ -523,8 +528,12 @@ mod test {
                 Arc::new(client)
             })
             .collect::<Vec<_>>();
-        let collector =
-            Collector::new("test-suite", &mgs_clients, &[], log.clone());
+        let collector = Collector::new(
+            "test-suite",
+            &mgs_clients,
+            StaticSledAgentEnumerator::empty(), // XXX-dap
+            log.clone(),
+        );
         let collection = collector
             .collect_all()
             .await
@@ -562,8 +571,12 @@ mod test {
             Arc::new(client)
         };
         let mgs_clients = &[bad_client, real_client];
-        let collector =
-            Collector::new("test-suite", mgs_clients, &[], log.clone());
+        let collector = Collector::new(
+            "test-suite",
+            mgs_clients,
+            StaticSledAgentEnumerator::empty(), // XXX-dap
+            log.clone(),
+        );
         let collection = collector
             .collect_all()
             .await

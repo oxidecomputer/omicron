@@ -4185,6 +4185,7 @@ dependencies = [
  "base64",
  "chrono",
  "expectorate",
+ "futures",
  "gateway-client",
  "gateway-messages",
  "gateway-test-utils",

@@ -15,6 +15,7 @@ use nexus_db_queries::db::DataStore;
 use nexus_types::inventory::Collection;
 use serde_json::json;
 use std::sync::Arc;
+use nexus_inventory::StaticSledAgentEnumerator;
 
 /// Background task that reads inventory for the rack
 pub struct InventoryCollector {
@@ -127,7 +128,7 @@ async fn inventory_activate(
     let inventory = nexus_inventory::Collector::new(
         creator,
         &mgs_clients,
-        &[], // XXX-dap
+        StaticSledAgentEnumerator::empty(), // XXX-dap
         opctx.log.clone(),
     );
     let collection =
