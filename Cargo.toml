@@ -235,7 +235,7 @@ linear-map = "1.2.0"
 macaddr = { version = "1.0.1", features = ["serde_std"] }
 maplit = "1.0.2"
 mime_guess = "2.0.4"
-mockall = "0.11"
+mockall = "0.12"
 newtype_derive = "0.1.6"
 mg-admin-client = { path = "clients/mg-admin-client" }
 nexus-client = { path = "clients/nexus-client" }
