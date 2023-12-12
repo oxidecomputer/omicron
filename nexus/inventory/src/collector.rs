@@ -326,7 +326,7 @@ impl Collector {
         let inventory = match maybe_ident {
             Ok(inventory) => inventory.into_inner(),
             Err(error) => {
-                self.in_progress.found_error(error);
+                self.in_progress.found_error(InventoryError::from(error));
                 return Ok(());
             }
         };
@@ -340,7 +340,7 @@ impl Collector {
             });
         match maybe_config {
             Err(error) => {
-                self.in_progress.found_error(error);
+                self.in_progress.found_error(InventoryError::from(error));
                 Ok(())
             }
             Ok(zones) => self.in_progress.found_sled_omicron_zones(

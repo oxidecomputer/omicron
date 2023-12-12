@@ -8,9 +8,6 @@
 //! from sources like MGS) from assembling a representation of what was
 //! collected.
 
-// XXX-dap instead of anyhow::Error, create CollectorBug or something? for
-// clarity in distinguishing collector bugs from inventory errors
-
 use anyhow::anyhow;
 use chrono::DateTime;
 use chrono::Utc;
@@ -422,10 +419,10 @@ impl CollectionBuilder {
                 ))
             }
             Baseboard::Unknown => {
-                self.found_error(anyhow!(
+                self.found_error(InventoryError::from(anyhow!(
                     "sled {:?}: reported unknown baseboard",
                     sled_id
-                ));
+                )));
                 None
             }
         };
@@ -437,13 +434,13 @@ impl CollectionBuilder {
         let sled_agent_address = match inventory.sled_agent_address.parse() {
             Ok(addr) => addr,
             Err(error) => {
-                self.found_error(anyhow!(
+                self.found_error(InventoryError::from(anyhow!(
                     "sled {:?}: bad sled agent address: {:?}: {:#}",
                     sled_id,
                     inventory.sled_agent_address,
                     error,
-                ));
-                return Ok(())
+                )));
+                return Ok(());
             }
         };
         let sled = Sled {
@@ -480,8 +477,7 @@ impl CollectionBuilder {
         sled_id: Uuid,
         zones: sled_agent_client::types::OmicronZonesConfig,
     ) -> Result<(), anyhow::Error> {
-        // XXX-dap
-        todo!();
+        todo!(); // XXX-dap
     }
 }
 

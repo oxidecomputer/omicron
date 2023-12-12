@@ -13,6 +13,7 @@ use internal_dns::ServiceName;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
+use nexus_inventory::InventoryError;
 use nexus_inventory::StaticSledAgentEnumerator;
 use nexus_types::identity::Asset;
 use nexus_types::inventory::Collection;
@@ -180,8 +181,7 @@ impl<'a> nexus_inventory::SledAgentEnumerator for DbSledAgentEnumerator<'a> {
                 all_sleds.extend(records_batch.into_iter().map(|sled| {
                     let log =
                         self.log.new(o!("SledAgent" => sled.id().to_string()));
-                    // XXX-dap
-                    let dur = std::time::Duration::from_secs(60);
+                    let dur = std::time::Duration::from_secs(60); // XXX-dap
                     let client = reqwest::ClientBuilder::new()
                         .connect_timeout(dur)
                         .timeout(dur)
