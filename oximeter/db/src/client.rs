@@ -3145,12 +3145,18 @@ mod tests {
         serde_json::Value: From<T>,
     {
         let datum = Datum::from(hist);
-        let measurement = Measurement::new(Utc::now(), datum);
+
+        // We artificially give different timestamps to avoid a test flake in
+        // CI (reproducible reliably on macOS) where the two Utc::now() are the
+        // same, which means we get two results on retrieval when we expect one
+        let t1 = Utc::now();
+        let t2 = t1 + Duration::from_nanos(1);
+
+        let measurement = Measurement::new(t1, datum);
         let missing_datum = Datum::Missing(
-            MissingDatum::new(measurement.datum_type(), Some(Utc::now()))
-                .unwrap(),
+            MissingDatum::new(measurement.datum_type(), Some(t2)).unwrap(),
         );
-        let missing_measurement = Measurement::new(Utc::now(), missing_datum);
+        let missing_measurement = Measurement::new(t2, missing_datum);
         test_recall_measurement_impl(measurement, client).await?;
         test_recall_measurement_impl(missing_measurement, client).await?;
         Ok(())
