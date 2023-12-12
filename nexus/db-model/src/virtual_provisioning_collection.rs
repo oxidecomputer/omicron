@@ -2,6 +2,21 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+//! Types used to describe "virtual provisioning collections".
+//!
+//! This means:
+//! - **Virtual**: These resources correspond with the user-requested
+//! sizes, rather than representing physical utilization. For example,
+//! if a user requests 10 GiB of storage, that's 10 GiB of virtual disk
+//! space, even if we happen to use 3x replication and actually use 30 GiB
+//! of physical storage.
+//! - **Provisioning**: These are user-requested resources that are
+//! provisioned in response to externally-facing requsets.
+//! - **Collections**: These objects are aggregates, containing individual
+//! resources (and possibly other collections). For example, a user-requested
+//! VM would be a "resource", but a project containing many VMs would be a
+//! "collection".
+
 use crate::schema::virtual_provisioning_collection;
 use crate::ByteCount;
 use chrono::{DateTime, Utc};
