@@ -818,6 +818,7 @@ impl AbortUpdateError {
 struct UpdateDriver {}
 
 impl UpdateDriver {
+    #![allow(clippy::too_many_arguments)]
     async fn run(
         self,
         plan: UpdatePlan,
