@@ -81,13 +81,13 @@ impl DataStore {
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    /// Look up whether the given pool is available to users in the given silo,
-    /// i.e., whether there is an entry in the association table associating the
-    /// pool with that silo
-    pub async fn ip_pool_fetch_association(
+    /// Look up whether the given pool is available to users in the current
+    /// silo, i.e., whether there is an entry in the association table linking
+    /// the pool with that silo
+    pub async fn ip_pool_fetch_link(
         &self,
         opctx: &OpContext,
-        authz_pool: &authz::IpPool,
+        ip_pool_id: Uuid,
     ) -> LookupResult<IpPoolResource> {
         use db::schema::ip_pool;
         use db::schema::ip_pool_resource;
@@ -101,7 +101,7 @@ impl DataStore {
                     .eq(IpPoolResourceType::Silo)
                     .and(ip_pool_resource::resource_id.eq(authz_silo.id())),
             )
-            .filter(ip_pool::id.eq(authz_pool.id()))
+            .filter(ip_pool::id.eq(ip_pool_id))
             .filter(ip_pool::time_deleted.is_null())
             .select(IpPoolResource::as_select())
             .first_async::<IpPoolResource>(
@@ -119,7 +119,7 @@ impl DataStore {
     pub async fn ip_pools_fetch_default(
         &self,
         opctx: &OpContext,
-    ) -> LookupResult<IpPool> {
+    ) -> LookupResult<(authz::IpPool, IpPool)> {
         use db::schema::ip_pool;
         use db::schema::ip_pool_resource;
 
@@ -156,6 +156,18 @@ impl DataStore {
             )
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .map(|ip_pool| {
+                (
+                    authz::IpPool::new(
+                        authz::FLEET,
+                        ip_pool.id(),
+                        LookupType::ByCompositeId(
+                            "Default IP Pool".to_string(),
+                        ),
+                    ),
+                    ip_pool,
+                )
+            })
     }
 
     /// Looks up an IP pool intended for internal services.
@@ -827,7 +839,7 @@ mod test {
             .expect("Failed to make IP pool default for silo");
 
         // now when we ask for the default pool again, we get that one
-        let ip_pool = datastore
+        let (.., ip_pool) = datastore
             .ip_pools_fetch_default(&opctx)
             .await
             .expect("Failed to get silo's default IP pool");

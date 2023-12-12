@@ -564,7 +564,7 @@ async fn sic_allocate_instance_snat_ip(
     let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
     let ip_id = sagactx.lookup::<Uuid>("snat_ip_id")?;
 
-    let pool = datastore
+    let (.., pool) = datastore
         .ip_pools_fetch_default(&opctx)
         .await
         .map_err(ActionError::action_failed)?;

@@ -12,6 +12,7 @@ use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use http::Method;
 use http::StatusCode;
+use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
@@ -20,13 +21,18 @@ use nexus_test_utils::resource_helpers::create_floating_ip;
 use nexus_test_utils::resource_helpers::create_instance_with;
 use nexus_test_utils::resource_helpers::create_ip_pool;
 use nexus_test_utils::resource_helpers::create_project;
+use nexus_test_utils::resource_helpers::link_ip_pool;
+use nexus_test_utils::resource_helpers::object_create;
+use nexus_test_utils::resource_helpers::object_create_error;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
 use nexus_types::external_api::views::FloatingIp;
+use nexus_types::identity::Resource;
 use omicron_common::address::IpRange;
 use omicron_common::address::Ipv4Range;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
+use omicron_common::api::external::NameOrId;
 use uuid::Uuid;
 
 type ControlPlaneTestContext =
@@ -102,15 +108,15 @@ async fn test_floating_ip_access(cptestctx: &ControlPlaneTestContext) {
 async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
+    // automatically linked to current silo
     create_default_ip_pool(&client).await;
+
     let other_pool_range = IpRange::V4(
         Ipv4Range::new(Ipv4Addr::new(10, 1, 0, 1), Ipv4Addr::new(10, 1, 0, 5))
             .unwrap(),
     );
+    // not automatically linked to currently silo. see below
     create_ip_pool(&client, "other-pool", Some(other_pool_range)).await;
-    // link_ip_pool(&client, "default", &DEFAULT_SILO.id(), false).await;
-    // TODO: add check for silo link on floating IP allocation so that this
-    // link line being commented out makes the test fail
 
     let project = create_project(client, PROJECT_NAME).await;
 
@@ -145,16 +151,26 @@ async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(fip.instance_id, None);
     assert_eq!(fip.ip, ip_addr);
 
-    // Create with no chosen IP from named pool.
+    // Creating with other-pool fails with 404 until it is linked to the current silo
     let fip_name = FIP_NAMES[2];
-    let fip = create_floating_ip(
-        client,
-        fip_name,
-        project.identity.name.as_str(),
-        None,
-        Some("other-pool"),
-    )
-    .await;
+    let params = params::FloatingIpCreate {
+        identity: IdentityMetadataCreateParams {
+            name: fip_name.parse().unwrap(),
+            description: String::from("a floating ip"),
+        },
+        address: None,
+        pool: Some(NameOrId::Name("other-pool".parse().unwrap())),
+    };
+    let url = format!("/v1/floating-ips?project={}", project.identity.name);
+    let error =
+        object_create_error(client, &url, &params, StatusCode::NOT_FOUND).await;
+    assert_eq!(error.message, "not found: ip-pool with name \"other-pool\"");
+
+    // now link the pool and everything should work with the exact same params
+    link_ip_pool(&client, "other-pool", &DEFAULT_SILO.id(), false).await;
+
+    // Create with no chosen IP from named pool.
+    let fip: FloatingIp = object_create(client, &url, &params).await;
     assert_eq!(fip.identity.name.as_str(), fip_name);
     assert_eq!(fip.project_id, project.identity.id);
     assert_eq!(fip.instance_id, None);
