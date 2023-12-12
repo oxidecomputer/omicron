@@ -54,9 +54,9 @@ impl super::Nexus {
         // Looking up DNS names requires reading the DNS configuration of the
         // _rack_, which this user may not be able to do (even if they have
         // permission to upload new certs, which almost certainly implies a
-        // silo-level admin. We'll use our `opctx_external_authn()` context,
+        // silo-level admin). We'll use our `opctx_external_authn()` context,
         // which is the same context used to create a silo. This is a higher
-        // privelege than the current user may have, but we believe it does not
+        // privilege than the current user may have, but we believe it does not
         // leak any information that a silo admin doesn't already know (the
         // external DNS name(s) of the rack, which leads to their silo's DNS
         // name(s)).
