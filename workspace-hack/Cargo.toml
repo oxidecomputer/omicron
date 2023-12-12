@@ -14,6 +14,7 @@ publish = false
 
 ### BEGIN HAKARI SECTION
 [dependencies]
+ahash = { version = "0.8.6" }
 anyhow = { version = "1.0.75", features = ["backtrace"] }
 base16ct = { version = "0.2.0", default-features = false, features = ["alloc"] }
 bit-set = { version = "0.5.3" }
@@ -62,7 +63,7 @@ ipnetwork = { version = "0.20.0", features = ["schemars"] }
 itertools = { version = "0.10.5" }
 lalrpop-util = { version = "0.19.12" }
 lazy_static = { version = "1.4.0", default-features = false, features = ["spin_no_std"] }
-libc = { version = "0.2.150", features = ["extra_traits"] }
+libc = { version = "0.2.151", features = ["extra_traits"] }
 log = { version = "0.4.20", default-features = false, features = ["std"] }
 managed = { version = "0.8.0", default-features = false, features = ["alloc", "map"] }
 memchr = { version = "2.6.3" }
@@ -86,8 +87,8 @@ reqwest = { version = "0.11.22", features = ["blocking", "json", "rustls-tls", "
 ring = { version = "0.17.7", features = ["std"] }
 schemars = { version = "0.8.13", features = ["bytes", "chrono", "uuid1"] }
 semver = { version = "1.0.20", features = ["serde"] }
-serde = { version = "1.0.192", features = ["alloc", "derive", "rc"] }
-serde_json = { version = "1.0.108", features = ["raw_value"] }
+serde = { version = "1.0.193", features = ["alloc", "derive", "rc"] }
+serde_json = { version = "1.0.108", features = ["raw_value", "unbounded_depth"] }
 sha2 = { version = "0.10.8", features = ["oid"] }
 similar = { version = "2.3.0", features = ["inline", "unicode"] }
 slog = { version = "2.7.0", features = ["dynamic-keys", "max_level_trace", "release_max_level_debug", "release_max_level_trace"] }
@@ -111,10 +112,12 @@ unicode-normalization = { version = "0.1.22" }
 usdt = { version = "0.3.5" }
 uuid = { version = "1.6.1", features = ["serde", "v4"] }
 yasna = { version = "0.5.2", features = ["bit-vec", "num-bigint", "std", "time"] }
+zerocopy = { version = "0.7.26", features = ["derive", "simd"] }
 zeroize = { version = "1.7.0", features = ["std", "zeroize_derive"] }
 zip = { version = "0.6.6", default-features = false, features = ["bzip2", "deflate"] }
 
 [build-dependencies]
+ahash = { version = "0.8.6" }
 anyhow = { version = "1.0.75", features = ["backtrace"] }
 base16ct = { version = "0.2.0", default-features = false, features = ["alloc"] }
 bit-set = { version = "0.5.3" }
@@ -163,7 +166,7 @@ ipnetwork = { version = "0.20.0", features = ["schemars"] }
 itertools = { version = "0.10.5" }
 lalrpop-util = { version = "0.19.12" }
 lazy_static = { version = "1.4.0", default-features = false, features = ["spin_no_std"] }
-libc = { version = "0.2.150", features = ["extra_traits"] }
+libc = { version = "0.2.151", features = ["extra_traits"] }
 log = { version = "0.4.20", default-features = false, features = ["std"] }
 managed = { version = "0.8.0", default-features = false, features = ["alloc", "map"] }
 memchr = { version = "2.6.3" }
@@ -187,8 +190,8 @@ reqwest = { version = "0.11.22", features = ["blocking", "json", "rustls-tls", "
 ring = { version = "0.17.7", features = ["std"] }
 schemars = { version = "0.8.13", features = ["bytes", "chrono", "uuid1"] }
 semver = { version = "1.0.20", features = ["serde"] }
-serde = { version = "1.0.192", features = ["alloc", "derive", "rc"] }
-serde_json = { version = "1.0.108", features = ["raw_value"] }
+serde = { version = "1.0.193", features = ["alloc", "derive", "rc"] }
+serde_json = { version = "1.0.108", features = ["raw_value", "unbounded_depth"] }
 sha2 = { version = "0.10.8", features = ["oid"] }
 similar = { version = "2.3.0", features = ["inline", "unicode"] }
 slog = { version = "2.7.0", features = ["dynamic-keys", "max_level_trace", "release_max_level_debug", "release_max_level_trace"] }
@@ -213,6 +216,7 @@ unicode-normalization = { version = "0.1.22" }
 usdt = { version = "0.3.5" }
 uuid = { version = "1.6.1", features = ["serde", "v4"] }
 yasna = { version = "0.5.2", features = ["bit-vec", "num-bigint", "std", "time"] }
+zerocopy = { version = "0.7.26", features = ["derive", "simd"] }
 zeroize = { version = "1.7.0", features = ["std", "zeroize_derive"] }
 zip = { version = "0.6.6", default-features = false, features = ["bzip2", "deflate"] }
 

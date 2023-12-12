@@ -202,6 +202,7 @@ gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-
 gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "2739c18e80697aa6bc235c935176d14b4d757ee9" }
 gateway-test-utils = { path = "gateway-test-utils" }
 glob = "0.3.1"
+guppy = "0.17.4"
 headers = "0.3.9"
 heck = "0.4"
 hex = "0.4.3"
@@ -229,7 +230,7 @@ itertools = "0.12.0"
 key-manager = { path = "key-manager" }
 kstat-rs = "0.2.3"
 lazy_static = "1.4.0"
-libc = "0.2.150"
+libc = "0.2.151"
 linear-map = "1.2.0"
 macaddr = { version = "1.0.1", features = ["serde_std"] }
 maplit = "1.0.2"
