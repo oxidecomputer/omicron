@@ -161,7 +161,7 @@ setup_hint = "Run `./tools/ci_download_clickhouse` to download the necessary bin
 service_name = "cockroachdb"
 only_for_targets.image = "standard"
 source.type = "composite"
-source.packages = [ "cockroachdb-service.tar.gz", "internal-dns-cli.tar.gz" ]
+source.packages = [ "cockroachdb-service.tar.gz", "internal-dns-cli.tar.gz", "zone-networking-cli.tar.gz" ]
 output.type = "zone"
 
 [package.cockroachdb-service]
@@ -601,3 +601,13 @@ source.packages = [
   "sp-sim-softnpu.tar.gz"
 ]
 output.type = "zone"
+
+[package.zone-networking-cli]
+service_name = "zone-networking-cli"
+only_for_targets.image = "standard"
+source.type = "local"
+source.rust.binary_names = ["zone-networking"]
+source.rust.release = true
+source.paths = []
+output.type = "zone"
+output.intermediate_only = true

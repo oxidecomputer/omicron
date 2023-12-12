@@ -5,42 +5,15 @@
 //! Executable program to set up zone networking
 
 use anyhow::anyhow;
-// use anyhow::bail;
-// use anyhow::Context;
-// use bytes::Buf;
-// use bytes::BufMut;
-// use bytes::BytesMut;
-// use camino::Utf8PathBuf;
-// use chrono::Local;
-// use clap::Args;
-// use clap::Parser;
-// use clap::Subcommand;
 use clap::{arg, command, Command};
 use illumos_utils::ipadm::Ipadm;
 use illumos_utils::route::Route;
-// use futures::stream::StreamExt;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
-//use sled_agent_client::types::CleanupContextUpdate;
-//use sled_agent_client::types::Duration;
-//use sled_agent_client::types::PriorityDimension;
-//use sled_agent_client::types::PriorityOrder;
-//use sled_agent_client::Client;
-//use slog::Drain;
 use slog::Level;
-// use slog::LevelFilter;
-// use slog::Logger;
-// use slog_term::FullFormat;
-// use slog_term::TermDecorator;
-// use std::collections::BTreeSet;
 use std::net::Ipv6Addr;
-//use std::time::SystemTime;
-//use tar::Builder;
-//use tar::Header;
-//use tokio::io::AsyncWriteExt;
-//use uuid::Uuid;
 
-// TODO: Set logger
+// TODO: Set logger?
 fn _parse_log_level(s: &str) -> anyhow::Result<Level> {
     s.parse().map_err(|_| anyhow!("Invalid log level"))
 }
@@ -59,7 +32,7 @@ async fn main() {
 async fn do_run() -> Result<(), CmdError> {
     let matches = command!()
         .subcommand(
-            Command::new("ensure-if").about("TODO description").arg(
+            Command::new("ensure-if").about("Ensures a temporary IP interface is created with the given data link").arg(
                 arg!(
                     -d --datalink <STRING> "datalink"
                 )
@@ -67,7 +40,7 @@ async fn do_run() -> Result<(), CmdError> {
             ),
         )
         .subcommand(
-            Command::new("set-mtu").about("TODO description").arg(
+            Command::new("set-mtu").about("Sets MTU to 9000 for IPv6 and IPv4 on the given data link").arg(
                 arg!(
                     -d --datalink <STRING> "datalink"
                 )
@@ -76,7 +49,7 @@ async fn do_run() -> Result<(), CmdError> {
         )
         .subcommand(
             Command::new("set-addrs")
-                .about("TODO description")
+                .about("Ensures static and auto-configured addresses are set on the given data link")
                 .arg(
                     arg!(
                         -l --listen_addr <Ipv6Addr> "listen_addr"
@@ -92,7 +65,7 @@ async fn do_run() -> Result<(), CmdError> {
                 ),
         )
         .subcommand(
-            Command::new("add-route").about("TODO description").arg(
+            Command::new("add-route").about("Ensures there is a default route with the given gateway").arg(
                 arg!(
                     -g --gateway <Ipv6Addr> "gateway"
                 )

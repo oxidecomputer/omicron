@@ -62,7 +62,6 @@ impl Ipadm {
         Ok(())
     }
 
-    // TODO: Return a struct with the configured addresses
     pub fn create_static_and_autoconfigured_addrs(
         datalink: &str,
         listen_addr: &Ipv6Addr,
