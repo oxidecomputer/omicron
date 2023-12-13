@@ -609,6 +609,13 @@ async fn sis_ensure_registered_undo(
         // If some other Nexus error occurred, this saga is in bad shape, so
         // return an error indicating that intervention is needed without trying
         // to modify the instance further.
+        //
+        // TODO(#3238): `instance_unhealthy` does not take an especially nuanced
+        // view of the meanings of the error codes sled agent could return, so
+        // assuming that an error that isn't `instance_unhealthy` means
+        // that everything is hunky-dory and it's OK to continue unwinding may
+        // be a bit of a stretch. See the definition of `instance_unhealthy` for
+        // more details.
         match e {
             InstanceStateChangeError::SledAgent(inner)
                 if inner.instance_unhealthy() =>
