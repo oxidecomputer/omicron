@@ -110,7 +110,7 @@ impl ResourceAllocator {
         client: &ClientTestContext,
         name: &str,
     ) -> TestResponse {
-        // Stop instance if it's started... can probably ignore errors here
+        // Try to stop the instance
         NexusRequest::new(
             RequestBuilder::new(
                 client,
