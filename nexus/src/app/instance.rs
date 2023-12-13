@@ -68,6 +68,12 @@ type SledAgentClientError =
 #[derive(Debug)]
 pub struct SledAgentInstancePutError(pub SledAgentClientError);
 
+impl std::fmt::Display for SledAgentInstancePutError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 impl From<SledAgentClientError> for SledAgentInstancePutError {
     fn from(value: SledAgentClientError) -> Self {
         Self(value)
@@ -111,7 +117,7 @@ impl SledAgentInstancePutError {
 #[derive(Debug, thiserror::Error)]
 pub enum InstanceStateChangeError {
     /// Sled agent returned an error from one of its instance endpoints.
-    #[error("sled agent client error")]
+    #[error("sled agent client error: {0}")]
     SledAgent(SledAgentInstancePutError),
 
     /// Some other error occurred outside of the attempt to communicate with
