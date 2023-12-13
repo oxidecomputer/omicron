@@ -12,11 +12,6 @@ DATASTORE="$(svcprop -c -p config/store "${SMF_FMRI}")"
 DATALINK="$(svcprop -c -p config/datalink "${SMF_FMRI}")"
 GATEWAY="$(svcprop -c -p config/gateway "${SMF_FMRI}")"
 
-if [[ $DATALINK == unknown ]] || [[ $GATEWAY == unknown ]]; then
-    printf 'ERROR: missing datalink or gateway\n' >&2
-    exit "$SMF_EXIT_ERR_CONFIG"
-fi
-
 # TODO remove when https://github.com/oxidecomputer/stlouis/issues/435 is addressed
 # Ensures a temporary IP interface is created with the given data link
 /opt/oxide/zone-networking-cli/bin/zone-networking ensure-if -d $DATALINK
@@ -28,7 +23,7 @@ fi
 /opt/oxide/zone-networking-cli/bin/zone-networking set-addrs -d $DATALINK -l $LISTEN_ADDR
 
 # Ensures there is a default route with the given gateway
-/opt/oxide/zone-networking-cli/bin/zone-networking ensure-if -g $GATEWAY
+/opt/oxide/zone-networking-cli/bin/zone-networking ensure-route -g $GATEWAY
 
 # We need to tell CockroachDB the DNS names or IP addresses of the other nodes
 # in the cluster.  Look these up in internal DNS.  Per the recommendations in

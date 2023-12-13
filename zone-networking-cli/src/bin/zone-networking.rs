@@ -13,8 +13,18 @@ use omicron_common::cmd::CmdError;
 use slog::info;
 use std::net::Ipv6Addr;
 
-fn parse_ipv6(s: &str) -> anyhow::Result<Ipv6Addr> {
-    s.parse().map_err(|_| anyhow!("Invalid IPv6 address"))
+fn validate_ipv6(s: &str) -> anyhow::Result<Ipv6Addr> {
+    if s == "unknown" {
+        return Err(anyhow!("ERROR: Missing input value"));
+    };
+    s.parse().map_err(|_| anyhow!("ERROR: Invalid IPv6 address"))
+}
+
+fn validate_datalink(s: &str) -> anyhow::Result<()> {
+    if s == "unknown" {
+        return Err(anyhow!("ERROR: Missing data link"));
+    };
+    Ok(())
 }
 
 #[tokio::main]
@@ -39,7 +49,8 @@ async fn do_run() -> Result<(), CmdError> {
                 arg!(
                     -d --datalink <STRING> "datalink"
                 )
-                .required(true),
+                .required(true)
+                .value_parser(validate_datalink),
             ),
         )
         .subcommand(
@@ -48,7 +59,7 @@ async fn do_run() -> Result<(), CmdError> {
                     -g --gateway <Ipv6Addr> "gateway"
                 )
                 .required(true)
-                .value_parser(parse_ipv6),
+                .value_parser(validate_ipv6),
             ),
         )
         .subcommand(
@@ -59,13 +70,13 @@ async fn do_run() -> Result<(), CmdError> {
                         -l --listen_addr <Ipv6Addr> "listen_addr"
                     )
                     .required(true)
-                    .value_parser(parse_ipv6),
+                    .value_parser(validate_ipv6),
                 )
                 .arg(
                     arg!(
                         -d --datalink <STRING> "datalink"
                     )
-                    .required(true),
+                    .required(true).value_parser(validate_datalink),
                 ),
         )
         .subcommand(
@@ -73,7 +84,7 @@ async fn do_run() -> Result<(), CmdError> {
                 arg!(
                     -d --datalink <STRING> "datalink"
                 )
-                .required(true),
+                .required(true).value_parser(validate_datalink),
             ),
         )
         .get_matches();
