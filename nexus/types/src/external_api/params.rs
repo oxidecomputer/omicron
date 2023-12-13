@@ -333,8 +333,8 @@ impl SiloQuotasCreate {
     pub fn arbitrarily_high_default() -> Self {
         Self {
             cpus: 9999999999,
-            memory: ByteCount::try_from(999999999999999999 as u64).unwrap(),
-            storage: ByteCount::try_from(999999999999999999 as u64).unwrap(),
+            memory: ByteCount::try_from(999999999999999999_u64).unwrap(),
+            storage: ByteCount::try_from(999999999999999999_u64).unwrap(),
         }
     }
 }
