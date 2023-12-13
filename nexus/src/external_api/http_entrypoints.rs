@@ -16,7 +16,6 @@ use super::{
 use crate::external_api::shared;
 use crate::ServerContext;
 use chrono::Utc;
-use dropshot::ApiDescription;
 use dropshot::EmptyScanParams;
 use dropshot::HttpError;
 use dropshot::HttpResponseAccepted;
@@ -35,6 +34,7 @@ use dropshot::WhichPage;
 use dropshot::{
     channel, endpoint, WebsocketChannelResult, WebsocketConnection,
 };
+use dropshot::{ApiDescription, StreamingBody};
 use ipnetwork::IpNetwork;
 use nexus_db_queries::authz;
 use nexus_db_queries::db;
@@ -4896,6 +4896,28 @@ async fn silo_metric(
 }
 
 // Updates
+
+/// Upload a TUF repository
+#[endpoint {
+    method = PUT,
+    path = "/v1/system/update/repository",
+    tags = ["system/update"],
+}]
+async fn system_update_put_repository(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    body: StreamingBody,
+) -> Result<HttpResponseOk<views::SystemUpdate>, HttpError> {
+    // TODO: need to increase request size limit for this endpoint
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let body = body.into_inner();
+        let update = nexus.updates_put_repository(&opctx, body).await?;
+        Ok(HttpResponseOk(update.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
 
 /// Refresh update data
 #[endpoint {

@@ -4,7 +4,10 @@
 
 //! Software Updates
 
+use bytes::Bytes;
 use chrono::Utc;
+use dropshot::{HttpError, StreamingBody};
+use futures::Stream;
 use hex;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
@@ -24,6 +27,7 @@ use std::convert::TryFrom;
 use std::num::NonZeroU32;
 use std::path::Path;
 use tokio::io::AsyncWriteExt;
+use update_common::artifacts::ArtifactsWithPlan;
 use uuid::Uuid;
 
 mod common_sp_update;
@@ -61,6 +65,23 @@ impl super::Nexus {
         }))
     }
 
+    pub(crate) async fn updates_put_repository(
+        &self,
+        opctx: &OpContext,
+        body: impl Stream<Item = Result<Bytes, HttpError>> + Send + Sync + 'static,
+    ) -> Result<(), HttpError> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
+        let artifacts_with_plan = ArtifactsWithPlan::from_body(body, &self.log)
+            .await
+            .map_err(|error| error.to_http_error())?;
+
+        // Now store the artifacts in the database.
+        
+
+        Ok(())
+    }
+
     pub(crate) async fn updates_refresh_metadata(
         &self,
         opctx: &OpContext,
@@ -68,7 +89,9 @@ impl super::Nexus {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
         let updates_config = self.updates_config.as_ref().ok_or_else(|| {
-            Error::invalid_request("updates system not configured")
+            Error::InvalidRequest {
+                message: "updates system not configured".into(),
+            }
         })?;
         let base_url = self.tuf_base_url(opctx).await?.ok_or_else(|| {
             Error::invalid_request("updates system not configured")

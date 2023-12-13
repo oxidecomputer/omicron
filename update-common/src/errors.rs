@@ -2,6 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+//! Error types for this crate.
+
 use camino::Utf8PathBuf;
 use display_error_chain::DisplayErrorChain;
 use dropshot::HttpError;
@@ -12,15 +14,27 @@ use slog::error;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
-pub(super) enum RepositoryError {
+pub enum RepositoryError {
     #[error("error opening archive")]
     OpenArchive(#[source] anyhow::Error),
 
     #[error("error creating temporary directory")]
     TempDirCreate(#[source] std::io::Error),
 
+    #[error("error creating temporary file")]
+    TempFileCreate(#[source] std::io::Error),
+
+    #[error("error reading chunk off of input stream")]
+    ReadChunkFromStream(#[source] HttpError),
+
+    #[error("error writing to temporary file")]
+    TempFileWrite(#[source] std::io::Error),
+
+    #[error("error flushing temporary file")]
+    TempFileFlush(#[source] std::io::Error),
+
     #[error("error creating temporary file in {path}")]
-    TempFileCreate {
+    NamedTempFileCreate {
         path: Utf8PathBuf,
         #[source]
         error: std::io::Error,
@@ -129,16 +143,27 @@ pub(super) enum RepositoryError {
 }
 
 impl RepositoryError {
-    pub(super) fn to_http_error(&self) -> HttpError {
+    pub fn to_http_error(&self) -> HttpError {
         let message = DisplayErrorChain::new(self).to_string();
 
         match self {
             // Errors we had that are unrelated to the contents of a repository
             // uploaded by a client.
             RepositoryError::TempDirCreate(_)
-            | RepositoryError::TempFileCreate { .. } => {
+            | RepositoryError::TempFileCreate(_)
+            | RepositoryError::TempFileWrite(_)
+            | RepositoryError::TempFileFlush(_)
+            | RepositoryError::NamedTempFileCreate { .. } => {
                 HttpError::for_unavail(None, message)
             }
+
+            // This error is bubbled up.
+            RepositoryError::ReadChunkFromStream(error) => HttpError {
+                status_code: error.status_code,
+                error_code: error.error_code.clone(),
+                external_message: error.external_message.clone(),
+                internal_message: error.internal_message.clone(),
+            },
 
             // Errors that are definitely caused by bad repository contents.
             RepositoryError::DuplicateArtifactKind(_)

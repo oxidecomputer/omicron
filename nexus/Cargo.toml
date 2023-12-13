@@ -13,8 +13,10 @@ assert_matches.workspace = true
 async-trait.workspace = true
 base64.workspace = true
 buf-list.workspace = true
+bytes.workspace = true
 cancel-safe-futures.workspace = true
 camino.workspace = true
+camino-tempfile.workspace = true
 clap.workspace = true
 chrono.workspace = true
 crucible-agent-client.workspace = true
@@ -85,6 +87,7 @@ oximeter.workspace = true
 oximeter-instruments = { workspace = true, features = ["http-instruments"] }
 oximeter-producer.workspace = true
 rustls = { workspace = true }
+update-common.workspace = true
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]

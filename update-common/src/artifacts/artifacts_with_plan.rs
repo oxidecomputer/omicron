@@ -2,27 +2,36 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::error::RepositoryError;
-use super::update_plan::UpdatePlanBuilder;
 use super::ExtractedArtifactDataHandle;
 use super::UpdatePlan;
+use super::UpdatePlanBuilder;
+use crate::errors::RepositoryError;
+use bytes::Bytes;
 use camino_tempfile::Utf8TempDir;
 use debug_ignore::DebugIgnore;
+use dropshot::HttpError;
+use futures::Stream;
+use futures::TryStreamExt;
 use omicron_common::update::ArtifactHash;
 use omicron_common::update::ArtifactHashId;
 use omicron_common::update::ArtifactId;
+use omicron_common::update::ArtifactsDocument;
 use slog::info;
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::io;
+use tokio::io::AsyncWriteExt;
 use tough::TargetName;
 use tufaceous_lib::ArchiveExtractor;
 use tufaceous_lib::OmicronRepo;
 
 /// A collection of artifacts along with an update plan using those artifacts.
 #[derive(Debug)]
-pub(super) struct ArtifactsWithPlan {
+pub struct ArtifactsWithPlan {
+    // The artifacts document contained in the TUF repo.
+    artifacts: ArtifactsDocument,
+
     // Map of top-level artifact IDs (present in the TUF repo) to the actual
     // artifacts we're serving (e.g., a top-level RoT artifact will map to two
     // artifact hashes: one for each of the A and B images).
@@ -50,7 +59,52 @@ pub(super) struct ArtifactsWithPlan {
 }
 
 impl ArtifactsWithPlan {
-    pub(super) async fn from_zip<T>(
+    /// Creates a new `ArtifactsWithPlan` from the given body stream.
+    ///
+    /// This method reads the body stream representing a TUF repo, and writes
+    /// it to a temporary file. Afterwards, it builds an `ArtifactsWithPlan`
+    /// from the contents of that file.
+    pub async fn from_body(
+        body: impl Stream<Item = Result<Bytes, HttpError>> + Send + Sync,
+        log: &Logger,
+    ) -> Result<Self, RepositoryError> {
+        // Create a temporary file to store the incoming archive.``
+        let tempfile = tokio::task::spawn_blocking(|| {
+            camino_tempfile::tempfile().map_err(RepositoryError::TempFileCreate)
+        })
+        .await
+        .unwrap()?;
+        let mut tempfile =
+            tokio::io::BufWriter::new(tokio::fs::File::from_std(tempfile));
+
+        let mut body = std::pin::pin!(body);
+
+        // Stream the uploaded body into our tempfile.
+        while let Some(bytes) = body
+            .try_next()
+            .await
+            .map_err(RepositoryError::ReadChunkFromStream)?
+        {
+            tempfile
+                .write_all(&bytes)
+                .await
+                .map_err(RepositoryError::TempFileWrite)?;
+        }
+
+        // Flush writes. We don't need to seek back to the beginning of the file
+        // because extracting the repository will do its own seeking as a part of
+        // unzipping this repo.
+        tempfile.flush().await.map_err(RepositoryError::TempFileFlush)?;
+
+        let tempfile = tempfile.into_inner().into_std().await;
+
+        let new_artifacts =
+            Self::from_zip(io::BufReader::new(tempfile), &log).await?;
+
+        Ok(new_artifacts)
+    }
+
+    pub async fn from_zip<T>(
         zip_data: T,
         log: &Logger,
     ) -> Result<Self, RepositoryError>
@@ -81,8 +135,8 @@ impl ArtifactsWithPlan {
         // these are just direct copies of artifacts we just unpacked into
         // `dir`, but we'll also unpack nested artifacts like the RoT dual A/B
         // archives.
-        let mut plan_builder =
-            UpdatePlanBuilder::new(artifacts.system_version, log)?;
+        let mut builder =
+            UpdatePlanBuilder::new(artifacts.system_version.clone(), log)?;
 
         // Make a pass through each artifact in the repo. For each artifact, we
         // do one of the following:
@@ -106,7 +160,7 @@ impl ArtifactsWithPlan {
 
         let mut by_id = BTreeMap::new();
         let mut by_hash = HashMap::new();
-        for artifact in artifacts.artifacts {
+        for artifact in &artifacts.artifacts {
             let target_name = TargetName::try_from(artifact.target.as_str())
                 .map_err(|error| RepositoryError::LocateTarget {
                     target: artifact.target.clone(),
@@ -146,9 +200,9 @@ impl ArtifactsWithPlan {
                     RepositoryError::MissingTarget(artifact.target.clone())
                 })?;
 
-            plan_builder
+            builder
                 .add_artifact(
-                    artifact.into_id(),
+                    artifact.clone().into_id(),
                     artifact_hash,
                     stream,
                     &mut by_id,
@@ -159,12 +213,17 @@ impl ArtifactsWithPlan {
 
         // Ensure we know how to apply updates from this set of artifacts; we'll
         // remember the plan we create.
-        let plan = plan_builder.build()?;
+        let plan = builder.build()?;
 
-        Ok(Self { by_id, by_hash: by_hash.into(), plan })
+        Ok(Self { artifacts, by_id, by_hash: by_hash.into(), plan })
     }
 
-    pub(super) fn by_id(&self) -> &BTreeMap<ArtifactId, Vec<ArtifactHashId>> {
+    /// Returns the `ArtifactsDocument` corresponding to this TUF repo.
+    pub fn artifacts(&self) -> &ArtifactsDocument {
+        &self.artifacts
+    }
+
+    pub fn by_id(&self) -> &BTreeMap<ArtifactId, Vec<ArtifactHashId>> {
         &self.by_id
     }
 
@@ -175,11 +234,11 @@ impl ArtifactsWithPlan {
         &self.by_hash
     }
 
-    pub(super) fn plan(&self) -> &UpdatePlan {
+    pub fn plan(&self) -> &UpdatePlan {
         &self.plan
     }
 
-    pub(super) fn get_by_hash(
+    pub fn get_by_hash(
         &self,
         id: &ArtifactHashId,
     ) -> Option<ExtractedArtifactDataHandle> {

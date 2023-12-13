@@ -1876,49 +1876,73 @@ CREATE INDEX IF NOT EXISTS lookup_console_by_silo_user ON omicron.public.console
 
 /*******************************************************************/
 
-CREATE TYPE IF NOT EXISTS omicron.public.update_artifact_kind AS ENUM (
-    -- Sled artifacts
-    'gimlet_sp',
-    'gimlet_rot',
-    'host',
-    'trampoline',
-    'control_plane',
+-- Describes a single uploaded TUF repo.
+--
+-- Identified by both a random uuid and its SHA256 hash. The hash could be the
+-- primary key, but it seems unnecessarily large and unwieldy.
+CREATE TABLE IF NOT EXISTS omicron.public.tuf_repo (
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
 
-    -- PSC artifacts
-    'psc_sp',
-    'psc_rot',
+    sha256 STRING(64) NOT NULL,
 
-    -- Switch artifacts
-    'switch_sp',
-    'switch_rot'
-);
-
-CREATE TABLE IF NOT EXISTS omicron.public.update_artifact (
-    name STRING(63) NOT NULL,
-    version STRING(63) NOT NULL,
-    kind omicron.public.update_artifact_kind NOT NULL,
-
-    /* the version of the targets.json role this came from */
+    -- The version of the targets.json role that was used to generate the repo.
     targets_role_version INT NOT NULL,
 
-    /* when the metadata this artifact was cached from expires */
+    -- The valid_until time for the repo.
     valid_until TIMESTAMPTZ NOT NULL,
 
-    /* data about the target from the targets.json role */
-    target_name STRING(512) NOT NULL,
-    target_sha256 STRING(64) NOT NULL,
-    target_length INT NOT NULL,
+    -- The system version described in the TUF repo.
+    system_version STRING(64) NOT NULL,
+
+    -- For debugging only:
+    -- Filename provided by the user.
+    source_file TEXT NOT NULL,
+
+    CONSTRAINT unique_checksum UNIQUE (sha256)
+);
+
+-- Describes an individual artifact from an uploaded TUF repo.
+--
+-- In the future, this may also be used to describe artifacts that are fetched
+-- from a remote TUF repo, but that requires some additional design work.
+CREATE TABLE IF NOT EXISTS omicron.public.tuf_artifact (
+    name STRING(63) NOT NULL,
+    version STRING(63) NOT NULL,
+    -- This used to be an enum but is now a string, because it can represent
+    -- artifact kinds currently unknown to a particular version of Nexus as
+    -- well.
+    kind STRING(63) NOT NULL,
+
+    -- The time this artifact was first recorded.
+    time_created TIMESTAMPTZ NOT NULL,
+
+    -- The SHA256 hash of the artifact, typically obtained from the TUF
+    -- targets.json (and validated at extract time).
+    sha256 STRING(64) NOT NULL,
+    -- The length of the artifact, in bytes.
+    artifact_length INT NOT NULL,
 
     PRIMARY KEY (name, version, kind)
 );
 
-/* This index is used to quickly find outdated artifacts. */
-CREATE INDEX IF NOT EXISTS lookup_artifact_by_targets_role_version ON omicron.public.update_artifact (
-    targets_role_version
+-- Reflects that a particular artifact was provided by a particular TUF repo.
+-- This is a many-many mapping.
+CREATE TABLE IF NOT EXISTS omicron.public.tuf_repo_artifact (
+    tuf_repo_id UUID NOT NULL,
+    tuf_artifact_name STRING(63) NOT NULL,
+    tuf_artifact_version STRING(63) NOT NULL,
+    tuf_artifact_kind STRING(63) NOT NULL,
+
+    PRIMARY KEY (
+        tuf_repo_id, tuf_artifact_name, tuf_artifact_version, tuf_artifact_kind
+    )
 );
 
 /*
- * System updates
+ * System updates.
+ * 
+ * These tables will have to be re-done once the update planner is ready.
  */
 CREATE TABLE IF NOT EXISTS omicron.public.system_update (
     /* Identity metadata (asset) */

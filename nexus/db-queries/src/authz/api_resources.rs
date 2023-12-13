@@ -36,7 +36,6 @@ use crate::authn;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::fixed_data::FLEET_ID;
-use crate::db::model::KnownArtifactKind;
 use crate::db::model::SemverVersion;
 use crate::db::DataStore;
 use authz_macros::authz_resource;
@@ -1009,9 +1008,17 @@ authz_resource! {
 }
 
 authz_resource! {
-    name = "UpdateArtifact",
+    name = "TufRepo",
     parent = "Fleet",
-    primary_key = (String, SemverVersion, KnownArtifactKind),
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = FleetChild,
+}
+
+authz_resource! {
+    name = "TufArtifact",
+    parent = "Fleet",
+    primary_key = (String, SemverVersion, String),
     roles_allowed = false,
     polar_snippet = FleetChild,
 }
