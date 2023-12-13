@@ -3693,7 +3693,6 @@ async fn test_instance_ephemeral_ip_from_orphan_pool(
     );
     create_ip_pool(&client, "orphan-pool", Some(orphan_pool_range)).await;
 
-    // this should 404
     let instance_name = "orphan-pool-inst";
     let body = params::InstanceCreate {
         identity: IdentityMetadataCreateParams {
@@ -3703,9 +3702,7 @@ async fn test_instance_ephemeral_ip_from_orphan_pool(
         ncpus: InstanceCpuCount(4),
         memory: ByteCount::from_gibibytes_u32(1),
         hostname: String::from("the_host"),
-        user_data:
-            b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
-                .to_vec(),
+        user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![params::ExternalIpCreate::Ephemeral {
             pool_name: Some("orphan-pool".parse().unwrap()),
@@ -3714,15 +3711,10 @@ async fn test_instance_ephemeral_ip_from_orphan_pool(
         start: true,
     };
 
+    // instance create 404s
     let url = format!("/v1/instances?project={}", PROJECT_NAME);
-    let error = NexusRequest::new(
-        RequestBuilder::new(&client, http::Method::POST, &url)
-            .expect_status(Some(StatusCode::NOT_FOUND))
-            .body(Some(&body)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute_and_parse_unwrap::<dropshot::HttpErrorResponseBody>()
-    .await;
+    let error =
+        object_create_error(client, &url, &body, StatusCode::NOT_FOUND).await;
 
     assert_eq!(error.error_code.unwrap(), "ObjectNotFound".to_string());
     assert_eq!(
@@ -3740,20 +3732,62 @@ async fn test_instance_ephemeral_ip_from_orphan_pool(
         object_create(client, "/v1/system/ip-pools/orphan-pool/silos", &params)
             .await;
 
-    let error = NexusRequest::new(
-        RequestBuilder::new(&client, http::Method::POST, &url)
-            .expect_status(Some(StatusCode::NOT_FOUND))
-            .body(Some(&body)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute_and_parse_unwrap::<dropshot::HttpErrorResponseBody>()
-    .await;
+    let error =
+        object_create_error(client, &url, &body, StatusCode::NOT_FOUND).await;
 
     assert_eq!(error.error_code.unwrap(), "ObjectNotFound".to_string());
     assert_eq!(
         error.message,
         "not found: ip-pool with name \"orphan-pool\"".to_string()
     );
+}
+
+// Test the error when creating an instance with an IP from the default pool,
+// but there is no default pool
+#[nexus_test]
+async fn test_instance_ephemeral_ip_no_default_pool_error(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let _ = create_project(&client, PROJECT_NAME).await;
+
+    // important: no pool create, so there is no pool
+
+    let body = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "no-default-pool".parse().unwrap(),
+            description: "".to_string(),
+        },
+        ncpus: InstanceCpuCount(4),
+        memory: ByteCount::from_gibibytes_u32(1),
+        hostname: String::from("the_host"),
+        user_data: vec![],
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![params::ExternalIpCreate::Ephemeral {
+            pool_name: None, // <--- the only important thing here
+        }],
+        disks: vec![],
+        start: true,
+    };
+
+    let url = format!("/v1/instances?project={}", PROJECT_NAME);
+    let error =
+        object_create_error(client, &url, &body, StatusCode::NOT_FOUND).await;
+    let msg = "not found: ip-pool with id \"Default pool for current silo\""
+        .to_string();
+    assert_eq!(error.message, msg);
+
+    // same deal if you specify a pool that doesn't exist
+    let body = params::InstanceCreate {
+        external_ips: vec![params::ExternalIpCreate::Ephemeral {
+            pool_name: Some("nonexistent-pool".parse().unwrap()),
+        }],
+        ..body
+    };
+    let error =
+        object_create_error(client, &url, &body, StatusCode::NOT_FOUND).await;
+    assert_eq!(error.message, msg);
 }
 
 #[nexus_test]

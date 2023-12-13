@@ -11,6 +11,7 @@ use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::error::public_error_from_diesel;
+use crate::db::error::public_error_from_diesel_lookup;
 use crate::db::error::ErrorHandler;
 use crate::db::fixed_data::silo::INTERNAL_SILO_ID;
 use crate::db::identity::Resource;
@@ -137,6 +138,11 @@ impl DataStore {
 
         // join ip_pool to ip_pool_resource and filter
 
+        // used in both success and error outcomes
+        let lookup_type = LookupType::ByCompositeId(
+            "Default pool for current silo".to_string(),
+        );
+
         ip_pool::table
             .inner_join(ip_pool_resource::table)
             .filter(
@@ -156,18 +162,20 @@ impl DataStore {
                 &*self.pool_connection_authorized(opctx).await?,
             )
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-            .map(|ip_pool| {
-                (
-                    authz::IpPool::new(
-                        authz::FLEET,
-                        ip_pool.id(),
-                        LookupType::ByCompositeId(
-                            "Default IP Pool".to_string(),
-                        ),
-                    ),
-                    ip_pool,
+            .map_err(|e| {
+                // janky to do this manually, but this is an unusual kind of
+                // lookup in that it is by (silo_id, is_default=true), which is
+                // arguably a composite ID.
+                public_error_from_diesel_lookup(
+                    e,
+                    ResourceType::IpPool,
+                    &lookup_type,
                 )
+            })
+            .map(|ip_pool| {
+                let authz_pool =
+                    authz::IpPool::new(authz::FLEET, ip_pool.id(), lookup_type);
+                (authz_pool, ip_pool)
             })
     }
 
@@ -858,7 +866,7 @@ mod test {
 
         // we start out with no default pool, so we expect not found
         let error = datastore.ip_pools_fetch_default(&opctx).await.unwrap_err();
-        assert_matches!(error, Error::InternalError { .. });
+        assert_matches!(error, Error::ObjectNotFound { .. });
 
         let silo_id = opctx.authn.silo_required().unwrap().id();
 
@@ -887,7 +895,7 @@ mod test {
         // because that one was not a default, when we ask for the silo default
         // pool, we still get nothing
         let error = datastore.ip_pools_fetch_default(&opctx).await.unwrap_err();
-        assert_matches!(error, Error::InternalError { .. });
+        assert_matches!(error, Error::ObjectNotFound { .. });
 
         // now we can change that association to is_default=true and
         // it should update rather than erroring out
@@ -948,7 +956,7 @@ mod test {
             .expect("Failed to dissociate IP pool from silo");
 
         let error = datastore.ip_pools_fetch_default(&opctx).await.unwrap_err();
-        assert_matches!(error, Error::InternalError { .. });
+        assert_matches!(error, Error::ObjectNotFound { .. });
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
