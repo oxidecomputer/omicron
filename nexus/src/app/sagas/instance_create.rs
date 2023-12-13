@@ -680,7 +680,14 @@ async fn sic_allocate_instance_external_ip_undo(
                 .fetch_for(authz::Action::Modify)
                 .await?;
 
-            datastore.floating_ip_detach(&opctx, &authz_fip, &db_fip).await?;
+            datastore
+                .floating_ip_detach(
+                    &opctx,
+                    &authz_fip,
+                    &db_fip,
+                    Some(repeat_saga_params.instance_id),
+                )
+                .await?;
         }
     }
     Ok(())

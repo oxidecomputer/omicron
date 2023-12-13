@@ -296,7 +296,7 @@ impl super::Nexus {
         opctx: &OpContext,
         instance_id: Uuid,
         sled_ip_address: &std::net::SocketAddrV6,
-        ip_index_filter: Option<usize>,
+        ip_filter: Option<Uuid>,
         dpd_client: &Arc<dpd_client::Client>,
     ) -> Result<(), Error> {
         let log = &self.log;
@@ -344,33 +344,25 @@ impl super::Nexus {
             .instance_lookup_external_ips(&opctx, instance_id)
             .await?;
 
-        if let Some(wanted_index) = ip_index_filter {
-            if let None = ips.get(wanted_index) {
+        let ips_of_interest = if let Some(wanted_id) = ip_filter {
+            if let Some(ip) = ips.iter().find(|v| v.id == wanted_id) {
+                std::slice::from_ref(ip)
+            } else {
                 return Err(Error::internal_error(&format!(
-                    "failed to find external ip address at index: {}",
-                    wanted_index
+                    "failed to find external ip address with id: {wanted_id}",
                 )));
             }
-        }
+        } else {
+            &ips[..]
+        };
 
         let sled_address =
             Ipv6Net(Ipv6Network::new(*sled_ip_address.ip(), 128).unwrap());
 
-        for target_ip in ips
-            .iter()
-            .enumerate()
-            .filter(|(index, _)| {
-                if let Some(wanted_index) = ip_index_filter {
-                    *index == wanted_index
-                } else {
-                    true
-                }
-            })
-            .map(|(_, ip)| ip)
-        {
+        for external_ip in ips_of_interest {
             // For each external ip, add a nat entry to the database
             self.ensure_nat_entry(
-                target_ip,
+                external_ip,
                 sled_address,
                 &network_interface,
                 mac_address,

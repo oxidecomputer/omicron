@@ -2480,8 +2480,6 @@ async fn instance_disk_detach(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-
-
 // Certificates
 
 /// List certificates for external endpoints
@@ -3671,8 +3669,13 @@ async fn instance_external_ip_attach(
         };
         let instance_lookup =
             nexus.instance_lookup(&opctx, instance_selector)?;
-        let disk =
-            nexus.instance_attach_external_ip(&opctx, &instance_lookup, &ip_to_detach.into_inner()).await?;
+        let disk = nexus
+            .instance_attach_external_ip(
+                &opctx,
+                &instance_lookup,
+                &ip_to_detach.into_inner(),
+            )
+            .await?;
         Ok(HttpResponseAccepted(disk.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -3702,8 +3705,13 @@ async fn instance_external_ip_detach(
         };
         let instance_lookup =
             nexus.instance_lookup(&opctx, instance_selector)?;
-        let disk =
-            nexus.instance_detach_external_ip(&opctx, &instance_lookup, &ip_to_detach.into_inner()).await?;
+        let disk = nexus
+            .instance_detach_external_ip(
+                &opctx,
+                &instance_lookup,
+                &ip_to_detach.into_inner(),
+            )
+            .await?;
         Ok(HttpResponseAccepted(disk.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await

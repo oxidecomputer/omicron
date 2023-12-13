@@ -16,10 +16,10 @@ use crate::long_running_tasks::LongRunningTaskHandles;
 use crate::metrics::MetricsManager;
 use crate::nexus::{ConvertInto, NexusClientWithResolver, NexusRequestQueue};
 use crate::params::{
-    DiskStateRequested, InstanceExternalIpBody, InstanceHardware, InstanceMigrationSourceParams,
-    InstancePutStateResponse, InstanceStateRequested,
-    InstanceUnregisterResponse, ServiceEnsureBody, SledRole, TimeSync,
-    VpcFirewallRule, ZoneBundleMetadata, Zpool,
+    DiskStateRequested, InstanceExternalIpBody, InstanceHardware,
+    InstanceMigrationSourceParams, InstancePutStateResponse,
+    InstanceStateRequested, InstanceUnregisterResponse, ServiceEnsureBody,
+    SledRole, TimeSync, VpcFirewallRule, ZoneBundleMetadata, Zpool,
 };
 use crate::services::{self, ServiceManager};
 use crate::storage_monitor::UnderlayAccess;

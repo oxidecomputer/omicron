@@ -467,7 +467,7 @@ impl DataStore {
         authz_fip: &authz::FloatingIp,
         db_fip: &FloatingIp,
         instance_id: Uuid,
-    ) -> UpdateResult<(FloatingIp, Option<Uuid>)> {
+    ) -> UpdateResult<FloatingIp> {
         use db::schema::external_ip::dsl;
 
         // Verify this FIP is not attached to any instances/services.
@@ -484,8 +484,6 @@ impl DataStore {
 
         opctx.authorize(authz::Action::Modify, authz_fip).await?;
         opctx.authorize(authz::Action::Modify, &authz_instance).await?;
-
-        let i = self.instance_fetch_with_vmm(opctx, &authz_instance).await?;
 
         let out = diesel::update(dsl::external_ip)
             .filter(dsl::id.eq(db_fip.id()))
@@ -508,7 +506,7 @@ impl DataStore {
             .and_then(|r| FloatingIp::try_from(r))
             .map_err(|e| Error::internal_error(&format!("{e}")))?;
 
-        Ok((out, i.sled_id()))
+        Ok(out)
     }
 
     /// Detaches a Floating IP address from an instance.
