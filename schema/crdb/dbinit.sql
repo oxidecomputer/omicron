@@ -1554,7 +1554,7 @@ CREATE TYPE IF NOT EXISTS omicron.public.ip_pool_resource_type AS ENUM (
 -- join table associating IP pools with resources like fleet or silo
 CREATE TABLE IF NOT EXISTS omicron.public.ip_pool_resource (
     ip_pool_id UUID NOT NULL,
-    resource_type ip_pool_resource_type NOT NULL,
+    resource_type omicron.public.ip_pool_resource_type NOT NULL,
     resource_id UUID NOT NULL,
     is_default BOOL NOT NULL,
     -- TODO: timestamps for soft deletes?
