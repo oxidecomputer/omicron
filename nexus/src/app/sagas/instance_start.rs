@@ -72,8 +72,10 @@ declare_saga_actions! {
 
     // Only account for the instance's resource consumption when the saga is on
     // the brink of actually starting it. This allows prior steps' undo actions
-    // to mark an instance as Failed without affecting the instance's generation
-    // number (which needs to remain fixed
+    // to change the instance's generation number if warranted (e.g. by moving
+    // the instance to the Failed state) without disrupting this step's undo
+    // action (which depends on the instance bearing the same generation number
+    // at undo time that it had at resource accounting time).
     ADD_VIRTUAL_RESOURCES -> "virtual_resources" {
         + sis_account_virtual_resources
         - sis_account_virtual_resources_undo
