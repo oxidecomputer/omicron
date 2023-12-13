@@ -451,7 +451,7 @@ impl CollectionBuilder {
             usable_hardware_threads: inventory.usable_hardware_threads,
             usable_physical_ram: ByteCount::from(inventory.usable_physical_ram),
             reservoir_size: ByteCount::from(inventory.reservoir_size),
-            time_collected: Utc::now(),
+            time_collected: now(),
             sled_id,
         };
 
@@ -513,6 +513,8 @@ mod test {
     use nexus_types::inventory::CabooseWhich;
     use nexus_types::inventory::RotPage;
     use nexus_types::inventory::RotPageWhich;
+    use nexus_types::inventory::SledRole;
+    use omicron_common::api::external::ByteCount;
 
     // Verify the contents of an empty collection.
     #[test]
@@ -554,9 +556,11 @@ mod test {
         let time_before = now();
         let Representative {
             builder,
-            sleds: [sled1_bb, sled2_bb, sled3_bb],
+            sleds: [sled1_bb, sled2_bb, sled3_bb, sled4_bb],
             switch,
             psc,
+            sled_agents:
+                [sled_agent_id_basic, sled_agent_id_extra, sled_agent_id_pc, sled_agent_id_unknown],
         } = representative();
         let collection = builder.build();
         let time_after = now();
@@ -570,21 +574,27 @@ mod test {
         // no RoT information.
         assert_eq!(
             collection.errors.iter().map(|e| e.to_string()).collect::<Vec<_>>(),
-            ["MGS \"fake MGS 1\": reading RoT state for BaseboardId \
+            [
+                "MGS \"fake MGS 1\": reading RoT state for BaseboardId \
                 { part_number: \"model1\", serial_number: \"s2\" }: test suite \
-                injected error"]
+                injected error",
+                "sled 5c5b4cf9-3e13-45fd-871c-f177d6537510: reported unknown \
+                baseboard"
+            ]
         );
 
         // Verify the baseboard ids found.
         let expected_baseboards =
-            &[&sled1_bb, &sled2_bb, &sled3_bb, &switch, &psc];
+            &[&sled1_bb, &sled2_bb, &sled3_bb, &sled4_bb, &switch, &psc];
         for bb in expected_baseboards {
             assert!(collection.baseboards.contains(*bb));
         }
         assert_eq!(collection.baseboards.len(), expected_baseboards.len());
 
         // Verify the stuff that's easy to verify for all SPs: timestamps.
-        assert_eq!(collection.sps.len(), collection.baseboards.len());
+        // There will be one more baseboard than SP because of the one added for
+        // the extra sled agent.
+        assert_eq!(collection.sps.len() + 1, collection.baseboards.len());
         for (bb, sp) in collection.sps.iter() {
             assert!(collection.time_started <= sp.time_collected);
             assert!(sp.time_collected <= collection.time_done);
@@ -846,6 +856,42 @@ mod test {
         // plus the common one; same for RoT pages.
         assert_eq!(collection.cabooses.len(), 5);
         assert_eq!(collection.rot_pages.len(), 5);
+
+        // Verify that we found the sled agents.
+        assert_eq!(collection.sled_agents.len(), 4);
+        for (sled_id, sled_agent) in &collection.sled_agents {
+            assert_eq!(*sled_id, sled_agent.sled_id);
+            if *sled_id == sled_agent_id_extra {
+                assert_eq!(sled_agent.sled_role, SledRole::Scrimlet);
+            } else {
+                assert_eq!(sled_agent.sled_role, SledRole::Gimlet);
+            }
+
+            assert_eq!(
+                sled_agent.sled_agent_address,
+                "[::1]:56792".parse().unwrap()
+            );
+            assert_eq!(sled_agent.usable_hardware_threads, 10);
+            assert_eq!(
+                sled_agent.usable_physical_ram,
+                ByteCount::from(1024 * 1024)
+            );
+            assert_eq!(sled_agent.reservoir_size, ByteCount::from(1024 * 1024));
+        }
+
+        let sled1_agent = &collection.sled_agents[&sled_agent_id_basic];
+        let sled1_bb = sled1_agent.baseboard_id.as_ref().unwrap();
+        assert_eq!(sled1_bb.part_number, "model1");
+        assert_eq!(sled1_bb.serial_number, "s1");
+        let sled4_agent = &collection.sled_agents[&sled_agent_id_extra];
+        let sled4_bb = sled4_agent.baseboard_id.as_ref().unwrap();
+        assert_eq!(sled4_bb.serial_number, "s4");
+        assert!(collection.sled_agents[&sled_agent_id_pc]
+            .baseboard_id
+            .is_none());
+        assert!(collection.sled_agents[&sled_agent_id_unknown]
+            .baseboard_id
+            .is_none());
     }
 
     // Exercises all the failure cases that shouldn't happen in real systems.

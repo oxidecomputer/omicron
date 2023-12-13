@@ -17,6 +17,7 @@ use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageWhich;
 use std::sync::Arc;
 use strum::IntoEnumIterator;
+use uuid::Uuid;
 
 /// Returns an example Collection used for testing
 ///
@@ -264,19 +265,106 @@ pub fn representative() -> Representative {
 
     // We deliberately provide no RoT pages for sled2.
 
+    // Report some sled agents.
+    //
+    // This first one will match "sled1_bb"'s baseboard information.
+    let sled_agent_id_basic =
+        "c5aec1df-b897-49e4-8085-ccd975f9b529".parse().unwrap();
+    builder
+        .found_sled_inventory(
+            "fake sled agent 1",
+            sled_agent(
+                sled_agent_id_basic,
+                sled_agent_client::types::Baseboard::Gimlet {
+                    identifier: String::from("s1"),
+                    model: String::from("model1"),
+                    revision: 0,
+                },
+                sled_agent_client::types::SledRole::Gimlet,
+            ),
+        )
+        .unwrap();
+
+    // Here, we report a different sled *with* baseboard information that
+    // doesn't match one of the baseboards we found.  This is unlikely but could
+    // happen.  Make this one a Scrimlet.
+    let sled4_bb = Arc::new(BaseboardId {
+        part_number: String::from("model1"),
+        serial_number: String::from("s4"),
+    });
+    let sled_agent_id_extra =
+        "d7efa9c4-833d-4354-a9a2-94ba9715c154".parse().unwrap();
+    builder
+        .found_sled_inventory(
+            "fake sled agent 4",
+            sled_agent(
+                sled_agent_id_extra,
+                sled_agent_client::types::Baseboard::Gimlet {
+                    identifier: sled4_bb.serial_number.clone(),
+                    model: sled4_bb.part_number.clone(),
+                    revision: 0,
+                },
+                sled_agent_client::types::SledRole::Scrimlet,
+            ),
+        )
+        .unwrap();
+
+    // Now report a different sled as though it were a PC.  It'd be unlikely to
+    // see a mix of real Oxide hardware and PCs in the same deployment, but this
+    // exercises different code paths.
+    let sled_agent_id_pc =
+        "c4a5325b-e852-4747-b28a-8aaa7eded8a0".parse().unwrap();
+    builder
+        .found_sled_inventory(
+            "fake sled agent 5",
+            sled_agent(
+                sled_agent_id_pc,
+                sled_agent_client::types::Baseboard::Pc {
+                    identifier: String::from("fellofftruck1"),
+                    model: String::from("fellofftruck"),
+                },
+                sled_agent_client::types::SledRole::Gimlet,
+            ),
+        )
+        .unwrap();
+
+    // Finally, report a sled with unknown baseboard information.  This should
+    // look the same as the PC as far as inventory is concerned but let's verify
+    // it.
+    let sled_agent_id_unknown =
+        "5c5b4cf9-3e13-45fd-871c-f177d6537510".parse().unwrap();
+
+    builder
+        .found_sled_inventory(
+            "fake sled agent 6",
+            sled_agent(
+                sled_agent_id_unknown,
+                sled_agent_client::types::Baseboard::Unknown,
+                sled_agent_client::types::SledRole::Gimlet,
+            ),
+        )
+        .unwrap();
+
     Representative {
         builder,
-        sleds: [sled1_bb, sled2_bb, sled3_bb],
+        sleds: [sled1_bb, sled2_bb, sled3_bb, sled4_bb],
         switch: switch1_bb,
         psc: psc_bb,
+        sled_agents: [
+            sled_agent_id_basic,
+            sled_agent_id_extra,
+            sled_agent_id_pc,
+            sled_agent_id_unknown,
+        ],
     }
 }
 
 pub struct Representative {
     pub builder: CollectionBuilder,
-    pub sleds: [Arc<BaseboardId>; 3],
+    pub sleds: [Arc<BaseboardId>; 4],
     pub switch: Arc<BaseboardId>,
     pub psc: Arc<BaseboardId>,
+    pub sled_agents: [Uuid; 4],
 }
 
 /// Returns an SP state that can be used to populate a collection for testing
@@ -312,5 +400,24 @@ pub fn rot_page(unique: &str) -> RotPage {
     use base64::Engine;
     RotPage {
         data_base64: base64::engine::general_purpose::STANDARD.encode(unique),
+    }
+}
+
+pub fn sled_agent(
+    sled_id: Uuid,
+    baseboard: sled_agent_client::types::Baseboard,
+    role: sled_agent_client::types::SledRole,
+) -> sled_agent_client::types::Inventory {
+    sled_agent_client::types::Inventory {
+        baseboard,
+        reservoir_size: sled_agent_client::types::ByteCount::from(1024),
+        // XXX-dap rename to sled_role
+        role,
+        sled_agent_address: "[::1]:56792".parse().unwrap(),
+        sled_id,
+        usable_hardware_threads: 10,
+        usable_physical_ram: sled_agent_client::types::ByteCount::from(
+            1024 * 1024,
+        ),
     }
 }

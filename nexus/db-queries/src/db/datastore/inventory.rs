@@ -952,7 +952,15 @@ impl DataStore {
         // start removing it and we'd also need to make sure we didn't leak a
         // collection if we crash while deleting it.
         let conn = self.pool_connection_authorized(opctx).await?;
-        let (ncollections, nsps, nrots, ncabooses, nrot_pages, nerrors) = conn
+        let (
+            ncollections,
+            nsps,
+            nrots,
+            ncabooses,
+            nrot_pages,
+            nsled_agents,
+            nerrors,
+        ) = conn
             .transaction_async(|conn| async move {
                 // Remove the record describing the collection itself.
                 let ncollections = {
@@ -1008,6 +1016,17 @@ impl DataStore {
                     .await?
                 };
 
+                // Remove rows for sled agents found.
+                let nsled_agents = {
+                    use db::schema::inv_sled_agent::dsl;
+                    diesel::delete(
+                        dsl::inv_sled_agent
+                            .filter(dsl::inv_collection_id.eq(collection_id)),
+                    )
+                    .execute_async(&conn)
+                    .await?
+                };
+
                 // Remove rows for errors encountered.
                 let nerrors = {
                     use db::schema::inv_collection_error::dsl;
@@ -1019,7 +1038,15 @@ impl DataStore {
                     .await?
                 };
 
-                Ok((ncollections, nsps, nrots, ncabooses, nrot_pages, nerrors))
+                Ok((
+                    ncollections,
+                    nsps,
+                    nrots,
+                    ncabooses,
+                    nrot_pages,
+                    nsled_agents,
+                    nerrors,
+                ))
             })
             .await
             .map_err(|error| match error {
@@ -1036,6 +1063,7 @@ impl DataStore {
             "nrots" => nrots,
             "ncabooses" => ncabooses,
             "nrot_pages" => nrot_pages,
+            "nsled_agents" => nsled_agents,
             "nerrors" => nerrors,
         );
 
@@ -1666,7 +1694,7 @@ mod test {
         assert_eq!(collection1, collection_read);
 
         // There ought to be no baseboards, cabooses, or RoT pages in the
-        // databases from that collection.
+        // database from that collection.
         assert_eq!(collection1.baseboards.len(), 0);
         assert_eq!(collection1.cabooses.len(), 0);
         assert_eq!(collection1.rot_pages.len(), 0);

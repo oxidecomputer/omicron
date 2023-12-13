@@ -617,7 +617,7 @@ impl InvSledAgent {
         // one with a baseboard id and one without.  This would muck up all the
         // other consumers of this type, just for a highly database-specific
         // concern.
-        if sled_agent.baseboard_id.is_none() {
+        if sled_agent.baseboard_id.is_some() {
             Err(anyhow!(
                 "attempted to directly insert InvSledAgent with \
                 non-null baseboard id"

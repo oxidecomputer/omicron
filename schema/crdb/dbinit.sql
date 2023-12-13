@@ -2886,7 +2886,7 @@ CREATE TYPE IF NOT EXISTS omicron.public.sled_role AS ENUM (
     -- this sled is directly attached to a Sidecar
     'scrimlet',
     -- everything else
-    'gimlet',
+    'gimlet'
 );
 
 -- observations from and about sled agents
