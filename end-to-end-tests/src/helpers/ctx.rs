@@ -78,7 +78,7 @@ fn rss_config() -> Result<SetupServiceConfig> {
     let content =
         std::fs::read_to_string(&path).unwrap_or(RSS_CONFIG_STR.to_string());
     toml::from_str(&content)
-        .with_context(|| format!("parsing config-rss as TOML"))
+        .with_context(|| "parsing config-rss as TOML".to_string())
 }
 
 fn nexus_external_dns_name(config: &SetupServiceConfig) -> String {

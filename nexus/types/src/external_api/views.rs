@@ -49,6 +49,14 @@ pub struct Silo {
         BTreeMap<shared::SiloRole, BTreeSet<shared::FleetRole>>,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SiloQuotas {
+    pub silo_id: Uuid,
+    pub cpus: i64,
+    pub memory: ByteCount,
+    pub storage: ByteCount,
+}
+
 // IDENTITY PROVIDER
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]

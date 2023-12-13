@@ -702,6 +702,7 @@ pub enum ResourceType {
     Silo,
     SiloUser,
     SiloGroup,
+    SiloQuotas,
     IdentityProvider,
     SamlIdentityProvider,
     SshKey,

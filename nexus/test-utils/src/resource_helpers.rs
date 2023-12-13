@@ -376,6 +376,7 @@ pub async fn create_silo(
                 name: silo_name.parse().unwrap(),
                 description: "a silo".to_string(),
             },
+            quotas: params::SiloQuotasCreate::arbitrarily_high_default(),
             discoverable,
             identity_mode,
             admin_group_name: None,

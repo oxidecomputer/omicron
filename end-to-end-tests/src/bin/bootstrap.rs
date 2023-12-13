@@ -5,11 +5,11 @@ use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use oxide_client::types::{
     ByteCount, DeviceAccessTokenRequest, DeviceAuthRequest, DeviceAuthVerify,
     DiskCreate, DiskSource, IpPoolCreate, IpPoolSiloLink, IpRange, Ipv4Range,
-    NameOrId,
+    NameOrId, SiloQuotasUpdate,
 };
 use oxide_client::{
     ClientDisksExt, ClientHiddenExt, ClientProjectsExt,
-    ClientSystemNetworkingExt,
+    ClientSystemNetworkingExt, ClientSystemSilosExt,
 };
 use serde::{de::DeserializeOwned, Deserialize};
 use std::time::Duration;
@@ -61,6 +61,19 @@ async fn main() -> Result<()> {
         .ip_pool_range_add()
         .pool(pool_name)
         .body(IpRange::V4(Ipv4Range { first, last }))
+        .send()
+        .await?;
+
+    // ===== SET UP QUOTAS ===== //
+    eprintln!("setting up quotas...");
+    client
+        .silo_quotas_update()
+        .silo("recovery")
+        .body(SiloQuotasUpdate {
+            cpus: Some(16),
+            memory: Some(ByteCount(1024 * 1024 * 1024 * 10)),
+            storage: Some(ByteCount(1024 * 1024 * 1024 * 1024)),
+        })
         .send()
         .await?;
 

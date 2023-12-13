@@ -235,7 +235,7 @@ linear-map = "1.2.0"
 macaddr = { version = "1.0.1", features = ["serde_std"] }
 maplit = "1.0.2"
 mime_guess = "2.0.4"
-mockall = "0.11"
+mockall = "0.12"
 newtype_derive = "0.1.6"
 mg-admin-client = { path = "clients/mg-admin-client" }
 nexus-client = { path = "clients/nexus-client" }
@@ -261,7 +261,7 @@ omicron-sled-agent = { path = "sled-agent" }
 omicron-test-utils = { path = "test-utils" }
 omicron-zone-package = "0.9.1"
 oxide-client = { path = "clients/oxide-client" }
-oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "24ceba1969269e4d81bda83d8968d7d7f713c46b", features = [ "api", "std" ] }
+oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "01356ee8c5d876ce6614ea550e12114c10bcfb34", features = [ "api", "std" ] }
 once_cell = "1.19.0"
 openapi-lint = { git = "https://github.com/oxidecomputer/openapi-lint", branch = "main" }
 openapiv3 = "2.0.0"
@@ -269,7 +269,7 @@ openapiv3 = "2.0.0"
 openssl = "0.10"
 openssl-sys = "0.9"
 openssl-probe = "0.1.5"
-opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "24ceba1969269e4d81bda83d8968d7d7f713c46b" }
+opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "01356ee8c5d876ce6614ea550e12114c10bcfb34" }
 oso = "0.27"
 owo-colors = "3.5.0"
 oximeter = { path = "oximeter/oximeter" }
@@ -302,6 +302,7 @@ rand = "0.8.5"
 ratatui = "0.23.0"
 rayon = "1.8"
 rcgen = "0.11.3"
+reedline = "0.22.0"
 ref-cast = "1.0"
 regex = "1.10.2"
 regress = "0.7.1"
@@ -311,6 +312,7 @@ rpassword = "7.3.1"
 rstest = "0.18.2"
 rustfmt-wrapper = "0.2"
 rustls = "0.21.9"
+rustyline = "12.0.0"
 samael = { git = "https://github.com/njaremko/samael", features = ["xmlsec"], branch = "master" }
 schemars = "0.8.12"
 secrecy = "0.8.0"
@@ -344,6 +346,7 @@ sp-sim = { path = "sp-sim" }
 sprockets-common = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
 sprockets-host = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
 sprockets-rot = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
+sqlparser = { version = "0.36.1", features = [ "visitor" ] }
 static_assertions = "1.1.0"
 # Please do not change the Steno version to a Git dependency.  It makes it
 # harder than expected to make breaking changes (even if you specify a specific

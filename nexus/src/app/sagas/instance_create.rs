@@ -903,8 +903,7 @@ pub mod test {
     };
     use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
     use diesel::{
-        BoolExpressionMethods, ExpressionMethods, OptionalExtension, QueryDsl,
-        SelectableHelper,
+        ExpressionMethods, OptionalExtension, QueryDsl, SelectableHelper,
     };
     use dropshot::test_util::ClientTestContext;
     use nexus_db_queries::authn::saga::Serialized;
@@ -1073,68 +1072,6 @@ pub mod test {
             .unwrap()
     }
 
-    async fn no_virtual_provisioning_resource_records_exist(
-        datastore: &DataStore,
-    ) -> bool {
-        use nexus_db_queries::db::model::VirtualProvisioningResource;
-        use nexus_db_queries::db::schema::virtual_provisioning_resource::dsl;
-
-        let conn = datastore.pool_connection_for_tests().await.unwrap();
-
-        datastore
-            .transaction_retry_wrapper("no_virtual_provisioning_resource_records_exist")
-            .transaction(&conn, |conn| async move {
-                conn
-                    .batch_execute_async(nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL)
-                    .await
-                    .unwrap();
-
-                Ok(
-                    dsl::virtual_provisioning_resource
-                        .filter(dsl::resource_type.eq(nexus_db_queries::db::model::ResourceTypeProvisioned::Instance.to_string()))
-                        .select(VirtualProvisioningResource::as_select())
-                        .get_results_async::<VirtualProvisioningResource>(&conn)
-                        .await
-                        .unwrap()
-                        .is_empty()
-                )
-            }).await.unwrap()
-    }
-
-    async fn no_virtual_provisioning_collection_records_using_instances(
-        datastore: &DataStore,
-    ) -> bool {
-        use nexus_db_queries::db::model::VirtualProvisioningCollection;
-        use nexus_db_queries::db::schema::virtual_provisioning_collection::dsl;
-
-        let conn = datastore.pool_connection_for_tests().await.unwrap();
-
-        datastore
-            .transaction_retry_wrapper(
-                "no_virtual_provisioning_collection_records_using_instances",
-            )
-            .transaction(&conn, |conn| async move {
-                conn.batch_execute_async(
-                    nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL,
-                )
-                .await
-                .unwrap();
-                Ok(dsl::virtual_provisioning_collection
-                    .filter(
-                        dsl::cpus_provisioned
-                            .ne(0)
-                            .or(dsl::ram_provisioned.ne(0)),
-                    )
-                    .select(VirtualProvisioningCollection::as_select())
-                    .get_results_async::<VirtualProvisioningCollection>(&conn)
-                    .await
-                    .unwrap()
-                    .is_empty())
-            })
-            .await
-            .unwrap()
-    }
-
     async fn disk_is_detached(datastore: &DataStore) -> bool {
         use nexus_db_queries::db::model::Disk;
         use nexus_db_queries::db::schema::disk::dsl;
@@ -1170,11 +1107,14 @@ pub mod test {
         assert!(no_external_ip_records_exist(datastore).await);
         assert!(no_sled_resource_instance_records_exist(datastore).await);
         assert!(
-            no_virtual_provisioning_resource_records_exist(datastore).await
+            test_helpers::no_virtual_provisioning_resource_records_exist(
+                cptestctx
+            )
+            .await
         );
         assert!(
-            no_virtual_provisioning_collection_records_using_instances(
-                datastore
+            test_helpers::no_virtual_provisioning_collection_records_using_instances(
+                cptestctx
             )
             .await
         );
