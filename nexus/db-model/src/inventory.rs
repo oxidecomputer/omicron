@@ -7,9 +7,9 @@
 use crate::schema::{
     hw_baseboard_id, inv_caboose, inv_collection, inv_collection_error,
     inv_root_of_trust, inv_root_of_trust_page, inv_service_processor,
-    sw_caboose, sw_root_of_trust_page,
+    inv_sled_agent, sw_caboose, sw_root_of_trust_page,
 };
-use crate::{impl_enum_type, SqlU16, SqlU32};
+use crate::{impl_enum_type, ByteCount, SqlU16, SqlU32};
 use chrono::DateTime;
 use chrono::Utc;
 use diesel::backend::Backend;
@@ -537,4 +537,64 @@ pub struct InvRotPage {
 
     pub which: RotPageWhich,
     pub sw_root_of_trust_page_id: Uuid,
+}
+
+// See [`nexus_types::inventory::SledRole`].
+impl_enum_type!(
+    #[derive(SqlType, Debug, QueryId)]
+    #[diesel(postgres_type(name = "sled_role"))]
+    pub struct SledRoleEnum;
+
+    #[derive(
+        Copy,
+        Clone,
+        Debug,
+        AsExpression,
+        FromSqlRow,
+        PartialOrd,
+        Ord,
+        PartialEq,
+        Eq
+    )]
+    #[diesel(sql_type = SledRoleEnum)]
+    pub enum SledRole;
+
+    // Enum values
+    Gimlet => b"gimlet"
+    Scrimlet =>  b"scrimlet"
+);
+
+impl From<nexus_types::inventory::SledRole> for SledRole {
+    fn from(value: nexus_types::inventory::SledRole) -> Self {
+        match value {
+            nexus_types::inventory::SledRole::Gimlet => SledRole::Gimlet,
+            nexus_types::inventory::SledRole::Scrimlet => SledRole::Scrimlet,
+        }
+    }
+}
+
+impl From<SledRole> for nexus_types::inventory::SledRole {
+    fn from(value: SledRole) -> Self {
+        match value {
+            SledRole::Gimlet => nexus_types::inventory::SledRole::Gimlet,
+            SledRole::Scrimlet => nexus_types::inventory::SledRole::Scrimlet,
+        }
+    }
+}
+
+/// See [`nexus_types::inventory::SledAgent`].
+#[derive(Queryable, Clone, Debug, Selectable)]
+#[diesel(table_name = inv_sled_agent)]
+pub struct InvSledAgent {
+    pub inv_collection_id: Uuid,
+    pub time_collected: DateTime<Utc>,
+    pub source: String,
+    pub sled_id: Uuid,
+    pub hw_baseboard_id: Option<Uuid>,
+    pub sled_agent_ip: crate::ipv6::Ipv6Addr,
+    pub sled_agent_port: SqlU16,
+    pub role: SledRole,
+    pub usable_hardware_threads: SqlU32,
+    pub usable_physical_ram: ByteCount,
+    pub reservoir_size: ByteCount,
 }

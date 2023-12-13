@@ -1301,6 +1301,24 @@ table! {
 }
 
 table! {
+    inv_sled_agent (inv_collection_id, sled_id) {
+        inv_collection_id -> Uuid,
+        time_collected -> Timestamptz,
+        source -> Text,
+        sled_id -> Uuid,
+
+        hw_baseboard_id -> Nullable<Uuid>,
+
+        sled_agent_ip -> Inet,
+        sled_agent_port -> Int4,
+        role -> crate::SledRoleEnum,
+        usable_hardware_threads -> Int8,
+        usable_physical_ram -> Int8,
+        reservoir_size -> Int8,
+    }
+}
+
+table! {
     bootstore_keys (key, generation) {
         key -> Text,
         generation -> Int8,

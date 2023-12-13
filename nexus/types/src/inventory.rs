@@ -93,8 +93,8 @@ pub struct Collection {
     pub rot_pages_found:
         BTreeMap<RotPageWhich, BTreeMap<Arc<BaseboardId>, RotPageFound>>,
 
-    /// Sleds, by *sled* id
-    pub sleds: BTreeMap<Uuid, Sled>,
+    /// Sled Agent information, by *sled* id
+    pub sleds: BTreeMap<Uuid, SledAgent>,
 
     /// Omicron zones found, by *sled* id
     pub omicron_zones: BTreeMap<Uuid, OmicronZonesConfig>,
@@ -273,19 +273,20 @@ impl IntoRotPage for gateway_client::types::RotCfpa {
     }
 }
 
-/// Describes a sled that's part of the control plane
+/// Inventory reported by sled agent
 ///
 /// This is a software notion of a sled, distinct from an underlying baseboard.
 /// A sled may be on a PC (in dev/test environments) and have no associated
 /// baseboard.  There might also be baseboards with no associated sled (if
 /// they have not been formally added to the control plane).
-// XXX-dap call this OmicronSled?
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Sled {
+pub struct SledAgent {
+    pub time_collected: DateTime<Utc>,
     pub source: String,
+    pub sled_id: Uuid,
+    pub baseboard: Option<Arc<BaseboardId>>,
     pub sled_agent_address: SocketAddrV6,
     pub role: SledRole,
-    pub baseboard: Option<Arc<BaseboardId>>,
     pub usable_hardware_threads: u32,
     pub usable_physical_ram: ByteCount,
     pub reservoir_size: ByteCount,

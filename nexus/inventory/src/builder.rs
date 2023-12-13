@@ -25,7 +25,7 @@ use nexus_types::inventory::RotPageFound;
 use nexus_types::inventory::RotPageWhich;
 use nexus_types::inventory::RotState;
 use nexus_types::inventory::ServiceProcessor;
-use nexus_types::inventory::Sled;
+use nexus_types::inventory::SledAgent;
 use omicron_common::api::external::ByteCount;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -84,7 +84,7 @@ pub struct CollectionBuilder {
         BTreeMap<CabooseWhich, BTreeMap<Arc<BaseboardId>, CabooseFound>>,
     rot_pages_found:
         BTreeMap<RotPageWhich, BTreeMap<Arc<BaseboardId>, RotPageFound>>,
-    sleds: BTreeMap<Uuid, Sled>,
+    sleds: BTreeMap<Uuid, SledAgent>,
     omicron_zones: BTreeMap<Uuid, OmicronZonesConfig>,
 }
 
@@ -443,7 +443,7 @@ impl CollectionBuilder {
                 return Ok(());
             }
         };
-        let sled = Sled {
+        let sled = SledAgent {
             source: source.to_string(),
             sled_agent_address,
             role: inventory.role,
@@ -451,19 +451,18 @@ impl CollectionBuilder {
             usable_hardware_threads: inventory.usable_hardware_threads,
             usable_physical_ram: ByteCount::from(inventory.usable_physical_ram),
             reservoir_size: ByteCount::from(inventory.reservoir_size),
+            time_collected: Utc::now(),
+            sled_id,
         };
 
         if let Some(previous) = self.sleds.get(&sled_id) {
-            let error = if *previous == sled {
-                anyhow!("reported multiple times (same value)",)
-            } else {
-                anyhow!(
-                    "reported sled multiple times (previously {:?}, now {:?})",
-                    previous,
-                    sled,
-                )
-            };
-            Err(error.context(format!("sled {:?}", sled_id,)))
+            Err(anyhow!(
+                "sled {:?}: reported sled multiple times \
+                (previously {:?}, now {:?})",
+                sled_id,
+                previous,
+                sled,
+            ))
         } else {
             self.sleds.insert(sled_id, sled);
             Ok(())

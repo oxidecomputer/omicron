@@ -2882,6 +2882,44 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_root_of_trust_page (
     PRIMARY KEY (inv_collection_id, hw_baseboard_id, which)
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.sled_role AS ENUM (
+    -- this sled is directly attached to a Sidecar
+    'scrimlet',
+    -- everything else
+    'gimlet',
+);
+
+-- observations from and about sled agents
+CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+    -- when this observation was made
+    time_collected TIMESTAMPTZ NOT NULL,
+    -- which MGS instance reported this data
+    source TEXT NOT NULL,
+
+    -- unique id for this sled (foreign key into `sled` table)
+    sled_id UUID NOT NULL,
+
+    -- which system this sled agent reports it's running on
+    -- (foreign key into `hw_baseboard_id` table)
+    -- This is optional because dev/test systems support running on non-Oxide
+    -- hardware.
+    hw_baseboard_id UUID,
+
+    -- Many of the following properties are duplicated from the `sled` table,
+    -- which predates the current inventory system.
+    sled_agent_address TEXT NOT NULL,
+    role omicron.public.sled_role NOT NULL,
+    usable_hardware_threads INT8
+        CHECK (usable_hardware_threads BETWEEN 0 AND 4294967295) NOT NULL,
+    usable_physical_ram INT8 NOT NULL,
+    reservoir_size INT8 CHECK (reservoir_size < usable_physical_ram) NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, sled_id)
+);
+
 /*******************************************************************/
 
 /*
