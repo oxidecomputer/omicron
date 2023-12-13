@@ -50,7 +50,7 @@ pub fn from_diesel(e: DieselError) -> external::Error {
             NOT_ENOUGH_CPUS_SENTINEL => {
                 return external::Error::InsufficientCapacity {
                     message: MessagePair::new_full(
-                         "Insufficient Capacity: Not enough CPUs to complete request. Either stop unused instances to free up resources or contact the rack operator to request a capacity increase.".to_string(),
+                         "vCPU Limit Exceeded: Not enough vCPUs to complete request. Either stop unused instances to free up resources or contact the rack operator to request a capacity increase.".to_string(),
                          "User tried to allocate an instance but the virtual provisioning resource table indicated that there were not enough CPUs available to satisfy the request.".to_string(),
                     )
                 }
@@ -58,7 +58,7 @@ pub fn from_diesel(e: DieselError) -> external::Error {
             NOT_ENOUGH_MEMORY_SENTINEL => {
                 return external::Error::InsufficientCapacity {
                     message: MessagePair::new_full(
-                         "Insufficient Capacity: Not enough memory to complete request. Either stop unused instances to free up resources or contact the rack operator to request a capacity increase.".to_string(),
+                         "Memory Limit Exceeded: Not enough memory to complete request. Either stop unused instances to free up resources or contact the rack operator to request a capacity increase.".to_string(),
                          "User tried to allocate an instance but the virtual provisioning resource table indicated that there were not enough RAM available to satisfy the request.".to_string(),
                     )
                 }
@@ -66,7 +66,7 @@ pub fn from_diesel(e: DieselError) -> external::Error {
             NOT_ENOUGH_STORAGE_SENTINEL => {
                 return external::Error::InsufficientCapacity {
                     message: MessagePair::new_full(
-                         "Insufficient Capacity: Not enough storage to complete request. Either remove unneeded disks and snapshots to free up resources or contact the rack operator to request a capacity increase.".to_string(),
+                         "Storage Limit Exceeded: Not enough storage to complete request. Either remove unneeded disks and snapshots to free up resources or contact the rack operator to request a capacity increase.".to_string(),
                          "User tried to allocate a disk or snapshot but the virtual provisioning resource table indicated that there were not enough storage available to satisfy the request.".to_string(),
                     )
                 }

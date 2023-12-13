@@ -1,4 +1,5 @@
-set local disallow_full_table_scans = off;
+set
+  local disallow_full_table_scans = off;
 
 -- Adds quotas for any existing silos without them. 
 -- The selected quotas are based on the resources of a half rack
@@ -18,8 +19,8 @@ SELECT
   NOW() AS time_created,
   NOW() AS time_modified,
   9999999999 AS cpus,
-  9999999999999999999 AS memory_bytes,
-  9999999999999999999 AS storage_bytes
+  999999999999999999 AS memory_bytes,
+  999999999999999999 AS storage_bytes
 FROM
   silo s
   LEFT JOIN silo_quotas sq ON s.id = sq.silo_id

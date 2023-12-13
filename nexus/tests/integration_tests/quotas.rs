@@ -1,5 +1,6 @@
 use anyhow::Error;
 use dropshot::test_util::ClientTestContext;
+use dropshot::HttpErrorResponseBody;
 use http::Method;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
@@ -97,8 +98,7 @@ impl ResourceAllocator {
                 format!("/v1/instances/{}/start?project=project", name)
                     .as_str(),
             )
-            .body(None as Option<&serde_json::Value>)
-            .expect_status(Some(http::StatusCode::ACCEPTED)),
+            .body(None as Option<&serde_json::Value>),
         )
         .authn_as(self.auth.clone())
         .execute()
@@ -140,10 +140,13 @@ impl ResourceAllocator {
         name: &str,
         size: u32,
     ) -> Result<TestResponse, Error> {
-        NexusRequest::objects_post(
-            client,
-            "/v1/disks?project=project",
-            &params::DiskCreate {
+        NexusRequest::new(
+            RequestBuilder::new(
+                client,
+                Method::POST,
+                "/v1/disks?project=project",
+            )
+            .body(Some(&params::DiskCreate {
                 identity: IdentityMetadataCreateParams {
                     name: name.parse().unwrap(),
                     description: "".into(),
@@ -152,7 +155,7 @@ impl ResourceAllocator {
                 disk_source: params::DiskSource::Blank {
                     block_size: params::BlockSize::try_from(512).unwrap(),
                 },
-            },
+            })),
         )
         .authn_as(self.auth.clone())
         .execute()
@@ -239,10 +242,17 @@ async fn test_quotas(cptestctx: &ControlPlaneTestContext) {
     .await;
 
     // Ensure trying to provision an instance with empty quotas fails
-    system
+    let err = system
         .provision_instance(client, "instance", 1, 1)
         .await
-        .expect_err("should've failed with insufficient CPU quota");
+        .expect("should've failed with insufficient CPU quota")
+        .parsed_body::<HttpErrorResponseBody>()
+        .expect("failed to parse error body");
+    assert!(
+        err.message.contains("vCPU Limit Exceeded"),
+        "Unexpected error: {0}",
+        err.message
+    );
     system.cleanup_instance(client, "instance").await;
 
     // Up the CPU, memory quotas
@@ -263,14 +273,36 @@ async fn test_quotas(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(quotas.memory, ByteCount::from_gibibytes_u32(15));
     assert_eq!(quotas.storage, ByteCount::from_gibibytes_u32(2));
 
+    // Ensure memory quota is enforced
+    let err = system
+        .provision_instance(client, "instance", 1, 16)
+        .await
+        .expect("should've failed with insufficient memory")
+        .parsed_body::<HttpErrorResponseBody>()
+        .expect("failed to parse error body");
+    assert!(
+        err.message.contains("Memory Limit Exceeded"),
+        "Unexpected error: {0}",
+        err.message
+    );
+    system.cleanup_instance(client, "instance").await;
+
     // Allocating instance should now succeed
     system
         .provision_instance(client, "instance", 2, 10)
         .await
         .expect("Instance should've had enough resources to be provisioned");
 
-    system.provision_disk(client, "disk", 3).await.expect_err(
-        "Disk should not be provisioned because it exceeds the quota",
+    let err = system
+        .provision_disk(client, "disk", 3)
+        .await
+        .expect("should've failed w/ disk quota exceeded error")
+        .parsed_body::<HttpErrorResponseBody>()
+        .expect("failed to parse error body");
+    assert!(
+        err.message.contains("Storage Limit Exceeded"),
+        "Unexpected error: {0}",
+        err.message
     );
 
     system
