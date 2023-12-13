@@ -245,7 +245,7 @@ async fn test_quotas(cptestctx: &ControlPlaneTestContext) {
     let err = system
         .provision_instance(client, "instance", 1, 1)
         .await
-        .expect("should've failed with insufficient CPU quota")
+        .unwrap()
         .parsed_body::<HttpErrorResponseBody>()
         .expect("failed to parse error body");
     assert!(
@@ -277,7 +277,7 @@ async fn test_quotas(cptestctx: &ControlPlaneTestContext) {
     let err = system
         .provision_instance(client, "instance", 1, 16)
         .await
-        .expect("should've failed with insufficient memory")
+        .unwrap()
         .parsed_body::<HttpErrorResponseBody>()
         .expect("failed to parse error body");
     assert!(
@@ -296,7 +296,7 @@ async fn test_quotas(cptestctx: &ControlPlaneTestContext) {
     let err = system
         .provision_disk(client, "disk", 3)
         .await
-        .expect("should've failed w/ disk quota exceeded error")
+        .unwrap()
         .parsed_body::<HttpErrorResponseBody>()
         .expect("failed to parse error body");
     assert!(
