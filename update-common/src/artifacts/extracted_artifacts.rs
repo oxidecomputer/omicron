@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::error::RepositoryError;
+use crate::errors::RepositoryError;
 use anyhow::Context;
 use camino::Utf8PathBuf;
 use camino_tempfile::NamedUtf8TempFile;
@@ -39,7 +39,7 @@ use tokio_util::io::ReaderStream;
 /// contexts where you need the data and need the temporary directory containing
 /// it to stick around.
 #[derive(Debug, Clone)]
-pub(crate) struct ExtractedArtifactDataHandle {
+pub struct ExtractedArtifactDataHandle {
     tempdir: Arc<Utf8TempDir>,
     file_size: usize,
     hash_id: ArtifactHashId,
@@ -61,11 +61,11 @@ impl Eq for ExtractedArtifactDataHandle {}
 
 impl ExtractedArtifactDataHandle {
     /// File size of this artifact in bytes.
-    pub(crate) fn file_size(&self) -> usize {
+    pub fn file_size(&self) -> usize {
         self.file_size
     }
 
-    pub(crate) fn hash(&self) -> ArtifactHash {
+    pub fn hash(&self) -> ArtifactHash {
         self.hash_id.hash
     }
 
@@ -73,7 +73,7 @@ impl ExtractedArtifactDataHandle {
     ///
     /// This can fail due to I/O errors outside our control (e.g., something
     /// removed the contents of our temporary directory).
-    pub(crate) async fn reader_stream(
+    pub async fn reader_stream(
         &self,
     ) -> anyhow::Result<ReaderStream<impl AsyncRead>> {
         let path = path_for_artifact(&self.tempdir, &self.hash_id);
@@ -96,7 +96,7 @@ impl ExtractedArtifactDataHandle {
 /// (e.g., when a new TUF repository is uploaded). The handles can be used to
 /// on-demand read files that were copied into the temp dir during ingest.
 #[derive(Debug)]
-pub(crate) struct ExtractedArtifacts {
+pub struct ExtractedArtifacts {
     // Directory in which we store extracted artifacts. This is currently a
     // single flat directory with files named by artifact hash; we don't expect
     // more than a few dozen files total, so no need to nest directories.
@@ -104,7 +104,7 @@ pub(crate) struct ExtractedArtifacts {
 }
 
 impl ExtractedArtifacts {
-    pub(super) fn new(log: &Logger) -> Result<Self, RepositoryError> {
+    pub fn new(log: &Logger) -> Result<Self, RepositoryError> {
         let tempdir = camino_tempfile::Builder::new()
             .prefix("wicketd-update-artifacts.")
             .tempdir()
@@ -125,7 +125,7 @@ impl ExtractedArtifacts {
 
     /// Copy from `stream` into our temp directory, returning a handle to the
     /// extracted artifact on success.
-    pub(super) async fn store(
+    pub async fn store(
         &mut self,
         artifact_hash_id: ArtifactHashId,
         stream: impl Stream<Item = Result<bytes::Bytes, tough::error::Error>>,
@@ -185,7 +185,7 @@ impl ExtractedArtifacts {
     /// As the returned file is written to, the data will be hashed; once
     /// writing is complete, call [`ExtractedArtifacts::store_tempfile()`] to
     /// persist the temporary file into an [`ExtractedArtifactDataHandle`].
-    pub(super) fn new_tempfile(
+    pub fn new_tempfile(
         &self,
     ) -> Result<HashingNamedUtf8TempFile, RepositoryError> {
         let file = NamedUtf8TempFile::new_in(self.tempdir.path()).map_err(
@@ -203,7 +203,7 @@ impl ExtractedArtifacts {
 
     /// Persist a temporary file that was returned by
     /// [`ExtractedArtifacts::new_tempfile()`] as an extracted artifact.
-    pub(super) fn store_tempfile(
+    pub fn store_tempfile(
         &self,
         kind: ArtifactKind,
         file: HashingNamedUtf8TempFile,
@@ -249,7 +249,7 @@ fn path_for_artifact(
 }
 
 // Wrapper around a `NamedUtf8TempFile` that hashes contents as they're written.
-pub(super) struct HashingNamedUtf8TempFile {
+pub struct HashingNamedUtf8TempFile {
     file: io::BufWriter<NamedUtf8TempFile>,
     hasher: Sha256,
     bytes_written: usize,

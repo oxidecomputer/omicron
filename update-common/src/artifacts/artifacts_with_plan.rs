@@ -2,10 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::error::RepositoryError;
-use super::update_plan::UpdatePlanBuilder;
 use super::ExtractedArtifactDataHandle;
 use super::UpdatePlan;
+use super::UpdatePlanBuilder;
+use crate::errors::RepositoryError;
 use camino_tempfile::Utf8TempDir;
 use debug_ignore::DebugIgnore;
 use omicron_common::update::ArtifactHash;
@@ -22,7 +22,7 @@ use tufaceous_lib::OmicronRepo;
 
 /// A collection of artifacts along with an update plan using those artifacts.
 #[derive(Debug)]
-pub(super) struct ArtifactsWithPlan {
+pub struct ArtifactsWithPlan {
     // Map of top-level artifact IDs (present in the TUF repo) to the actual
     // artifacts we're serving (e.g., a top-level RoT artifact will map to two
     // artifact hashes: one for each of the A and B images).
@@ -50,7 +50,7 @@ pub(super) struct ArtifactsWithPlan {
 }
 
 impl ArtifactsWithPlan {
-    pub(super) async fn from_zip<T>(
+    pub async fn from_zip<T>(
         zip_data: T,
         log: &Logger,
     ) -> Result<Self, RepositoryError>
@@ -81,7 +81,7 @@ impl ArtifactsWithPlan {
         // these are just direct copies of artifacts we just unpacked into
         // `dir`, but we'll also unpack nested artifacts like the RoT dual A/B
         // archives.
-        let mut plan_builder =
+        let mut builder =
             UpdatePlanBuilder::new(artifacts.system_version, log)?;
 
         // Make a pass through each artifact in the repo. For each artifact, we
@@ -146,7 +146,7 @@ impl ArtifactsWithPlan {
                     RepositoryError::MissingTarget(artifact.target.clone())
                 })?;
 
-            plan_builder
+            builder
                 .add_artifact(
                     artifact.into_id(),
                     artifact_hash,
@@ -159,12 +159,12 @@ impl ArtifactsWithPlan {
 
         // Ensure we know how to apply updates from this set of artifacts; we'll
         // remember the plan we create.
-        let plan = plan_builder.build()?;
+        let artifacts = builder.build()?;
 
-        Ok(Self { by_id, by_hash: by_hash.into(), plan })
+        Ok(Self { by_id, by_hash: by_hash.into(), plan: artifacts })
     }
 
-    pub(super) fn by_id(&self) -> &BTreeMap<ArtifactId, Vec<ArtifactHashId>> {
+    pub fn by_id(&self) -> &BTreeMap<ArtifactId, Vec<ArtifactHashId>> {
         &self.by_id
     }
 
@@ -175,11 +175,11 @@ impl ArtifactsWithPlan {
         &self.by_hash
     }
 
-    pub(super) fn plan(&self) -> &UpdatePlan {
+    pub fn plan(&self) -> &UpdatePlan {
         &self.plan
     }
 
-    pub(super) fn get_by_hash(
+    pub fn get_by_hash(
         &self,
         id: &ArtifactHashId,
     ) -> Option<ExtractedArtifactDataHandle> {
