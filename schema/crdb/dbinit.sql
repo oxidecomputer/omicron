@@ -2899,7 +2899,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     -- which MGS instance reported this data
     source TEXT NOT NULL,
 
-    -- unique id for this sled (foreign key into `sled` table)
+    -- unique id for this sled (should be foreign keys into `sled` table, though
+    -- it's conceivable a sled will report an id that we don't know about)
     sled_id UUID NOT NULL,
 
     -- which system this sled agent reports it's running on
@@ -2910,8 +2911,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
 
     -- Many of the following properties are duplicated from the `sled` table,
     -- which predates the current inventory system.
-    sled_agent_address TEXT NOT NULL,
-    role omicron.public.sled_role NOT NULL,
+    sled_agent_ip INET NOT NULL,
+    sled_agent_port INT4 NOT NULL,
+    sled_role omicron.public.sled_role NOT NULL,
     usable_hardware_threads INT8
         CHECK (usable_hardware_threads BETWEEN 0 AND 4294967295) NOT NULL,
     usable_physical_ram INT8 NOT NULL,

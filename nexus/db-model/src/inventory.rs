@@ -9,7 +9,8 @@ use crate::schema::{
     inv_root_of_trust, inv_root_of_trust_page, inv_service_processor,
     inv_sled_agent, sw_caboose, sw_root_of_trust_page,
 };
-use crate::{impl_enum_type, ByteCount, SqlU16, SqlU32};
+use crate::{impl_enum_type, ipv6, ByteCount, SqlU16, SqlU32};
+use anyhow::anyhow;
 use chrono::DateTime;
 use chrono::Utc;
 use diesel::backend::Backend;
@@ -583,7 +584,7 @@ impl From<SledRole> for nexus_types::inventory::SledRole {
 }
 
 /// See [`nexus_types::inventory::SledAgent`].
-#[derive(Queryable, Clone, Debug, Selectable)]
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_sled_agent)]
 pub struct InvSledAgent {
     pub inv_collection_id: Uuid,
@@ -591,10 +592,56 @@ pub struct InvSledAgent {
     pub source: String,
     pub sled_id: Uuid,
     pub hw_baseboard_id: Option<Uuid>,
-    pub sled_agent_ip: crate::ipv6::Ipv6Addr,
+    pub sled_agent_ip: ipv6::Ipv6Addr,
     pub sled_agent_port: SqlU16,
-    pub role: SledRole,
+    pub sled_role: SledRole,
     pub usable_hardware_threads: SqlU32,
     pub usable_physical_ram: ByteCount,
     pub reservoir_size: ByteCount,
+}
+
+impl InvSledAgent {
+    pub fn new_without_baseboard(
+        collection_id: Uuid,
+        sled_agent: &nexus_types::inventory::SledAgent,
+    ) -> Result<InvSledAgent, anyhow::Error> {
+        // It's irritating to have to check this case at runtime.  The challenge
+        // is that if this sled agent does have a baseboard id, we don't know
+        // what it's (SQL) id is.  The only way to get it is to query it from
+        // the database.  As a result, the caller takes a wholly different code
+        // path for that case that doesn't even involve constructing one of
+        // these objects.  (In fact, we never see the id in Rust.)
+        //
+        // To check this at compile time, we'd have to bifurcate
+        // `nexus_types::inventory::SledAgent` into an enum with two variants:
+        // one with a baseboard id and one without.  This would muck up all the
+        // other consumers of this type, just for a highly database-specific
+        // concern.
+        if sled_agent.baseboard_id.is_none() {
+            Err(anyhow!(
+                "attempted to directly insert InvSledAgent with \
+                non-null baseboard id"
+            ))
+        } else {
+            Ok(InvSledAgent {
+                inv_collection_id: collection_id,
+                time_collected: sled_agent.time_collected,
+                source: sled_agent.source.clone(),
+                sled_id: sled_agent.sled_id,
+                hw_baseboard_id: None,
+                sled_agent_ip: ipv6::Ipv6Addr::from(
+                    *sled_agent.sled_agent_address.ip(),
+                ),
+                sled_agent_port: SqlU16(sled_agent.sled_agent_address.port()),
+                sled_role: SledRole::from(sled_agent.sled_role),
+                usable_hardware_threads: SqlU32(
+                    sled_agent.usable_hardware_threads,
+                ),
+                usable_physical_ram: ByteCount::from(
+                    sled_agent.usable_physical_ram,
+                ),
+                reservoir_size: ByteCount::from(sled_agent.reservoir_size),
+            })
+        }
+    }
 }

@@ -39,9 +39,14 @@ use nexus_db_model::InvCollectionError;
 use nexus_db_model::InvRootOfTrust;
 use nexus_db_model::InvRotPage;
 use nexus_db_model::InvServiceProcessor;
+use nexus_db_model::InvSledAgent;
 use nexus_db_model::RotPageWhichEnum;
+use nexus_db_model::SledRole;
+use nexus_db_model::SledRoleEnum;
 use nexus_db_model::SpType;
 use nexus_db_model::SpTypeEnum;
+use nexus_db_model::SqlU16;
+use nexus_db_model::SqlU32;
 use nexus_db_model::SwCaboose;
 use nexus_db_model::SwRotPage;
 use nexus_types::inventory::BaseboardId;
@@ -106,6 +111,23 @@ impl DataStore {
                     index,
                     message.clone(),
                 ))
+            })
+            .collect::<Result<Vec<_>, Error>>()?;
+        // Partition the sled agents into those with an associated baseboard id
+        // and those without one.  We handle these pretty differently.
+        let (sled_agents_baseboards, sled_agents_no_baseboards): (
+            Vec<_>,
+            Vec<_>,
+        ) = collection
+            .sled_agents
+            .values()
+            .partition(|sled_agent| sled_agent.baseboard_id.is_some());
+        let sled_agents_no_baseboards = sled_agents_no_baseboards
+            .into_iter()
+            .map(|sled_agent| {
+                assert!(sled_agent.baseboard_id.is_none());
+                InvSledAgent::new_without_baseboard(collection_id, sled_agent)
+                    .map_err(|e| Error::internal_error(&e.to_string()))
             })
             .collect::<Result<Vec<_>, Error>>()?;
 
@@ -571,6 +593,111 @@ impl DataStore {
                         _which,
                     ) = dsl_inv_rot_page::inv_root_of_trust_page::all_columns();
                 }
+            }
+
+            // Insert rows for the sled agents that we found.  In practice, we'd
+            // expect these to all have baseboards (if using Oxide hardware) or
+            // none have baseboards (if not).
+            {
+                use db::schema::hw_baseboard_id::dsl as baseboard_dsl;
+                use db::schema::inv_sled_agent::dsl as sa_dsl;
+
+                // For sleds with a real baseboard id, we have to use the
+                // `INSERT INTO ... SELECT` pattern that we used for other types
+                // of rows above to pull in the baseboard id's uuid.
+                for sled_agent in &sled_agents_baseboards {
+                    let baseboard_id = sled_agent.baseboard_id.as_ref().expect(
+                        "already selected only sled agents with baseboards",
+                    );
+                    let selection = db::schema::hw_baseboard_id::table
+                        .select((
+                            collection_id.into_sql::<diesel::sql_types::Uuid>(),
+                            sled_agent
+                                .time_collected
+                                .into_sql::<diesel::sql_types::Timestamptz>(),
+                            sled_agent
+                                .source
+                                .clone()
+                                .into_sql::<diesel::sql_types::Text>(),
+                            sled_agent
+                                .sled_id
+                                .into_sql::<diesel::sql_types::Uuid>(),
+                            baseboard_dsl::id.nullable(),
+                            nexus_db_model::ipv6::Ipv6Addr::from(
+                                sled_agent.sled_agent_address.ip(),
+                            )
+                            .into_sql::<diesel::sql_types::Inet>(),
+                            SqlU16(sled_agent.sled_agent_address.port())
+                                .into_sql::<diesel::sql_types::Int4>(),
+                            SledRole::from(sled_agent.sled_role)
+                                .into_sql::<SledRoleEnum>(),
+                            SqlU32(sled_agent.usable_hardware_threads)
+                                .into_sql::<diesel::sql_types::Int8>(),
+                            nexus_db_model::ByteCount::from(
+                                sled_agent.usable_physical_ram,
+                            )
+                            .into_sql::<diesel::sql_types::Int8>(),
+                            nexus_db_model::ByteCount::from(
+                                sled_agent.reservoir_size,
+                            )
+                            .into_sql::<diesel::sql_types::Int8>(),
+                        ))
+                        .filter(
+                            baseboard_dsl::part_number
+                                .eq(baseboard_id.part_number.clone()),
+                        )
+                        .filter(
+                            baseboard_dsl::serial_number
+                                .eq(baseboard_id.serial_number.clone()),
+                        );
+
+                    let _ =
+                        diesel::insert_into(db::schema::inv_sled_agent::table)
+                            .values(selection)
+                            .into_columns((
+                                sa_dsl::inv_collection_id,
+                                sa_dsl::time_collected,
+                                sa_dsl::source,
+                                sa_dsl::sled_id,
+                                sa_dsl::hw_baseboard_id,
+                                sa_dsl::sled_agent_ip,
+                                sa_dsl::sled_agent_port,
+                                sa_dsl::sled_role,
+                                sa_dsl::usable_hardware_threads,
+                                sa_dsl::usable_physical_ram,
+                                sa_dsl::reservoir_size,
+                            ))
+                            .execute_async(&conn)
+                            .await?;
+
+                    // See the comment in the earlier block (where we use
+                    // `inv_service_processor::all_columns()`).  The same
+                    // applies here.
+                    let (
+                        _inv_collection_id,
+                        _time_collected,
+                        _source,
+                        _sled_id,
+                        _hw_baseboard_id,
+                        _sled_agent_ip,
+                        _sled_agent_port,
+                        _sled_role,
+                        _usable_hardware_threads,
+                        _usable_physical_ram,
+                        _reservoir_size,
+                    ) = sa_dsl::inv_sled_agent::all_columns();
+                }
+
+                // For sleds with no baseboard information, we can't use
+                // the same INSERT INTO ... SELECT pattern because we
+                // won't find anything in the hw_baseboard_id table.  It
+                // sucks that these are bifurcated code paths, but on
+                // the plus side, this is a much simpler INSERT, and we
+                // can insert all of them in one statement.
+                let _ = diesel::insert_into(db::schema::inv_sled_agent::table)
+                    .values(sled_agents_no_baseboards)
+                    .execute_async(&conn)
+                    .await?;
             }
 
             // Finally, insert the list of errors.
@@ -1313,7 +1440,7 @@ impl DataStore {
                 rots,
                 cabooses_found,
                 rot_pages_found,
-                sleds: BTreeMap::new(), // XXX-dap
+                sled_agents: BTreeMap::new(), // XXX-dap
                 omicron_zones: BTreeMap::new(), // XXX-dap
             },
             limit_reached,

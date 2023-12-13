@@ -126,7 +126,7 @@ impl CollectionBuilder {
             rots: self.rots,
             cabooses_found: self.cabooses_found,
             rot_pages_found: self.rot_pages_found,
-            sleds: self.sleds,
+            sled_agents: self.sleds,
             omicron_zones: self.omicron_zones,
         }
     }
@@ -407,7 +407,7 @@ impl CollectionBuilder {
 
         // Normalize the baseboard id, if any.
         use sled_agent_client::types::Baseboard;
-        let baseboard = match inventory.baseboard {
+        let baseboard_id = match inventory.baseboard {
             Baseboard::Pc { .. } => None,
             Baseboard::Gimlet { identifier, model, revision: _ } => {
                 Some(Self::normalize_item(
@@ -446,8 +446,8 @@ impl CollectionBuilder {
         let sled = SledAgent {
             source: source.to_string(),
             sled_agent_address,
-            role: inventory.role,
-            baseboard,
+            sled_role: inventory.role,
+            baseboard_id,
             usable_hardware_threads: inventory.usable_hardware_threads,
             usable_physical_ram: ByteCount::from(inventory.usable_physical_ram),
             reservoir_size: ByteCount::from(inventory.reservoir_size),

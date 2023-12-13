@@ -94,7 +94,7 @@ pub struct Collection {
         BTreeMap<RotPageWhich, BTreeMap<Arc<BaseboardId>, RotPageFound>>,
 
     /// Sled Agent information, by *sled* id
-    pub sleds: BTreeMap<Uuid, SledAgent>,
+    pub sled_agents: BTreeMap<Uuid, SledAgent>,
 
     /// Omicron zones found, by *sled* id
     pub omicron_zones: BTreeMap<Uuid, OmicronZonesConfig>,
@@ -284,9 +284,9 @@ pub struct SledAgent {
     pub time_collected: DateTime<Utc>,
     pub source: String,
     pub sled_id: Uuid,
-    pub baseboard: Option<Arc<BaseboardId>>,
+    pub baseboard_id: Option<Arc<BaseboardId>>,
     pub sled_agent_address: SocketAddrV6,
-    pub role: SledRole,
+    pub sled_role: SledRole,
     pub usable_hardware_threads: u32,
     pub usable_physical_ram: ByteCount,
     pub reservoir_size: ByteCount,

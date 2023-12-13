@@ -1311,7 +1311,7 @@ table! {
 
         sled_agent_ip -> Inet,
         sled_agent_port -> Int4,
-        role -> crate::SledRoleEnum,
+        sled_role -> crate::SledRoleEnum,
         usable_hardware_threads -> Int8,
         usable_physical_ram -> Int8,
         reservoir_size -> Int8,
@@ -1360,6 +1360,7 @@ allow_tables_to_appear_in_same_query!(
     sw_root_of_trust_page,
     inv_root_of_trust_page
 );
+allow_tables_to_appear_in_same_query!(hw_baseboard_id, inv_sled_agent,);
 
 allow_tables_to_appear_in_same_query!(
     dataset,
