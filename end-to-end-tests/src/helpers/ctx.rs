@@ -287,6 +287,10 @@ impl ClientParams {
             .build()?;
         Ok(Client::new_with_client(&base_url, reqwest_client))
     }
+
+    pub fn silo_name(&self) -> String {
+        self.rss_config.recovery_silo.silo_name.to_string()
+    }
 }
 
 async fn wait_for_records(
