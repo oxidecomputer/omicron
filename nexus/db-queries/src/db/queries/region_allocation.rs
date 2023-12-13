@@ -46,19 +46,23 @@ pub fn from_diesel(e: DieselError) -> external::Error {
         NOT_ENOUGH_UNIQUE_ZPOOLS_SENTINEL,
     ];
     if let Some(sentinel) = matches_sentinel(&e, &sentinels) {
+        let external_message = "Not enough storage";
         match sentinel {
             NOT_ENOUGH_DATASETS_SENTINEL => {
-                return external::Error::unavail(
+                return external::Error::insufficient_capacity(
+                    external_message,
                     "Not enough datasets to allocate disks",
                 );
             }
             NOT_ENOUGH_ZPOOL_SPACE_SENTINEL => {
-                return external::Error::unavail(
+                return external::Error::insufficient_capacity(
+                    external_message,
                     "Not enough zpool space to allocate disks. There may not be enough disks with space for the requested region. You may also see this if your rack is in a degraded state, or you're running the default multi-rack topology configuration in a 1-sled development environment.",
                 );
             }
             NOT_ENOUGH_UNIQUE_ZPOOLS_SENTINEL => {
-                return external::Error::unavail(
+                return external::Error::insufficient_capacity(
+                    external_message,
                     "Not enough unique zpools selected while allocating disks",
                 );
             }

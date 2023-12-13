@@ -4,6 +4,7 @@
 
 //! Sled agent implementation
 
+use crate::boot_disk_os_writer::BootDiskOsWriter;
 use crate::bootstrap::config::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use crate::bootstrap::early_networking::{
     EarlyNetworkConfig, EarlyNetworkSetupError,
@@ -264,6 +265,9 @@ struct SledAgentInner {
 
     // Object handling production of metrics for oximeter.
     metrics_manager: MetricsManager,
+
+    // Handle to the traffic manager for writing OS updates to our boot disks.
+    boot_disk_os_writer: BootDiskOsWriter,
 }
 
 impl SledAgentInner {
@@ -445,8 +449,11 @@ impl SledAgent {
                 })?;
 
             let early_network_config =
-                EarlyNetworkConfig::try_from(serialized_config)
-                    .map_err(|err| BackoffError::transient(err.to_string()))?;
+                EarlyNetworkConfig::deserialize_bootstore_config(
+                    &log,
+                    &serialized_config,
+                )
+                .map_err(|err| BackoffError::transient(err.to_string()))?;
 
             Ok(early_network_config.body.rack_network_config)
         };
@@ -542,6 +549,7 @@ impl SledAgent {
                 zone_bundler: long_running_task_handles.zone_bundler.clone(),
                 bootstore: long_running_task_handles.bootstore.clone(),
                 metrics_manager,
+                boot_disk_os_writer: BootDiskOsWriter::new(&parent_log),
             }),
             log: log.clone(),
         };
@@ -1039,6 +1047,14 @@ impl SledAgent {
     /// Return the metric producer registry.
     pub fn metrics_registry(&self) -> &ProducerRegistry {
         self.inner.metrics_manager.registry()
+    }
+
+    pub(crate) fn storage(&self) -> &StorageHandle {
+        &self.inner.storage
+    }
+
+    pub(crate) fn boot_disk_os_writer(&self) -> &BootDiskOsWriter {
+        &self.inner.boot_disk_os_writer
     }
 }
 

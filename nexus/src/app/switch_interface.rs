@@ -95,9 +95,9 @@ impl super::Nexus {
 
 pub fn validate_switch_location(switch_location: &str) -> Result<(), Error> {
     if switch_location != "switch0" && switch_location != "switch1" {
-        return Err(Error::InvalidRequest {
-            message: "Switch location must be switch0 or switch1".into(),
-        });
+        return Err(Error::invalid_request(
+            "Switch location must be switch0 or switch1",
+        ));
     }
     Ok(())
 }

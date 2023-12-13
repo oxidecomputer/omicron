@@ -5,6 +5,7 @@
 //! Queries for inserting and deleting network interfaces.
 
 use crate::db;
+use crate::db::error::{public_error_from_diesel, retryable, ErrorHandler};
 use crate::db::model::IncompleteNetworkInterface;
 use crate::db::pool::DbConnection;
 use crate::db::queries::next_item::DefaultShiftGenerator;
@@ -120,6 +121,8 @@ pub enum InsertError {
     InstanceMustBeStopped(Uuid),
     /// The instance does not exist at all, or is in the destroyed state.
     InstanceNotFound(Uuid),
+    /// The operation occurred within a transaction, and is retryable
+    Retryable(DieselError),
     /// Any other error
     External(external::Error),
 }
@@ -135,7 +138,6 @@ impl InsertError {
         e: DieselError,
         interface: &IncompleteNetworkInterface,
     ) -> Self {
-        use crate::db::error;
         match e {
             // Catch the specific errors designed to communicate the failures we
             // want to distinguish
@@ -143,9 +145,9 @@ impl InsertError {
                 decode_database_error(e, interface)
             }
             // Any other error at all is a bug
-            _ => InsertError::External(error::public_error_from_diesel(
+            _ => InsertError::External(public_error_from_diesel(
                 e,
-                error::ErrorHandler::Server,
+                ErrorHandler::Server,
             )),
         }
     }
@@ -208,6 +210,9 @@ impl InsertError {
             }
             InsertError::InstanceNotFound(id) => {
                 external::Error::not_found_by_id(external::ResourceType::Instance, &id)
+            }
+            InsertError::Retryable(err) => {
+                public_error_from_diesel(err, ErrorHandler::Server)
             }
             InsertError::External(e) => e,
         }
@@ -289,6 +294,10 @@ fn decode_database_error(
         r#"could not parse "non-unique-subnets" as type uuid: "#,
         r#"uuid: incorrect UUID length: non-unique-subnets"#,
     );
+
+    if retryable(&err) {
+        return InsertError::Retryable(err);
+    }
 
     match err {
         // If the address allocation subquery fails, we'll attempt to insert

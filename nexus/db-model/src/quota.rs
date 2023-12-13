@@ -1,3 +1,4 @@
+use super::ByteCount;
 use crate::schema::silo_quotas;
 use chrono::{DateTime, Utc};
 use nexus_types::external_api::{params, views};
@@ -20,13 +21,25 @@ pub struct SiloQuotas {
     pub time_created: DateTime<Utc>,
     pub time_modified: DateTime<Utc>,
 
+    /// The number of CPUs that this silo is allowed to use
     pub cpus: i64,
-    pub memory: i64,
-    pub storage: i64,
+
+    /// The amount of memory (in bytes) that this silo is allowed to use
+    #[diesel(column_name = memory_bytes)]
+    pub memory: ByteCount,
+
+    /// The amount of storage (in bytes) that this silo is allowed to use
+    #[diesel(column_name = storage_bytes)]
+    pub storage: ByteCount,
 }
 
 impl SiloQuotas {
-    pub fn new(silo_id: Uuid, cpus: i64, memory: i64, storage: i64) -> Self {
+    pub fn new(
+        silo_id: Uuid,
+        cpus: i64,
+        memory: ByteCount,
+        storage: ByteCount,
+    ) -> Self {
         Self {
             silo_id,
             time_created: Utc::now(),
@@ -36,6 +49,16 @@ impl SiloQuotas {
             storage,
         }
     }
+
+    pub fn arbitrarily_high_default(silo_id: Uuid) -> Self {
+        let count = params::SiloQuotasCreate::arbitrarily_high_default();
+        Self::new(
+            silo_id,
+            count.cpus,
+            count.memory.into(),
+            count.storage.into(),
+        )
+    }
 }
 
 impl From<SiloQuotas> for views::SiloQuotas {
@@ -43,8 +66,8 @@ impl From<SiloQuotas> for views::SiloQuotas {
         Self {
             silo_id: silo_quotas.silo_id,
             cpus: silo_quotas.cpus,
-            memory: silo_quotas.memory,
-            storage: silo_quotas.storage,
+            memory: silo_quotas.memory.into(),
+            storage: silo_quotas.storage.into(),
         }
     }
 }
@@ -56,8 +79,8 @@ impl From<views::SiloQuotas> for SiloQuotas {
             time_created: Utc::now(),
             time_modified: Utc::now(),
             cpus: silo_quotas.cpus,
-            memory: silo_quotas.memory,
-            storage: silo_quotas.storage,
+            memory: silo_quotas.memory.into(),
+            storage: silo_quotas.storage.into(),
         }
     }
 }
@@ -67,7 +90,9 @@ impl From<views::SiloQuotas> for SiloQuotas {
 #[diesel(table_name = silo_quotas)]
 pub struct SiloQuotasUpdate {
     pub cpus: Option<i64>,
+    #[diesel(column_name = memory_bytes)]
     pub memory: Option<i64>,
+    #[diesel(column_name = storage_bytes)]
     pub storage: Option<i64>,
     pub time_modified: DateTime<Utc>,
 }
@@ -76,8 +101,8 @@ impl From<params::SiloQuotasUpdate> for SiloQuotasUpdate {
     fn from(params: params::SiloQuotasUpdate) -> Self {
         Self {
             cpus: params.cpus,
-            memory: params.memory,
-            storage: params.storage,
+            memory: params.memory.map(|f| f.into()),
+            storage: params.storage.map(|f| f.into()),
             time_modified: Utc::now(),
         }
     }

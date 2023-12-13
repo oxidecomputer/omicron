@@ -4,11 +4,14 @@
 
 //! Tests basic instance support in the API
 
+use super::external_ips::floating_ip_get;
+use super::external_ips::get_floating_ip_by_id_url;
 use super::metrics::{get_latest_silo_metric, get_latest_system_metric};
 
 use camino::Utf8Path;
 use http::method::Method;
 use http::StatusCode;
+use itertools::Itertools;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_db_queries::db::fixed_data::silo::SILO_ID;
@@ -18,6 +21,7 @@ use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::create_disk;
+use nexus_test_utils::resource_helpers::create_floating_ip;
 use nexus_test_utils::resource_helpers::create_ip_pool;
 use nexus_test_utils::resource_helpers::create_local_user;
 use nexus_test_utils::resource_helpers::create_silo;
@@ -54,6 +58,7 @@ use omicron_nexus::TestInterfaces as _;
 use omicron_sled_agent::sim::SledAgent;
 use sled_agent_client::TestInterfaces as _;
 use std::convert::TryFrom;
+use std::net::Ipv4Addr;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -67,8 +72,6 @@ use nexus_test_utils::resource_helpers::{
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::shared::SiloRole;
 use omicron_sled_agent::sim;
-
-use httptest::{matchers::*, responders::*, Expectation, ServerBuilder};
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -1275,18 +1278,6 @@ async fn test_instance_using_image_from_other_project_fails(
     let client = &cptestctx.external_client;
     create_org_and_project(&client).await;
 
-    let server = ServerBuilder::new().run().unwrap();
-    server.expect(
-        Expectation::matching(request::method_path("HEAD", "/image.raw"))
-            .times(1..)
-            .respond_with(
-                status_code(200).append_header(
-                    "Content-Length",
-                    format!("{}", 4096 * 1000),
-                ),
-            ),
-    );
-
     // Create an image in springfield-squidport.
     let images_url = format!("/v1/images?project={}", PROJECT_NAME);
     let image_create_params = params::ImageCreate {
@@ -1298,10 +1289,7 @@ async fn test_instance_using_image_from_other_project_fails(
         },
         os: "alpine".to_string(),
         version: "edge".to_string(),
-        source: params::ImageSource::Url {
-            url: server.url("/image.raw").to_string(),
-            block_size: params::BlockSize::try_from(512).unwrap(),
-        },
+        source: params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
     };
     let image =
         NexusRequest::objects_post(client, &images_url, &image_create_params)
@@ -3202,7 +3190,7 @@ async fn test_instances_memory_greater_than_max_size(
     assert!(error.message.contains("memory must be less than"));
 }
 
-async fn expect_instance_start_fail_unavailable(
+async fn expect_instance_start_fail_507(
     client: &ClientTestContext,
     instance_name: &str,
 ) {
@@ -3211,13 +3199,15 @@ async fn expect_instance_start_fail_unavailable(
         http::Method::POST,
         &get_instance_start_url(instance_name),
     )
-    .expect_status(Some(http::StatusCode::SERVICE_UNAVAILABLE));
+    .expect_status(Some(http::StatusCode::INSUFFICIENT_STORAGE));
 
     NexusRequest::new(builder)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
-        .expect("Expected instance start to fail with SERVICE_UNAVAILABLE");
+        .expect(
+            "Expected instance start to fail with 507 Insufficient Storage",
+        );
 }
 
 async fn expect_instance_start_ok(
@@ -3308,9 +3298,7 @@ async fn test_cannot_provision_instance_beyond_cpu_capacity(
     for config in &configs {
         match config.2 {
             Ok(_) => expect_instance_start_ok(client, config.0).await,
-            Err(_) => {
-                expect_instance_start_fail_unavailable(client, config.0).await
-            }
+            Err(_) => expect_instance_start_fail_507(client, config.0).await,
         }
     }
 
@@ -3416,9 +3404,7 @@ async fn test_cannot_provision_instance_beyond_ram_capacity(
     for config in &configs {
         match config.2 {
             Ok(_) => expect_instance_start_ok(client, config.0).await,
-            Err(_) => {
-                expect_instance_start_fail_unavailable(client, config.0).await
-            }
+            Err(_) => expect_instance_start_fail_507(client, config.0).await,
         }
     }
 
@@ -3645,6 +3631,139 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
     );
 }
 
+#[nexus_test]
+async fn test_instance_attach_several_external_ips(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let _ = create_project(&client, PROJECT_NAME).await;
+
+    // Create a single (large) IP pool
+    let default_pool_range = IpRange::V4(
+        Ipv4Range::new(
+            std::net::Ipv4Addr::new(10, 0, 0, 1),
+            std::net::Ipv4Addr::new(10, 0, 0, 10),
+        )
+        .unwrap(),
+    );
+    populate_ip_pool(&client, "default", Some(default_pool_range)).await;
+
+    // Create several floating IPs for the instance, totalling 8 IPs.
+    let mut external_ip_create =
+        vec![params::ExternalIpCreate::Ephemeral { pool_name: None }];
+    let mut fips = vec![];
+    for i in 1..8 {
+        let name = format!("fip-{i}");
+        fips.push(
+            create_floating_ip(&client, &name, PROJECT_NAME, None, None).await,
+        );
+        external_ip_create.push(params::ExternalIpCreate::Floating {
+            floating_ip_name: name.parse().unwrap(),
+        });
+    }
+
+    // Create an instance with pool name blank, expect IP from default pool
+    let instance_name = "many-fips";
+    let instance = create_instance_with(
+        &client,
+        PROJECT_NAME,
+        instance_name,
+        &params::InstanceNetworkInterfaceAttachment::Default,
+        vec![],
+        external_ip_create,
+    )
+    .await;
+
+    // Verify that all external IPs are visible on the instance and have
+    // been allocated in order.
+    let external_ips =
+        fetch_instance_external_ips(&client, instance_name).await;
+    assert_eq!(external_ips.len(), 8);
+    eprintln!("{external_ips:?}");
+    for (i, eip) in external_ips
+        .iter()
+        .sorted_unstable_by(|a, b| a.ip.cmp(&b.ip))
+        .enumerate()
+    {
+        let last_octet = i + if i != external_ips.len() - 1 {
+            assert_eq!(eip.kind, IpKind::Floating);
+            1
+        } else {
+            // SNAT will occupy 1.0.0.8 here, since it it alloc'd before
+            // the ephemeral.
+            assert_eq!(eip.kind, IpKind::Ephemeral);
+            2
+        };
+        assert_eq!(eip.ip, Ipv4Addr::new(10, 0, 0, last_octet as u8));
+    }
+
+    // Verify that all floating IPs are bound to their parent instance.
+    for fip in fips {
+        let fetched_fip = floating_ip_get(
+            &client,
+            &get_floating_ip_by_id_url(&fip.identity.id),
+        )
+        .await;
+        assert_eq!(fetched_fip.instance_id, Some(instance.identity.id));
+    }
+}
+
+#[nexus_test]
+async fn test_instance_allow_only_one_ephemeral_ip(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let _ = create_project(&client, PROJECT_NAME).await;
+
+    // Create one IP pool with space for two ephemerals.
+    let default_pool_range = IpRange::V4(
+        Ipv4Range::new(
+            std::net::Ipv4Addr::new(10, 0, 0, 1),
+            std::net::Ipv4Addr::new(10, 0, 0, 2),
+        )
+        .unwrap(),
+    );
+    populate_ip_pool(&client, "default", Some(default_pool_range)).await;
+
+    let ephemeral_create = params::ExternalIpCreate::Ephemeral {
+        pool_name: Some("default".parse().unwrap()),
+    };
+    let error: HttpErrorResponseBody = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &get_instances_url())
+            .body(Some(&params::InstanceCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "default-pool-inst".parse().unwrap(),
+                    description: "instance default-pool-inst".into(),
+                },
+                ncpus: InstanceCpuCount(4),
+                memory: ByteCount::from_gibibytes_u32(1),
+                hostname: String::from("the_host"),
+                user_data:
+                    b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
+                        .to_vec(),
+                network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+                external_ips: vec![
+                    ephemeral_create.clone(), ephemeral_create
+                ],
+                disks: vec![],
+                start: true,
+            }))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
+    assert_eq!(
+        error.message,
+        "An instance may not have more than 1 ephemeral IP address"
+    );
+}
+
 async fn create_instance_with_pool(
     client: &ClientTestContext,
     instance_name: &str,
@@ -3663,10 +3782,10 @@ async fn create_instance_with_pool(
     .await
 }
 
-async fn fetch_instance_ephemeral_ip(
+async fn fetch_instance_external_ips(
     client: &ClientTestContext,
     instance_name: &str,
-) -> views::ExternalIp {
+) -> Vec<views::ExternalIp> {
     let ips_url = format!(
         "/v1/instances/{}/external-ips?project={}",
         instance_name, PROJECT_NAME
@@ -3678,9 +3797,18 @@ async fn fetch_instance_ephemeral_ip(
         .expect("Failed to fetch external IPs")
         .parsed_body::<ResultsPage<views::ExternalIp>>()
         .expect("Failed to parse external IPs");
-    assert_eq!(ips.items.len(), 1);
-    assert_eq!(ips.items[0].kind, IpKind::Ephemeral);
-    ips.items[0].clone()
+    ips.items
+}
+
+async fn fetch_instance_ephemeral_ip(
+    client: &ClientTestContext,
+    instance_name: &str,
+) -> views::ExternalIp {
+    fetch_instance_external_ips(client, instance_name)
+        .await
+        .into_iter()
+        .find(|v| v.kind == IpKind::Ephemeral)
+        .unwrap()
 }
 
 #[nexus_test]
@@ -3783,6 +3911,30 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
     instance_simulate_with_opctx(nexus, &instance.identity.id, &opctx).await;
     let instance = instance_get_as(&client, &instance_url, authn).await;
     assert_eq!(instance.runtime.run_state, InstanceState::Running);
+
+    // Stop the instance
+    NexusRequest::new(
+        RequestBuilder::new(
+            client,
+            Method::POST,
+            &format!("/v1/instances/{}/stop", instance.identity.id),
+        )
+        .body(None as Option<&serde_json::Value>)
+        .expect_status(Some(StatusCode::ACCEPTED)),
+    )
+    .authn_as(AuthnMode::SiloUser(user_id))
+    .execute()
+    .await
+    .expect("Failed to stop the instance");
+
+    instance_simulate_with_opctx(nexus, &instance.identity.id, &opctx).await;
+
+    // Delete the instance
+    NexusRequest::object_delete(client, &instance_url)
+        .authn_as(AuthnMode::SiloUser(user_id))
+        .execute()
+        .await
+        .expect("Failed to delete the instance");
 }
 
 /// Test that appropriate OPTE V2P mappings are created and deleted.

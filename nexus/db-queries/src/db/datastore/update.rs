@@ -8,15 +8,13 @@ use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
-use crate::db::error::{
-    public_error_from_diesel, ErrorHandler, TransactionError,
-};
+use crate::db::error::{public_error_from_diesel, ErrorHandler};
 use crate::db::model::{
     ComponentUpdate, SemverVersion, SystemUpdate, UpdateArtifact,
     UpdateDeployment, UpdateStatus, UpdateableComponent,
 };
 use crate::db::pagination::paginated;
-use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl};
+use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
 use nexus_db_model::SystemUpdateComponentUpdate;
@@ -141,36 +139,40 @@ impl DataStore {
 
         let version_string = update.version.to_string();
 
-        self.pool_connection_authorized(opctx)
-            .await?
-            .transaction_async(|conn| async move {
-                let db_update = diesel::insert_into(component_update::table)
-                    .values(update.clone())
-                    .returning(ComponentUpdate::as_returning())
-                    .get_result_async(&conn)
-                    .await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
 
-                diesel::insert_into(join_table::table)
-                    .values(SystemUpdateComponentUpdate {
-                        system_update_id,
-                        component_update_id: update.id(),
-                    })
-                    .returning(SystemUpdateComponentUpdate::as_returning())
-                    .get_result_async(&conn)
-                    .await?;
+        self.transaction_retry_wrapper("create_component_update")
+            .transaction(&conn, |conn| {
+                let update = update.clone();
+                async move {
+                    let db_update =
+                        diesel::insert_into(component_update::table)
+                            .values(update.clone())
+                            .returning(ComponentUpdate::as_returning())
+                            .get_result_async(&conn)
+                            .await?;
 
-                Ok(db_update)
+                    diesel::insert_into(join_table::table)
+                        .values(SystemUpdateComponentUpdate {
+                            system_update_id,
+                            component_update_id: update.id(),
+                        })
+                        .returning(SystemUpdateComponentUpdate::as_returning())
+                        .get_result_async(&conn)
+                        .await?;
+
+                    Ok(db_update)
+                }
             })
             .await
-            .map_err(|e| match e {
-                TransactionError::CustomError(e) => e,
-                TransactionError::Database(e) => public_error_from_diesel(
+            .map_err(|e| {
+                public_error_from_diesel(
                     e,
                     ErrorHandler::Conflict(
                         ResourceType::ComponentUpdate,
                         &version_string,
                     ),
-                ),
+                )
             })
     }
 

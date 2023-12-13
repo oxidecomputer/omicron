@@ -451,8 +451,6 @@ impl super::Nexus {
             .instance_lookup_external_ips(opctx, instance_id)
             .await?;
 
-        let boundary_switches = self.boundary_switches(opctx).await?;
-
         let mut errors = vec![];
         for entry in external_ips {
             // Soft delete the NAT entry
@@ -477,6 +475,9 @@ impl super::Nexus {
                 },
             }?;
         }
+
+        let boundary_switches =
+            self.boundary_switches(&self.opctx_alloc).await?;
 
         for switch in &boundary_switches {
             debug!(&self.log, "notifying dendrite of updates";

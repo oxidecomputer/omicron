@@ -157,9 +157,7 @@ mod test {
         app::saga::create_saga_dag, app::sagas::project_create::Params,
         app::sagas::project_create::SagaProjectCreate, external_api::params,
     };
-    use async_bb8_diesel::{
-        AsyncConnection, AsyncRunQueryDsl, AsyncSimpleConnection,
-    };
+    use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
     use diesel::{
         ExpressionMethods, OptionalExtension, QueryDsl, SelectableHelper,
     };
@@ -233,15 +231,16 @@ mod test {
         use nexus_db_queries::db::model::VirtualProvisioningCollection;
         use nexus_db_queries::db::schema::virtual_provisioning_collection::dsl;
 
-        datastore.pool_connection_for_tests()
-            .await
-            .unwrap()
-            .transaction_async(|conn| async move {
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        datastore
+            .transaction_retry_wrapper("no_virtual_provisioning_collection_records_for_projects")
+            .transaction(&conn, |conn| async move {
                 conn
                     .batch_execute_async(nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL)
                     .await
                     .unwrap();
-                Ok::<_, nexus_db_queries::db::TransactionError<()>>(
+                Ok(
                     dsl::virtual_provisioning_collection
                         .filter(dsl::collection_type.eq(nexus_db_queries::db::model::CollectionTypeProvisioned::Project.to_string()))
                         // ignore built-in services project

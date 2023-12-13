@@ -54,9 +54,9 @@ pub struct Silo {
 pub struct VirtualResourceCounts {
     /// Number of virtual CPUs
     pub cpus: i64,
-    /// Amount of memory in bytes 
+    /// Amount of memory in bytes
     pub memory: ByteCount,
-    /// Amount of disk storage in bytes 
+    /// Amount of disk storage in bytes
     pub storage: ByteCount,
 }
 
@@ -65,7 +65,7 @@ pub struct VirtualResourceCounts {
 pub struct SiloQuotas {
     pub silo_id: Uuid,
     #[serde(flatten)]
-    pub quotas: VirtualResourceCounts
+    pub quotas: VirtualResourceCounts,
 }
 
 /// View of a silo's resource utilization and capacity
@@ -76,13 +76,13 @@ pub struct Utilization {
     pub provisioned: VirtualResourceCounts,
     /// The total amount of resources that can be provisioned in this silo
     /// Actions that would exceed this limit will fail
-    pub capacity: VirtualResourceCounts, 
+    pub capacity: VirtualResourceCounts,
 }
 
 pub struct SiloUtilization {
     pub silo_id: Uuid,
     #[serde(flatten)]
-    pub utilization: Utilization
+    pub utilization: Utilization,
 }
 
 /// View of a fleet's utilization
@@ -93,7 +93,7 @@ pub struct SystemUtilization {
     pub provisioned: VirtualResourceCounts,
     /// Accounts for the total amount of resources reserved for silos via their quotas
     pub allocated: VirtualResourceCounts,
-    /// The total amount of virtual resources available to the system 
+    /// The total amount of virtual resources available to the system
     pub capacity: VirtualResourceCounts,
 }
 
@@ -180,9 +180,6 @@ pub struct Image {
 
     /// ID of the parent project if the image is a project image
     pub project_id: Option<Uuid>,
-
-    /// URL source of this image, if any
-    pub url: Option<String>,
 
     /// The family of the operating system like Debian, Ubuntu, etc.
     pub os: String,
@@ -311,6 +308,22 @@ pub struct IpPoolRange {
 pub struct ExternalIp {
     pub ip: IpAddr,
     pub kind: IpKind,
+}
+
+/// A Floating IP is a well-known IP address which can be attached
+/// and detached from instances.
+#[derive(ObjectIdentity, Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct FloatingIp {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    /// The IP address held by this resource.
+    pub ip: IpAddr,
+    /// The project this resource exists within.
+    pub project_id: Uuid,
+    /// The ID of the instance that this Floating IP is attached to,
+    /// if it is presently in use.
+    pub instance_id: Option<Uuid>,
 }
 
 // RACKS

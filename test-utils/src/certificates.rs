@@ -79,10 +79,10 @@ impl CertificateChain {
 fn tls_cert_to_pem(certs: &Vec<rustls::Certificate>) -> String {
     let mut serialized_certs = String::new();
     for cert in certs {
-        let encoded_cert = pem::encode(&pem::Pem {
-            tag: "CERTIFICATE".to_string(),
-            contents: cert.0.clone(),
-        });
+        let encoded_cert = pem::encode(&pem::Pem::new(
+            "CERTIFICATE".to_string(),
+            cert.0.clone(),
+        ));
 
         serialized_certs.push_str(&encoded_cert);
     }

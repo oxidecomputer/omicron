@@ -992,7 +992,7 @@ async fn test_disk_backed_by_multiple_region_sets(
             .body(Some(&new_disk))
             // TODO: this fails! the current allocation algorithm does not split
             // across datasets
-            .expect_status(Some(StatusCode::SERVICE_UNAVAILABLE)),
+            .expect_status(Some(StatusCode::INSUFFICIENT_STORAGE)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -1026,7 +1026,7 @@ async fn test_disk_too_big(cptestctx: &ControlPlaneTestContext) {
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &disks_url)
             .body(Some(&new_disk))
-            .expect_status(Some(StatusCode::SERVICE_UNAVAILABLE)),
+            .expect_status(Some(StatusCode::INSUFFICIENT_STORAGE)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -1457,7 +1457,7 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &disks_url)
             .body(Some(&disk_two))
-            .expect_status(Some(StatusCode::SERVICE_UNAVAILABLE)),
+            .expect_status(Some(StatusCode::INSUFFICIENT_STORAGE)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()

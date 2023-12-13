@@ -140,6 +140,11 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(ip_pool_service_range_add)?;
         api.register(ip_pool_service_range_remove)?;
 
+        api.register(floating_ip_list)?;
+        api.register(floating_ip_create)?;
+        api.register(floating_ip_view)?;
+        api.register(floating_ip_delete)?;
+
         api.register(disk_list)?;
         api.register(disk_create)?;
         api.register(disk_view)?;
@@ -149,7 +154,6 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(disk_bulk_write_import_start)?;
         api.register(disk_bulk_write_import)?;
         api.register(disk_bulk_write_import_stop)?;
-        api.register(disk_import_blocks_from_url)?;
         api.register(disk_finalize_import)?;
 
         api.register(instance_list)?;
@@ -528,8 +532,10 @@ async fn utilization_view(
     let handler = async {
         let nexus = &apictx.nexus;
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let authz_silo =
-            opctx.authn.silo_required().internal_context("get current silo utilization")?;
+        let authz_silo = opctx
+            .authn
+            .silo_required()
+            .internal_context("get current silo utilization")?;
         let silo_lookup = nexus.silo_lookup(&opctx, authz_silo.id().into())?;
         let quotas = nexus.silo_utilization_view(&opctx, &silo_lookup).await?;
 
@@ -594,8 +600,8 @@ async fn silo_utilization_list(
 /// Lists resource quotas for all silos
 #[endpoint {
     method = GET,
-    path = "/v1/system/quotas",
-    tags = ["system/quotas"],
+    path = "/v1/system/silo-quotas",
+    tags = ["system/silos"],
 }]
 async fn system_quotas_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -629,7 +635,7 @@ async fn system_quotas_list(
 #[endpoint {
     method = GET,
     path = "/v1/system/silos/{silo}/quotas",
-    tags = ["system/quotas"],
+    tags = ["system/silos"],
 }]
 async fn silo_quotas_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -649,10 +655,12 @@ async fn silo_quotas_view(
 }
 
 /// Update the resource quotas of a given silo
+///
+/// If a quota value is not specified, it will remain unchanged.
 #[endpoint {
     method = PUT,
     path = "/v1/system/silos/{silo}/quotas",
-    tags = ["system/quotas"],
+    tags = ["system/silos"],
 }]
 async fn silo_quotas_update(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -1689,6 +1697,126 @@ async fn ip_pool_service_range_remove(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+// Floating IP Addresses
+
+/// List all Floating IPs
+#[endpoint {
+    method = GET,
+    path = "/v1/floating-ips",
+    tags = ["floating-ips"],
+}]
+async fn floating_ip_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
+) -> Result<HttpResponseOk<ResultsPage<views::FloatingIp>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let query = query_params.into_inner();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+        let project_lookup =
+            nexus.project_lookup(&opctx, scan_params.selector.clone())?;
+        let ips = nexus
+            .floating_ips_list(&opctx, &project_lookup, &paginated_by)
+            .await?;
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
+            ips,
+            &marker_for_name_or_id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Create a Floating IP
+#[endpoint {
+    method = POST,
+    path = "/v1/floating-ips",
+    tags = ["floating-ips"],
+}]
+async fn floating_ip_create(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<params::ProjectSelector>,
+    floating_params: TypedBody<params::FloatingIpCreate>,
+) -> Result<HttpResponseCreated<views::FloatingIp>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let floating_params = floating_params.into_inner();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let project_lookup =
+            nexus.project_lookup(&opctx, query_params.into_inner())?;
+        let ip = nexus
+            .floating_ip_create(&opctx, &project_lookup, floating_params)
+            .await?;
+        Ok(HttpResponseCreated(ip))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Delete a Floating IP
+#[endpoint {
+    method = DELETE,
+    path = "/v1/floating-ips/{floating_ip}",
+    tags = ["floating-ips"],
+}]
+async fn floating_ip_delete(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::FloatingIpPath>,
+    query_params: Query<params::OptionalProjectSelector>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let floating_ip_selector = params::FloatingIpSelector {
+            floating_ip: path.floating_ip,
+            project: query.project,
+        };
+        let fip_lookup =
+            nexus.floating_ip_lookup(&opctx, floating_ip_selector)?;
+
+        nexus.floating_ip_delete(&opctx, fip_lookup).await?;
+        Ok(HttpResponseDeleted())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch a floating IP
+#[endpoint {
+    method = GET,
+    path = "/v1/floating-ips/{floating_ip}",
+    tags = ["floating-ips"]
+}]
+async fn floating_ip_view(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::FloatingIpPath>,
+    query_params: Query<params::OptionalProjectSelector>,
+) -> Result<HttpResponseOk<views::FloatingIp>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let floating_ip_selector = params::FloatingIpSelector {
+            floating_ip: path.floating_ip,
+            project: query.project,
+        };
+        let (.., fip) = nexus
+            .floating_ip_lookup(&opctx, floating_ip_selector)?
+            .fetch()
+            .await?;
+        Ok(HttpResponseOk(fip.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 // Disks
 
 /// List disks
@@ -1953,39 +2081,6 @@ async fn disk_bulk_write_import_stop(
         let disk_lookup = nexus.disk_lookup(&opctx, disk_selector)?;
 
         nexus.disk_manual_import_stop(&opctx, &disk_lookup).await?;
-
-        Ok(HttpResponseUpdatedNoContent())
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Request to import blocks from URL
-#[endpoint {
-    method = POST,
-    path = "/v1/disks/{disk}/import",
-    tags = ["disks"],
-}]
-async fn disk_import_blocks_from_url(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<params::DiskPath>,
-    query_params: Query<params::OptionalProjectSelector>,
-    import_params: TypedBody<params::ImportBlocksFromUrl>,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let query = query_params.into_inner();
-        let params = import_params.into_inner();
-
-        let disk_selector =
-            params::DiskSelector { disk: path.disk, project: query.project };
-        let disk_lookup = nexus.disk_lookup(&opctx, disk_selector)?;
-
-        nexus
-            .import_blocks_from_url_for_disk(&opctx, &disk_lookup, params)
-            .await?;
 
         Ok(HttpResponseUpdatedNoContent())
     };
@@ -5475,10 +5570,7 @@ async fn role_list(
             WhichPage::First(..) => None,
             WhichPage::Next(RolePage { last_seen }) => {
                 Some(last_seen.split_once('.').ok_or_else(|| {
-                    Error::InvalidValue {
-                        label: last_seen.clone(),
-                        message: String::from("bad page token"),
-                    }
+                    Error::invalid_value(last_seen.clone(), "bad page token")
                 })?)
                 .map(|(s1, s2)| (s1.to_string(), s2.to_string()))
             }
