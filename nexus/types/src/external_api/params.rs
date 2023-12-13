@@ -829,11 +829,19 @@ pub struct IpPoolSiloPath {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct IpPoolSiloLink {
     pub silo: NameOrId,
+    /// When a pool is the default for a silo, floating IPs and instance
+    /// ephemeral IPs will come from that pool when no other pool is specified.
+    /// There can be at most one default for a given silo.
     pub is_default: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct IpPoolSiloUpdate {
+    /// When a pool is the default for a silo, floating IPs and instance
+    /// ephemeral IPs will come from that pool when no other pool is specified.
+    /// There can be at most one default for a given silo, so when a pool is
+    /// made default, an existing default will remain linked but will no longer
+    /// be the default.
     pub is_default: bool,
 }
 

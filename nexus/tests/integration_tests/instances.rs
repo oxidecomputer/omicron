@@ -3622,9 +3622,6 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
     stop_instance(&cptestctx, "pool1-inst").await;
     stop_instance(&cptestctx, "pool2-inst").await;
 
-    // TODO: this still doesn't working because the SNAT IP is always created
-    // with the default pool, so even when pool2-inst was created by specifying
-    // pool2, the SNAT IP came from pool1
     object_delete(client, &pool1_silo_url).await;
 
     // create instance with pool1, expecting allocation to fail

@@ -5104,7 +5104,8 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Make an IP pool the default for a silo",
+        "summary": "Make an IP pool default or not-default for a silo",
+        "description": "When a pool is made default for a silo, any existing default will remain linked to the silo, but will no longer be the default.",
         "operationId": "ip_pool_silo_update",
         "parameters": [
           {
@@ -5157,7 +5158,8 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Remove an IP pool's association with a silo or project",
+        "summary": "Unlink an IP pool from a silo",
+        "description": "Will fail if there are any outstanding IPs allocated in the silo.",
         "operationId": "ip_pool_silo_unlink",
         "parameters": [
           {
@@ -12313,7 +12315,7 @@
         ]
       },
       "IpPool": {
-        "description": "Identity-related metadata that's included in nearly all public API objects",
+        "description": "A collection of IP ranges. If a pool is linked to a silo, IP addresses from the pool can be allocated within that silo",
         "type": "object",
         "properties": {
           "description": {
@@ -12437,6 +12439,7 @@
         ]
       },
       "IpPoolSilo": {
+        "description": "A link between an IP pool and a silo that allows one to allocate IPs from the pool within the silo",
         "type": "object",
         "properties": {
           "ip_pool_id": {
@@ -12444,6 +12447,7 @@
             "format": "uuid"
           },
           "is_default": {
+            "description": "When a pool is the default for a silo, floating IPs and instance ephemeral IPs will come from that pool when no other pool is specified. There can be at most one default for a given silo.",
             "type": "boolean"
           },
           "silo_id": {
@@ -12461,6 +12465,7 @@
         "type": "object",
         "properties": {
           "is_default": {
+            "description": "When a pool is the default for a silo, floating IPs and instance ephemeral IPs will come from that pool when no other pool is specified. There can be at most one default for a given silo.",
             "type": "boolean"
           },
           "silo": {
@@ -12497,6 +12502,7 @@
         "type": "object",
         "properties": {
           "is_default": {
+            "description": "When a pool is the default for a silo, floating IPs and instance ephemeral IPs will come from that pool when no other pool is specified. There can be at most one default for a given silo, so when a pool is made default, an existing default will remain linked but will no longer be the default.",
             "type": "boolean"
           }
         },

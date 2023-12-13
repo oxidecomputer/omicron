@@ -1278,12 +1278,6 @@ async fn project_ip_pool_view(
             .project_ip_pool_lookup(&opctx, &pool_selector, &project_lookup)?
             .fetch()
             .await?;
-        // TODO(2148): once we've actualy implemented filtering to pools belonging to
-        // the specified project, we can remove this internal check.
-        // TODO: do this? forget about it?
-        // if pool.silo_id == Some(*INTERNAL_SILO_ID) {
-        //     return Err(authz_pool.not_found().into());
-        // }
         Ok(HttpResponseOk(IpPool::from(pool)))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -1485,7 +1479,9 @@ async fn ip_pool_silo_link(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Remove an IP pool's association with a silo or project
+/// Unlink an IP pool from a silo
+///
+/// Will fail if there are any outstanding IPs allocated in the silo.
 #[endpoint {
     method = DELETE,
     path = "/v1/system/ip-pools/{pool}/silos/{silo}",
@@ -1510,10 +1506,10 @@ async fn ip_pool_silo_unlink(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-// TODO: change this to PUT /ip-pools/{pool}/silos/{silo} so
-// it can be used for both set default true and false
-
-/// Make an IP pool the default for a silo
+/// Make an IP pool default or not-default for a silo
+///
+/// When a pool is made default for a silo, any existing default will remain
+/// linked to the silo, but will no longer be the default.
 #[endpoint {
     method = PUT,
     path = "/v1/system/ip-pools/{pool}/silos/{silo}",

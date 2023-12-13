@@ -15,22 +15,25 @@ use crate::db::error::public_error_from_diesel_lookup;
 use crate::db::error::ErrorHandler;
 use crate::db::fixed_data::silo::INTERNAL_SILO_ID;
 use crate::db::identity::Resource;
-use crate::db::model::{
-    IpPool, IpPoolRange, IpPoolResource, IpPoolResourceDelete, IpPoolUpdate,
-    Name,
-};
+use crate::db::model::ExternalIp;
+use crate::db::model::IpKind;
+use crate::db::model::IpPool;
+use crate::db::model::IpPoolRange;
+use crate::db::model::IpPoolResource;
+use crate::db::model::IpPoolResourceDelete;
+use crate::db::model::IpPoolResourceType;
+use crate::db::model::IpPoolUpdate;
+use crate::db::model::Name;
 use crate::db::pagination::paginated;
 use crate::db::pool::DbConnection;
 use crate::db::queries::ip_pool::FilterOverlappingIpRanges;
 use crate::db::TransactionError;
-use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl};
+use async_bb8_diesel::AsyncConnection;
+use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::result::Error as DieselError;
 use ipnetwork::IpNetwork;
-use nexus_db_model::ExternalIp;
-use nexus_db_model::IpKind;
-use nexus_db_model::IpPoolResourceType;
 use nexus_types::external_api::shared::IpRange;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
@@ -330,25 +333,24 @@ impl DataStore {
         use db::schema::ip_pool;
         use db::schema::ip_pool_resource;
 
-        let result = ip_pool::table
+        ip_pool::table
             .inner_join(ip_pool_resource::table)
             .filter(ip_pool::id.eq(authz_pool.id()))
             .filter(
-                ip_pool_resource::resource_type
-                    .eq(IpPoolResourceType::Silo)
-                    .and(ip_pool_resource::resource_id.eq(*INTERNAL_SILO_ID)),
+                ip_pool_resource::resource_type.eq(IpPoolResourceType::Silo),
             )
+            .filter(ip_pool_resource::resource_id.eq(*INTERNAL_SILO_ID))
             .filter(ip_pool::time_deleted.is_null())
-            .select(IpPool::as_select())
-            .load_async::<IpPool>(
+            .select(ip_pool::id)
+            .first_async::<Uuid>(
                 &*self.pool_connection_authorized(opctx).await?,
             )
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-
-        // if there is a result, the pool is associated with the internal silo,
-        // which makes it the internal pool
-        Ok(result.len() > 0)
+            .optional()
+            // if there is a result, the pool is associated with the internal silo,
+            // which makes it the internal pool
+            .map(|result| Ok(result.is_some()))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
     }
 
     pub async fn ip_pool_update(
@@ -400,8 +402,7 @@ impl DataStore {
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    // TODO: separate this operation from update so that we can have /link 409
-    // or whatever when the association already exists?
+    // TODO: should this error on conflict instead of updating?
     pub async fn ip_pool_associate_resource(
         &self,
         opctx: &OpContext,
@@ -847,13 +848,16 @@ impl DataStore {
 
 #[cfg(test)]
 mod test {
+    use crate::authz;
     use crate::db::datastore::datastore_test;
     use crate::db::model::{IpPool, IpPoolResource, IpPoolResourceType};
     use assert_matches::assert_matches;
     use nexus_db_model::IpPoolResourceDelete;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::identity::Resource;
-    use omicron_common::api::external::{Error, IdentityMetadataCreateParams};
+    use omicron_common::api::external::{
+        Error, IdentityMetadataCreateParams, LookupType,
+    };
     use omicron_test_utils::dev;
 
     // TODO: add calls to the list endpoint throughout all this
@@ -957,6 +961,60 @@ mod test {
 
         let error = datastore.ip_pools_fetch_default(&opctx).await.unwrap_err();
         assert_matches!(error, Error::ObjectNotFound { .. });
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_internal_ip_pool() {
+        let logctx = dev::test_setup_log("test_internal_ip_pool");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        // confirm internal pool appears as internal
+        let (authz_pool, _pool) =
+            datastore.ip_pools_service_lookup(&opctx).await.unwrap();
+
+        let is_internal =
+            datastore.ip_pool_is_internal(&opctx, &authz_pool).await;
+        assert_eq!(is_internal, Ok(true));
+
+        // another random pool should not be considered internal
+        let identity = IdentityMetadataCreateParams {
+            name: "other-pool".parse().unwrap(),
+            description: "".to_string(),
+        };
+        let other_pool = datastore
+            .ip_pool_create(&opctx, IpPool::new(&identity))
+            .await
+            .expect("Failed to create IP pool");
+
+        let authz_other_pool = authz::IpPool::new(
+            authz::FLEET,
+            other_pool.id(),
+            LookupType::ById(other_pool.id()),
+        );
+        let is_internal =
+            datastore.ip_pool_is_internal(&opctx, &authz_other_pool).await;
+        assert_eq!(is_internal, Ok(false));
+
+        // now link it to the current silo, and it is still not internal
+        let silo_id = opctx.authn.silo_required().unwrap().id();
+        let link = IpPoolResource {
+            ip_pool_id: other_pool.id(),
+            resource_type: IpPoolResourceType::Silo,
+            resource_id: silo_id,
+            is_default: true,
+        };
+        datastore
+            .ip_pool_associate_resource(&opctx, link)
+            .await
+            .expect("Failed to make IP pool default for silo");
+
+        let is_internal =
+            datastore.ip_pool_is_internal(&opctx, &authz_other_pool).await;
+        assert_eq!(is_internal, Ok(false));
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();

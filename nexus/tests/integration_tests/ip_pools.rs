@@ -246,28 +246,22 @@ async fn test_ip_pool_service_no_cud(cptestctx: &ControlPlaneTestContext) {
 
     // deletes fail
 
-    let error = NexusRequest::expect_failure(
+    let error = object_delete_error(
         client,
-        StatusCode::NOT_FOUND,
-        Method::DELETE,
         &internal_pool_name_url,
+        StatusCode::NOT_FOUND,
     )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute_and_parse_unwrap::<HttpErrorResponseBody>()
     .await;
     assert_eq!(
         error.message,
         "not found: ip-pool with name \"oxide-service-pool\""
     );
 
-    let error = NexusRequest::expect_failure(
+    let error = object_delete_error(
         client,
-        StatusCode::NOT_FOUND,
-        Method::DELETE,
         &internal_pool_id_url,
+        StatusCode::NOT_FOUND,
     )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute_and_parse_unwrap::<HttpErrorResponseBody>()
     .await;
     assert_eq!(
         error.message,
