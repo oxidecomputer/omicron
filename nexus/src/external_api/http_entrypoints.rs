@@ -6,11 +6,13 @@
 
 use super::{
     console_api, device_auth, params,
+    params::ProjectSelector,
     shared::UninitializedSled,
     views::{
         self, Certificate, Group, IdentityProvider, Image, IpPool, IpPoolRange,
-        PhysicalDisk, Project, Rack, Role, Silo, Sled, Snapshot, SshKey, User,
-        UserBuiltin, Vpc, VpcRouter, VpcSubnet,
+        PhysicalDisk, Project, Rack, Role, Silo, SiloQuotas, SiloUtilization,
+        Sled, SledInstance, Snapshot, SshKey, Switch, User, UserBuiltin, Vpc,
+        VpcRouter, VpcSubnet,
     },
 };
 use crate::external_api::shared;
@@ -38,17 +40,13 @@ use dropshot::{
 use ipnetwork::IpNetwork;
 use nexus_db_queries::authz;
 use nexus_db_queries::db;
+use nexus_db_queries::db::identity::AssetIdentityMetadata;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup::ImageLookup;
 use nexus_db_queries::db::lookup::ImageParentLookup;
 use nexus_db_queries::db::model::Name;
 use nexus_db_queries::{
     authz::ApiResource, db::fixed_data::silo::INTERNAL_SILO_ID,
-};
-use nexus_types::external_api::{params::ProjectSelector, views::SiloQuotas};
-use nexus_types::{
-    external_api::views::{SledInstance, Switch},
-    identity::AssetIdentityMetadata,
 };
 use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_common::api::external::http_pagination::marker_for_name;
@@ -282,7 +280,7 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(silo_policy_view)?;
         api.register(silo_policy_update)?;
 
-        api.register(system_utilization_view)?;
+        api.register(silo_utilization_view)?;
         api.register(silo_utilization_list)?;
 
         api.register(system_quotas_list)?;
@@ -546,18 +544,20 @@ async fn utilization_view(
 
 #[endpoint {
     method = GET,
-    path = "/v1/system/utilization",
-    tags = ["system/utilization"],
+    path = "/v1/system/utilization/silos/{silo}"
 }]
-async fn system_utilization_view(
+async fn silo_utilization_view(
     rqctx: RequestContext<Arc<ServerContext>>,
-) -> Result<HttpResponseOk<SiloQuotas>, HttpError> {
+    path_params: Path<params::SiloPath>,
+) -> Result<HttpResponseOk<SiloUtilization>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
 
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let quotas = nexus.fleet_utilization_view(&opctx).await?;
+        let silo_lookup =
+            nexus.silo_lookup(&opctx, path_params.into_inner().silo)?;
+        let quotas = nexus.silo_utilization_view(&opctx, &silo_lookup).await?;
 
         Ok(HttpResponseOk(quotas.into()))
     };

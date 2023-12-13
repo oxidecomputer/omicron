@@ -65,10 +65,12 @@ pub struct VirtualResourceCounts {
 pub struct SiloQuotas {
     pub silo_id: Uuid,
     #[serde(flatten)]
-    pub quotas: VirtualResourceCounts,
+    pub limits: VirtualResourceCounts,
 }
 
-/// View of a silo's resource utilization and capacity
+// For the eyes of end users
+/// View of the current silo's resource utilization and capacity
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Utilization {
     /// Accounts for resources allocated to running instances or storage allocated via disks or snapshots
     /// Note that CPU and memory resources associated with a stopped instances are not counted here
@@ -79,22 +81,16 @@ pub struct Utilization {
     pub capacity: VirtualResourceCounts,
 }
 
+// For the eyes of an operator
+/// View of a silo's resource utilization and capacity
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SiloUtilization {
     pub silo_id: Uuid,
-    #[serde(flatten)]
-    pub utilization: Utilization,
-}
-
-/// View of a fleet's utilization
-/// Note that these values represent _virtual_ resources in the system, not physical ones
-pub struct SystemUtilization {
     /// Accounts for resources allocated by in silos like CPU or memory for running instances and storage for disks and snapshots
     /// Note that CPU and memory resources associated with a stopped instances are not counted here
     pub provisioned: VirtualResourceCounts,
     /// Accounts for the total amount of resources reserved for silos via their quotas
     pub allocated: VirtualResourceCounts,
-    /// The total amount of virtual resources available to the system
-    pub capacity: VirtualResourceCounts,
 }
 
 // IDENTITY PROVIDER
