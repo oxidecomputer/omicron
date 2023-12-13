@@ -1212,9 +1212,27 @@ impl DataStore {
         };
         limit_reached = limit_reached || rots.len() == usize_limit;
 
-        // Collect the unique baseboard ids referenced by SPs and RoTs.
-        let baseboard_id_ids: BTreeSet<_> =
-            sps.keys().chain(rots.keys()).cloned().collect();
+        let sled_agent_rows: Vec<_> = {
+            use db::schema::inv_sled_agent::dsl;
+            dsl::inv_sled_agent
+                .filter(dsl::inv_collection_id.eq(id))
+                .limit(sql_limit)
+                .select(InvSledAgent::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?
+        };
+
+        // Collect the unique baseboard ids referenced by SPs, RoTs, and Sled
+        // Agents.
+        let baseboard_id_ids: BTreeSet<_> = sps
+            .keys()
+            .chain(rots.keys())
+            .cloned()
+            .chain(sled_agent_rows.iter().filter_map(|s| s.hw_baseboard_id))
+            .collect();
         // Fetch the corresponding baseboard records.
         let baseboards_by_id: BTreeMap<_, _> = {
             use db::schema::hw_baseboard_id::dsl;
@@ -1263,6 +1281,49 @@ impl DataStore {
                     })
             })
             .collect::<Result<BTreeMap<_, _>, _>>()?;
+        let sled_agents: BTreeMap<_, _> =
+            sled_agent_rows
+                .into_iter()
+                .map(|s: InvSledAgent| {
+                    let sled_id = s.sled_id;
+                    let baseboard_id = s
+                        .hw_baseboard_id
+                        .map(|id| {
+                            baseboards_by_id.get(&id).cloned().ok_or_else(
+                                || {
+                                    Error::internal_error(
+                                "missing baseboard that we should have fetched",
+                            )
+                                },
+                            )
+                        })
+                        .transpose()?;
+                    let sled_agent = nexus_types::inventory::SledAgent {
+                        time_collected: s.time_collected,
+                        source: s.source,
+                        sled_id,
+                        baseboard_id,
+                        sled_agent_address: std::net::SocketAddrV6::new(
+                            std::net::Ipv6Addr::from(s.sled_agent_ip),
+                            u16::from(s.sled_agent_port),
+                            0,
+                            0,
+                        ),
+                        sled_role: nexus_types::inventory::SledRole::from(
+                            s.sled_role,
+                        ),
+                        usable_hardware_threads: u32::from(
+                            s.usable_hardware_threads,
+                        ),
+                        usable_physical_ram: s.usable_physical_ram.into(),
+                        reservoir_size: s.reservoir_size.into(),
+                    };
+                    Ok((sled_id, sled_agent))
+                })
+                .collect::<Result<
+                    BTreeMap<Uuid, nexus_types::inventory::SledAgent>,
+                    Error,
+                >>()?;
 
         // Fetch records of cabooses found.
         let inv_caboose_rows = {
@@ -1440,7 +1501,7 @@ impl DataStore {
                 rots,
                 cabooses_found,
                 rot_pages_found,
-                sled_agents: BTreeMap::new(), // XXX-dap
+                sled_agents,
                 omicron_zones: BTreeMap::new(), // XXX-dap
             },
             limit_reached,
