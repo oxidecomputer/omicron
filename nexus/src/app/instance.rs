@@ -1174,6 +1174,19 @@ impl super::Nexus {
         Ok(())
     }
 
+    /// Takes an updated instance state returned from a call to sled agent and
+    /// writes it back to the database.
+    ///
+    /// # Return value
+    ///
+    /// - `Ok((instance_updated, vmm_updated))` if no failures occurred. The
+    ///   tuple fields indicate which database records (if any) were updated.
+    ///   Note that it is possible for sled agent not to return an updated
+    ///   instance state from a particular API call. In that case, the `state`
+    ///   parameter is `None` and this routine returns `Ok((false, false))`.
+    /// - `Err` if an error occurred while writing state to the database. A
+    ///   database operation that succeeds but doesn't update anything (e.g.
+    ///   owing to an outdated generation number) will return `Ok`.
     async fn write_returned_instance_state(
         &self,
         instance_id: &Uuid,
@@ -1207,6 +1220,9 @@ impl super::Nexus {
         }
     }
 
+    /// Attempts to move an instance from `prev_instance_runtime` to the
+    /// `Failed` state in response to an error returned from a call to a sled
+    /// agent instance API, supplied in `reason`.
     pub(crate) async fn mark_instance_failed(
         &self,
         instance_id: &Uuid,
