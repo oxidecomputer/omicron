@@ -1244,18 +1244,20 @@ impl super::Nexus {
             ..prev_instance_runtime.clone()
         };
 
-        // XXX what if this fails?
-        let result = self
+        match self
             .db_datastore
             .instance_update_runtime(&instance_id, &new_runtime)
-            .await;
-
-        error!(
-            self.log,
-            "attempted to set instance to Failed due to sled agent API error";
-            "instance_id" => %instance_id,
-            "result" => ?result,
-        );
+            .await
+        {
+            Ok(_) => info!(self.log, "marked instance as Failed";
+                           "instance_id" => %instance_id),
+            // XXX: It's not clear what to do with this error; should it be
+            // bubbled back up to the caller?
+            Err(e) => error!(self.log,
+                            "failed to write Failed instance state to DB";
+                            "instance_id" => %instance_id,
+                            "error" => ?e),
+        }
 
         Ok(())
     }
