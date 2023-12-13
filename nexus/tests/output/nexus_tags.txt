@@ -183,9 +183,12 @@ silo_identity_provider_list              GET      /v1/system/identity-providers
 silo_list                                GET      /v1/system/silos
 silo_policy_update                       PUT      /v1/system/silos/{silo}/policy
 silo_policy_view                         GET      /v1/system/silos/{silo}/policy
+silo_quotas_update                       PUT      /v1/system/silos/{silo}/quotas
+silo_quotas_view                         GET      /v1/system/silos/{silo}/quotas
 silo_user_list                           GET      /v1/system/users
 silo_user_view                           GET      /v1/system/users/{user_id}
 silo_view                                GET      /v1/system/silos/{silo}
+system_quotas_list                       GET      /v1/system/silo-quotas
 user_builtin_list                        GET      /v1/system/users-builtin
 user_builtin_view                        GET      /v1/system/users-builtin/{user}
 

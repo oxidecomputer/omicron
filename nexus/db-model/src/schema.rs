@@ -410,6 +410,17 @@ table! {
 }
 
 table! {
+    silo_quotas(silo_id) {
+        silo_id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        cpus -> Int8,
+        memory_bytes -> Int8,
+        storage_bytes -> Int8,
+    }
+}
+
+table! {
     network_interface (id) {
         id -> Uuid,
         name -> Text,
@@ -1322,7 +1333,7 @@ table! {
 ///
 /// This should be updated whenever the schema is changed. For more details,
 /// refer to: schema/crdb/README.adoc
-pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(19, 0, 0);
+pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(20, 0, 0);
 
 allow_tables_to_appear_in_same_query!(
     system_update,

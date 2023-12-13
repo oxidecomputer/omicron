@@ -51,6 +51,7 @@ mod metrics;
 mod network_interface;
 mod oximeter;
 mod project;
+mod quota;
 mod rack;
 pub(crate) mod saga;
 mod session;

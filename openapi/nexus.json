@@ -6210,6 +6210,65 @@
         }
       }
     },
+    "/v1/system/silo-quotas": {
+      "get": {
+        "tags": [
+          "system/silos"
+        ],
+        "summary": "Lists resource quotas for all silos",
+        "operationId": "system_quotas_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiloQuotasResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
     "/v1/system/silos": {
       "get": {
         "tags": [
@@ -6445,6 +6504,91 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SiloRolePolicy"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/silos/{silo}/quotas": {
+      "get": {
+        "tags": [
+          "system/silos"
+        ],
+        "summary": "View the resource quotas of a given silo",
+        "operationId": "silo_quotas_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "silo",
+            "description": "Name or ID of the silo",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiloQuotas"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "system/silos"
+        ],
+        "summary": "Update the resource quotas of a given silo",
+        "description": "If a quota value is not specified, it will remain unchanged.",
+        "operationId": "silo_quotas_update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "silo",
+            "description": "Name or ID of the silo",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SiloQuotasUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiloQuotas"
                 }
               }
             }
@@ -13206,6 +13350,14 @@
           "name": {
             "$ref": "#/components/schemas/Name"
           },
+          "quotas": {
+            "description": "Limits the amount of provisionable CPU, memory, and storage in the Silo. CPU and memory are only consumed by running instances, while storage is consumed by any disk or snapshot. A value of 0 means that resource is *not* provisionable.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SiloQuotasCreate"
+              }
+            ]
+          },
           "tls_certificates": {
             "description": "Initial TLS certificates to be used for the new Silo's console and API endpoints.  These should be valid for the Silo's DNS name(s).",
             "type": "array",
@@ -13219,6 +13371,7 @@
           "discoverable",
           "identity_mode",
           "name",
+          "quotas",
           "tls_certificates"
         ]
       },
@@ -13240,6 +13393,114 @@
             ]
           }
         ]
+      },
+      "SiloQuotas": {
+        "type": "object",
+        "properties": {
+          "cpus": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "memory": {
+            "$ref": "#/components/schemas/ByteCount"
+          },
+          "silo_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "storage": {
+            "$ref": "#/components/schemas/ByteCount"
+          }
+        },
+        "required": [
+          "cpus",
+          "memory",
+          "silo_id",
+          "storage"
+        ]
+      },
+      "SiloQuotasCreate": {
+        "description": "The amount of provisionable resources for a Silo",
+        "type": "object",
+        "properties": {
+          "cpus": {
+            "description": "The amount of virtual CPUs available for running instances in the Silo",
+            "type": "integer",
+            "format": "int64"
+          },
+          "memory": {
+            "description": "The amount of RAM (in bytes) available for running instances in the Silo",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          },
+          "storage": {
+            "description": "The amount of storage (in bytes) available for disks or snapshots",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          }
+        },
+        "required": [
+          "cpus",
+          "memory",
+          "storage"
+        ]
+      },
+      "SiloQuotasResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SiloQuotas"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "SiloQuotasUpdate": {
+        "description": "Updateable properties of a Silo's resource limits. If a value is omitted it will not be updated.",
+        "type": "object",
+        "properties": {
+          "cpus": {
+            "nullable": true,
+            "description": "The amount of virtual CPUs available for running instances in the Silo",
+            "type": "integer",
+            "format": "int64"
+          },
+          "memory": {
+            "nullable": true,
+            "description": "The amount of RAM (in bytes) available for running instances in the Silo",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          },
+          "storage": {
+            "nullable": true,
+            "description": "The amount of storage (in bytes) available for disks or snapshots",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          }
+        }
       },
       "SiloResultsPage": {
         "description": "A single page of results",
