@@ -421,6 +421,18 @@ table! {
 }
 
 table! {
+    silo_utilization(silo_id) {
+        silo_id -> Uuid,
+        cpus_provisioned -> Int8,
+        ram_provisioned -> Int8,
+        storage_provisioned -> Int8,
+        cpus_allocated -> Int8,
+        ram_allocated -> Int8,
+        storage_allocated -> Int8,
+    }
+}
+
+table! {
     network_interface (id) {
         id -> Uuid,
         name -> Text,
