@@ -1271,6 +1271,7 @@ async fn test_disk_virtual_provisioning_collection_failed_delete(
         },
         size: disk_size,
     };
+
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &disks_url)
             .body(Some(&disk_one))
@@ -1280,6 +1281,11 @@ async fn test_disk_virtual_provisioning_collection_failed_delete(
     .execute()
     .await
     .expect("unexpected failure creating 1 GiB disk");
+
+    // Get the disk
+    let disk_url = format!("/v1/disks/{}?project={}", "disk-one", PROJECT_NAME);
+    let disk = disk_get(&client, &disk_url).await;
+    assert_eq!(disk.state, DiskState::Detached);
 
     // Assert correct virtual provisioning collection numbers
     let virtual_provisioning_collection = datastore
@@ -1302,8 +1308,6 @@ async fn test_disk_virtual_provisioning_collection_failed_delete(
         .await;
 
     // Delete the disk - expect this to fail
-    let disk_url = format!("/v1/disks/{}?project={}", "disk-one", PROJECT_NAME);
-
     NexusRequest::new(
         RequestBuilder::new(client, Method::DELETE, &disk_url)
             .expect_status(Some(StatusCode::INTERNAL_SERVER_ERROR)),
@@ -1323,7 +1327,12 @@ async fn test_disk_virtual_provisioning_collection_failed_delete(
         disk_size
     );
 
-    // And the disk is now faulted
+    // And the disk is now faulted. The name will have changed due to the
+    // "undelete and fault" function.
+    let disk_url = format!(
+        "/v1/disks/deleted-{}?project={}",
+        disk.identity.id, PROJECT_NAME
+    );
     let disk = disk_get(&client, &disk_url).await;
     assert_eq!(disk.state, DiskState::Faulted);
 
