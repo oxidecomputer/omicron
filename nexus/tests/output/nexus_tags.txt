@@ -105,7 +105,10 @@ group_list                               GET      /v1/groups
 group_view                               GET      /v1/groups/{group_id}
 policy_update                            PUT      /v1/policy
 policy_view                              GET      /v1/policy
+silo_utilization_list                    GET      /v1/system/utilization/silos
+silo_utilization_view                    GET      /v1/system/utilization/silos/{silo}
 user_list                                GET      /v1/users
+utilization_view                         GET      /v1/utilization
 
 API operations found with tag "snapshots"
 OPERATION ID                             METHOD   URL PATH
