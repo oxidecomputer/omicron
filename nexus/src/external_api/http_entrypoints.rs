@@ -544,7 +544,7 @@ async fn utilization_view(
 #[endpoint {
     method = GET,
     path = "/v1/system/utilization/silos/{silo}",
-    tags = ["silos"],
+    tags = ["system/silos"],
 }]
 async fn silo_utilization_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -567,7 +567,7 @@ async fn silo_utilization_view(
 #[endpoint {
     method = GET,
     path = "/v1/system/utilization/silos",
-    tags = ["silos"],
+    tags = ["system/silos"],
 }]
 async fn silo_utilization_list(
     rqctx: RequestContext<Arc<ServerContext>>,

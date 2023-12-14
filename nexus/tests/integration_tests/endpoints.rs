@@ -124,6 +124,9 @@ lazy_static! {
         "/v1/system/identity-providers/local/users/{{id}}/set-password?silo={}",
         DEFAULT_SILO.identity().name,
     );
+}
+
+lazy_static! {
 
     // Project used for testing
     pub static ref DEMO_PROJECT_NAME: Name = "demo-project".parse().unwrap();
@@ -978,7 +981,7 @@ lazy_static! {
             ],
         },
         VerifyEndpoint {
-            url: "/v1/system/utilization",
+            url: "/v1/system/utilization/silos",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
@@ -1000,7 +1003,7 @@ lazy_static! {
             allowed_methods: vec![
                 AllowedMethod::Get
             ]
-        }
+        },
         VerifyEndpoint {
             url: "/v1/policy",
             visibility: Visibility::Public,

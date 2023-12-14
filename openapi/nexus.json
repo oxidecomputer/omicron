@@ -6818,7 +6818,7 @@
     "/v1/system/utilization/silos": {
       "get": {
         "tags": [
-          "silos"
+          "system/silos"
         ],
         "summary": "List current utilization state for all silos",
         "operationId": "silo_utilization_list",
@@ -6877,7 +6877,7 @@
     "/v1/system/utilization/silos/{silo}": {
       "get": {
         "tags": [
-          "silos"
+          "system/silos"
         ],
         "summary": "View the current utilization of a given silo",
         "operationId": "silo_utilization_view",
