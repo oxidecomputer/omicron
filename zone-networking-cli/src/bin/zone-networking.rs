@@ -13,18 +13,18 @@ use omicron_common::cmd::CmdError;
 use slog::info;
 use std::net::Ipv6Addr;
 
-fn validate_ipv6(s: &str) -> anyhow::Result<Ipv6Addr> {
+fn parse_ipv6(s: &str) -> anyhow::Result<Ipv6Addr> {
     if s == "unknown" {
         return Err(anyhow!("ERROR: Missing input value"));
     };
     s.parse().map_err(|_| anyhow!("ERROR: Invalid IPv6 address"))
 }
 
-fn validate_datalink(s: &str) -> anyhow::Result<()> {
+fn parse_datalink(s: &str) -> anyhow::Result<String> {
     if s == "unknown" {
         return Err(anyhow!("ERROR: Missing data link"));
     };
-    Ok(())
+    s.parse().map_err(|_| anyhow!("ERROR: Data link"))
 }
 
 #[tokio::main]
@@ -50,7 +50,7 @@ async fn do_run() -> Result<(), CmdError> {
                     -d --datalink <STRING> "datalink"
                 )
                 .required(true)
-                .value_parser(validate_datalink),
+                .value_parser(parse_datalink),
             ),
         )
         .subcommand(
@@ -59,7 +59,7 @@ async fn do_run() -> Result<(), CmdError> {
                     -g --gateway <Ipv6Addr> "gateway"
                 )
                 .required(true)
-                .value_parser(validate_ipv6),
+                .value_parser(parse_ipv6),
             ),
         )
         .subcommand(
@@ -70,13 +70,13 @@ async fn do_run() -> Result<(), CmdError> {
                         -l --listen_addr <Ipv6Addr> "listen_addr"
                     )
                     .required(true)
-                    .value_parser(validate_ipv6),
+                    .value_parser(parse_ipv6),
                 )
                 .arg(
                     arg!(
                         -d --datalink <STRING> "datalink"
                     )
-                    .required(true).value_parser(validate_datalink),
+                    .required(true).value_parser(parse_datalink),
                 ),
         )
         .subcommand(
@@ -84,7 +84,7 @@ async fn do_run() -> Result<(), CmdError> {
                 arg!(
                     -d --datalink <STRING> "datalink"
                 )
-                .required(true).value_parser(validate_datalink),
+                .required(true).value_parser(parse_datalink),
             ),
         )
         .get_matches();
