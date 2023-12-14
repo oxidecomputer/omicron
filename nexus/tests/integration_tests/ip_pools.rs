@@ -25,6 +25,7 @@ use nexus_test_utils::resource_helpers::object_delete_error;
 use nexus_test_utils::resource_helpers::object_get;
 use nexus_test_utils::resource_helpers::object_get_error;
 use nexus_test_utils::resource_helpers::object_put;
+use nexus_test_utils::resource_helpers::object_put_error;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
@@ -306,12 +307,7 @@ async fn test_ip_pool_silo_link(cptestctx: &ControlPlaneTestContext) {
 
     // get silo ID so we can test association by ID as well
     let silo_url = format!("/v1/system/silos/{}", cptestctx.silo_name);
-    let silo_id = NexusRequest::object_get(client, &silo_url)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute_and_parse_unwrap::<Silo>()
-        .await
-        .identity
-        .id;
+    let silo_id = object_get::<Silo>(client, &silo_url).await.identity.id;
 
     let assocs_p0 = silos_for_pool(client, "p0").await;
     let silo_link =
@@ -383,7 +379,19 @@ async fn test_ip_pool_update_default(cptestctx: &ControlPlaneTestContext) {
     let silos_p1 = silos_for_pool(client, "p1").await;
     assert_eq!(silos_p1.items.len(), 0);
 
-    // associated both pools with the test silo
+    // put 404s if link doesn't exist yet
+    let params = IpPoolSiloUpdate { is_default: true };
+    let p0_silo_url =
+        format!("/v1/system/ip-pools/p0/silos/{}", cptestctx.silo_name);
+    let error =
+        object_put_error(client, &p0_silo_url, &params, StatusCode::NOT_FOUND)
+            .await;
+    assert_eq!(
+        error.message,
+        "not found: ip-pool-resource with id \"(pool, silo)\""
+    );
+
+    // associate both pools with the test silo
     let silo = NameOrId::Name(cptestctx.silo_name.clone());
     let params =
         params::IpPoolSiloLink { silo: silo.clone(), is_default: false };
@@ -403,8 +411,6 @@ async fn test_ip_pool_update_default(cptestctx: &ControlPlaneTestContext) {
 
     // make p0 default
     let params = IpPoolSiloUpdate { is_default: true };
-    let p0_silo_url =
-        format!("/v1/system/ip-pools/p0/silos/{}", cptestctx.silo_name);
     let _: IpPoolSilo = object_put(client, &p0_silo_url, &params).await;
 
     // making the same one default again is not an error

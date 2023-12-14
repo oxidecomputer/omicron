@@ -155,6 +155,28 @@ where
         .unwrap()
 }
 
+pub async fn object_put_error<InputType>(
+    client: &ClientTestContext,
+    path: &str,
+    input: &InputType,
+    status: StatusCode,
+) -> HttpErrorResponseBody
+where
+    InputType: serde::Serialize,
+{
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::PUT, path)
+            .body(Some(&input))
+            .expect_status(Some(status)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<HttpErrorResponseBody>()
+    .unwrap()
+}
+
 pub async fn object_delete(client: &ClientTestContext, path: &str) {
     NexusRequest::object_delete(client, path)
         .authn_as(AuthnMode::PrivilegedUser)

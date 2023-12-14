@@ -508,10 +508,8 @@ impl DataStore {
     ) -> UpdateResult<IpPoolResource> {
         use db::schema::ip_pool_resource::dsl;
 
-        // TODO: correct auth check
-        opctx
-            .authorize(authz::Action::CreateChild, &authz::IP_POOL_LIST)
-            .await?;
+        opctx.authorize(authz::Action::Modify, authz_ip_pool).await?;
+        opctx.authorize(authz::Action::Modify, authz_silo).await?;
 
         let ip_pool_id = authz_ip_pool.id();
         let silo_id = authz_silo.id();
@@ -580,7 +578,6 @@ impl DataStore {
                 }
             }
 
-            // TODO: test that this errors if the link doesn't exist already
             let updated_link = diesel::update(dsl::ip_pool_resource)
                 .filter(dsl::resource_id.eq(silo_id))
                 .filter(dsl::ip_pool_id.eq(ip_pool_id))
@@ -592,8 +589,20 @@ impl DataStore {
             Ok(updated_link)
         })
         .await
-        .map_err(|e| {
-            Error::internal_error(&format!("Transaction error: {:?}", e))
+        .map_err(|e| match e {
+            TransactionError::CustomError(
+                IpPoolResourceUpdateError::FailedToUnsetDefault(e),
+            ) => public_error_from_diesel(e, ErrorHandler::Server),
+            TransactionError::Database(e) => public_error_from_diesel(
+                e,
+                ErrorHandler::NotFoundByLookup(
+                    ResourceType::IpPoolResource,
+                    // TODO: would be nice to put the actual names and/or ids in
+                    // here but LookupType on each of the two silos doesn't have
+                    // a nice to_string yet or a way of composing them
+                    LookupType::ByCompositeId(format!("(pool, silo)")),
+                ),
+            ),
         })
     }
 
