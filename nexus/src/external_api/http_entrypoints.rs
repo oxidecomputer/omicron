@@ -48,6 +48,7 @@ use nexus_db_queries::db::model::Name;
 use nexus_db_queries::{
     authz::ApiResource, db::fixed_data::silo::INTERNAL_SILO_ID,
 };
+use nexus_types::external_api::views::Utilization;
 use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_common::api::external::http_pagination::marker_for_name;
 use omicron_common::api::external::http_pagination::marker_for_name_or_id;
@@ -530,21 +531,20 @@ async fn utilization_view(
     let handler = async {
         let nexus = &apictx.nexus;
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let authz_silo = opctx
-            .authn
-            .silo_required()
-            .internal_context("get current silo utilization")?;
-        let silo_lookup = nexus.silo_lookup(&opctx, authz_silo.id().into())?;
-        let quotas = nexus.silo_utilization_view(&opctx, &silo_lookup).await?;
+        let silo_lookup = nexus.current_silo_lookup(&opctx)?;
+        let utilization =
+            nexus.silo_utilization_view(&opctx, &silo_lookup).await?;
 
-        Ok(HttpResponseOk(quotas.into()))
+        Ok(HttpResponseOk(utilization.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// View the current utilization of a given silo
 #[endpoint {
     method = GET,
-    path = "/v1/system/utilization/silos/{silo}"
+    path = "/v1/system/utilization/silos/{silo}",
+    tags = ["silos"],
 }]
 async fn silo_utilization_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -563,15 +563,15 @@ async fn silo_utilization_view(
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
-
+/// List current utilization state for all silos
 #[endpoint {
     method = GET,
     path = "/v1/system/utilization/silos",
-    tags = ["system/utilization"],
+    tags = ["silos"],
 }]
 async fn silo_utilization_list(
     rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedById>,
+    query_params: Query<PaginatedByNameOrId>,
 ) -> Result<HttpResponseOk<ResultsPage<SiloUtilization>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
@@ -579,19 +579,21 @@ async fn silo_utilization_list(
 
         let query = query_params.into_inner();
         let pagparams = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pagparams, scan_params)?;
 
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let quotas = nexus
-            .silo_utilization_list(&opctx, &pagparams)
+        let utilization = nexus
+            .silo_utilization_list(&opctx, &paginated_by)
             .await?
             .into_iter()
             .map(|p| p.into())
             .collect();
 
-        Ok(HttpResponseOk(ScanById::results_page(
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
             &query,
-            quotas,
-            &|_, quota: &SiloQuotas| quota.silo_id,
+            utilization,
+            &marker_for_name_or_id,
         )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await

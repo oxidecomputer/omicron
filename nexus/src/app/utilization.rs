@@ -8,10 +8,9 @@ use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::lookup;
-use omicron_common::api::external::DataPageParams;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
-use uuid::Uuid;
 
 impl super::Nexus {
     pub async fn silo_utilization_view(
@@ -27,9 +26,8 @@ impl super::Nexus {
     pub async fn silo_utilization_list(
         &self,
         opctx: &OpContext,
-        pagparams: &DataPageParams<'_, Uuid>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::SiloUtilization> {
-        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         self.db_datastore.silo_utilization_list(opctx, pagparams).await
     }
 }
