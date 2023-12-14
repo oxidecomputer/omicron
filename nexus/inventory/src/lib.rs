@@ -23,5 +23,7 @@ pub mod examples;
 
 // only exposed for test code to construct collections
 pub use builder::CollectionBuilder;
+pub use builder::CollectorBug;
+pub use builder::InventoryError;
 
 pub use collector::Collector;

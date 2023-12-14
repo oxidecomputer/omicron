@@ -845,12 +845,7 @@ impl ServiceManager {
                 None,
                 omicron_zones_config.clone(),
                 |z: &OmicronZoneConfig| {
-                    matches!(
-                        z.zone_type,
-                        OmicronZoneType::InternalDns { .. }
-                            | OmicronZoneType::BoundaryNtp { .. }
-                            | OmicronZoneType::InternalNtp { .. }
-                    )
+                    matches!(z.zone_type, OmicronZoneType::InternalDns { .. })
                 },
             )
             .await?;
@@ -859,8 +854,6 @@ impl ServiceManager {
         // synchronization, which is a pre-requisite for the other services. We
         // keep `OmicronZoneType::InternalDns` because
         // `ensure_all_omicron_zones` is additive.
-        // TODO This looks like a duplicate of the block above -- why do we do
-        // this?
         let all_zones_request = self
             .ensure_all_omicron_zones(
                 &mut existing_zones,
@@ -1167,7 +1160,7 @@ impl ServiceManager {
             .collect();
 
         let external_ip;
-        let (zone_type_str, nic, snat, external_ips) = match &zone_args
+        let (zone_type_str, nic, snat, floating_ips) = match &zone_args
             .omicron_type()
         {
             Some(
@@ -1207,16 +1200,18 @@ impl ServiceManager {
         // config allows outbound access which is enough for
         // Boundary NTP which needs to come up before Nexus.
         let port = port_manager
-            .create_port(nic, snat, external_ips, &[], DhcpCfg::default())
+            .create_port(nic, snat, None, floating_ips, &[], DhcpCfg::default())
             .map_err(|err| Error::ServicePortCreation {
                 service: zone_type_str.clone(),
                 err: Box::new(err),
             })?;
 
         // We also need to update the switch with the NAT mappings
+        // XXX: need to revisit iff. any services get more than one
+        //      address.
         let (target_ip, first_port, last_port) = match snat {
             Some(s) => (s.ip, s.first_port, s.last_port),
-            None => (external_ips[0], 0, u16::MAX),
+            None => (floating_ips[0], 0, u16::MAX),
         };
 
         for dpd_client in &dpd_clients {
@@ -3889,7 +3884,6 @@ mod test {
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_ensure_service() {
         let logctx =
             omicron_test_utils::dev::test_setup_log("test_ensure_service");
@@ -3921,7 +3915,6 @@ mod test {
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_ensure_service_which_already_exists() {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_ensure_service_which_already_exists",
@@ -3949,7 +3942,6 @@ mod test {
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_services_are_recreated_on_reboot() {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_services_are_recreated_on_reboot",
@@ -3986,7 +3978,6 @@ mod test {
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_services_do_not_persist_without_config() {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_services_do_not_persist_without_config",
@@ -4028,7 +4019,6 @@ mod test {
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_bad_generations() {
         // Start like the normal tests.
         let logctx =
@@ -4133,7 +4123,6 @@ mod test {
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_old_ledger_migration() {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_old_ledger_migration",
@@ -4198,7 +4187,6 @@ mod test {
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_old_ledger_migration_continue() {
         // This test is just like "test_old_ledger_migration", except that we
         // deploy a new zone after migration and before shutting down the
@@ -4276,7 +4264,6 @@ mod test {
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_old_ledger_migration_bad() {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_old_ledger_migration_bad",

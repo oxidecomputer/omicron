@@ -217,8 +217,10 @@ impl DataStore {
                 if let Some(err) = err.take() {
                     match err {
                         SledReservationError::NotFound => {
-                            return external::Error::unavail(
+                            return external::Error::insufficient_capacity(
                                 "No sleds can fit the requested instance",
+                                "No sled targets found that had enough \
+                                 capacity to fit the requested instance.",
                             );
                         }
                     }
@@ -399,7 +401,7 @@ mod test {
             )
             .await
             .unwrap_err();
-        assert!(matches!(error, external::Error::ServiceUnavailable { .. }));
+        assert!(matches!(error, external::Error::InsufficientCapacity { .. }));
 
         // Now add a provisionable sled and try again.
         let sled_update = test_new_sled_update();

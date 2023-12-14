@@ -94,10 +94,9 @@ fn validate_blocks(lot: &params::AddressLotCreate) -> Result<(), Error> {
                 validate_v6_block(first, last)?
             }
             _ => {
-                return Err(Error::InvalidRequest {
-                    message: "Block bounds must be in same address family"
-                        .into(),
-                })
+                return Err(Error::invalid_request(
+                    "Block bounds must be in same address family",
+                ));
             }
         }
     }
@@ -106,18 +105,18 @@ fn validate_blocks(lot: &params::AddressLotCreate) -> Result<(), Error> {
 
 fn validate_v4_block(first: &Ipv4Addr, last: &Ipv4Addr) -> Result<(), Error> {
     if first > last {
-        return Err(Error::InvalidRequest {
-            message: "Invalid range, first must be <= last".into(),
-        });
+        return Err(Error::invalid_request(
+            "Invalid range, first must be <= last",
+        ));
     }
     Ok(())
 }
 
 fn validate_v6_block(first: &Ipv6Addr, last: &Ipv6Addr) -> Result<(), Error> {
     if first > last {
-        return Err(Error::InvalidRequest {
-            message: "Invalid range, first must be <= last".into(),
-        });
+        return Err(Error::invalid_request(
+            "Invalid range, first must be <= last",
+        ));
     }
     Ok(())
 }

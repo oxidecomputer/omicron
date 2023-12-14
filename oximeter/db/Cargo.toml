@@ -9,27 +9,46 @@ license = "MPL-2.0"
 anyhow.workspace = true
 async-trait.workspace = true
 bcs.workspace = true
-bytes = { workspace = true, features = [ "serde" ] }
 camino.workspace = true
 chrono.workspace = true
 clap.workspace = true
 dropshot.workspace = true
+futures.workspace = true
 highway.workspace = true
+indexmap.workspace = true
 omicron-common.workspace = true
+omicron-workspace-hack.workspace = true
 oximeter.workspace = true
+reedline.workspace = true
 regex.workspace = true
-reqwest = { workspace = true, features = [ "json" ] }
-schemars = { workspace = true, features = [ "uuid1", "bytes", "chrono" ] }
+rustyline.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 slog.workspace = true
 slog-async.workspace = true
 slog-term.workspace = true
+sqlparser.workspace = true
+sqlformat = "0.2.2"
+tabled.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = [ "rt-multi-thread", "macros" ] }
 usdt.workspace = true
 uuid.workspace = true
-omicron-workspace-hack.workspace = true
+
+[dependencies.bytes]
+workspace = true
+features = [ "serde" ]
+
+[dependencies.reqwest]
+workspace = true
+features = [ "json" ]
+
+[dependencies.schemars]
+workspace = true
+features = [ "uuid1", "bytes", "chrono" ]
+
+[dependencies.tokio]
+workspace = true
+features = [ "rt-multi-thread", "macros" ]
 
 [dev-dependencies]
 expectorate.workspace = true

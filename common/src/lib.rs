@@ -31,6 +31,8 @@ pub mod postgres_config;
 pub mod update;
 pub mod vlan;
 
+pub use update::hex_schema;
+
 #[macro_export]
 macro_rules! generate_logging_api {
     ($path:literal) => {
