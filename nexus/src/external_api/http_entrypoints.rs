@@ -228,7 +228,7 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(physical_disk_list)?;
         api.register(switch_list)?;
         api.register(switch_view)?;
-        api.register(uninitialized_sled_list)?;
+        api.register(sled_list_uninitialized)?;
         api.register(add_sled_to_initialized_rack)?;
 
         api.register(user_builtin_list)?;
@@ -4573,15 +4573,15 @@ async fn rack_view(
     path = "/v1/system/hardware/uninitialized-sleds",
     tags = ["system/hardware"]
 }]
-async fn uninitialized_sled_list(
+async fn sled_list_uninitialized(
     rqctx: RequestContext<Arc<ServerContext>>,
-) -> Result<HttpResponseOk<Vec<UninitializedSled>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<UninitializedSled>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let sleds = nexus.uninitialized_sled_list(&opctx).await?;
-        Ok(HttpResponseOk(sleds))
+        let sleds = nexus.sled_list_uninitialized(&opctx).await?;
+        Ok(HttpResponseOk(ResultsPage { items: sleds, next_page: None }))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

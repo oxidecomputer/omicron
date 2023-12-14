@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use dropshot::ResultsPage;
 use http::Method;
 use http::StatusCode;
 use nexus_test_utils::http_testing::AuthnMode;
@@ -85,7 +86,7 @@ async fn test_rack_initialization(cptestctx: &ControlPlaneTestContext) {
 }
 
 #[nexus_test]
-async fn test_uninitialized_sled_list(cptestctx: &ControlPlaneTestContext) {
+async fn test_sled_list_uninitialized(cptestctx: &ControlPlaneTestContext) {
     let internal_client = &cptestctx.internal_client;
     let external_client = &cptestctx.external_client;
     let list_url = "/v1/system/hardware/uninitialized-sleds";
@@ -95,8 +96,9 @@ async fn test_uninitialized_sled_list(cptestctx: &ControlPlaneTestContext) {
             .execute()
             .await
             .expect("failed to get uninitialized sleds")
-            .parsed_body::<Vec<UninitializedSled>>()
-            .unwrap();
+            .parsed_body::<ResultsPage<UninitializedSled>>()
+            .unwrap()
+            .items;
     debug!(cptestctx.logctx.log, "{:#?}", uninitialized_sleds);
 
     // There are currently two fake sim gimlets created in the latest inventory
@@ -137,8 +139,9 @@ async fn test_uninitialized_sled_list(cptestctx: &ControlPlaneTestContext) {
             .execute()
             .await
             .expect("failed to get uninitialized sleds")
-            .parsed_body::<Vec<UninitializedSled>>()
-            .unwrap();
+            .parsed_body::<ResultsPage<UninitializedSled>>()
+            .unwrap()
+            .items;
     debug!(cptestctx.logctx.log, "{:#?}", uninitialized_sleds);
     assert_eq!(1, uninitialized_sleds_2.len());
     assert_eq!(uninitialized_sleds, uninitialized_sleds_2);

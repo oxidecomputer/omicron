@@ -125,12 +125,12 @@ rack_list                                GET      /v1/system/hardware/racks
 rack_view                                GET      /v1/system/hardware/racks/{rack_id}
 sled_instance_list                       GET      /v1/system/hardware/sleds/{sled_id}/instances
 sled_list                                GET      /v1/system/hardware/sleds
+sled_list_uninitialized                  GET      /v1/system/hardware/uninitialized-sleds
 sled_physical_disk_list                  GET      /v1/system/hardware/sleds/{sled_id}/disks
 sled_set_provision_state                 PUT      /v1/system/hardware/sleds/{sled_id}/provision-state
 sled_view                                GET      /v1/system/hardware/sleds/{sled_id}
 switch_list                              GET      /v1/system/hardware/switches
 switch_view                              GET      /v1/system/hardware/switches/{switch_id}
-uninitialized_sled_list                  GET      /v1/system/hardware/uninitialized-sleds
 
 API operations found with tag "system/metrics"
 OPERATION ID                             METHOD   URL PATH

@@ -4296,18 +4296,14 @@
           "system/hardware"
         ],
         "summary": "List uninitialized sleds in a given rack",
-        "operationId": "uninitialized_sled_list",
+        "operationId": "sled_list_uninitialized",
         "responses": {
           "200": {
             "description": "successful operation",
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "Array_of_UninitializedSled",
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/UninitializedSled"
-                  }
+                  "$ref": "#/components/schemas/UninitializedSledResultsPage"
                 }
               }
             }
@@ -14694,6 +14690,27 @@
           "baseboard",
           "cubby",
           "rack_id"
+        ]
+      },
+      "UninitializedSledResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UninitializedSled"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
         ]
       },
       "User": {
