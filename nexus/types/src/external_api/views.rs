@@ -94,6 +94,10 @@ pub struct SiloUtilization {
     pub allocated: VirtualResourceCounts,
 }
 
+// We want to be able to paginate SiloUtilization by NameOrId
+// but we can't derive ObjectIdentity because this isn't a typical asset.
+// Instead we implement this new simple identity trait which is used under the
+// hood by the pagination code.
 impl SimpleIdentity for SiloUtilization {
     fn id(&self) -> Uuid {
         self.silo_id
