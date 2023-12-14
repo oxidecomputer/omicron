@@ -97,15 +97,6 @@ pub struct IpPoolResource {
     pub is_default: bool,
 }
 
-/// Information required to delete an IP pool association. Comes from request
-/// params -- silo is a NameOrId and must be resolved to ID.
-#[derive(Clone, Debug)]
-pub struct IpPoolResourceDelete {
-    pub ip_pool_id: Uuid,
-    pub resource_type: IpPoolResourceType,
-    pub resource_id: Uuid,
-}
-
 impl From<IpPoolResource> for views::IpPoolSilo {
     fn from(assoc: IpPoolResource) -> Self {
         Self {

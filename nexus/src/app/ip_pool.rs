@@ -7,8 +7,6 @@
 use crate::external_api::params;
 use crate::external_api::shared::IpRange;
 use ipnetwork::IpNetwork;
-use nexus_db_model::IpPoolResourceDelete;
-use nexus_db_model::IpPoolResourceType;
 use nexus_db_queries::authz;
 use nexus_db_queries::authz::ApiResource;
 use nexus_db_queries::context::OpContext;
@@ -154,14 +152,7 @@ impl super::Nexus {
             silo_lookup.lookup_for(authz::Action::Modify).await?;
 
         self.db_datastore
-            .ip_pool_unlink_silo(
-                opctx,
-                &IpPoolResourceDelete {
-                    ip_pool_id: authz_pool.id(),
-                    resource_id: authz_silo.id(),
-                    resource_type: IpPoolResourceType::Silo,
-                },
-            )
+            .ip_pool_unlink_silo(opctx, &authz_pool, &authz_silo)
             .await
     }
 

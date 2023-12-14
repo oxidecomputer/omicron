@@ -20,7 +20,6 @@ use crate::db::model::IpKind;
 use crate::db::model::IpPool;
 use crate::db::model::IpPoolRange;
 use crate::db::model::IpPoolResource;
-use crate::db::model::IpPoolResourceDelete;
 use crate::db::model::IpPoolResourceType;
 use crate::db::model::IpPoolUpdate;
 use crate::db::model::Name;
@@ -612,14 +611,12 @@ impl DataStore {
     async fn ensure_no_instance_ips_outstanding(
         &self,
         opctx: &OpContext,
-        association: &IpPoolResourceDelete,
+        authz_pool: &authz::IpPool,
+        authz_silo: &authz::Silo,
     ) -> Result<(), Error> {
         use db::schema::external_ip;
         use db::schema::instance;
         use db::schema::project;
-        opctx
-            .authorize(authz::Action::CreateChild, &authz::IP_POOL_LIST)
-            .await?;
 
         let existing_ips = external_ip::table
             .inner_join(
@@ -630,12 +627,12 @@ impl DataStore {
             .filter(external_ip::is_service.eq(false))
             .filter(external_ip::parent_id.is_not_null())
             .filter(external_ip::time_deleted.is_null())
-            .filter(external_ip::ip_pool_id.eq(association.ip_pool_id))
+            .filter(external_ip::ip_pool_id.eq(authz_pool.id()))
             // important, floating IPs are handled separately
             .filter(external_ip::kind.eq(IpKind::Ephemeral).or(external_ip::kind.eq(IpKind::SNat)))
             .filter(instance::time_deleted.is_null())
             // we have to join through IPs to instances to projects to get the silo ID
-            .filter(project::silo_id.eq(association.resource_id))
+            .filter(project::silo_id.eq(authz_silo.id()))
             .select(ExternalIp::as_select())
             .limit(1)
             .load_async::<ExternalIp>(
@@ -663,13 +660,11 @@ impl DataStore {
     async fn ensure_no_floating_ips_outstanding(
         &self,
         opctx: &OpContext,
-        association: &IpPoolResourceDelete,
+        authz_pool: &authz::IpPool,
+        authz_silo: &authz::Silo,
     ) -> Result<(), Error> {
         use db::schema::external_ip;
         use db::schema::project;
-        opctx
-            .authorize(authz::Action::CreateChild, &authz::IP_POOL_LIST)
-            .await?;
 
         let existing_ips = external_ip::table
             .inner_join(project::table.on(external_ip::project_id.eq(project::id.nullable())))
@@ -677,10 +672,10 @@ impl DataStore {
             .filter(external_ip::time_deleted.is_null())
             // all floating IPs have a project
             .filter(external_ip::project_id.is_not_null())
-            .filter(external_ip::ip_pool_id.eq(association.ip_pool_id))
+            .filter(external_ip::ip_pool_id.eq(authz_pool.id()))
             .filter(external_ip::kind.eq(IpKind::Floating))
             // we have to join through IPs to projects to get the silo ID
-            .filter(project::silo_id.eq(association.resource_id))
+            .filter(project::silo_id.eq(authz_silo.id()))
             .filter(project::time_deleted.is_null())
             .select(ExternalIp::as_select())
             .limit(1)
@@ -709,21 +704,24 @@ impl DataStore {
     pub async fn ip_pool_unlink_silo(
         &self,
         opctx: &OpContext,
-        association: &IpPoolResourceDelete,
+        authz_pool: &authz::IpPool,
+        authz_silo: &authz::Silo,
     ) -> DeleteResult {
         use db::schema::ip_pool_resource;
-        opctx
-            .authorize(authz::Action::CreateChild, &authz::IP_POOL_LIST)
-            .await?;
+
+        opctx.authorize(authz::Action::Modify, authz_pool).await?;
+        opctx.authorize(authz::Action::Modify, authz_silo).await?;
 
         // We can only delete the association if there are no IPs allocated
         // from this pool in the associated resource.
-        self.ensure_no_instance_ips_outstanding(opctx, association).await?;
-        self.ensure_no_floating_ips_outstanding(opctx, association).await?;
+        self.ensure_no_instance_ips_outstanding(opctx, authz_pool, authz_silo)
+            .await?;
+        self.ensure_no_floating_ips_outstanding(opctx, authz_pool, authz_silo)
+            .await?;
 
         diesel::delete(ip_pool_resource::table)
-            .filter(ip_pool_resource::ip_pool_id.eq(association.ip_pool_id))
-            .filter(ip_pool_resource::resource_id.eq(association.resource_id))
+            .filter(ip_pool_resource::ip_pool_id.eq(authz_pool.id()))
+            .filter(ip_pool_resource::resource_id.eq(authz_silo.id()))
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map(|_rows_deleted| ())
@@ -905,7 +903,6 @@ mod test {
     use crate::db::datastore::datastore_test;
     use crate::db::model::{IpPool, IpPoolResource, IpPoolResourceType};
     use assert_matches::assert_matches;
-    use nexus_db_model::IpPoolResourceDelete;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::identity::Resource;
     use omicron_common::api::external::{
@@ -970,7 +967,7 @@ mod test {
             .expect("Failed to make IP pool default for silo");
 
         // now when we ask for the default pool again, we get that one
-        let (.., ip_pool) = datastore
+        let (authz_pool1_for_silo, ip_pool) = datastore
             .ip_pools_fetch_default(&opctx)
             .await
             .expect("Failed to get silo's default IP pool");
@@ -1000,15 +997,10 @@ mod test {
         assert_matches!(err, Error::ObjectAlreadyExists { .. });
 
         // now remove the association and we should get nothing again
+        let authz_silo =
+            authz::Silo::new(authz::Fleet, silo_id, LookupType::ById(silo_id));
         datastore
-            .ip_pool_unlink_silo(
-                &opctx,
-                &IpPoolResourceDelete {
-                    ip_pool_id: pool1_for_silo.id(),
-                    resource_id: silo_id,
-                    resource_type: IpPoolResourceType::Silo,
-                },
-            )
+            .ip_pool_unlink_silo(&opctx, &authz_pool1_for_silo, &authz_silo)
             .await
             .expect("Failed to unlink IP pool from silo");
 
