@@ -836,6 +836,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.silo_quotas (
     storage_bytes INT8 NOT NULL
 );
 
+/**
+ * A view of the amount of provisioned and allocated (set by quotas) resources
+ * on a given silo. 
+ */
 CREATE VIEW IF NOT EXISTS omicron.public.silo_utilization 
 AS SELECT
     c.id AS silo_id,
