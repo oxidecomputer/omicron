@@ -661,6 +661,16 @@ impl DataStore {
     /// of its new name to ensure that even if a user created another disk that
     /// shadows this "phantom" disk the original can still be un-deleted and
     /// faulted.
+    ///
+    /// It's worth pointing out that it's possible that the user created a disk,
+    /// then used that disk's ID to make a new disk with the same name as this
+    /// function would have picked when undeleting the original disk. In the
+    /// event that the original disk's delete saga unwound, this would cause
+    /// that unwind to fail at this step, and would cause a stuck saga that
+    /// requires manual intervention. The fixes as part of addressing issue 3866
+    /// should greatly reduce the number of disk delete sagas that unwind, but
+    /// this possibility does exist. To any customer reading this: please don't
+    /// name your disks `deleted-{another disk's id}` :)
     pub async fn project_undelete_disk_set_faulted_no_auth(
         &self,
         disk_id: &Uuid,
