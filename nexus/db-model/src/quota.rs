@@ -74,19 +74,6 @@ impl From<SiloQuotas> for views::SiloQuotas {
     }
 }
 
-impl From<views::SiloQuotas> for SiloQuotas {
-    fn from(silo_quotas: views::SiloQuotas) -> Self {
-        Self {
-            silo_id: silo_quotas.silo_id,
-            time_created: Utc::now(),
-            time_modified: Utc::now(),
-            cpus: silo_quotas.limits.cpus,
-            memory: silo_quotas.limits.memory.into(),
-            storage: silo_quotas.limits.storage.into(),
-        }
-    }
-}
-
 // Describes a set of updates for the [`SiloQuotas`] model.
 #[derive(AsChangeset)]
 #[diesel(table_name = silo_quotas)]
