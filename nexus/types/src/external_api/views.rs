@@ -13,7 +13,7 @@ use chrono::DateTime;
 use chrono::Utc;
 use omicron_common::api::external::{
     ByteCount, Digest, IdentityMetadata, InstanceState, Ipv4Net, Ipv6Net, Name,
-    ObjectIdentity, RoleName, SemverVersion,
+    ObjectIdentity, RoleName, SemverVersion, SimpleIdentity,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -86,11 +86,21 @@ pub struct Utilization {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SiloUtilization {
     pub silo_id: Uuid,
+    pub silo_name: Name,
     /// Accounts for resources allocated by in silos like CPU or memory for running instances and storage for disks and snapshots
     /// Note that CPU and memory resources associated with a stopped instances are not counted here
     pub provisioned: VirtualResourceCounts,
     /// Accounts for the total amount of resources reserved for silos via their quotas
     pub allocated: VirtualResourceCounts,
+}
+
+impl SimpleIdentity for SiloUtilization {
+    fn id(&self) -> Uuid {
+        self.silo_id
+    }
+    fn name(&self) -> &Name {
+        &self.silo_name
+    }
 }
 
 // IDENTITY PROVIDER

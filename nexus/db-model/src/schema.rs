@@ -423,11 +423,12 @@ table! {
 table! {
     silo_utilization(silo_id) {
         silo_id -> Uuid,
+        silo_name -> Text,
         cpus_provisioned -> Int8,
-        ram_provisioned -> Int8,
+        memory_provisioned -> Int8,
         storage_provisioned -> Int8,
         cpus_allocated -> Int8,
-        ram_allocated -> Int8,
+        memory_allocated -> Int8,
         storage_allocated -> Int8,
     }
 }
