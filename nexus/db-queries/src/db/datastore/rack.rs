@@ -773,7 +773,7 @@ impl DataStore {
         // make default for the internal silo. only need to do this if
         // the create went through, i.e., if it wasn't already there
         if internal_created {
-            self.ip_pool_associate_resource(
+            self.ip_pool_link_silo(
                 opctx,
                 db::model::IpPoolResource {
                     ip_pool_id: internal_pool_id,

@@ -1420,7 +1420,7 @@ async fn ip_pool_silo_list(
         let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
 
         let assocs = nexus
-            .ip_pool_association_list(&opctx, &pool_lookup, &pag_params)
+            .ip_pool_silo_list(&opctx, &pool_lookup, &pag_params)
             .await?
             .into_iter()
             .map(|assoc| assoc.into())
@@ -1454,7 +1454,7 @@ async fn ip_pool_silo_link(
         let resource_assoc = resource_assoc.into_inner();
         let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
         let assoc = nexus
-            .ip_pool_associate_resource(&opctx, &pool_lookup, &resource_assoc)
+            .ip_pool_link_silo(&opctx, &pool_lookup, &resource_assoc)
             .await?;
         Ok(HttpResponseCreated(assoc.into()))
     };
@@ -1480,9 +1480,7 @@ async fn ip_pool_silo_unlink(
         let path = path_params.into_inner();
         let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
         let silo_lookup = nexus.silo_lookup(&opctx, path.silo)?;
-        nexus
-            .ip_pool_dissociate_resource(&opctx, &pool_lookup, &silo_lookup)
-            .await?;
+        nexus.ip_pool_unlink_silo(&opctx, &pool_lookup, &silo_lookup).await?;
         Ok(HttpResponseUpdatedNoContent())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await

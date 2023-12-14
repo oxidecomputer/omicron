@@ -897,7 +897,7 @@ mod tests {
                 is_default,
             };
             self.db_datastore
-                .ip_pool_associate_resource(&self.opctx, association)
+                .ip_pool_link_silo(&self.opctx, association)
                 .await
                 .expect("Failed to associate IP pool with silo");
 

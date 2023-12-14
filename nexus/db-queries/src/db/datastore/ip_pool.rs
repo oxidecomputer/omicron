@@ -139,7 +139,9 @@ impl DataStore {
         use db::schema::ip_pool;
         use db::schema::ip_pool_resource;
 
-        let authz_silo = opctx.authn.silo_required()?;
+        let authz_silo = opctx.authn.silo_required().internal_context(
+            "fetching link from an IP pool to current silo",
+        )?;
 
         ip_pool::table
             .inner_join(ip_pool_resource::table)
@@ -419,7 +421,7 @@ impl DataStore {
             })
     }
 
-    pub async fn ip_pool_association_list(
+    pub async fn ip_pool_silo_list(
         &self,
         opctx: &OpContext,
         authz_pool: &authz::IpPool,
@@ -445,7 +447,7 @@ impl DataStore {
     }
 
     // TODO: should this error on conflict instead of updating?
-    pub async fn ip_pool_associate_resource(
+    pub async fn ip_pool_link_silo(
         &self,
         opctx: &OpContext,
         ip_pool_resource: IpPoolResource,
@@ -695,7 +697,7 @@ impl DataStore {
 
     /// Delete IP pool assocation with resource unless there are outstanding
     /// IPs allocated from the pool in the associated silo
-    pub async fn ip_pool_dissociate_resource(
+    pub async fn ip_pool_unlink_silo(
         &self,
         opctx: &OpContext,
         association: &IpPoolResourceDelete,
@@ -926,7 +928,7 @@ mod test {
             .await
             .expect("Failed to create IP pool");
         datastore
-            .ip_pool_associate_resource(
+            .ip_pool_link_silo(
                 &opctx,
                 IpPoolResource {
                     ip_pool_id: pool1_for_silo.id(),
@@ -946,7 +948,7 @@ mod test {
         // now we can change that association to is_default=true and
         // it should update rather than erroring out
         datastore
-            .ip_pool_associate_resource(
+            .ip_pool_link_silo(
                 &opctx,
                 IpPoolResource {
                     ip_pool_id: pool1_for_silo.id(),
@@ -975,7 +977,7 @@ mod test {
             .await
             .expect("Failed to create pool");
         let err = datastore
-            .ip_pool_associate_resource(
+            .ip_pool_link_silo(
                 &opctx,
                 IpPoolResource {
                     ip_pool_id: second_silo_default.id(),
@@ -990,7 +992,7 @@ mod test {
 
         // now remove the association and we should get nothing again
         datastore
-            .ip_pool_dissociate_resource(
+            .ip_pool_unlink_silo(
                 &opctx,
                 &IpPoolResourceDelete {
                     ip_pool_id: pool1_for_silo.id(),
@@ -999,7 +1001,7 @@ mod test {
                 },
             )
             .await
-            .expect("Failed to dissociate IP pool from silo");
+            .expect("Failed to unlink IP pool from silo");
 
         let error = datastore.ip_pools_fetch_default(&opctx).await.unwrap_err();
         assert_matches!(error, Error::ObjectNotFound { .. });
@@ -1050,7 +1052,7 @@ mod test {
             is_default: true,
         };
         datastore
-            .ip_pool_associate_resource(&opctx, link)
+            .ip_pool_link_silo(&opctx, link)
             .await
             .expect("Failed to make IP pool default for silo");
 

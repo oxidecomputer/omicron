@@ -106,46 +106,43 @@ impl super::Nexus {
         Ok(pool)
     }
 
-    pub(crate) async fn ip_pool_association_list(
+    pub(crate) async fn ip_pool_silo_list(
         &self,
         opctx: &OpContext,
         pool_lookup: &lookup::IpPool<'_>,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::IpPoolResource> {
-        // TODO: is this the right action to check?
         let (.., authz_pool) =
             pool_lookup.lookup_for(authz::Action::ListChildren).await?;
-        self.db_datastore
-            .ip_pool_association_list(opctx, &authz_pool, pagparams)
-            .await
+        self.db_datastore.ip_pool_silo_list(opctx, &authz_pool, pagparams).await
     }
 
-    pub(crate) async fn ip_pool_associate_resource(
+    pub(crate) async fn ip_pool_link_silo(
         &self,
         opctx: &OpContext,
         pool_lookup: &lookup::IpPool<'_>,
         silo_link: &params::IpPoolSiloLink,
     ) -> CreateResult<db::model::IpPoolResource> {
-        let (.., authz_pool) =
+        let (authz_pool,) =
             pool_lookup.lookup_for(authz::Action::Modify).await?;
-        let (silo,) = self
+        let (authz_silo,) = self
             .silo_lookup(&opctx, silo_link.silo.clone())?
-            .lookup_for(authz::Action::Read)
+            .lookup_for(authz::Action::Modify)
             .await?;
         self.db_datastore
-            .ip_pool_associate_resource(
+            .ip_pool_link_silo(
                 opctx,
                 db::model::IpPoolResource {
                     ip_pool_id: authz_pool.id(),
                     resource_type: db::model::IpPoolResourceType::Silo,
-                    resource_id: silo.id(),
+                    resource_id: authz_silo.id(),
                     is_default: silo_link.is_default,
                 },
             )
             .await
     }
 
-    pub(crate) async fn ip_pool_dissociate_resource(
+    pub(crate) async fn ip_pool_unlink_silo(
         &self,
         opctx: &OpContext,
         pool_lookup: &lookup::IpPool<'_>,
@@ -157,7 +154,7 @@ impl super::Nexus {
             silo_lookup.lookup_for(authz::Action::Modify).await?;
 
         self.db_datastore
-            .ip_pool_dissociate_resource(
+            .ip_pool_unlink_silo(
                 opctx,
                 &IpPoolResourceDelete {
                     ip_pool_id: authz_pool.id(),
@@ -178,7 +175,7 @@ impl super::Nexus {
         let (.., authz_pool) =
             pool_lookup.lookup_for(authz::Action::Modify).await?;
         let (.., authz_silo) =
-            silo_lookup.lookup_for(authz::Action::Read).await?;
+            silo_lookup.lookup_for(authz::Action::Modify).await?;
 
         self.db_datastore
             .ip_pool_set_default(
