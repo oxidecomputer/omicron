@@ -3669,14 +3669,14 @@ async fn instance_external_ip_attach(
         };
         let instance_lookup =
             nexus.instance_lookup(&opctx, instance_selector)?;
-        let disk = nexus
+        let ip = nexus
             .instance_attach_external_ip(
                 &opctx,
                 &instance_lookup,
                 &ip_to_detach.into_inner(),
             )
             .await?;
-        Ok(HttpResponseAccepted(disk.into()))
+        Ok(HttpResponseAccepted(ip.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -3705,14 +3705,14 @@ async fn instance_external_ip_detach(
         };
         let instance_lookup =
             nexus.instance_lookup(&opctx, instance_selector)?;
-        let disk = nexus
+        let ip = nexus
             .instance_detach_external_ip(
                 &opctx,
                 &instance_lookup,
                 &ip_to_detach.into_inner(),
             )
             .await?;
-        Ok(HttpResponseAccepted(disk.into()))
+        Ok(HttpResponseAccepted(ip.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

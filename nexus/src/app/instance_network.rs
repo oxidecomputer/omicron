@@ -283,12 +283,10 @@ impl super::Nexus {
     /// - `instance_id`: The ID of the instance to act on.
     /// - `sled_ip_address`: The internal IP address assigned to the sled's
     ///   sled agent.
-    /// - `ip_index_filter`: An optional filter on the index into the instance's
+    /// - `ip_filter`: An optional filter on the index into the instance's
     ///   external IP array.
-    ///   - If this is `Some(n)`, this routine configures DPD state for only the
-    ///     Nth external IP in the collection returned from CRDB. The caller is
-    ///     responsible for ensuring that the IP collection has stable indices
-    ///     when making this call.
+    ///   - If this is `Some(id)`, this routine configures DPD state for only the
+    ///     external IP with `id` in the collection returned from CRDB.
     ///   - If this is `None`, this routine configures DPD for all external
     ///     IPs.
     pub(crate) async fn instance_ensure_dpd_config(
@@ -297,7 +295,6 @@ impl super::Nexus {
         instance_id: Uuid,
         sled_ip_address: &std::net::SocketAddrV6,
         ip_filter: Option<Uuid>,
-        dpd_client: &Arc<dpd_client::Client>,
     ) -> Result<(), Error> {
         let log = &self.log;
 
@@ -359,24 +356,41 @@ impl super::Nexus {
         let sled_address =
             Ipv6Net(Ipv6Network::new(*sled_ip_address.ip(), 128).unwrap());
 
-        for external_ip in ips_of_interest {
-            // For each external ip, add a nat entry to the database
-            self.ensure_nat_entry(
-                external_ip,
-                sled_address,
-                &network_interface,
-                mac_address,
-                opctx,
-            )
-            .await?;
-        }
+        // Querying boundary switches also requires fleet access and the use of the
+        // instance allocator context.
+        let boundary_switches =
+            self.boundary_switches(&self.opctx_alloc).await?;
 
-        // Notify dendrite that there are changes for it to reconcile.
-        // In the event of a failure to notify dendrite, we'll log an error
-        // and rely on dendrite's RPW timer to catch it up.
-        if let Err(e) = dpd_client.ipv4_nat_trigger_update().await {
-            error!(self.log, "failed to notify dendrite of nat updates"; "error" => ?e);
-        };
+        for switch in &boundary_switches {
+            debug!(&self.log, "notifying dendrite of updates";
+                       "instance_id" => %authz_instance.id(),
+                       "switch" => switch.to_string());
+
+            let dpd_client = self.dpd_clients.get(switch).ok_or_else(|| {
+                Error::internal_error(&format!(
+                    "unable to find dendrite client for {switch}"
+                ))
+            })?;
+
+            for external_ip in ips_of_interest {
+                // For each external ip, add a nat entry to the database
+                self.ensure_nat_entry(
+                    external_ip,
+                    sled_address,
+                    &network_interface,
+                    mac_address,
+                    opctx,
+                )
+                .await?;
+            }
+
+            // Notify dendrite that there are changes for it to reconcile.
+            // In the event of a failure to notify dendrite, we'll log an error
+            // and rely on dendrite's RPW timer to catch it up.
+            if let Err(e) = dpd_client.ipv4_nat_trigger_update().await {
+                error!(self.log, "failed to notify dendrite of nat updates"; "error" => ?e);
+            };
+        }
 
         Ok(())
     }
@@ -427,10 +441,17 @@ impl super::Nexus {
     /// - If an operation fails while this routine is walking NAT entries, it
     ///   will continue trying to delete subsequent entries but will return the
     ///   first error it encountered.
+    /// - `ip_filter`: An optional filter on the index into the instance's
+    ///   external IP array.
+    ///   - If this is `Some(id)`, this routine configures DPD state for only the
+    ///     external IP with `id` in the collection returned from CRDB.
+    ///   - If this is `None`, this routine configures DPD for all external
+    ///     IPs.
     pub(crate) async fn instance_delete_dpd_config(
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,
+        ip_filter: Option<Uuid>,
     ) -> Result<(), Error> {
         let log = &self.log;
         let instance_id = authz_instance.id();
@@ -443,8 +464,20 @@ impl super::Nexus {
             .instance_lookup_external_ips(opctx, instance_id)
             .await?;
 
+        let ips_of_interest = if let Some(wanted_id) = ip_filter {
+            if let Some(ip) = external_ips.iter().find(|v| v.id == wanted_id) {
+                std::slice::from_ref(ip)
+            } else {
+                return Err(Error::internal_error(&format!(
+                    "failed to find external ip address with id: {wanted_id}",
+                )));
+            }
+        } else {
+            &external_ips[..]
+        };
+
         let mut errors = vec![];
-        for entry in external_ips {
+        for entry in ips_of_interest {
             // Soft delete the NAT entry
             match self
                 .db_datastore
@@ -498,7 +531,7 @@ impl super::Nexus {
             };
         }
 
-        if let Some(e) = errors.into_iter().nth(0) {
+        if let Some(e) = errors.into_iter().next() {
             return Err(e);
         }
 
@@ -707,24 +740,13 @@ impl super::Nexus {
             .fetch()
             .await?;
 
-        let boundary_switches =
-            self.boundary_switches(&self.opctx_alloc).await?;
-
-        for switch in &boundary_switches {
-            let dpd_client = self.dpd_clients.get(switch).ok_or_else(|| {
-                Error::internal_error(&format!(
-                    "could not find dpd client for {switch}"
-                ))
-            })?;
-            self.instance_ensure_dpd_config(
-                opctx,
-                instance_id,
-                &sled.address(),
-                None,
-                dpd_client,
-            )
-            .await?;
-        }
+        self.instance_ensure_dpd_config(
+            opctx,
+            instance_id,
+            &sled.address(),
+            None,
+        )
+        .await?;
 
         Ok(())
     }

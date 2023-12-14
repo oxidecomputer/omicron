@@ -10,7 +10,7 @@ use crate::bootstrap::params::AddSledRequest;
 use crate::params::{
     CleanupContextUpdate, DiskEnsureBody, InstanceEnsureBody,
     InstanceExternalIpBody, InstancePutMigrationIdsBody, InstancePutStateBody,
-    InstancePutStateResponse, InstanceUnregisterResponse, ServiceEnsureBody,
+    InstancePutStateResponse, InstanceUnregisterResponse, OmicronZonesConfig,
     SledRole, TimeSync, VpcFirewallRulesEnsureBody, ZoneBundleId,
     ZoneBundleMetadata, Zpool,
 };

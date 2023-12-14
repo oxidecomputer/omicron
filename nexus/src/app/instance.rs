@@ -1876,7 +1876,7 @@ impl super::Nexus {
 
     /// Attach a disk to an instance.
     pub(crate) async fn instance_attach_external_ip(
-        self: Arc<Self>,
+        self: &Arc<Self>,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
         ext_ip: &params::ExternalIpCreate,
@@ -1888,72 +1888,48 @@ impl super::Nexus {
             create_params: ext_ip.clone(),
             authz_instance,
             instance,
-            ephemeral_ip_id: Uuid::new_v4(),
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
         };
 
-        let saga_results = self
+        let saga_outputs = self
             .execute_saga::<sagas::instance_ip_attach::SagaInstanceIpAttach>(
                 saga_params,
             )
             .await?;
 
-        todo!()
-
-        // XXX: add a From<db::External> for views::External
-        // Ok(views::ExternalIp::from(views::FloatingIp::from(eip)))
+        saga_outputs
+            .lookup_node_output::<views::ExternalIp>("output")
+            .map_err(|e| Error::internal_error(&format!("{:#}", &e)))
+            .internal_context("looking up output from ip attach saga")
     }
 
     /// Detach an external IP from an instance.
     pub(crate) async fn instance_detach_external_ip(
-        &self,
+        self: &Arc<Self>,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
         ext_ip: &params::ExternalIpDelete,
     ) -> UpdateResult<views::ExternalIp> {
-        let (.., authz_project, authz_instance) =
-            instance_lookup.lookup_for(authz::Action::Modify).await?;
+        let (.., authz_project, authz_instance, instance) =
+            instance_lookup.fetch_for(authz::Action::Modify).await?;
 
-        let (authz_fip, db_fip) = match ext_ip {
-            params::ExternalIpDelete::Ephemeral => Err(Error::internal_error(
-                "ephemeral IP attach/detach not yet supported",
-            ))?,
-            params::ExternalIpDelete::Floating { floating_ip_name } => {
-                let floating_ip_name =
-                    db::model::Name(floating_ip_name.clone());
-                let (.., authz_fip, db_fip) =
-                    LookupPath::new(&opctx, &self.datastore())
-                        .project_id(authz_project.id())
-                        .floating_ip_name(&floating_ip_name)
-                        .fetch_for(authz::Action::Modify)
-                        .await?;
-                (authz_fip, db_fip)
-            }
+        let saga_params = sagas::instance_ip_detach::Params {
+            delete_params: ext_ip.clone(),
+            authz_instance,
+            instance,
+            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
         };
 
-        let (eip, sled_uuid) = self
-            .datastore()
-            .floating_ip_detach(
-                opctx,
-                &authz_fip,
-                &db_fip,
-                Some(authz_instance.id()),
+        let saga_outputs = self
+            .execute_saga::<sagas::instance_ip_detach::SagaInstanceIpDetach>(
+                saga_params,
             )
             .await?;
 
-        if let Some(uuid) = sled_uuid {
-            self.sled_client(&uuid)
-                .await?
-                .instance_delete_external_ip(
-                    &authz_instance.id(),
-                    &sled_agent_client::types::InstanceExternalIpBody::Floating(
-                        db_fip.ip.ip(),
-                    ),
-                )
-                .await?;
-        }
-
-        Ok(views::ExternalIp::from(views::FloatingIp::from(eip)))
+        saga_outputs
+            .lookup_node_output::<views::ExternalIp>("output")
+            .map_err(|e| Error::internal_error(&format!("{:#}", &e)))
+            .internal_context("looking up output from ip attach saga")
     }
 }
 
