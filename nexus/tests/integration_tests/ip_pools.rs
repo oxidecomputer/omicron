@@ -4,8 +4,6 @@
 
 //! Integration tests for operating on IP Pools
 
-use std::collections::HashSet;
-
 use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use dropshot::ResultsPage;
@@ -16,7 +14,10 @@ use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
+use nexus_test_utils::resource_helpers::create_instance;
+use nexus_test_utils::resource_helpers::create_ip_pool;
 use nexus_test_utils::resource_helpers::create_project;
+use nexus_test_utils::resource_helpers::link_ip_pool;
 use nexus_test_utils::resource_helpers::object_create;
 use nexus_test_utils::resource_helpers::object_create_error;
 use nexus_test_utils::resource_helpers::object_delete;
@@ -25,14 +26,8 @@ use nexus_test_utils::resource_helpers::object_get;
 use nexus_test_utils::resource_helpers::object_get_error;
 use nexus_test_utils::resource_helpers::object_put;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
-use nexus_test_utils::resource_helpers::{
-    create_instance, create_instance_with,
-};
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
-use nexus_types::external_api::params::ExternalIpCreate;
-use nexus_types::external_api::params::InstanceDiskAttachment;
-use nexus_types::external_api::params::InstanceNetworkInterfaceAttachment;
 use nexus_types::external_api::params::IpPoolCreate;
 use nexus_types::external_api::params::IpPoolSiloLink;
 use nexus_types::external_api::params::IpPoolSiloUpdate;
@@ -810,48 +805,15 @@ async fn test_ip_pool_range_pagination(cptestctx: &ControlPlaneTestContext) {
 }
 
 #[nexus_test]
-async fn test_ip_pool_list_usable_by_project(
-    cptestctx: &ControlPlaneTestContext,
-) {
+async fn test_ip_pool_list_in_silo(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let scoped_ip_pools_url = "/v1/ip-pools";
-    let ip_pools_url = "/v1/system/ip-pools";
     let mypool_name = "mypool";
-    let mypool_silos_url = format!("{}/{}/silos", ip_pools_url, mypool_name);
-    let mypool_ip_pool_add_range_url =
-        format!("{}/{}/ranges/add", ip_pools_url, mypool_name);
-    let service_ip_pool_add_range_url =
-        "/v1/system/ip-pools-service/ranges/add".to_string();
-
-    // Create an org and project, and then try to make an instance with an IP from
-    // each range to which the project is expected have access.
 
     const PROJECT_NAME: &str = "myproj";
-    const INSTANCE_NAME: &str = "myinst";
     create_project(client, PROJECT_NAME).await;
 
-    let params = IpPoolCreate {
-        identity: IdentityMetadataCreateParams {
-            name: String::from(mypool_name).parse().unwrap(),
-            description: String::from("right on cue"),
-        },
-    };
-    NexusRequest::objects_post(client, ip_pools_url, &params)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute_and_parse_unwrap::<IpPool>()
-        .await;
-
-    // associate pool with default silo, which is the privileged user's silo
-    let params = IpPoolSiloLink {
-        silo: NameOrId::Id(DEFAULT_SILO.id()),
-        is_default: true,
-    };
-    NexusRequest::objects_post(client, &mypool_silos_url, &params)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute_and_parse_unwrap::<IpPoolSilo>()
-        .await;
-
-    // Add an IP range to mypool
+    // create pool with range and link (as default pool) to default silo, which
+    // is the privileged user's silo
     let mypool_range = IpRange::V4(
         Ipv4Range::new(
             std::net::Ipv4Addr::new(10, 0, 0, 51),
@@ -859,97 +821,35 @@ async fn test_ip_pool_list_usable_by_project(
         )
         .unwrap(),
     );
-    let created_range: IpPoolRange = NexusRequest::objects_post(
-        client,
-        &mypool_ip_pool_add_range_url,
-        &mypool_range,
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap()
-    .parsed_body()
-    .unwrap();
-    assert_eq!(
-        mypool_range.first_address(),
-        created_range.range.first_address()
-    );
-    assert_eq!(mypool_range.last_address(), created_range.range.last_address());
+    create_ip_pool(client, mypool_name, Some(mypool_range)).await;
+    link_ip_pool(client, mypool_name, &DEFAULT_SILO.id(), true).await;
 
-    // add a service range we *don't* expect to see in the results
-    let service_range = IpRange::V4(
+    // create another pool and don't link it to anything
+    let otherpool_name = "other-pool";
+    let otherpool_range = IpRange::V4(
         Ipv4Range::new(
-            std::net::Ipv4Addr::new(10, 0, 0, 101),
-            std::net::Ipv4Addr::new(10, 0, 0, 102),
+            std::net::Ipv4Addr::new(10, 0, 0, 53),
+            std::net::Ipv4Addr::new(10, 0, 0, 54),
         )
         .unwrap(),
     );
+    create_ip_pool(client, otherpool_name, Some(otherpool_range)).await;
 
-    let created_range: IpPoolRange = NexusRequest::objects_post(
-        client,
-        &service_ip_pool_add_range_url,
-        &service_range,
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap()
-    .parsed_body()
-    .unwrap();
-    assert_eq!(
-        service_range.first_address(),
-        created_range.range.first_address()
-    );
-    assert_eq!(
-        service_range.last_address(),
-        created_range.range.last_address()
-    );
+    let list =
+        objects_list_page_authz::<IpPool>(client, "/v1/ip-pools").await.items;
 
-    // TODO: add non-service ip pools that the project *can't* use
-
-    let list_url = format!("{}?project={}", scoped_ip_pools_url, PROJECT_NAME);
-    let list = NexusRequest::iter_collection_authn::<IpPool>(
-        client, &list_url, "", None,
-    )
-    .await
-    .expect("Failed to list IP Pools")
-    .all_items;
-
+    // only mypool shows up because it's linked to my silo
     assert_eq!(list.len(), 1);
     assert_eq!(list[0].identity.name.to_string(), mypool_name);
 
-    // currently there's only one in the list, so this is overkill. But there might be more
-    let pool_names: HashSet<String> =
-        list.iter().map(|pool| pool.identity.name.to_string()).collect();
+    // fetch the pool directly too
+    let url = format!("/v1/ip-pools/{}", mypool_name);
+    let pool: IpPool = object_get(client, &url).await;
+    assert_eq!(pool.identity.name.as_str(), mypool_name);
 
-    // ensure we can view each pool returned
-    for pool_name in &pool_names {
-        let view_pool_url = format!(
-            "{}/{}?project={}",
-            scoped_ip_pools_url, pool_name, PROJECT_NAME
-        );
-        let pool = NexusRequest::object_get(client, &view_pool_url)
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute_and_parse_unwrap::<IpPool>()
-            .await;
-        assert_eq!(pool.identity.name.as_str(), pool_name.as_str());
-    }
-
-    // ensure we can successfully create an instance with each of the pools we
-    // should be able to access
-    for pool_name in pool_names {
-        let instance_name = format!("{}-{}", INSTANCE_NAME, pool_name);
-        let pool_name = Some(Name::try_from(pool_name.to_string()).unwrap());
-        create_instance_with(
-            client,
-            PROJECT_NAME,
-            &instance_name,
-            &InstanceNetworkInterfaceAttachment::Default,
-            Vec::<InstanceDiskAttachment>::new(),
-            vec![ExternalIpCreate::Ephemeral { pool_name }],
-        )
-        .await;
-    }
+    // fetching the other pool directly 404s
+    let url = format!("/v1/ip-pools/{}", otherpool_name);
+    object_get_error(client, &url, StatusCode::NOT_FOUND).await;
 }
 
 #[nexus_test]

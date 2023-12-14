@@ -500,8 +500,7 @@ lazy_static! {
         };
 
     // IP Pools
-    pub static ref DEMO_IP_POOLS_PROJ_URL: String =
-        format!("/v1/ip-pools?project={}", *DEMO_PROJECT_NAME);
+    pub static ref DEMO_IP_POOLS_PROJ_URL: String = "/v1/ip-pools".to_string();
     pub static ref DEMO_IP_POOLS_URL: &'static str = "/v1/system/ip-pools";
     pub static ref DEMO_IP_POOL_NAME: Name = "default".parse().unwrap();
     pub static ref DEMO_IP_POOL_CREATE: params::IpPoolCreate =
@@ -511,8 +510,7 @@ lazy_static! {
                 description: String::from("an IP pool"),
             },
         };
-    pub static ref DEMO_IP_POOL_PROJ_URL: String =
-        format!("/v1/ip-pools/{}?project={}", *DEMO_IP_POOL_NAME, *DEMO_PROJECT_NAME);
+    pub static ref DEMO_IP_POOL_PROJ_URL: String = format!("/v1/ip-pools/{}", *DEMO_IP_POOL_NAME);
     pub static ref DEMO_IP_POOL_URL: String = format!("/v1/system/ip-pools/{}", *DEMO_IP_POOL_NAME);
     pub static ref DEMO_IP_POOL_UPDATE: params::IpPoolUpdate =
         params::IpPoolUpdate {

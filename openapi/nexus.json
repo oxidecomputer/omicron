@@ -2154,7 +2154,7 @@
         "tags": [
           "projects"
         ],
-        "summary": "List all IP Pools that can be used by a given project.",
+        "summary": "List all IP pools",
         "operationId": "project_ip_pool_list",
         "parameters": [
           {
@@ -2175,14 +2175,6 @@
             "schema": {
               "nullable": true,
               "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "project",
-            "description": "Name or ID of the project",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
             }
           },
           {
@@ -2212,9 +2204,7 @@
           }
         },
         "x-dropshot-pagination": {
-          "required": [
-            "project"
-          ]
+          "required": []
         }
       }
     },
@@ -2231,14 +2221,6 @@
             "name": "pool",
             "description": "Name or ID of the IP pool",
             "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "project",
-            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }

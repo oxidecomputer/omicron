@@ -10,11 +10,13 @@ use ipnetwork::IpNetwork;
 use nexus_db_model::IpPoolResourceDelete;
 use nexus_db_model::IpPoolResourceType;
 use nexus_db_queries::authz;
+use nexus_db_queries::authz::ApiResource;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::model::Name;
+use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -71,6 +73,37 @@ impl super::Nexus {
     ) -> CreateResult<db::model::IpPool> {
         let pool = db::model::IpPool::new(&pool_params.identity);
         self.db_datastore.ip_pool_create(opctx, pool).await
+    }
+
+    // TODO: this is used by a developer user to see what IP pools they can use
+    // in their silo, so it would be nice to say which one is the default
+
+    /// List IP pools in current silo
+    pub(crate) async fn silo_ip_pools_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<db::model::IpPool> {
+        self.db_datastore.silo_ip_pools_list(opctx, pagparams).await
+    }
+
+    // Look up pool by name or ID, but only return it if it's linked to the
+    // current silo
+    pub async fn silo_ip_pool_fetch<'a>(
+        &'a self,
+        opctx: &'a OpContext,
+        pool: &'a NameOrId,
+    ) -> LookupResult<db::model::IpPool> {
+        let (authz_pool, pool) =
+            self.ip_pool_lookup(opctx, pool)?.fetch().await?;
+
+        // 404 if no link is found in the current silo
+        let link = self.db_datastore.ip_pool_fetch_link(opctx, pool.id()).await;
+        if link.is_err() {
+            return Err(authz_pool.not_found());
+        }
+
+        Ok(pool)
     }
 
     pub(crate) async fn ip_pool_association_list(

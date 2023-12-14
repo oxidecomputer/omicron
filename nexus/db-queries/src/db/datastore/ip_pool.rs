@@ -40,6 +40,7 @@ use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
@@ -81,6 +82,47 @@ impl DataStore {
         )
         .filter(ip_pool::time_deleted.is_null())
         .select(IpPool::as_select())
+        .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// List IP pools linked to the current silo
+    pub async fn silo_ip_pools_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<db::model::IpPool> {
+        use db::schema::ip_pool;
+        use db::schema::ip_pool_resource;
+
+        // From the developer user's point of view, we treat IP pools linked to
+        // their silo as silo resources, so they can list them if they can list
+        // silo children
+        let authz_silo =
+            opctx.authn.silo_required().internal_context("listing IP pools")?;
+        opctx.authorize(authz::Action::ListChildren, &authz_silo).await?;
+
+        let silo_id = authz_silo.id();
+
+        match pagparams {
+            PaginatedBy::Id(pagparams) => {
+                paginated(ip_pool::table, ip_pool::id, pagparams)
+            }
+            PaginatedBy::Name(pagparams) => paginated(
+                ip_pool::table,
+                ip_pool::name,
+                &pagparams.map_name(|n| Name::ref_cast(n)),
+            ),
+        }
+        .inner_join(ip_pool_resource::table)
+        .filter(
+            ip_pool_resource::resource_type
+                .eq(IpPoolResourceType::Silo)
+                .and(ip_pool_resource::resource_id.eq(silo_id)),
+        )
+        .filter(ip_pool::time_deleted.is_null())
+        .select(db::model::IpPool::as_select())
         .get_results_async(&*self.pool_connection_authorized(opctx).await?)
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))

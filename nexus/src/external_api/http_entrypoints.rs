@@ -42,7 +42,7 @@ use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup::ImageLookup;
 use nexus_db_queries::db::lookup::ImageParentLookup;
 use nexus_db_queries::db::model::Name;
-use nexus_types::external_api::{params::ProjectSelector, views::SiloQuotas};
+use nexus_types::external_api::views::SiloQuotas;
 use nexus_types::{
     external_api::views::{SledInstance, Switch},
     identity::AssetIdentityMetadata,
@@ -1211,7 +1211,7 @@ async fn project_policy_update(
 
 // IP Pools
 
-/// List all IP Pools that can be used by a given project.
+/// List all IP pools
 #[endpoint {
     method = GET,
     path = "/v1/ip-pools",
@@ -1219,14 +1219,8 @@ async fn project_policy_update(
 }]
 async fn project_ip_pool_list(
     rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
+    query_params: Query<PaginatedByNameOrId>,
 ) -> Result<HttpResponseOk<ResultsPage<IpPool>>, HttpError> {
-    // Per https://github.com/oxidecomputer/omicron/issues/2148
-    // This is currently the same list as /v1/system/ip-pools, that is to say,
-    // IP pools that are *available to* a given project, those being ones that
-    // are not the internal pools for Oxide service usage. This may change
-    // in the future as the scoping of pools is further developed, but for now,
-    // this is literally a near-duplicate of `ip_pool_list`:
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
@@ -1235,10 +1229,8 @@ async fn project_ip_pool_list(
         let scan_params = ScanByNameOrId::from_query(&query)?;
         let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let project_lookup =
-            nexus.project_lookup(&opctx, scan_params.selector.clone())?;
         let pools = nexus
-            .project_ip_pools_list(&opctx, &project_lookup, &paginated_by)
+            .silo_ip_pools_list(&opctx, &paginated_by)
             .await?
             .into_iter()
             .map(IpPool::from)
@@ -1261,23 +1253,13 @@ async fn project_ip_pool_list(
 async fn project_ip_pool_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::IpPoolPath>,
-    project: Query<params::OptionalProjectSelector>,
 ) -> Result<HttpResponseOk<views::IpPool>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let nexus = &apictx.nexus;
         let pool_selector = path_params.into_inner().pool;
-        let project_lookup = if let Some(project) = project.into_inner().project
-        {
-            Some(nexus.project_lookup(&opctx, ProjectSelector { project })?)
-        } else {
-            None
-        };
-        let (_authz_pool, pool) = nexus
-            .project_ip_pool_lookup(&opctx, &pool_selector, &project_lookup)?
-            .fetch()
-            .await?;
+        let pool = nexus.silo_ip_pool_fetch(&opctx, &pool_selector).await?;
         Ok(HttpResponseOk(IpPool::from(pool)))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await

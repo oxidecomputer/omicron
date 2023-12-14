@@ -81,7 +81,7 @@ pub async fn object_get_error(
     status: StatusCode,
 ) -> HttpErrorResponseBody {
     NexusRequest::new(
-        RequestBuilder::new(client, Method::DELETE, path)
+        RequestBuilder::new(client, Method::GET, path)
             .expect_status(Some(status)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
