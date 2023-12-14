@@ -1,12 +1,13 @@
--- Preemptively turn any former fleet defaults into non-defaults if there's
--- going to be a silo conflicting with it after up6
-UPDATE omicron.public.ip_pool_resource AS ipr
-SET is_default = false
-FROM omicron.public.ip_pool as ip
-WHERE ipr.resource_type = 'silo' -- technically unnecessary because there is only silo
-  AND ipr.is_default = true
-  AND ip.is_default = true -- both being default is the conflict being resolved
-  AND ip.silo_id IS NOT NULL
-  AND ip.silo_id = ipr.resource_id
-  AND ip.id = ipr.ip_pool_id;
-
+-- Copy existing silo-scoped pools over to the pool-silo join table 
+INSERT INTO omicron.public.ip_pool_resource (ip_pool_id, resource_type, resource_id, is_default)
+SELECT 
+  id as ip_pool_id, 
+  'silo' as resource_type,
+  silo_id as resource_id,
+  is_default
+FROM omicron.public.ip_pool AS ip
+WHERE silo_id IS NOT null
+  AND time_deleted IS null
+-- this makes it idempotent
+ON CONFLICT (ip_pool_id, resource_type, resource_id)
+DO NOTHING;
