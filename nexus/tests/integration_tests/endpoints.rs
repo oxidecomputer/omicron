@@ -999,7 +999,7 @@ lazy_static! {
         VerifyEndpoint {
             url: "/v1/utilization",
             visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
+            unprivileged_access: UnprivilegedAccess::ReadOnly,
             allowed_methods: vec![
                 AllowedMethod::Get
             ]
