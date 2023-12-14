@@ -838,7 +838,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.silo_quotas (
 
 /**
  * A view of the amount of provisioned and allocated (set by quotas) resources
- * on a given silo. 
+ * on a given silo.
  */
 CREATE VIEW IF NOT EXISTS omicron.public.silo_utilization 
 AS SELECT
@@ -3096,7 +3096,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '20.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '21.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
