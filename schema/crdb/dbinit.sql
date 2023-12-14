@@ -827,6 +827,15 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_ssh_key_by_silo_user ON omicron.public.
 ) WHERE
     time_deleted IS NULL;
 
+CREATE TABLE IF NOT EXISTS omicron.public.silo_quotas (
+    silo_id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    cpus INT8 NOT NULL,
+    memory_bytes INT8 NOT NULL,
+    storage_bytes INT8 NOT NULL
+);
+
 /*
  * Projects
  */
@@ -3062,7 +3071,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '19.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '20.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

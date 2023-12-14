@@ -912,6 +912,8 @@ mod test {
                         name: "test-silo".parse().unwrap(),
                         description: String::new(),
                     },
+                    // Set a default quota of a half rack's worth of resources
+                    quotas: external_params::SiloQuotasCreate::arbitrarily_high_default(),
                     discoverable: false,
                     identity_mode: SiloIdentityMode::LocalOnly,
                     admin_group_name: None,
