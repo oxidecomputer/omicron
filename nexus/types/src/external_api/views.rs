@@ -50,7 +50,7 @@ pub struct Silo {
 }
 
 /// A collection of resource counts used to describe capacity and utilization
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct VirtualResourceCounts {
     /// Number of virtual CPUs
     pub cpus: i64,
