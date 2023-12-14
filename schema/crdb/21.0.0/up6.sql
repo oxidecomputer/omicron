@@ -1,9 +1,13 @@
 -- copy existing ip_pool-to-silo associations into association table
 INSERT INTO omicron.public.ip_pool_resource (ip_pool_id, resource_type, resource_id, is_default)
-SELECT id, 'silo', silo_id, is_default
-FROM ip_pool
+SELECT 
+  id as ip_pool_id, 
+  'silo' as resource_type,
+  silo_id as resource_id,
+  is_default
+FROM omicron.public.ip_pool AS ip
 WHERE silo_id IS NOT null
   AND time_deleted IS null
--- make this idempotent
+-- this makes it idempotent
 ON CONFLICT (ip_pool_id, resource_type, resource_id)
 DO NOTHING;

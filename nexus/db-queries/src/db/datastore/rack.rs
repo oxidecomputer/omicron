@@ -1330,9 +1330,7 @@ mod test {
         // been allocated as a part of the service IP pool.
         let (.., svc_pool) =
             datastore.ip_pools_service_lookup(&opctx).await.unwrap();
-        // TODO: do we care? we should just check that the name or ID of the
-        // pool itself matches the known name or ID of the service pool
-        // assert_eq!(svc_pool.silo_id, Some(*INTERNAL_SILO_ID));
+        assert_eq!(svc_pool.name().as_str(), "oxide-service-pool");
 
         let observed_ip_pool_ranges = get_all_ip_pool_ranges(&datastore).await;
         assert_eq!(observed_ip_pool_ranges.len(), 1);
@@ -1534,9 +1532,7 @@ mod test {
         // allocated as a part of the service IP pool.
         let (.., svc_pool) =
             datastore.ip_pools_service_lookup(&opctx).await.unwrap();
-        // TODO: do we care? we should just check that the name or ID of the
-        // pool itself matches the known name or ID of the service pool
-        // assert_eq!(svc_pool.silo_id, Some(*INTERNAL_SILO_ID));
+        assert_eq!(svc_pool.name().as_str(), "oxide-service-pool");
 
         let observed_ip_pool_ranges = get_all_ip_pool_ranges(&datastore).await;
         assert_eq!(observed_ip_pool_ranges.len(), 1);

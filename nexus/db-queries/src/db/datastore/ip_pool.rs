@@ -600,7 +600,7 @@ impl DataStore {
                     // TODO: would be nice to put the actual names and/or ids in
                     // here but LookupType on each of the two silos doesn't have
                     // a nice to_string yet or a way of composing them
-                    LookupType::ByCompositeId(format!("(pool, silo)")),
+                    LookupType::ByCompositeId("(pool, silo)".to_string()),
                 ),
             ),
         })
