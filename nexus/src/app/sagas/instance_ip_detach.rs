@@ -2,30 +2,21 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{
-    ActionRegistry, NexusActionContext, NexusSaga,
-};
+use super::{ActionRegistry, NexusActionContext, NexusSaga};
 use crate::app::sagas::declare_saga_actions;
 use crate::app::{authn, authz, db};
 use crate::external_api::params;
 use nexus_db_model::IpKind;
-use nexus_db_queries::db::identity::{Asset, Resource};
+use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_types::external_api::views;
-
 use omicron_common::api::external::Error;
-
 use serde::Deserialize;
 use serde::Serialize;
-
-
-use std::net::IpAddr;
-
-use steno::ActionError;
-
-use uuid::Uuid;
-
 use sled_agent_client::types::InstanceExternalIpBody;
+use std::net::IpAddr;
+use steno::ActionError;
+use uuid::Uuid;
 
 #[derive(Copy, Clone, Debug, Deserialize, Serialize)]
 enum ExternalIp {
@@ -137,17 +128,20 @@ async fn siid_migration_lock(
     );
 
     let inst_and_vmm = datastore
-        .instance_fetch_with_vmm(
-            &opctx,
-            &params.authz_instance,
-        )
+        .instance_fetch_with_vmm(&opctx, &params.authz_instance)
         .await
         .map_err(ActionError::action_failed)?;
+
+    if inst_and_vmm.instance().runtime_state.migration_id.is_some() {
+        return Err(ActionError::action_failed(Error::ServiceUnavailable {
+            internal_message: "target instance is migrating".into(),
+        }));
+    }
 
     // TODO: actually lock?
     // TODO: fail out in a user-friendly way if migrating?
 
-    Ok(inst_and_vmm.vmm().as_ref().map(|v| v.sled_id))
+    Ok(inst_and_vmm.sled_id())
 }
 
 async fn siid_migration_lock_undo(
@@ -173,7 +167,8 @@ async fn siid_resolve_ip(
     match params.delete_params {
         // Allocate a new IP address from the target, possibly default, pool
         params::ExternalIpDelete::Ephemeral => {
-            let eips = datastore.instance_lookup_external_ips(&opctx, params.instance.id())
+            let eips = datastore
+                .instance_lookup_external_ips(&opctx, params.instance.id())
                 .await
                 .map_err(ActionError::action_failed)?;
 
@@ -181,7 +176,7 @@ async fn siid_resolve_ip(
                 .ok_or_else(|| ActionError::action_failed(Error::invalid_request("instance does not have an attached ephemeral IP address")))?;
 
             Ok(ExternalIp::Ephemeral(eph_ip.ip.ip(), eph_ip.id))
-        },
+        }
         // Set the parent of an existing floating IP to the new instance's ID.
         params::ExternalIpDelete::Floating { ref floating_ip_name } => {
             let floating_ip_name = db::model::Name(floating_ip_name.clone());
@@ -460,21 +455,8 @@ impl NexusSaga for SagaInstanceIpDetach {
 
 #[cfg(test)]
 pub(crate) mod test {
-    
-    
-    
-    
-    
-    
-    
-    
-    
+
     use nexus_test_utils_macros::nexus_test;
-    
-    
-    
-    
-    
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;

@@ -2,14 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{
-    ActionRegistry, NexusActionContext, NexusSaga,
-};
+use super::{ActionRegistry, NexusActionContext, NexusSaga};
 use crate::app::sagas::declare_saga_actions;
 use crate::app::{authn, authz, db};
 use crate::external_api::params;
-use futures::TryFutureExt;
-use nexus_db_queries::db::identity::{Asset, Resource};
+use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_types::external_api::views;
 
@@ -17,7 +14,6 @@ use omicron_common::api::external::Error;
 
 use serde::Deserialize;
 use serde::Serialize;
-
 
 use std::net::IpAddr;
 
@@ -160,17 +156,22 @@ async fn siia_migration_lock(
     );
 
     let inst_and_vmm = datastore
-        .instance_fetch_with_vmm(
-            &opctx,
-            &params.authz_instance,
-        )
+        .instance_fetch_with_vmm(&opctx, &params.authz_instance)
         .await
         .map_err(ActionError::action_failed)?;
+
+    // TODO: Currently stop if there's a migration. This may be a good case
+    //       for RPW'ing ext_ip_state -> { NAT RPW, sled-agent } in future.
+    if inst_and_vmm.instance().runtime_state.migration_id.is_some() {
+        return Err(ActionError::action_failed(Error::ServiceUnavailable {
+            internal_message: "target instance is migrating".into(),
+        }));
+    }
 
     // TODO: actually lock?
     // TODO: fail out in a user-friendly way if migrating?
 
-    Ok(inst_and_vmm.vmm().as_ref().map(|v| v.sled_id))
+    Ok(inst_and_vmm.sled_id())
 }
 
 async fn siia_migration_lock_undo(
@@ -448,21 +449,8 @@ async fn siia_migration_unlock_undo(
 
 #[cfg(test)]
 pub(crate) mod test {
-    
-    
-    
-    
-    
-    
-    
-    
-    
+
     use nexus_test_utils_macros::nexus_test;
-    
-    
-    
-    
-    
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
