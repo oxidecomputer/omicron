@@ -29,6 +29,7 @@ use omicron_common::address::IpRange;
 use omicron_common::address::Ipv4Range;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
+use omicron_common::api::external::NameOrId;
 use uuid::Uuid;
 
 type ControlPlaneTestContext =
@@ -178,7 +179,6 @@ async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
 }
 
 #[nexus_test]
-#[should_panic]
 async fn test_floating_ip_create_fails_in_other_silo_pool(
     cptestctx: &ControlPlaneTestContext,
 ) {
@@ -188,7 +188,7 @@ async fn test_floating_ip_create_fails_in_other_silo_pool(
 
     let project = create_project(client, PROJECT_NAME).await;
 
-    // Try to create with named pool in another silo -- this should fail.
+    // Create other silo and pool linked to that silo
     let other_silo = create_silo(
         &client,
         "not-my-silo",
@@ -209,14 +209,32 @@ async fn test_floating_ip_create_fails_in_other_silo_pool(
     .await;
 
     let fip_name = FIP_NAMES[4];
-    create_floating_ip(
-        client,
-        fip_name,
-        project.identity.name.as_str(),
-        None,
-        Some("external-silo-pool"),
+
+    // creating a floating IP should fail with a 404 as if the specified pool
+    // does not exist
+    let url =
+        format!("/v1/floating-ips?project={}", project.identity.name.as_str());
+    let body = params::FloatingIpCreate {
+        identity: IdentityMetadataCreateParams {
+            name: fip_name.parse().unwrap(),
+            description: String::from("a floating ip"),
+        },
+        address: None,
+        pool: Some(NameOrId::Name("external-silo-pool".parse().unwrap())),
+    };
+
+    let error = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &url)
+            .body(Some(&body))
+            .expect_status(Some(StatusCode::NOT_FOUND)),
     )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap::<HttpErrorResponseBody>()
     .await;
+    assert_eq!(
+        error.message,
+        "not found: ip-pool with name \"external-silo-pool\""
+    );
 }
 
 #[nexus_test]
