@@ -480,6 +480,8 @@ mod tests {
             name = "Instance",
             parent = "Project",
             primary_key = (String, String),
+            // The SomeCompositeId type doesn't exist, but that's okay because
+            // this code is never compiled, just printed out.
             input_key = SomeCompositeId,
             roles_allowed = false,
             polar_snippet = InProject,
