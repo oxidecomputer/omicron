@@ -45,7 +45,7 @@ use nexus_db_queries::db::model::Name;
 use nexus_db_queries::{
     authz::ApiResource, db::fixed_data::silo::INTERNAL_SILO_ID,
 };
-use nexus_types::external_api::params::ProjectSelector;
+use nexus_types::external_api::{params::ProjectSelector, views::SiloQuotas};
 use nexus_types::{
     external_api::views::{SledInstance, Switch},
     identity::AssetIdentityMetadata,
@@ -280,6 +280,11 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(silo_policy_view)?;
         api.register(silo_policy_update)?;
 
+        api.register(system_quotas_list)?;
+
+        api.register(silo_quotas_view)?;
+        api.register(silo_quotas_update)?;
+
         api.register(silo_identity_provider_list)?;
 
         api.register(saml_identity_provider_create)?;
@@ -506,6 +511,91 @@ async fn policy_update(
         let policy =
             nexus.silo_update_policy(&opctx, &silo_lookup, &new_policy).await?;
         Ok(HttpResponseOk(policy))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Lists resource quotas for all silos
+#[endpoint {
+    method = GET,
+    path = "/v1/system/silo-quotas",
+    tags = ["system/silos"],
+}]
+async fn system_quotas_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<SiloQuotas>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+
+        let query = query_params.into_inner();
+        let pagparams = data_page_params_for(&rqctx, &query)?;
+
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let quotas = nexus
+            .fleet_list_quotas(&opctx, &pagparams)
+            .await?
+            .into_iter()
+            .map(|p| p.into())
+            .collect();
+
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            quotas,
+            &|_, quota: &SiloQuotas| quota.silo_id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// View the resource quotas of a given silo
+#[endpoint {
+    method = GET,
+    path = "/v1/system/silos/{silo}/quotas",
+    tags = ["system/silos"],
+}]
+async fn silo_quotas_view(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::SiloPath>,
+) -> Result<HttpResponseOk<SiloQuotas>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let silo_lookup =
+            nexus.silo_lookup(&opctx, path_params.into_inner().silo)?;
+        let quota = nexus.silo_quotas_view(&opctx, &silo_lookup).await?;
+        Ok(HttpResponseOk(quota.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Update the resource quotas of a given silo
+///
+/// If a quota value is not specified, it will remain unchanged.
+#[endpoint {
+    method = PUT,
+    path = "/v1/system/silos/{silo}/quotas",
+    tags = ["system/silos"],
+}]
+async fn silo_quotas_update(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::SiloPath>,
+    new_quota: TypedBody<params::SiloQuotasUpdate>,
+) -> Result<HttpResponseOk<SiloQuotas>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let silo_lookup =
+            nexus.silo_lookup(&opctx, path_params.into_inner().silo)?;
+        let quota = nexus
+            .silo_update_quota(&opctx, &silo_lookup, &new_quota.into_inner())
+            .await?;
+        Ok(HttpResponseOk(quota.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

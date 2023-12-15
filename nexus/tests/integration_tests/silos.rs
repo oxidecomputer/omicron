@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::integration_tests::saml::SAML_IDP_DESCRIPTOR;
+use dropshot::ResultsPage;
 use nexus_db_queries::authn::silos::{
     AuthenticatedSubject, IdentityProviderType,
 };
@@ -19,6 +20,7 @@ use nexus_test_utils::resource_helpers::{
     objects_list_page_authz, projects_list,
 };
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::views::Certificate;
 use nexus_types::external_api::views::{
     self, IdentityProvider, Project, SamlIdentityProvider, Silo,
 };
@@ -27,6 +29,7 @@ use omicron_common::api::external::ObjectIdentity;
 use omicron_common::api::external::{
     IdentityMetadataCreateParams, LookupType, Name,
 };
+use omicron_test_utils::certificates::CertificateChain;
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -65,6 +68,7 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
                     name: cptestctx.silo_name.clone(),
                     description: "a silo".to_string(),
                 },
+                quotas: params::SiloQuotasCreate::empty(),
                 discoverable: false,
                 identity_mode: shared::SiloIdentityMode::LocalOnly,
                 admin_group_name: None,
@@ -281,6 +285,7 @@ async fn test_silo_admin_group(cptestctx: &ControlPlaneTestContext) {
                 name: "silo-name".parse().unwrap(),
                 description: "a silo".to_string(),
             },
+            quotas: params::SiloQuotasCreate::empty(),
             discoverable: false,
             identity_mode: shared::SiloIdentityMode::SamlJit,
             admin_group_name: Some("administrator".into()),
@@ -2253,6 +2258,7 @@ async fn test_silo_authn_policy(cptestctx: &ControlPlaneTestContext) {
                     name: silo_name,
                     description: String::new(),
                 },
+                quotas: params::SiloQuotasCreate::empty(),
                 discoverable: false,
                 identity_mode: shared::SiloIdentityMode::LocalOnly,
                 admin_group_name: None,
@@ -2329,6 +2335,7 @@ async fn check_fleet_privileges(
             name: SILO_NAME.parse().unwrap(),
             description: String::new(),
         },
+        quotas: params::SiloQuotasCreate::empty(),
         discoverable: false,
         identity_mode: shared::SiloIdentityMode::LocalOnly,
         admin_group_name: None,
@@ -2357,6 +2364,7 @@ async fn check_fleet_privileges(
                         name: SILO_NAME.parse().unwrap(),
                         description: String::new(),
                     },
+                    quotas: params::SiloQuotasCreate::empty(),
                     discoverable: false,
                     identity_mode: shared::SiloIdentityMode::LocalOnly,
                     admin_group_name: None,
@@ -2384,6 +2392,7 @@ async fn check_fleet_privileges(
             name: SILO_NAME.parse().unwrap(),
             description: String::new(),
         },
+        quotas: params::SiloQuotasCreate::empty(),
         discoverable: false,
         identity_mode: shared::SiloIdentityMode::LocalOnly,
         admin_group_name: None,
@@ -2416,6 +2425,7 @@ async fn check_fleet_privileges(
                         name: SILO_NAME.parse().unwrap(),
                         description: String::new(),
                     },
+                    quotas: params::SiloQuotasCreate::empty(),
                     discoverable: false,
                     identity_mode: shared::SiloIdentityMode::LocalOnly,
                     admin_group_name: None,
@@ -2436,4 +2446,83 @@ async fn check_fleet_privileges(
             .await
             .unwrap();
     }
+}
+
+// Test that a silo admin can create new certificates for their silo
+//
+// Internally, the certificate validation check requires the `authz::DNS_CONFIG`
+// resource (to check that the certificate is valid for
+// `{silo_name}.{external_dns_zone_name}`), which silo admins may not have. We
+// have to use an alternate, elevated context to perform that check, and this
+// test confirms we do so.
+#[nexus_test]
+async fn test_silo_admin_can_create_certs(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let certs_url = "/v1/certificates";
+
+    // Create a silo with an admin user
+    let silo = create_silo(
+        client,
+        "silo-name",
+        true,
+        shared::SiloIdentityMode::LocalOnly,
+    )
+    .await;
+
+    let new_silo_user_id = create_local_user(
+        client,
+        &silo,
+        &"admin".parse().unwrap(),
+        params::UserPassword::LoginDisallowed,
+    )
+    .await
+    .id;
+
+    grant_iam(
+        client,
+        "/v1/system/silos/silo-name",
+        SiloRole::Admin,
+        new_silo_user_id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    // The user should be able to create certs for this silo
+    let chain = CertificateChain::new(cptestctx.wildcard_silo_dns_name());
+    let (cert, key) =
+        (chain.cert_chain_as_pem(), chain.end_cert_private_key_as_pem());
+
+    let cert: Certificate = NexusRequest::objects_post(
+        client,
+        certs_url,
+        &params::CertificateCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "test-cert".parse().unwrap(),
+                description: "the test cert".to_string(),
+            },
+            cert,
+            key,
+            service: shared::ServiceUsingCertificate::ExternalApi,
+        },
+    )
+    .authn_as(AuthnMode::SiloUser(new_silo_user_id))
+    .execute()
+    .await
+    .expect("failed to create certificate")
+    .parsed_body()
+    .unwrap();
+
+    // The cert should exist when listing the silo's certs as the silo admin
+    let silo_certs =
+        NexusRequest::object_get(client, &format!("{certs_url}?limit=10"))
+            .authn_as(AuthnMode::SiloUser(new_silo_user_id))
+            .execute()
+            .await
+            .expect("failed to list certificates")
+            .parsed_body::<ResultsPage<Certificate>>()
+            .expect("failed to parse body as ResultsPage<Certificate>")
+            .items;
+
+    assert_eq!(silo_certs.len(), 1);
+    assert_eq!(silo_certs[0].identity.id, cert.identity.id);
 }

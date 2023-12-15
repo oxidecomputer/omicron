@@ -296,6 +296,7 @@ impl SelectQueryBuilder {
     }
 }
 
+/// Return the name of the measurements table for a datum type.
 pub(crate) fn measurement_table_name(ty: DatumType) -> String {
     format!("measurements_{}", ty.to_string().to_lowercase())
 }
@@ -335,6 +336,7 @@ pub struct FieldSelector {
     comparison: Option<FieldComparison>,
 }
 
+/// Return the name of the field table for the provided field type.
 pub(crate) fn field_table_name(ty: FieldType) -> String {
     format!("fields_{}", ty.to_string().to_lowercase())
 }

@@ -95,6 +95,33 @@ use serde_tokenstream::ParseWrapper;
 ///     polar_snippet = FleetChild,
 /// }
 /// ```
+///
+/// In some cases, it may be more convenient to identify a composite key with a
+/// struct rather than relying on tuples. This is supported too:
+///
+/// ```ignore
+/// struct SomeCompositeId {
+///     foo: String,
+///     bar: String,
+/// }
+///
+/// // There needs to be a `From` impl from the composite ID to the primary key.
+/// impl From<SomeCompositeId> for (String, String) {
+///     fn from(id: SomeCompositeId) -> Self {
+///         (id.foo, id.bar)
+///     }
+/// }
+///
+/// authz_resource! {
+///     name = "MyResource",
+///     parent = "Fleet",
+///     primary_key = (String, String),
+///     input_key = SomeCompositeId,
+///     roles_allowed = false,
+///     polar_snippet = FleetChild,
+/// }
+/// ```
+
 // Allow private intra-doc links.  This is useful because the `Input` struct
 // cannot be exported (since we're a proc macro crate, and we can't expose
 // a struct), but its documentation is very useful.
@@ -121,6 +148,12 @@ struct Input {
     parent: String,
     /// Rust type for the primary key for this resource
     primary_key: ParseWrapper<syn::Type>,
+    /// Rust type for the input key for this resource (the key users specify
+    /// for this resource, convertible to `primary_key`).
+    ///
+    /// This is the same as primary_key if not specified.
+    #[serde(default)]
+    input_key: Option<ParseWrapper<syn::Type>>,
     /// Whether roles may be attached directly to this resource
     roles_allowed: bool,
     /// How to generate the Polar snippet for this resource
@@ -153,6 +186,9 @@ fn do_authz_resource(
     let parent_resource_name = format_ident!("{}", input.parent);
     let parent_as_snake = heck::AsSnakeCase(&input.parent).to_string();
     let primary_key_type = &*input.primary_key;
+    let input_key_type =
+        &**input.input_key.as_ref().unwrap_or(&input.primary_key);
+
     let (has_role_body, as_roles_body, api_resource_roles_trait) =
         if input.roles_allowed {
             (
@@ -335,6 +371,21 @@ fn do_authz_resource(
             /// `lookup_type`
             pub fn new(
                 parent: #parent_resource_name,
+                key: #input_key_type,
+                lookup_type: LookupType,
+            ) -> #resource_name {
+                #resource_name {
+                    parent,
+                    key: key.into(),
+                    lookup_type,
+                }
+            }
+
+            /// A version of `new` that takes the primary key type directly.
+            /// This is only different from [`Self::new`] if this resource
+            /// uses a different input key type.
+            pub fn with_primary_key(
+                parent: #parent_resource_name,
                 key: #primary_key_type,
                 lookup_type: LookupType,
             ) -> #resource_name {
@@ -346,7 +397,7 @@ fn do_authz_resource(
             }
 
             pub fn id(&self) -> #primary_key_type {
-                self.key.clone()
+                self.key.clone().into()
             }
 
             /// Describes how to register this type with Oso
@@ -411,15 +462,34 @@ fn do_authz_resource(
 
 // See the test for lookup_resource.
 #[cfg(test)]
-#[test]
-fn test_authz_dump() {
-    let output = do_authz_resource(quote! {
-        name = "Organization",
-        parent = "Fleet",
-        primary_key = Uuid,
-        roles_allowed = false,
-        polar_snippet = Custom,
-    })
-    .unwrap();
-    println!("{}", output);
+mod tests {
+    use super::*;
+    #[test]
+    fn test_authz_dump() {
+        let output = do_authz_resource(quote! {
+            name = "Organization",
+            parent = "Fleet",
+            primary_key = Uuid,
+            roles_allowed = false,
+            polar_snippet = Custom,
+        })
+        .unwrap();
+        println!("{}", pretty_format(output));
+
+        let output = do_authz_resource(quote! {
+            name = "Instance",
+            parent = "Project",
+            primary_key = (String, String),
+            input_key = SomeCompositeId,
+            roles_allowed = false,
+            polar_snippet = InProject,
+        })
+        .unwrap();
+        println!("{}", pretty_format(output));
+    }
+
+    fn pretty_format(input: TokenStream) -> String {
+        let parsed = syn::parse2(input).unwrap();
+        prettyplease::unparse(&parsed)
+    }
 }
