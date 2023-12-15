@@ -474,7 +474,7 @@ impl DataStore {
 #[cfg(test)]
 mod test {
     use super::*;
-    use camino_tempfilae::Utf8TempDir;
+    use camino_tempfile::Utf8TempDir;
     use nexus_db_model::schema::SCHEMA_VERSION;
     use nexus_test_utils::db as test_db;
     use omicron_test_utils::dev;

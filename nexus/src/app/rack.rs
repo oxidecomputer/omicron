@@ -203,6 +203,10 @@ impl super::Nexus {
                 name: request.recovery_silo.silo_name,
                 description: "built-in recovery Silo".to_string(),
             },
+            // The recovery silo is initialized with no allocated capacity given it's
+            // not intended to be used to deploy workloads. Operators can add capacity
+            // after the fact if they want to use it for that purpose.
+            quotas: params::SiloQuotasCreate::empty(),
             discoverable: false,
             identity_mode: SiloIdentityMode::LocalOnly,
             admin_group_name: None,

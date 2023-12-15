@@ -37,7 +37,7 @@ use omicron_common::api::external::http_pagination::ScanParams;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::SledInstanceState;
-use omicron_common::api::internal::nexus::UpdateArtifactId;
+use omicron_common::update::ArtifactId;
 use oximeter::types::ProducerResults;
 use oximeter_producer::{collect, ProducerIdPathParams};
 use schemars::JsonSchema;
@@ -426,7 +426,7 @@ async fn cpapi_metrics_collect(
 }]
 async fn cpapi_artifact_download(
     request_context: RequestContext<Arc<ServerContext>>,
-    path_params: Path<UpdateArtifactId>,
+    path_params: Path<ArtifactId>,
 ) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
     let context = request_context.context();
     let nexus = &context.nexus;

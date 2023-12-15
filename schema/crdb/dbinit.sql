@@ -827,6 +827,15 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_ssh_key_by_silo_user ON omicron.public.
 ) WHERE
     time_deleted IS NULL;
 
+CREATE TABLE IF NOT EXISTS omicron.public.silo_quotas (
+    silo_id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    cpus INT8 NOT NULL,
+    memory_bytes INT8 NOT NULL,
+    storage_bytes INT8 NOT NULL
+);
+
 /*
  * Projects
  */
@@ -1893,13 +1902,16 @@ CREATE TABLE IF NOT EXISTS omicron.public.tuf_repo (
     valid_until TIMESTAMPTZ NOT NULL,
 
     -- The system version described in the TUF repo.
+    --
+    -- Each system version is associated with just exactly one checksum.
     system_version STRING(64) NOT NULL,
 
     -- For debugging only:
     -- Filename provided by the user.
-    source_file TEXT NOT NULL,
+    file_name TEXT NOT NULL,
 
-    CONSTRAINT unique_checksum UNIQUE (sha256)
+    CONSTRAINT unique_checksum UNIQUE (sha256),
+    CONSTRAINT unique_system_version UNIQUE (system_version)
 );
 
 -- Describes an individual artifact from an uploaded TUF repo.
@@ -1921,7 +1933,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.tuf_artifact (
     -- targets.json (and validated at extract time).
     sha256 STRING(64) NOT NULL,
     -- The length of the artifact, in bytes.
-    artifact_length INT NOT NULL,
+    artifact_size INT NOT NULL,
 
     PRIMARY KEY (name, version, kind)
 );
@@ -3086,7 +3098,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '19.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '20.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

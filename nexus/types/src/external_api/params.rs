@@ -288,6 +288,12 @@ pub struct SiloCreate {
     /// endpoints.  These should be valid for the Silo's DNS name(s).
     pub tls_certificates: Vec<CertificateCreate>,
 
+    /// Limits the amount of provisionable CPU, memory, and storage in the Silo.
+    /// CPU and memory are only consumed by running instances, while storage is
+    /// consumed by any disk or snapshot. A value of 0 means that resource is
+    /// *not* provisionable.
+    pub quotas: SiloQuotasCreate,
+
     /// Mapping of which Fleet roles are conferred by each Silo role
     ///
     /// The default is that no Fleet roles are conferred by any Silo roles
@@ -295,6 +301,54 @@ pub struct SiloCreate {
     #[serde(default)]
     pub mapped_fleet_roles:
         BTreeMap<shared::SiloRole, BTreeSet<shared::FleetRole>>,
+}
+
+/// The amount of provisionable resources for a Silo
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SiloQuotasCreate {
+    /// The amount of virtual CPUs available for running instances in the Silo
+    pub cpus: i64,
+    /// The amount of RAM (in bytes) available for running instances in the Silo
+    pub memory: ByteCount,
+    /// The amount of storage (in bytes) available for disks or snapshots
+    pub storage: ByteCount,
+}
+
+impl SiloQuotasCreate {
+    /// All quotas set to 0
+    pub fn empty() -> Self {
+        Self {
+            cpus: 0,
+            memory: ByteCount::from(0),
+            storage: ByteCount::from(0),
+        }
+    }
+
+    /// An arbitrarily high but identifiable default for quotas
+    /// that can be used for creating a Silo for testing
+    ///
+    /// The only silo that customers will see that this should be set on is the default
+    /// silo. Ultimately the default silo should only be initialized with an empty quota,
+    /// but as tests currently relying on it having a quota, we need to set something.
+    pub fn arbitrarily_high_default() -> Self {
+        Self {
+            cpus: 9999999999,
+            memory: ByteCount::try_from(999999999999999999_u64).unwrap(),
+            storage: ByteCount::try_from(999999999999999999_u64).unwrap(),
+        }
+    }
+}
+
+/// Updateable properties of a Silo's resource limits.
+/// If a value is omitted it will not be updated.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SiloQuotasUpdate {
+    /// The amount of virtual CPUs available for running instances in the Silo
+    pub cpus: Option<i64>,
+    /// The amount of RAM (in bytes) available for running instances in the Silo
+    pub memory: Option<ByteCount>,
+    /// The amount of storage (in bytes) available for disks or snapshots
+    pub storage: Option<ByteCount>,
 }
 
 /// Create-time parameters for a `User`
@@ -1830,6 +1884,13 @@ pub struct ResourceMetrics {
 }
 
 // SYSTEM UPDATE
+
+/// Parameters for `/v1/system/update/repository`.
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+pub struct PutRepositoryParams {
+    /// The name of the uploaded file.
+    pub file_name: String,
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SystemUpdatePath {

@@ -28,46 +28,25 @@ use nexus_db_model::{
 use nexus_types::identity::Asset;
 use omicron_common::api::external::{
     self, CreateResult, DataPageParams, ListResultVec, LookupResult,
-    LookupType, ResourceType, UpdateResult,
+    LookupType, ResourceType, TufRepoInsertStatus, UpdateResult,
 };
 use swrite::{swrite, SWrite};
 use uuid::Uuid;
 
-#[derive(Clone, Debug)]
-enum TufRepoDescriptionError {
-    /// The SHA256 or length of one or more artifacts doesn't match the
-    /// corresponding entries in the database.
-    ArtifactMismatch {
-        // Pairs of (uploaded, existing) artifacts.
-        uploaded_and_existing: Vec<(TufArtifact, TufArtifact)>,
-    },
+/// The return value of [`DataStore::update_tuf_repo_description_insert`].
+///
+/// This is similar to [`external::TufRepoInsertResponse`], but uses
+/// nexus-db-model's types instead of external types.
+pub struct TufRepoInsertResponse {
+    pub recorded: TufRepoDescription,
+    pub status: TufRepoInsertStatus,
 }
 
-impl From<TufRepoDescriptionError> for external::Error {
-    fn from(e: TufRepoDescriptionError) -> Self {
-        match e {
-            TufRepoDescriptionError::ArtifactMismatch {
-                uploaded_and_existing,
-            } => {
-                // Build a message out of uploaded and existing artifacts.
-                let mut message = String::new();
-                for (uploaded, existing) in uploaded_and_existing {
-                    swrite!(
-                        message,
-                        "Uploaded artifact {} has SHA256 hash {} and length \
-                         {}, but existing artifact {} has SHA256 hash {} and \
-                         length {}.\n",
-                        uploaded.display_id(),
-                        uploaded.sha256,
-                        uploaded.artifact_length(),
-                        existing.display_id(),
-                        existing.sha256,
-                        existing.artifact_length(),
-                    );
-                }
-
-                external::Error::conflict(message)
-            }
+impl TufRepoInsertResponse {
+    pub fn into_external(self) -> external::TufRepoInsertResponse {
+        external::TufRepoInsertResponse {
+            recorded: self.recorded.into_external(),
+            status: self.status,
         }
     }
 }
@@ -102,12 +81,12 @@ impl DataStore {
     /// Inserts a new TUF repository into the database.
     ///
     /// Returns the repository just inserted, or an existing
-    /// `TufRepoDescription` if one was already found.
-    pub async fn tuf_repo_description_insert(
+    /// `TufRepoDescription` if one was already found. (This is not an upsert.)
+    pub async fn update_tuf_repo_description_insert(
         &self,
         opctx: &OpContext,
         description: TufRepoDescription,
-    ) -> CreateResult<TufRepoDescription> {
+    ) -> CreateResult<TufRepoInsertResponse> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
         let err = OptionalError::new();
@@ -121,7 +100,7 @@ impl DataStore {
                 let err = err2.clone();
 
                 async move {
-                    {
+                    let repo = {
                         use db::schema::tuf_repo::dsl;
 
                         // Load the existing repo by the SHA256 hash, if any.
@@ -141,42 +120,37 @@ impl DataStore {
                                 artifacts_for_repo(existing_repo.id, &conn)
                                     .await?;
 
-                            return Ok(TufRepoDescription {
+                            let recorded = TufRepoDescription {
                                 repo: existing_repo,
                                 artifacts,
+                            };
+                            return Ok(TufRepoInsertResponse {
+                                recorded,
+                                status: TufRepoInsertStatus::AlreadyExists,
                             });
                         }
 
-                        // This will fail if this ID already exists with a
-                        // different hash, but that's a weird situation that
-                        // should error out anyway (IDs are not user
-                        // controlled, hashes are).
+                        // This will fail if this ID or system version already
+                        // exists with a different hash, but that's a weird
+                        // situation that should error out anyway (IDs are not
+                        // user controlled, hashes are).
                         diesel::insert_into(dsl::tuf_repo)
                             .values(description.repo.clone())
                             .execute_async(&conn)
                             .await?;
+                        description.repo.clone()
                     };
 
                     // Since we've inserted a new repo, we also need to insert
                     // the corresponding artifacts.
-                    {
+                    let all_artifacts = {
                         use db::schema::tuf_artifact::dsl;
 
-                        // Build an index of the artifacts by their (name,
-                        // version, kind) triples.
-                        let artifacts_by_triple = description
+                        // Build an index of the artifacts by their IDs.
+                        let artifacts_by_id = description
                             .artifacts
                             .iter()
-                            .map(|artifact| {
-                                (
-                                    (
-                                        &artifact.name,
-                                        &artifact.version,
-                                        &artifact.kind,
-                                    ),
-                                    artifact,
-                                )
-                            })
+                            .map(|artifact| (&artifact.id, artifact))
                             .collect::<HashMap<_, _>>();
 
                         // Multiple repos can have the same artifacts, so we
@@ -189,9 +163,9 @@ impl DataStore {
                         for artifact in description.artifacts.clone() {
                             filter_dsl = filter_dsl.or_filter(
                                 dsl::name
-                                    .eq(artifact.name)
-                                    .and(dsl::version.eq(artifact.version))
-                                    .and(dsl::kind.eq(artifact.kind)),
+                                    .eq(artifact.id.name)
+                                    .and(dsl::version.eq(artifact.id.version))
+                                    .and(dsl::kind.eq(artifact.id.kind)),
                             );
                         }
 
@@ -202,28 +176,28 @@ impl DataStore {
 
                         let mut uploaded_and_existing = Vec::new();
                         let mut new_artifacts = Vec::new();
+                        let mut all_artifacts = Vec::new();
 
                         for artifact in results {
-                            let Some(&uploaded_artifact) = artifacts_by_triple
-                                .get(&(
-                                    &artifact.name,
-                                    &artifact.version,
-                                    &artifact.kind,
-                                ))
+                            let Some(&uploaded_artifact) =
+                                artifacts_by_id.get(&artifact.id)
                             else {
                                 // This is a new artifact.
-                                new_artifacts.push(artifact);
+                                new_artifacts.push(artifact.clone());
+                                all_artifacts.push(artifact);
                                 continue;
                             };
 
                             if uploaded_artifact.sha256 != artifact.sha256
-                                || uploaded_artifact.artifact_length()
-                                    != artifact.artifact_length()
+                                || uploaded_artifact.artifact_size()
+                                    != artifact.artifact_size()
                             {
                                 uploaded_and_existing.push((
                                     uploaded_artifact.clone(),
                                     artifact,
                                 ));
+                            } else {
+                                all_artifacts.push(artifact);
                             }
                         }
 
@@ -240,7 +214,8 @@ impl DataStore {
                             .values(new_artifacts)
                             .execute_async(&conn)
                             .await?;
-                    }
+                        all_artifacts
+                    };
 
                     // Finally, insert all the associations into the tuf_repo_artifact table.
                     {
@@ -251,9 +226,10 @@ impl DataStore {
                         for artifact in description.artifacts.clone() {
                             values.push((
                                 dsl::tuf_repo_id.eq(description.repo.id),
-                                dsl::tuf_artifact_name.eq(artifact.name),
-                                dsl::tuf_artifact_version.eq(artifact.version),
-                                dsl::tuf_artifact_kind.eq(artifact.kind),
+                                dsl::tuf_artifact_name.eq(artifact.id.name),
+                                dsl::tuf_artifact_version
+                                    .eq(artifact.id.version),
+                                dsl::tuf_artifact_kind.eq(artifact.id.kind),
                             ));
                         }
 
@@ -263,20 +239,12 @@ impl DataStore {
                             .await?;
                     }
 
-                    // Just return the original description. This is okay to do
-                    // because:
-                    //
-                    // 1. This is a new repo that we inserted (the existing
-                    //    repo case is handled by an early return).
-                    // 2. We either inserted new artifact records from this
-                    //    description, or reused existing ones. If we reused
-                    //    existing artifact records, note that the only fields
-                    //    are name, version, kind, SHA256 hash, and length. All
-                    //    five fields are checked for equivalence above, which
-                    //    means that existing records are identical to new
-                    //    ones. (If this changes in the future, we'll want to
-                    //    return existing rows more explicitly.)
-                    Ok(description)
+                    let recorded =
+                        TufRepoDescription { repo, artifacts: all_artifacts };
+                    Ok(TufRepoInsertResponse {
+                        recorded,
+                        status: TufRepoInsertStatus::Inserted,
+                    })
                 }
             })
             .await
@@ -632,5 +600,44 @@ impl DataStore {
             .first_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+}
+
+#[derive(Clone, Debug)]
+enum TufRepoDescriptionError {
+    /// The SHA256 or length of one or more artifacts doesn't match the
+    /// corresponding entries in the database.
+    ArtifactMismatch {
+        // Pairs of (uploaded, existing) artifacts.
+        uploaded_and_existing: Vec<(TufArtifact, TufArtifact)>,
+    },
+}
+
+impl From<TufRepoDescriptionError> for external::Error {
+    fn from(e: TufRepoDescriptionError) -> Self {
+        match e {
+            TufRepoDescriptionError::ArtifactMismatch {
+                uploaded_and_existing,
+            } => {
+                // Build a message out of uploaded and existing artifacts.
+                let mut message = String::new();
+                for (uploaded, existing) in uploaded_and_existing {
+                    swrite!(
+                        message,
+                        "Uploaded artifact {} has SHA256 hash {} and length \
+                         {}, but existing artifact {} has SHA256 hash {} and \
+                         length {}.\n",
+                        uploaded.id,
+                        uploaded.sha256,
+                        uploaded.artifact_size(),
+                        existing.id,
+                        existing.sha256,
+                        existing.artifact_size(),
+                    );
+                }
+
+                external::Error::conflict(message)
+            }
+        }
     }
 }

@@ -4,6 +4,7 @@
 
 use super::ExtractedArtifactDataHandle;
 use super::UpdatePlan;
+use super::UpdatePlanBuildOutput;
 use super::UpdatePlanBuilder;
 use crate::errors::RepositoryError;
 use bytes::Bytes;
@@ -12,10 +13,12 @@ use debug_ignore::DebugIgnore;
 use dropshot::HttpError;
 use futures::Stream;
 use futures::TryStreamExt;
+use omicron_common::api::external::TufRepoDescription;
+use omicron_common::api::external::TufRepoMeta;
 use omicron_common::update::ArtifactHash;
 use omicron_common::update::ArtifactHashId;
 use omicron_common::update::ArtifactId;
-use omicron_common::update::ArtifactsDocument;
+use sha2::{Digest, Sha256};
 use slog::info;
 use slog::Logger;
 use std::collections::BTreeMap;
@@ -29,8 +32,8 @@ use tufaceous_lib::OmicronRepo;
 /// A collection of artifacts along with an update plan using those artifacts.
 #[derive(Debug)]
 pub struct ArtifactsWithPlan {
-    // The artifacts document contained in the TUF repo.
-    artifacts: ArtifactsDocument,
+    // A description of this repository.
+    description: TufRepoDescription,
 
     // Map of top-level artifact IDs (present in the TUF repo) to the actual
     // artifacts we're serving (e.g., a top-level RoT artifact will map to two
@@ -59,13 +62,14 @@ pub struct ArtifactsWithPlan {
 }
 
 impl ArtifactsWithPlan {
-    /// Creates a new `ArtifactsWithPlan` from the given body stream.
+    /// Creates a new `ArtifactsWithPlan` from the given stream of `Bytes`.
     ///
-    /// This method reads the body stream representing a TUF repo, and writes
-    /// it to a temporary file. Afterwards, it builds an `ArtifactsWithPlan`
-    /// from the contents of that file.
-    pub async fn from_body(
-        body: impl Stream<Item = Result<Bytes, HttpError>> + Send + Sync,
+    /// This method reads the stream representing a TUF repo, and writes it to
+    /// a temporary file. Afterwards, it builds an `ArtifactsWithPlan` from the
+    /// contents of that file.
+    pub async fn from_stream(
+        body: impl Stream<Item = Result<Bytes, HttpError>> + Send,
+        file_name: String,
         log: &Logger,
     ) -> Result<Self, RepositoryError> {
         // Create a temporary file to store the incoming archive.``
@@ -80,16 +84,20 @@ impl ArtifactsWithPlan {
         let mut body = std::pin::pin!(body);
 
         // Stream the uploaded body into our tempfile.
+        let mut hasher = Sha256::new();
         while let Some(bytes) = body
             .try_next()
             .await
             .map_err(RepositoryError::ReadChunkFromStream)?
         {
+            hasher.update(&bytes);
             tempfile
                 .write_all(&bytes)
                 .await
                 .map_err(RepositoryError::TempFileWrite)?;
         }
+
+        let repo_hash = ArtifactHash(hasher.finalize().into());
 
         // Flush writes. We don't need to seek back to the beginning of the file
         // because extracting the repository will do its own seeking as a part of
@@ -98,14 +106,21 @@ impl ArtifactsWithPlan {
 
         let tempfile = tempfile.into_inner().into_std().await;
 
-        let new_artifacts =
-            Self::from_zip(io::BufReader::new(tempfile), &log).await?;
+        let artifacts_with_plan = Self::from_zip(
+            io::BufReader::new(tempfile),
+            file_name,
+            repo_hash,
+            log,
+        )
+        .await?;
 
-        Ok(new_artifacts)
+        Ok(artifacts_with_plan)
     }
 
     pub async fn from_zip<T>(
         zip_data: T,
+        file_name: String,
+        repo_hash: ArtifactHash,
         log: &Logger,
     ) -> Result<Self, RepositoryError>
     where
@@ -158,8 +173,6 @@ impl ArtifactsWithPlan {
         // priority - copying small SP artifacts is neglible compared to the
         // work we do to unpack host OS images.
 
-        let mut by_id = BTreeMap::new();
-        let mut by_hash = HashMap::new();
         for artifact in &artifacts.artifacts {
             let target_name = TargetName::try_from(artifact.target.as_str())
                 .map_err(|error| RepositoryError::LocateTarget {
@@ -201,26 +214,38 @@ impl ArtifactsWithPlan {
                 })?;
 
             builder
-                .add_artifact(
-                    artifact.clone().into_id(),
-                    artifact_hash,
-                    stream,
-                    &mut by_id,
-                    &mut by_hash,
-                )
+                .add_artifact(artifact.clone().into_id(), artifact_hash, stream)
                 .await?;
         }
 
         // Ensure we know how to apply updates from this set of artifacts; we'll
         // remember the plan we create.
-        let plan = builder.build()?;
+        let UpdatePlanBuildOutput { plan, by_id, by_hash, artifacts_meta } =
+            builder.build()?;
 
-        Ok(Self { artifacts, by_id, by_hash: by_hash.into(), plan })
+        let tuf_repository = repository.repo();
+        let repo_meta = TufRepoMeta {
+            hash: repo_hash,
+            targets_role_version: tuf_repository.targets().signed.version.get(),
+            valid_until: tuf_repository
+                .root()
+                .signed
+                .expires
+                .min(tuf_repository.snapshot().signed.expires)
+                .min(tuf_repository.targets().signed.expires)
+                .min(tuf_repository.timestamp().signed.expires),
+            system_version: artifacts.system_version,
+            file_name,
+        };
+        let description =
+            TufRepoDescription { repo: repo_meta, artifacts: artifacts_meta };
+
+        Ok(Self { description, by_id, by_hash: by_hash.into(), plan })
     }
 
     /// Returns the `ArtifactsDocument` corresponding to this TUF repo.
-    pub fn artifacts(&self) -> &ArtifactsDocument {
-        &self.artifacts
+    pub fn description(&self) -> &TufRepoDescription {
+        &self.description
     }
 
     pub fn by_id(&self) -> &BTreeMap<ArtifactId, Vec<ArtifactHashId>> {
@@ -307,9 +332,17 @@ mod tests {
         // Now check that it can be read by the archive extractor.
         let zip_bytes = std::fs::File::open(&archive_path)
             .context("error opening archive.zip")?;
-        let plan = ArtifactsWithPlan::from_zip(zip_bytes, &logctx.log)
-            .await
-            .context("error reading archive.zip")?;
+        // We could also compute the hash from the file here, but the repo hash
+        // doesn't matter for the test.
+        let repo_hash = ArtifactHash([0u8; 32]);
+        let plan = ArtifactsWithPlan::from_zip(
+            zip_bytes,
+            "dummy".to_owned(),
+            repo_hash,
+            &logctx.log,
+        )
+        .await
+        .context("error reading archive.zip")?;
         // Check that all known artifact kinds are present in the map.
         let by_id_kinds: BTreeSet<_> =
             plan.by_id().keys().map(|id| id.kind.clone()).collect();

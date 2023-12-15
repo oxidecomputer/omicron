@@ -45,12 +45,11 @@ use nexus_db_queries::db::model::Name;
 use nexus_db_queries::{
     authz::ApiResource, db::fixed_data::silo::INTERNAL_SILO_ID,
 };
-use nexus_types::external_api::params::ProjectSelector;
+use nexus_types::external_api::{params::ProjectSelector, views::SiloQuotas};
 use nexus_types::{
     external_api::views::{SledInstance, Switch},
     identity::AssetIdentityMetadata,
 };
-use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_common::api::external::http_pagination::marker_for_name;
 use omicron_common::api::external::http_pagination::marker_for_name_or_id;
 use omicron_common::api::external::http_pagination::name_or_id_pagination;
@@ -84,6 +83,9 @@ use omicron_common::api::external::SwitchPortSettings;
 use omicron_common::api::external::SwitchPortSettingsView;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRules;
+use omicron_common::api::external::{
+    http_pagination::data_page_params_for, TufRepoInsertResponse,
+};
 use omicron_common::bail_unless;
 use parse_display::Display;
 use propolis_client::support::tungstenite::protocol::frame::coding::CloseCode;
@@ -280,6 +282,11 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(silo_policy_view)?;
         api.register(silo_policy_update)?;
 
+        api.register(system_quotas_list)?;
+
+        api.register(silo_quotas_view)?;
+        api.register(silo_quotas_update)?;
+
         api.register(silo_identity_provider_list)?;
 
         api.register(saml_identity_provider_create)?;
@@ -297,7 +304,7 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(system_metric)?;
         api.register(silo_metric)?;
 
-        api.register(system_update_refresh)?;
+        api.register(system_update_put_repository)?;
         api.register(system_version)?;
         api.register(system_component_version_list)?;
         api.register(system_update_list)?;
@@ -506,6 +513,91 @@ async fn policy_update(
         let policy =
             nexus.silo_update_policy(&opctx, &silo_lookup, &new_policy).await?;
         Ok(HttpResponseOk(policy))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Lists resource quotas for all silos
+#[endpoint {
+    method = GET,
+    path = "/v1/system/silo-quotas",
+    tags = ["system/silos"],
+}]
+async fn system_quotas_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<SiloQuotas>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+
+        let query = query_params.into_inner();
+        let pagparams = data_page_params_for(&rqctx, &query)?;
+
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let quotas = nexus
+            .fleet_list_quotas(&opctx, &pagparams)
+            .await?
+            .into_iter()
+            .map(|p| p.into())
+            .collect();
+
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            quotas,
+            &|_, quota: &SiloQuotas| quota.silo_id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// View the resource quotas of a given silo
+#[endpoint {
+    method = GET,
+    path = "/v1/system/silos/{silo}/quotas",
+    tags = ["system/silos"],
+}]
+async fn silo_quotas_view(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::SiloPath>,
+) -> Result<HttpResponseOk<SiloQuotas>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let silo_lookup =
+            nexus.silo_lookup(&opctx, path_params.into_inner().silo)?;
+        let quota = nexus.silo_quotas_view(&opctx, &silo_lookup).await?;
+        Ok(HttpResponseOk(quota.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Update the resource quotas of a given silo
+///
+/// If a quota value is not specified, it will remain unchanged.
+#[endpoint {
+    method = PUT,
+    path = "/v1/system/silos/{silo}/quotas",
+    tags = ["system/silos"],
+}]
+async fn silo_quotas_update(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::SiloPath>,
+    new_quota: TypedBody<params::SiloQuotasUpdate>,
+) -> Result<HttpResponseOk<SiloQuotas>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let silo_lookup =
+            nexus.silo_lookup(&opctx, path_params.into_inner().silo)?;
+        let quota = nexus
+            .silo_update_quota(&opctx, &silo_lookup, &new_quota.into_inner())
+            .await?;
+        Ok(HttpResponseOk(quota.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -4902,42 +4994,30 @@ async fn silo_metric(
     method = PUT,
     path = "/v1/system/update/repository",
     tags = ["system/update"],
+    unpublished = true,
 }]
 async fn system_update_put_repository(
     rqctx: RequestContext<Arc<ServerContext>>,
+    query: Query<params::PutRepositoryParams>,
     body: StreamingBody,
-) -> Result<HttpResponseOk<views::SystemUpdate>, HttpError> {
+) -> Result<HttpResponseOk<TufRepoInsertResponse>, HttpError> {
     // TODO: need to increase request size limit for this endpoint
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let body = body.into_inner();
-        let update = nexus.updates_put_repository(&opctx, body).await?;
-        Ok(HttpResponseOk(update.into()))
+        let query = query.into_inner();
+        let body = body.into_stream();
+        let update =
+            nexus.updates_put_repository(&opctx, body, query.file_name).await?;
+        Ok(HttpResponseOk(update))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Refresh update data
-#[endpoint {
-     method = POST,
-     path = "/v1/system/update/refresh",
-     tags = ["system/update"],
-     unpublished = true,
-}]
-async fn system_update_refresh(
-    rqctx: RequestContext<Arc<ServerContext>>,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        nexus.updates_refresh_metadata(&opctx).await?;
-        Ok(HttpResponseUpdatedNoContent())
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
+// ---
+// All the update-related endpoints below this one are likely going to be removed.
+// ---
 
 /// View system version and update status
 #[endpoint {

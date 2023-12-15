@@ -33,9 +33,13 @@ use thiserror::Error;
 mod client;
 pub mod model;
 pub mod query;
+pub mod sql;
+
 pub use client::Client;
 pub use client::DbWrite;
-
+pub use client::QueryMetadata;
+pub use client::QueryResult;
+pub use client::Table;
 pub use model::OXIMETER_VERSION;
 
 #[derive(Debug, Error)]
@@ -47,8 +51,14 @@ pub enum Error {
     #[error("Telemetry database unavailable: {0}")]
     DatabaseUnavailable(String),
 
+    #[error("Missing expected metadata header key '{key}'")]
+    MissingHeaderKey { key: String },
+
+    #[error("Invalid or malformed query metadata for key '{key}': {msg}")]
+    BadMetadata { key: String, msg: String },
+
     /// An error interacting with the telemetry database
-    #[error("Error interacting with telemetry database: {0}")]
+    #[error("Error interacting with telemetry database")]
     Database(String),
 
     /// A schema provided when collecting samples did not match the expected schema
@@ -123,6 +133,9 @@ pub enum Error {
 
     #[error("Schema update versions must be sequential without gaps")]
     NonSequentialSchemaVersions,
+
+    #[error("SQL error")]
+    Sql(#[from] sql::Error),
 }
 
 impl From<model::DbTimeseriesSchema> for TimeseriesSchema {
@@ -268,29 +281,7 @@ mod tests {
     use super::*;
     use crate::model::DbFieldList;
     use crate::model::DbTimeseriesSchema;
-    use std::convert::TryFrom;
     use uuid::Uuid;
-
-    #[test]
-    fn test_timeseries_name() {
-        let name = TimeseriesName::try_from("foo:bar").unwrap();
-        assert_eq!(format!("{}", name), "foo:bar");
-    }
-
-    #[test]
-    fn test_timeseries_name_from_str() {
-        assert!(TimeseriesName::try_from("a:b").is_ok());
-        assert!(TimeseriesName::try_from("a_a:b_b").is_ok());
-        assert!(TimeseriesName::try_from("a0:b0").is_ok());
-        assert!(TimeseriesName::try_from("a_0:b_0").is_ok());
-
-        assert!(TimeseriesName::try_from("_:b").is_err());
-        assert!(TimeseriesName::try_from("a_:b").is_err());
-        assert!(TimeseriesName::try_from("0:b").is_err());
-        assert!(TimeseriesName::try_from(":b").is_err());
-        assert!(TimeseriesName::try_from("a:").is_err());
-        assert!(TimeseriesName::try_from("123").is_err());
-    }
 
     // Validates that the timeseries_key stability for a sample is stable.
     #[test]

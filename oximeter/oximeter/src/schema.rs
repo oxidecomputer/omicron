@@ -261,7 +261,7 @@ impl PartialEq for TimeseriesSchema {
 //
 // That describes the target/metric name, and the timeseries is two of those, joined with ':'.
 const TIMESERIES_NAME_REGEX: &str =
-    "(([a-z]+[a-z0-9]*)(_([a-z0-9]+))*):(([a-z]+[a-z0-9]*)(_([a-z0-9]+))*)";
+    "^(([a-z]+[a-z0-9]*)(_([a-z0-9]+))*):(([a-z]+[a-z0-9]*)(_([a-z0-9]+))*)$";
 
 /// A set of timeseries schema, useful for testing changes to targets or
 /// metrics.
@@ -502,6 +502,7 @@ mod tests {
         assert!(TimeseriesName::try_from(":b").is_err());
         assert!(TimeseriesName::try_from("a:").is_err());
         assert!(TimeseriesName::try_from("123").is_err());
+        assert!(TimeseriesName::try_from("x.a:b").is_err());
     }
 
     #[derive(Target)]

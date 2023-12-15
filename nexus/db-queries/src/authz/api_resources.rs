@@ -36,7 +36,7 @@ use crate::authn;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::fixed_data::FLEET_ID;
-use crate::db::model::SemverVersion;
+use crate::db::model::{ArtifactId, SemverVersion};
 use crate::db::DataStore;
 use authz_macros::authz_resource;
 use futures::future::BoxFuture;
@@ -1019,6 +1019,7 @@ authz_resource! {
     name = "TufArtifact",
     parent = "Fleet",
     primary_key = (String, SemverVersion, String),
+    input_key = ArtifactId,
     roles_allowed = false,
     polar_snippet = FleetChild,
 }

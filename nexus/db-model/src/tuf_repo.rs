@@ -10,22 +10,66 @@ use crate::{
 };
 use chrono::{DateTime, Utc};
 use diesel::{deserialize::FromSql, serialize::ToSql, sql_types::Text};
-use omicron_common::update::ArtifactHash as ExternalArtifactHash;
+use omicron_common::{
+    api::external,
+    update::{
+        ArtifactHash as ExternalArtifactHash, ArtifactId as ExternalArtifactId,
+        ArtifactKind,
+    },
+};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use uuid::Uuid;
 
 /// A description of a TUF update: a repo, along with the artifacts it
 /// contains.
+///
+/// This is equivalent to [`external::TufRepoDescription`], but is more
+/// Diesel-friendly.
 #[derive(Debug, Clone)]
 pub struct TufRepoDescription {
     /// The repository.
     pub repo: TufRepo,
+
     /// The artifacts.
     pub artifacts: Vec<TufArtifact>,
 }
 
+impl TufRepoDescription {
+    /// Creates a new `TufRepoDescription` from an external
+    /// `TufRepoDescription`.
+    ///
+    /// This is not implemented as a `From` impl because we insert new fields
+    /// as part of the process, which `From` doesn't necessarily communicate
+    /// and can be surprising.
+    pub fn from_external(description: external::TufRepoDescription) -> Self {
+        Self {
+            repo: TufRepo::from_external(description.repo),
+            artifacts: description
+                .artifacts
+                .into_iter()
+                .map(TufArtifact::from_external)
+                .collect(),
+        }
+    }
+
+    /// Converts self into [`external::TufRepoDescription`].
+    pub fn into_external(self) -> external::TufRepoDescription {
+        external::TufRepoDescription {
+            repo: self.repo.into_external(),
+            artifacts: self
+                .artifacts
+                .into_iter()
+                .map(TufArtifact::into_external)
+                .collect(),
+        }
+    }
+}
+
 /// A record representing an uploaded TUF repository.
+///
+/// This is equivalent to [`external::TufRepoMeta`], but is more
+/// Diesel-friendly.
 #[derive(
     Queryable, Identifiable, Insertable, Clone, Debug, Selectable, AsChangeset,
 )]
@@ -39,7 +83,7 @@ pub struct TufRepo {
     pub targets_role_version: i64,
     pub valid_until: DateTime<Utc>,
     pub system_version: SemverVersion,
-    pub source_file: String,
+    pub file_name: String,
 }
 
 impl TufRepo {
@@ -49,7 +93,7 @@ impl TufRepo {
         targets_role_version: u64,
         valid_until: DateTime<Utc>,
         system_version: SemverVersion,
-        source_file: String,
+        file_name: String,
     ) -> Self {
         Self {
             id: Uuid::new_v4(),
@@ -58,7 +102,34 @@ impl TufRepo {
             targets_role_version: targets_role_version as i64,
             valid_until,
             system_version,
-            source_file,
+            file_name,
+        }
+    }
+
+    /// Creates a new `TufRepo` ready for insertion from an external
+    /// `TufRepoMeta`.
+    ///
+    /// This is not implemented as a `From` impl because we insert new fields
+    /// as part of the process, which `From` doesn't necessarily communicate
+    /// and can be surprising.
+    pub fn from_external(repo: external::TufRepoMeta) -> Self {
+        Self::new(
+            repo.hash.into(),
+            repo.targets_role_version,
+            repo.valid_until,
+            repo.system_version.into(),
+            repo.file_name,
+        )
+    }
+
+    /// Converts self into [`external::TufRepoMeta`].
+    pub fn into_external(self) -> external::TufRepoMeta {
+        external::TufRepoMeta {
+            hash: self.sha256.into(),
+            targets_role_version: self.targets_role_version as u64,
+            valid_until: self.valid_until,
+            system_version: self.system_version.into(),
+            file_name: self.file_name,
         }
     }
 
@@ -76,57 +147,112 @@ impl TufRepo {
 #[derive(Queryable, Insertable, Clone, Debug, Selectable, AsChangeset)]
 #[diesel(table_name = tuf_artifact)]
 pub struct TufArtifact {
-    pub name: String,
-    pub version: SemverVersion,
-    pub kind: String,
+    #[diesel(embed)]
+    pub id: ArtifactId,
     pub time_created: DateTime<Utc>,
     pub sha256: ArtifactHash,
-    artifact_length: i64,
+    artifact_size: i64,
 }
 
 impl TufArtifact {
     /// Creates a new `TufArtifact` ready for insertion.
     pub fn new(
-        name: String,
-        version: SemverVersion,
-        kind: String,
+        id: ArtifactId,
         sha256: ArtifactHash,
-        artifact_length: u64,
+        artifact_size: u64,
     ) -> Self {
         Self {
-            name,
-            version,
-            kind,
+            id,
             time_created: Utc::now(),
             sha256,
-            artifact_length: artifact_length as i64,
+            artifact_size: artifact_size as i64,
+        }
+    }
+
+    /// Creates a new `TufArtifact` ready for insertion from an external
+    /// `TufArtifactMeta`.
+    ///
+    /// This is not implemented as a `From` impl because we insert new fields
+    /// as part of the process, which `From` doesn't necessarily communicate
+    /// and can be surprising.
+    pub fn from_external(artifact: external::TufArtifactMeta) -> Self {
+        Self::new(artifact.id.into(), artifact.hash.into(), artifact.size)
+    }
+
+    /// Converts self into [`external::TufArtifactMeta`].
+    pub fn into_external(self) -> external::TufArtifactMeta {
+        external::TufArtifactMeta {
+            id: self.id.into(),
+            hash: self.sha256.into(),
+            size: self.artifact_size as u64,
         }
     }
 
     /// Returns the artifact's ID.
     pub fn id(&self) -> (String, SemverVersion, String) {
-        (self.name.clone(), self.version.clone(), self.kind.clone())
+        (self.id.name.clone(), self.id.version.clone(), self.id.kind.clone())
     }
 
     /// Returns the artifact length in bytes.
-    pub fn artifact_length(&self) -> u64 {
-        self.artifact_length as u64
-    }
-
-    /// Returns a way to display this object's (name, version, kind) triple (its
-    /// primary key).
-    pub fn display_id(&self) -> TufArtifactDisplayId<'_> {
-        TufArtifactDisplayId(self)
+    pub fn artifact_size(&self) -> u64 {
+        self.artifact_size as u64
     }
 }
 
-/// A wrapper around [`TufArtifact`] that implements [`std::fmt::Display`] to display
-/// the artifact's (name, version, kind) triple (its primary key).
-pub struct TufArtifactDisplayId<'a>(&'a TufArtifact);
+/// The ID (primary key) of a [`TufArtifact`].
+///
+/// This is equivalent to an [`ExternalArtifactId`] but is more
+/// Diesel-friendly.
+#[derive(
+    Queryable,
+    Insertable,
+    Clone,
+    Debug,
+    Selectable,
+    PartialEq,
+    Eq,
+    Hash,
+    Deserialize,
+    Serialize,
+)]
+#[diesel(table_name = tuf_artifact)]
+pub struct ArtifactId {
+    pub name: String,
+    pub version: SemverVersion,
+    pub kind: String,
+}
 
-impl fmt::Display for TufArtifactDisplayId<'_> {
+impl From<ExternalArtifactId> for ArtifactId {
+    fn from(id: ExternalArtifactId) -> Self {
+        Self {
+            name: id.name,
+            version: id.version.into(),
+            kind: id.kind.as_str().to_owned(),
+        }
+    }
+}
+
+impl From<ArtifactId> for ExternalArtifactId {
+    fn from(id: ArtifactId) -> Self {
+        Self {
+            name: id.name,
+            version: id.version.into(),
+            kind: ArtifactKind::new(id.kind),
+        }
+    }
+}
+
+impl fmt::Display for ArtifactId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} v{} ({})", self.0.name, self.0.version, self.0.kind)
+        // This is the same as ExternalArtifactId's Display impl.
+        write!(f, "{} v{} ({})", self.name, self.version, self.kind)
+    }
+}
+
+/// Required by the authz_resource macro.
+impl From<ArtifactId> for (String, SemverVersion, String) {
+    fn from(id: ArtifactId) -> Self {
+        (id.name, id.version, id.kind)
     }
 }
 

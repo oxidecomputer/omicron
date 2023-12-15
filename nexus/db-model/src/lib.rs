@@ -55,6 +55,7 @@ mod system_update;
 // for join-based marker trait generation.
 mod ipv4_nat_entry;
 pub mod queries;
+mod quota;
 mod rack;
 mod region;
 mod region_snapshot;
@@ -139,6 +140,7 @@ pub use physical_disk::*;
 pub use physical_disk_kind::*;
 pub use producer_endpoint::*;
 pub use project::*;
+pub use quota::*;
 pub use rack::*;
 pub use region::*;
 pub use region_snapshot::*;
