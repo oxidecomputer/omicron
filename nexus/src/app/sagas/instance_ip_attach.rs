@@ -160,10 +160,14 @@ async fn siia_migration_lock(
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
     let params = sagactx.saga_params::<Params>()?;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let inst_and_vmm = datastore
         .instance_fetch_with_vmm(
-            &osagactx.nexus().opctx_alloc,
+            &opctx,
             &params.authz_instance,
         )
         .await

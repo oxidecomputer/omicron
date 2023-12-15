@@ -14,6 +14,7 @@ use super::{
 use crate::app::sagas::declare_saga_actions;
 use crate::app::{authn, authz, db};
 use crate::external_api::params;
+use nexus_db_model::IpKind;
 use nexus_db_queries::db::identity::{Asset, Resource};
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_types::external_api::views;
@@ -94,7 +95,7 @@ declare_saga_actions! {
         - siid_migration_lock_undo
     }
 
-    RESOLVE_EXTERNAL_IP -> "new_ip_uuid" {
+    RESOLVE_EXTERNAL_IP -> "target_ip" {
         + siid_resolve_ip
     }
 
@@ -108,7 +109,7 @@ declare_saga_actions! {
         - siid_update_opte_undo
     }
 
-    DETACH_EXTERNAL_IP -> "new_ip" {
+    DETACH_EXTERNAL_IP -> "no_result2" {
         + siid_detach_ip
         - siid_detach_ip_undo
     }
@@ -136,10 +137,14 @@ async fn siid_migration_lock(
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
     let params = sagactx.saga_params::<Params>()?;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let inst_and_vmm = datastore
         .instance_fetch_with_vmm(
-            &osagactx.nexus().opctx_alloc,
+            &opctx,
             &params.authz_instance,
         )
         .await
@@ -162,7 +167,7 @@ async fn siid_migration_lock_undo(
 // need to undo `siid_attach_ip`.
 async fn siid_resolve_ip(
     sagactx: NexusActionContext,
-) -> Result<Uuid, ActionError> {
+) -> Result<ExternalIp, ActionError> {
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
     let params = sagactx.saga_params::<Params>()?;
@@ -173,18 +178,27 @@ async fn siid_resolve_ip(
 
     match params.delete_params {
         // Allocate a new IP address from the target, possibly default, pool
-        params::ExternalIpDelete::Ephemeral => Ok(Uuid::new_v4()),
-        // Set the parent of an existing floating IP to the new instance's ID.
-        params::ExternalIpDelete::Floating { ref floating_ip_name } => {
-            let floating_ip_name = db::model::Name(floating_ip_name.clone());
-            let (.., authz_fip) = LookupPath::new(&opctx, &datastore)
-                .project_id(params.instance.project_id)
-                .floating_ip_name(&floating_ip_name)
-                .lookup_for(authz::Action::Modify)
+        params::ExternalIpDelete::Ephemeral => {
+            let eips = datastore.instance_lookup_external_ips(&opctx, params.instance.id())
                 .await
                 .map_err(ActionError::action_failed)?;
 
-            Ok(authz_fip.id())
+            let eph_ip = eips.iter().find(|e| e.kind == IpKind::Ephemeral)
+                .ok_or_else(|| ActionError::action_failed(Error::invalid_request("instance does not have an attached ephemeral IP address")))?;
+
+            Ok(ExternalIp::Ephemeral(eph_ip.ip.ip(), eph_ip.id))
+        },
+        // Set the parent of an existing floating IP to the new instance's ID.
+        params::ExternalIpDelete::Floating { ref floating_ip_name } => {
+            let floating_ip_name = db::model::Name(floating_ip_name.clone());
+            let (.., fip) = LookupPath::new(&opctx, &datastore)
+                .project_id(params.instance.project_id)
+                .floating_ip_name(&floating_ip_name)
+                .fetch_for(authz::Action::Modify)
+                .await
+                .map_err(ActionError::action_failed)?;
+
+            Ok(ExternalIp::Floating(fip.ip.ip(), fip.id()))
         }
     }
 }
@@ -202,7 +216,7 @@ async fn siid_nat(sagactx: NexusActionContext) -> Result<(), ActionError> {
         return Ok(());
     }
 
-    let new_ip = sagactx.lookup::<ExternalIp>("new_ip")?;
+    let new_ip = sagactx.lookup::<ExternalIp>("target_ip")?;
     let ip_id = new_ip.into();
 
     osagactx
@@ -232,7 +246,7 @@ async fn siid_nat_undo(
         return Ok(());
     };
 
-    let new_ip = sagactx.lookup::<ExternalIp>("new_ip")?;
+    let new_ip = sagactx.lookup::<ExternalIp>("target_ip")?;
     let ip_id = new_ip.into();
 
     // Querying sleds requires fleet access; use the instance allocator context
@@ -266,7 +280,7 @@ async fn siid_update_opte(
         return Ok(());
     };
 
-    let new_ip = sagactx.lookup::<ExternalIp>("new_ip")?;
+    let new_ip = sagactx.lookup::<ExternalIp>("target_ip")?;
 
     // TODO: disambiguate the various sled agent errors etc.
     osagactx
@@ -294,7 +308,7 @@ async fn siid_update_opte_undo(
         return Ok(());
     };
 
-    let new_ip = sagactx.lookup::<ExternalIp>("new_ip")?;
+    let new_ip = sagactx.lookup::<ExternalIp>("target_ip")?;
 
     // TODO: disambiguate the various sled agent errors etc.
     osagactx
@@ -319,8 +333,7 @@ async fn siid_detach_ip(
         &params.serialized_authn,
     );
 
-    let new_ip = sagactx.lookup::<ExternalIp>("new_ip")?;
-    let new_ip_uuid = sagactx.lookup::<Uuid>("new_ip_uuid")?;
+    let new_ip_uuid = sagactx.lookup::<ExternalIp>("target_ip")?.into();
 
     match params.delete_params {
         params::ExternalIpDelete::Ephemeral => {
@@ -362,7 +375,7 @@ async fn siid_detach_ip_undo(
         &params.serialized_authn,
     );
 
-    let new_ip_uuid = sagactx.lookup::<Uuid>("new_ip_uuid")?;
+    let new_ip_uuid = sagactx.lookup::<Uuid>("target_ip")?.into();
 
     match params.delete_params {
         // Allocate a new IP address from the target, possibly default, pool
@@ -415,7 +428,7 @@ async fn siid_migration_unlock(
 ) -> Result<views::ExternalIp, ActionError> {
     // TODO: do this iff. we implement migration lock.
     // TODO: Backtrack if there's an unexpected change to runstate?
-    let new_ip = sagactx.lookup::<ExternalIp>("new_ip")?;
+    let new_ip = sagactx.lookup::<ExternalIp>("target_ip")?;
 
     Ok(new_ip.into())
 }
