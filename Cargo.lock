@@ -3189,7 +3189,7 @@ dependencies = [
 [[package]]
 name = "illumos-sys-hdrs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=01356ee8c5d876ce6614ea550e12114c10bcfb34#01356ee8c5d876ce6614ea550e12114c10bcfb34"
+source = "git+https://github.com/oxidecomputer/opte?rev=4e6e6ab6379fa4bc40f5d0c7340b9f35c45ad6e4#4e6e6ab6379fa4bc40f5d0c7340b9f35c45ad6e4"
 
 [[package]]
 name = "illumos-utils"
@@ -3596,7 +3596,7 @@ dependencies = [
 [[package]]
 name = "kstat-macro"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=01356ee8c5d876ce6614ea550e12114c10bcfb34#01356ee8c5d876ce6614ea550e12114c10bcfb34"
+source = "git+https://github.com/oxidecomputer/opte?rev=4e6e6ab6379fa4bc40f5d0c7340b9f35c45ad6e4#4e6e6ab6379fa4bc40f5d0c7340b9f35c45ad6e4"
 dependencies = [
  "quote",
  "syn 2.0.32",
@@ -5297,7 +5297,7 @@ dependencies = [
 [[package]]
 name = "opte"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=01356ee8c5d876ce6614ea550e12114c10bcfb34#01356ee8c5d876ce6614ea550e12114c10bcfb34"
+source = "git+https://github.com/oxidecomputer/opte?rev=4e6e6ab6379fa4bc40f5d0c7340b9f35c45ad6e4#4e6e6ab6379fa4bc40f5d0c7340b9f35c45ad6e4"
 dependencies = [
  "cfg-if",
  "dyn-clone",
@@ -5313,7 +5313,7 @@ dependencies = [
 [[package]]
 name = "opte-api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=01356ee8c5d876ce6614ea550e12114c10bcfb34#01356ee8c5d876ce6614ea550e12114c10bcfb34"
+source = "git+https://github.com/oxidecomputer/opte?rev=4e6e6ab6379fa4bc40f5d0c7340b9f35c45ad6e4#4e6e6ab6379fa4bc40f5d0c7340b9f35c45ad6e4"
 dependencies = [
  "illumos-sys-hdrs",
  "ipnetwork",
@@ -5325,7 +5325,7 @@ dependencies = [
 [[package]]
 name = "opte-ioctl"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=01356ee8c5d876ce6614ea550e12114c10bcfb34#01356ee8c5d876ce6614ea550e12114c10bcfb34"
+source = "git+https://github.com/oxidecomputer/opte?rev=4e6e6ab6379fa4bc40f5d0c7340b9f35c45ad6e4#4e6e6ab6379fa4bc40f5d0c7340b9f35c45ad6e4"
 dependencies = [
  "libc",
  "libnet",
@@ -5399,7 +5399,7 @@ dependencies = [
 [[package]]
 name = "oxide-vpc"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=01356ee8c5d876ce6614ea550e12114c10bcfb34#01356ee8c5d876ce6614ea550e12114c10bcfb34"
+source = "git+https://github.com/oxidecomputer/opte?rev=4e6e6ab6379fa4bc40f5d0c7340b9f35c45ad6e4#4e6e6ab6379fa4bc40f5d0c7340b9f35c45ad6e4"
 dependencies = [
  "illumos-sys-hdrs",
  "opte",
@@ -6906,9 +6906,9 @@ dependencies = [
 
 [[package]]
 name = "russh"
-version = "0.40.0"
+version = "0.40.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "98bee7ebcce06bfc40a46b9d90205c6132d899bb9095c5ce9da3cdad8ec0833d"
+checksum = "23955cec4c4186e8c36f42c5d4043f9fd6cab8702fd08ce1971d966b48ec832f"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -6951,9 +6951,9 @@ dependencies = [
 
 [[package]]
 name = "russh-keys"
-version = "0.40.0"
+version = "0.40.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b5d5a656fe1c3024d829d054cd8c0c78dc831e4b2d4b08360569c3b38f3017f"
+checksum = "9d0de3cb3cbfa773b7f170b6830565fac207a0d630cc666a29f80097cc374dd8"
 dependencies = [
  "aes",
  "async-trait",

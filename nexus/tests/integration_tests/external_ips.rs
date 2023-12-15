@@ -19,14 +19,17 @@ use nexus_test_utils::resource_helpers::create_floating_ip;
 use nexus_test_utils::resource_helpers::create_instance_with;
 use nexus_test_utils::resource_helpers::create_ip_pool;
 use nexus_test_utils::resource_helpers::create_project;
+use nexus_test_utils::resource_helpers::create_silo;
 use nexus_test_utils::resource_helpers::populate_ip_pool;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
+use nexus_types::external_api::shared;
 use nexus_types::external_api::views::FloatingIp;
 use omicron_common::address::IpRange;
 use omicron_common::address::Ipv4Range;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
+use omicron_common::api::external::NameOrId;
 use uuid::Uuid;
 
 type ControlPlaneTestContext =
@@ -34,7 +37,8 @@ type ControlPlaneTestContext =
 
 const PROJECT_NAME: &str = "rootbeer-float";
 
-const FIP_NAMES: &[&str] = &["vanilla", "chocolate", "strawberry", "pistachio"];
+const FIP_NAMES: &[&str] =
+    &["vanilla", "chocolate", "strawberry", "pistachio", "caramel"];
 
 pub fn get_floating_ips_url(project_name: &str) -> String {
     format!("/v1/floating-ips?project={project_name}")
@@ -107,7 +111,7 @@ async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
         Ipv4Range::new(Ipv4Addr::new(10, 1, 0, 1), Ipv4Addr::new(10, 1, 0, 5))
             .unwrap(),
     );
-    create_ip_pool(&client, "other-pool", Some(other_pool_range)).await;
+    create_ip_pool(&client, "other-pool", Some(other_pool_range), None).await;
 
     let project = create_project(client, PROJECT_NAME).await;
 
@@ -142,7 +146,7 @@ async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(fip.instance_id, None);
     assert_eq!(fip.ip, ip_addr);
 
-    // Create with no chosen IP from named pool.
+    // Create with no chosen IP from fleet-scoped named pool.
     let fip_name = FIP_NAMES[2];
     let fip = create_floating_ip(
         client,
@@ -157,7 +161,7 @@ async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(fip.instance_id, None);
     assert_eq!(fip.ip, IpAddr::from(Ipv4Addr::new(10, 1, 0, 1)));
 
-    // Create with chosen IP from named pool.
+    // Create with chosen IP from fleet-scoped named pool.
     let fip_name = FIP_NAMES[3];
     let ip_addr = "10.1.0.5".parse().unwrap();
     let fip = create_floating_ip(
@@ -172,6 +176,65 @@ async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(fip.project_id, project.identity.id);
     assert_eq!(fip.instance_id, None);
     assert_eq!(fip.ip, ip_addr);
+}
+
+#[nexus_test]
+async fn test_floating_ip_create_fails_in_other_silo_pool(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    populate_ip_pool(&client, "default", None).await;
+
+    let project = create_project(client, PROJECT_NAME).await;
+
+    // Create other silo and pool linked to that silo
+    let other_silo = create_silo(
+        &client,
+        "not-my-silo",
+        true,
+        shared::SiloIdentityMode::SamlJit,
+    )
+    .await;
+    let other_pool_range = IpRange::V4(
+        Ipv4Range::new(Ipv4Addr::new(10, 2, 0, 1), Ipv4Addr::new(10, 2, 0, 5))
+            .unwrap(),
+    );
+    create_ip_pool(
+        &client,
+        "external-silo-pool",
+        Some(other_pool_range),
+        Some(other_silo.identity.id),
+    )
+    .await;
+
+    let fip_name = FIP_NAMES[4];
+
+    // creating a floating IP should fail with a 404 as if the specified pool
+    // does not exist
+    let url =
+        format!("/v1/floating-ips?project={}", project.identity.name.as_str());
+    let body = params::FloatingIpCreate {
+        identity: IdentityMetadataCreateParams {
+            name: fip_name.parse().unwrap(),
+            description: String::from("a floating ip"),
+        },
+        address: None,
+        pool: Some(NameOrId::Name("external-silo-pool".parse().unwrap())),
+    };
+
+    let error = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &url)
+            .body(Some(&body))
+            .expect_status(Some(StatusCode::NOT_FOUND)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap::<HttpErrorResponseBody>()
+    .await;
+    assert_eq!(
+        error.message,
+        "not found: ip-pool with name \"external-silo-pool\""
+    );
 }
 
 #[nexus_test]

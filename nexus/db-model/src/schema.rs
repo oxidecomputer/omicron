@@ -421,6 +421,19 @@ table! {
 }
 
 table! {
+    silo_utilization(silo_id) {
+        silo_id -> Uuid,
+        silo_name -> Text,
+        cpus_provisioned -> Int8,
+        memory_provisioned -> Int8,
+        storage_provisioned -> Int8,
+        cpus_allocated -> Int8,
+        memory_allocated -> Int8,
+        storage_allocated -> Int8,
+    }
+}
+
+table! {
     network_interface (id) {
         id -> Uuid,
         name -> Text,
@@ -1333,7 +1346,7 @@ table! {
 ///
 /// This should be updated whenever the schema is changed. For more details,
 /// refer to: schema/crdb/README.adoc
-pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(20, 0, 0);
+pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(21, 0, 0);
 
 allow_tables_to_appear_in_same_query!(
     system_update,

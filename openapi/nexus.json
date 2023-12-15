@@ -6927,6 +6927,103 @@
         }
       }
     },
+    "/v1/system/utilization/silos": {
+      "get": {
+        "tags": [
+          "system/silos"
+        ],
+        "summary": "List current utilization state for all silos",
+        "operationId": "silo_utilization_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiloUtilizationResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
+    "/v1/system/utilization/silos/{silo}": {
+      "get": {
+        "tags": [
+          "system/silos"
+        ],
+        "summary": "View the current utilization of a given silo",
+        "operationId": "silo_utilization_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "silo",
+            "description": "Name or ID of the silo",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiloUtilization"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/users": {
       "get": {
         "tags": [
@@ -6992,6 +7089,33 @@
         },
         "x-dropshot-pagination": {
           "required": []
+        }
+      }
+    },
+    "/v1/utilization": {
+      "get": {
+        "tags": [
+          "silos"
+        ],
+        "summary": "View the resource utilization of the user's current silo",
+        "operationId": "utilization_view",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Utilization"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
         }
       }
     },
@@ -13543,21 +13667,33 @@
         ]
       },
       "SiloQuotas": {
+        "description": "A collection of resource counts used to set the virtual capacity of a silo",
         "type": "object",
         "properties": {
           "cpus": {
+            "description": "Number of virtual CPUs",
             "type": "integer",
             "format": "int64"
           },
           "memory": {
-            "$ref": "#/components/schemas/ByteCount"
+            "description": "Amount of memory in bytes",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
           },
           "silo_id": {
             "type": "string",
             "format": "uuid"
           },
           "storage": {
-            "$ref": "#/components/schemas/ByteCount"
+            "description": "Amount of disk storage in bytes",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
           }
         },
         "required": [
@@ -13714,6 +13850,62 @@
           "identity_id",
           "identity_type",
           "role_name"
+        ]
+      },
+      "SiloUtilization": {
+        "description": "View of a silo's resource utilization and capacity",
+        "type": "object",
+        "properties": {
+          "allocated": {
+            "description": "Accounts for the total amount of resources reserved for silos via their quotas",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VirtualResourceCounts"
+              }
+            ]
+          },
+          "provisioned": {
+            "description": "Accounts for resources allocated by in silos like CPU or memory for running instances and storage for disks and snapshots Note that CPU and memory resources associated with a stopped instances are not counted here",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VirtualResourceCounts"
+              }
+            ]
+          },
+          "silo_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "silo_name": {
+            "$ref": "#/components/schemas/Name"
+          }
+        },
+        "required": [
+          "allocated",
+          "provisioned",
+          "silo_id",
+          "silo_name"
+        ]
+      },
+      "SiloUtilizationResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SiloUtilization"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
         ]
       },
       "Sled": {
@@ -15037,6 +15229,64 @@
         "required": [
           "password",
           "username"
+        ]
+      },
+      "Utilization": {
+        "description": "View of the current silo's resource utilization and capacity",
+        "type": "object",
+        "properties": {
+          "capacity": {
+            "description": "The total amount of resources that can be provisioned in this silo Actions that would exceed this limit will fail",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VirtualResourceCounts"
+              }
+            ]
+          },
+          "provisioned": {
+            "description": "Accounts for resources allocated to running instances or storage allocated via disks or snapshots Note that CPU and memory resources associated with a stopped instances are not counted here whereas associated disks will still be counted",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VirtualResourceCounts"
+              }
+            ]
+          }
+        },
+        "required": [
+          "capacity",
+          "provisioned"
+        ]
+      },
+      "VirtualResourceCounts": {
+        "description": "A collection of resource counts used to describe capacity and utilization",
+        "type": "object",
+        "properties": {
+          "cpus": {
+            "description": "Number of virtual CPUs",
+            "type": "integer",
+            "format": "int64"
+          },
+          "memory": {
+            "description": "Amount of memory in bytes",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          },
+          "storage": {
+            "description": "Amount of disk storage in bytes",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          }
+        },
+        "required": [
+          "cpus",
+          "memory",
+          "storage"
         ]
       },
       "Vpc": {

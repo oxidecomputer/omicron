@@ -86,6 +86,7 @@ mod switch;
 mod switch_interface;
 mod switch_port;
 mod update;
+mod utilization;
 mod virtual_provisioning_collection;
 mod vmm;
 mod volume;

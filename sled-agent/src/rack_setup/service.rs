@@ -191,11 +191,11 @@ impl RackSetupService {
     /// Arguments:
     /// - `log`: The logger.
     /// - `config`: The config file, which is used to setup the rack.
-    /// - `storage_resources`: All the disks and zpools managed by this sled
+    /// - `storage_manager`: A handle for interacting with the storage manager
+    ///   task
     /// - `local_bootstrap_agent`: Communication channel by which we can send
-    ///   commands to our local bootstrap-agent (e.g., to initialize sled
+    ///   commands to our local bootstrap-agent (e.g., to start sled-agents)
     /// - `bootstore` - A handle to call bootstore APIs
-    ///   agents).
     pub(crate) fn new(
         log: Logger,
         config: Config,
@@ -1082,10 +1082,6 @@ impl ServiceInner {
             nexus_address,
         )
         .await?;
-
-        // TODO Questions to consider:
-        // - What if a sled comes online *right after* this setup? How does
-        // it get a /64?
 
         Ok(())
     }

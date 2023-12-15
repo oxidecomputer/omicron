@@ -100,6 +100,9 @@ lazy_static! {
             tls_certificates: vec![],
             mapped_fleet_roles: Default::default(),
         };
+
+    pub static ref DEMO_SILO_UTIL_URL: String = format!("/v1/system/utilization/silos/{}", *DEMO_SILO_NAME);
+
     // Use the default Silo for testing the local IdP
     pub static ref DEMO_SILO_USERS_CREATE_URL: String = format!(
         "/v1/system/identity-providers/local/users?silo={}",
@@ -121,6 +124,9 @@ lazy_static! {
         "/v1/system/identity-providers/local/users/{{id}}/set-password?silo={}",
         DEFAULT_SILO.identity().name,
     );
+}
+
+lazy_static! {
 
     // Project used for testing
     pub static ref DEMO_PROJECT_NAME: Name = "demo-project".parse().unwrap();
@@ -973,6 +979,30 @@ lazy_static! {
             allowed_methods: vec![
                 AllowedMethod::Get
             ],
+        },
+        VerifyEndpoint {
+            url: "/v1/system/utilization/silos",
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get
+            ]
+        },
+        VerifyEndpoint {
+            url: &DEMO_SILO_UTIL_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get
+            ]
+        },
+        VerifyEndpoint {
+            url: "/v1/utilization",
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::ReadOnly,
+            allowed_methods: vec![
+                AllowedMethod::Get
+            ]
         },
         VerifyEndpoint {
             url: "/v1/policy",
