@@ -65,22 +65,11 @@ impl From<SiloQuotas> for views::SiloQuotas {
     fn from(silo_quotas: SiloQuotas) -> Self {
         Self {
             silo_id: silo_quotas.silo_id,
-            cpus: silo_quotas.cpus,
-            memory: silo_quotas.memory.into(),
-            storage: silo_quotas.storage.into(),
-        }
-    }
-}
-
-impl From<views::SiloQuotas> for SiloQuotas {
-    fn from(silo_quotas: views::SiloQuotas) -> Self {
-        Self {
-            silo_id: silo_quotas.silo_id,
-            time_created: Utc::now(),
-            time_modified: Utc::now(),
-            cpus: silo_quotas.cpus,
-            memory: silo_quotas.memory.into(),
-            storage: silo_quotas.storage.into(),
+            limits: views::VirtualResourceCounts {
+                cpus: silo_quotas.cpus,
+                memory: silo_quotas.memory.into(),
+                storage: silo_quotas.storage.into(),
+            },
         }
     }
 }
