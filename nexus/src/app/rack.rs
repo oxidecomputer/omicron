@@ -933,16 +933,16 @@ impl super::Nexus {
     }
 
     /// Add a sled to an intialized rack
-    pub(crate) async fn add_sled_to_initialized_rack(
+    pub(crate) async fn sled_add(
         &self,
         opctx: &OpContext,
-        sled: UninitializedSled,
+        sled: Baseboard,
     ) -> Result<(), Error> {
-        let baseboard_id = sled.baseboard.clone().into();
+        let baseboard_id = sled.clone().into();
         let hw_baseboard_id =
             self.db_datastore.find_hw_baseboard_id(opctx, baseboard_id).await?;
 
-        let subnet = self.db_datastore.rack_subnet(opctx, sled.rack_id).await?;
+        let subnet = self.db_datastore.rack_subnet(opctx, self.rack_id).await?;
         let rack_subnet =
             Ipv6Subnet::<RACK_PREFIX>::from(rack_subnet(Some(subnet))?);
 
@@ -950,16 +950,16 @@ impl super::Nexus {
             .db_datastore
             .allocate_sled_underlay_subnet_octets(
                 opctx,
-                sled.rack_id,
+                self.rack_id,
                 hw_baseboard_id,
             )
             .await?;
 
         // Convert the baseboard as necessary
         let baseboard = sled_agent_client::types::Baseboard::Gimlet {
-            identifier: sled.baseboard.serial.clone(),
-            model: sled.baseboard.part.clone(),
-            revision: sled.baseboard.revision,
+            identifier: sled.serial.clone(),
+            model: sled.part.clone(),
+            revision: sled.revision,
         };
 
         // Make the call to sled-agent
@@ -985,13 +985,11 @@ impl super::Nexus {
             },
         };
         let sa = self.get_any_sled_agent(opctx).await?;
-        sa.add_sled_to_initialized_rack(&req).await.map_err(|e| {
-            Error::InternalError {
-                internal_message: format!(
-                    "failed to add sled with baseboard {:?} to rack {}: {e}",
-                    sled.baseboard, allocation.rack_id
-                ),
-            }
+        sa.sled_add(&req).await.map_err(|e| Error::InternalError {
+            internal_message: format!(
+                "failed to add sled with baseboard {:?} to rack {}: {e}",
+                sled, allocation.rack_id
+            ),
         })?;
 
         Ok(())

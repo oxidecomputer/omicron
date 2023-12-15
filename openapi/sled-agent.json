@@ -576,7 +576,7 @@
     "/sleds": {
       "put": {
         "summary": "Add a sled to a rack that was already initialized via RSS",
-        "operationId": "add_sled_to_initialized_rack",
+        "operationId": "sled_add",
         "requestBody": {
           "content": {
             "application/json": {

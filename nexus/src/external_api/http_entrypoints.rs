@@ -45,7 +45,9 @@ use nexus_db_queries::db::model::Name;
 use nexus_db_queries::{
     authz::ApiResource, db::fixed_data::silo::INTERNAL_SILO_ID,
 };
-use nexus_types::external_api::{params::ProjectSelector, views::SiloQuotas};
+use nexus_types::external_api::{
+    params::ProjectSelector, shared::Baseboard, views::SiloQuotas,
+};
 use nexus_types::{
     external_api::views::{SledInstance, Switch},
     identity::AssetIdentityMetadata,
@@ -229,7 +231,7 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(switch_list)?;
         api.register(switch_view)?;
         api.register(sled_list_uninitialized)?;
-        api.register(add_sled_to_initialized_rack)?;
+        api.register(sled_add)?;
 
         api.register(user_builtin_list)?;
         api.register(user_builtin_view)?;
@@ -4597,15 +4599,15 @@ async fn sled_list_uninitialized(
     path = "/v1/system/hardware/sleds/",
     tags = ["system/hardware"]
 }]
-async fn add_sled_to_initialized_rack(
+async fn sled_add(
     rqctx: RequestContext<Arc<ServerContext>>,
-    sled: TypedBody<UninitializedSled>,
+    sled: TypedBody<Baseboard>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        nexus.add_sled_to_initialized_rack(&opctx, sled.into_inner()).await?;
+        nexus.sled_add(&opctx, sled.into_inner()).await?;
         Ok(HttpResponseUpdatedNoContent())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await

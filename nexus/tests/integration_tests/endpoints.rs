@@ -24,7 +24,6 @@ use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::Baseboard;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::shared::Ipv4Range;
-use nexus_types::external_api::shared::UninitializedSled;
 use omicron_common::api::external::AddressLotKind;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -41,7 +40,6 @@ use omicron_test_utils::certificates::CertificateChain;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::str::FromStr;
-use uuid::Uuid;
 
 lazy_static! {
     pub static ref HARDWARE_RACK_URL: String =
@@ -66,14 +64,10 @@ lazy_static! {
     pub static ref SLED_INSTANCES_URL: String =
         format!("/v1/system/hardware/sleds/{}/instances", SLED_AGENT_UUID);
 
-    pub static ref DEMO_UNINITIALIZED_SLED: UninitializedSled = UninitializedSled {
-        baseboard: Baseboard {
-            serial: "demo-serial".to_string(),
-            part: "demo-part".to_string(),
-            revision: 6
-        },
-        rack_id: Uuid::new_v4(),
-        cubby: 1
+    pub static ref DEMO_UNINITIALIZED_SLED: Baseboard  = Baseboard {
+        serial: "demo-serial".to_string(),
+        part: "demo-part".to_string(),
+        revision: 6
     };
 
     // Global policy
