@@ -21,7 +21,6 @@ use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils::SWITCH_UUID;
 use nexus_types::external_api::params;
 use nexus_types::external_api::shared;
-use nexus_types::external_api::shared::Baseboard;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::shared::Ipv4Range;
 use omicron_common::api::external::AddressLotKind;
@@ -64,11 +63,11 @@ lazy_static! {
     pub static ref SLED_INSTANCES_URL: String =
         format!("/v1/system/hardware/sleds/{}/instances", SLED_AGENT_UUID);
 
-    pub static ref DEMO_UNINITIALIZED_SLED: Baseboard  = Baseboard {
-        serial: "demo-serial".to_string(),
-        part: "demo-part".to_string(),
-        revision: 6
-    };
+    pub static ref DEMO_UNINITIALIZED_SLED: params::UninitializedSledId =
+        params::UninitializedSledId {
+            serial: "demo-serial".to_string(),
+            part: "demo-part".to_string(),
+        };
 
     // Global policy
     pub static ref SYSTEM_POLICY_URL: &'static str = "/v1/system/policy";

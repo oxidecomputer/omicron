@@ -31,6 +31,7 @@ use nexus_types::external_api::params::LinkConfig;
 use nexus_types::external_api::params::LldpServiceConfig;
 use nexus_types::external_api::params::RouteConfig;
 use nexus_types::external_api::params::SwitchPortConfig;
+use nexus_types::external_api::params::UninitializedSledId;
 use nexus_types::external_api::params::{
     AddressLotCreate, BgpPeerConfig, LoopbackAddressCreate, Route, SiloCreate,
     SwitchPortSettingsCreate,
@@ -51,6 +52,7 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
+use omicron_common::api::external::ResourceType;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use sled_agent_client::types::AddSledRequest;
 use sled_agent_client::types::EarlyNetworkConfigBody;
@@ -936,11 +938,13 @@ impl super::Nexus {
     pub(crate) async fn sled_add(
         &self,
         opctx: &OpContext,
-        sled: Baseboard,
+        sled: UninitializedSledId,
     ) -> Result<(), Error> {
         let baseboard_id = sled.clone().into();
-        let hw_baseboard_id =
-            self.db_datastore.find_hw_baseboard_id(opctx, baseboard_id).await?;
+        let hw_baseboard_id = self
+            .db_datastore
+            .find_hw_baseboard_id(opctx, &baseboard_id)
+            .await?;
 
         let subnet = self.db_datastore.rack_subnet(opctx, self.rack_id).await?;
         let rack_subnet =
@@ -955,11 +959,52 @@ impl super::Nexus {
             )
             .await?;
 
+        // Grab the SPs from the last collection
+        //
+        // This is necessary to get the revision_id for the given sled
+        //
+        // We set a limit of 200 here to give us some breathing room when
+        // querying for cabooses and RoT pages, each of which is "4 per SP/RoT",
+        // which in a single fully populated rack works out to (32 sleds + 2
+        // switches + 1 psc) * 4 = 140.
+        //
+        // This feels bad and probably needs more thought; see
+        // https://github.com/oxidecomputer/omicron/issues/4621 where this limit
+        // being too low bit us, and it will link to a more general followup
+        // issue.
+        let limit = NonZeroU32::new(200).unwrap();
+        let collection = self
+            .db_datastore
+            .inventory_get_latest_collection(opctx, limit)
+            .await?;
+
+        // If there isn't a collection, we don't know about the sled
+        let Some(collection) = collection else {
+            return Err(Error::ObjectNotFound {
+                type_name: ResourceType::Sled,
+                lookup_type:
+                    omicron_common::api::external::LookupType::ByCompositeId(
+                        format!("{sled:?}"),
+                    ),
+            });
+        };
+
+        // Find the revision
+        let Some(sp) = collection.sps.get(&baseboard_id) else {
+            return Err(Error::ObjectNotFound {
+                type_name: ResourceType::Sled,
+                lookup_type:
+                    omicron_common::api::external::LookupType::ByCompositeId(
+                        format!("{sled:?}"),
+                    ),
+            });
+        };
+
         // Convert the baseboard as necessary
         let baseboard = sled_agent_client::types::Baseboard::Gimlet {
             identifier: sled.serial.clone(),
             model: sled.part.clone(),
-            revision: sled.revision,
+            revision: sp.baseboard_revision.into(),
         };
 
         // Make the call to sled-agent

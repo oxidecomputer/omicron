@@ -3770,7 +3770,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/Baseboard"
+                "$ref": "#/components/schemas/UninitializedSledId"
               }
             }
           },
@@ -14690,6 +14690,22 @@
           "baseboard",
           "cubby",
           "rack_id"
+        ]
+      },
+      "UninitializedSledId": {
+        "description": "The unique hardware ID for a sled",
+        "type": "object",
+        "properties": {
+          "part": {
+            "type": "string"
+          },
+          "serial": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "part",
+          "serial"
         ]
       },
       "UninitializedSledResultsPage": {

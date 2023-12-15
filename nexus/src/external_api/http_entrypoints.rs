@@ -46,7 +46,8 @@ use nexus_db_queries::{
     authz::ApiResource, db::fixed_data::silo::INTERNAL_SILO_ID,
 };
 use nexus_types::external_api::{
-    params::ProjectSelector, shared::Baseboard, views::SiloQuotas,
+    params::{ProjectSelector, UninitializedSledId},
+    views::SiloQuotas,
 };
 use nexus_types::{
     external_api::views::{SledInstance, Switch},
@@ -4601,7 +4602,7 @@ async fn sled_list_uninitialized(
 }]
 async fn sled_add(
     rqctx: RequestContext<Arc<ServerContext>>,
-    sled: TypedBody<Baseboard>,
+    sled: TypedBody<UninitializedSledId>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
