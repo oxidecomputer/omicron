@@ -406,7 +406,7 @@ fn generate_misc_helpers(config: &Config) -> TokenStream {
             db_row: &nexus_db_model::#resource_name,
             lookup_type: LookupType,
         ) -> authz::#resource_name {
-            authz::#resource_name::new(
+            authz::#resource_name::with_primary_key(
                 authz_parent.clone(),
                 db_row.id(),
                 lookup_type
@@ -923,8 +923,8 @@ fn generate_database_functions(config: &Config) -> TokenStream {
 #[cfg(test)]
 mod test {
     use super::lookup_resource;
+    use proc_macro2::TokenStream;
     use quote::quote;
-    use rustfmt_wrapper::rustfmt;
 
     #[test]
     #[ignore]
@@ -938,7 +938,7 @@ mod test {
             primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
         })
         .unwrap();
-        println!("{}", rustfmt(output).unwrap());
+        println!("{}", pretty_format(output));
 
         let output = lookup_resource(quote! {
             name = "SiloUser",
@@ -949,7 +949,7 @@ mod test {
             primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
         })
         .unwrap();
-        println!("{}", rustfmt(output).unwrap());
+        println!("{}", pretty_format(output));
 
         let output = lookup_resource(quote! {
             name = "UpdateArtifact",
@@ -964,6 +964,11 @@ mod test {
             ]
         })
         .unwrap();
-        println!("{}", rustfmt(output).unwrap());
+        println!("{}", pretty_format(output));
+    }
+
+    fn pretty_format(input: TokenStream) -> String {
+        let parsed = syn::parse2(input).unwrap();
+        prettyplease::unparse(&parsed)
     }
 }

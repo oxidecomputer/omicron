@@ -354,6 +354,7 @@ version = "0.1.0"
 dependencies = [
  "heck 0.4.1",
  "omicron-workspace-hack",
+ "prettyplease",
  "proc-macro2",
  "quote",
  "serde",
@@ -1539,9 +1540,9 @@ version = "0.1.0"
 dependencies = [
  "heck 0.4.1",
  "omicron-workspace-hack",
+ "prettyplease",
  "proc-macro2",
  "quote",
- "rustfmt-wrapper",
  "serde",
  "serde_tokenstream 0.2.0",
  "syn 2.0.32",
