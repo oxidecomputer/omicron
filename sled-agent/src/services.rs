@@ -365,6 +365,8 @@ pub struct OmicronZoneConfigLocal {
     pub root: Utf8PathBuf,
 }
 
+// TODO: I'll need something similar to this for the nw service
+
 /// Describes how we want a switch zone to be configured
 ///
 /// This is analogous to `OmicronZoneConfig`, but for the switch zone (which is
