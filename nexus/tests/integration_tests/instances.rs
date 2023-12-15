@@ -3563,7 +3563,7 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
         .unwrap(),
     );
     populate_ip_pool(&client, "default", Some(default_pool_range)).await;
-    create_ip_pool(&client, "other-pool", Some(other_pool_range)).await;
+    create_ip_pool(&client, "other-pool", Some(other_pool_range), None).await;
 
     // Create an instance with pool name blank, expect IP from default pool
     create_instance_with_pool(client, "default-pool-inst", None).await;
