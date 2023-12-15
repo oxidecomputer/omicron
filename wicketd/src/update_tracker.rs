@@ -351,8 +351,9 @@ impl UpdateTracker {
         // Build the ArtifactsWithPlan from the stream.
         let artifacts_with_plan = ArtifactsWithPlan::from_stream(
             stream,
-            "wicket-uploaded.zip".to_owned(),
-            &self.log,
+            // We don't have a good file name here because file contents are
+            // uploaded over stdin, so let ArtifactsWithPlan pick the name.
+            None, &self.log,
         )
         .await
         .map_err(|error| error.to_http_error())?;

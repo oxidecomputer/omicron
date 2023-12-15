@@ -55,7 +55,7 @@ impl super::Nexus {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
         let artifacts_with_plan =
-            ArtifactsWithPlan::from_stream(body, file_name, &self.log)
+            ArtifactsWithPlan::from_stream(body, Some(file_name), &self.log)
                 .await
                 .map_err(|error| error.to_http_error())?;
 

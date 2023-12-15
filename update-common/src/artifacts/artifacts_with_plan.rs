@@ -69,7 +69,7 @@ impl ArtifactsWithPlan {
     /// contents of that file.
     pub async fn from_stream(
         body: impl Stream<Item = Result<Bytes, HttpError>> + Send,
-        file_name: String,
+        file_name: Option<String>,
         log: &Logger,
     ) -> Result<Self, RepositoryError> {
         // Create a temporary file to store the incoming archive.``
@@ -119,7 +119,7 @@ impl ArtifactsWithPlan {
 
     pub async fn from_zip<T>(
         zip_data: T,
-        file_name: String,
+        file_name: Option<String>,
         repo_hash: ArtifactHash,
         log: &Logger,
     ) -> Result<Self, RepositoryError>
@@ -224,6 +224,12 @@ impl ArtifactsWithPlan {
             builder.build()?;
 
         let tuf_repository = repository.repo();
+
+        let file_name = file_name.unwrap_or_else(|| {
+            // Just pick a reasonable-sounding file name if we don't have one.
+            format!("system-update-v{}.zip", artifacts.system_version)
+        });
+
         let repo_meta = TufRepoMeta {
             hash: repo_hash,
             targets_role_version: tuf_repository.targets().signed.version.get(),
@@ -337,7 +343,7 @@ mod tests {
         let repo_hash = ArtifactHash([0u8; 32]);
         let plan = ArtifactsWithPlan::from_zip(
             zip_bytes,
-            "dummy".to_owned(),
+            None,
             repo_hash,
             &logctx.log,
         )
