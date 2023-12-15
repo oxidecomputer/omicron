@@ -24,7 +24,7 @@ use sled_agent_client::types::DeleteVirtualNetworkInterfaceHost;
 use sled_agent_client::types::SetVirtualNetworkInterfaceHost;
 use std::collections::HashSet;
 use std::str::FromStr;
-use std::sync::Arc;
+
 use uuid::Uuid;
 
 impl super::Nexus {

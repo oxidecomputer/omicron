@@ -443,7 +443,7 @@ impl InstanceManager {
     ) -> Result<(), Error> {
         let instance = {
             let instances = self.inner.instances.lock().unwrap();
-            instances.get(&instance_id).map(|(id, v)| v.clone())
+            instances.get(&instance_id).map(|(_id, v)| v.clone())
         };
 
         let Some(instance) = instance else {
@@ -461,7 +461,7 @@ impl InstanceManager {
     ) -> Result<(), Error> {
         let instance = {
             let instances = self.inner.instances.lock().unwrap();
-            instances.get(&instance_id).map(|(id, v)| v.clone())
+            instances.get(&instance_id).map(|(_id, v)| v.clone())
         };
 
         let Some(instance) = instance else {

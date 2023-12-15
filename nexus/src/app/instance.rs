@@ -1881,7 +1881,7 @@ impl super::Nexus {
         instance_lookup: &lookup::Instance<'_>,
         ext_ip: &params::ExternalIpCreate,
     ) -> UpdateResult<views::ExternalIp> {
-        let (.., authz_project, authz_instance, instance) =
+        let (.., _authz_project, authz_instance, instance) =
             instance_lookup.fetch_for(authz::Action::Modify).await?;
 
         let saga_params = sagas::instance_ip_attach::Params {
@@ -1910,7 +1910,7 @@ impl super::Nexus {
         instance_lookup: &lookup::Instance<'_>,
         ext_ip: &params::ExternalIpDelete,
     ) -> UpdateResult<views::ExternalIp> {
-        let (.., authz_project, authz_instance, instance) =
+        let (.., _authz_project, authz_instance, instance) =
             instance_lookup.fetch_for(authz::Action::Modify).await?;
 
         let saga_params = sagas::instance_ip_detach::Params {
