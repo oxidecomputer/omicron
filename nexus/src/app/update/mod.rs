@@ -72,7 +72,7 @@ impl super::Nexus {
         Ok(response.into_external())
     }
 
-    /// Downloads a file from within [`BASE_ARTIFACT_DIR`].
+    /// Downloads a file (currently not implemented).
     pub(crate) async fn download_artifact(
         &self,
         _opctx: &OpContext,

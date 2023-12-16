@@ -2674,7 +2674,7 @@ pub struct TufRepoInsertResponse {
 
 /// Status of a TUF repo import.
 ///
-/// Part of [`TufRepoImport`].
+/// Part of [`TufRepoInsertResponse`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TufRepoInsertStatus {
