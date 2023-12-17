@@ -65,7 +65,7 @@ type SledAgentClientError =
     sled_agent_client::Error<sled_agent_client::types::Error>;
 
 // Newtype wrapper to avoid the orphan type rule.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub struct SledAgentInstancePutError(pub SledAgentClientError);
 
 impl std::fmt::Display for SledAgentInstancePutError {
@@ -117,8 +117,8 @@ impl SledAgentInstancePutError {
 #[derive(Debug, thiserror::Error)]
 pub enum InstanceStateChangeError {
     /// Sled agent returned an error from one of its instance endpoints.
-    #[error("sled agent client error: {0}")]
-    SledAgent(SledAgentInstancePutError),
+    #[error("sled agent client error")]
+    SledAgent(#[source] SledAgentInstancePutError),
 
     /// Some other error occurred outside of the attempt to communicate with
     /// sled agent.
@@ -624,14 +624,31 @@ impl super::Nexus {
             .instance_fetch_with_vmm(opctx, &authz_instance)
             .await?;
 
-        self.instance_request_state(
-            opctx,
-            &authz_instance,
-            state.instance(),
-            state.vmm(),
-            InstanceStateChangeRequest::Reboot,
-        )
-        .await?;
+        if let Err(e) = self
+            .instance_request_state(
+                opctx,
+                &authz_instance,
+                state.instance(),
+                state.vmm(),
+                InstanceStateChangeRequest::Reboot,
+            )
+            .await
+        {
+            if let InstanceStateChangeError::SledAgent(inner) = &e {
+                if inner.instance_unhealthy() {
+                    let _ = self
+                        .mark_instance_failed(
+                            &authz_instance.id(),
+                            state.instance().runtime(),
+                            inner,
+                        )
+                        .await;
+                }
+            }
+
+            return Err(e.into());
+        }
+
         self.db_datastore.instance_fetch_with_vmm(opctx, &authz_instance).await
     }
 
@@ -711,14 +728,30 @@ impl super::Nexus {
             .instance_fetch_with_vmm(opctx, &authz_instance)
             .await?;
 
-        self.instance_request_state(
-            opctx,
-            &authz_instance,
-            state.instance(),
-            state.vmm(),
-            InstanceStateChangeRequest::Stop,
-        )
-        .await?;
+        if let Err(e) = self
+            .instance_request_state(
+                opctx,
+                &authz_instance,
+                state.instance(),
+                state.vmm(),
+                InstanceStateChangeRequest::Stop,
+            )
+            .await
+        {
+            if let InstanceStateChangeError::SledAgent(inner) = &e {
+                if inner.instance_unhealthy() {
+                    let _ = self
+                        .mark_instance_failed(
+                            &authz_instance.id(),
+                            state.instance().runtime(),
+                            inner,
+                        )
+                        .await;
+                }
+            }
+
+            return Err(e.into());
+        }
 
         self.db_datastore.instance_fetch_with_vmm(opctx, &authz_instance).await
     }
