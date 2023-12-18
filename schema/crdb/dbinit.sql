@@ -2922,6 +2922,230 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     PRIMARY KEY (inv_collection_id, sled_id)
 );
 
+CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_omicron_zones (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+    -- when this observation was made
+    time_collected TIMESTAMPTZ NOT NULL,
+    -- which MGS instance reported this data
+    source TEXT NOT NULL,
+
+    -- unique id for this sled (should be foreign keys into `sled` table, though
+    -- it's conceivable a sled will report an id that we don't know about)
+    sled_id UUID NOT NULL,
+
+    -- OmicronZonesConfig generation that this was found in
+    generation INT4 NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, sled_id)
+);
+
+CREATE TYPE IF NOT EXISTS omicron.public.zpool_kind AS ENUM (
+    'external',
+    'internal'
+);
+
+-- observations from sled agents about Omicron-managed zones
+CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone_generic (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+
+    -- unique id for this sled (should be foreign keys into `sled` table, though
+    -- it's conceivable a sled will report an id that we don't know about)
+    sled_id UUID NOT NULL,
+
+    -- unique id for this zone
+    id UUID NOT NULL,
+    underlay_address INET NOT NULL,
+    zone_type omicron.public.service_kind NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone_boundary_ntp (
+    inv_collection_id UUID NOT NULL,
+    zone_id UUID NOT NULL,
+
+    -- address
+    service_ip INET NOT NULL,
+    service_port INT4 CHECK (service_port BETWEEN 0 AND 65535) NOT NULL,
+    ntp_servers TEXT[] NOT NULL,
+    dns_servers INET[] NOT NULL,
+    domain TEXT, -- nullable
+
+    -- NIC
+    nic_id UUID NOT NULL,
+    nic_kind omicron.public.network_interface_kind NOT NULL,
+    nic_kind_id UUID NOT NULL,
+    nic_name TEXT NOT NULL,
+    nic_ip INET NOT NULL,
+    nic_mac INT8 NOT NULL,
+    nic_subnet INET NOT NULL,
+    nic_vni INT8 NOT NULL,
+    nic_primary BOOLEAN NOT NULL,
+    nic_slot INT2 NOT NULL,
+
+    -- Source NAT config
+    snat_ip INET NOT NULL,
+    snat_first_port INT4 CHECK (snat_first_port BETWEEN 0 AND 65535) NOT NULL,
+    snat_last_port INT4 CHECK (snat_last_port BETWEEN 0 AND 65535) NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, zone_id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone_clickhouse (
+    inv_collection_id UUID NOT NULL,
+    zone_id UUID NOT NULL,
+    -- address
+    service_ip INET NOT NULL,
+    service_port INT4 CHECK (service_port BETWEEN 0 AND 65535) NOT NULL,
+    -- dataset
+    dataset_zpool_id UUID NOT NULL,
+    dataset_zpool_kind omicron.public.zpool_kind NOT NULL,
+    PRIMARY KEY (inv_collection_id, zone_id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone_clickhouse_keeper (
+    inv_collection_id UUID NOT NULL,
+    zone_id UUID NOT NULL,
+    -- address
+    service_ip INET NOT NULL,
+    service_port INT4 CHECK (service_port BETWEEN 0 AND 65535) NOT NULL,
+    -- dataset
+    dataset_zpool_id UUID NOT NULL,
+    dataset_zpool_kind omicron.public.zpool_kind NOT NULL,
+    PRIMARY KEY (inv_collection_id, zone_id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone_cockroachdb (
+    inv_collection_id UUID NOT NULL,
+    zone_id UUID NOT NULL,
+    -- address
+    service_ip INET NOT NULL,
+    service_port INT4 CHECK (service_port BETWEEN 0 AND 65535) NOT NULL,
+    -- dataset
+    dataset_zpool_id UUID NOT NULL,
+    dataset_zpool_kind omicron.public.zpool_kind NOT NULL,
+    PRIMARY KEY (inv_collection_id, zone_id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone_crucible (
+    inv_collection_id UUID NOT NULL,
+    zone_id UUID NOT NULL,
+    -- address
+    service_ip INET NOT NULL,
+    service_port INT4 CHECK (service_port BETWEEN 0 AND 65535) NOT NULL,
+    -- dataset
+    dataset_zpool_id UUID NOT NULL,
+    dataset_zpool_kind omicron.public.zpool_kind NOT NULL,
+    PRIMARY KEY (inv_collection_id, zone_id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone_crucible_pantry (
+    inv_collection_id UUID NOT NULL,
+    zone_id UUID NOT NULL,
+    -- address
+    service_ip INET NOT NULL,
+    service_port INT4 CHECK (service_port BETWEEN 0 AND 65535) NOT NULL,
+    PRIMARY KEY (inv_collection_id, zone_id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone_external_dns (
+    inv_collection_id UUID NOT NULL,
+    zone_id UUID NOT NULL,
+    -- http address
+    http_ip INET NOT NULL,
+    http_port INT4 CHECK (http_port BETWEEN 0 AND 65535) NOT NULL,
+    -- (external) DNS address
+    dns_ip INET NOT NULL,
+    dns_port INT4 CHECK (dns_port BETWEEN 0 AND 65535) NOT NULL,
+    -- dataset
+    dataset_zpool_id UUID NOT NULL,
+    dataset_zpool_kind omicron.public.zpool_kind NOT NULL,
+    -- nic
+    nic_id UUID NOT NULL,
+    nic_kind omicron.public.network_interface_kind NOT NULL,
+    nic_kind_id UUID NOT NULL,
+    nic_name TEXT NOT NULL,
+    nic_ip INET NOT NULL,
+    nic_mac INT8 NOT NULL,
+    nic_subnet INET NOT NULL,
+    nic_vni INT8 NOT NULL,
+    nic_primary BOOLEAN NOT NULL,
+    nic_slot INT2 NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, zone_id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone_internal_dns (
+    inv_collection_id UUID NOT NULL,
+    zone_id UUID NOT NULL,
+    -- http server address
+    http_ip INET NOT NULL,
+    http_port INT4 CHECK (http_port BETWEEN 0 AND 65535) NOT NULL,
+    -- dns server address
+    dns_ip INET NOT NULL,
+    dns_port INT4 CHECK (dns_port BETWEEN 0 AND 65535) NOT NULL,
+    -- address outside the sled's subnet attached to this zone
+    gz_address INET NOT NULL,
+    gz_address_index INT4 NOT NULL,
+    -- dataset
+    dataset_zpool_id UUID NOT NULL,
+    dataset_zpool_kind omicron.public.zpool_kind NOT NULL,
+    PRIMARY KEY (inv_collection_id, zone_id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone_internal_ntp (
+    inv_collection_id UUID NOT NULL,
+    zone_id UUID NOT NULL,
+    -- address
+    service_ip INET NOT NULL,
+    service_port INT4 CHECK (service_port BETWEEN 0 AND 65535) NOT NULL,
+    ntp_servers TEXT[] NOT NULL,
+    dns_servers INET[] NOT NULL,
+    domain TEXT, -- nullable
+    PRIMARY KEY (inv_collection_id, zone_id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone_nexus (
+    inv_collection_id UUID NOT NULL,
+    zone_id UUID NOT NULL,
+    -- internal address
+    internal_ip INET NOT NULL,
+    internal_port INT4 CHECK (internal_port BETWEEN 0 AND 65535) NOT NULL,
+    -- external address
+    external_ip INET NOT NULL,
+    external_port INT4 CHECK (external_port BETWEEN 0 AND 65535) NOT NULL,
+    external_tls BOOLEAN NOT NULL,
+    external_dns_servers INET ARRAY NOT NULL,
+
+    nic_id UUID NOT NULL,
+    nic_kind omicron.public.network_interface_kind NOT NULL,
+    nic_kind_id UUID NOT NULL,
+    nic_name TEXT NOT NULL,
+    nic_ip INET NOT NULL,
+    nic_mac INT8 NOT NULL,
+    nic_subnet INET NOT NULL,
+    nic_vni INT8 NOT NULL,
+    nic_primary BOOLEAN NOT NULL,
+    nic_slot INT2 NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, zone_id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone_oximeter (
+    inv_collection_id UUID NOT NULL,
+    zone_id UUID NOT NULL,
+
+    -- address
+    service_ip INET NOT NULL,
+    service_port INT4 CHECK (service_port BETWEEN 0 AND 65535) NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, zone_id)
+);
+
 /*******************************************************************/
 
 /*
