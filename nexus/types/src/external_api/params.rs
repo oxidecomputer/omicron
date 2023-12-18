@@ -356,6 +356,14 @@ impl SiloQuotasCreate {
     }
 }
 
+// This conversion is mostly just useful for tests such that we can reuse
+// empty() and arbitrarily_high_default() when testing utilization
+impl From<SiloQuotasCreate> for super::views::VirtualResourceCounts {
+    fn from(quota: SiloQuotasCreate) -> Self {
+        Self { cpus: quota.cpus, memory: quota.memory, storage: quota.storage }
+    }
+}
+
 /// Updateable properties of a Silo's resource limits.
 /// If a value is omitted it will not be updated.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]

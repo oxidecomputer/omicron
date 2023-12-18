@@ -71,6 +71,23 @@ pub trait ObjectIdentity {
     fn identity(&self) -> &IdentityMetadata;
 }
 
+/// Exists for types that don't properly implement `ObjectIdentity` but
+/// still need to be paginated by name or id.
+pub trait SimpleIdentity {
+    fn id(&self) -> Uuid;
+    fn name(&self) -> &Name;
+}
+
+impl<T: ObjectIdentity> SimpleIdentity for T {
+    fn id(&self) -> Uuid {
+        self.identity().id
+    }
+
+    fn name(&self) -> &Name {
+        &self.identity().name
+    }
+}
+
 /// Parameters used to request a specific page of results when listing a
 /// collection of objects
 ///

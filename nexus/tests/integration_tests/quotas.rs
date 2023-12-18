@@ -269,9 +269,9 @@ async fn test_quotas(cptestctx: &ControlPlaneTestContext) {
         .expect("failed to set quotas");
 
     let quotas = system.get_quotas(client).await;
-    assert_eq!(quotas.cpus, 4);
-    assert_eq!(quotas.memory, ByteCount::from_gibibytes_u32(15));
-    assert_eq!(quotas.storage, ByteCount::from_gibibytes_u32(2));
+    assert_eq!(quotas.limits.cpus, 4);
+    assert_eq!(quotas.limits.memory, ByteCount::from_gibibytes_u32(15));
+    assert_eq!(quotas.limits.storage, ByteCount::from_gibibytes_u32(2));
 
     // Ensure memory quota is enforced
     let err = system
