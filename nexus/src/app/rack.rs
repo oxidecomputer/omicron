@@ -866,7 +866,7 @@ impl super::Nexus {
     //
     // TODO-multirack: We currently limit sleds to a single rack and we also
     // retrieve the `rack_uuid` from the Nexus instance used.
-    pub(crate) async fn uninitialized_sled_list(
+    pub(crate) async fn sled_list_uninitialized(
         &self,
         opctx: &OpContext,
     ) -> ListResultVec<UninitializedSled> {

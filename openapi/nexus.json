@@ -4015,6 +4015,33 @@
         }
       }
     },
+    "/v1/system/hardware/sleds-uninitialized": {
+      "get": {
+        "tags": [
+          "system/hardware"
+        ],
+        "summary": "List uninitialized sleds in a given rack",
+        "operationId": "sled_list_uninitialized",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UninitializedSledResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/hardware/switch-port": {
       "get": {
         "tags": [
@@ -4277,37 +4304,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Switch"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/v1/system/hardware/uninitialized-sleds": {
-      "get": {
-        "tags": [
-          "system/hardware"
-        ],
-        "summary": "List uninitialized sleds in a given rack",
-        "operationId": "uninitialized_sled_list",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "title": "Array_of_UninitializedSled",
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/UninitializedSled"
-                  }
                 }
               }
             }
@@ -14886,6 +14882,27 @@
           "baseboard",
           "cubby",
           "rack_id"
+        ]
+      },
+      "UninitializedSledResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UninitializedSled"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
         ]
       },
       "User": {
