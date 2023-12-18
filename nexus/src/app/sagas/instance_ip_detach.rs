@@ -332,19 +332,14 @@ async fn siid_detach_ip(
                 .map_err(ActionError::action_failed)?;
         }
         params::ExternalIpDelete::Floating { .. } => {
-            let (.., authz_fip, db_fip) = LookupPath::new(&opctx, &datastore)
+            let (.., authz_fip) = LookupPath::new(&opctx, &datastore)
                 .floating_ip_id(new_ip_uuid)
-                .fetch_for(authz::Action::Modify)
+                .lookup_for(authz::Action::Modify)
                 .await
                 .map_err(ActionError::action_failed)?;
 
             datastore
-                .floating_ip_detach(
-                    &opctx,
-                    &authz_fip,
-                    &db_fip,
-                    Some(params.instance.id()),
-                )
+                .floating_ip_detach(&opctx, &authz_fip, params.instance.id())
                 .await
                 .map_err(ActionError::action_failed)?;
         }
@@ -391,19 +386,14 @@ async fn siid_detach_ip_undo(
         }
         // Set the parent of an existing floating IP to the new instance's ID.
         params::ExternalIpDelete::Floating { .. } => {
-            let (.., authz_fip, db_fip) = LookupPath::new(&opctx, &datastore)
+            let (.., authz_fip) = LookupPath::new(&opctx, &datastore)
                 .floating_ip_id(new_ip_uuid)
-                .fetch_for(authz::Action::Modify)
+                .lookup_for(authz::Action::Modify)
                 .await
                 .map_err(ActionError::action_failed)?;
 
             let _eip = datastore
-                .floating_ip_attach(
-                    &opctx,
-                    &authz_fip,
-                    &db_fip,
-                    params.instance.id(),
-                )
+                .floating_ip_attach(&opctx, &authz_fip, params.instance.id())
                 .await
                 .map_err(ActionError::action_failed)?;
 

@@ -436,26 +436,19 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_fip: &authz::FloatingIp,
-        db_fip: &FloatingIp,
     ) -> DeleteResult {
         use db::schema::external_ip::dsl;
-
-        // Verify this FIP is not attached to any instances/services.
-        if db_fip.parent_id.is_some() {
-            return Err(Error::invalid_request(
-                "Floating IP cannot be deleted while attached to an instance",
-            ));
-        }
 
         opctx.authorize(authz::Action::Delete, authz_fip).await?;
 
         let now = Utc::now();
-        let updated_rows = diesel::update(dsl::external_ip)
-            .filter(dsl::id.eq(db_fip.id()))
+        let result = diesel::update(dsl::external_ip)
+            .filter(dsl::id.eq(authz_fip.id()))
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::parent_id.is_null())
             .set(dsl::time_deleted.eq(now))
-            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .check_if_exists::<FloatingIp>(authz_fip.id())
+            .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 public_error_from_diesel(
@@ -464,12 +457,15 @@ impl DataStore {
                 )
             })?;
 
-        if updated_rows == 0 {
-            return Err(Error::invalid_request(
-                "deletion failed due to concurrent modification",
-            ));
+        match result.status {
+            // Verify this FIP is not attached to any instances/services.
+            UpdateStatus::NotUpdatedButExists if result.found.parent_id.is_some() => Err(Error::invalid_request(
+                "Floating IP cannot be deleted while attached to an instance",
+            )),
+            // Only remaining cause of `NotUpdated` is earlier soft-deletion.
+            // Return success in this case to maintain idempotency.
+            UpdateStatus::Updated | UpdateStatus::NotUpdatedButExists => Ok(()),
         }
-        Ok(())
     }
 
     /// Attaches a Floating IP address to an instance.
@@ -477,17 +473,9 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_fip: &authz::FloatingIp,
-        db_fip: &FloatingIp,
         instance_id: Uuid,
     ) -> UpdateResult<FloatingIp> {
         use db::schema::external_ip::dsl;
-
-        // Verify this FIP is not attached to any instances/services.
-        if db_fip.parent_id.is_some() {
-            return Err(Error::invalid_request(
-                "Floating IP cannot be attached to one instance while still attached to another",
-            ));
-        }
 
         let (.., authz_instance, _db_instance) = LookupPath::new(&opctx, self)
             .instance_id(instance_id)
@@ -497,8 +485,10 @@ impl DataStore {
         opctx.authorize(authz::Action::Modify, authz_fip).await?;
         opctx.authorize(authz::Action::Modify, &authz_instance).await?;
 
+        let fip_id = authz_fip.id();
+
         let out = diesel::update(dsl::external_ip)
-            .filter(dsl::id.eq(db_fip.id()))
+            .filter(dsl::id.eq(fip_id))
             .filter(dsl::kind.eq(IpKind::Floating))
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::parent_id.is_null())
@@ -506,19 +496,23 @@ impl DataStore {
                 dsl::parent_id.eq(Some(instance_id)),
                 dsl::time_modified.eq(Utc::now()),
             ))
-            .returning(ExternalIp::as_returning())
-            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
+            .check_if_exists::<FloatingIp>(fip_id)
+            .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 public_error_from_diesel(
                     e,
                     ErrorHandler::NotFoundByResource(authz_fip),
                 )
-            })
-            .and_then(|r| FloatingIp::try_from(r))
-            .map_err(|e| Error::internal_error(&format!("{e}")))?;
+            })?;
 
-        Ok(out)
+        match (out.status, out.found.parent_id) {
+            (UpdateStatus::NotUpdatedButExists, Some(_)) => Err(Error::invalid_request(
+                "Floating IP cannot be attached to one instance while still attached to another",
+            )),
+            (UpdateStatus::Updated, _) => Ok(out.found.into()),
+            _ => unreachable!(),
+        }
     }
 
     /// Detaches a Floating IP address from an instance.
@@ -526,37 +520,22 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_fip: &authz::FloatingIp,
-        db_fip: &FloatingIp,
-        target_instance_id: Option<Uuid>,
-    ) -> UpdateResult<(FloatingIp, Option<Uuid>)> {
+        instance_id: Uuid,
+    ) -> UpdateResult<FloatingIp> {
         use db::schema::external_ip::dsl;
 
-        let Some(instance_id) = db_fip.parent_id else {
-            return Err(Error::invalid_request(
-                "Floating IP is not attached to an instance",
-            ));
-        };
-
-        if let Some(target_instance_id) = target_instance_id {
-            if target_instance_id != instance_id {
-                return Err(Error::invalid_request(
-                    "Floating IP is not attached to the target instance",
-                ));
-            }
-        }
-
-        let (.., authz_instance, _db_instance) = LookupPath::new(&opctx, self)
+        let (.., authz_instance) = LookupPath::new(&opctx, self)
             .instance_id(instance_id)
-            .fetch_for(authz::Action::Modify)
+            .lookup_for(authz::Action::Modify)
             .await?;
 
         opctx.authorize(authz::Action::Modify, authz_fip).await?;
         opctx.authorize(authz::Action::Modify, &authz_instance).await?;
 
-        let i = self.instance_fetch_with_vmm(opctx, &authz_instance).await?;
+        let fip_id = authz_fip.id();
 
         let out = diesel::update(dsl::external_ip)
-            .filter(dsl::id.eq(db_fip.id()))
+            .filter(dsl::id.eq(fip_id))
             .filter(dsl::kind.eq(IpKind::Floating))
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::parent_id.eq(instance_id))
@@ -564,18 +543,31 @@ impl DataStore {
                 dsl::parent_id.eq(Option::<Uuid>::None),
                 dsl::time_modified.eq(Utc::now()),
             ))
-            .returning(ExternalIp::as_returning())
-            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
+            .check_if_exists::<FloatingIp>(fip_id)
+            .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 public_error_from_diesel(
                     e,
                     ErrorHandler::NotFoundByResource(authz_fip),
                 )
-            })
-            .and_then(|r| FloatingIp::try_from(r))
-            .map_err(|e| Error::internal_error(&format!("{e}")))?;
+            })?;
 
-        Ok((out, i.sled_id()))
+        match (out.status, out.found.parent_id) {
+            (UpdateStatus::NotUpdatedButExists, Some(id))
+                if id != instance_id =>
+            {
+                Err(Error::invalid_request(
+                    "Floating IP is not attached to the target instance",
+                ))
+            }
+            (UpdateStatus::NotUpdatedButExists, None) => {
+                Err(Error::invalid_request(
+                    "Floating IP is not attached to an instance",
+                ))
+            }
+            (UpdateStatus::Updated, _) => Ok(out.found.into()),
+            _ => unreachable!(),
+        }
     }
 }

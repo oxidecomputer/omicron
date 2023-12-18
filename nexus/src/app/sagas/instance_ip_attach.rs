@@ -247,23 +247,18 @@ async fn siia_attach_ip(
         }
         // Set the parent of an existing floating IP to the new instance's ID.
         params::ExternalIpCreate::Floating { .. } => {
-            let (.., authz_fip, db_fip) = LookupPath::new(&opctx, &datastore)
+            let (.., authz_fip) = LookupPath::new(&opctx, &datastore)
                 .floating_ip_id(new_ip_uuid)
-                .fetch_for(authz::Action::Modify)
+                .lookup_for(authz::Action::Modify)
                 .await
                 .map_err(ActionError::action_failed)?;
 
             let eip = datastore
-                .floating_ip_attach(
-                    &opctx,
-                    &authz_fip,
-                    &db_fip,
-                    params.instance.id(),
-                )
+                .floating_ip_attach(&opctx, &authz_fip, params.instance.id())
                 .await
                 .map_err(ActionError::action_failed)?;
 
-            Ok(ExternalIp::Floating(eip.ip.ip(), db_fip.id()))
+            Ok(ExternalIp::Floating(eip.ip.ip(), authz_fip.id()))
         }
     }
 }
@@ -286,18 +281,13 @@ async fn siia_attach_ip_undo(
             datastore.deallocate_external_ip(&opctx, new_ip_uuid).await?;
         }
         params::ExternalIpCreate::Floating { .. } => {
-            let (.., authz_fip, db_fip) = LookupPath::new(&opctx, &datastore)
+            let (.., authz_fip) = LookupPath::new(&opctx, &datastore)
                 .floating_ip_id(new_ip_uuid)
-                .fetch_for(authz::Action::Modify)
+                .lookup_for(authz::Action::Modify)
                 .await?;
 
             datastore
-                .floating_ip_detach(
-                    &opctx,
-                    &authz_fip,
-                    &db_fip,
-                    Some(params.instance.id()),
-                )
+                .floating_ip_detach(&opctx, &authz_fip, params.instance.id())
                 .await?;
         }
     }

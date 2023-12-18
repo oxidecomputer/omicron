@@ -115,9 +115,9 @@ impl super::Nexus {
         opctx: &OpContext,
         ip_lookup: lookup::FloatingIp<'_>,
     ) -> DeleteResult {
-        let (.., authz_fip, db_fip) =
-            ip_lookup.fetch_for(authz::Action::Delete).await?;
+        let (.., authz_fip) =
+            ip_lookup.lookup_for(authz::Action::Delete).await?;
 
-        self.db_datastore.floating_ip_delete(opctx, &authz_fip, &db_fip).await
+        self.db_datastore.floating_ip_delete(opctx, &authz_fip).await
     }
 }

@@ -634,15 +634,15 @@ async fn sic_allocate_instance_external_ip(
         // Set the parent of an existing floating IP to the new instance's ID.
         params::ExternalIpCreate::Floating { ref floating_ip_name } => {
             let floating_ip_name = db::model::Name(floating_ip_name.clone());
-            let (.., authz_fip, db_fip) = LookupPath::new(&opctx, &datastore)
+            let (.., authz_fip) = LookupPath::new(&opctx, &datastore)
                 .project_id(saga_params.project_id)
                 .floating_ip_name(&floating_ip_name)
-                .fetch_for(authz::Action::Modify)
+                .lookup_for(authz::Action::Modify)
                 .await
                 .map_err(ActionError::action_failed)?;
 
             datastore
-                .floating_ip_attach(&opctx, &authz_fip, &db_fip, instance_id)
+                .floating_ip_attach(&opctx, &authz_fip, instance_id)
                 .await
                 .map_err(ActionError::action_failed)?;
         }
@@ -674,18 +674,17 @@ async fn sic_allocate_instance_external_ip_undo(
         }
         params::ExternalIpCreate::Floating { floating_ip_name } => {
             let floating_ip_name = db::model::Name(floating_ip_name.clone());
-            let (.., authz_fip, db_fip) = LookupPath::new(&opctx, &datastore)
+            let (.., authz_fip) = LookupPath::new(&opctx, &datastore)
                 .project_id(saga_params.project_id)
                 .floating_ip_name(&floating_ip_name)
-                .fetch_for(authz::Action::Modify)
+                .lookup_for(authz::Action::Modify)
                 .await?;
 
             datastore
                 .floating_ip_detach(
                     &opctx,
                     &authz_fip,
-                    &db_fip,
-                    Some(repeat_saga_params.instance_id),
+                    repeat_saga_params.instance_id,
                 )
                 .await?;
         }
