@@ -125,7 +125,7 @@ rack_list                                GET      /v1/system/hardware/racks
 rack_view                                GET      /v1/system/hardware/racks/{rack_id}
 sled_instance_list                       GET      /v1/system/hardware/sleds/{sled_id}/instances
 sled_list                                GET      /v1/system/hardware/sleds
-sled_list_uninitialized                  GET      /v1/system/hardware/uninitialized-sleds
+sled_list_uninitialized                  GET      /v1/system/hardware/sleds-uninitialized
 sled_physical_disk_list                  GET      /v1/system/hardware/sleds/{sled_id}/disks
 sled_set_provision_state                 PUT      /v1/system/hardware/sleds/{sled_id}/provision-state
 sled_view                                GET      /v1/system/hardware/sleds/{sled_id}

@@ -89,7 +89,7 @@ async fn test_rack_initialization(cptestctx: &ControlPlaneTestContext) {
 async fn test_sled_list_uninitialized(cptestctx: &ControlPlaneTestContext) {
     let internal_client = &cptestctx.internal_client;
     let external_client = &cptestctx.external_client;
-    let list_url = "/v1/system/hardware/uninitialized-sleds";
+    let list_url = "/v1/system/hardware/sleds-uninitialized";
     let mut uninitialized_sleds =
         NexusRequest::object_get(external_client, &list_url)
             .authn_as(AuthnMode::PrivilegedUser)

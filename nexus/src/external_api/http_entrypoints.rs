@@ -4570,7 +4570,7 @@ async fn rack_view(
 /// List uninitialized sleds in a given rack
 #[endpoint {
     method = GET,
-    path = "/v1/system/hardware/uninitialized-sleds",
+    path = "/v1/system/hardware/sleds-uninitialized",
     tags = ["system/hardware"]
 }]
 async fn sled_list_uninitialized(
