@@ -69,6 +69,7 @@ service_name = "overlay"
 source.type = "composite"
 source.packages = [
   "logadm.tar.gz",
+  "profile.tar.gz",
 ]
 output.type = "zone"
 
@@ -80,6 +81,18 @@ source.type = "local"
 source.paths = [
   { from = "smf/logadm/crontab.root", to = "/var/spool/cron/crontabs/root" },
   { from = "smf/logadm/logadm.conf", to = "/etc/logadm.conf" },
+]
+output.type = "zone"
+output.intermediate_only = true
+#
+# The profile package is an overlay for all non-global zones to configure
+# root's bash environment.
+[package.profile]
+service_name = "profile"
+source.type = "local"
+source.paths = [
+  { from = "smf/profile/profile", to = "/root/.profile" },
+  { from = "smf/profile/bashrc", to = "/root/.bashrc" },
 ]
 output.type = "zone"
 output.intermediate_only = true
@@ -335,7 +348,6 @@ source.paths = [
   { from = "smf/switch_zone_setup/manifest.xml", to = "/var/svc/manifest/site/switch_zone_setup/manifest.xml" },
   { from = "smf/switch_zone_setup/switch_zone_setup", to = "/opt/oxide/bin/switch_zone_setup" },
   { from = "smf/switch_zone_setup/support_authorized_keys", to = "/opt/oxide/support/authorized_keys" },
-  { from = "smf/switch_zone_setup/root.profile", to = "/root/.profile" },
 ]
 output.type = "zone"
 output.intermediate_only = true
