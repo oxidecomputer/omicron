@@ -447,7 +447,7 @@ impl DataStore {
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::parent_id.is_null())
             .set(dsl::time_deleted.eq(now))
-            .check_if_exists::<FloatingIp>(authz_fip.id())
+            .check_if_exists::<ExternalIp>(authz_fip.id())
             .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
@@ -496,7 +496,7 @@ impl DataStore {
                 dsl::parent_id.eq(Some(instance_id)),
                 dsl::time_modified.eq(Utc::now()),
             ))
-            .check_if_exists::<FloatingIp>(fip_id)
+            .check_if_exists::<ExternalIp>(fip_id)
             .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
@@ -510,7 +510,7 @@ impl DataStore {
             (UpdateStatus::NotUpdatedButExists, Some(_)) => Err(Error::invalid_request(
                 "Floating IP cannot be attached to one instance while still attached to another",
             )),
-            (UpdateStatus::Updated, _) => Ok(out.found.into()),
+            (UpdateStatus::Updated, _) => Ok(out.found.try_into().map_err(|e| Error::internal_error(&format!("{e}")))?),
             _ => unreachable!(),
         }
     }
@@ -543,7 +543,7 @@ impl DataStore {
                 dsl::parent_id.eq(Option::<Uuid>::None),
                 dsl::time_modified.eq(Utc::now()),
             ))
-            .check_if_exists::<FloatingIp>(fip_id)
+            .check_if_exists::<ExternalIp>(fip_id)
             .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
@@ -566,7 +566,10 @@ impl DataStore {
                     "Floating IP is not attached to an instance",
                 ))
             }
-            (UpdateStatus::Updated, _) => Ok(out.found.into()),
+            (UpdateStatus::Updated, _) => Ok(out
+                .found
+                .try_into()
+                .map_err(|e| Error::internal_error(&format!("{e}")))?),
             _ => unreachable!(),
         }
     }

@@ -208,6 +208,11 @@ async fn siid_nat(sagactx: NexusActionContext) -> Result<(), ActionError> {
     let new_ip = sagactx.lookup::<ExternalIp>("target_ip")?;
     let ip_id = new_ip.into();
 
+    // Currently getting an unfortunate error from here since 'detach'
+    // comes so late.
+    // Possible soln: use states, capture logic in 'begin_detach/attach'
+    // and call early?
+
     osagactx
         .nexus()
         .instance_delete_dpd_config(&opctx, &params.authz_instance, Some(ip_id))
@@ -359,7 +364,7 @@ async fn siid_detach_ip_undo(
         &params.serialized_authn,
     );
 
-    let new_ip_uuid = sagactx.lookup::<Uuid>("target_ip")?.into();
+    let new_ip = sagactx.lookup::<ExternalIp>("target_ip")?;
 
     match params.delete_params {
         // Allocate a new IP address from the target, possibly default, pool
@@ -387,7 +392,7 @@ async fn siid_detach_ip_undo(
         // Set the parent of an existing floating IP to the new instance's ID.
         params::ExternalIpDelete::Floating { .. } => {
             let (.., authz_fip) = LookupPath::new(&opctx, &datastore)
-                .floating_ip_id(new_ip_uuid)
+                .floating_ip_id(new_ip.into())
                 .lookup_for(authz::Action::Modify)
                 .await
                 .map_err(ActionError::action_failed)?;

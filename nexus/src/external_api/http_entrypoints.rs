@@ -3760,7 +3760,7 @@ async fn instance_external_ip_attach(
                 &ip_to_detach.into_inner(),
             )
             .await?;
-        Ok(HttpResponseAccepted(ip.into()))
+        Ok(HttpResponseAccepted(ip))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -3796,7 +3796,7 @@ async fn instance_external_ip_detach(
                 &ip_to_detach.into_inner(),
             )
             .await?;
-        Ok(HttpResponseAccepted(ip.into()))
+        Ok(HttpResponseAccepted(ip))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
