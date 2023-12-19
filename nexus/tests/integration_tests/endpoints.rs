@@ -47,7 +47,7 @@ lazy_static! {
     pub static ref HARDWARE_RACK_URL: String =
         format!("/v1/system/hardware/racks/{}", RACK_UUID);
     pub static ref HARDWARE_UNINITIALIZED_SLEDS: String =
-        format!("/v1/system/hardware/uninitialized-sleds");
+        format!("/v1/system/hardware/sleds-uninitialized");
     pub static ref HARDWARE_SLED_URL: String =
         format!("/v1/system/hardware/sleds/{}", SLED_AGENT_UUID);
     pub static ref HARDWARE_SLED_PROVISION_STATE_URL: String =
