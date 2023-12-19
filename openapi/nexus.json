@@ -4022,6 +4022,28 @@
         ],
         "summary": "List uninitialized sleds in a given rack",
         "operationId": "sled_list_uninitialized",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "successful operation",
@@ -4039,6 +4061,9 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
+        },
+        "x-dropshot-pagination": {
+          "required": []
         }
       }
     },
