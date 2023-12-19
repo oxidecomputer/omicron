@@ -47,7 +47,7 @@ lazy_static! {
     pub static ref HARDWARE_RACK_URL: String =
         format!("/v1/system/hardware/racks/{}", RACK_UUID);
     pub static ref HARDWARE_UNINITIALIZED_SLEDS: String =
-        format!("/v1/system/hardware/uninitialized-sleds");
+        format!("/v1/system/hardware/sleds-uninitialized");
     pub static ref HARDWARE_SLED_URL: String =
         format!("/v1/system/hardware/sleds/{}", SLED_AGENT_UUID);
     pub static ref HARDWARE_SLED_PROVISION_STATE_URL: String =
@@ -85,18 +85,24 @@ lazy_static! {
         format!("/v1/system/silos/{}", *DEMO_SILO_NAME);
     pub static ref DEMO_SILO_POLICY_URL: String =
         format!("/v1/system/silos/{}/policy", *DEMO_SILO_NAME);
+    pub static ref DEMO_SILO_QUOTAS_URL: String =
+        format!("/v1/system/silos/{}/quotas", *DEMO_SILO_NAME);
     pub static ref DEMO_SILO_CREATE: params::SiloCreate =
         params::SiloCreate {
             identity: IdentityMetadataCreateParams {
                 name: DEMO_SILO_NAME.clone(),
                 description: String::from(""),
             },
+            quotas: params::SiloQuotasCreate::arbitrarily_high_default(),
             discoverable: true,
             identity_mode: shared::SiloIdentityMode::SamlJit,
             admin_group_name: None,
             tls_certificates: vec![],
             mapped_fleet_roles: Default::default(),
         };
+
+    pub static ref DEMO_SILO_UTIL_URL: String = format!("/v1/system/utilization/silos/{}", *DEMO_SILO_NAME);
+
     // Use the default Silo for testing the local IdP
     pub static ref DEMO_SILO_USERS_CREATE_URL: String = format!(
         "/v1/system/identity-providers/local/users?silo={}",
@@ -118,6 +124,9 @@ lazy_static! {
         "/v1/system/identity-providers/local/users/{{id}}/set-password?silo={}",
         DEFAULT_SILO.identity().name,
     );
+}
+
+lazy_static! {
 
     // Project used for testing
     pub static ref DEMO_PROJECT_NAME: Name = "demo-project".parse().unwrap();
@@ -949,6 +958,51 @@ lazy_static! {
                     ).unwrap()
                 ),
             ],
+        },
+        VerifyEndpoint {
+            url: &DEMO_SILO_QUOTAS_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Put(
+                    serde_json::to_value(
+                        params::SiloQuotasCreate::empty()
+                    ).unwrap()
+                )
+            ],
+        },
+        VerifyEndpoint {
+            url: "/v1/system/silo-quotas",
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get
+            ],
+        },
+        VerifyEndpoint {
+            url: "/v1/system/utilization/silos",
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get
+            ]
+        },
+        VerifyEndpoint {
+            url: &DEMO_SILO_UTIL_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get
+            ]
+        },
+        VerifyEndpoint {
+            url: "/v1/utilization",
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::ReadOnly,
+            allowed_methods: vec![
+                AllowedMethod::Get
+            ]
         },
         VerifyEndpoint {
             url: "/v1/policy",

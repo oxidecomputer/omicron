@@ -867,6 +867,86 @@ async fn test_instance_migrate_v2p(cptestctx: &ControlPlaneTestContext) {
     }
 }
 
+// Verifies that if a request to reboot or stop an instance fails because of a
+// 500-level error from sled agent, then the instance moves to the Failed state.
+#[nexus_test]
+async fn test_instance_failed_after_sled_agent_error(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let apictx = &cptestctx.server.apictx();
+    let nexus = &apictx.nexus;
+    let instance_name = "losing-is-fun";
+
+    // Create and start the test instance.
+    create_org_and_project(&client).await;
+    let instance_url = get_instance_url(instance_name);
+    let instance = create_instance(client, PROJECT_NAME, instance_name).await;
+    instance_simulate(nexus, &instance.identity.id).await;
+    let instance_next = instance_get(&client, &instance_url).await;
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
+
+    let sled_agent = &cptestctx.sled_agent.sled_agent;
+    sled_agent
+        .set_instance_ensure_state_error(Some(
+            omicron_common::api::external::Error::internal_error(
+                "injected by test_instance_failed_after_sled_agent_error",
+            ),
+        ))
+        .await;
+
+    let url = get_instance_url(format!("{}/reboot", instance_name).as_str());
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &url)
+            .body(None as Option<&serde_json::Value>),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<Instance>()
+    .expect_err("expected injected failure");
+
+    let instance_next = instance_get(&client, &instance_url).await;
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Failed);
+
+    NexusRequest::object_delete(client, &get_instance_url(instance_name))
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+
+    sled_agent.set_instance_ensure_state_error(None).await;
+
+    let instance = create_instance(client, PROJECT_NAME, instance_name).await;
+    instance_simulate(nexus, &instance.identity.id).await;
+    let instance_next = instance_get(&client, &instance_url).await;
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
+
+    sled_agent
+        .set_instance_ensure_state_error(Some(
+            omicron_common::api::external::Error::internal_error(
+                "injected by test_instance_failed_after_sled_agent_error",
+            ),
+        ))
+        .await;
+
+    let url = get_instance_url(format!("{}/stop", instance_name).as_str());
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &url)
+            .body(None as Option<&serde_json::Value>),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<Instance>()
+    .expect_err("expected injected failure");
+
+    let instance_next = instance_get(&client, &instance_url).await;
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Failed);
+}
+
 /// Assert values for fleet, silo, and project using both system and silo
 /// metrics endpoints
 async fn assert_metrics(
@@ -3563,7 +3643,7 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
         .unwrap(),
     );
     populate_ip_pool(&client, "default", Some(default_pool_range)).await;
-    create_ip_pool(&client, "other-pool", Some(other_pool_range)).await;
+    create_ip_pool(&client, "other-pool", Some(other_pool_range), None).await;
 
     // Create an instance with pool name blank, expect IP from default pool
     create_instance_with_pool(client, "default-pool-inst", None).await;

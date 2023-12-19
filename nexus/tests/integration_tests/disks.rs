@@ -1246,7 +1246,7 @@ async fn test_disk_virtual_provisioning_collection(
 async fn test_disk_virtual_provisioning_collection_failed_delete(
     cptestctx: &ControlPlaneTestContext,
 ) {
-    // Confirm that there's a panic deleting a project if a disk deletion fails
+    // Confirm that there's no panic deleting a project if a disk deletion fails
     let client = &cptestctx.external_client;
     let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
@@ -1272,6 +1272,7 @@ async fn test_disk_virtual_provisioning_collection_failed_delete(
         },
         size: disk_size,
     };
+
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &disks_url)
             .body(Some(&disk_one))
@@ -1281,6 +1282,11 @@ async fn test_disk_virtual_provisioning_collection_failed_delete(
     .execute()
     .await
     .expect("unexpected failure creating 1 GiB disk");
+
+    // Get the disk
+    let disk_url = format!("/v1/disks/{}?project={}", "disk-one", PROJECT_NAME);
+    let disk = disk_get(&client, &disk_url).await;
+    assert_eq!(disk.state, DiskState::Detached);
 
     // Assert correct virtual provisioning collection numbers
     let virtual_provisioning_collection = datastore
@@ -1303,8 +1309,6 @@ async fn test_disk_virtual_provisioning_collection_failed_delete(
         .await;
 
     // Delete the disk - expect this to fail
-    let disk_url = format!("/v1/disks/{}?project={}", "disk-one", PROJECT_NAME);
-
     NexusRequest::new(
         RequestBuilder::new(client, Method::DELETE, &disk_url)
             .expect_status(Some(StatusCode::INTERNAL_SERVER_ERROR)),
@@ -1324,7 +1328,12 @@ async fn test_disk_virtual_provisioning_collection_failed_delete(
         disk_size
     );
 
-    // And the disk is now faulted
+    // And the disk is now faulted. The name will have changed due to the
+    // "undelete and fault" function.
+    let disk_url = format!(
+        "/v1/disks/deleted-{}?project={}",
+        disk.identity.id, PROJECT_NAME
+    );
     let disk = disk_get(&client, &disk_url).await;
     assert_eq!(disk.state, DiskState::Faulted);
 
@@ -1372,6 +1381,130 @@ async fn test_disk_virtual_provisioning_collection_failed_delete(
     .execute()
     .await
     .expect("unexpected failure deleting project");
+}
+
+#[nexus_test]
+async fn test_phantom_disk_rename(cptestctx: &ControlPlaneTestContext) {
+    // Confirm that phantom disks are renamed when they are un-deleted and
+    // faulted
+
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.apictx().nexus;
+    let datastore = nexus.datastore();
+
+    let _disk_test = DiskTest::new(&cptestctx).await;
+
+    populate_ip_pool(&client, "default", None).await;
+    let _project_id1 = create_project(client, PROJECT_NAME).await.identity.id;
+
+    // Create a 1 GB disk
+    let disk_size = ByteCount::from_gibibytes_u32(1);
+    let disks_url = get_disks_url();
+    let disk_one = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "disk-one".parse().unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_source: params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(512).unwrap(),
+        },
+        size: disk_size,
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&disk_one))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("unexpected failure creating 1 GiB disk");
+
+    let disk_url = format!("/v1/disks/{}?project={}", "disk-one", PROJECT_NAME);
+
+    // Confirm it's there
+    let disk = disk_get(&client, &disk_url).await;
+    assert_eq!(disk.state, DiskState::Detached);
+
+    let original_disk_id = disk.identity.id;
+
+    // Now, request disk delete
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::DELETE, &disk_url)
+            .expect_status(Some(StatusCode::NO_CONTENT)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("unexpected failure deleting 1 GiB disk");
+
+    // It's gone!
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::GET, &disk_url)
+            .expect_status(Some(StatusCode::NOT_FOUND)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("unexpected success finding 1 GiB disk");
+
+    // Create a new disk with the same name
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&disk_one))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("unexpected failure creating 1 GiB disk");
+
+    // Confirm it's there
+    let disk = disk_get(&client, &disk_url).await;
+    assert_eq!(disk.state, DiskState::Detached);
+
+    // Confirm it's not the same disk
+    let new_disk_id = disk.identity.id;
+    assert_ne!(original_disk_id, new_disk_id);
+
+    // Un-delete the original and set it to faulted
+    datastore
+        .project_undelete_disk_set_faulted_no_auth(&original_disk_id)
+        .await
+        .unwrap();
+
+    // The original disk is now faulted
+    let disk_url = format!(
+        "/v1/disks/deleted-{}?project={}",
+        original_disk_id, PROJECT_NAME
+    );
+    let disk = disk_get(&client, &disk_url).await;
+    assert_eq!(disk.state, DiskState::Faulted);
+
+    // Make sure original can still be deleted
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::DELETE, &disk_url)
+            .expect_status(Some(StatusCode::NO_CONTENT)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("unexpected failure deleting 1 GiB disk");
+
+    // Make sure new can be deleted too
+    let disk_url = format!("/v1/disks/{}?project={}", "disk-one", PROJECT_NAME);
+    let disk = disk_get(&client, &disk_url).await;
+    assert_eq!(disk.state, DiskState::Detached);
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::DELETE, &disk_url)
+            .expect_status(Some(StatusCode::NO_CONTENT)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("unexpected failure deleting 1 GiB disk");
 }
 
 // Test disk size accounting

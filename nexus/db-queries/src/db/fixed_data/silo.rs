@@ -24,6 +24,9 @@ lazy_static! {
                     name: "default-silo".parse().unwrap(),
                     description: "default silo".to_string(),
                 },
+                // This quota is actually _unused_ because the default silo
+                // isn't constructed in the same way a normal silo would be.
+                quotas: params::SiloQuotasCreate::empty(),
                 discoverable: false,
                 identity_mode: shared::SiloIdentityMode::LocalOnly,
                 admin_group_name: None,
@@ -49,6 +52,8 @@ lazy_static! {
                     name: "oxide-internal".parse().unwrap(),
                     description: "Built-in internal Silo.".to_string(),
                 },
+                // The internal silo contains no virtual resources, so it has no allotted capacity.
+                quotas: params::SiloQuotasCreate::empty(),
                 discoverable: false,
                 identity_mode: shared::SiloIdentityMode::LocalOnly,
                 admin_group_name: None,

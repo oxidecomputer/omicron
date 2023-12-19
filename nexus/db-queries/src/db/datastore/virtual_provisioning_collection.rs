@@ -195,7 +195,9 @@ impl DataStore {
             )
             .get_results_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+            .map_err(|e| {
+                crate::db::queries::virtual_provisioning_collection_update::from_diesel(e)
+            })?;
         self.virtual_provisioning_collection_producer
             .append_disk_metrics(&provisions)?;
         Ok(provisions)
@@ -249,7 +251,7 @@ impl DataStore {
             )
             .get_results_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+            .map_err(|e| crate::db::queries::virtual_provisioning_collection_update::from_diesel(e))?;
         self.virtual_provisioning_collection_producer
             .append_disk_metrics(&provisions)?;
         Ok(provisions)
@@ -270,7 +272,7 @@ impl DataStore {
             )
             .get_results_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+            .map_err(|e| crate::db::queries::virtual_provisioning_collection_update::from_diesel(e))?;
         self.virtual_provisioning_collection_producer
             .append_cpu_metrics(&provisions)?;
         Ok(provisions)
@@ -300,7 +302,7 @@ impl DataStore {
             )
             .get_results_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+            .map_err(|e| crate::db::queries::virtual_provisioning_collection_update::from_diesel(e))?;
         self.virtual_provisioning_collection_producer
             .append_cpu_metrics(&provisions)?;
         Ok(provisions)
