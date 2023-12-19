@@ -6,8 +6,9 @@
 
 use crate::schema::{
     hw_baseboard_id, inv_caboose, inv_collection, inv_collection_error,
-    inv_root_of_trust, inv_root_of_trust_page, inv_service_processor,
-    inv_sled_agent, sw_caboose, sw_root_of_trust_page,
+    inv_omicron_zone, inv_root_of_trust, inv_root_of_trust_page,
+    inv_service_processor, inv_sled_agent, inv_sled_omicron_zones, sw_caboose,
+    sw_root_of_trust_page,
 };
 use crate::{impl_enum_type, ipv6, ByteCount, SqlU16, SqlU32};
 use anyhow::anyhow;
@@ -644,4 +645,66 @@ impl InvSledAgent {
             })
         }
     }
+}
+
+/// See [`nexus_types::inventory::OmicronZonesConfig`].
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_sled_omicron_zones)]
+struct InvSledOmicronZones {
+    pub inv_collection_id: Uuid,
+    pub time_collected: DateTime<Utc>,
+    pub source: String,
+    pub sled_id: Uuid,
+    pub generation: SqlU32,
+}
+
+impl_enum_type!(
+    #[derive(Clone, SqlType, Debug, QueryId)]
+    #[diesel(postgres_type(name = "zone_type"))]
+    pub struct ZoneTypeEnum;
+
+    #[derive(Clone, Copy, Debug, Eq, AsExpression, FromSqlRow, PartialEq)]
+    #[diesel(sql_type = ZoneTypeEnum)]
+    pub enum ZoneType;
+
+    // Enum values
+    BoundaryNtp => b"boundary_ntp"
+    ClickhouseKeeper => b"clickhouse_keeper"
+    Clickhouse => b"clickhouse"
+    Cockroach => b"cockroach"
+    CruciblePantry => b"crucible_pantry"
+    Crucible => b"crucible"
+    Dendrite => b"dendrite"
+    ExternalDns => b"external_dns"
+    InternalDns => b"internal_dns"
+    InternapNtp => b"internal_ntp"
+    Nexus => b"nexus"
+    Oximeter => b"oximeter"
+);
+
+/// See [`nexus_types::inventory::OmicronZoneConfig`].
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_omicron_zone)]
+struct InvOmicronZone {
+    pub inv_collection_id: Uuid,
+    pub sled_id: Uuid,
+    pub id: Uuid,
+    pub underlay_address: ipv6::Ipv6Addr,
+    pub zone_type: ZoneType,
+    pub primary_service_ip: ipv6::Ipv6Addr,
+    pub primary_service_port: SqlU16,
+    pub dataset_zpool_id: Option<Uuid>,
+    pub nic_id: Option<Uuid>,
+    pub external_ip: Option<ipv6::Ipv6Addr>, // XXX-dap could be v4 addr
+    pub external_port: Option<SqlU16>,
+    pub dns_gz_address: Option<ipv6::Ipv6Addr>,
+    pub dns_gz_address_index: Option<SqlU16>, // XXX-dap check range
+    pub ntp_ntp_servers: Option<Vec<String>>,
+    pub ntp_dns_servers: Option<Vec<ipv6::Ipv6Addr>>,
+    pub ntp_ntp_domain: Option<String>,
+    pub nexus_external_tls: Option<bool>,
+    pub nexus_external_dns_servers: Option<Vec<ipv6::Ipv6Addr>>, // XXX-dap v4
+    pub snat_ip: Option<ipv6::Ipv6Addr>,
+    pub snat_first_port: Option<SqlU16>,
+    pub snat_last_port: Option<SqlU16>,
 }

@@ -97,7 +97,7 @@ pub struct Collection {
     pub sled_agents: BTreeMap<Uuid, SledAgent>,
 
     /// Omicron zones found, by *sled* id
-    pub omicron_zones: BTreeMap<Uuid, OmicronZonesConfig>,
+    pub omicron_zones: BTreeMap<Uuid, OmicronZonesFound>,
 }
 
 impl Collection {
@@ -290,4 +290,12 @@ pub struct SledAgent {
     pub usable_hardware_threads: u32,
     pub usable_physical_ram: ByteCount,
     pub reservoir_size: ByteCount,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OmicronZonesFound {
+    pub time_collected: DateTime<Utc>,
+    pub source: String,
+    pub sled_id: Uuid,
+    pub zones: OmicronZonesConfig,
 }

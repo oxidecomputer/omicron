@@ -19,7 +19,7 @@ use nexus_types::inventory::Caboose;
 use nexus_types::inventory::CabooseFound;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
-use nexus_types::inventory::OmicronZonesConfig;
+use nexus_types::inventory::OmicronZonesFound;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageFound;
 use nexus_types::inventory::RotPageWhich;
@@ -85,7 +85,7 @@ pub struct CollectionBuilder {
     rot_pages_found:
         BTreeMap<RotPageWhich, BTreeMap<Arc<BaseboardId>, RotPageFound>>,
     sleds: BTreeMap<Uuid, SledAgent>,
-    omicron_zones: BTreeMap<Uuid, OmicronZonesConfig>,
+    omicron_zones: BTreeMap<Uuid, OmicronZonesFound>,
 }
 
 impl CollectionBuilder {
@@ -476,7 +476,24 @@ impl CollectionBuilder {
         sled_id: Uuid,
         zones: sled_agent_client::types::OmicronZonesConfig,
     ) -> Result<(), anyhow::Error> {
-        todo!(); // XXX-dap
+        if let Some(previous) = self.omicron_zones.get(&sled_id) {
+            Err(anyhow!(
+                "sled {:?} omicron zones: reported previously: {:?}",
+                sled_id,
+                previous
+            ))
+        } else {
+            self.omicron_zones.insert(
+                sled_id,
+                OmicronZonesFound {
+                    time_collected: now(),
+                    source: source.to_string(),
+                    sled_id,
+                    zones,
+                },
+            );
+            Ok(())
+        }
     }
 }
 

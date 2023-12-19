@@ -2936,7 +2936,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_omicron_zones (
     sled_id UUID NOT NULL,
 
     -- OmicronZonesConfig generation that this was found in
-    generation INT4 NOT NULL,
+    generation INT8 NOT NULL,
 
     PRIMARY KEY (inv_collection_id, sled_id)
 );
@@ -2957,7 +2957,7 @@ CREATE TYPE IF NOT EXISTS omicron.public.zone_type AS ENUM (
 );
 
 -- observations from sled agents about Omicron-managed zones
-CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone_generic (
+CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone (
     -- where this observation came from
     -- (foreign key into `inv_collection` table)
     inv_collection_id UUID NOT NULL,

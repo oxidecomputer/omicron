@@ -1319,6 +1319,45 @@ table! {
 }
 
 table! {
+    inv_sled_omicron_zones (inv_collection_id, sled_id) {
+        inv_collection_id -> Uuid,
+        time_collected -> Timestamptz,
+        source -> Text,
+        sled_id -> Uuid,
+
+        generation -> Int8,
+    }
+}
+
+table! {
+    inv_omicron_zone (inv_collection_id, id) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+
+        id -> Uuid,
+        underlay_address -> Inet,
+        zone_type -> crate::ZoneTypeEnum,
+
+        primary_service_ip -> Inet,
+        primary_service_port -> Int4,
+        dataset_zpool_id -> Nullable<Uuid>,
+        nic_id -> Nullable<Uuid>,
+        external_ip -> Nullable<Inet>,
+        external_port -> Nullable<Int4>,
+        dns_gz_address -> Nullable<Inet>,
+        dns_gz_address_index -> Nullable<Int4>,
+        ntp_ntp_servers -> Nullable<Array<Text>>,
+        ntp_dns_servers -> Nullable<Array<Inet>>,
+        ntp_ntp_domain -> Nullable<Text>,
+        nexus_external_tls -> Nullable<Bool>,
+        nexus_external_dns_servers -> Nullable<Array<Inet>>,
+        snat_ip -> Nullable<Inet>,
+        snat_first_port -> Nullable<Int4>,
+        snat_last_port -> Nullable<Int4>,
+    }
+}
+
+table! {
     bootstore_keys (key, generation) {
         key -> Text,
         generation -> Int8,
