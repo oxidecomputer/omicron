@@ -6,7 +6,7 @@
 
 use super::{
     console_api, device_auth, params,
-    params::ProjectSelector,
+    params::{ProjectSelector, UninitializedSledId},
     shared::UninitializedSled,
     views::{
         self, Certificate, Group, IdentityProvider, Image, IpPool, IpPoolRange,
@@ -49,14 +49,6 @@ use nexus_db_queries::{
     authz::ApiResource, db::fixed_data::silo::INTERNAL_SILO_ID,
 };
 use nexus_types::external_api::views::Utilization;
-use nexus_types::external_api::{
-    params::{ProjectSelector, UninitializedSledId},
-    views::SiloQuotas,
-};
-use nexus_types::{
-    external_api::views::{SledInstance, Switch},
-    identity::AssetIdentityMetadata,
-};
 use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_common::api::external::http_pagination::marker_for_name;
 use omicron_common::api::external::http_pagination::marker_for_name_or_id;

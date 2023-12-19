@@ -980,13 +980,7 @@ impl super::Nexus {
 
         // If there isn't a collection, we don't know about the sled
         let Some(collection) = collection else {
-            return Err(Error::ObjectNotFound {
-                type_name: ResourceType::Sled,
-                lookup_type:
-                    omicron_common::api::external::LookupType::ByCompositeId(
-                        format!("{sled:?}"),
-                    ),
-            });
+            return Err(Error::unavail("no inventory data available"));
         };
 
         // Find the revision
