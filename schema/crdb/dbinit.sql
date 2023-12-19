@@ -2961,6 +2961,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone_generic (
     -- unique id for this zone
     id UUID NOT NULL,
     underlay_address INET NOT NULL,
+    -- XXX-dap create a new type for this because service_kind is not quite
+    -- right and migration would be annoying
     zone_type omicron.public.service_kind NOT NULL,
 
     -- Generic properties common to many (but not all) kinds of zones
@@ -3003,6 +3005,16 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone_generic (
     nic_slot INT2
     	CHECK(!(nic_id IS NULL # nic_slot IS NULL)),
 
+    -- Source NAT (common to zones with source NAT configured, which is
+    -- currently just boundary NTP)
+    snat_ip INET CHECK(zone_type == 'ntp' # snat_ip IS NULL),
+    snat_first_port INT4
+        CHECK (!(snat_ip IS NULL # snat_first_port IS NULL))
+	CHECK (snat_first_port IS NULL || snat_first_port BETWEEN 0 AND 65535),
+    snat_last_port INT4
+        CHECK (!(snat_ip IS NULL # snat_last_port IS NULL))
+	CHECK (snat_last_port IS NULL || snat_last_port BETWEEN 0 AND 65535),
+
     -- SocketAddr of the "primary" service for this zone
     -- (what this describes varies by zone type, but all zones have at least one
     -- service in them)
@@ -3010,95 +3022,40 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone_generic (
     primary_service_port INT4
         CHECK (primary_service_port BETWEEN 0 AND 65535) NOT NULL,
 
+    -- Properties specific to DNS zones
+    --
+    -- Identifies the SocketAddr (IP and port) on which the DNS server listens.
+    dns_ip INET
+        CHECK ((zone_type in ("external_dns", "internal_dns")) # dns_ip IS NULL),
+    dns_port INT4
+	CHECK(!(dns_ip IS NULL # dns_port IS NULL))
+        CHECK(dns_port IS NULL OR dns_port BETWEEN 0 AND 65535),
+
+    -- Properties for internal DNS servers
+    -- address attached to this zone from outside the sled's subnet
+    gz_address INET CHECK((zone_type == "internal_dns") # gz_address IS NULL),
+    gz_address_index INT4
+        CHECK(!(gz_address IS NULL # gz_address_index IS NULL)),
+
+    -- Properties common to both kinds of NTP zones
+    ntp_ntp_servers TEXT[]
+        CHECK((zone_type == 'ntp') # ntp_ntp_servers IS NULL),
+    ntp_dns_servers INET[]
+        CHECK(!(ntp_ntp_servers IS NULL # ntp_dns_servers IS NULL),
+    ntp_domain TEXT CHECK(zone_type == 'ntp' || ntp_domain IS NULL),
+
+    -- Properties specific to Nexus zones
+    nexus_external_ip INET
+        CHECK((zone_type == 'nexus') # nexus_external_ip IS NULL),
+    nexus_external_port INT4
+	CHECK(!(nexus_external_ip IS NULL # nexus_external_port IS NULL))
+        CHECK(nexus_external_port IS NULL OR nexus_external_port BETWEEN 0 AND 65535),
+    nexus_external_tls BOOLEAN
+        CHECK(!(nexus_external_ip IS NULL # nexus_external_tls IS NULL)),
+    nexus_external_dns_servers INET ARRAY
+        CHECK(!(nexus_external_ip IS NULL # nexus_external_dns_servers IS NULL)),
+
     PRIMARY KEY (inv_collection_id, id)
-);
-
-CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone_boundary_ntp (
-    inv_collection_id UUID NOT NULL,
-    zone_id UUID NOT NULL,
-
-    -- address
-    service_ip INET NOT NULL,
-    service_port INT4 CHECK (service_port BETWEEN 0 AND 65535) NOT NULL,
-    ntp_servers TEXT[] NOT NULL,
-    dns_servers INET[] NOT NULL,
-    domain TEXT, -- nullable
-
-    -- NIC
-    nic_id UUID NOT NULL,
-    nic_kind omicron.public.network_interface_kind NOT NULL,
-    nic_kind_id UUID NOT NULL,
-    nic_name TEXT NOT NULL,
-    nic_ip INET NOT NULL,
-    nic_mac INT8 NOT NULL,
-    nic_subnet INET NOT NULL,
-    nic_vni INT8 NOT NULL,
-    nic_primary BOOLEAN NOT NULL,
-    nic_slot INT2 NOT NULL,
-
-    -- Source NAT config
-    snat_ip INET NOT NULL,
-    snat_first_port INT4 CHECK (snat_first_port BETWEEN 0 AND 65535) NOT NULL,
-    snat_last_port INT4 CHECK (snat_last_port BETWEEN 0 AND 65535) NOT NULL,
-
-    PRIMARY KEY (inv_collection_id, zone_id)
-);
-
-CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone_external_dns (
-    inv_collection_id UUID NOT NULL,
-    zone_id UUID NOT NULL,
-
-    -- The "primary" service in the external DNS zone is the HTTP service used
-    -- to configure DNS.  This is stored in the generic record.
-
-    -- (external) DNS address
-    dns_ip INET NOT NULL,
-    dns_port INT4 CHECK (dns_port BETWEEN 0 AND 65535) NOT NULL,
-
-    PRIMARY KEY (inv_collection_id, zone_id)
-);
-
-CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone_internal_dns (
-    inv_collection_id UUID NOT NULL,
-    zone_id UUID NOT NULL,
-
-    -- The "primary" service in the internal DNS zone is the HTTP service used
-    -- to configure DNS.  This is stored in the generic record.
-
-    -- dns server address
-    dns_ip INET NOT NULL,
-    dns_port INT4 CHECK (dns_port BETWEEN 0 AND 65535) NOT NULL,
-
-    -- address outside the sled's subnet attached to this zone
-    gz_address INET NOT NULL,
-    gz_address_index INT4 NOT NULL,
-
-    PRIMARY KEY (inv_collection_id, zone_id)
-);
-
-CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone_internal_ntp (
-    inv_collection_id UUID NOT NULL,
-    zone_id UUID NOT NULL,
-    ntp_servers TEXT[] NOT NULL,
-    dns_servers INET[] NOT NULL,
-    domain TEXT, -- nullable
-    PRIMARY KEY (inv_collection_id, zone_id)
-);
-
-CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone_nexus (
-    inv_collection_id UUID NOT NULL,
-    zone_id UUID NOT NULL,
-
-    -- The "primary" service in the Nexus zone is its internal HTTP server.
-    -- This is stored in the generic record.
-
-    -- external address
-    external_ip INET NOT NULL,
-    external_port INT4 CHECK (external_port BETWEEN 0 AND 65535) NOT NULL,
-    external_tls BOOLEAN NOT NULL,
-    external_dns_servers INET ARRAY NOT NULL,
-
-    PRIMARY KEY (inv_collection_id, zone_id)
 );
 
 /*******************************************************************/
