@@ -4659,6 +4659,7 @@ async fn rack_view(
 }]
 async fn sled_list_uninitialized(
     rqctx: RequestContext<Arc<ServerContext>>,
+    _query_params: Query<PaginatedById>,
 ) -> Result<HttpResponseOk<ResultsPage<UninitializedSled>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
