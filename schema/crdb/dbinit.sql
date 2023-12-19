@@ -2941,9 +2941,19 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_omicron_zones (
     PRIMARY KEY (inv_collection_id, sled_id)
 );
 
-CREATE TYPE IF NOT EXISTS omicron.public.zpool_kind AS ENUM (
-    'external',
-    'internal'
+CREATE TYPE IF NOT EXISTS omicron.public.zone_type AS ENUM (
+  'boundary_ntp',
+  'clickhouse_keeper',
+  'clickhouse',
+  'cockroach',
+  'crucible_pantry',
+  'crucible',
+  'dendrite',
+  'external_dns',
+  'internal_dns',
+  'internal_ntp',
+  'nexus',
+  'oximeter'
 );
 
 -- observations from sled agents about Omicron-managed zones
@@ -2956,105 +2966,72 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone_generic (
     -- it's conceivable a sled will report an id that we don't know about)
     sled_id UUID NOT NULL,
 
-    -- Generic properties common to all zones
-
     -- unique id for this zone
     id UUID NOT NULL,
     underlay_address INET NOT NULL,
-    -- XXX-dap create a new type for this because service_kind is not quite
-    -- right and migration would be annoying
-    zone_type omicron.public.service_kind NOT NULL,
-
-    -- Generic properties common to many (but not all) kinds of zones
-
-    -- "dataset" (properties common to zones that have an associated datset)
-    dataset_zpool_id UUID CHECK
-        (zone_type in (
-	    "clickhouse",
-	    "clickhouse_keeper",
-	    "cockroach",
-	    "crucible",
-	    "external_dns",
-	    "internal_dns"
-	) # dataset_zpool_id IS NULL),
-    dataset_zpool_kind omicron.public.zpool_kind
-        CHECK(!(dataset_zpool_id IS NULL # dataset_zpool_kind IS NULL)),
-
-    -- NIC (properties common to zones that have an external NIC)
-    nic_id UUID
-    	CHECK(
-	    (zone_type in ("nexus", "external_dns", "ntp"))
-	    # nic_id IS NULL
-	)
-    nic_kind omicron.public.network_interface_kind
-        CHECK(!(nic_id IS NULL # nic_ IS NULL)),
-    nic_kind_id UUID
-        CHECK(!(nic_id IS NULL # nic_kind_id IS NULL)),
-    nic_name TEXT
-        CHECK(!(nic_id IS NULL # nic_name IS NULL)),
-    nic_ip INET
-    	CHECK(!(nic_id IS NULL # nic_ip IS NULL)),
-    nic_mac INT8
-    	CHECK(!(nic_id IS NULL # nic_mac IS NULL)),
-    nic_subnet INET
-    	CHECK(!(nic_id IS NULL # nic_subnet IS NULL)),
-    nic_vni INT8
-    	CHECK(!(nic_id IS NULL # nic_vni IS NULL)),
-    nic_primary BOOLEAN
-    	CHECK(!(nic_id IS NULL # nic_primary IS NULL)),
-    nic_slot INT2
-    	CHECK(!(nic_id IS NULL # nic_slot IS NULL)),
-
-    -- Source NAT (common to zones with source NAT configured, which is
-    -- currently just boundary NTP)
-    snat_ip INET CHECK(zone_type == 'ntp' # snat_ip IS NULL),
-    snat_first_port INT4
-        CHECK (!(snat_ip IS NULL # snat_first_port IS NULL))
-	CHECK (snat_first_port IS NULL || snat_first_port BETWEEN 0 AND 65535),
-    snat_last_port INT4
-        CHECK (!(snat_ip IS NULL # snat_last_port IS NULL))
-	CHECK (snat_last_port IS NULL || snat_last_port BETWEEN 0 AND 65535),
+    zone_type omicron.public.zone_type NOT NULL,
 
     -- SocketAddr of the "primary" service for this zone
     -- (what this describes varies by zone type, but all zones have at least one
     -- service in them)
     primary_service_ip INET NOT NULL,
     primary_service_port INT4
-        CHECK (primary_service_port BETWEEN 0 AND 65535) NOT NULL,
+	CHECK (primary_service_port BETWEEN 0 AND 65535)
+	NOT NULL,
 
-    -- Properties specific to DNS zones
-    --
-    -- Identifies the SocketAddr (IP and port) on which the DNS server listens.
-    dns_ip INET
-        CHECK ((zone_type in ("external_dns", "internal_dns")) # dns_ip IS NULL),
-    dns_port INT4
-	CHECK(!(dns_ip IS NULL # dns_port IS NULL))
-        CHECK(dns_port IS NULL OR dns_port BETWEEN 0 AND 65535),
+    -- The remaining properties may be NULL for different kinds of zones.  The
+    -- specific constraints are not enforced at the database layer, basically
+    -- because it's really complicated to do that and it's not obvious that it's
+    -- worthwhile.
+
+    -- Zones may have an associated dataset.  They're currently always on a U.2.
+    -- The only thing we need to identify it here is the id of the zpool that
+    -- it's on.
+    dataset_zpool_id UUID,
+
+    -- Zones with external IPs have an associated NIC and sockaddr for listening
+    -- (first is a foreign key into `inv_omicron_zone_nic`)
+    nic_id UUID,
+    external_ip INET,
+    external_port INT4
+        CHECK (external_port IS NULL
+	    OR external_port BETWEEN 0 AND 65535),
 
     -- Properties for internal DNS servers
     -- address attached to this zone from outside the sled's subnet
-    gz_address INET CHECK((zone_type == "internal_dns") # gz_address IS NULL),
-    gz_address_index INT4
-        CHECK(!(gz_address IS NULL # gz_address_index IS NULL)),
+    dns_gz_address INET,
+    dns_gz_address_index INT4,
 
     -- Properties common to both kinds of NTP zones
-    ntp_ntp_servers TEXT[]
-        CHECK((zone_type == 'ntp') # ntp_ntp_servers IS NULL),
-    ntp_dns_servers INET[]
-        CHECK(!(ntp_ntp_servers IS NULL # ntp_dns_servers IS NULL),
-    ntp_domain TEXT CHECK(zone_type == 'ntp' || ntp_domain IS NULL),
+    ntp_ntp_servers TEXT[],
+    ntp_dns_servers INET[],
+    ntp_domain TEXT,
 
     -- Properties specific to Nexus zones
-    nexus_external_ip INET
-        CHECK((zone_type == 'nexus') # nexus_external_ip IS NULL),
-    nexus_external_port INT4
-	CHECK(!(nexus_external_ip IS NULL # nexus_external_port IS NULL))
-        CHECK(nexus_external_port IS NULL OR nexus_external_port BETWEEN 0 AND 65535),
-    nexus_external_tls BOOLEAN
-        CHECK(!(nexus_external_ip IS NULL # nexus_external_tls IS NULL)),
-    nexus_external_dns_servers INET ARRAY
-        CHECK(!(nexus_external_ip IS NULL # nexus_external_dns_servers IS NULL)),
+    nexus_external_tls BOOLEAN,
+    nexus_external_dns_servers INET ARRAY,
 
+    -- Source NAT configuration (currently used for boundary NTP only)
+    snat_ip INET,
+    snat_first_port INT4
+	CHECK (snat_first_port IS NULL OR snat_first_port BETWEEN 0 AND 65535),
+    snat_last_port INT4
+	CHECK (snat_last_port IS NULL OR snat_last_port BETWEEN 0 AND 65535),
+
+    PRIMARY KEY (inv_collection_id, id)
+);
+
+CREATE TABLE inv_omicron_zone_nic (
+    id UUID NOT NULL,
+    name TEXT NOT NULL,
+    ip INET NOT NULL,
+    mac INT8 NOT NULL,
+    subnet INET NOT NULL,
+    vni INT8 NOT NULL,
+    is_primary BOOLEAN NOT NULL,
+    slot INT2 NOT NULL,
+
+    inv_collection_id UUID NOT NULL,
     PRIMARY KEY (inv_collection_id, id)
 );
 
