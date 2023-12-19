@@ -409,11 +409,8 @@ impl ManagementSwitch {
                 None => {
                     warn!(
                         self.log,
-                        concat!(
-                            "ignoring unknown ignition target {}",
-                            " returned by ignition controller SP"
-                        ),
-                        target,
+                        "ignoring unknown ignition target {target} \
+                         returned by ignition controller SP",
                     );
                     None
                 }

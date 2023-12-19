@@ -115,7 +115,9 @@ pub(crate) async fn run(
                             Ok(()) => (),
                             Err(TrySendError::Full(data)) => {
                                 warn!(
-                                    log, "channel full; discarding serial console data from SP";
+                                    log,
+                                    "channel full; discarding serial \
+                                     console data from SP";
                                     "length" => data.len(),
                                 );
                             }
