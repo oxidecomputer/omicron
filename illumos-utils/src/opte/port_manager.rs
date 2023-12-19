@@ -412,14 +412,14 @@ impl PortManager {
         ephemeral_ip: Option<IpAddr>,
         floating_ips: &[IpAddr],
     ) -> Result<(), Error> {
-        // TODO: new errors
         let ports = self.inner.ports.lock().unwrap();
-        let port = ports
-            .get(&(nic_id, nic_kind))
-            .ok_or_else(|| Error::ReleaseMissingPort(nic_id, nic_kind))?;
+        let port = ports.get(&(nic_id, nic_kind)).ok_or_else(|| {
+            Error::ExternalIpUpdateMissingPort(nic_id, nic_kind)
+        })?;
 
+        // TODO: massively cleanup.
         // Describe the external IP addresses for this port.
-        macro_rules! ip_cfg {
+        macro_rules! ext_ip_cfg {
             ($ip:expr, $log_prefix:literal, $ip_t:path, $cidr_t:path,
              $ipcfg_e:path, $ipcfg_t:ident, $snat_t:ident) => {{
                 let snat = match source_nat {
@@ -477,7 +477,7 @@ impl PortManager {
         let mut v6_cfg = None;
         match port.gateway().ip {
             IpAddr::V4(_) => {
-                v4_cfg = Some(ip_cfg!(
+                v4_cfg = Some(ext_ip_cfg!(
                     ip,
                     "Expected IPv4",
                     IpAddr::V4,
@@ -488,7 +488,7 @@ impl PortManager {
                 ))
             }
             IpAddr::V6(_) => {
-                v6_cfg = Some(ip_cfg!(
+                v6_cfg = Some(ext_ip_cfg!(
                     ip,
                     "Expected IPv6",
                     IpAddr::V6,
