@@ -339,6 +339,7 @@ slog = { version = "2.7", features = [ "dynamic-keys", "max_level_trace", "relea
 slog-async = "2.8"
 slog-dtrace = "0.2"
 slog-envlogger = "2.2"
+slog-error-chain = { git = "https://github.com/oxidecomputer/slog-error-chain", branch = "main", features = ["derive"] }
 slog-term = "2.9"
 smf = "0.2"
 snafu = "0.7"
