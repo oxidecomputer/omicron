@@ -4042,13 +4042,6 @@
               "nullable": true,
               "type": "string"
             }
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/IdSortMode"
-            }
           }
         ],
         "responses": {

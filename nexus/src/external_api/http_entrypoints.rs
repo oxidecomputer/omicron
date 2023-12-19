@@ -4659,9 +4659,16 @@ async fn rack_view(
 }]
 async fn sled_list_uninitialized(
     rqctx: RequestContext<Arc<ServerContext>>,
-    _query_params: Query<PaginatedById>,
+    query: Query<PaginationParams<EmptyScanParams, String>>,
 ) -> Result<HttpResponseOk<ResultsPage<UninitializedSled>>, HttpError> {
     let apictx = rqctx.context();
+    // We don't actually support real pagination
+    let pag_params = query.into_inner();
+    if let dropshot::WhichPage::Next(last_seen) = &pag_params.page {
+        return Err(
+            Error::invalid_value(last_seen.clone(), "bad page token").into()
+        );
+    }
     let handler = async {
         let nexus = &apictx.nexus;
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
