@@ -25,7 +25,6 @@ progenitor::generate_api!(
     //TODO trade the manual transformations later in this file for the
     //     replace directives below?
     replace = {
-        //Ipv4Network = ipnetwork::Ipv4Network,
         SwitchLocation = omicron_common::api::external::SwitchLocation,
         Ipv6Network = ipnetwork::Ipv6Network,
         IpNetwork = ipnetwork::IpNetwork,

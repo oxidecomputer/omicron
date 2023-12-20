@@ -36,10 +36,12 @@ use nexus_db_model::HwRotSlotEnum;
 use nexus_db_model::InvCaboose;
 use nexus_db_model::InvCollection;
 use nexus_db_model::InvCollectionError;
+use nexus_db_model::InvOmicronZone;
 use nexus_db_model::InvRootOfTrust;
 use nexus_db_model::InvRotPage;
 use nexus_db_model::InvServiceProcessor;
 use nexus_db_model::InvSledAgent;
+use nexus_db_model::InvSledOmicronZones;
 use nexus_db_model::RotPageWhichEnum;
 use nexus_db_model::SledRole;
 use nexus_db_model::SledRoleEnum;
@@ -129,6 +131,27 @@ impl DataStore {
                 InvSledAgent::new_without_baseboard(collection_id, sled_agent)
                     .map_err(|e| Error::internal_error(&e.to_string()))
             })
+            .collect::<Result<Vec<_>, Error>>()?;
+
+        let sled_omicron_zones = collection
+            .omicron_zones
+            .values()
+            .map(|found| InvSledOmicronZones::new(collection_id, found))
+            .collect::<Vec<_>>();
+        let omicron_zones = collection
+            .omicron_zones
+            .values()
+            .map(|found| {
+                found.zones.zones.iter().map(|found_zone| {
+                    InvOmicronZone::new(
+                        collection_id,
+                        found.sled_id,
+                        found_zone,
+                    )
+                    .map_err(|e| Error::internal_error(&e.to_string()))
+                })
+            })
+            .flatten()
             .collect::<Result<Vec<_>, Error>>()?;
 
         // This implementation inserts all records associated with the
@@ -696,6 +719,23 @@ impl DataStore {
                 // can insert all of them in one statement.
                 let _ = diesel::insert_into(db::schema::inv_sled_agent::table)
                     .values(sled_agents_no_baseboards)
+                    .execute_async(&conn)
+                    .await?;
+            }
+
+            // Insert all the Omicron zones that we found.
+            {
+                use db::schema::inv_sled_omicron_zones::dsl as sled_zones;
+                let _ = diesel::insert_into(sled_zones::inv_sled_omicron_zones)
+                    .values(sled_omicron_zones)
+                    .execute_async(&conn)
+                    .await?;
+            }
+
+            {
+                use db::schema::inv_omicron_zone::dsl as omicron_zone;
+                let _ = diesel::insert_into(omicron_zone::inv_omicron_zone)
+                    .values(omicron_zones)
                     .execute_async(&conn)
                     .await?;
             }

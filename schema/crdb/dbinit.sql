@@ -247,7 +247,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_switch_by_rack ON omicron.public.switch
 CREATE TYPE IF NOT EXISTS omicron.public.service_kind AS ENUM (
   'clickhouse',
   'clickhouse_keeper',
-  'cockroach',
+  'cockroach_db',
   'crucible',
   'crucible_pantry',
   'dendrite',
@@ -2984,23 +2984,26 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone (
     -- because it's really complicated to do that and it's not obvious that it's
     -- worthwhile.
 
+    -- Some zones have a second service.  Like the primary one, the meaning of
+    -- this is zone-type-dependent.
+    second_service_ip INET,
+    second_service_portINT4
+        CHECK (second_service_port IS NULL
+	    OR second_service_port BETWEEN 0 AND 65535),
+
     -- Zones may have an associated dataset.  They're currently always on a U.2.
-    -- The only thing we need to identify it here is the id of the zpool that
+    -- The only thing we need to identify it here is the name of the zpool that
     -- it's on.
-    dataset_zpool_id UUID,
+    dataset_zpool_name TEXT,
 
     -- Zones with external IPs have an associated NIC and sockaddr for listening
     -- (first is a foreign key into `inv_omicron_zone_nic`)
     nic_id UUID,
-    external_ip INET,
-    external_port INT4
-        CHECK (external_port IS NULL
-	    OR external_port BETWEEN 0 AND 65535),
 
     -- Properties for internal DNS servers
     -- address attached to this zone from outside the sled's subnet
     dns_gz_address INET,
-    dns_gz_address_index INT4,
+    dns_gz_address_index INT8,
 
     -- Properties common to both kinds of NTP zones
     ntp_ntp_servers TEXT[],

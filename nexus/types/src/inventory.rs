@@ -14,6 +14,8 @@ use chrono::Utc;
 pub use gateway_client::types::PowerState;
 pub use gateway_client::types::RotSlot;
 pub use gateway_client::types::SpType;
+pub use sled_agent_client::types::OmicronZoneConfig;
+pub use sled_agent_client::types::OmicronZoneType;
 pub use sled_agent_client::types::OmicronZonesConfig;
 pub use sled_agent_client::types::SledRole;
 use std::collections::BTreeMap;

@@ -10,8 +10,9 @@ use crate::schema::{
     inv_service_processor, inv_sled_agent, inv_sled_omicron_zones, sw_caboose,
     sw_root_of_trust_page,
 };
-use crate::{impl_enum_type, ipv6, ByteCount, SqlU16, SqlU32};
+use crate::{impl_enum_type, ipv6, ByteCount, Generation, SqlU16, SqlU32};
 use anyhow::anyhow;
+use anyhow::Context;
 use chrono::DateTime;
 use chrono::Utc;
 use diesel::backend::Backend;
@@ -20,8 +21,10 @@ use diesel::expression::AsExpression;
 use diesel::pg::Pg;
 use diesel::serialize::ToSql;
 use diesel::{serialize, sql_types};
+use ipnetwork::IpNetwork;
 use nexus_types::inventory::{
-    BaseboardId, Caboose, Collection, PowerState, RotPage, RotSlot,
+    BaseboardId, Caboose, Collection, OmicronZoneType, PowerState, RotPage,
+    RotSlot,
 };
 use uuid::Uuid;
 
@@ -647,15 +650,30 @@ impl InvSledAgent {
     }
 }
 
-/// See [`nexus_types::inventory::OmicronZonesConfig`].
+/// See [`nexus_types::inventory::OmicronZonesFound`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_sled_omicron_zones)]
-struct InvSledOmicronZones {
+pub struct InvSledOmicronZones {
     pub inv_collection_id: Uuid,
     pub time_collected: DateTime<Utc>,
     pub source: String,
     pub sled_id: Uuid,
-    pub generation: SqlU32,
+    pub generation: Generation,
+}
+
+impl InvSledOmicronZones {
+    pub fn new(
+        inv_collection_id: Uuid,
+        zones_found: &nexus_types::inventory::OmicronZonesFound,
+    ) -> InvSledOmicronZones {
+        InvSledOmicronZones {
+            inv_collection_id,
+            time_collected: zones_found.time_collected,
+            source: zones_found.source.clone(),
+            sled_id: zones_found.sled_id,
+            generation: Generation(zones_found.zones.generation.clone().into()),
+        }
+    }
 }
 
 impl_enum_type!(
@@ -671,13 +689,13 @@ impl_enum_type!(
     BoundaryNtp => b"boundary_ntp"
     ClickhouseKeeper => b"clickhouse_keeper"
     Clickhouse => b"clickhouse"
-    Cockroach => b"cockroach"
+    CockroachDb => b"cockroach_db"
     CruciblePantry => b"crucible_pantry"
     Crucible => b"crucible"
     Dendrite => b"dendrite"
     ExternalDns => b"external_dns"
     InternalDns => b"internal_dns"
-    InternapNtp => b"internal_ntp"
+    InternalNtp => b"internal_ntp"
     Nexus => b"nexus"
     Oximeter => b"oximeter"
 );
@@ -685,7 +703,7 @@ impl_enum_type!(
 /// See [`nexus_types::inventory::OmicronZoneConfig`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_omicron_zone)]
-struct InvOmicronZone {
+pub struct InvOmicronZone {
     pub inv_collection_id: Uuid,
     pub sled_id: Uuid,
     pub id: Uuid,
@@ -693,18 +711,193 @@ struct InvOmicronZone {
     pub zone_type: ZoneType,
     pub primary_service_ip: ipv6::Ipv6Addr,
     pub primary_service_port: SqlU16,
-    pub dataset_zpool_id: Option<Uuid>,
+    pub second_service_ip: Option<IpNetwork>,
+    pub second_service_port: Option<SqlU16>,
+    pub dataset_zpool_name: Option<String>,
     pub nic_id: Option<Uuid>,
-    pub external_ip: Option<ipv6::Ipv6Addr>, // XXX-dap could be v4 addr
-    pub external_port: Option<SqlU16>,
     pub dns_gz_address: Option<ipv6::Ipv6Addr>,
-    pub dns_gz_address_index: Option<SqlU16>, // XXX-dap check range
+    pub dns_gz_address_index: Option<SqlU32>,
     pub ntp_ntp_servers: Option<Vec<String>>,
-    pub ntp_dns_servers: Option<Vec<ipv6::Ipv6Addr>>,
+    pub ntp_dns_servers: Option<Vec<IpNetwork>>,
     pub ntp_ntp_domain: Option<String>,
     pub nexus_external_tls: Option<bool>,
-    pub nexus_external_dns_servers: Option<Vec<ipv6::Ipv6Addr>>, // XXX-dap v4
+    pub nexus_external_dns_servers: Option<Vec<IpNetwork>>,
     pub snat_ip: Option<ipv6::Ipv6Addr>,
     pub snat_first_port: Option<SqlU16>,
     pub snat_last_port: Option<SqlU16>,
+}
+
+impl InvOmicronZone {
+    pub fn new(
+        inv_collection_id: Uuid,
+        sled_id: Uuid,
+        zone: &nexus_types::inventory::OmicronZoneConfig,
+    ) -> Result<InvOmicronZone, anyhow::Error> {
+        let id = zone.id;
+        let underlay_address = ipv6::Ipv6Addr::from(zone.underlay_address);
+        let mut nic_id = None;
+        let mut dns_gz_address = None;
+        let mut dns_gz_address_index = None;
+        let mut ntp_ntp_servers = None;
+        let mut ntp_dns_servers = None;
+        let mut ntp_ntp_domain = None;
+        let mut nexus_external_tls = None;
+        let mut nexus_external_dns_servers = None;
+        let mut snat_ip = None;
+        let mut snat_first_port = None;
+        let mut snat_last_port = None;
+        let mut second_service_ip = None;
+        let mut second_service_port = None;
+
+        let (zone_type, primary_service_sockaddr_str, dataset) = match &zone
+            .zone_type
+        {
+            OmicronZoneType::BoundaryNtp {
+                address,
+                ntp_servers,
+                dns_servers,
+                domain,
+                nic,
+                snat_cfg,
+            } => {
+                ntp_ntp_servers = Some(ntp_servers.clone());
+                ntp_dns_servers = Some(dns_servers.clone());
+                ntp_ntp_domain = domain.clone();
+                snat_ip = Some(ipv6::Ipv6Addr::from(match snat_cfg.ip {
+                    std::net::IpAddr::V6(a) => Ok(a),
+                    std::net::IpAddr::V4(bad) => Err(anyhow!(
+                        "expected source NAT IP to be IPv6, found IPv4 {:?}",
+                        bad
+                    )),
+                }?));
+                snat_first_port = Some(SqlU16::from(snat_cfg.first_port));
+                snat_last_port = Some(SqlU16::from(snat_cfg.last_port));
+                nic_id = Some(nic.id);
+                (ZoneType::BoundaryNtp, address, None)
+            }
+            OmicronZoneType::Clickhouse { address, dataset } => {
+                (ZoneType::Clickhouse, address, Some(dataset))
+            }
+            OmicronZoneType::ClickhouseKeeper { address, dataset } => {
+                (ZoneType::ClickhouseKeeper, address, Some(dataset))
+            }
+            OmicronZoneType::CockroachDb { address, dataset } => {
+                (ZoneType::CockroachDb, address, Some(dataset))
+            }
+            OmicronZoneType::Crucible { address, dataset } => {
+                (ZoneType::Crucible, address, Some(dataset))
+            }
+            OmicronZoneType::CruciblePantry { address } => {
+                (ZoneType::CruciblePantry, address, None)
+            }
+            OmicronZoneType::ExternalDns {
+                dataset,
+                http_address,
+                dns_address,
+                nic,
+            } => {
+                nic_id = Some(nic.id);
+                let sockaddr = dns_address
+                    .parse::<std::net::SocketAddr>()
+                    .with_context(|| {
+                        format!(
+                            "parsing address for external DNS server {:?}",
+                            dns_address
+                        )
+                    })?;
+                second_service_ip = Some(sockaddr.ip());
+                second_service_port = Some(SqlU16::from(sockaddr.port()));
+                (ZoneType::ExternalDns, http_address, Some(dataset))
+            }
+            OmicronZoneType::InternalDns {
+                dataset,
+                http_address,
+                dns_address,
+                gz_address,
+                gz_address_index,
+            } => {
+                dns_gz_address = Some(ipv6::Ipv6Addr::from(gz_address));
+                dns_gz_address_index = Some(SqlU32::from(*gz_address_index));
+                let sockaddr = dns_address
+                    .parse::<std::net::SocketAddr>()
+                    .with_context(|| {
+                        format!(
+                            "parsing address for internal DNS server {:?}",
+                            dns_address
+                        )
+                    })?;
+                second_service_ip = Some(sockaddr.ip());
+                second_service_port = Some(SqlU16::from(sockaddr.port()));
+                (ZoneType::InternalDns, http_address, Some(dataset))
+            }
+            OmicronZoneType::InternalNtp {
+                address,
+                ntp_servers,
+                dns_servers,
+                domain,
+            } => {
+                ntp_ntp_servers = Some(ntp_servers.clone());
+                ntp_dns_servers = Some(dns_servers.clone());
+                ntp_ntp_domain = domain.clone();
+                (ZoneType::InternalNtp, address, None)
+            }
+            OmicronZoneType::Nexus {
+                internal_address,
+                external_ip,
+                nic,
+                external_tls,
+                external_dns_servers,
+            } => {
+                nic_id = Some(nic.id);
+                nexus_external_tls = Some(*external_tls);
+                nexus_external_dns_servers = Some(external_dns_servers.clone());
+                second_service_ip = Some(*external_ip);
+                (ZoneType::Nexus, internal_address, None)
+            }
+            OmicronZoneType::Oximeter { address } => {
+                (ZoneType::Oximeter, address, None)
+            }
+        };
+
+        let dataset_zpool_name =
+            dataset.map(|d| d.pool_name.as_str().to_string());
+        let primary_service_sockaddr = primary_service_sockaddr_str
+            .parse::<std::net::SocketAddrV6>()
+            .with_context(|| {
+                format!(
+                    "parsing socket address for primary IP {:?}",
+                    primary_service_sockaddr_str
+                )
+            })?;
+        let (primary_service_ip, primary_service_port) = (
+            ipv6::Ipv6Addr::from(*primary_service_sockaddr.ip()),
+            SqlU16::from(primary_service_sockaddr.port()),
+        );
+
+        Ok(InvOmicronZone {
+            inv_collection_id,
+            sled_id,
+            id,
+            underlay_address,
+            zone_type,
+            primary_service_ip,
+            primary_service_port,
+            second_service_ip: second_service_ip.map(IpNetwork::from),
+            second_service_port,
+            dataset_zpool_name,
+            nic_id,
+            dns_gz_address,
+            dns_gz_address_index,
+            ntp_ntp_servers,
+            ntp_dns_servers: ntp_dns_servers
+                .map(|list| list.into_iter().map(IpNetwork::from).collect()),
+            ntp_ntp_domain,
+            nexus_external_tls,
+            nexus_external_dns_servers: nexus_external_dns_servers
+                .map(|list| list.into_iter().map(IpNetwork::from).collect()),
+            snat_ip,
+            snat_first_port,
+            snat_last_port,
+        })
+    }
 }
