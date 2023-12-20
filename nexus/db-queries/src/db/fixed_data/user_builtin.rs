@@ -3,8 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 //! Built-in users
 
-use lazy_static::lazy_static;
 use omicron_common::api;
+use once_cell::sync::Lazy;
 use uuid::Uuid;
 
 pub struct UserBuiltinConfig {
@@ -27,61 +27,65 @@ impl UserBuiltinConfig {
     }
 }
 
-lazy_static! {
-    /// Internal user used for seeding initial database data
-    // NOTE: This uuid and name are duplicated in dbinit.sql.
-    pub static ref USER_DB_INIT: UserBuiltinConfig =
-        UserBuiltinConfig::new_static(
-            // "0001" is the first possible user that wouldn't be confused with
-            // 0, or root.
-            "001de000-05e4-4000-8000-000000000001",
-            "db-init",
-            "used for seeding initial database data",
-        );
+/// Internal user used for seeding initial database data
+// NOTE: This uuid and name are duplicated in dbinit.sql.
+pub static USER_DB_INIT: Lazy<UserBuiltinConfig> = Lazy::new(|| {
+    UserBuiltinConfig::new_static(
+        // "0001" is the first possible user that wouldn't be confused with
+        // 0, or root.
+        "001de000-05e4-4000-8000-000000000001",
+        "db-init",
+        "used for seeding initial database data",
+    )
+});
 
-    /// Internal user for performing operations to manage the
-    /// provisioning of services across the fleet.
-    pub static ref USER_SERVICE_BALANCER: UserBuiltinConfig =
-        UserBuiltinConfig::new_static(
-            "001de000-05e4-4000-8000-00000000bac3",
-            "service-balancer",
-            "used for Nexus-driven service balancing",
-        );
+/// Internal user for performing operations to manage the
+/// provisioning of services across the fleet.
+pub static USER_SERVICE_BALANCER: Lazy<UserBuiltinConfig> = Lazy::new(|| {
+    UserBuiltinConfig::new_static(
+        "001de000-05e4-4000-8000-00000000bac3",
+        "service-balancer",
+        "used for Nexus-driven service balancing",
+    )
+});
 
-    /// Internal user used by Nexus when handling internal API requests
-    pub static ref USER_INTERNAL_API: UserBuiltinConfig =
-        UserBuiltinConfig::new_static(
-            "001de000-05e4-4000-8000-000000000002",
-            "internal-api",
-            "used by Nexus when handling internal API requests",
-        );
+/// Internal user used by Nexus when handling internal API requests
+pub static USER_INTERNAL_API: Lazy<UserBuiltinConfig> = Lazy::new(|| {
+    UserBuiltinConfig::new_static(
+        "001de000-05e4-4000-8000-000000000002",
+        "internal-api",
+        "used by Nexus when handling internal API requests",
+    )
+});
 
-    /// Internal user used by Nexus to read privileged control plane data
-    pub static ref USER_INTERNAL_READ: UserBuiltinConfig =
-        UserBuiltinConfig::new_static(
-            // "4ead" looks like "read"
-            "001de000-05e4-4000-8000-000000004ead",
-            "internal-read",
-            "used by Nexus to read privileged control plane data",
-        );
+/// Internal user used by Nexus to read privileged control plane data
+pub static USER_INTERNAL_READ: Lazy<UserBuiltinConfig> = Lazy::new(|| {
+    UserBuiltinConfig::new_static(
+        // "4ead" looks like "read"
+        "001de000-05e4-4000-8000-000000004ead",
+        "internal-read",
+        "used by Nexus to read privileged control plane data",
+    )
+});
 
-    /// Internal user used by Nexus when recovering sagas
-    pub static ref USER_SAGA_RECOVERY: UserBuiltinConfig =
-        UserBuiltinConfig::new_static(
-            // "3a8a" looks a bit like "saga".
-            "001de000-05e4-4000-8000-000000003a8a",
-            "saga-recovery",
-            "used by Nexus when recovering sagas",
-        );
+/// Internal user used by Nexus when recovering sagas
+pub static USER_SAGA_RECOVERY: Lazy<UserBuiltinConfig> = Lazy::new(|| {
+    UserBuiltinConfig::new_static(
+        // "3a8a" looks a bit like "saga".
+        "001de000-05e4-4000-8000-000000003a8a",
+        "saga-recovery",
+        "used by Nexus when recovering sagas",
+    )
+});
 
-    /// Internal user used by Nexus when authenticating external requests
-    pub static ref USER_EXTERNAL_AUTHN: UserBuiltinConfig =
-        UserBuiltinConfig::new_static(
-            "001de000-05e4-4000-8000-000000000003",
-            "external-authn",
-            "used by Nexus when authenticating external requests",
-        );
-}
+/// Internal user used by Nexus when authenticating external requests
+pub static USER_EXTERNAL_AUTHN: Lazy<UserBuiltinConfig> = Lazy::new(|| {
+    UserBuiltinConfig::new_static(
+        "001de000-05e4-4000-8000-000000000003",
+        "external-authn",
+        "used by Nexus when authenticating external requests",
+    )
+});
 
 #[cfg(test)]
 mod test {

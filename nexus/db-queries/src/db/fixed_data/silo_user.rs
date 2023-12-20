@@ -6,25 +6,26 @@
 use super::role_builtin;
 use crate::db;
 use crate::db::identity::Asset;
-use lazy_static::lazy_static;
+use once_cell::sync::Lazy;
 
-lazy_static! {
-    /// Test user that's granted all privileges, used for automated testing and
-    /// local development
-    // TODO-security Once we have a way to bootstrap the initial Silo with the
-    // initial privileged user, this user should be created in the test suite,
-    // not automatically at Nexus startup.  See omicron#2305.
-    pub static ref USER_TEST_PRIVILEGED: db::model::SiloUser =
-        db::model::SiloUser::new(
-            *db::fixed_data::silo::SILO_ID,
-            // "4007" looks a bit like "root".
-            "001de000-05e4-4000-8000-000000004007".parse().unwrap(),
-            "privileged".into(),
-        );
+/// Test user that's granted all privileges, used for automated testing and
+/// local development
+// TODO-security Once we have a way to bootstrap the initial Silo with the
+// initial privileged user, this user should be created in the test suite,
+// not automatically at Nexus startup.  See omicron#2305.
+pub static USER_TEST_PRIVILEGED: Lazy<db::model::SiloUser> = Lazy::new(|| {
+    db::model::SiloUser::new(
+        *db::fixed_data::silo::SILO_ID,
+        // "4007" looks a bit like "root".
+        "001de000-05e4-4000-8000-000000004007".parse().unwrap(),
+        "privileged".into(),
+    )
+});
 
-    /// Role assignments needed for the privileged user
-    pub static ref ROLE_ASSIGNMENTS_PRIVILEGED:
-        Vec<db::model::RoleAssignment> = vec![
+/// Role assignments needed for the privileged user
+pub static ROLE_ASSIGNMENTS_PRIVILEGED: Lazy<Vec<db::model::RoleAssignment>> =
+    Lazy::new(|| {
+        vec![
             // The "test-privileged" user gets the "admin" role on the sole
             // Fleet as well as the default Silo.
             db::model::RoleAssignment::new(
@@ -34,7 +35,6 @@ lazy_static! {
                 *db::fixed_data::FLEET_ID,
                 role_builtin::FLEET_ADMIN.role_name,
             ),
-
             db::model::RoleAssignment::new(
                 db::model::IdentityType::SiloUser,
                 USER_TEST_PRIVILEGED.id(),
@@ -42,20 +42,22 @@ lazy_static! {
                 *db::fixed_data::silo::SILO_ID,
                 role_builtin::SILO_ADMIN.role_name,
             ),
-        ];
+        ]
+    });
 
-    /// Test user that's granted no privileges, used for automated testing
-    // TODO-security Once we have a way to bootstrap the initial Silo with the
-    // initial privileged user, this user should be created in the test suite,
-    // not automatically at Nexus startup.  See omicron#2305.
-    pub static ref USER_TEST_UNPRIVILEGED: db::model::SiloUser =
+/// Test user that's granted no privileges, used for automated testing
+// TODO-security Once we have a way to bootstrap the initial Silo with the
+// initial privileged user, this user should be created in the test suite,
+// not automatically at Nexus startup.  See omicron#2305.
+pub static USER_TEST_UNPRIVILEGED: Lazy<db::model::SiloUser> =
+    Lazy::new(|| {
         db::model::SiloUser::new(
             *db::fixed_data::silo::SILO_ID,
             // 60001 is the decimal uid for "nobody" on Helios.
             "001de000-05e4-4000-8000-000000060001".parse().unwrap(),
             "unprivileged".into(),
-        );
-}
+        )
+    });
 
 #[cfg(test)]
 mod test {
