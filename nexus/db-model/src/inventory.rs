@@ -705,12 +705,11 @@ impl_enum_type!(
 
     // Enum values
     BoundaryNtp => b"boundary_ntp"
-    ClickhouseKeeper => b"clickhouse_keeper"
     Clickhouse => b"clickhouse"
+    ClickhouseKeeper => b"clickhouse_keeper"
     CockroachDb => b"cockroach_db"
-    CruciblePantry => b"crucible_pantry"
     Crucible => b"crucible"
-    Dendrite => b"dendrite"
+    CruciblePantry => b"crucible_pantry"
     ExternalDns => b"external_dns"
     InternalDns => b"internal_dns"
     InternalNtp => b"internal_ntp"
@@ -971,6 +970,44 @@ impl InvOmicronZone {
             (None, Some(_)) => bail!("caller unexpectedly provided a NIC"),
         };
 
+        // Similarly, assemble a value that we can use to extract the dataset,
+        // if necessary.  We only return this error if code below tries to use
+        // this value.
+        let dataset = self
+            .dataset_zpool_name
+            .map(|zpool_name| -> Result<_, anyhow::Error> {
+                Ok(nexus_types::inventory::OmicronZoneDataset {
+                    pool_name: zpool_name.parse().map_err(|e| {
+                        anyhow!("parsing zpool name {:?}: {}", zpool_name, e)
+                    })?,
+                })
+            })
+            .transpose()?
+            .ok_or_else(|| anyhow!("expected dataset zpool name, found none"));
+
+        // Do the same for the DNS server address.
+        let dns_address =
+            match (self.second_service_ip, self.second_service_port) {
+                (Some(dns_ip), Some(dns_port)) => {
+                    Ok(std::net::SocketAddr::new(dns_ip.ip(), *dns_port)
+                        .to_string())
+                }
+                _ => Err(anyhow!(
+                    "expected second service IP and port, \
+                            found one missing"
+                )),
+            };
+
+        // Do the same for NTP zone properties.
+        let ntp_dns_servers = self
+            .ntp_dns_servers
+            .ok_or_else(|| anyhow!("expected list of DNS servers, found null"))
+            .map(|list| {
+                list.into_iter().map(|ipnetwork| ipnetwork.ip()).collect()
+            });
+        let ntp_ntp_servers =
+            self.ntp_ntp_servers.ok_or_else(|| anyhow!("expected ntp_servers"));
+
         let zone_type = match self.zone_type {
             ZoneType::BoundaryNtp => {
                 let snat_cfg = match (
@@ -992,34 +1029,69 @@ impl InvOmicronZone {
                 };
                 OmicronZoneType::BoundaryNtp {
                     address,
-                    dns_servers: self
-                        .ntp_dns_servers
-                        .ok_or_else(|| {
-                            anyhow!("expected list of DNS servers, found null")
-                        })?
-                        .into_iter()
-                        .map(|ipnetwork| ipnetwork.ip())
-                        .collect(),
+                    dns_servers: ntp_dns_servers?,
                     domain: self.ntp_ntp_domain,
                     nic: nic?,
-                    ntp_servers: self
-                        .ntp_ntp_servers
-                        .ok_or_else(|| anyhow!("expected ntp_servers"))?,
+                    ntp_servers: ntp_ntp_servers?,
                     snat_cfg,
                 }
             }
-            // XXX-dap implement the rest of these
-            ZoneType::ClickhouseKeeper => todo!(),
-            ZoneType::Clickhouse => todo!(),
-            ZoneType::CockroachDb => todo!(),
-            ZoneType::CruciblePantry => todo!(),
-            ZoneType::Crucible => todo!(),
-            ZoneType::Dendrite => todo!(),
-            ZoneType::ExternalDns => todo!(),
-            ZoneType::InternalDns => todo!(),
-            ZoneType::InternalNtp => todo!(),
-            ZoneType::Nexus => todo!(),
-            ZoneType::Oximeter => todo!(),
+            ZoneType::Clickhouse => {
+                OmicronZoneType::Clickhouse { address, dataset: dataset? }
+            }
+            ZoneType::ClickhouseKeeper => {
+                OmicronZoneType::ClickhouseKeeper { address, dataset: dataset? }
+            }
+            ZoneType::CockroachDb => {
+                OmicronZoneType::CockroachDb { address, dataset: dataset? }
+            }
+            ZoneType::Crucible => {
+                OmicronZoneType::Crucible { address, dataset: dataset? }
+            }
+            ZoneType::CruciblePantry => {
+                OmicronZoneType::CruciblePantry { address }
+            }
+            ZoneType::ExternalDns => OmicronZoneType::ExternalDns {
+                dataset: dataset?,
+                dns_address: dns_address?,
+                http_address: address,
+                nic: nic?,
+            },
+            ZoneType::InternalDns => OmicronZoneType::InternalDns {
+                dataset: dataset?,
+                dns_address: dns_address?,
+                http_address: address,
+                gz_address: *self.dns_gz_address.ok_or_else(|| {
+                    anyhow!("expected dns_gz_address, found none")
+                })?,
+                gz_address_index: *self.dns_gz_address_index.ok_or_else(
+                    || anyhow!("expected dns_gz_address_index, found none"),
+                )?,
+            },
+            ZoneType::InternalNtp => OmicronZoneType::InternalNtp {
+                address,
+                dns_servers: ntp_dns_servers?,
+                domain: self.ntp_ntp_domain,
+                ntp_servers: ntp_ntp_servers?,
+            },
+            ZoneType::Nexus => OmicronZoneType::Nexus {
+                internal_address: address,
+                nic: nic?,
+                external_tls: self
+                    .nexus_external_tls
+                    .ok_or_else(|| anyhow!("expected 'external_tls'"))?,
+                external_ip: self
+                    .second_service_ip
+                    .ok_or_else(|| anyhow!("expected second service IP"))?
+                    .ip(),
+                external_dns_servers: self
+                    .nexus_external_dns_servers
+                    .ok_or_else(|| anyhow!("expected 'external_dns_servers'"))?
+                    .into_iter()
+                    .map(|i| i.ip())
+                    .collect(),
+            },
+            ZoneType::Oximeter => OmicronZoneType::Oximeter { address },
         };
         Ok(nexus_types::inventory::OmicronZoneConfig {
             id: self.id,

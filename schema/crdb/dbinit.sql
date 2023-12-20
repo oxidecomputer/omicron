@@ -2943,12 +2943,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_omicron_zones (
 
 CREATE TYPE IF NOT EXISTS omicron.public.zone_type AS ENUM (
   'boundary_ntp',
-  'clickhouse_keeper',
   'clickhouse',
+  'clickhouse_keeper',
   'cockroach',
-  'crucible_pantry',
   'crucible',
-  'dendrite',
+  'crucible_pantry',
   'external_dns',
   'internal_dns',
   'internal_ntp',
