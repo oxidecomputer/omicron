@@ -227,7 +227,7 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(physical_disk_list)?;
         api.register(switch_list)?;
         api.register(switch_view)?;
-        api.register(uninitialized_sled_list)?;
+        api.register(sled_list_uninitialized)?;
         api.register(add_sled_to_initialized_rack)?;
 
         api.register(user_builtin_list)?;
@@ -4654,18 +4654,26 @@ async fn rack_view(
 /// List uninitialized sleds in a given rack
 #[endpoint {
     method = GET,
-    path = "/v1/system/hardware/uninitialized-sleds",
+    path = "/v1/system/hardware/sleds-uninitialized",
     tags = ["system/hardware"]
 }]
-async fn uninitialized_sled_list(
+async fn sled_list_uninitialized(
     rqctx: RequestContext<Arc<ServerContext>>,
-) -> Result<HttpResponseOk<Vec<UninitializedSled>>, HttpError> {
+    query: Query<PaginationParams<EmptyScanParams, String>>,
+) -> Result<HttpResponseOk<ResultsPage<UninitializedSled>>, HttpError> {
     let apictx = rqctx.context();
+    // We don't actually support real pagination
+    let pag_params = query.into_inner();
+    if let dropshot::WhichPage::Next(last_seen) = &pag_params.page {
+        return Err(
+            Error::invalid_value(last_seen.clone(), "bad page token").into()
+        );
+    }
     let handler = async {
         let nexus = &apictx.nexus;
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let sleds = nexus.uninitialized_sled_list(&opctx).await?;
-        Ok(HttpResponseOk(sleds))
+        let sleds = nexus.sled_list_uninitialized(&opctx).await?;
+        Ok(HttpResponseOk(ResultsPage { items: sleds, next_page: None }))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

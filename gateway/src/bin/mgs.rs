@@ -5,6 +5,7 @@
 //! Executable program to run gateway, the management gateway service
 
 use anyhow::{anyhow, Context};
+use camino::Utf8PathBuf;
 use clap::Parser;
 use futures::StreamExt;
 use omicron_common::cmd::{fatal, CmdError};
@@ -12,7 +13,6 @@ use omicron_gateway::{run_openapi, start_server, Config, MgsArguments};
 use signal_hook::consts::signal;
 use signal_hook_tokio::Signals;
 use std::net::SocketAddrV6;
-use std::path::PathBuf;
 use uuid::Uuid;
 
 #[derive(Debug, Parser)]
@@ -24,7 +24,7 @@ enum Args {
     /// Start an MGS server
     Run {
         #[clap(name = "CONFIG_FILE_PATH", action)]
-        config_file_path: PathBuf,
+        config_file_path: Utf8PathBuf,
 
         /// Read server ID and address(es) for dropshot server from our SMF
         /// properties (only valid when running as a service on illumos)
@@ -81,9 +81,7 @@ async fn do_run() -> Result<(), CmdError> {
             address,
         } => {
             let config = Config::from_file(&config_file_path)
-                .with_context(|| {
-                    format!("failed to parse {}", config_file_path.display())
-                })
+                .map_err(anyhow::Error::new)
                 .map_err(CmdError::Failure)?;
 
             let mut signals = Signals::new([signal::SIGUSR1])

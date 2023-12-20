@@ -35,6 +35,7 @@ use slog::info;
 use slog::o;
 use slog::warn;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::mem;
@@ -138,7 +139,10 @@ impl Server {
         match gateway_sp_comms::register_probes() {
             Ok(_) => debug!(log, "successfully registered DTrace USDT probes"),
             Err(err) => {
-                warn!(log, "failed to register DTrace USDT probes: {}", err);
+                warn!(
+                    log, "failed to register DTrace USDT probes";
+                    InlineErrorChain::new(&err),
+                );
             }
         }
 
@@ -328,9 +332,9 @@ pub async fn start_server(
     );
     let log = slog::Logger::root(drain.fuse(), slog::o!(FileKv));
     if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
-        let msg = format!("failed to register DTrace probes: {}", e);
-        error!(log, "{}", msg);
-        return Err(msg);
+        let err = InlineErrorChain::new(&e);
+        error!(log, "failed to register DTrace probes"; &err);
+        return Err(format!("failed to register DTrace probes: {err}"));
     } else {
         debug!(log, "registered DTrace probes");
     }

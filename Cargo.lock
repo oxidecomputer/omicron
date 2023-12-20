@@ -4698,6 +4698,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64",
+ "camino",
  "clap 4.4.3",
  "dropshot",
  "expectorate",
@@ -4723,6 +4724,7 @@ dependencies = [
  "signal-hook-tokio",
  "slog",
  "slog-dtrace",
+ "slog-error-chain",
  "sp-sim",
  "subprocess",
  "thiserror",
@@ -7839,6 +7841,25 @@ dependencies = [
  "slog-scope",
  "slog-stdlog",
  "slog-term",
+]
+
+[[package]]
+name = "slog-error-chain"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/slog-error-chain?branch=main#15f69041f45774602108e47fb25e705dc23acfb2"
+dependencies = [
+ "slog",
+ "slog-error-chain-derive",
+]
+
+[[package]]
+name = "slog-error-chain-derive"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/slog-error-chain?branch=main#15f69041f45774602108e47fb25e705dc23acfb2"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.32",
 ]
 
 [[package]]

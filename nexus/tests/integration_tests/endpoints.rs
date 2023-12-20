@@ -46,7 +46,7 @@ use uuid::Uuid;
 pub static HARDWARE_RACK_URL: Lazy<String> =
     Lazy::new(|| format!("/v1/system/hardware/racks/{}", RACK_UUID));
 pub const HARDWARE_UNINITIALIZED_SLEDS: &'static str =
-    "/v1/system/hardware/uninitialized-sleds";
+    "/v1/system/hardware/sleds-uninitialized";
 pub static HARDWARE_SLED_URL: Lazy<String> =
     Lazy::new(|| format!("/v1/system/hardware/sleds/{}", SLED_AGENT_UUID));
 pub static HARDWARE_SLED_PROVISION_STATE_URL: Lazy<String> = Lazy::new(|| {
