@@ -161,6 +161,8 @@ setup_hint = "Run `./tools/ci_download_clickhouse` to download the necessary bin
 service_name = "cockroachdb"
 only_for_targets.image = "standard"
 source.type = "composite"
+# TODO: Removeme once the zone networking setup service is functional -> "zone-networking-cli.tar.gz"
+# TODO: Once service is ready add "zone_network_setup.tar.gz",
 source.packages = [ "cockroachdb-service.tar.gz", "internal-dns-cli.tar.gz", "zone-networking-cli.tar.gz" ]
 output.type = "zone"
 
@@ -602,6 +604,7 @@ source.packages = [
 ]
 output.type = "zone"
 
+# TODO: Removeme once the zone networking setup service is functional
 [package.zone-networking-cli]
 service_name = "zone-networking-cli"
 only_for_targets.image = "standard"
@@ -609,5 +612,18 @@ source.type = "local"
 source.rust.binary_names = ["zone-networking"]
 source.rust.release = true
 source.paths = []
+output.type = "zone"
+output.intermediate_only = true
+
+[package.zone_network_setup]
+service_name = "zone_network_setup"
+only_for_targets.image = "standard"
+source.type = "local"
+source.rust.binary_names = ["zone-networking"]
+source.rust.release = true
+source.paths = [
+    { from = "smf/zone_network_setup/manifest.xml", to = "/var/svc/manifest/site/zone_network_setup/manifest.xml" },
+    { from = "smf/zone_network_setup/method_script.sh", to = "/opt/oxide/lib/svc/manifest/zone_network_setup.sh" },
+]
 output.type = "zone"
 output.intermediate_only = true
