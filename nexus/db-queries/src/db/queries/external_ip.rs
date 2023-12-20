@@ -26,6 +26,8 @@ use diesel::Column;
 use diesel::Expression;
 use diesel::QueryResult;
 use diesel::RunQueryDsl;
+use nexus_db_model::IpAttachState;
+use nexus_db_model::IpAttachStateEnum;
 use omicron_common::address::NUM_SOURCE_NAT_PORTS;
 use omicron_common::api::external;
 use uuid::Uuid;
@@ -99,7 +101,8 @@ const MAX_PORT: u16 = u16::MAX;
 ///         candidate_ip AS ip,
 ///         CAST(candidate_first_port AS INT4) AS first_port,
 ///         CAST(candidate_last_port AS INT4) AS last_port,
-///         <project_id> AS project_id
+///         <project_id> AS project_id,
+///         <state> AS state
 ///     FROM
 ///         SELECT * FROM (
 ///             -- Select all IP addresses by pool and range.
@@ -378,6 +381,14 @@ impl NextExternalIp {
         out.push_bind_param::<sql_types::Nullable<sql_types::Uuid>, Option<Uuid>>(self.ip.project_id())?;
         out.push_sql(" AS ");
         out.push_identifier(dsl::project_id::NAME)?;
+        out.push_sql(", ");
+
+        // Initial state, mainly needed by Ephemeral/Floating IPs.
+        out.push_bind_param::<IpAttachStateEnum, IpAttachState>(
+            self.ip.state(),
+        )?;
+        out.push_sql(" AS ");
+        out.push_identifier(dsl::state::NAME)?;
 
         out.push_sql(" FROM (");
         self.push_address_sequence_subquery(out.reborrow())?;

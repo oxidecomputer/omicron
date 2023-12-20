@@ -27,6 +27,7 @@ use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use nexus_db_model::IpAttachState;
 use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -60,6 +61,12 @@ impl DataStore {
     }
 
     /// Create an Ephemeral IP address for an instance.
+    ///
+    /// For consistency between instance create and External IP attach/detach
+    /// operations, this IP will be created in the `Attaching` state to block
+    /// concurrent access.
+    /// Callers must call `external_ip_complete_op` on saga completion to move
+    /// the IP to `Attached`.
     pub async fn allocate_instance_ephemeral_ip(
         &self,
         opctx: &OpContext,
@@ -340,6 +347,33 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
+    pub async fn begin_deallocate_ephemeral_ip(
+        &self,
+        opctx: &OpContext,
+        ip_id: Uuid,
+    ) -> Result<ExternalIp, Error> {
+        use db::schema::external_ip::dsl;
+        let now = Utc::now();
+        let result = diesel::update(dsl::external_ip)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(ip_id))
+            .filter(dsl::kind.eq(IpKind::Ephemeral))
+            .filter(dsl::state.eq(IpAttachState::Attached))
+            .set((
+                dsl::time_modified.eq(now),
+                dsl::state.eq(IpAttachState::Detaching),
+            ))
+            .check_if_exists::<ExternalIp>(ip_id)
+            .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        match result.status {
+            UpdateStatus::NotUpdatedButExists => todo!(),
+            UpdateStatus::Updated => todo!(),
+        }
+    }
+
     /// Delete all external IP addresses associated with the provided instance
     /// ID.
     ///
@@ -446,6 +480,7 @@ impl DataStore {
             .filter(dsl::id.eq(authz_fip.id()))
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::parent_id.is_null())
+            .filter(dsl::state.eq(IpAttachState::Detached))
             .set(dsl::time_deleted.eq(now))
             .check_if_exists::<ExternalIp>(authz_fip.id())
             .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
@@ -469,12 +504,16 @@ impl DataStore {
     }
 
     /// Attaches a Floating IP address to an instance.
-    pub async fn floating_ip_attach(
+    ///
+    /// This moves a floating IP into the 'attaching' state. Callers are
+    /// responsible for calling `external_ip_complete_op` to finalise the
+    /// IP in 'attached' state at saga completion.
+    pub async fn floating_ip_begin_attach(
         &self,
         opctx: &OpContext,
         authz_fip: &authz::FloatingIp,
         instance_id: Uuid,
-    ) -> UpdateResult<FloatingIp> {
+    ) -> UpdateResult<ExternalIp> {
         use db::schema::external_ip::dsl;
 
         let (.., authz_instance, _db_instance) = LookupPath::new(&opctx, self)
@@ -492,9 +531,11 @@ impl DataStore {
             .filter(dsl::kind.eq(IpKind::Floating))
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::parent_id.is_null())
+            .filter(dsl::state.eq(IpAttachState::Detached))
             .set((
                 dsl::parent_id.eq(Some(instance_id)),
                 dsl::time_modified.eq(Utc::now()),
+                dsl::state.eq(IpAttachState::Attaching),
             ))
             .check_if_exists::<ExternalIp>(fip_id)
             .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
@@ -506,22 +547,27 @@ impl DataStore {
                 )
             })?;
 
+        // TODO: include state checks.
         match (out.status, out.found.parent_id) {
             (UpdateStatus::NotUpdatedButExists, Some(_)) => Err(Error::invalid_request(
                 "Floating IP cannot be attached to one instance while still attached to another",
             )),
-            (UpdateStatus::Updated, _) => Ok(out.found.try_into().map_err(|e| Error::internal_error(&format!("{e}")))?),
+            (UpdateStatus::Updated, _) => Ok(out.found),
             _ => unreachable!(),
         }
     }
 
     /// Detaches a Floating IP address from an instance.
-    pub async fn floating_ip_detach(
+    ///
+    /// This moves a floating IP into the 'detaching' state. Callers are
+    /// responsible for calling `external_ip_complete_op` to finalise the
+    /// IP in 'detached' state at saga completion.
+    pub async fn floating_ip_begin_detach(
         &self,
         opctx: &OpContext,
         authz_fip: &authz::FloatingIp,
         instance_id: Uuid,
-    ) -> UpdateResult<FloatingIp> {
+    ) -> UpdateResult<ExternalIp> {
         use db::schema::external_ip::dsl;
 
         let (.., authz_instance) = LookupPath::new(&opctx, self)
@@ -539,9 +585,11 @@ impl DataStore {
             .filter(dsl::kind.eq(IpKind::Floating))
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::parent_id.eq(instance_id))
+            .filter(dsl::state.eq(IpAttachState::Attached))
             .set((
                 dsl::parent_id.eq(Option::<Uuid>::None),
                 dsl::time_modified.eq(Utc::now()),
+                dsl::state.eq(IpAttachState::Attaching),
             ))
             .check_if_exists::<ExternalIp>(fip_id)
             .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
@@ -553,6 +601,7 @@ impl DataStore {
                 )
             })?;
 
+        // TODO: include state checks.
         match (out.status, out.found.parent_id) {
             (UpdateStatus::NotUpdatedButExists, Some(id))
                 if id != instance_id =>
@@ -572,5 +621,77 @@ impl DataStore {
                 .map_err(|e| Error::internal_error(&format!("{e}")))?),
             _ => unreachable!(),
         }
+    }
+
+    /// Move an external IP from a transitional state (attaching, detaching)
+    /// to its intended end state.
+    // FIXME: what do do in case of undo?
+    pub async fn external_ip_complete_op(
+        &self,
+        opctx: &OpContext,
+        ip_id: Uuid,
+        ip_kind: IpKind,
+        expected_state: IpAttachState,
+        target_state: IpAttachState,
+    ) -> Result<usize, Error> {
+        use db::schema::external_ip::dsl;
+
+        if matches!(
+            expected_state,
+            IpAttachState::Attached | IpAttachState::Detached
+        ) {
+            return Err(Error::internal_error(&format!(
+                "{expected_state:?} is not a valid transition state for attach/detach"
+            )));
+        }
+
+        let part_out = diesel::update(dsl::external_ip)
+            .filter(dsl::id.eq(ip_id))
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::state.eq(expected_state));
+
+        // This leaves out SNat for now, double check where it fits in with
+        // instance destroy.
+        let now = Utc::now();
+        let conn = self.pool_connection_authorized(opctx).await?;
+        match (ip_kind, target_state) {
+            (IpKind::SNat, _) => {
+                return Err(Error::internal_error(
+                    "shouldn't need to multistage for SNAT",
+                ))
+            }
+            (IpKind::Ephemeral, IpAttachState::Detached) => {
+                part_out
+                    .set((
+                        dsl::parent_id.eq(Option::<Uuid>::None),
+                        dsl::time_modified.eq(now),
+                        dsl::time_deleted.eq(now),
+                        dsl::state.eq(target_state),
+                    ))
+                    .execute_async(&*conn)
+                    .await
+            }
+            (IpKind::Floating, IpAttachState::Detached) => {
+                part_out
+                    .set((
+                        dsl::parent_id.eq(Option::<Uuid>::None),
+                        dsl::time_modified.eq(now),
+                        dsl::state.eq(target_state),
+                    ))
+                    .execute_async(&*conn)
+                    .await
+            }
+            (_, IpAttachState::Attached) => {
+                part_out
+                    .set((
+                        dsl::time_modified.eq(Utc::now()),
+                        dsl::state.eq(target_state),
+                    ))
+                    .execute_async(&*conn)
+                    .await
+            }
+            _ => return Err(Error::internal_error("unreachable")),
+        }
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 }

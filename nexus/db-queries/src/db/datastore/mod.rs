@@ -1672,6 +1672,7 @@ mod test {
                 ))),
                 first_port: crate::db::model::SqlU16(0),
                 last_port: crate::db::model::SqlU16(10),
+                state: nexus_db_model::IpAttachState::Attached,
             })
             .collect::<Vec<_>>();
         diesel::insert_into(dsl::external_ip)
@@ -1733,6 +1734,7 @@ mod test {
             ))),
             first_port: crate::db::model::SqlU16(0),
             last_port: crate::db::model::SqlU16(10),
+            state: nexus_db_model::IpAttachState::Attached,
         };
         diesel::insert_into(dsl::external_ip)
             .values(ip.clone())
@@ -1803,6 +1805,7 @@ mod test {
             ip: addresses.next().unwrap().into(),
             first_port: crate::db::model::SqlU16(0),
             last_port: crate::db::model::SqlU16(10),
+            state: nexus_db_model::IpAttachState::Attached,
         };
 
         // Combinations of NULL and non-NULL for:

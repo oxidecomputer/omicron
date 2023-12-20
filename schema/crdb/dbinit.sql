@@ -1654,6 +1654,13 @@ CREATE TYPE IF NOT EXISTS omicron.public.ip_kind AS ENUM (
     'floating'
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.ip_attach_state AS ENUM (
+    'detached',
+    'attached',
+    'detaching',
+    'attaching'
+);
+
 /*
  * External IP addresses used for guest instances and externally-facing
  * services.
@@ -1699,6 +1706,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.external_ip (
     /* FK to the `project` table. */
     project_id UUID,
 
+    /* State of this IP with regard to instance attach/detach
+     * operations. This is mainly used to prevent concurrent use
+     * across sagas and allow rollback to correct state.
+     */
+    state omicron.public.ip_attach_state NOT NULL,
+
     /* The name must be non-NULL iff this is a floating IP. */
     CONSTRAINT null_fip_name CHECK (
         (kind != 'floating' AND name IS NULL) OR
@@ -1730,6 +1743,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.external_ip (
     /* Ephemeral IPs are not supported for services. */
     CONSTRAINT ephemeral_kind_service CHECK (
         (kind = 'ephemeral' AND is_service = FALSE) OR (kind != 'ephemeral')
+    ),
+
+    /* parent_id must be null if detached, non-null if not detached */
+    CONSTRAINT detached_null_parent_id CHECK (
+        (state = 'detached') != (parent_id IS NOT NULL)
     )
 );
 
@@ -3096,7 +3114,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '21.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '22.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
