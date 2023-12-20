@@ -37,6 +37,7 @@ use nexus_db_model::InvCaboose;
 use nexus_db_model::InvCollection;
 use nexus_db_model::InvCollectionError;
 use nexus_db_model::InvOmicronZone;
+use nexus_db_model::InvOmicronZoneNic;
 use nexus_db_model::InvRootOfTrust;
 use nexus_db_model::InvRotPage;
 use nexus_db_model::InvServiceProcessor;
@@ -153,6 +154,16 @@ impl DataStore {
             })
             .flatten()
             .collect::<Result<Vec<_>, Error>>()?;
+        let omicron_zone_nics = collection
+            .omicron_zones
+            .values()
+            .map(|found| {
+                found.zones.zones.iter().filter_map(|found_zone| {
+                    InvOmicronZoneNic::new(collection_id, found_zone)
+                })
+            })
+            .flatten()
+            .collect::<Vec<_>>();
 
         // This implementation inserts all records associated with the
         // collection in one transaction.  This is primarily for simplicity.  It
@@ -740,6 +751,15 @@ impl DataStore {
                     .await?;
             }
 
+            {
+                use db::schema::inv_omicron_zone_nic::dsl as omicron_zone_nic;
+                let _ =
+                    diesel::insert_into(omicron_zone_nic::inv_omicron_zone_nic)
+                        .values(omicron_zone_nics)
+                        .execute_async(&conn)
+                        .await?;
+            }
+
             // Finally, insert the list of errors.
             {
                 use db::schema::inv_collection_error::dsl as errors_dsl;
@@ -999,6 +1019,9 @@ impl DataStore {
             ncabooses,
             nrot_pages,
             nsled_agents,
+            nsled_agent_zones,
+            nzones,
+            nnics,
             nerrors,
         ) = conn
             .transaction_async(|conn| async move {
@@ -1067,6 +1090,37 @@ impl DataStore {
                     .await?
                 };
 
+                // Remove rows associated with Omicron zones
+                let nsled_agent_zones = {
+                    use db::schema::inv_sled_omicron_zones::dsl;
+                    diesel::delete(
+                        dsl::inv_sled_omicron_zones
+                            .filter(dsl::inv_collection_id.eq(collection_id)),
+                    )
+                    .execute_async(&conn)
+                    .await?
+                };
+
+                let nzones = {
+                    use db::schema::inv_omicron_zone::dsl;
+                    diesel::delete(
+                        dsl::inv_omicron_zone
+                            .filter(dsl::inv_collection_id.eq(collection_id)),
+                    )
+                    .execute_async(&conn)
+                    .await?
+                };
+
+                let nnics = {
+                    use db::schema::inv_omicron_zone_nic::dsl;
+                    diesel::delete(
+                        dsl::inv_omicron_zone_nic
+                            .filter(dsl::inv_collection_id.eq(collection_id)),
+                    )
+                    .execute_async(&conn)
+                    .await?
+                };
+
                 // Remove rows for errors encountered.
                 let nerrors = {
                     use db::schema::inv_collection_error::dsl;
@@ -1085,6 +1139,9 @@ impl DataStore {
                     ncabooses,
                     nrot_pages,
                     nsled_agents,
+                    nsled_agent_zones,
+                    nzones,
+                    nnics,
                     nerrors,
                 ))
             })
@@ -1104,6 +1161,9 @@ impl DataStore {
             "ncabooses" => ncabooses,
             "nrot_pages" => nrot_pages,
             "nsled_agents" => nsled_agents,
+            "nsled_agent_zones" => nsled_agent_zones,
+            "nzones" => nzones,
+            "nnics" => nnics,
             "nerrors" => nerrors,
         );
 

@@ -252,6 +252,12 @@ impl From<&omicron_common::api::external::Name> for types::Name {
     }
 }
 
+impl From<types::Name> for omicron_common::api::external::Name {
+    fn from(s: types::Name) -> Self {
+        Self::try_from(s.clone()).unwrap()
+    }
+}
+
 impl From<omicron_common::api::external::Vni> for types::Vni {
     fn from(v: omicron_common::api::external::Vni) -> Self {
         Self(u32::from(v))
@@ -268,6 +274,12 @@ impl From<omicron_common::api::external::MacAddr> for types::MacAddr {
     fn from(s: omicron_common::api::external::MacAddr) -> Self {
         Self::try_from(s.0.to_string())
             .unwrap_or_else(|e| panic!("{}: {}", s.0, e))
+    }
+}
+
+impl From<types::MacAddr> for omicron_common::api::external::MacAddr {
+    fn from(s: types::MacAddr) -> Self {
+        s.parse().unwrap()
     }
 }
 
@@ -299,6 +311,12 @@ impl From<ipnetwork::Ipv4Network> for types::Ipv4Net {
     }
 }
 
+impl From<types::Ipv4Net> for ipnetwork::Ipv4Network {
+    fn from(n: types::Ipv4Net) -> Self {
+        n.parse().unwrap()
+    }
+}
+
 impl From<ipnetwork::Ipv4Network> for types::Ipv4Network {
     fn from(n: ipnetwork::Ipv4Network) -> Self {
         Self::try_from(n.to_string()).unwrap_or_else(|e| panic!("{}: {}", n, e))
@@ -311,12 +329,27 @@ impl From<ipnetwork::Ipv6Network> for types::Ipv6Net {
     }
 }
 
+impl From<types::Ipv6Net> for ipnetwork::Ipv6Network {
+    fn from(n: types::Ipv6Net) -> Self {
+        n.parse().unwrap()
+    }
+}
+
 impl From<ipnetwork::IpNetwork> for types::IpNet {
     fn from(n: ipnetwork::IpNetwork) -> Self {
         use ipnetwork::IpNetwork;
         match n {
             IpNetwork::V4(v4) => Self::V4(v4.into()),
             IpNetwork::V6(v6) => Self::V6(v6.into()),
+        }
+    }
+}
+
+impl From<types::IpNet> for ipnetwork::IpNetwork {
+    fn from(n: types::IpNet) -> Self {
+        match n {
+            types::IpNet::V4(v4) => ipnetwork::IpNetwork::V4(v4.into()),
+            types::IpNet::V6(v6) => ipnetwork::IpNetwork::V6(v6.into()),
         }
     }
 }

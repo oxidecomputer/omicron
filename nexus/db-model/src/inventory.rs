@@ -6,11 +6,14 @@
 
 use crate::schema::{
     hw_baseboard_id, inv_caboose, inv_collection, inv_collection_error,
-    inv_omicron_zone, inv_root_of_trust, inv_root_of_trust_page,
-    inv_service_processor, inv_sled_agent, inv_sled_omicron_zones, sw_caboose,
-    sw_root_of_trust_page,
+    inv_omicron_zone, inv_omicron_zone_nic, inv_root_of_trust,
+    inv_root_of_trust_page, inv_service_processor, inv_sled_agent,
+    inv_sled_omicron_zones, sw_caboose, sw_root_of_trust_page,
 };
-use crate::{impl_enum_type, ipv6, ByteCount, Generation, SqlU16, SqlU32};
+use crate::{
+    impl_enum_type, ipv6, ByteCount, Generation, MacAddr, Name, SqlU16, SqlU32,
+    SqlU8,
+};
 use anyhow::anyhow;
 use anyhow::Context;
 use chrono::DateTime;
@@ -899,5 +902,49 @@ impl InvOmicronZone {
             snat_first_port,
             snat_last_port,
         })
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_omicron_zone_nic)]
+pub struct InvOmicronZoneNic {
+    inv_collection_id: Uuid,
+    id: Uuid,
+    name: Name,
+    ip: IpNetwork,
+    mac: MacAddr,
+    subnet: IpNetwork,
+    vni: SqlU32,
+    is_primary: bool,
+    slot: SqlU8,
+}
+
+impl InvOmicronZoneNic {
+    pub fn new(
+        inv_collection_id: Uuid,
+        zone: &nexus_types::inventory::OmicronZoneConfig,
+    ) -> Option<InvOmicronZoneNic> {
+        match &zone.zone_type {
+            OmicronZoneType::ExternalDns { nic, .. }
+            | OmicronZoneType::BoundaryNtp { nic, .. }
+            | OmicronZoneType::Nexus { nic, .. } => Some(InvOmicronZoneNic {
+                inv_collection_id,
+                id: nic.id,
+                name: Name::from(omicron_common::api::external::Name::from(
+                    nic.name.clone(),
+                )),
+                ip: IpNetwork::from(nic.ip),
+                mac: MacAddr::from(
+                    omicron_common::api::external::MacAddr::from(
+                        nic.mac.clone(),
+                    ),
+                ),
+                subnet: IpNetwork::from(nic.subnet.clone()),
+                vni: SqlU32::from(nic.vni.0),
+                is_primary: nic.primary,
+                slot: SqlU8::from(nic.slot),
+            }),
+            _ => None,
+        }
     }
 }

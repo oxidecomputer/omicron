@@ -1358,6 +1358,20 @@ table! {
 }
 
 table! {
+    inv_omicron_zone_nic (inv_collection_id, id) {
+        inv_collection_id -> Uuid,
+        id -> Uuid,
+        name -> Text,
+        ip -> Inet,
+        mac -> Int8,
+        subnet -> Inet,
+        vni -> Int8,
+        is_primary -> Bool,
+        slot -> Int2,
+    }
+}
+
+table! {
     bootstore_keys (key, generation) {
         key -> Text,
         generation -> Int8,
