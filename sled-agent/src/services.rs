@@ -1471,6 +1471,56 @@ impl ServiceManager {
             .install()
             .await?;
 
+        // Only for self assembling zones for now. Once all zones are self assembling
+        // There will be no need to apply selectively.
+        //
+        // TODO: Extract this into it's own function and pass only if
+        // it matches each of the self assembling zones
+        // NB: Only adding cockroach for now as it's just to test it out
+        #[allow(clippy::match_single_binding)]
+        match &request {
+            // TODO: Uncomment once I have removed all previous zone networking from the Cockroach db zone
+            //            ZoneArgs::Omicron(OmicronZoneConfigLocal {
+            //                zone:
+            //                    OmicronZoneConfig {
+            //                        zone_type: OmicronZoneType::CockroachDb { .. },
+            //                        underlay_address,
+            //                        ..
+            //                    },
+            //                ..
+            //            }) => {
+            //                let Some(info) = self.inner.sled_info.get() else {
+            //                    return Err(Error::SledAgentNotReady);
+            //                };
+            //
+            //                let datalink = installed_zone.get_control_vnic_name();
+            //                let gateway = &info.underlay_address.to_string();
+            //                let listen_addr = &underlay_address.to_string();
+            //
+            //                let mut config_builder = PropertyGroupBuilder::new("config");
+            //                config_builder = config_builder
+            //                    .add_property("datalink", "astring", datalink)
+            //                    .add_property("gateway", "astring", gateway)
+            //                    .add_property("listen_addr", "astring", listen_addr);
+            //                let nw_setup = ServiceBuilder::new("oxide/zone_network_setup")
+            //                    .add_property_group(config_builder)
+            //                    .add_instance(ServiceInstanceBuilder::new("default"));
+            //                // TODO: I'm unsure about the name here, should it be something other than "omicron"?
+            //                let profile =
+            //                    ProfileBuilder::new("omicron").add_service(nw_setup);
+            //                profile
+            //                    .add_to_zone(&self.inner.log, &installed_zone)
+            //                    .await
+            //                    .map_err(|err| {
+            //                        Error::io(
+            //                            "Failed to setup zone_network_setup profile",
+            //                            err,
+            //                        )
+            //                    })?;
+            //            }
+            _ => {}
+        }
+
         // TODO(https://github.com/oxidecomputer/omicron/issues/1898):
         //
         // These zones are self-assembling -- after they boot, there should
@@ -1497,6 +1547,8 @@ impl ServiceManager {
                 let listen_port = &CLICKHOUSE_PORT.to_string();
 
                 let config = PropertyGroupBuilder::new("config")
+                    // TODO: Once the nw setup service is running, we don't need to pass datalink or gateway
+                    // to the individual zones
                     .add_property("datalink", "astring", datalink)
                     .add_property("gateway", "astring", gateway)
                     .add_property("listen_addr", "astring", listen_addr)

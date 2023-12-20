@@ -1003,8 +1003,6 @@ impl ServiceInner {
         let version4_cockroachdb = version3_dns_and_ntp.next();
         let version5_everything = version4_cockroachdb.next();
 
-        // TODO: Probably want to set up zone networking service around here?
-
         // Set up internal DNS services first and write the initial
         // DNS configuration to the internal DNS servers.
         let v1generator = OmicronZonesConfigGenerator::initial_version(

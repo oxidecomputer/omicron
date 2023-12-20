@@ -16,7 +16,7 @@
 
 <!--TODO: Do the actual thing we want to do-->
   <exec_method type='method' name='start'
-    exec=''
+    exec='/opt/oxide/lib/svc/manifest/zone_network_setup.sh'
     timeout_seconds='0' />
   
   <!-- 
