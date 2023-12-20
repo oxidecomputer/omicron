@@ -14,8 +14,8 @@ use crate::{
     impl_enum_type, ipv6, ByteCount, Generation, MacAddr, Name, SqlU16, SqlU32,
     SqlU8,
 };
-use anyhow::anyhow;
-use anyhow::Context;
+use anyhow::{anyhow, ensure};
+use anyhow::{bail, Context};
 use chrono::DateTime;
 use chrono::Utc;
 use diesel::backend::Backend;
@@ -29,6 +29,7 @@ use nexus_types::inventory::{
     BaseboardId, Caboose, Collection, OmicronZoneType, PowerState, RotPage,
     RotSlot,
 };
+use std::net::SocketAddrV6;
 use uuid::Uuid;
 
 // See [`nexus_types::inventory::PowerState`].
@@ -677,6 +678,20 @@ impl InvSledOmicronZones {
             generation: Generation(zones_found.zones.generation.clone().into()),
         }
     }
+
+    pub fn into_uninit_zones_found(
+        self,
+    ) -> nexus_types::inventory::OmicronZonesFound {
+        nexus_types::inventory::OmicronZonesFound {
+            time_collected: self.time_collected,
+            source: self.source,
+            sled_id: self.sled_id,
+            zones: nexus_types::inventory::OmicronZonesConfig {
+                generation: self.generation.0.into(),
+                zones: Vec::new(),
+            },
+        }
+    }
 }
 
 impl_enum_type!(
@@ -903,13 +918,122 @@ impl InvOmicronZone {
             snat_last_port,
         })
     }
+
+    pub fn into_omicron_zone_config(
+        self,
+        nic_row: Option<InvOmicronZoneNic>,
+    ) -> Result<nexus_types::inventory::OmicronZoneConfig, anyhow::Error> {
+        let address = SocketAddrV6::new(
+            std::net::Ipv6Addr::from(self.primary_service_ip),
+            *self.primary_service_port,
+            0,
+            0,
+        )
+        .to_string();
+
+        // Assemble a value that we can use to extract the NIC _if necessary_
+        // and report an error if it was needed but not found.
+        //
+        // Any error here should be impossible.  By the time we get here, the
+        // caller should have provided `nic_row` iff there's a corresponding
+        // `nic_id` in this row, and the ids should match up.  And whoever
+        // created this row ought to have provided a nic_id iff this type of
+        // zone needs a NIC.  This last issue is not under our control, though,
+        // so we definitely want to handle that as an operational error.  The
+        // others could arguably be programmer errors (i.e., we could `assert`),
+        // but it seems excessive to crash here.
+        //
+        // Note that we immediately return for any of the caller errors here.
+        // For the other error, we will return only later, if some code path
+        // below tries to use `nic` when it's not present.
+        let nic = match (self.nic_id, nic_row) {
+            (Some(expected_id), Some(nic_row)) => {
+                ensure!(expected_id == nic_row.id, "caller provided wrong NIC");
+                // XXX-dap move to InvOmicronZoneNic method
+                Ok(nexus_types::inventory::NetworkInterface {
+                    id: nic_row.id,
+                    ip: nic_row.ip.ip(),
+                    kind: nexus_types::inventory::NetworkInterfaceKind::Service(
+                        self.id,
+                    ),
+                    mac: (*nic_row.mac).into(),
+                    name: (&(*nic_row.name)).into(),
+                    primary: nic_row.is_primary,
+                    slot: *nic_row.slot,
+                    vni: nexus_types::inventory::Vni::from(*nic_row.vni),
+                    subnet: nic_row.subnet.into(),
+                })
+            }
+            (None, None) => Err(anyhow!(
+                "expected zone to have an associated NIC, but it doesn't"
+            )),
+            (Some(_), None) => bail!("caller provided no NIC"),
+            (None, Some(_)) => bail!("caller unexpectedly provided a NIC"),
+        };
+
+        let zone_type = match self.zone_type {
+            ZoneType::BoundaryNtp => {
+                let snat_cfg = match (
+                    self.snat_ip,
+                    self.snat_first_port,
+                    self.snat_last_port,
+                ) {
+                    (Some(ip), Some(first_port), Some(last_port)) => {
+                        nexus_types::inventory::SourceNatConfig {
+                            ip: std::net::IpAddr::from(*ip),
+                            first_port: *first_port,
+                            last_port: *last_port,
+                        }
+                    }
+                    _ => bail!(
+                        "expected non-NULL snat properties, \
+                        found at least one NULL"
+                    ),
+                };
+                OmicronZoneType::BoundaryNtp {
+                    address,
+                    dns_servers: self
+                        .ntp_dns_servers
+                        .ok_or_else(|| {
+                            anyhow!("expected list of DNS servers, found null")
+                        })?
+                        .into_iter()
+                        .map(|ipnetwork| ipnetwork.ip())
+                        .collect(),
+                    domain: self.ntp_ntp_domain,
+                    nic: nic?,
+                    ntp_servers: self
+                        .ntp_ntp_servers
+                        .ok_or_else(|| anyhow!("expected ntp_servers"))?,
+                    snat_cfg,
+                }
+            }
+            // XXX-dap implement the rest of these
+            ZoneType::ClickhouseKeeper => todo!(),
+            ZoneType::Clickhouse => todo!(),
+            ZoneType::CockroachDb => todo!(),
+            ZoneType::CruciblePantry => todo!(),
+            ZoneType::Crucible => todo!(),
+            ZoneType::Dendrite => todo!(),
+            ZoneType::ExternalDns => todo!(),
+            ZoneType::InternalDns => todo!(),
+            ZoneType::InternalNtp => todo!(),
+            ZoneType::Nexus => todo!(),
+            ZoneType::Oximeter => todo!(),
+        };
+        Ok(nexus_types::inventory::OmicronZoneConfig {
+            id: self.id,
+            underlay_address: std::net::Ipv6Addr::from(self.underlay_address),
+            zone_type,
+        })
+    }
 }
 
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_omicron_zone_nic)]
 pub struct InvOmicronZoneNic {
     inv_collection_id: Uuid,
-    id: Uuid,
+    pub id: Uuid,
     name: Name,
     ip: IpNetwork,
     mac: MacAddr,
@@ -923,28 +1047,47 @@ impl InvOmicronZoneNic {
     pub fn new(
         inv_collection_id: Uuid,
         zone: &nexus_types::inventory::OmicronZoneConfig,
-    ) -> Option<InvOmicronZoneNic> {
+    ) -> Result<Option<InvOmicronZoneNic>, anyhow::Error> {
         match &zone.zone_type {
             OmicronZoneType::ExternalDns { nic, .. }
             | OmicronZoneType::BoundaryNtp { nic, .. }
-            | OmicronZoneType::Nexus { nic, .. } => Some(InvOmicronZoneNic {
-                inv_collection_id,
-                id: nic.id,
-                name: Name::from(omicron_common::api::external::Name::from(
-                    nic.name.clone(),
-                )),
-                ip: IpNetwork::from(nic.ip),
-                mac: MacAddr::from(
-                    omicron_common::api::external::MacAddr::from(
-                        nic.mac.clone(),
+            | OmicronZoneType::Nexus { nic, .. } => {
+                // We do not bother storing the NIC's kind and associated id
+                // because it should be inferrable from the other information
+                // that we have.  Verify that here.
+                ensure!(
+                    matches!(
+                        nic.kind,
+                        nexus_types::inventory::NetworkInterfaceKind::Service(
+                            id
+                        ) if id == zone.id
                     ),
-                ),
-                subnet: IpNetwork::from(nic.subnet.clone()),
-                vni: SqlU32::from(nic.vni.0),
-                is_primary: nic.primary,
-                slot: SqlU8::from(nic.slot),
-            }),
-            _ => None,
+                    "expected zone's NIC kind to be \"service\" and the \
+                    id to match the zone's id ({})",
+                    zone.id
+                );
+
+                Ok(Some(InvOmicronZoneNic {
+                    inv_collection_id,
+                    id: nic.id,
+                    name: Name::from(
+                        omicron_common::api::external::Name::from(
+                            nic.name.clone(),
+                        ),
+                    ),
+                    ip: IpNetwork::from(nic.ip),
+                    mac: MacAddr::from(
+                        omicron_common::api::external::MacAddr::from(
+                            nic.mac.clone(),
+                        ),
+                    ),
+                    subnet: IpNetwork::from(nic.subnet.clone()),
+                    vni: SqlU32::from(nic.vni.0),
+                    is_primary: nic.primary,
+                    slot: SqlU8::from(nic.slot),
+                }))
+            }
+            _ => Ok(None),
         }
     }
 }

@@ -160,10 +160,13 @@ impl DataStore {
             .map(|found| {
                 found.zones.zones.iter().filter_map(|found_zone| {
                     InvOmicronZoneNic::new(collection_id, found_zone)
+                        .with_context(|| format!("zone {:?}", found_zone.id))
+                        .map_err(|e| Error::internal_error(&format!("{:#}", e)))
+                        .transpose()
                 })
             })
             .flatten()
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<InvOmicronZoneNic>, _>>()?;
 
         // This implementation inserts all records associated with the
         // collection in one transaction.  This is primarily for simplicity.  It
@@ -1553,7 +1556,7 @@ impl DataStore {
             .iter()
             .map(|inv_rot_page| inv_rot_page.sw_root_of_trust_page_id)
             .collect();
-        // Fetch the corresponing records.
+        // Fetch the corresponding records.
         let rot_pages_by_id: BTreeMap<_, _> = {
             use db::schema::sw_root_of_trust_page::dsl;
             dsl::sw_root_of_trust_page
@@ -1615,6 +1618,113 @@ impl DataStore {
             );
         }
 
+        // Now read the Omicron zones.
+        //
+        // In the first pass, we'll load the "inv_sled_omicron_zones" records.
+        // There's one of these per sled.  It does not contain the actual list
+        // of zones -- basically just collection metadata and the generation
+        // number.  We'll assemble these directly into the data structure we're
+        // trying to build, which maps sled ids to objects describing the zones
+        // found on each sled.
+        let mut omicron_zones: BTreeMap<_, _> = {
+            use db::schema::inv_sled_omicron_zones::dsl;
+            dsl::inv_sled_omicron_zones
+                .filter(dsl::inv_collection_id.eq(id))
+                .limit(sql_limit)
+                .select(InvSledOmicronZones::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
+                .into_iter()
+                .map(|sled_zones_config| {
+                    (
+                        sled_zones_config.sled_id,
+                        sled_zones_config.into_uninit_zones_found(),
+                    )
+                })
+                .collect()
+        };
+        limit_reached = limit_reached || omicron_zones.len() == usize_limit;
+
+        // Assemble a mutable map of all the NICs found, by NIC id.  As we
+        // match these up with the corresponding zone below, we'll remove items
+        // from this set.  That way we can tell if the same NIC was used twice
+        // or not used at all.
+        let mut omicron_zone_nics: BTreeMap<_, _> = {
+            use db::schema::inv_omicron_zone_nic::dsl;
+            dsl::inv_omicron_zone_nic
+                .filter(dsl::inv_collection_id.eq(id))
+                .limit(sql_limit)
+                .select(InvOmicronZoneNic::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
+                .into_iter()
+                .map(|found_zone_nic| (found_zone_nic.id, found_zone_nic))
+                .collect()
+        };
+        limit_reached = limit_reached || omicron_zone_nics.len() == usize_limit;
+
+        // Now load the actual list of zones from all sleds.
+        let omicron_zones_list = {
+            use db::schema::inv_omicron_zone::dsl;
+            dsl::inv_omicron_zone
+                .filter(dsl::inv_collection_id.eq(id))
+                .limit(sql_limit)
+                .select(InvOmicronZone::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?
+        };
+        limit_reached =
+            limit_reached || omicron_zones_list.len() == usize_limit;
+        for z in omicron_zones_list {
+            let nic_row = z
+                .nic_id
+                .map(|id| {
+                    // This error means that we found a row in inv_omicron_zone
+                    // that references a NIC by id but there's no corresponding
+                    // row in inv_omicron_zone_nic with that id.  This should be
+                    // impossible and reflects either a bug or database
+                    // corruption.
+                    omicron_zone_nics.remove(&id).ok_or_else(|| {
+                        Error::internal_error(&format!(
+                            "zone {:?}: expected to find NIC {:?}, but didn't",
+                            z.id, z.nic_id
+                        ))
+                    })
+                })
+                .transpose()?;
+            let map = omicron_zones.get_mut(&z.sled_id).ok_or_else(|| {
+                // This error means that we found a row in inv_omicron_zone with
+                // no associated record in inv_sled_omicron_zones.  This should
+                // be impossible and reflects either a bug or database
+                // corruption.
+                Error::internal_error(&format!(
+                    "zone {:?}: unknown sled: {:?}",
+                    z.id, z.sled_id
+                ))
+            })?;
+            let zone_id = z.id;
+            let zone = z
+                .into_omicron_zone_config(nic_row)
+                .with_context(|| {
+                    format!("zone {:?}: parse from database", zone_id)
+                })
+                .map_err(|e| {
+                    Error::internal_error(&format!("{:#}", e.to_string()))
+                })?;
+            map.zones.zones.push(zone);
+        }
+
+        bail_unless!(
+            omicron_zone_nics.is_empty(),
+            "found extra Omicron zone NICs: {:?}",
+            omicron_zone_nics.keys()
+        );
+
         Ok((
             Collection {
                 id,
@@ -1630,7 +1740,7 @@ impl DataStore {
                 cabooses_found,
                 rot_pages_found,
                 sled_agents,
-                omicron_zones: BTreeMap::new(), // XXX-dap
+                omicron_zones,
             },
             limit_reached,
         ))
