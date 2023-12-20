@@ -589,7 +589,7 @@ impl DataStore {
             .set((
                 dsl::parent_id.eq(Option::<Uuid>::None),
                 dsl::time_modified.eq(Utc::now()),
-                dsl::state.eq(IpAttachState::Attaching),
+                dsl::state.eq(IpAttachState::Detaching),
             ))
             .check_if_exists::<ExternalIp>(fip_id)
             .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
