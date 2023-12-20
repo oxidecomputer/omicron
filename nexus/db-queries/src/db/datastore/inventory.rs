@@ -142,7 +142,7 @@ impl DataStore {
         let omicron_zones = collection
             .omicron_zones
             .values()
-            .map(|found| {
+            .flat_map(|found| {
                 found.zones.zones.iter().map(|found_zone| {
                     InvOmicronZone::new(
                         collection_id,
@@ -152,12 +152,11 @@ impl DataStore {
                     .map_err(|e| Error::internal_error(&e.to_string()))
                 })
             })
-            .flatten()
             .collect::<Result<Vec<_>, Error>>()?;
         let omicron_zone_nics = collection
             .omicron_zones
             .values()
-            .map(|found| {
+            .flat_map(|found| {
                 found.zones.zones.iter().filter_map(|found_zone| {
                     InvOmicronZoneNic::new(collection_id, found_zone)
                         .with_context(|| format!("zone {:?}", found_zone.id))
@@ -165,7 +164,6 @@ impl DataStore {
                         .transpose()
                 })
             })
-            .flatten()
             .collect::<Result<Vec<InvOmicronZoneNic>, _>>()?;
 
         // This implementation inserts all records associated with the
