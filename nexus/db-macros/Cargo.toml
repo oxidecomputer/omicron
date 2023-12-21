@@ -18,4 +18,4 @@ syn = { workspace = true, features = ["extra-traits"] }
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
-rustfmt-wrapper.workspace = true
+prettyplease.workspace = true
