@@ -20,18 +20,18 @@ use std::sync::Arc;
 use strum::IntoEnumIterator;
 
 /// Collect all inventory data from an Oxide system
-pub struct Collector {
+pub struct Collector<'a> {
     log: slog::Logger,
     mgs_clients: Vec<Arc<gateway_client::Client>>,
-    sled_agent_lister: Box<dyn SledAgentEnumerator + Send>,
+    sled_agent_lister: &'a (dyn SledAgentEnumerator + Send + Sync),
     in_progress: CollectionBuilder,
 }
 
-impl Collector {
+impl<'a> Collector<'a> {
     pub fn new(
         creator: &str,
         mgs_clients: &[Arc<gateway_client::Client>],
-        sled_agent_lister: Box<dyn SledAgentEnumerator + Send>,
+        sled_agent_lister: &'a (dyn SledAgentEnumerator + Send + Sync),
         log: slog::Logger,
     ) -> Self {
         Collector {
@@ -481,10 +481,11 @@ mod test {
         let mgs_url = format!("http://{}/", gwtestctx.client.bind_address);
         let mgs_client =
             Arc::new(gateway_client::Client::new(&mgs_url, log.clone()));
+        let sled_enum = StaticSledAgentEnumerator::empty();
         let collector = Collector::new(
             "test-suite",
             &[mgs_client],
-            StaticSledAgentEnumerator::empty(), // XXX-dap
+            &sled_enum, // XXX-dap
             log.clone(),
         );
         let collection = collector
@@ -524,10 +525,11 @@ mod test {
                 Arc::new(client)
             })
             .collect::<Vec<_>>();
+        let sled_enum = StaticSledAgentEnumerator::empty();
         let collector = Collector::new(
             "test-suite",
             &mgs_clients,
-            StaticSledAgentEnumerator::empty(), // XXX-dap
+            &sled_enum, // XXX-dap
             log.clone(),
         );
         let collection = collector
@@ -567,10 +569,11 @@ mod test {
             Arc::new(client)
         };
         let mgs_clients = &[bad_client, real_client];
+        let sled_enum = StaticSledAgentEnumerator::empty();
         let collector = Collector::new(
             "test-suite",
             mgs_clients,
-            StaticSledAgentEnumerator::empty(), // XXX-dap
+            &sled_enum, // XXX-dap
             log.clone(),
         );
         let collection = collector

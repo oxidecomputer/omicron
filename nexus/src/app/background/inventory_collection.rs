@@ -14,7 +14,6 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
 use nexus_inventory::InventoryError;
-use nexus_inventory::StaticSledAgentEnumerator;
 use nexus_types::identity::Asset;
 use nexus_types::inventory::Collection;
 use serde_json::json;
@@ -128,11 +127,15 @@ async fn inventory_activate(
         })
         .collect::<Vec<_>>();
 
+    // Create an enumerator to find sled agents.
+    let sled_enum =
+        DbSledAgentEnumerator { opctx, datastore, log: opctx.log.clone() };
+
     // Run a collection.
     let inventory = nexus_inventory::Collector::new(
         creator,
         &mgs_clients,
-        StaticSledAgentEnumerator::empty(), // XXX-dap
+        &sled_enum,
         opctx.log.clone(),
     );
     let collection =

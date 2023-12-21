@@ -27,13 +27,11 @@ pub struct StaticSledAgentEnumerator {
 impl StaticSledAgentEnumerator {
     pub fn new(
         iter: impl IntoIterator<Item = Arc<sled_agent_client::Client>>,
-    ) -> Box<dyn SledAgentEnumerator + Send> {
-        Box::new(StaticSledAgentEnumerator {
-            agents: iter.into_iter().collect(),
-        })
+    ) -> Self {
+        StaticSledAgentEnumerator { agents: iter.into_iter().collect() }
     }
 
-    pub fn empty() -> Box<dyn SledAgentEnumerator + Send> {
+    pub fn empty() -> Self {
         Self::new(std::iter::empty())
     }
 }
