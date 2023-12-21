@@ -10080,7 +10080,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "zone-networking-cli"
+name = "zone-network-setup"
 version = "0.1.0"
 dependencies = [
  "anyhow",

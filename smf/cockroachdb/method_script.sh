@@ -9,11 +9,6 @@ set -o pipefail
 LISTEN_ADDR="$(svcprop -c -p config/listen_addr "${SMF_FMRI}")"
 LISTEN_PORT="$(svcprop -c -p config/listen_port "${SMF_FMRI}")"
 DATASTORE="$(svcprop -c -p config/store "${SMF_FMRI}")"
-DATALINK="$(svcprop -c -p config/datalink "${SMF_FMRI}")"
-GATEWAY="$(svcprop -c -p config/gateway "${SMF_FMRI}")"
-
-# TODO: Removeme once the zone networking setup service is functional
-/opt/oxide/zone-networking-cli/bin/zone-networking -d $DATALINK -l $LISTEN_ADDR -g $GATEWAY
 
 # We need to tell CockroachDB the DNS names or IP addresses of the other nodes
 # in the cluster.  Look these up in internal DNS.  Per the recommendations in

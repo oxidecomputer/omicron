@@ -1,22 +1,27 @@
 <?xml version="1.0"?>
 <!DOCTYPE service_bundle SYSTEM "/usr/share/lib/xml/dtd/service_bundle.dtd.1">
 
-<service_bundle type='manifest' name='zone_network_setup'>
+<service_bundle type='manifest' name='zone-network-setup'>
 
-<service name='oxide/zone_network_setup' type='service' version='1'>
+<service name='oxide/zone-network-setup' type='service' version='1'>
   <create_default_instance enabled='true' />
 
   <!-- Run after the operating system's svc:/network/physical service is done. -->
-  <dependency name='network' grouping='require_all' restart_on='none'
+  <dependency name='physical' grouping='require_all' restart_on='none'
     type='service'>
-  <service_fmri value='svc:/network/physical' />
+  <service_fmri value='svc:/network/physical:default' />
   </dependency>
 
-  <!-- TODO: Make svc:/milestone/network depend on this service -->
+  <dependency name='multi_user' grouping='require_all' restart_on='none'
+    type='service'>
+  <service_fmri value='svc:/milestone/multi-user:default' />
+  </dependency>
+
+  <!-- TODO: Make svc:/milestone/network depend on this service? -->
 
 <!--TODO: Do the actual thing we want to do-->
   <exec_method type='method' name='start'
-    exec='/opt/oxide/lib/svc/manifest/zone_network_setup.sh'
+    exec='/opt/oxide/lib/svc/manifest/zone-network-setup.sh'
     timeout_seconds='0' />
   
   <!-- 
