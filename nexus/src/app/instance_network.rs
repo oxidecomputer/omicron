@@ -7,6 +7,7 @@
 use crate::app::sagas::retry_until_known_result;
 use ipnetwork::IpNetwork;
 use ipnetwork::Ipv6Network;
+use nexus_db_model::IpAttachState;
 use nexus_db_model::Ipv4NatValues;
 use nexus_db_model::Vni as DbVni;
 use nexus_db_queries::authz;
@@ -341,17 +342,26 @@ impl super::Nexus {
             .instance_lookup_external_ips(&opctx, instance_id)
             .await?;
 
-        let ips_of_interest = if let Some(wanted_id) = ip_filter {
+        let (ips_of_interest, must_all_be_attached) = if let Some(wanted_id) = ip_filter {
             if let Some(ip) = ips.iter().find(|v| v.id == wanted_id) {
-                std::slice::from_ref(ip)
+                (std::slice::from_ref(ip), false)
             } else {
                 return Err(Error::internal_error(&format!(
                     "failed to find external ip address with id: {wanted_id}",
                 )));
             }
         } else {
-            &ips[..]
+            (&ips[..], true)
         };
+
+        // This is performed so that an IP attach/detach will block the
+        // instance_start saga. Return service unavailable to indicate
+        // the request is retryable.
+        if ips_of_interest.iter().find(|ip| must_all_be_attached && ip.state != IpAttachState::Attached).is_some() {
+            return Err(Error::ServiceUnavailable { 
+                internal_message: "cannot push all DPD state: IP attach/detach in progress".into(),
+            });
+        }
 
         let sled_address =
             Ipv6Net(Ipv6Network::new(*sled_ip_address.ip(), 128).unwrap());
