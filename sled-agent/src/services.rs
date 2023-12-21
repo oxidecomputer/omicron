@@ -1378,6 +1378,25 @@ impl ServiceManager {
             .add_instance(ServiceInstanceBuilder::new("default")))
     }
 
+    async fn zone_network_setup_install(
+        info: &SledAgentInfo,
+        zone: &InstalledZone,
+        listen_addr: &String,
+    ) -> Result<ServiceBuilder, Error> {
+        let datalink = zone.get_control_vnic_name();
+        let gateway = &info.underlay_address.to_string();
+
+        let mut config_builder = PropertyGroupBuilder::new("config");
+        config_builder = config_builder
+            .add_property("datalink", "astring", datalink)
+            .add_property("gateway", "astring", gateway)
+            .add_property("listen_addr", "astring", listen_addr);
+
+        Ok(ServiceBuilder::new("oxide/zone-network-setup")
+            .add_property_group(config_builder)
+            .add_instance(ServiceInstanceBuilder::new("default")))
+    }
+
     async fn initialize_zone(
         &self,
         request: ZoneArgs<'_>,
@@ -1470,55 +1489,6 @@ impl ServiceManager {
             .with_limit_priv(limit_priv)
             .install()
             .await?;
-
-        // Only for self assembling zones for now. Once all zones are self assembling
-        // There will be no need to apply selectively.
-        //
-        // TODO: Extract this into it's own function and pass only if
-        // it matches each of the self assembling zones
-        // NB: Only adding cockroach for now as it's just to test it out
-        #[allow(clippy::match_single_binding)]
-        match &request {
-            ZoneArgs::Omicron(OmicronZoneConfigLocal {
-                zone:
-                    OmicronZoneConfig {
-                        zone_type: OmicronZoneType::CockroachDb { .. },
-                        underlay_address,
-                        ..
-                    },
-                ..
-            }) => {
-                let Some(info) = self.inner.sled_info.get() else {
-                    return Err(Error::SledAgentNotReady);
-                };
-
-                let datalink = installed_zone.get_control_vnic_name();
-                let gateway = &info.underlay_address.to_string();
-                let listen_addr = &underlay_address.to_string();
-
-                let mut config_builder = PropertyGroupBuilder::new("config");
-                config_builder = config_builder
-                    .add_property("datalink", "astring", datalink)
-                    .add_property("gateway", "astring", gateway)
-                    .add_property("listen_addr", "astring", listen_addr);
-                let nw_setup = ServiceBuilder::new("oxide/zone-network-setup")
-                    .add_property_group(config_builder)
-                    .add_instance(ServiceInstanceBuilder::new("default"));
-                // TODO: I'm unsure about the name here, should it be something other than "omicron"?
-                let profile =
-                    ProfileBuilder::new("omicron").add_service(nw_setup);
-                profile
-                    .add_to_zone(&self.inner.log, &installed_zone)
-                    .await
-                    .map_err(|err| {
-                        Error::io(
-                            "Failed to setup zone-network-setup profile",
-                            err,
-                        )
-                    })?;
-            }
-            _ => {}
-        }
 
         // TODO(https://github.com/oxidecomputer/omicron/issues/1898):
         //
@@ -1631,9 +1601,6 @@ impl ServiceManager {
                     return Err(Error::SledAgentNotReady);
                 };
 
-                let dns_service = Self::dns_install(info).await?;
-
-                // Configure the CockroachDB service.
                 let address = SocketAddr::new(
                     IpAddr::V6(*underlay_address),
                     COCKROACH_PORT,
@@ -1641,6 +1608,16 @@ impl ServiceManager {
                 let listen_addr = &address.ip().to_string();
                 let listen_port = &address.port().to_string();
 
+                let nw_setup_service = Self::zone_network_setup_install(
+                    info,
+                    &installed_zone,
+                    listen_addr,
+                )
+                .await?;
+
+                let dns_service = Self::dns_install(info).await?;
+
+                // Configure the CockroachDB service.
                 let cockroachdb_config = PropertyGroupBuilder::new("config")
                     .add_property("listen_addr", "astring", listen_addr)
                     .add_property("listen_port", "astring", listen_port)
@@ -1652,6 +1629,7 @@ impl ServiceManager {
                     );
 
                 let profile = ProfileBuilder::new("omicron")
+                    .add_service(nw_setup_service)
                     .add_service(cockroachdb_service)
                     .add_service(dns_service);
                 profile
