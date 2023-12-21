@@ -16,6 +16,9 @@ use serde::Serialize;
 use steno::ActionError;
 use uuid::Uuid;
 
+// TODO: explain in-depth here how locking works in practice for
+// attach and detach wrt create/stop/start.
+
 // rough sequence of evts:
 // - take temp ownership of instance while interacting w/ sled agent
 //  -> mark instance migration id as Some(0) if None
@@ -161,6 +164,7 @@ async fn siia_begin_attach_ip(
                     &opctx,
                     &authz_fip,
                     params.instance.id(),
+                    false,
                 )
                 .await
                 .map_err(ActionError::action_failed)
@@ -348,6 +352,8 @@ async fn siia_migration_unlock(
         )
         .await
         .map_err(ActionError::action_failed)?;
+
+    // TODO: explain why it is safe to not back out on state change.
 
     new_ip.try_into().map_err(ActionError::action_failed)
 }

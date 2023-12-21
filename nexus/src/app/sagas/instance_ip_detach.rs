@@ -140,7 +140,11 @@ async fn siid_begin_detach_ip(
                 .ok_or_else(|| ActionError::action_failed(Error::invalid_request("instance does not have an attached ephemeral IP address")))?;
 
             datastore
-                .begin_deallocate_ephemeral_ip(&opctx, eph_ip.id)
+                .begin_deallocate_ephemeral_ip(
+                    &opctx,
+                    eph_ip.id,
+                    params.instance.id(),
+                )
                 .await
                 .map_err(ActionError::action_failed)
         }
@@ -158,6 +162,7 @@ async fn siid_begin_detach_ip(
                     &opctx,
                     &authz_fip,
                     params.instance.id(),
+                    false,
                 )
                 .await
                 .map_err(ActionError::action_failed)

@@ -1745,9 +1745,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.external_ip (
         (kind = 'ephemeral' AND is_service = FALSE) OR (kind != 'ephemeral')
     ),
 
-    /* parent_id must be null if detached, non-null if not detached */
+    /*
+     * (Not detached) => non-null parent_id.
+     * This is not a two-way implication because SNAT/Ephemeral IPs
+     * cannot have a null parent_id.
+     */
     CONSTRAINT detached_null_parent_id CHECK (
-        (state = 'detached') != (parent_id IS NOT NULL)
+        (state = 'detached') OR (parent_id IS NOT NULL)
     )
 );
 

@@ -223,7 +223,7 @@ impl NexusSaga for SagaInstanceCreate {
                 SagaName::new(&format!("instance-create-external-ip{i}"));
             let mut subsaga_builder = DagBuilder::new(subsaga_name);
             subsaga_builder.append(Node::action(
-                "output",
+                format!("external-ip-{i}").as_str(),
                 format!("CreateExternalIp{i}").as_str(),
                 CREATE_EXTERNAL_IP.as_ref(),
             ));
@@ -615,9 +615,6 @@ async fn sic_allocate_instance_external_ip(
     );
     let instance_id = repeat_saga_params.instance_id;
 
-    // We need two things here:
-    // - permanently exfil data
-
     // We perform the 'complete_op' in this saga stage because our IPs are
     // created in the attaching state, and we need to move them to attached.
     // We *can* do so because the `creating` state will block the IP attach/detach
@@ -652,7 +649,7 @@ async fn sic_allocate_instance_external_ip(
                 .map_err(ActionError::action_failed)?;
 
             datastore
-                .floating_ip_begin_attach(&opctx, &authz_fip, instance_id)
+                .floating_ip_begin_attach(&opctx, &authz_fip, instance_id, true)
                 .await
                 .map_err(ActionError::action_failed)?
         }
@@ -688,7 +685,7 @@ async fn sic_allocate_instance_external_ip_undo(
     // We store and lookup `ExternalIp` so that we can do the detach
     // and/or deallocate without double name resolution.
     let new_ip = sagactx
-        .lookup::<Option<ExternalIp>>(&format!("external_ip{ip_index}"))?;
+        .lookup::<Option<ExternalIp>>(&format!("external-ip-{ip_index}"))?;
 
     let Some(ip) = new_ip else {
         return Ok(());
@@ -714,6 +711,7 @@ async fn sic_allocate_instance_external_ip_undo(
                     &opctx,
                     &authz_fip,
                     repeat_saga_params.instance_id,
+                    true,
                 )
                 .await?;
 
