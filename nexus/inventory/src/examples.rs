@@ -438,13 +438,12 @@ pub fn rot_page(unique: &str) -> RotPage {
 pub fn sled_agent(
     sled_id: Uuid,
     baseboard: sled_agent_client::types::Baseboard,
-    role: sled_agent_client::types::SledRole,
+    sled_role: sled_agent_client::types::SledRole,
 ) -> sled_agent_client::types::Inventory {
     sled_agent_client::types::Inventory {
         baseboard,
         reservoir_size: sled_agent_client::types::ByteCount::from(1024),
-        // XXX-dap rename to sled_role
-        role,
+        sled_role,
         sled_agent_address: "[::1]:56792".parse().unwrap(),
         sled_id,
         usable_hardware_threads: 10,

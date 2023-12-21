@@ -821,7 +821,6 @@ pub struct CleanupContextUpdate {
 // Our SledRole and Baseboard types do not have to be identical to the Nexus
 // ones, but they generally should be, and this avoids duplication.  If it
 // becomes easier to maintain a separate copy, we should do that.
-// XXX-dap review the API spec changes here to see if they're ok
 pub type SledRole = nexus_client::types::SledRole;
 
 /// Identity and basic status information about this sled agent
@@ -829,7 +828,7 @@ pub type SledRole = nexus_client::types::SledRole;
 pub struct Inventory {
     pub sled_id: Uuid,
     pub sled_agent_address: SocketAddrV6,
-    pub role: SledRole,
+    pub sled_role: SledRole,
     pub baseboard: Baseboard,
     pub usable_hardware_threads: u32,
     pub usable_physical_ram: ByteCount,

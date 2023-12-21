@@ -4950,15 +4950,15 @@
           "reservoir_size": {
             "$ref": "#/components/schemas/ByteCount"
           },
-          "role": {
-            "$ref": "#/components/schemas/SledRole"
-          },
           "sled_agent_address": {
             "type": "string"
           },
           "sled_id": {
             "type": "string",
             "format": "uuid"
+          },
+          "sled_role": {
+            "$ref": "#/components/schemas/SledRole"
           },
           "usable_hardware_threads": {
             "type": "integer",
@@ -4972,9 +4972,9 @@
         "required": [
           "baseboard",
           "reservoir_size",
-          "role",
           "sled_agent_address",
           "sled_id",
+          "sled_role",
           "usable_hardware_threads",
           "usable_physical_ram"
         ]

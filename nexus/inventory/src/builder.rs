@@ -452,7 +452,7 @@ impl CollectionBuilder {
         let sled = SledAgent {
             source: source.to_string(),
             sled_agent_address,
-            sled_role: inventory.role,
+            sled_role: inventory.sled_role,
             baseboard_id,
             usable_hardware_threads: inventory.usable_hardware_threads,
             usable_physical_ram: ByteCount::from(inventory.usable_physical_ram),

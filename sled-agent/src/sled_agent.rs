@@ -1100,7 +1100,7 @@ impl SledAgent {
         let usable_physical_ram =
             self.inner.hardware.usable_physical_ram_bytes();
         let reservoir_size = self.inner.instances.reservoir_size();
-        let role = if is_scrimlet {
+        let sled_role = if is_scrimlet {
             crate::params::SledRole::Scrimlet
         } else {
             crate::params::SledRole::Gimlet
@@ -1109,7 +1109,7 @@ impl SledAgent {
         Ok(Inventory {
             sled_id,
             sled_agent_address,
-            role,
+            sled_role,
             baseboard,
             usable_hardware_threads,
             usable_physical_ram: ByteCount::try_from(usable_physical_ram)?,
