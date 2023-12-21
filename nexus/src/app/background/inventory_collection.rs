@@ -128,8 +128,7 @@ async fn inventory_activate(
         .collect::<Vec<_>>();
 
     // Create an enumerator to find sled agents.
-    let sled_enum =
-        DbSledAgentEnumerator { opctx, datastore, log: opctx.log.clone() };
+    let sled_enum = DbSledAgentEnumerator { opctx, datastore };
 
     // Run a collection.
     let inventory = nexus_inventory::Collector::new(
@@ -157,16 +156,12 @@ async fn inventory_activate(
 struct DbSledAgentEnumerator<'a> {
     opctx: &'a OpContext,
     datastore: &'a DataStore,
-    log: slog::Logger,
 }
 
 impl<'a> nexus_inventory::SledAgentEnumerator for DbSledAgentEnumerator<'a> {
     fn list_sled_agents(
         &self,
-    ) -> BoxFuture<
-        '_,
-        Result<Vec<Arc<sled_agent_client::Client>>, InventoryError>,
-    > {
+    ) -> BoxFuture<'_, Result<Vec<String>, InventoryError>> {
         async {
             let mut all_sleds = Vec::new();
             let mut paginator =
@@ -181,21 +176,11 @@ impl<'a> nexus_inventory::SledAgentEnumerator for DbSledAgentEnumerator<'a> {
                     &records_batch,
                     &|s: &nexus_db_model::Sled| s.id(),
                 );
-                all_sleds.extend(records_batch.into_iter().map(|sled| {
-                    let log =
-                        self.log.new(o!("SledAgent" => sled.id().to_string()));
-                    let dur = std::time::Duration::from_secs(60); // XXX-dap
-                    let client = reqwest::ClientBuilder::new()
-                        .connect_timeout(dur)
-                        .timeout(dur)
-                        .build()
-                        .unwrap();
-                    Arc::new(sled_agent_client::Client::new_with_client(
-                        &format!("http://{}", sled.address()),
-                        client,
-                        log,
-                    ))
-                }));
+                all_sleds.extend(
+                    records_batch
+                        .into_iter()
+                        .map(|sled| format!("http://{}", sled.address())),
+                );
             }
 
             Ok(all_sleds)

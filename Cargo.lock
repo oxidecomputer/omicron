@@ -4193,6 +4193,7 @@ dependencies = [
  "omicron-common",
  "omicron-workspace-hack",
  "regex",
+ "reqwest",
  "serde_json",
  "sled-agent-client",
  "slog",

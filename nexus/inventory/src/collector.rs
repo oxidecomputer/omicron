@@ -15,9 +15,14 @@ use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageWhich;
+use slog::o;
 use slog::{debug, error};
 use std::sync::Arc;
+use std::time::Duration;
 use strum::IntoEnumIterator;
+
+/// connection and request timeout used for Sled Agent HTTP client
+const SLED_AGENT_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Collect all inventory data from an Oxide system
 pub struct Collector<'a> {
@@ -291,7 +296,7 @@ impl<'a> Collector<'a> {
     /// Collect inventory from all sled agent instances
     async fn collect_all_sled_agents(&mut self) {
         // XXX-dap consider doing this with a little bit of concurrency
-        let clients = match self.sled_agent_lister.list_sled_agents().await {
+        let urls = match self.sled_agent_lister.list_sled_agents().await {
             Err(error) => {
                 self.in_progress.found_error(error);
                 return;
@@ -299,7 +304,19 @@ impl<'a> Collector<'a> {
             Ok(clients) => clients,
         };
 
-        for client in clients {
+        for url in urls {
+            let log = self.log.new(o!("SledAgent" => url.clone()));
+            let reqwest_client = reqwest::ClientBuilder::new()
+                .connect_timeout(SLED_AGENT_TIMEOUT)
+                .timeout(SLED_AGENT_TIMEOUT)
+                .build()
+                .unwrap();
+            let client = Arc::new(sled_agent_client::Client::new_with_client(
+                &url,
+                reqwest_client,
+                log,
+            ));
+
             if let Err(error) = self.collect_one_sled_agent(&client).await {
                 error!(
                     &self.log,

@@ -5,29 +5,24 @@
 use crate::InventoryError;
 use futures::future::BoxFuture;
 use futures::FutureExt;
-use std::sync::Arc;
 
 /// Describes how to find the list of sled agents to collect from
 pub trait SledAgentEnumerator {
+    /// Returns a list of URLs for Sled Agent HTTP endpoints
     fn list_sled_agents(
         &self,
-    ) -> BoxFuture<
-        '_,
-        Result<Vec<Arc<sled_agent_client::Client>>, InventoryError>,
-    >;
+    ) -> BoxFuture<'_, Result<Vec<String>, InventoryError>>;
 }
 
 /// Used to provide an explicit list of sled agents to a `Collector`
 ///
 /// This is mainly used for testing.
 pub struct StaticSledAgentEnumerator {
-    agents: Vec<Arc<sled_agent_client::Client>>,
+    agents: Vec<String>,
 }
 
 impl StaticSledAgentEnumerator {
-    pub fn new(
-        iter: impl IntoIterator<Item = Arc<sled_agent_client::Client>>,
-    ) -> Self {
+    pub fn new(iter: impl IntoIterator<Item = String>) -> Self {
         StaticSledAgentEnumerator { agents: iter.into_iter().collect() }
     }
 
@@ -39,10 +34,7 @@ impl StaticSledAgentEnumerator {
 impl SledAgentEnumerator for StaticSledAgentEnumerator {
     fn list_sled_agents(
         &self,
-    ) -> BoxFuture<
-        '_,
-        Result<Vec<Arc<sled_agent_client::Client>>, InventoryError>,
-    > {
+    ) -> BoxFuture<'_, Result<Vec<String>, InventoryError>> {
         futures::future::ready(Ok(self.agents.clone())).boxed()
     }
 }
