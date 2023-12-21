@@ -365,8 +365,6 @@ pub struct OmicronZoneConfigLocal {
     pub root: Utf8PathBuf,
 }
 
-// TODO: I'll need something similar to this for the nw service
-
 /// Describes how we want a switch zone to be configured
 ///
 /// This is analogous to `OmicronZoneConfig`, but for the switch zone (which is
@@ -1508,18 +1506,19 @@ impl ServiceManager {
                     return Err(Error::SledAgentNotReady);
                 };
 
-                let dns_service = Self::dns_install(info).await?;
-
-                let datalink = installed_zone.get_control_vnic_name();
-                let gateway = &info.underlay_address.to_string();
                 let listen_addr = &underlay_address.to_string();
                 let listen_port = &CLICKHOUSE_PORT.to_string();
 
+                let nw_setup_service = Self::zone_network_setup_install(
+                    info,
+                    &installed_zone,
+                    listen_addr,
+                )
+                .await?;
+
+                let dns_service = Self::dns_install(info).await?;
+
                 let config = PropertyGroupBuilder::new("config")
-                    // TODO: Once the nw setup service is running, we don't need to pass datalink or gateway
-                    // to the individual zones
-                    .add_property("datalink", "astring", datalink)
-                    .add_property("gateway", "astring", gateway)
                     .add_property("listen_addr", "astring", listen_addr)
                     .add_property("listen_port", "astring", listen_port)
                     .add_property("store", "astring", "/data");
@@ -1530,6 +1529,7 @@ impl ServiceManager {
                     );
 
                 let profile = ProfileBuilder::new("omicron")
+                    .add_service(nw_setup_service)
                     .add_service(clickhouse_service)
                     .add_service(dns_service);
                 profile
@@ -1554,16 +1554,19 @@ impl ServiceManager {
                     return Err(Error::SledAgentNotReady);
                 };
 
-                let dns_service = Self::dns_install(info).await?;
-
-                let datalink = installed_zone.get_control_vnic_name();
-                let gateway = &info.underlay_address.to_string();
                 let listen_addr = &underlay_address.to_string();
                 let listen_port = &CLICKHOUSE_KEEPER_PORT.to_string();
 
+                let nw_setup_service = Self::zone_network_setup_install(
+                    info,
+                    &installed_zone,
+                    listen_addr,
+                )
+                .await?;
+
+                let dns_service = Self::dns_install(info).await?;
+
                 let config = PropertyGroupBuilder::new("config")
-                    .add_property("datalink", "astring", datalink)
-                    .add_property("gateway", "astring", gateway)
                     .add_property("listen_addr", "astring", listen_addr)
                     .add_property("listen_port", "astring", listen_port)
                     .add_property("store", "astring", "/data");
@@ -1574,6 +1577,7 @@ impl ServiceManager {
                                 .add_property_group(config),
                         );
                 let profile = ProfileBuilder::new("omicron")
+                    .add_service(nw_setup_service)
                     .add_service(clickhouse_keeper_service)
                     .add_service(dns_service);
                 profile

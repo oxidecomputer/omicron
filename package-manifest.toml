@@ -119,7 +119,7 @@ output.type = "zone"
 service_name = "clickhouse"
 only_for_targets.image = "standard"
 source.type = "composite"
-source.packages = [ "clickhouse_svc.tar.gz", "internal-dns-cli.tar.gz" ]
+source.packages = [ "clickhouse_svc.tar.gz", "internal-dns-cli.tar.gz", "zone-network-setup.tar.gz" ]
 output.type = "zone"
 
 [package.clickhouse_svc]
@@ -140,7 +140,7 @@ setup_hint = "Run `./tools/ci_download_clickhouse` to download the necessary bin
 service_name = "clickhouse_keeper"
 only_for_targets.image = "standard"
 source.type = "composite"
-source.packages = [ "clickhouse_keeper_svc.tar.gz", "internal-dns-cli.tar.gz" ]
+source.packages = [ "clickhouse_keeper_svc.tar.gz", "internal-dns-cli.tar.gz", "zone-network-setup.tar.gz" ]
 output.type = "zone"
 
 [package.clickhouse_keeper_svc]
