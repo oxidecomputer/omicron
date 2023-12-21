@@ -20,6 +20,9 @@ use serde_json::json;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
+/// How many rows to request in each paginated database query
+const DB_PAGE_SIZE: u32 = 1024;
+
 /// Background task that reads inventory for the rack
 pub struct InventoryCollector {
     datastore: Arc<DataStore>,
@@ -128,7 +131,8 @@ async fn inventory_activate(
         .collect::<Vec<_>>();
 
     // Create an enumerator to find sled agents.
-    let sled_enum = DbSledAgentEnumerator { opctx, datastore };
+    let page_size = NonZeroU32::new(DB_PAGE_SIZE).unwrap();
+    let sled_enum = DbSledAgentEnumerator { opctx, datastore, page_size };
 
     // Run a collection.
     let inventory = nexus_inventory::Collector::new(
@@ -156,6 +160,7 @@ async fn inventory_activate(
 struct DbSledAgentEnumerator<'a> {
     opctx: &'a OpContext,
     datastore: &'a DataStore,
+    page_size: NonZeroU32,
 }
 
 impl<'a> nexus_inventory::SledAgentEnumerator for DbSledAgentEnumerator<'a> {
@@ -164,8 +169,7 @@ impl<'a> nexus_inventory::SledAgentEnumerator for DbSledAgentEnumerator<'a> {
     ) -> BoxFuture<'_, Result<Vec<String>, InventoryError>> {
         async {
             let mut all_sleds = Vec::new();
-            let mut paginator =
-                Paginator::new(NonZeroU32::new(10).unwrap() /* XXX-dap */);
+            let mut paginator = Paginator::new(self.page_size);
             while let Some(p) = paginator.next() {
                 let records_batch = self
                     .datastore

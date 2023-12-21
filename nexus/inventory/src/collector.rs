@@ -295,7 +295,6 @@ impl<'a> Collector<'a> {
 
     /// Collect inventory from all sled agent instances
     async fn collect_all_sled_agents(&mut self) {
-        // XXX-dap consider doing this with a little bit of concurrency
         let urls = match self.sled_agent_lister.list_sled_agents().await {
             Err(error) => {
                 self.in_progress.found_error(error);
