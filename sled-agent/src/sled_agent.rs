@@ -42,7 +42,7 @@ use illumos_utils::zone::ZONE_PREFIX;
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
 };
-use omicron_common::api::external::{ByteCount, Vni};
+use omicron_common::api::external::{ByteCount, ByteCountRangeError, Vni};
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::ProducerKind;
 use omicron_common::api::internal::nexus::{
@@ -211,6 +211,35 @@ impl From<Error> for dropshot::HttpError {
             },
             e => HttpError::for_internal_error(e.to_string()),
         }
+    }
+}
+
+/// Error returned by `SledAgent::inventory()`
+#[derive(thiserror::Error, Debug)]
+pub enum InventoryError {
+    // This error should be impossible because ByteCount supports values from
+    // [0, i64::MAX] and we don't have anything with that many bytes in the
+    // system.
+    #[error(transparent)]
+    BadByteCount(#[from] ByteCountRangeError),
+}
+
+impl From<InventoryError> for omicron_common::api::external::Error {
+    fn from(inventory_error: InventoryError) -> Self {
+        match inventory_error {
+            e @ InventoryError::BadByteCount(..) => {
+                omicron_common::api::external::Error::internal_error(&format!(
+                    "{:#}",
+                    e
+                ))
+            }
+        }
+    }
+}
+
+impl From<InventoryError> for dropshot::HttpError {
+    fn from(error: InventoryError) -> Self {
+        Self::from(omicron_common::api::external::Error::from(error))
     }
 }
 
@@ -1061,7 +1090,7 @@ impl SledAgent {
     ///
     /// This is basically a GET version of the information we push to Nexus on
     /// startup.
-    pub(crate) fn inventory(&self) -> Inventory {
+    pub(crate) fn inventory(&self) -> Result<Inventory, InventoryError> {
         let sled_id = self.inner.id;
         let sled_agent_address = self.inner.sled_address();
         let is_scrimlet = self.inner.hardware.is_scrimlet();
@@ -1077,17 +1106,15 @@ impl SledAgent {
             crate::params::SledRole::Gimlet
         };
 
-        Inventory {
+        Ok(Inventory {
             sled_id,
             sled_agent_address,
             role,
             baseboard,
             usable_hardware_threads,
-            // XXX-dap remove unwrap
-            usable_physical_ram: ByteCount::try_from(usable_physical_ram)
-                .unwrap(),
+            usable_physical_ram: ByteCount::try_from(usable_physical_ram)?,
             reservoir_size,
-        }
+        })
     }
 }
 

@@ -936,5 +936,5 @@ async fn inventory(
     request_context: RequestContext<SledAgent>,
 ) -> Result<HttpResponseOk<Inventory>, HttpError> {
     let sa = request_context.context();
-    Ok(HttpResponseOk(sa.inventory()))
+    Ok(HttpResponseOk(sa.inventory()?))
 }
