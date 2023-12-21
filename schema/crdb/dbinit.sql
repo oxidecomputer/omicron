@@ -3023,7 +3023,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone (
     PRIMARY KEY (inv_collection_id, id)
 );
 
-CREATE TABLE inv_omicron_zone_nic (
+CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone_nic (
     inv_collection_id UUID NOT NULL,
     id UUID NOT NULL,
     name TEXT NOT NULL,
