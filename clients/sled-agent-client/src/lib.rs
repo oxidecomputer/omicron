@@ -33,9 +33,9 @@ progenitor::generate_api!(
     }
 );
 
-// XXX-dap could derive this if there were a way to do it on a per-type basis.
-// But we can't impl this for all types in sled-agent-client (there are some f32
-// and f64 in the API).
+// We cannot easily configure progenitor to derive `Eq` on all the client-
+// generated types because some have floats and other types that can't impl
+// `Eq`.  We impl it explicitly for a few types on which we need it.
 impl Eq for types::OmicronZonesConfig {}
 impl Eq for types::OmicronZoneConfig {}
 impl Eq for types::OmicronZoneType {}

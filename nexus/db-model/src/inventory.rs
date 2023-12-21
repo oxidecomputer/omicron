@@ -942,20 +942,7 @@ impl InvOmicronZone {
         let nic = match (self.nic_id, nic_row) {
             (Some(expected_id), Some(nic_row)) => {
                 ensure!(expected_id == nic_row.id, "caller provided wrong NIC");
-                // XXX-dap move to InvOmicronZoneNic method
-                Ok(nexus_types::inventory::NetworkInterface {
-                    id: nic_row.id,
-                    ip: nic_row.ip.ip(),
-                    kind: nexus_types::inventory::NetworkInterfaceKind::Service(
-                        self.id,
-                    ),
-                    mac: (*nic_row.mac).into(),
-                    name: (&(*nic_row.name)).into(),
-                    primary: nic_row.is_primary,
-                    slot: *nic_row.slot,
-                    vni: nexus_types::inventory::Vni::from(*nic_row.vni),
-                    subnet: nic_row.subnet.into(),
-                })
+                Ok(nic_row.into_network_interface_for_zone(self.id))
             }
             (None, None) => Err(anyhow!(
                 "expected zone to have an associated NIC, but it doesn't"
@@ -1154,6 +1141,25 @@ impl InvOmicronZoneNic {
                 }))
             }
             _ => Ok(None),
+        }
+    }
+
+    pub fn into_network_interface_for_zone(
+        self,
+        zone_id: Uuid,
+    ) -> nexus_types::inventory::NetworkInterface {
+        nexus_types::inventory::NetworkInterface {
+            id: zone_id,
+            ip: self.ip.ip(),
+            kind: nexus_types::inventory::NetworkInterfaceKind::Service(
+                self.id,
+            ),
+            mac: (*self.mac).into(),
+            name: (&(*self.name)).into(),
+            primary: self.is_primary,
+            slot: *self.slot,
+            vni: nexus_types::inventory::Vni::from(*self.vni),
+            subnet: self.subnet.into(),
         }
     }
 }
