@@ -254,7 +254,7 @@ impl From<&omicron_common::api::external::Name> for types::Name {
 
 impl From<types::Name> for omicron_common::api::external::Name {
     fn from(s: types::Name) -> Self {
-        Self::try_from(s.clone()).unwrap()
+        Self::try_from(s.as_str().to_owned()).unwrap()
     }
 }
 

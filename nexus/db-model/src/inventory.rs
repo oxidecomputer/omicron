@@ -736,10 +736,10 @@ pub struct InvOmicronZone {
     pub dns_gz_address_index: Option<SqlU32>,
     pub ntp_ntp_servers: Option<Vec<String>>,
     pub ntp_dns_servers: Option<Vec<IpNetwork>>,
-    pub ntp_ntp_domain: Option<String>,
+    pub ntp_domain: Option<String>,
     pub nexus_external_tls: Option<bool>,
     pub nexus_external_dns_servers: Option<Vec<IpNetwork>>,
-    pub snat_ip: Option<ipv6::Ipv6Addr>,
+    pub snat_ip: Option<IpNetwork>,
     pub snat_first_port: Option<SqlU16>,
     pub snat_last_port: Option<SqlU16>,
 }
@@ -780,13 +780,7 @@ impl InvOmicronZone {
                 ntp_ntp_servers = Some(ntp_servers.clone());
                 ntp_dns_servers = Some(dns_servers.clone());
                 ntp_ntp_domain = domain.clone();
-                snat_ip = Some(ipv6::Ipv6Addr::from(match snat_cfg.ip {
-                    std::net::IpAddr::V6(a) => Ok(a),
-                    std::net::IpAddr::V4(bad) => Err(anyhow!(
-                        "expected source NAT IP to be IPv6, found IPv4 {:?}",
-                        bad
-                    )),
-                }?));
+                snat_ip = Some(IpNetwork::from(snat_cfg.ip));
                 snat_first_port = Some(SqlU16::from(snat_cfg.first_port));
                 snat_last_port = Some(SqlU16::from(snat_cfg.last_port));
                 nic_id = Some(nic.id);
@@ -908,7 +902,7 @@ impl InvOmicronZone {
             ntp_ntp_servers,
             ntp_dns_servers: ntp_dns_servers
                 .map(|list| list.into_iter().map(IpNetwork::from).collect()),
-            ntp_ntp_domain,
+            ntp_domain: ntp_ntp_domain,
             nexus_external_tls,
             nexus_external_dns_servers: nexus_external_dns_servers
                 .map(|list| list.into_iter().map(IpNetwork::from).collect()),
@@ -1017,7 +1011,7 @@ impl InvOmicronZone {
                 ) {
                     (Some(ip), Some(first_port), Some(last_port)) => {
                         nexus_types::inventory::SourceNatConfig {
-                            ip: std::net::IpAddr::from(*ip),
+                            ip: ip.ip(),
                             first_port: *first_port,
                             last_port: *last_port,
                         }
@@ -1030,7 +1024,7 @@ impl InvOmicronZone {
                 OmicronZoneType::BoundaryNtp {
                     address,
                     dns_servers: ntp_dns_servers?,
-                    domain: self.ntp_ntp_domain,
+                    domain: self.ntp_domain,
                     nic: nic?,
                     ntp_servers: ntp_ntp_servers?,
                     snat_cfg,
@@ -1071,7 +1065,7 @@ impl InvOmicronZone {
             ZoneType::InternalNtp => OmicronZoneType::InternalNtp {
                 address,
                 dns_servers: ntp_dns_servers?,
-                domain: self.ntp_ntp_domain,
+                domain: self.ntp_domain,
                 ntp_servers: ntp_ntp_servers?,
             },
             ZoneType::Nexus => OmicronZoneType::Nexus {

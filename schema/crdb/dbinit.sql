@@ -247,7 +247,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_switch_by_rack ON omicron.public.switch
 CREATE TYPE IF NOT EXISTS omicron.public.service_kind AS ENUM (
   'clickhouse',
   'clickhouse_keeper',
-  'cockroach_db',
+  'cockroach',
   'crucible',
   'crucible_pantry',
   'dendrite',
@@ -2945,7 +2945,7 @@ CREATE TYPE IF NOT EXISTS omicron.public.zone_type AS ENUM (
   'boundary_ntp',
   'clickhouse',
   'clickhouse_keeper',
-  'cockroach',
+  'cockroach_db',
   'crucible',
   'crucible_pantry',
   'external_dns',
@@ -2986,7 +2986,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone (
     -- Some zones have a second service.  Like the primary one, the meaning of
     -- this is zone-type-dependent.
     second_service_ip INET,
-    second_service_portINT4
+    second_service_port INT4
         CHECK (second_service_port IS NULL
 	    OR second_service_port BETWEEN 0 AND 65535),
 

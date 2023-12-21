@@ -1668,6 +1668,10 @@ impl DataStore {
             use db::schema::inv_omicron_zone::dsl;
             dsl::inv_omicron_zone
                 .filter(dsl::inv_collection_id.eq(id))
+                // It's not strictly necessary to order these by id.  Doing so
+                // ensures a consistent representation for `Collection`, which
+                // makes testing easier.  It's already indexed to do this, too.
+                .order_by(dsl::id)
                 .limit(sql_limit)
                 .select(InvOmicronZone::as_select())
                 .load_async(&*conn)
@@ -2241,6 +2245,39 @@ mod test {
                 .await
                 .unwrap();
             assert_eq!(0, count);
+            let count =
+                schema::inv_root_of_trust_page::dsl::inv_root_of_trust_page
+                    .select(diesel::dsl::count_star())
+                    .first_async::<i64>(&conn)
+                    .await
+                    .unwrap();
+            assert_eq!(0, count);
+            let count = schema::inv_sled_agent::dsl::inv_sled_agent
+                .select(diesel::dsl::count_star())
+                .first_async::<i64>(&conn)
+                .await
+                .unwrap();
+            assert_eq!(0, count);
+            let count =
+                schema::inv_sled_omicron_zones::dsl::inv_sled_omicron_zones
+                    .select(diesel::dsl::count_star())
+                    .first_async::<i64>(&conn)
+                    .await
+                    .unwrap();
+            assert_eq!(0, count);
+            let count = schema::inv_omicron_zone::dsl::inv_omicron_zone
+                .select(diesel::dsl::count_star())
+                .first_async::<i64>(&conn)
+                .await
+                .unwrap();
+            assert_eq!(0, count);
+            let count = schema::inv_omicron_zone_nic::dsl::inv_omicron_zone_nic
+                .select(diesel::dsl::count_star())
+                .first_async::<i64>(&conn)
+                .await
+                .unwrap();
+            assert_eq!(0, count);
+
             Ok::<(), anyhow::Error>(())
         })
         .await

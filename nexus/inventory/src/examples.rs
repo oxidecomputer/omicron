@@ -13,6 +13,7 @@ use gateway_client::types::SpState;
 use gateway_client::types::SpType;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::CabooseWhich;
+use nexus_types::inventory::OmicronZonesConfig;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageWhich;
 use std::sync::Arc;
@@ -343,6 +344,37 @@ pub fn representative() -> Representative {
                 sled_agent_client::types::SledRole::Gimlet,
             ),
         )
+        .unwrap();
+
+    // Report a representative set of Omicron zones.
+    //
+    // Use the data we already keep around for the test suite.  We've
+    // hand-selected a minimal set of files to cover each type of zone.  These
+    // files were constructed by:
+    //
+    // (1) copying the "omicron zones" ledgers from the sleds in a working
+    //     Omicron deployment
+    // (2) pretty-printing each one with `json --in-place --file FILENAME`
+    // (3) adjusting the format slightly with
+    //         `jq '{ generation: .omicron_generation, zones: .zones }'`
+    let sled14_data = include_str!("../example-data/madrid-sled14.json");
+    let sled16_data = include_str!("../example-data/madrid-sled16.json");
+    let sled17_data = include_str!("../example-data/madrid-sled17.json");
+    let sled14: OmicronZonesConfig = serde_json::from_str(sled14_data).unwrap();
+    let sled16: OmicronZonesConfig = serde_json::from_str(sled16_data).unwrap();
+    let sled17: OmicronZonesConfig = serde_json::from_str(sled17_data).unwrap();
+
+    let sled14_id = "7612d745-d978-41c8-8ee0-84564debe1d2".parse().unwrap();
+    builder
+        .found_sled_omicron_zones("fake sled 14 agent", sled14_id, sled14)
+        .unwrap();
+    let sled16_id = "af56cb43-3422-4f76-85bf-3f229db5f39c".parse().unwrap();
+    builder
+        .found_sled_omicron_zones("fake sled 15 agent", sled16_id, sled16)
+        .unwrap();
+    let sled17_id = "6eb2a0d9-285d-4e03-afa1-090e4656314b".parse().unwrap();
+    builder
+        .found_sled_omicron_zones("fake sled 15 agent", sled17_id, sled17)
         .unwrap();
 
     Representative {

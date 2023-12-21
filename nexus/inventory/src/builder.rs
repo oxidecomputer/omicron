@@ -112,7 +112,13 @@ impl CollectionBuilder {
     }
 
     /// Assemble a complete `Collection` representation
-    pub fn build(self) -> Collection {
+    pub fn build(mut self) -> Collection {
+        // This is not strictly necessary.  But for testing, it's helpful for
+        // things to be in sorted order.
+        for v in self.omicron_zones.values_mut() {
+            v.zones.zones.sort_by(|a, b| a.id.cmp(&b.id));
+        }
+
         Collection {
             id: Uuid::new_v4(),
             errors: self.errors.into_iter().map(|e| e.to_string()).collect(),
@@ -565,6 +571,8 @@ mod test {
     // - some missing cabooses
     // - some cabooses common to multiple baseboards; others not
     // - serial number reused across different model numbers
+    // - sled agent inventory
+    // - omicron zone inventory
     //
     // This test is admittedly pretty tedious and maybe not worthwhile but it's
     // a useful quick check.
@@ -893,7 +901,7 @@ mod test {
                 sled_agent.usable_physical_ram,
                 ByteCount::from(1024 * 1024)
             );
-            assert_eq!(sled_agent.reservoir_size, ByteCount::from(1024 * 1024));
+            assert_eq!(sled_agent.reservoir_size, ByteCount::from(1024));
         }
 
         let sled1_agent = &collection.sled_agents[&sled_agent_id_basic];

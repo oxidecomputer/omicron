@@ -1348,7 +1348,7 @@ table! {
         dns_gz_address_index -> Nullable<Int8>,
         ntp_ntp_servers -> Nullable<Array<Text>>,
         ntp_dns_servers -> Nullable<Array<Inet>>,
-        ntp_ntp_domain -> Nullable<Text>,
+        ntp_domain -> Nullable<Text>,
         nexus_external_tls -> Nullable<Bool>,
         nexus_external_dns_servers -> Nullable<Array<Inet>>,
         snat_ip -> Nullable<Inet>,
