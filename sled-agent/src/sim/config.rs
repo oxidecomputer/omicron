@@ -100,6 +100,7 @@ impl Config {
             nexus_address,
             dropshot: ConfigDropshot {
                 bind_address: SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 0),
+                request_body_max_bytes: 1024 * 1024,
                 ..Default::default()
             },
             storage: ConfigStorage {
