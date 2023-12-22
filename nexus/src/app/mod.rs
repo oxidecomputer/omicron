@@ -51,6 +51,7 @@ mod metrics;
 mod network_interface;
 mod oximeter;
 mod project;
+mod quota;
 mod rack;
 pub(crate) mod saga;
 mod session;
@@ -63,6 +64,7 @@ mod switch_interface;
 mod switch_port;
 pub mod test_interfaces;
 mod update;
+mod utilization;
 mod volume;
 mod vpc;
 mod vpc_router;
@@ -79,8 +81,13 @@ pub(crate) use nexus_db_queries::db::queries::disk::MAX_DISKS_PER_INSTANCE;
 
 pub(crate) const MAX_NICS_PER_INSTANCE: usize = 8;
 
-// TODO-completeness: Support multiple external IPs
-pub(crate) const MAX_EXTERNAL_IPS_PER_INSTANCE: usize = 1;
+// XXX: Might want to recast as max *floating* IPs, we have at most one
+//      ephemeral (so bounded in saga by design).
+//      The value here is arbitrary, but we need *a* limit for the instance
+//      create saga to have a bounded DAG. We might want to only enforce
+//      this during instance create (rather than live attach) in future.
+pub(crate) const MAX_EXTERNAL_IPS_PER_INSTANCE: usize = 32;
+pub(crate) const MAX_EPHEMERAL_IPS_PER_INSTANCE: usize = 1;
 
 pub const MAX_VCPU_PER_INSTANCE: u16 = 64;
 
@@ -349,6 +356,9 @@ impl Nexus {
             &background_ctx,
             Arc::clone(&db_datastore),
             &config.pkg.background_tasks,
+            &dpd_clients,
+            config.deployment.id,
+            resolver.clone(),
         );
 
         let external_resolver = {

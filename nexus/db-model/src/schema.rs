@@ -8,6 +8,13 @@
 
 use omicron_common::api::external::SemverVersion;
 
+/// The version of the database schema this particular version of Nexus was
+/// built against.
+///
+/// This should be updated whenever the schema is changed. For more details,
+/// refer to: schema/crdb/README.adoc
+pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(21, 0, 0);
+
 table! {
     disk (id) {
         id -> Uuid,
@@ -146,6 +153,7 @@ table! {
         mtu -> Int4,
         fec -> crate::SwitchLinkFecEnum,
         speed -> crate::SwitchLinkSpeedEnum,
+        autoneg -> Bool,
     }
 }
 
@@ -399,11 +407,36 @@ table! {
         id -> Uuid,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
+        kind -> crate::ProducerKindEnum,
         ip -> Inet,
         port -> Int4,
         interval -> Float8,
         base_route -> Text,
         oximeter_id -> Uuid,
+    }
+}
+
+table! {
+    silo_quotas(silo_id) {
+        silo_id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        cpus -> Int8,
+        memory_bytes -> Int8,
+        storage_bytes -> Int8,
+    }
+}
+
+table! {
+    silo_utilization(silo_id) {
+        silo_id -> Uuid,
+        silo_name -> Text,
+        cpus_provisioned -> Int8,
+        memory_provisioned -> Int8,
+        storage_provisioned -> Int8,
+        cpus_allocated -> Int8,
+        memory_allocated -> Int8,
+        storage_allocated -> Int8,
     }
 }
 
@@ -490,6 +523,32 @@ table! {
 }
 
 table! {
+    ipv4_nat_entry (id) {
+        id -> Uuid,
+        external_address -> Inet,
+        first_port -> Int4,
+        last_port -> Int4,
+        sled_address -> Inet,
+        vni -> Int4,
+        mac -> Int8,
+        version_added -> Int8,
+        version_removed -> Nullable<Int8>,
+        time_created -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+    }
+}
+
+// This is the sequence used for the version number
+// in ipv4_nat_entry.
+table! {
+    ipv4_nat_version (last_value) {
+        last_value -> Int8,
+        log_cnt -> Int8,
+        is_called -> Bool,
+    }
+}
+
+table! {
     external_ip (id) {
         id -> Uuid,
         name -> Nullable<Text>,
@@ -497,6 +556,7 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
+
         ip_pool_id -> Uuid,
         ip_pool_range_id -> Uuid,
         is_service -> Bool,
@@ -505,6 +565,26 @@ table! {
         ip -> Inet,
         first_port -> Int4,
         last_port -> Int4,
+
+        project_id -> Nullable<Uuid>,
+    }
+}
+
+table! {
+    floating_ip (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+
+        ip_pool_id -> Uuid,
+        ip_pool_range_id -> Uuid,
+        is_service -> Bool,
+        parent_id -> Nullable<Uuid>,
+        ip -> Inet,
+        project_id -> Uuid,
     }
 }
 
@@ -714,6 +794,7 @@ table! {
         ip -> Inet,
         port -> Int4,
         last_used_address -> Inet,
+        provision_state -> crate::SledProvisionStateEnum,
     }
 }
 
@@ -727,6 +808,16 @@ table! {
         reservoir_ram -> Int8,
     }
 }
+
+table! {
+    sled_underlay_subnet_allocation (rack_id, sled_id) {
+        rack_id -> Uuid,
+        sled_id -> Uuid,
+        subnet_octet -> Int2,
+        hw_baseboard_id -> Uuid,
+    }
+}
+allow_tables_to_appear_in_same_query!(rack, sled_underlay_subnet_allocation);
 
 table! {
     switch (id) {
@@ -1140,6 +1231,106 @@ table! {
     }
 }
 
+/* hardware inventory */
+
+table! {
+    hw_baseboard_id (id) {
+        id -> Uuid,
+        part_number -> Text,
+        serial_number -> Text,
+    }
+}
+
+table! {
+    sw_caboose (id) {
+        id -> Uuid,
+        board -> Text,
+        git_commit -> Text,
+        name -> Text,
+        version -> Text,
+    }
+}
+
+table! {
+    sw_root_of_trust_page (id) {
+        id -> Uuid,
+        data_base64 -> Text,
+    }
+}
+
+table! {
+    inv_collection (id) {
+        id -> Uuid,
+        time_started -> Timestamptz,
+        time_done -> Timestamptz,
+        collector -> Text,
+    }
+}
+
+table! {
+    inv_collection_error (inv_collection_id, idx) {
+        inv_collection_id -> Uuid,
+        idx -> Int4,
+        message -> Text,
+    }
+}
+
+table! {
+    inv_service_processor (inv_collection_id, hw_baseboard_id) {
+        inv_collection_id -> Uuid,
+        hw_baseboard_id -> Uuid,
+        time_collected -> Timestamptz,
+        source -> Text,
+
+        sp_type -> crate::SpTypeEnum,
+        sp_slot -> Int4,
+
+        baseboard_revision -> Int8,
+        hubris_archive_id -> Text,
+        power_state -> crate::HwPowerStateEnum,
+    }
+}
+
+table! {
+    inv_root_of_trust (inv_collection_id, hw_baseboard_id) {
+        inv_collection_id -> Uuid,
+        hw_baseboard_id -> Uuid,
+        time_collected -> Timestamptz,
+        source -> Text,
+
+        slot_active -> crate::HwRotSlotEnum,
+        slot_boot_pref_transient -> Nullable<crate::HwRotSlotEnum>,
+        slot_boot_pref_persistent -> crate::HwRotSlotEnum,
+        slot_boot_pref_persistent_pending -> Nullable<crate::HwRotSlotEnum>,
+        slot_a_sha3_256 -> Nullable<Text>,
+        slot_b_sha3_256 -> Nullable<Text>,
+    }
+}
+
+table! {
+    inv_caboose (inv_collection_id, hw_baseboard_id, which) {
+        inv_collection_id -> Uuid,
+        hw_baseboard_id -> Uuid,
+        time_collected -> Timestamptz,
+        source -> Text,
+
+        which -> crate::CabooseWhichEnum,
+        sw_caboose_id -> Uuid,
+    }
+}
+
+table! {
+    inv_root_of_trust_page (inv_collection_id, hw_baseboard_id, which) {
+        inv_collection_id -> Uuid,
+        hw_baseboard_id -> Uuid,
+        time_collected -> Timestamptz,
+        source -> Text,
+
+        which -> crate::RotPageWhichEnum,
+        sw_root_of_trust_page_id -> Uuid,
+    }
+}
+
 table! {
     bootstore_keys (key, generation) {
         key -> Text,
@@ -1157,13 +1348,6 @@ table! {
     }
 }
 
-/// The version of the database schema this particular version of Nexus was
-/// built against.
-///
-/// This should be updated whenever the schema is changed. For more details,
-/// refer to: schema/crdb/README.adoc
-pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(8, 0, 0);
-
 allow_tables_to_appear_in_same_query!(
     system_update,
     component_update,
@@ -1173,6 +1357,15 @@ joinable!(system_update_component_update -> component_update (component_update_i
 
 allow_tables_to_appear_in_same_query!(ip_pool_range, ip_pool);
 joinable!(ip_pool_range -> ip_pool (ip_pool_id));
+
+allow_tables_to_appear_in_same_query!(inv_collection, inv_collection_error);
+joinable!(inv_collection_error -> inv_collection (inv_collection_id));
+allow_tables_to_appear_in_same_query!(hw_baseboard_id, sw_caboose, inv_caboose);
+allow_tables_to_appear_in_same_query!(
+    hw_baseboard_id,
+    sw_root_of_trust_page,
+    inv_root_of_trust_page
+);
 
 allow_tables_to_appear_in_same_query!(
     dataset,
@@ -1217,3 +1410,12 @@ allow_tables_to_appear_in_same_query!(
     switch_port,
     switch_port_settings_route_config
 );
+
+allow_tables_to_appear_in_same_query!(
+    switch_port,
+    switch_port_settings_bgp_peer_config
+);
+
+allow_tables_to_appear_in_same_query!(disk, virtual_provisioning_resource);
+
+allow_tables_to_appear_in_same_query!(volume, virtual_provisioning_resource);

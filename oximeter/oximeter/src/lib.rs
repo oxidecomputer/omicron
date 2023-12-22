@@ -108,10 +108,14 @@ pub use oximeter_macro_impl::*;
 extern crate self as oximeter;
 
 pub mod histogram;
+pub mod schema;
 pub mod test_util;
 pub mod traits;
 pub mod types;
 
+pub use schema::FieldSchema;
+pub use schema::TimeseriesName;
+pub use schema::TimeseriesSchema;
 pub use traits::Metric;
 pub use traits::Producer;
 pub use traits::Target;

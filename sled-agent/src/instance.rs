@@ -17,7 +17,6 @@ use crate::params::{
     InstanceMigrationTargetParams, InstanceStateRequested, VpcFirewallRule,
 };
 use crate::profile::*;
-use crate::storage_manager::StorageResources;
 use crate::zone_bundle::BundleError;
 use crate::zone_bundle::ZoneBundler;
 use anyhow::anyhow;
@@ -27,12 +26,11 @@ use futures::lock::{Mutex, MutexGuard};
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::{DhcpCfg, PortManager};
-use illumos_utils::running_zone::{InstalledZone, RunningZone};
+use illumos_utils::running_zone::{RunningZone, ZoneBuilderFactory};
 use illumos_utils::svc::wait_for_service;
 use illumos_utils::zone::Zones;
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use omicron_common::address::NEXUS_INTERNAL_PORT;
-use omicron_common::address::PROPOLIS_PORT;
 use omicron_common::api::internal::nexus::{
     InstanceRuntimeState, SledInstanceState, VmmRuntimeState,
 };
@@ -43,7 +41,8 @@ use omicron_common::backoff;
 use propolis_client::Client as PropolisClient;
 use rand::prelude::SliceRandom;
 use rand::SeedableRng;
-use sled_hardware::disk::ZONE_DATASET;
+use sled_storage::dataset::ZONE_DATASET;
+use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::net::IpAddr;
 use std::net::{SocketAddr, SocketAddrV6};
@@ -191,13 +190,13 @@ struct InstanceInner {
     log: Logger,
 
     // Properties visible to Propolis
-    properties: propolis_client::api::InstanceProperties,
+    properties: propolis_client::types::InstanceProperties,
 
     // The ID of the Propolis server (and zone) running this instance
     propolis_id: Uuid,
 
-    // The IP address of the Propolis server running this instance
-    propolis_ip: IpAddr,
+    // The socket address of the Propolis server running this instance
+    propolis_addr: SocketAddr,
 
     // NIC-related properties
     vnic_allocator: VnicAllocator<Etherstub>,
@@ -209,13 +208,13 @@ struct InstanceInner {
     // Guest NIC and OPTE port information
     requested_nics: Vec<NetworkInterface>,
     source_nat: SourceNatConfig,
-    external_ips: Vec<IpAddr>,
+    ephemeral_ip: Option<IpAddr>,
+    floating_ips: Vec<IpAddr>,
     firewall_rules: Vec<VpcFirewallRule>,
     dhcp_config: DhcpCfg,
 
     // Disk related properties
-    // TODO: replace `propolis_client::handmade::*` with properly-modeled local types
-    requested_disks: Vec<propolis_client::handmade::api::DiskRequest>,
+    requested_disks: Vec<propolis_client::types::DiskRequest>,
     cloud_init_bytes: Option<String>,
 
     // Internal State management
@@ -226,7 +225,10 @@ struct InstanceInner {
     nexus_client: NexusClientWithResolver,
 
     // Storage resources
-    storage: StorageResources,
+    storage: StorageHandle,
+
+    // Used to create propolis zones
+    zone_builder_factory: ZoneBuilderFactory,
 
     // Object used to collect zone bundles from this instance when terminated.
     zone_bundler: ZoneBundler,
@@ -380,7 +382,7 @@ impl InstanceInner {
     /// Sends an instance state PUT request to this instance's Propolis.
     async fn propolis_state_put(
         &self,
-        request: propolis_client::api::InstanceStateRequested,
+        request: propolis_client::types::InstanceStateRequested,
     ) -> Result<(), Error> {
         let res = self
             .running_state
@@ -410,11 +412,11 @@ impl InstanceInner {
     ) -> Result<(), Error> {
         let nics = running_zone
             .opte_ports()
-            .map(|port| propolis_client::api::NetworkInterfaceRequest {
+            .map(|port| propolis_client::types::NetworkInterfaceRequest {
                 // TODO-correctness: Remove `.vnic()` call when we use the port
                 // directly.
                 name: port.vnic_name().to_string(),
-                slot: propolis_client::api::Slot(port.slot()),
+                slot: propolis_client::types::Slot(port.slot()),
             })
             .collect();
 
@@ -424,7 +426,7 @@ impl InstanceInner {
                     self.state.instance().migration_id.ok_or_else(|| {
                         Error::Migration(anyhow!("Missing Migration UUID"))
                     })?;
-                Some(propolis_client::api::InstanceMigrateInitiateRequest {
+                Some(propolis_client::types::InstanceMigrateInitiateRequest {
                     src_addr: params.src_propolis_addr.to_string(),
                     src_uuid: params.src_propolis_id,
                     migration_id,
@@ -433,7 +435,7 @@ impl InstanceInner {
             None => None,
         };
 
-        let request = propolis_client::api::InstanceEnsureRequest {
+        let request = propolis_client::types::InstanceEnsureRequest {
             properties: self.properties.clone(),
             nics,
             disks: self
@@ -613,6 +615,7 @@ impl Instance {
             port_manager,
             storage,
             zone_bundler,
+            zone_builder_factory,
         } = services;
 
         let mut dhcp_config = DhcpCfg {
@@ -649,7 +652,7 @@ impl Instance {
         let instance = InstanceInner {
             log: log.new(o!("instance_id" => id.to_string())),
             // NOTE: Mostly lies.
-            properties: propolis_client::api::InstanceProperties {
+            properties: propolis_client::types::InstanceProperties {
                 id,
                 name: hardware.properties.hostname.clone(),
                 description: "Test description".to_string(),
@@ -662,12 +665,13 @@ impl Instance {
                 vcpus: hardware.properties.ncpus.0 as u8,
             },
             propolis_id,
-            propolis_ip: propolis_addr.ip(),
+            propolis_addr,
             vnic_allocator,
             port_manager,
             requested_nics: hardware.nics,
             source_nat: hardware.source_nat,
-            external_ips: hardware.external_ips,
+            ephemeral_ip: hardware.ephemeral_ip,
+            floating_ips: hardware.floating_ips,
             firewall_rules: hardware.firewall_rules,
             dhcp_config,
             requested_disks: hardware.disks,
@@ -680,6 +684,7 @@ impl Instance {
             running_state: None,
             nexus_client,
             storage,
+            zone_builder_factory,
             zone_bundler,
             instance_ticket: ticket,
         };
@@ -790,7 +795,7 @@ impl Instance {
         &self,
         state: crate::params::InstanceStateRequested,
     ) -> Result<SledInstanceState, Error> {
-        use propolis_client::api::InstanceStateRequested as PropolisRequest;
+        use propolis_client::types::InstanceStateRequested as PropolisRequest;
         let mut inner = self.inner.lock().await;
         let (propolis_state, next_published) = match state {
             InstanceStateRequested::MigrationTarget(migration_params) => {
@@ -858,13 +863,11 @@ impl Instance {
             }
 
             return Err(Error::Transition(
-                omicron_common::api::external::Error::Conflict {
-                    internal_message: format!(
-                        "wrong instance state generation: expected {}, got {}",
-                        inner.state.instance().gen,
-                        old_runtime.gen
-                    ),
-                },
+                omicron_common::api::external::Error::conflict(format!(
+                    "wrong instance state generation: expected {}, got {}",
+                    inner.state.instance().gen,
+                    old_runtime.gen
+                )),
             ));
         }
 
@@ -879,15 +882,20 @@ impl Instance {
         // Create OPTE ports for the instance
         let mut opte_ports = Vec::with_capacity(inner.requested_nics.len());
         for nic in inner.requested_nics.iter() {
-            let (snat, external_ips) = if nic.primary {
-                (Some(inner.source_nat), &inner.external_ips[..])
+            let (snat, ephemeral_ip, floating_ips) = if nic.primary {
+                (
+                    Some(inner.source_nat),
+                    inner.ephemeral_ip,
+                    &inner.floating_ips[..],
+                )
             } else {
-                (None, &[][..])
+                (None, None, &[][..])
             };
             let port = inner.port_manager.create_port(
                 nic,
                 snat,
-                external_ips,
+                ephemeral_ip,
+                floating_ips,
                 &inner.firewall_rules,
                 inner.dhcp_config.clone(),
             )?;
@@ -900,36 +908,34 @@ impl Instance {
         let mut rng = rand::rngs::StdRng::from_entropy();
         let root = inner
             .storage
-            .all_u2_mountpoints(ZONE_DATASET)
+            .get_latest_resources()
             .await
+            .all_u2_mountpoints(ZONE_DATASET)
             .choose(&mut rng)
             .ok_or_else(|| Error::U2NotFound)?
             .clone();
-        let installed_zone = InstalledZone::install(
-            &inner.log,
-            &inner.vnic_allocator,
-            &root,
-            &["/opt/oxide".into()],
-            "propolis-server",
-            Some(*inner.propolis_id()),
-            // dataset=
-            &[],
-            // filesystems=
-            &[],
-            // data_links=
-            &[],
-            &[
+        let installed_zone = inner
+            .zone_builder_factory
+            .builder()
+            .with_log(inner.log.clone())
+            .with_underlay_vnic_allocator(&inner.vnic_allocator)
+            .with_zone_root_path(&root)
+            .with_zone_image_paths(&["/opt/oxide".into()])
+            .with_zone_type("propolis-server")
+            .with_unique_name(*inner.propolis_id())
+            .with_datasets(&[])
+            .with_filesystems(&[])
+            .with_data_links(&[])
+            .with_devices(&[
                 zone::Device { name: "/dev/vmm/*".to_string() },
                 zone::Device { name: "/dev/vmmctl".to_string() },
                 zone::Device { name: "/dev/viona".to_string() },
-            ],
-            opte_ports,
-            // physical_nic=
-            None,
-            vec![],
-            vec![],
-        )
-        .await?;
+            ])
+            .with_opte_ports(opte_ports)
+            .with_links(vec![])
+            .with_limit_priv(vec![])
+            .install()
+            .await?;
 
         let gateway = inner.port_manager.underlay_ip();
 
@@ -964,9 +970,13 @@ impl Instance {
             .add_property(
                 "listen_addr",
                 "astring",
-                &inner.propolis_ip.to_string(),
+                &inner.propolis_addr.ip().to_string(),
             )
-            .add_property("listen_port", "astring", &PROPOLIS_PORT.to_string())
+            .add_property(
+                "listen_port",
+                "astring",
+                &inner.propolis_addr.port().to_string(),
+            )
             .add_property("metric_addr", "astring", &metric_addr.to_string());
 
         let profile = ProfileBuilder::new("omicron").add_service(
@@ -984,18 +994,16 @@ impl Instance {
         // but it helps distinguish "online in SMF" from "responding to HTTP
         // requests".
         let fmri = fmri_name();
-        wait_for_service(Some(&zname), &fmri)
+        wait_for_service(Some(&zname), &fmri, inner.log.clone())
             .await
             .map_err(|_| Error::Timeout(fmri.to_string()))?;
         info!(inner.log, "Propolis SMF service is online");
-
-        let server_addr = SocketAddr::new(inner.propolis_ip, PROPOLIS_PORT);
 
         // We use a custom client builder here because the default progenitor
         // one has a timeout of 15s but we want to be able to wait indefinitely.
         let reqwest_client = reqwest::ClientBuilder::new().build().unwrap();
         let client = Arc::new(PropolisClient::new_with_client(
-            &format!("http://{}", server_addr),
+            &format!("http://{}", &inner.propolis_addr),
             reqwest_client,
         ));
 
@@ -1034,7 +1042,9 @@ impl Instance {
             // known to Propolis.
             let response = client
                 .instance_state_monitor()
-                .body(propolis_client::api::InstanceStateMonitorRequest { gen })
+                .body(propolis_client::types::InstanceStateMonitorRequest {
+                    gen,
+                })
                 .send()
                 .await?
                 .into_inner();

@@ -9,7 +9,9 @@ jobs:
   check-style:
     runs-on: ubuntu-22.04
     steps:
-    - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
+    - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+      with:
+        ref: ${{ github.event.pull_request.head.sha }} # see omicron#4461
     - name: Report cargo version
       run: cargo --version
     - name: Report rustfmt version
@@ -19,6 +21,8 @@ jobs:
 
   check-omicron-deployment:
     runs-on: ${{ matrix.os }}
+    env:
+      CARGO_INCREMENTAL: 0
     strategy:
       fail-fast: false
       matrix:
@@ -27,8 +31,10 @@ jobs:
     # This repo is unstable and unnecessary: https://github.com/microsoft/linux-package-repositories/issues/34
     - name: Disable packages.microsoft.com repo
       run: sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list
-    - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
-    - uses: Swatinem/rust-cache@6fd3edff6979b79f87531400ad694fb7f2c84b1f # v2.2.1
+    - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+      with:
+        ref: ${{ github.event.pull_request.head.sha }} # see omicron#4461
+    - uses: Swatinem/rust-cache@3cf7f8cc28d1b4e7d01e3783be10a97d55d483c8 # v2.7.1
       if: ${{ github.ref != 'refs/heads/main' }}
     - name: Report cargo version
       run: cargo --version
@@ -49,12 +55,16 @@ jobs:
   # of our code.
   clippy-lint:
     runs-on: ubuntu-22.04
+    env:
+      CARGO_INCREMENTAL: 0
     steps:
     # This repo is unstable and unnecessary: https://github.com/microsoft/linux-package-repositories/issues/34
     - name: Disable packages.microsoft.com repo
       run: sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list
-    - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
-    - uses: Swatinem/rust-cache@6fd3edff6979b79f87531400ad694fb7f2c84b1f # v2.2.1
+    - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+      with:
+        ref: ${{ github.event.pull_request.head.sha }} # see omicron#4461
+    - uses: Swatinem/rust-cache@3cf7f8cc28d1b4e7d01e3783be10a97d55d483c8 # v2.7.1
       if: ${{ github.ref != 'refs/heads/main' }}
     - name: Report cargo version
       run: cargo --version
@@ -75,12 +85,16 @@ jobs:
   # the separate "rustdocs" repo.
   build-docs:
     runs-on: ubuntu-22.04
+    env:
+      CARGO_INCREMENTAL: 0
     steps:
     # This repo is unstable and unnecessary: https://github.com/microsoft/linux-package-repositories/issues/34
     - name: Disable packages.microsoft.com repo
       run: sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list
-    - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
-    - uses: Swatinem/rust-cache@6fd3edff6979b79f87531400ad694fb7f2c84b1f # v2.2.1
+    - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+      with:
+        ref: ${{ github.event.pull_request.head.sha }} # see omicron#4461
+    - uses: Swatinem/rust-cache@3cf7f8cc28d1b4e7d01e3783be10a97d55d483c8 # v2.7.1
       if: ${{ github.ref != 'refs/heads/main' }}
     - name: Report cargo version
       run: cargo --version

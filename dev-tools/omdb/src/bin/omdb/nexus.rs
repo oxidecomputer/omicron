@@ -6,6 +6,7 @@
 
 use crate::Omdb;
 use anyhow::Context;
+use chrono::DateTime;
 use chrono::SecondsFormat;
 use chrono::Utc;
 use clap::Args;
@@ -144,7 +145,10 @@ async fn cmd_nexus_background_tasks_show(
 ) -> Result<(), anyhow::Error> {
     let response =
         client.bgtask_list().await.context("listing background tasks")?;
-    let mut tasks = response.into_inner();
+    // Convert the HashMap to a BTreeMap because we want the keys in sorted
+    // order.
+    let mut tasks =
+        response.into_inner().into_iter().collect::<BTreeMap<_, _>>();
 
     // We want to pick the order that we print some tasks intentionally.  Then
     // we want to print anything else that we find.
@@ -155,6 +159,7 @@ async fn cmd_nexus_background_tasks_show(
         "dns_config_external",
         "dns_servers_external",
         "dns_propagation_external",
+        "nat_v4_garbage_collector",
     ] {
         if let Some(bgtask) = tasks.remove(name) {
             print_task(&bgtask);
@@ -478,6 +483,64 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 }
             }
         }
+    } else if name == "inventory_collection" {
+        #[derive(Deserialize)]
+        struct InventorySuccess {
+            collection_id: Uuid,
+            time_started: DateTime<Utc>,
+            time_done: DateTime<Utc>,
+        }
+
+        match serde_json::from_value::<InventorySuccess>(details.clone()) {
+            Err(error) => eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            ),
+            Ok(found_inventory) => {
+                println!(
+                    "    last collection id:      {}",
+                    found_inventory.collection_id
+                );
+                println!(
+                    "    last collection started: {}",
+                    found_inventory
+                        .time_started
+                        .to_rfc3339_opts(SecondsFormat::Secs, true),
+                );
+                println!(
+                    "    last collection done:    {}",
+                    found_inventory
+                        .time_done
+                        .to_rfc3339_opts(SecondsFormat::Secs, true),
+                );
+            }
+        };
+    } else if name == "phantom_disks" {
+        #[derive(Deserialize)]
+        struct TaskSuccess {
+            /// how many phantom disks were deleted ok
+            phantom_disk_deleted_ok: usize,
+
+            /// how many phantom disks could not be deleted
+            phantom_disk_deleted_err: usize,
+        }
+
+        match serde_json::from_value::<TaskSuccess>(details.clone()) {
+            Err(error) => eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            ),
+            Ok(success) => {
+                println!(
+                    "    number of phantom disks deleted: {}",
+                    success.phantom_disk_deleted_ok
+                );
+                println!(
+                    "    number of phantom disk delete errors: {}",
+                    success.phantom_disk_deleted_err
+                );
+            }
+        };
     } else {
         println!(
             "warning: unknown background task: {:?} \

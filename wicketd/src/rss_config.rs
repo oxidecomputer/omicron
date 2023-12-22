@@ -521,6 +521,11 @@ fn validate_rack_network_config(
                         addr: p.addr,
                         asn: p.asn,
                         port: p.port.clone(),
+                        hold_time: p.hold_time,
+                        connect_retry: p.connect_retry,
+                        delay_open: p.delay_open,
+                        idle_hold_time: p.idle_hold_time,
+                        keepalive: p.keepalive,
                     })
                     .collect(),
                 switch: match config.switch {
@@ -543,6 +548,7 @@ fn validate_rack_network_config(
                     PortFec::None => BaPortFec::None,
                     PortFec::Rs => BaPortFec::Rs,
                 },
+                autoneg: config.autoneg,
             })
             .collect(),
         bgp: config

@@ -6,6 +6,7 @@
 
 use crate::updates::ConfigUpdates;
 use camino::{Utf8Path, Utf8PathBuf};
+use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use illumos_utils::dladm::Dladm;
 use illumos_utils::dladm::FindPhysicalLinkError;
@@ -28,7 +29,8 @@ pub enum SledMode {
 #[serde(rename_all = "snake_case")]
 pub enum SidecarRevision {
     Physical(String),
-    Soft(SoftPortConfig),
+    SoftZone(SoftPortConfig),
+    SoftPropolis(SoftPortConfig),
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -43,6 +45,11 @@ pub struct SoftPortConfig {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
+    /// Configuration for the sled agent dropshot server
+    ///
+    /// If the `bind_address` is set, it will be ignored. The remaining fields
+    /// will be respected.
+    pub dropshot: ConfigDropshot,
     /// Configuration for the sled agent debug log
     pub log: ConfigLogging,
     /// The sled's mode of operation (auto detect or force gimlet/scrimlet).
@@ -51,6 +58,9 @@ pub struct Config {
     pub sidecar_revision: SidecarRevision,
     /// Optional percentage of DRAM to reserve for guest memory
     pub vmm_reservoir_percentage: Option<u8>,
+    /// Optional DRAM to reserve for guest memory in MiB (mutually exclusive
+    /// option with vmm_reservoir_percentage).
+    pub vmm_reservoir_size_mb: Option<u32>,
     /// Optional swap device size in GiB
     pub swap_device_size_gb: Option<u32>,
     /// Optional VLAN ID to be used for tagging guest VNICs.

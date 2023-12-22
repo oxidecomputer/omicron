@@ -131,6 +131,8 @@ function install_packages {
       "library/libxmlsec1"
       # "bindgen leverages libclang to preprocess, parse, and type check C and C++ header files."
       "pkg:/ooce/developer/clang-$CLANGVER"
+      "system/library/gcc-runtime"
+      "system/library/g++-runtime"
     )
 
     # Install/update the set of packages.

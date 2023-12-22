@@ -29,8 +29,8 @@ use ratatui::widgets::{
 use slog::{info, o, Logger};
 use tui_tree_widget::{Tree, TreeItem, TreeState};
 use update_engine::{
-    AbortReason, ExecutionStatus, FailureReason, StepKey, TerminalKind,
-    WillNotBeRunReason,
+    AbortReason, CompletionReason, ExecutionStatus, FailureReason, StepKey,
+    TerminalKind, WillNotBeRunReason,
 };
 use wicket_common::update_events::{
     EventBuffer, EventReport, ProgressEvent, StepOutcome, StepStatus,
@@ -282,7 +282,9 @@ impl UpdatePane {
 
                 // TODO: show previous attempts
             }
-            StepStatus::Completed { info: Some(info) } => {
+            StepStatus::Completed {
+                reason: CompletionReason::StepCompleted(info),
+            } => {
                 let mut spans =
                     vec![Span::styled("Status: ", style::selected())];
 
@@ -333,9 +335,9 @@ impl UpdatePane {
                     push_text_lines(&message, prefix, &mut body.lines);
                 }
             }
-            StepStatus::Completed { info: None } => {
-                // No information is available, so all we can do is say that
-                // this step is completed.
+            StepStatus::Completed { reason: _ } => {
+                // No information about this step is available, so all we can do
+                // is say that this step is completed.
                 body.lines.push(Line::from(vec![
                     Span::styled("Status: ", style::selected()),
                     Span::styled("Completed", style::successful_update_bold()),
@@ -383,7 +385,7 @@ impl UpdatePane {
                 }
             }
             StepStatus::Failed {
-                reason: FailureReason::ParentFailed { parent_step },
+                reason: FailureReason::ParentFailed { parent_step, .. },
             } => {
                 let mut spans = vec![
                     Span::styled("Status: ", style::selected()),
@@ -442,7 +444,7 @@ impl UpdatePane {
                 }
             }
             StepStatus::Aborted {
-                reason: AbortReason::ParentAborted { parent_step },
+                reason: AbortReason::ParentAborted { parent_step, .. },
                 last_progress,
             } => {
                 let mut spans = vec![
@@ -1893,7 +1895,7 @@ impl ComponentUpdateListState {
                     ));
                     None
                 }
-                ExecutionStatus::Running { step_key } => {
+                ExecutionStatus::Running { step_key, .. } => {
                     status_text
                         .push(Span::styled("Update ", style::plain_text()));
                     status_text.push(Span::styled(
@@ -2017,24 +2019,25 @@ impl ComponentUpdateListState {
                     }
                     style::selected()
                 }
-                StepStatus::Completed { info } => {
-                    let (character, style) = if let Some(info) = info {
-                        match info.outcome {
-                            StepOutcome::Success { .. } => {
-                                ('✔', style::successful_update())
+                StepStatus::Completed { reason } => {
+                    let (character, style) =
+                        if let Some(info) = reason.step_completed_info() {
+                            match info.outcome {
+                                StepOutcome::Success { .. } => {
+                                    ('✔', style::successful_update())
+                                }
+                                StepOutcome::Warning { .. } => {
+                                    ('⚠', style::warning_update())
+                                }
+                                StepOutcome::Skipped { .. } => {
+                                    ('*', style::successful_update())
+                                }
                             }
-                            StepOutcome::Warning { .. } => {
-                                ('⚠', style::warning_update())
-                            }
-                            StepOutcome::Skipped { .. } => {
-                                ('*', style::successful_update())
-                            }
-                        }
-                    } else {
-                        // No information available for this step -- just mark
-                        // it successful.
-                        ('✔', style::successful_update())
-                    };
+                        } else {
+                            // No information available for this step -- just mark
+                            // it successful.
+                            ('✔', style::successful_update())
+                        };
                     item_spans.push(Span::styled(
                         format!("{:>5} ", character),
                         style,

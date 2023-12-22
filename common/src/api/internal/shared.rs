@@ -103,6 +103,17 @@ pub struct BgpPeerConfig {
     pub port: String,
     /// Address of the peer.
     pub addr: Ipv4Addr,
+    /// How long to keep a session alive without a keepalive in seconds.
+    /// Defaults to 6.
+    pub hold_time: Option<u64>,
+    /// How long to keep a peer in idle after a state machine reset in seconds.
+    pub idle_hold_time: Option<u64>,
+    /// How long to delay sending open messages to a peer. In seconds.
+    pub delay_open: Option<u64>,
+    /// The interval in seconds between peer connection retry attempts.
+    pub connect_retry: Option<u64>,
+    /// The interval to send keepalive messages at.
+    pub keepalive: Option<u64>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
@@ -129,6 +140,9 @@ pub struct PortConfigV1 {
     pub uplink_port_fec: PortFec,
     /// BGP peers on this port
     pub bgp_peers: Vec<BgpPeerConfig>,
+    /// Whether or not to set autonegotiation
+    #[serde(default)]
+    pub autoneg: bool,
 }
 
 impl From<UplinkConfig> for PortConfigV1 {
@@ -144,6 +158,7 @@ impl From<UplinkConfig> for PortConfigV1 {
             uplink_port_speed: value.uplink_port_speed,
             uplink_port_fec: value.uplink_port_fec,
             bgp_peers: vec![],
+            autoneg: false,
         }
     }
 }
@@ -249,7 +264,7 @@ pub enum ExternalPortDiscovery {
 }
 
 /// Switchport Speed options
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PortSpeed {
     #[serde(alias = "0G")]
@@ -273,7 +288,7 @@ pub enum PortSpeed {
 }
 
 /// Switchport FEC options
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PortFec {
     Firecode,

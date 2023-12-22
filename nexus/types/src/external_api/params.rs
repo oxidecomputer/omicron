@@ -54,6 +54,7 @@ path_param!(VpcPath, vpc, "VPC");
 path_param!(SubnetPath, subnet, "subnet");
 path_param!(RouterPath, router, "router");
 path_param!(RoutePath, route, "route");
+path_param!(FloatingIpPath, floating_ip, "Floating IP");
 path_param!(DiskPath, disk, "disk");
 path_param!(SnapshotPath, snapshot, "snapshot");
 path_param!(ImagePath, image, "image");
@@ -73,6 +74,23 @@ id_path_param!(SwitchPath, switch_id, "switch");
 pub struct SledSelector {
     /// ID of the sled
     pub sled: Uuid,
+}
+
+/// Parameters for `sled_set_provision_state`.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct SledProvisionStateParams {
+    /// The provision state.
+    pub state: super::views::SledProvisionState,
+}
+
+/// Response to `sled_set_provision_state`.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct SledProvisionStateResponse {
+    /// The old provision state.
+    pub old_state: super::views::SledProvisionState,
+
+    /// The new provision state.
+    pub new_state: super::views::SledProvisionState,
 }
 
 pub struct SwitchSelector {
@@ -127,6 +145,14 @@ pub struct ProjectSelector {
 pub struct OptionalProjectSelector {
     /// Name or ID of the project
     pub project: Option<NameOrId>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct FloatingIpSelector {
+    /// Name or ID of the project, only required if `floating_ip` is provided as a `Name`
+    pub project: Option<NameOrId>,
+    /// Name or ID of the Floating IP
+    pub floating_ip: NameOrId,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -262,6 +288,12 @@ pub struct SiloCreate {
     /// endpoints.  These should be valid for the Silo's DNS name(s).
     pub tls_certificates: Vec<CertificateCreate>,
 
+    /// Limits the amount of provisionable CPU, memory, and storage in the Silo.
+    /// CPU and memory are only consumed by running instances, while storage is
+    /// consumed by any disk or snapshot. A value of 0 means that resource is
+    /// *not* provisionable.
+    pub quotas: SiloQuotasCreate,
+
     /// Mapping of which Fleet roles are conferred by each Silo role
     ///
     /// The default is that no Fleet roles are conferred by any Silo roles
@@ -269,6 +301,62 @@ pub struct SiloCreate {
     #[serde(default)]
     pub mapped_fleet_roles:
         BTreeMap<shared::SiloRole, BTreeSet<shared::FleetRole>>,
+}
+
+/// The amount of provisionable resources for a Silo
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SiloQuotasCreate {
+    /// The amount of virtual CPUs available for running instances in the Silo
+    pub cpus: i64,
+    /// The amount of RAM (in bytes) available for running instances in the Silo
+    pub memory: ByteCount,
+    /// The amount of storage (in bytes) available for disks or snapshots
+    pub storage: ByteCount,
+}
+
+impl SiloQuotasCreate {
+    /// All quotas set to 0
+    pub fn empty() -> Self {
+        Self {
+            cpus: 0,
+            memory: ByteCount::from(0),
+            storage: ByteCount::from(0),
+        }
+    }
+
+    /// An arbitrarily high but identifiable default for quotas
+    /// that can be used for creating a Silo for testing
+    ///
+    /// The only silo that customers will see that this should be set on is the default
+    /// silo. Ultimately the default silo should only be initialized with an empty quota,
+    /// but as tests currently relying on it having a quota, we need to set something.
+    pub fn arbitrarily_high_default() -> Self {
+        Self {
+            cpus: 9999999999,
+            memory: ByteCount::try_from(999999999999999999_u64).unwrap(),
+            storage: ByteCount::try_from(999999999999999999_u64).unwrap(),
+        }
+    }
+}
+
+// This conversion is mostly just useful for tests such that we can reuse
+// empty() and arbitrarily_high_default() when testing utilization
+impl From<SiloQuotasCreate> for super::views::VirtualResourceCounts {
+    fn from(quota: SiloQuotasCreate) -> Self {
+        Self { cpus: quota.cpus, memory: quota.memory, storage: quota.storage }
+    }
+}
+
+/// Updateable properties of a Silo's resource limits.
+/// If a value is omitted it will not be updated.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SiloQuotasUpdate {
+    /// The amount of virtual CPUs available for running instances in the Silo
+    pub cpus: Option<i64>,
+    /// The amount of RAM (in bytes) available for running instances in the Silo
+    pub memory: Option<ByteCount>,
+    /// The amount of storage (in bytes) available for disks or snapshots
+    pub storage: Option<ByteCount>,
 }
 
 /// Create-time parameters for a `User`
@@ -751,6 +839,23 @@ pub struct IpPoolUpdate {
     pub identity: IdentityMetadataUpdateParams,
 }
 
+// Floating IPs
+/// Parameters for creating a new floating IP address for instances.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct FloatingIpCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+
+    /// An IP address to reserve for use as a floating IP. This field is
+    /// optional: when not set, an address will be automatically chosen from
+    /// `pool`. If set, then the IP must be available in the resolved `pool`.
+    pub address: Option<IpAddr>,
+
+    /// The parent IP pool that a floating IP is pulled from. If unset, the
+    /// default pool is selected.
+    pub pool: Option<NameOrId>,
+}
+
 // INSTANCES
 
 /// Describes an attachment of an `InstanceNetworkInterface` to an `Instance`,
@@ -818,7 +923,11 @@ pub enum ExternalIpCreate {
     /// automatically-assigned from the provided IP Pool, or all available pools
     /// if not specified.
     Ephemeral { pool_name: Option<Name> },
-    // TODO: Add floating IPs: https://github.com/oxidecomputer/omicron/issues/1334
+    /// An IP address providing both inbound and outbound access. The address is
+    /// an existing Floating IP object assigned to the current project.
+    ///
+    /// The floating IP must not be in use by another instance or service.
+    Floating { floating_ip_name: Name },
 }
 
 /// Create-time parameters for an `Instance`
@@ -1172,15 +1281,6 @@ pub enum ExpectedDigest {
     Sha256(String),
 }
 
-/// Parameters for importing blocks from a URL to a disk
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct ImportBlocksFromUrl {
-    /// the source to pull blocks from
-    pub url: String,
-    /// Expected digest of all blocks when importing from a URL
-    pub expected_digest: Option<ExpectedDigest>,
-}
-
 /// Parameters for importing blocks with a bulk write
 // equivalent to crucible_pantry_client::types::BulkWriteRequest
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -1337,6 +1437,18 @@ pub enum LinkFec {
     Rs,
 }
 
+impl From<omicron_common::api::internal::shared::PortFec> for LinkFec {
+    fn from(x: omicron_common::api::internal::shared::PortFec) -> LinkFec {
+        match x {
+            omicron_common::api::internal::shared::PortFec::Firecode => {
+                Self::Firecode
+            }
+            omicron_common::api::internal::shared::PortFec::None => Self::None,
+            omicron_common::api::internal::shared::PortFec::Rs => Self::Rs,
+        }
+    }
+}
+
 /// The speed of a link.
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -1361,6 +1473,40 @@ pub enum LinkSpeed {
     Speed400G,
 }
 
+impl From<omicron_common::api::internal::shared::PortSpeed> for LinkSpeed {
+    fn from(x: omicron_common::api::internal::shared::PortSpeed) -> Self {
+        match x {
+            omicron_common::api::internal::shared::PortSpeed::Speed0G => {
+                Self::Speed0G
+            }
+            omicron_common::api::internal::shared::PortSpeed::Speed1G => {
+                Self::Speed1G
+            }
+            omicron_common::api::internal::shared::PortSpeed::Speed10G => {
+                Self::Speed10G
+            }
+            omicron_common::api::internal::shared::PortSpeed::Speed25G => {
+                Self::Speed25G
+            }
+            omicron_common::api::internal::shared::PortSpeed::Speed40G => {
+                Self::Speed40G
+            }
+            omicron_common::api::internal::shared::PortSpeed::Speed50G => {
+                Self::Speed50G
+            }
+            omicron_common::api::internal::shared::PortSpeed::Speed100G => {
+                Self::Speed100G
+            }
+            omicron_common::api::internal::shared::PortSpeed::Speed200G => {
+                Self::Speed200G
+            }
+            omicron_common::api::internal::shared::PortSpeed::Speed400G => {
+                Self::Speed400G
+            }
+        }
+    }
+}
+
 /// Switch link configuration.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct LinkConfig {
@@ -1375,6 +1521,9 @@ pub struct LinkConfig {
 
     /// The speed of the link.
     pub speed: LinkSpeed,
+
+    /// Whether or not to set autonegotiation
+    pub autoneg: bool,
 }
 
 /// The LLDP configuration associated with a port. LLDP may be either enabled or
@@ -1462,12 +1611,17 @@ pub struct BgpConfigListSelector {
     pub name_or_id: Option<NameOrId>,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct BgpPeerConfig {
+    pub peers: Vec<BgpPeer>,
+}
+
 /// A BGP peer configuration for an interface. Includes the set of announcements
 /// that will be advertised to the peer identified by `addr`. The `bgp_config`
 /// parameter is a reference to global BGP parameters. The `interface_name`
 /// indicates what interface the peer should be contacted on.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct BgpPeerConfig {
+pub struct BgpPeer {
     /// The set of announcements advertised by the peer.
     pub bgp_announce_set: NameOrId,
 
@@ -1635,12 +1789,6 @@ pub struct SwitchPortApplySettings {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ImageSource {
-    Url {
-        url: String,
-
-        /// The block size in bytes
-        block_size: BlockSize,
-    },
     Snapshot {
         id: Uuid,
     },

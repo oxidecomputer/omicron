@@ -23,7 +23,6 @@ pub mod disk_create;
 pub mod disk_delete;
 pub mod finalize_disk;
 pub mod image_delete;
-pub mod import_blocks_from_url;
 mod instance_common;
 pub mod instance_create;
 pub mod instance_delete;
@@ -36,6 +35,7 @@ pub mod snapshot_create;
 pub mod snapshot_delete;
 pub mod switch_port_settings_apply;
 pub mod switch_port_settings_clear;
+pub mod switch_port_settings_common;
 pub mod test_saga;
 pub mod volume_delete;
 pub mod volume_remove_rop;
@@ -124,7 +124,6 @@ fn make_action_registry() -> ActionRegistry {
     <finalize_disk::SagaFinalizeDisk as NexusSaga>::register_actions(
         &mut registry,
     );
-    <import_blocks_from_url::SagaImportBlocksFromUrl as NexusSaga>::register_actions(&mut registry);
     <instance_create::SagaInstanceCreate as NexusSaga>::register_actions(
         &mut registry,
     );
@@ -313,7 +312,7 @@ macro_rules! declare_saga_actions {
     };
 }
 
-pub(crate) const NEXUS_DPD_TAG: &str = "nexus";
+use omicron_common::OMICRON_DPD_TAG as NEXUS_DPD_TAG;
 
 pub(crate) use __action_name;
 pub(crate) use __emit_action;

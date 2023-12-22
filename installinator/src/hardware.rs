@@ -6,10 +6,11 @@ use anyhow::anyhow;
 use anyhow::ensure;
 use anyhow::Context;
 use anyhow::Result;
-use sled_hardware::Disk;
 use sled_hardware::DiskVariant;
 use sled_hardware::HardwareManager;
 use sled_hardware::SledMode;
+use sled_storage::disk::Disk;
+use sled_storage::disk::RawDisk;
 use slog::info;
 use slog::Logger;
 
@@ -28,7 +29,8 @@ impl Hardware {
                 anyhow!("failed to create HardwareManager: {err}")
             })?;
 
-        let disks = hardware.disks();
+        let disks: Vec<RawDisk> =
+            hardware.disks().into_iter().map(|disk| disk.into()).collect();
 
         info!(
             log, "found gimlet hardware";

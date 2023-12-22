@@ -8,14 +8,15 @@ use super::config::Config;
 use super::http_entrypoints::api as http_api;
 use super::sled_agent::SledAgent;
 use crate::bootstrap::params::StartSledAgentRequest;
+use crate::long_running_tasks::LongRunningTaskHandles;
 use crate::nexus::NexusClientWithResolver;
 use crate::services::ServiceManager;
-use crate::storage_manager::StorageManager;
-use bootstore::schemes::v0 as bootstore;
+use crate::storage_monitor::UnderlayAccess;
 use internal_dns::resolver::Resolver;
 use slog::Logger;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use tokio::sync::oneshot;
 use uuid::Uuid;
 
 /// Packages up a [`SledAgent`], running the sled agent API under a Dropshot
@@ -39,9 +40,9 @@ impl Server {
         config: &Config,
         log: Logger,
         request: StartSledAgentRequest,
+        long_running_tasks_handles: LongRunningTaskHandles,
         services: ServiceManager,
-        storage: StorageManager,
-        bootstore: bootstore::NodeHandle,
+        underlay_available_tx: oneshot::Sender<UnderlayAccess>,
     ) -> Result<Server, String> {
         info!(log, "setting up sled agent server");
 
@@ -63,15 +64,16 @@ impl Server {
             nexus_client,
             request,
             services,
-            storage,
-            bootstore,
+            long_running_tasks_handles,
+            underlay_available_tx,
         )
         .await
         .map_err(|e| e.to_string())?;
 
-        let mut dropshot_config = dropshot::ConfigDropshot::default();
-        dropshot_config.request_body_max_bytes = 1024 * 1024;
-        dropshot_config.bind_address = SocketAddr::V6(sled_address);
+        let dropshot_config = dropshot::ConfigDropshot {
+            bind_address: SocketAddr::V6(sled_address),
+            ..config.dropshot
+        };
         let dropshot_log = log.new(o!("component" => "dropshot (SledAgent)"));
         let http_server = dropshot::HttpServerStarter::new(
             &dropshot_config,

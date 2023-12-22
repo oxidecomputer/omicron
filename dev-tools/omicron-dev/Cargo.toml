@@ -21,7 +21,6 @@ nexus-test-interface.workspace = true
 omicron-common.workspace = true
 omicron-nexus.workspace = true
 omicron-test-utils.workspace = true
-omicron-sled-agent.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
 rcgen.workspace = true

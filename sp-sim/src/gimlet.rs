@@ -9,24 +9,30 @@ use crate::helpers::rot_slot_id_to_u16;
 use crate::rot::RotSprocketExt;
 use crate::serial_number_padded;
 use crate::server;
+use crate::server::SimSpHandler;
 use crate::server::UdpServer;
+use crate::update::SimSpUpdate;
 use crate::Responsiveness;
 use crate::SimulatedSp;
+use crate::SIM_ROT_BOARD;
 use anyhow::{anyhow, bail, Context, Result};
 use async_trait::async_trait;
 use futures::future;
+use futures::Future;
 use gateway_messages::ignition::{self, LinkEvents};
 use gateway_messages::sp_impl::SpHandler;
 use gateway_messages::sp_impl::{BoundsChecked, DeviceDescription};
+use gateway_messages::CfpaPage;
 use gateway_messages::ComponentAction;
 use gateway_messages::Header;
+use gateway_messages::RotRequest;
+use gateway_messages::RotResponse;
 use gateway_messages::RotSlotId;
 use gateway_messages::SpComponent;
 use gateway_messages::SpError;
 use gateway_messages::SpPort;
 use gateway_messages::SpRequest;
 use gateway_messages::SpStateV2;
-use gateway_messages::UpdateId;
 use gateway_messages::{version, MessageKind};
 use gateway_messages::{ComponentDetails, Message, MgsError, StartupOptions};
 use gateway_messages::{DiscoverResponse, IgnitionState, PowerState};
@@ -36,17 +42,20 @@ use sprockets_rot::common::Ed25519PublicKey;
 use sprockets_rot::{RotSprocket, RotSprocketError};
 use std::cell::Cell;
 use std::collections::HashMap;
-use std::io::Cursor;
 use std::iter;
 use std::net::{SocketAddr, SocketAddrV6};
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tokio::select;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot;
+use tokio::sync::watch;
 use tokio::sync::Mutex as TokioMutex;
 use tokio::task::{self, JoinHandle};
+
+pub const SIM_GIMLET_BOARD: &str = "SimGimletSp";
 
 pub struct Gimlet {
     rot: Mutex<RotSprocket>,
@@ -54,9 +63,9 @@ pub struct Gimlet {
     local_addrs: Option<[SocketAddrV6; 2]>,
     handler: Option<Arc<TokioMutex<Handler>>>,
     serial_console_addrs: HashMap<String, SocketAddrV6>,
-    commands:
-        mpsc::UnboundedSender<(Command, oneshot::Sender<CommandResponse>)>,
+    commands: mpsc::UnboundedSender<Command>,
     inner_tasks: Vec<JoinHandle<()>>,
+    responses_sent_count: Option<watch::Receiver<usize>>,
 }
 
 impl Drop for Gimlet {
@@ -90,8 +99,7 @@ impl SimulatedSp for Gimlet {
 
     async fn set_responsiveness(&self, r: Responsiveness) {
         let (tx, rx) = oneshot::channel();
-        if let Ok(()) = self.commands.send((Command::SetResponsiveness(r), tx))
-        {
+        if let Ok(()) = self.commands.send(Command::SetResponsiveness(r, tx)) {
             rx.await.unwrap();
         }
     }
@@ -101,6 +109,52 @@ impl SimulatedSp for Gimlet {
         request: RotRequestV1,
     ) -> Result<RotResponseV1, RotSprocketError> {
         self.rot.lock().unwrap().handle_deserialized(request)
+    }
+
+    async fn last_sp_update_data(&self) -> Option<Box<[u8]>> {
+        let handler = self.handler.as_ref()?;
+        let handler = handler.lock().await;
+        handler.update_state.last_sp_update_data()
+    }
+
+    async fn last_rot_update_data(&self) -> Option<Box<[u8]>> {
+        let handler = self.handler.as_ref()?;
+        let handler = handler.lock().await;
+        handler.update_state.last_rot_update_data()
+    }
+
+    async fn last_host_phase1_update_data(
+        &self,
+        slot: u16,
+    ) -> Option<Box<[u8]>> {
+        let handler = self.handler.as_ref()?;
+        let handler = handler.lock().await;
+        handler.update_state.last_host_phase1_update_data(slot)
+    }
+
+    async fn current_update_status(&self) -> gateway_messages::UpdateStatus {
+        let Some(handler) = self.handler.as_ref() else {
+            return gateway_messages::UpdateStatus::None;
+        };
+
+        handler.lock().await.update_state.status()
+    }
+
+    fn responses_sent_count(&self) -> Option<watch::Receiver<usize>> {
+        self.responses_sent_count.clone()
+    }
+
+    async fn install_udp_accept_semaphore(
+        &self,
+    ) -> mpsc::UnboundedSender<usize> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let (resp_tx, resp_rx) = oneshot::channel();
+        if let Ok(()) =
+            self.commands.send(Command::SetThrottler(Some(rx), resp_tx))
+        {
+            resp_rx.await.unwrap();
+        }
+        tx
     }
 }
 
@@ -115,108 +169,108 @@ impl Gimlet {
         let mut inner_tasks = Vec::new();
         let (commands, commands_rx) = mpsc::unbounded_channel();
 
-        let (local_addrs, handler) = if let Some(bind_addrs) =
-            gimlet.common.bind_addrs
-        {
-            // bind to our two local "KSZ" ports
-            assert_eq!(bind_addrs.len(), 2); // gimlet SP always has 2 ports
-            let servers = future::try_join(
-                UdpServer::new(
-                    bind_addrs[0],
-                    gimlet.common.multicast_addr,
-                    &log,
-                ),
-                UdpServer::new(
-                    bind_addrs[1],
-                    gimlet.common.multicast_addr,
-                    &log,
-                ),
-            )
-            .await?;
-            let servers = [servers.0, servers.1];
-
-            for component_config in &gimlet.common.components {
-                let id = component_config.id.as_str();
-                let component = SpComponent::try_from(id)
-                    .map_err(|_| anyhow!("component id {:?} too long", id))?;
-
-                if let Some(addr) = component_config.serial_console {
-                    let listener =
-                        TcpListener::bind(addr).await.with_context(|| {
-                            format!("failed to bind to {}", addr)
-                        })?;
-                    info!(
-                        log, "bound fake serial console to TCP port";
-                        "addr" => %addr,
-                        "component" => ?component,
-                    );
-
-                    serial_console_addrs.insert(
-                        component
-                            .as_str()
-                            .with_context(|| "non-utf8 component")?
-                            .to_string(),
-                        listener
-                            .local_addr()
-                            .with_context(|| {
-                                "failed to get local address of bound socket"
-                            })
-                            .and_then(|addr| match addr {
-                                SocketAddr::V4(addr) => {
-                                    bail!("bound IPv4 address {}", addr)
-                                }
-                                SocketAddr::V6(addr) => Ok(addr),
-                            })?,
-                    );
-
-                    let (tx, rx) = mpsc::unbounded_channel();
-                    incoming_console_tx.insert(component, tx);
-
-                    let serial_console = SerialConsoleTcpTask::new(
-                        component,
-                        listener,
-                        rx,
-                        [
-                            Arc::clone(servers[0].socket()),
-                            Arc::clone(servers[1].socket()),
-                        ],
-                        Arc::clone(&attached_mgs),
-                        log.new(slog::o!("serial-console" => id.to_string())),
-                    );
-                    inner_tasks.push(task::spawn(async move {
-                        serial_console.run().await
-                    }));
-                }
-            }
-            let local_addrs =
-                [servers[0].local_addr(), servers[1].local_addr()];
-            let (inner, handler) = UdpTask::new(
-                servers,
-                gimlet.common.components.clone(),
-                attached_mgs,
-                gimlet.common.serial_number.clone(),
-                incoming_console_tx,
-                commands_rx,
-                log,
-            );
-            inner_tasks
-                .push(task::spawn(async move { inner.run().await.unwrap() }));
-
-            (Some(local_addrs), Some(handler))
-        } else {
-            (None, None)
-        };
-
         let (manufacturing_public_key, rot) =
             RotSprocket::bootstrap_from_config(&gimlet.common);
+
+        // Weird case - if we don't have any bind addresses, we're only being
+        // created to simulate an RoT, so go ahead and return without actually
+        // starting a simulated SP.
+        let Some(bind_addrs) = gimlet.common.bind_addrs else {
+            return Ok(Self {
+                rot: Mutex::new(rot),
+                manufacturing_public_key,
+                local_addrs: None,
+                handler: None,
+                serial_console_addrs,
+                commands,
+                inner_tasks,
+                responses_sent_count: None,
+            });
+        };
+
+        // bind to our two local "KSZ" ports
+        assert_eq!(bind_addrs.len(), 2); // gimlet SP always has 2 ports
+        let servers = future::try_join(
+            UdpServer::new(bind_addrs[0], gimlet.common.multicast_addr, &log),
+            UdpServer::new(bind_addrs[1], gimlet.common.multicast_addr, &log),
+        )
+        .await?;
+        let servers = [servers.0, servers.1];
+
+        for component_config in &gimlet.common.components {
+            let id = component_config.id.as_str();
+            let component = SpComponent::try_from(id)
+                .map_err(|_| anyhow!("component id {:?} too long", id))?;
+
+            if let Some(addr) = component_config.serial_console {
+                let listener = TcpListener::bind(addr)
+                    .await
+                    .with_context(|| format!("failed to bind to {}", addr))?;
+                info!(
+                    log, "bound fake serial console to TCP port";
+                    "addr" => %addr,
+                    "component" => ?component,
+                );
+
+                serial_console_addrs.insert(
+                    component
+                        .as_str()
+                        .with_context(|| "non-utf8 component")?
+                        .to_string(),
+                    listener
+                        .local_addr()
+                        .with_context(|| {
+                            "failed to get local address of bound socket"
+                        })
+                        .and_then(|addr| match addr {
+                            SocketAddr::V4(addr) => {
+                                bail!("bound IPv4 address {}", addr)
+                            }
+                            SocketAddr::V6(addr) => Ok(addr),
+                        })?,
+                );
+
+                let (tx, rx) = mpsc::unbounded_channel();
+                incoming_console_tx.insert(component, tx);
+
+                let serial_console = SerialConsoleTcpTask::new(
+                    component,
+                    listener,
+                    rx,
+                    [
+                        Arc::clone(servers[0].socket()),
+                        Arc::clone(servers[1].socket()),
+                    ],
+                    Arc::clone(&attached_mgs),
+                    log.new(slog::o!("serial-console" => id.to_string())),
+                );
+                inner_tasks.push(task::spawn(async move {
+                    serial_console.run().await
+                }));
+            }
+        }
+        let local_addrs = [servers[0].local_addr(), servers[1].local_addr()];
+        let (inner, handler, responses_sent_count) = UdpTask::new(
+            servers,
+            gimlet.common.components.clone(),
+            attached_mgs,
+            gimlet.common.serial_number.clone(),
+            incoming_console_tx,
+            commands_rx,
+            log,
+        );
+        inner_tasks
+            .push(task::spawn(async move { inner.run().await.unwrap() }));
+
         Ok(Self {
             rot: Mutex::new(rot),
             manufacturing_public_key,
-            local_addrs,
-            handler,
+            local_addrs: Some(local_addrs),
+            handler: Some(handler),
             serial_console_addrs,
             commands,
             inner_tasks,
+            responses_sent_count: Some(responses_sent_count),
         })
     }
 
@@ -393,19 +447,18 @@ impl SerialConsoleTcpTask {
 }
 
 enum Command {
-    SetResponsiveness(Responsiveness),
+    SetResponsiveness(Responsiveness, oneshot::Sender<Ack>),
+    SetThrottler(Option<mpsc::UnboundedReceiver<usize>>, oneshot::Sender<Ack>),
 }
 
-enum CommandResponse {
-    SetResponsivenessAck,
-}
+struct Ack;
 
 struct UdpTask {
     udp0: UdpServer,
     udp1: UdpServer,
     handler: Arc<TokioMutex<Handler>>,
-    commands:
-        mpsc::UnboundedReceiver<(Command, oneshot::Sender<CommandResponse>)>,
+    commands: mpsc::UnboundedReceiver<Command>,
+    responses_sent_count: watch::Sender<usize>,
 }
 
 impl UdpTask {
@@ -415,12 +468,9 @@ impl UdpTask {
         attached_mgs: Arc<Mutex<Option<(SpComponent, SpPort, SocketAddrV6)>>>,
         serial_number: String,
         incoming_serial_console: HashMap<SpComponent, UnboundedSender<Vec<u8>>>,
-        commands: mpsc::UnboundedReceiver<(
-            Command,
-            oneshot::Sender<CommandResponse>,
-        )>,
+        commands: mpsc::UnboundedReceiver<Command>,
         log: Logger,
-    ) -> (Self, Arc<TokioMutex<Handler>>) {
+    ) -> (Self, Arc<TokioMutex<Handler>>, watch::Receiver<usize>) {
         let [udp0, udp1] = servers;
         let handler = Arc::new(TokioMutex::new(Handler::new(
             serial_number,
@@ -429,15 +479,40 @@ impl UdpTask {
             incoming_serial_console,
             log,
         )));
-        (Self { udp0, udp1, handler: Arc::clone(&handler), commands }, handler)
+        let responses_sent_count = watch::Sender::new(0);
+        let responses_sent_count_rx = responses_sent_count.subscribe();
+        (
+            Self {
+                udp0,
+                udp1,
+                handler: Arc::clone(&handler),
+                commands,
+                responses_sent_count,
+            },
+            handler,
+            responses_sent_count_rx,
+        )
     }
 
     async fn run(mut self) -> Result<()> {
         let mut out_buf = [0; gateway_messages::MAX_SERIALIZED_SIZE];
         let mut responsiveness = Responsiveness::Responsive;
+        let mut throttle_count = usize::MAX;
+        let mut throttler: Option<mpsc::UnboundedReceiver<usize>> = None;
         loop {
+            let incr_throttle_count: Pin<
+                Box<dyn Future<Output = Option<usize>> + Send>,
+            > = if let Some(throttler) = throttler.as_mut() {
+                Box::pin(throttler.recv())
+            } else {
+                Box::pin(future::pending())
+            };
             select! {
-                recv0 = self.udp0.recv_from() => {
+                Some(n) = incr_throttle_count => {
+                    throttle_count = throttle_count.saturating_add(n);
+                }
+
+                recv0 = self.udp0.recv_from(), if throttle_count > 0 => {
                     if let Some((resp, addr)) = server::handle_request(
                         &mut *self.handler.lock().await,
                         recv0,
@@ -445,11 +520,13 @@ impl UdpTask {
                         responsiveness,
                         SpPort::One,
                     ).await? {
+                        throttle_count -= 1;
                         self.udp0.send_to(resp, addr).await?;
+                        self.responses_sent_count.send_modify(|n| *n += 1);
                     }
                 }
 
-                recv1 = self.udp1.recv_from() => {
+                recv1 = self.udp1.recv_from(), if throttle_count > 0 => {
                     if let Some((resp, addr)) = server::handle_request(
                         &mut *self.handler.lock().await,
                         recv1,
@@ -457,21 +534,36 @@ impl UdpTask {
                         responsiveness,
                         SpPort::Two,
                     ).await? {
+                        throttle_count -= 1;
                         self.udp1.send_to(resp, addr).await?;
+                        self.responses_sent_count.send_modify(|n| *n += 1);
                     }
                 }
 
                 command = self.commands.recv() => {
                     // if sending half is gone, we're about to be killed anyway
-                    let (command, tx) = match command {
-                        Some((command, tx)) => (command, tx),
+                    let command = match command {
+                        Some(command) => command,
                         None => return Ok(()),
                     };
 
                     match command {
-                        Command::SetResponsiveness(r) => {
+                        Command::SetResponsiveness(r, tx) => {
                             responsiveness = r;
-                            tx.send(CommandResponse::SetResponsivenessAck)
+                            tx.send(Ack)
+                                .map_err(|_| "receiving half died").unwrap();
+                        }
+                        Command::SetThrottler(thr, tx) => {
+                            throttler = thr;
+
+                            // Either immediately start throttling, or
+                            // immediately stop throttling.
+                            if throttler.is_some() {
+                                throttle_count = 0;
+                            } else {
+                                throttle_count = usize::MAX;
+                            }
+                            tx.send(Ack)
                                 .map_err(|_| "receiving half died").unwrap();
                         }
                     }
@@ -499,7 +591,15 @@ struct Handler {
     rot_active_slot: RotSlotId,
     power_state: PowerState,
     startup_options: StartupOptions,
-    update_state: UpdateState,
+    update_state: SimSpUpdate,
+    reset_pending: Option<SpComponent>,
+
+    // To simulate an SP reset, we should (after doing whatever housekeeping we
+    // need to track the reset) intentionally _fail_ to respond to the request,
+    // simulating a `-> !` function on the SP that triggers a reset. To provide
+    // this, our caller will pass us a function to call if they should ignore
+    // whatever result we return and fail to respond at all.
+    should_fail_to_respond_signal: Option<Box<dyn FnOnce() + Send>>,
 }
 
 impl Handler {
@@ -533,7 +633,9 @@ impl Handler {
             rot_active_slot: RotSlotId::A,
             power_state: PowerState::A2,
             startup_options: StartupOptions::empty(),
-            update_state: UpdateState::NotPrepared,
+            update_state: SimSpUpdate::default(),
+            reset_pending: None,
+            should_fail_to_respond_signal: None,
         }
     }
 
@@ -853,14 +955,18 @@ impl SpHandler for Handler {
         port: SpPort,
         update: gateway_messages::SpUpdatePrepare,
     ) -> Result<(), SpError> {
-        warn!(
+        debug!(
             &self.log,
-            "received update prepare request; not supported by simulated gimlet";
+            "received SP update prepare request";
             "sender" => %sender,
             "port" => ?port,
             "update" => ?update,
         );
-        Err(SpError::RequestUnsupportedForSp)
+        self.update_state.prepare(
+            SpComponent::SP_ITSELF,
+            update.id,
+            update.sp_image_size.try_into().unwrap(),
+        )
     }
 
     fn component_update_prepare(
@@ -877,14 +983,11 @@ impl SpHandler for Handler {
             "update" => ?update,
         );
 
-        self.update_state = UpdateState::Prepared {
-            component: update.component,
-            id: update.id,
-            data: Cursor::new(
-                vec![0u8; update.total_size as usize].into_boxed_slice(),
-            ),
-        };
-        Ok(())
+        self.update_state.prepare(
+            update.component,
+            update.id,
+            update.total_size.try_into().unwrap(),
+        )
     }
 
     fn update_status(
@@ -900,8 +1003,7 @@ impl SpHandler for Handler {
             "port" => ?port,
             "component" => ?component,
         );
-        // TODO: check that component matches
-        Ok(self.update_state.to_message())
+        Ok(self.update_state.status())
     }
 
     fn update_chunk(
@@ -919,38 +1021,7 @@ impl SpHandler for Handler {
             "offset" => chunk.offset,
             "length" => chunk_data.len(),
         );
-        match &mut self.update_state {
-            UpdateState::Prepared { id, data, .. } => {
-                // Ensure that the update ID is correct.
-                // TODO: component?
-                if chunk.id != *id {
-                    return Err(SpError::InvalidUpdateId { sp_update_id: *id });
-                };
-                if data.position() != chunk.offset as u64 {
-                    return Err(SpError::UpdateInProgress(
-                        self.update_state.to_message(),
-                    ));
-                }
-
-                std::io::Write::write_all(data, chunk_data).map_err(|error| {
-                    // Writing to an in-memory buffer can only fail if the update is too large.
-                    warn!(
-                        &self.log,
-                        "update is too large";
-                        "sender" => %sender,
-                        "port" => ?port,
-                        "offset" => chunk.offset,
-                        "length" => chunk_data.len(),
-                        "total_size" => data.get_ref().len(),
-                        "error" => %error,
-                    );
-                    SpError::UpdateIsTooLarge
-                })
-            }
-            UpdateState::NotPrepared | UpdateState::Aborted(_) => {
-                Err(SpError::UpdateNotPrepared)
-            }
-        }
+        self.update_state.ingest_chunk(chunk, chunk_data)
     }
 
     fn update_abort(
@@ -968,21 +1039,7 @@ impl SpHandler for Handler {
             "component" => ?update_component,
             "id" => ?update_id,
         );
-        match &self.update_state {
-            UpdateState::NotPrepared => {
-                // Ignore this. TODO error here?
-            }
-            UpdateState::Prepared { id, .. } => {
-                if update_id != *id {
-                    return Err(SpError::InvalidUpdateId { sp_update_id: *id });
-                }
-                // TODO: check for component equality?
-                self.update_state = UpdateState::Aborted(update_id);
-            }
-            UpdateState::Aborted(_) => {}
-        }
-
-        Err(SpError::RequestUnsupportedForSp)
+        self.update_state.abort(update_id)
     }
 
     fn power_state(
@@ -1021,13 +1078,19 @@ impl SpHandler for Handler {
         port: SpPort,
         component: SpComponent,
     ) -> Result<(), SpError> {
-        warn!(
-            &self.log, "received reset prepare request; not supported by simulated gimlet";
+        debug!(
+            &self.log, "received reset prepare request";
             "sender" => %sender,
             "port" => ?port,
             "component" => ?component,
         );
-        Err(SpError::RequestUnsupportedForSp)
+        if component == SpComponent::SP_ITSELF || component == SpComponent::ROT
+        {
+            self.reset_pending = Some(component);
+            Ok(())
+        } else {
+            Err(SpError::RequestUnsupportedForComponent)
+        }
     }
 
     fn reset_component_trigger(
@@ -1036,13 +1099,37 @@ impl SpHandler for Handler {
         port: SpPort,
         component: SpComponent,
     ) -> Result<(), SpError> {
-        warn!(
-            &self.log, "received reset trigger request; not supported by simulated gimlet";
+        debug!(
+            &self.log, "received reset trigger request";
             "sender" => %sender,
             "port" => ?port,
             "component" => ?component,
         );
-        Err(SpError::RequestUnsupportedForSp)
+        if component == SpComponent::SP_ITSELF {
+            if self.reset_pending == Some(SpComponent::SP_ITSELF) {
+                self.update_state.sp_reset();
+                self.reset_pending = None;
+                if let Some(signal) = self.should_fail_to_respond_signal.take()
+                {
+                    // Instruct `server::handle_request()` to _not_ respond to
+                    // this request at all, simulating an SP actually resetting.
+                    signal();
+                }
+                Ok(())
+            } else {
+                Err(SpError::ResetComponentTriggerWithoutPrepare)
+            }
+        } else if component == SpComponent::ROT {
+            if self.reset_pending == Some(SpComponent::ROT) {
+                self.update_state.rot_reset();
+                self.reset_pending = None;
+                Ok(())
+            } else {
+                Err(SpError::ResetComponentTriggerWithoutPrepare)
+            }
+        } else {
+            Err(SpError::RequestUnsupportedForComponent)
+        }
     }
 
     fn num_devices(&mut self, _: SocketAddrV6, _: SpPort) -> u32 {
@@ -1110,7 +1197,7 @@ impl SpHandler for Handler {
         port: SpPort,
         component: SpComponent,
     ) -> Result<u16, SpError> {
-        warn!(
+        debug!(
             &self.log, "asked for component active slot";
             "sender" => %sender,
             "port" => ?port,
@@ -1133,7 +1220,7 @@ impl SpHandler for Handler {
         slot: u16,
         persist: bool,
     ) -> Result<(), SpError> {
-        warn!(
+        debug!(
             &self.log, "asked to set component active slot";
             "sender" => %sender,
             "port" => ?port,
@@ -1144,9 +1231,12 @@ impl SpHandler for Handler {
         if component == SpComponent::ROT {
             self.rot_active_slot = rot_slot_id_from_u16(slot)?;
             Ok(())
+        } else if component == SpComponent::HOST_CPU_BOOT_FLASH {
+            self.update_state.set_active_host_slot(slot);
+            Ok(())
         } else {
             // The real SP returns `RequestUnsupportedForComponent` for anything
-            // other than the RoT, including SP_ITSELF.
+            // other than the RoT and host boot flash, including SP_ITSELF.
             Err(SpError::RequestUnsupportedForComponent)
         }
     }
@@ -1258,12 +1348,12 @@ impl SpHandler for Handler {
         buf: &mut [u8],
     ) -> std::result::Result<usize, SpError> {
         static SP_GITC: &[u8] = b"ffffffff";
-        static SP_BORD: &[u8] = b"SimGimletSp";
+        static SP_BORD: &[u8] = SIM_GIMLET_BOARD.as_bytes();
         static SP_NAME: &[u8] = b"SimGimlet";
         static SP_VERS: &[u8] = b"0.0.1";
 
         static ROT_GITC: &[u8] = b"eeeeeeee";
-        static ROT_BORD: &[u8] = b"SimGimletRot";
+        static ROT_BORD: &[u8] = SIM_ROT_BOARD.as_bytes();
         static ROT_NAME: &[u8] = b"SimGimlet";
         static ROT_VERS: &[u8] = b"0.0.1";
 
@@ -1296,49 +1386,26 @@ impl SpHandler for Handler {
 
     fn read_rot(
         &mut self,
-        _request: gateway_messages::RotRequest,
-        _buf: &mut [u8],
-    ) -> std::result::Result<gateway_messages::RotResponse, SpError> {
-        Err(SpError::RequestUnsupportedForSp)
+        request: RotRequest,
+        buf: &mut [u8],
+    ) -> std::result::Result<RotResponse, SpError> {
+        let dummy_page = match request {
+            RotRequest::ReadCmpa => "gimlet-cmpa",
+            RotRequest::ReadCfpa(CfpaPage::Active) => "gimlet-cfpa-active",
+            RotRequest::ReadCfpa(CfpaPage::Inactive) => "gimlet-cfpa-inactive",
+            RotRequest::ReadCfpa(CfpaPage::Scratch) => "gimlet-cfpa-scratch",
+        };
+        buf[..dummy_page.len()].copy_from_slice(dummy_page.as_bytes());
+        buf[dummy_page.len()..].fill(0);
+        Ok(RotResponse::Ok)
     }
 }
 
-enum UpdateState {
-    NotPrepared,
-    Prepared {
-        #[allow(unused)]
-        component: SpComponent,
-        id: UpdateId,
-        // data would ordinarily be a Cursor<Vec<u8>>, but that can grow and
-        // reallocate. We want to ensure that we don't receive any more data
-        // than originally promised, so use a Cursor<Box<[u8]>> to ensure that
-        // it never grows.
-        data: Cursor<Box<[u8]>>,
-    },
-    Aborted(UpdateId),
-}
-
-impl UpdateState {
-    fn to_message(&self) -> gateway_messages::UpdateStatus {
-        match self {
-            Self::NotPrepared => gateway_messages::UpdateStatus::None,
-            Self::Prepared { id, data, .. } => {
-                // If all the data has written, mark it as completed.
-                let bytes_received = data.position() as u32;
-                let total_size = data.get_ref().len() as u32;
-                if bytes_received == total_size {
-                    gateway_messages::UpdateStatus::Complete(*id)
-                } else {
-                    gateway_messages::UpdateStatus::InProgress(
-                        gateway_messages::UpdateInProgressStatus {
-                            id: *id,
-                            bytes_received,
-                            total_size,
-                        },
-                    )
-                }
-            }
-            Self::Aborted(id) => gateway_messages::UpdateStatus::Aborted(*id),
-        }
+impl SimSpHandler for Handler {
+    fn set_sp_should_fail_to_respond_signal(
+        &mut self,
+        signal: Box<dyn FnOnce() + Send>,
+    ) {
+        self.should_fail_to_respond_signal = Some(signal);
     }
 }

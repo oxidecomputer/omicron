@@ -32,6 +32,7 @@ mod image;
 mod instance;
 mod instance_cpu_count;
 mod instance_state;
+mod inventory;
 mod ip_pool;
 mod ipv4net;
 mod ipv6;
@@ -52,7 +53,9 @@ mod system_update;
 // These actually represent subqueries, not real table.
 // However, they must be defined in the same crate as our tables
 // for join-based marker trait generation.
+mod ipv4_nat_entry;
 pub mod queries;
+mod quota;
 mod rack;
 mod region;
 mod region_snapshot;
@@ -68,14 +71,17 @@ mod silo_user;
 mod silo_user_password_hash;
 mod sled;
 mod sled_instance;
+mod sled_provision_state;
 mod sled_resource;
 mod sled_resource_kind;
+mod sled_underlay_subnet_allocation;
 mod snapshot;
 mod ssh_key;
 mod switch;
 mod unsigned;
 mod update_artifact;
 mod user_builtin;
+mod utilization;
 mod virtual_provisioning_collection;
 mod virtual_provisioning_resource;
 mod vmm;
@@ -121,7 +127,9 @@ pub use image::*;
 pub use instance::*;
 pub use instance_cpu_count::*;
 pub use instance_state::*;
+pub use inventory::*;
 pub use ip_pool::*;
+pub use ipv4_nat_entry::*;
 pub use ipv4net::*;
 pub use ipv6::*;
 pub use ipv6net::*;
@@ -133,6 +141,7 @@ pub use physical_disk::*;
 pub use physical_disk_kind::*;
 pub use producer_endpoint::*;
 pub use project::*;
+pub use quota::*;
 pub use rack::*;
 pub use region::*;
 pub use region_snapshot::*;
@@ -147,8 +156,10 @@ pub use silo_user::*;
 pub use silo_user_password_hash::*;
 pub use sled::*;
 pub use sled_instance::*;
+pub use sled_provision_state::*;
 pub use sled_resource::*;
 pub use sled_resource_kind::*;
+pub use sled_underlay_subnet_allocation::*;
 pub use snapshot::*;
 pub use ssh_key::*;
 pub use switch::*;
@@ -157,6 +168,7 @@ pub use switch_port::*;
 pub use system_update::*;
 pub use update_artifact::*;
 pub use user_builtin::*;
+pub use utilization::*;
 pub use virtual_provisioning_collection::*;
 pub use virtual_provisioning_resource::*;
 pub use vmm::*;
@@ -281,10 +293,9 @@ macro_rules! impl_enum_type {
                         Ok($model_type::$enum_item)
                     }
                     )*
-                    _ => {
-                        Err(concat!("Unrecognized enum variant for ",
-                                stringify!{$model_type})
-                            .into())
+                    other => {
+                        let s = concat!("Unrecognized enum variant for ", stringify!{$model_type});
+                        Err(format!("{}: (raw bytes: {:?})", s, other).into())
                     }
                 }
             }

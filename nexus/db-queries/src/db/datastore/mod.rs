@@ -61,11 +61,14 @@ mod external_ip;
 mod identity_provider;
 mod image;
 mod instance;
+mod inventory;
 mod ip_pool;
+mod ipv4_nat_entry;
 mod network_interface;
 mod oximeter;
 mod physical_disk;
 mod project;
+mod quota;
 mod rack;
 mod region;
 mod region_snapshot;
@@ -83,6 +86,7 @@ mod switch;
 mod switch_interface;
 mod switch_port;
 mod update;
+mod utilization;
 mod virtual_provisioning_collection;
 mod vmm;
 mod volume;
@@ -96,10 +100,12 @@ pub use db_metadata::{
 };
 pub use dns::DnsVersionUpdateBuilder;
 pub use instance::InstanceAndActiveVmm;
+pub use inventory::DataStoreInventoryTest;
 pub use rack::RackInit;
 pub use silo::Discoverability;
 pub use switch_port::SwitchPortSettingsCombinedResult;
 pub use virtual_provisioning_collection::StorageType;
+pub use volume::read_only_resources_associated_with_volume;
 pub use volume::CrucibleResources;
 pub use volume::CrucibleTargets;
 
@@ -138,9 +144,13 @@ impl<U, T> RunnableQuery<U> for T where
 {
 }
 
+pub type DataStoreConnection<'a> =
+    bb8::PooledConnection<'a, ConnectionManager<DbConnection>>;
+
 pub struct DataStore {
     pool: Arc<Pool>,
     virtual_provisioning_collection_producer: crate::provisioning::Producer,
+    transaction_retry_producer: crate::transaction_retry::Producer,
 }
 
 // The majority of `DataStore`'s methods live in our submodules as a concession
@@ -157,6 +167,8 @@ impl DataStore {
             pool,
             virtual_provisioning_collection_producer:
                 crate::provisioning::Producer::new(),
+            transaction_retry_producer: crate::transaction_retry::Producer::new(
+            ),
         };
         Ok(datastore)
     }
@@ -203,23 +215,38 @@ impl DataStore {
                 self.virtual_provisioning_collection_producer.clone(),
             )
             .unwrap();
+        registry
+            .register_producer(self.transaction_retry_producer.clone())
+            .unwrap();
     }
 
-    async fn pool_authorized(
+    /// Constructs a transaction retry helper
+    ///
+    /// Automatically wraps the underlying producer
+    pub fn transaction_retry_wrapper(
         &self,
-        opctx: &OpContext,
-    ) -> Result<&bb8::Pool<ConnectionManager<DbConnection>>, Error> {
-        opctx.authorize(authz::Action::Query, &authz::DATABASE).await?;
-        Ok(self.pool.pool())
+        name: &'static str,
+    ) -> crate::transaction_retry::RetryHelper {
+        crate::transaction_retry::RetryHelper::new(
+            &self.transaction_retry_producer,
+            name,
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn transaction_retry_producer(
+        &self,
+    ) -> &crate::transaction_retry::Producer {
+        &self.transaction_retry_producer
     }
 
     /// Returns a connection to a connection from the database connection pool.
     pub(super) async fn pool_connection_authorized(
         &self,
         opctx: &OpContext,
-    ) -> Result<bb8::PooledConnection<ConnectionManager<DbConnection>>, Error>
-    {
-        let pool = self.pool_authorized(opctx).await?;
+    ) -> Result<DataStoreConnection, Error> {
+        opctx.authorize(authz::Action::Query, &authz::DATABASE).await?;
+        let pool = self.pool.pool();
         let connection = pool.get().await.map_err(|err| {
             Error::unavail(&format!("Failed to access DB connection: {err}"))
         })?;
@@ -233,8 +260,7 @@ impl DataStore {
     /// "pool_connection_authorized".
     pub(super) async fn pool_connection_unauthorized(
         &self,
-    ) -> Result<bb8::PooledConnection<ConnectionManager<DbConnection>>, Error>
-    {
+    ) -> Result<DataStoreConnection, Error> {
         let connection = self.pool.pool().get().await.map_err(|err| {
             Error::unavail(&format!("Failed to access DB connection: {err}"))
         })?;
@@ -245,8 +271,7 @@ impl DataStore {
     #[doc(hidden)]
     pub async fn pool_connection_for_tests(
         &self,
-    ) -> Result<bb8::PooledConnection<ConnectionManager<DbConnection>>, Error>
-    {
+    ) -> Result<DataStoreConnection, Error> {
         self.pool_connection_unauthorized().await
     }
 
@@ -374,9 +399,9 @@ mod test {
     use crate::db::model::{
         BlockSize, ComponentUpdate, ComponentUpdateIdentity, ConsoleSession,
         Dataset, DatasetKind, ExternalIp, PhysicalDisk, PhysicalDiskKind,
-        Project, Rack, Region, Service, ServiceKind, SiloUser, Sled,
-        SledBaseboard, SledSystemHardware, SshKey, SystemUpdate,
-        UpdateableComponentType, VpcSubnet, Zpool,
+        Project, Rack, Region, Service, ServiceKind, SiloUser, SledBaseboard,
+        SledProvisionState, SledSystemHardware, SledUpdate, SshKey,
+        SystemUpdate, UpdateableComponentType, VpcSubnet, Zpool,
     };
     use crate::db::queries::vpc_subnet::FilterConflictingVpcSubnetRangesQuery;
     use assert_matches::assert_matches;
@@ -602,15 +627,44 @@ mod test {
         let rack_id = Uuid::new_v4();
         let sled_id = Uuid::new_v4();
 
-        let sled = Sled::new(
+        let sled_update = SledUpdate::new(
             sled_id,
             bogus_addr,
             sled_baseboard_for_test(),
             sled_system_hardware_for_test(),
             rack_id,
         );
-        datastore.sled_upsert(sled).await.unwrap();
+        datastore.sled_upsert(sled_update).await.unwrap();
         sled_id
+    }
+
+    // Marks a sled as non-provisionable.
+    async fn mark_sled_non_provisionable(
+        datastore: &DataStore,
+        opctx: &OpContext,
+        sled_id: Uuid,
+    ) {
+        let (authz_sled, sled) = LookupPath::new(opctx, datastore)
+            .sled_id(sled_id)
+            .fetch_for(authz::Action::Modify)
+            .await
+            .unwrap();
+        println!("sled: {:?}", sled);
+        let old_state = datastore
+            .sled_set_provision_state(
+                &opctx,
+                &authz_sled,
+                SledProvisionState::NonProvisionable,
+            )
+            .await
+            .unwrap_or_else(|error| {
+                panic!(
+                    "error marking sled {sled_id} as non-provisionable: {error}"
+                )
+            });
+        // The old state should always be provisionable since that's where we
+        // start.
+        assert_eq!(old_state, SledProvisionState::Provisionable);
     }
 
     fn test_zpool_size() -> ByteCount {
@@ -773,10 +827,21 @@ mod test {
         let logctx = dev::test_setup_log("test_region_allocation_strat_random");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
-        create_test_datasets_for_region_allocation(
+        let test_datasets = create_test_datasets_for_region_allocation(
             &opctx,
             datastore.clone(),
+            // Even though we're going to mark one sled as non-provisionable to
+            // test that logic, we aren't forcing the datasets to be on
+            // distinct sleds, so REGION_REDUNDANCY_THRESHOLD is enough.
             REGION_REDUNDANCY_THRESHOLD,
+        )
+        .await;
+
+        let non_provisionable_dataset_id = test_datasets[0].dataset_id;
+        mark_sled_non_provisionable(
+            &datastore,
+            &opctx,
+            test_datasets[0].sled_id,
         )
         .await;
 
@@ -812,6 +877,9 @@ mod test {
                 // Must be 3 unique datasets
                 assert!(disk_datasets.insert(dataset.id()));
 
+                // Dataset must not be non-provisionable.
+                assert_ne!(dataset.id(), non_provisionable_dataset_id);
+
                 // Must be 3 unique zpools
                 assert!(disk_zpools.insert(dataset.pool_id));
 
@@ -840,12 +908,23 @@ mod test {
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
-        // Create a rack without enough sleds for a successful allocation when
-        // we require 3 distinct sleds.
+        // Create a rack with enough sleds for a successful allocation when we
+        // require 3 distinct provisionable sleds.
         let test_datasets = create_test_datasets_for_region_allocation(
             &opctx,
             datastore.clone(),
-            REGION_REDUNDANCY_THRESHOLD,
+            // We're going to mark one sled as non-provisionable to test that
+            // logic, and we *are* forcing the datasets to be on distinct
+            // sleds: hence threshold + 1.
+            REGION_REDUNDANCY_THRESHOLD + 1,
+        )
+        .await;
+
+        let non_provisionable_dataset_id = test_datasets[0].dataset_id;
+        mark_sled_non_provisionable(
+            &datastore,
+            &opctx,
+            test_datasets[0].sled_id,
         )
         .await;
 
@@ -887,6 +966,9 @@ mod test {
                 // Must be 3 unique datasets
                 assert!(disk_datasets.insert(dataset.id()));
 
+                // Dataset must not be non-provisionable.
+                assert_ne!(dataset.id(), non_provisionable_dataset_id);
+
                 // Must be 3 unique zpools
                 assert!(disk_zpools.insert(dataset.pool_id));
 
@@ -919,11 +1001,22 @@ mod test {
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
         // Create a rack without enough sleds for a successful allocation when
-        // we require 3 distinct sleds.
-        create_test_datasets_for_region_allocation(
+        // we require 3 distinct provisionable sleds.
+        let test_datasets = create_test_datasets_for_region_allocation(
             &opctx,
             datastore.clone(),
-            REGION_REDUNDANCY_THRESHOLD - 1,
+            // Here, we need to have REGION_REDUNDANCY_THRESHOLD - 1
+            // provisionable sleds to test this failure condition. We're going
+            // to mark one sled as non-provisionable to test that logic, so we
+            // need to add 1 to that number.
+            REGION_REDUNDANCY_THRESHOLD,
+        )
+        .await;
+
+        mark_sled_non_provisionable(
+            &datastore,
+            &opctx,
+            test_datasets[0].sled_id,
         )
         .await;
 
@@ -955,7 +1048,7 @@ mod test {
                 "Saw error: \'{err}\', but expected \'{expected}\'"
             );
 
-            assert!(matches!(err, Error::ServiceUnavailable { .. }));
+            assert!(matches!(err, Error::InsufficientCapacity { .. }));
         }
 
         let _ = db.cleanup().await;
@@ -1100,7 +1193,7 @@ mod test {
             "Saw error: \'{err}\', but expected \'{expected}\'"
         );
 
-        assert!(matches!(err, Error::ServiceUnavailable { .. }));
+        assert!(matches!(err, Error::InsufficientCapacity { .. }));
 
         let _ = db.cleanup().await;
         logctx.cleanup_successful();
@@ -1208,7 +1301,7 @@ mod test {
         let rack_id = Uuid::new_v4();
         let addr1 = "[fd00:1de::1]:12345".parse().unwrap();
         let sled1_id = "0de4b299-e0b4-46f0-d528-85de81a7095f".parse().unwrap();
-        let sled1 = db::model::Sled::new(
+        let sled1 = db::model::SledUpdate::new(
             sled1_id,
             addr1,
             sled_baseboard_for_test(),
@@ -1219,7 +1312,7 @@ mod test {
 
         let addr2 = "[fd00:1df::1]:12345".parse().unwrap();
         let sled2_id = "66285c18-0c79-43e0-e54f-95271f271314".parse().unwrap();
-        let sled2 = db::model::Sled::new(
+        let sled2 = db::model::SledUpdate::new(
             sled2_id,
             addr2,
             sled_baseboard_for_test(),
@@ -1570,6 +1663,7 @@ mod test {
                 time_deleted: None,
                 ip_pool_id: Uuid::new_v4(),
                 ip_pool_range_id: Uuid::new_v4(),
+                project_id: None,
                 is_service: false,
                 parent_id: Some(instance_id),
                 kind: IpKind::Ephemeral,
@@ -1630,6 +1724,7 @@ mod test {
             time_deleted: None,
             ip_pool_id: Uuid::new_v4(),
             ip_pool_range_id: Uuid::new_v4(),
+            project_id: None,
             is_service: false,
             parent_id: Some(Uuid::new_v4()),
             kind: IpKind::SNat,
@@ -1676,6 +1771,7 @@ mod test {
         use crate::db::model::IpKind;
         use crate::db::schema::external_ip::dsl;
         use diesel::result::DatabaseErrorKind::CheckViolation;
+        use diesel::result::DatabaseErrorKind::UniqueViolation;
         use diesel::result::Error::DatabaseError;
 
         let logctx = dev::test_setup_log("test_external_ip_check_constraints");
@@ -1700,6 +1796,7 @@ mod test {
             time_deleted: None,
             ip_pool_id: Uuid::new_v4(),
             ip_pool_range_id: Uuid::new_v4(),
+            project_id: None,
             is_service: false,
             parent_id: Some(Uuid::new_v4()),
             kind: IpKind::Floating,
@@ -1712,151 +1809,190 @@ mod test {
         // - name
         // - description
         // - parent (instance / service) UUID
-        let names = [
-            None,
-            Some(db::model::Name(Name::try_from("foo".to_string()).unwrap())),
-        ];
+        // - project UUID
+        let names = [None, Some("foo")];
         let descriptions = [None, Some("foo".to_string())];
         let parent_ids = [None, Some(Uuid::new_v4())];
+        let project_ids = [None, Some(Uuid::new_v4())];
+
+        let mut seen_pairs = HashSet::new();
 
         // For Floating IPs, both name and description must be non-NULL
-        for name in names.iter() {
-            for description in descriptions.iter() {
-                for parent_id in parent_ids.iter() {
-                    for is_service in [false, true] {
-                        let new_ip = ExternalIp {
-                            id: Uuid::new_v4(),
-                            name: name.clone(),
-                            description: description.clone(),
-                            ip: addresses.next().unwrap().into(),
-                            is_service,
-                            parent_id: *parent_id,
-                            ..ip
-                        };
-                        let res = diesel::insert_into(dsl::external_ip)
-                            .values(new_ip)
-                            .execute_async(&*conn)
-                            .await;
-                        if name.is_some() && description.is_some() {
-                            // Name/description must be non-NULL, instance ID can be
-                            // either
-                            res.unwrap_or_else(|_| {
-                                panic!(
-                                    "Failed to insert Floating IP with valid \
-                                     name, description, and {} ID",
-                                    if is_service {
-                                        "Service"
-                                    } else {
-                                        "Instance"
-                                    }
-                                )
-                            });
-                        } else {
-                            // At least one is not valid, we expect a check violation
-                            let err = res.expect_err(
-                                "Expected a CHECK violation when inserting a \
-                                 Floating IP record with NULL name and/or description",
-                            );
-                            assert!(
-                                matches!(
-                                    err,
-                                    DatabaseError(
-                                        CheckViolation,
-                                        _
-                                    )
-                                ),
-                                "Expected a CHECK violation when inserting a \
-                                 Floating IP record with NULL name and/or description",
-                            );
-                        }
-                    }
-                }
+        // If they are instance FIPs, they *must* have a project id.
+        for (
+            name,
+            description,
+            parent_id,
+            is_service,
+            project_id,
+            modify_name,
+        ) in itertools::iproduct!(
+            &names,
+            &descriptions,
+            &parent_ids,
+            [false, true],
+            &project_ids,
+            [false, true]
+        ) {
+            // Both choices of parent_id are valid, so we need a unique name for each.
+            let name_local = name.map(|v| {
+                let name = if modify_name {
+                    v.to_string()
+                } else {
+                    format!("{v}-with-parent")
+                };
+                db::model::Name(Name::try_from(name).unwrap())
+            });
+
+            // We do name duplicate checking on the `Some` branch, don't steal the
+            // name intended for another floating IP.
+            if parent_id.is_none() && modify_name {
+                continue;
+            }
+
+            let new_ip = ExternalIp {
+                id: Uuid::new_v4(),
+                name: name_local.clone(),
+                description: description.clone(),
+                ip: addresses.next().unwrap().into(),
+                is_service,
+                parent_id: *parent_id,
+                project_id: *project_id,
+                ..ip
+            };
+
+            let key = (*project_id, name_local);
+
+            let res = diesel::insert_into(dsl::external_ip)
+                .values(new_ip)
+                .execute_async(&*conn)
+                .await;
+
+            let project_as_expected = (is_service && project_id.is_none())
+                || (!is_service && project_id.is_some());
+
+            let valid_expression =
+                name.is_some() && description.is_some() && project_as_expected;
+            let name_exists = seen_pairs.contains(&key);
+
+            if valid_expression && !name_exists {
+                // Name/description must be non-NULL, instance ID can be
+                // either
+                // Names must be unique at fleet level and at project level.
+                // Project must be NULL if service, non-NULL if instance.
+                res.unwrap_or_else(|e| {
+                    panic!(
+                        "Failed to insert Floating IP with valid \
+                         name, description, project ID, and {} ID:\
+                         {name:?} {description:?} {project_id:?} {:?}\n{e}",
+                        if is_service { "Service" } else { "Instance" },
+                        &ip.parent_id
+                    )
+                });
+
+                seen_pairs.insert(key);
+            } else if !valid_expression {
+                // Several permutations are invalid and we want to detect them all.
+                // NOTE: CHECK violation will supersede UNIQUE violation below.
+                let err = res.expect_err(
+                    "Expected a CHECK violation when inserting a \
+                     Floating IP record with NULL name and/or description, \
+                     and incorrect project parent relation",
+                );
+                assert!(
+                    matches!(err, DatabaseError(CheckViolation, _)),
+                    "Expected a CHECK violation when inserting a \
+                     Floating IP record with NULL name and/or description, \
+                     and incorrect project parent relation",
+                );
+            } else {
+                let err = res.expect_err(
+                    "Expected a UNIQUE violation when inserting a \
+                     Floating IP record with existing (name, project_id)",
+                );
+                assert!(
+                    matches!(err, DatabaseError(UniqueViolation, _)),
+                    "Expected a UNIQUE violation when inserting a \
+                     Floating IP record with existing (name, project_id)",
+                );
             }
         }
 
-        // For other IP types, both name and description must be NULL
-        for kind in [IpKind::SNat, IpKind::Ephemeral].into_iter() {
-            for name in names.iter() {
-                for description in descriptions.iter() {
-                    for parent_id in parent_ids.iter() {
-                        for is_service in [false, true] {
-                            let new_ip = ExternalIp {
-                                id: Uuid::new_v4(),
-                                name: name.clone(),
-                                description: description.clone(),
-                                kind,
-                                ip: addresses.next().unwrap().into(),
-                                is_service,
-                                parent_id: *parent_id,
-                                ..ip
-                            };
-                            let res = diesel::insert_into(dsl::external_ip)
-                                .values(new_ip.clone())
-                                .execute_async(&*conn)
-                                .await;
-                            let ip_type =
-                                if is_service { "Service" } else { "Instance" };
-                            if name.is_none()
-                                && description.is_none()
-                                && parent_id.is_some()
-                            {
-                                // Name/description must be NULL, instance ID cannot
-                                // be NULL.
+        // For other IP types: name, description and project must be NULL
+        for (kind, name, description, parent_id, is_service, project_id) in itertools::iproduct!(
+            [IpKind::SNat, IpKind::Ephemeral],
+            &names,
+            &descriptions,
+            &parent_ids,
+            [false, true],
+            &project_ids
+        ) {
+            let name_local = name.map(|v| {
+                db::model::Name(Name::try_from(v.to_string()).unwrap())
+            });
+            let new_ip = ExternalIp {
+                id: Uuid::new_v4(),
+                name: name_local,
+                description: description.clone(),
+                kind,
+                ip: addresses.next().unwrap().into(),
+                is_service,
+                parent_id: *parent_id,
+                project_id: *project_id,
+                ..ip
+            };
+            let res = diesel::insert_into(dsl::external_ip)
+                .values(new_ip.clone())
+                .execute_async(&*conn)
+                .await;
+            let ip_type = if is_service { "Service" } else { "Instance" };
+            if name.is_none()
+                && description.is_none()
+                && parent_id.is_some()
+                && project_id.is_none()
+            {
+                // Name/description must be NULL, instance ID cannot
+                // be NULL.
 
-                                if kind == IpKind::Ephemeral && is_service {
-                                    // Ephemeral Service IPs aren't supported.
-                                    let err = res.unwrap_err();
-                                    assert!(
-                                        matches!(
-                                            err,
-                                            DatabaseError(
-                                                CheckViolation,
-                                                _
-                                            )
-                                        ),
-                                        "Expected a CHECK violation when inserting an \
-                                         Ephemeral Service IP",
-                                    );
-                                } else {
-                                    assert!(
-                                        res.is_ok(),
-                                        "Failed to insert {:?} IP with valid \
-                                         name, description, and {} ID",
-                                        kind,
-                                        ip_type,
-                                    );
-                                }
-                            } else {
-                                // One is not valid, we expect a check violation
-                                assert!(
-                                    res.is_err(),
-                                    "Expected a CHECK violation when inserting a \
-                                     {:?} IP record with non-NULL name, description, \
-                                     and/or {} ID",
-                                    kind,
-                                    ip_type,
-                                );
-                                let err = res.unwrap_err();
-                                assert!(
-                                    matches!(
-                                        err,
-                                        DatabaseError(
-                                            CheckViolation,
-                                            _
-                                        )
-                                    ),
-                                    "Expected a CHECK violation when inserting a \
-                                     {:?} IP record with non-NULL name, description, \
-                                     and/or {} ID",
-                                    kind,
-                                    ip_type,
-                                );
-                            }
-                        }
-                    }
+                if kind == IpKind::Ephemeral && is_service {
+                    // Ephemeral Service IPs aren't supported.
+                    let err = res.unwrap_err();
+                    assert!(
+                        matches!(err, DatabaseError(CheckViolation, _)),
+                        "Expected a CHECK violation when inserting an \
+                         Ephemeral Service IP",
+                    );
+                } else {
+                    assert!(
+                        res.is_ok(),
+                        "Failed to insert {:?} IP with valid \
+                         name, description, and {} ID",
+                        kind,
+                        ip_type,
+                    );
                 }
+            } else {
+                // One is not valid, we expect a check violation
+                assert!(
+                    res.is_err(),
+                    "Expected a CHECK violation when inserting a \
+                     {:?} IP record with non-NULL name, description, \
+                     and/or {} ID",
+                    kind,
+                    ip_type,
+                );
+                let err = res.unwrap_err();
+                assert!(
+                    matches!(err, DatabaseError(CheckViolation, _)),
+                    "Expected a CHECK violation when inserting a \
+                     {:?} IP record with non-NULL name, description, \
+                     and/or {} ID",
+                    kind,
+                    ip_type,
+                );
             }
         }
+
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

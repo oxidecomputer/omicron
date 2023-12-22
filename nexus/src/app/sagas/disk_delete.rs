@@ -32,10 +32,8 @@ pub(crate) struct Params {
 declare_saga_actions! {
     disk_delete;
     DELETE_DISK_RECORD -> "deleted_disk" {
-        // TODO: See the comment on the "DeleteRegions" step,
-        // we may want to un-delete the disk if we cannot remove
-        // underlying regions.
         + sdd_delete_disk_record
+        - sdd_delete_disk_record_undo
     }
     SPACE_ACCOUNT -> "no_result1" {
         + sdd_account_space
@@ -117,6 +115,21 @@ async fn sdd_delete_disk_record(
     Ok(disk)
 }
 
+async fn sdd_delete_disk_record_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+
+    osagactx
+        .datastore()
+        .project_undelete_disk_set_faulted_no_auth(&params.disk_id)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    Ok(())
+}
+
 async fn sdd_account_space(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
@@ -189,7 +202,7 @@ pub(crate) mod test {
     const PROJECT_NAME: &str = "springfield-squidport";
 
     async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
-        create_ip_pool(&client, "p0", None).await;
+        create_ip_pool(&client, "p0", None, None).await;
         let project = create_project(client, PROJECT_NAME).await;
         project.identity.id
     }

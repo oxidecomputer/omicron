@@ -7,7 +7,7 @@
 use async_trait::async_trait;
 use camino::{Utf8Path, Utf8PathBuf};
 use serde::{de::DeserializeOwned, Serialize};
-use slog::{debug, warn, Logger};
+use slog::{debug, info, warn, Logger};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -54,6 +54,7 @@ impl From<Error> for crate::api::external::Error {
 ///
 /// This structure is intended to help with serialization and deserialization
 /// of configuration information to both M.2s.
+#[derive(Debug)]
 pub struct Ledger<T> {
     log: Logger,
     ledger: T,
@@ -84,8 +85,11 @@ impl<T: Ledgerable> Ledger<T> {
         // Read all the ledgers that we can.
         let mut ledgers = vec![];
         for path in paths.iter() {
-            if let Ok(ledger) = T::read_from(log, &path).await {
-                ledgers.push(ledger);
+            match T::read_from(log, &path).await {
+                Ok(ledger) => ledgers.push(ledger),
+                Err(err) => {
+                    debug!(log, "Failed to read ledger: {err}"; "path" => %path)
+                }
             }
         }
 
@@ -169,8 +173,8 @@ pub trait Ledgerable: DeserializeOwned + Serialize + Send + Sync {
     /// Reads from `path` as a json-serialized version of `Self`.
     async fn read_from(log: &Logger, path: &Utf8Path) -> Result<Self, Error> {
         if path.exists() {
-            debug!(log, "Reading ledger from {}", path);
-            serde_json::from_str(
+            info!(log, "Reading ledger from {}", path);
+            <Self as Ledgerable>::deserialize(
                 &tokio::fs::read_to_string(&path)
                     .await
                     .map_err(|err| Error::io_path(&path, err))?,
@@ -180,7 +184,7 @@ pub trait Ledgerable: DeserializeOwned + Serialize + Send + Sync {
                 err,
             })
         } else {
-            debug!(log, "No ledger in {path}");
+            info!(log, "No ledger in {path}");
             Err(Error::NotFound)
         }
     }
@@ -191,7 +195,7 @@ pub trait Ledgerable: DeserializeOwned + Serialize + Send + Sync {
         log: &Logger,
         path: &Utf8Path,
     ) -> Result<(), Error> {
-        debug!(log, "Writing ledger to {}", path);
+        info!(log, "Writing ledger to {}", path);
         let as_str = serde_json::to_string(&self).map_err(|err| {
             Error::JsonSerialize { path: path.to_path_buf(), err }
         })?;
@@ -199,6 +203,10 @@ pub trait Ledgerable: DeserializeOwned + Serialize + Send + Sync {
             .await
             .map_err(|err| Error::io_path(&path, err))?;
         Ok(())
+    }
+
+    fn deserialize(s: &str) -> Result<Self, serde_json::Error> {
+        serde_json::from_str(s)
     }
 }
 

@@ -9,7 +9,6 @@ license = "MPL-2.0"
 anyhow.workspace = true
 async-trait.workspace = true
 base64.workspace = true
-bincode.workspace = true
 bootstore.workspace = true
 bootstrap-agent-client.workspace = true
 bytes.workspace = true
@@ -20,45 +19,49 @@ cfg-if.workspace = true
 chrono.workspace = true
 clap.workspace = true
 # Only used by the simulated sled agent.
-crucible-client-types.workspace = true
 crucible-agent-client.workspace = true
 ddm-admin-client.workspace = true
 derive_more.workspace = true
 dns-server.workspace = true
 dns-service-client.workspace = true
 dpd-client.workspace = true
+display-error-chain.workspace = true
 dropshot.workspace = true
 flate2.workspace = true
 futures.workspace = true
 glob.workspace = true
+hex.workspace = true
 http.workspace = true
 hyper-staticfile.workspace = true
 gateway-client.workspace = true
 illumos-utils.workspace = true
+installinator-common.workspace = true
 internal-dns.workspace = true
 ipnetwork.workspace = true
 itertools.workspace = true
 key-manager.workspace = true
 libc.workspace = true
 macaddr.workspace = true
+mg-admin-client.workspace = true
 nexus-client.workspace = true
 omicron-common.workspace = true
 once_cell.workspace = true
 oximeter.workspace = true
+oximeter-instruments.workspace = true
 oximeter-producer.workspace = true
-percent-encoding.workspace = true
-progenitor.workspace = true
-propolis-client = { workspace = true, features = [ "generated-migration" ] }
-propolis-server.workspace = true # Only used by the simulated sled agent
+propolis-client.workspace = true
+propolis-mock-server.workspace = true # Only used by the simulated sled agent
 rand = { workspace = true, features = ["getrandom"] }
 reqwest = { workspace = true, features = ["rustls-tls", "stream"] }
 schemars = { workspace = true, features = [ "chrono", "uuid1" ] }
 semver.workspace = true
 serde.workspace = true
+serde_human_bytes.workspace = true
 serde_json = {workspace = true, features = ["raw_value"]}
 sha3.workspace = true
 sled-agent-client.workspace = true
 sled-hardware.workspace = true
+sled-storage.workspace = true
 slog.workspace = true
 slog-async.workspace = true
 slog-dtrace.workspace = true
@@ -68,7 +71,6 @@ tar.workspace = true
 thiserror.workspace = true
 tofino.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
-tokio-tungstenite.workspace = true
 toml.workspace = true
 usdt.workspace = true
 uuid.workspace = true
@@ -83,6 +85,7 @@ opte-ioctl.workspace = true
 [dev-dependencies]
 assert_matches.workspace = true
 expectorate.workspace = true
+guppy.workspace = true
 http.workspace = true
 hyper.workspace = true
 omicron-test-utils.workspace = true
@@ -90,13 +93,15 @@ openapi-lint.workspace = true
 openapiv3.workspace = true
 pretty_assertions.workspace = true
 rcgen.workspace = true
-serial_test.workspace = true
 subprocess.workspace = true
 slog-async.workspace = true
 slog-term.workspace = true
 tempfile.workspace = true
+tokio-stream.workspace = true
+tokio-util.workspace = true
 
-illumos-utils = { workspace = true, features = ["testing"] }
+illumos-utils = { workspace = true, features = ["testing", "tmp_keypath"] }
+sled-storage = { workspace = true, features = ["testing"] }
 
 #
 # Disable doc builds by default for our binaries to work around issue
@@ -119,5 +124,6 @@ machine-non-gimlet = []
 switch-asic = []
 switch-stub = []
 switch-softnpu = []
+switch-hypersoftnpu = []
 rack-topology-single-sled = []
 rack-topology-multi-sled = []

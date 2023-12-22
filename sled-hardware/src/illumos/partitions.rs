@@ -5,7 +5,7 @@
 //! illumos-specific mechanisms for parsing disk info.
 
 use crate::illumos::gpt;
-use crate::{DiskError, DiskPaths, DiskVariant, Partition};
+use crate::{DiskPaths, DiskVariant, Partition, PooledDiskError};
 use camino::Utf8Path;
 use illumos_utils::zpool::ZpoolName;
 use slog::info;
@@ -41,9 +41,9 @@ fn parse_partition_types<const N: usize>(
     path: &Utf8Path,
     partitions: &Vec<impl gpt::LibEfiPartition>,
     expected_partitions: &[Partition; N],
-) -> Result<Vec<Partition>, DiskError> {
+) -> Result<Vec<Partition>, PooledDiskError> {
     if partitions.len() != N {
-        return Err(DiskError::BadPartitionLayout {
+        return Err(PooledDiskError::BadPartitionLayout {
             path: path.to_path_buf(),
             why: format!(
                 "Expected {} partitions, only saw {}",
@@ -54,7 +54,7 @@ fn parse_partition_types<const N: usize>(
     }
     for i in 0..N {
         if partitions[i].index() != i {
-            return Err(DiskError::BadPartitionLayout {
+            return Err(PooledDiskError::BadPartitionLayout {
                 path: path.to_path_buf(),
                 why: format!(
                     "The {i}-th partition has index {}",
@@ -80,7 +80,7 @@ pub fn ensure_partition_layout(
     log: &Logger,
     paths: &DiskPaths,
     variant: DiskVariant,
-) -> Result<Vec<Partition>, DiskError> {
+) -> Result<Vec<Partition>, PooledDiskError> {
     internal_ensure_partition_layout::<libefi_illumos::Gpt>(log, paths, variant)
 }
 
@@ -90,7 +90,7 @@ fn internal_ensure_partition_layout<GPT: gpt::LibEfiGpt>(
     log: &Logger,
     paths: &DiskPaths,
     variant: DiskVariant,
-) -> Result<Vec<Partition>, DiskError> {
+) -> Result<Vec<Partition>, PooledDiskError> {
     // Open the "Whole Disk" as a raw device to be parsed by the
     // libefi-illumos library. This lets us peek at the GPT before
     // making too many assumptions about it.
@@ -114,14 +114,16 @@ fn internal_ensure_partition_layout<GPT: gpt::LibEfiGpt>(
             let dev_path = if let Some(dev_path) = &paths.dev_path {
                 dev_path
             } else {
-                return Err(DiskError::CannotFormatMissingDevPath { path });
+                return Err(PooledDiskError::CannotFormatMissingDevPath {
+                    path,
+                });
             };
             match variant {
                 DiskVariant::U2 => {
                     info!(log, "Formatting zpool on disk {}", paths.devfs_path);
                     // If a zpool does not already exist, create one.
                     let zpool_name = ZpoolName::new_external(Uuid::new_v4());
-                    Zpool::create(zpool_name, dev_path)?;
+                    Zpool::create(&zpool_name, dev_path)?;
                     return Ok(vec![Partition::ZfsPool]);
                 }
                 DiskVariant::M2 => {
@@ -129,12 +131,12 @@ fn internal_ensure_partition_layout<GPT: gpt::LibEfiGpt>(
                     // the expected partitions? Or would it be wiser to infer
                     // that this indicates an unexpected error conditions that
                     // needs mitigation?
-                    return Err(DiskError::CannotFormatM2NotImplemented);
+                    return Err(PooledDiskError::CannotFormatM2NotImplemented);
                 }
             }
         }
         Err(err) => {
-            return Err(DiskError::Gpt {
+            return Err(PooledDiskError::Gpt {
                 path,
                 error: anyhow::Error::new(err),
             });
@@ -197,7 +199,7 @@ mod test {
             DiskVariant::U2,
         );
         match result {
-            Err(DiskError::CannotFormatMissingDevPath { .. }) => {}
+            Err(PooledDiskError::CannotFormatMissingDevPath { .. }) => {}
             _ => panic!("Should have failed with a missing dev path error"),
         }
 
@@ -205,7 +207,6 @@ mod test {
     }
 
     #[test]
-    #[serial_test::serial]
     fn ensure_partition_layout_u2_format_with_dev_path() {
         let logctx =
             test_setup_log("ensure_partition_layout_u2_format_with_dev_path");
@@ -373,7 +374,7 @@ mod test {
                 DiskVariant::M2,
             )
             .expect_err("Should have failed parsing empty GPT"),
-            DiskError::BadPartitionLayout { .. }
+            PooledDiskError::BadPartitionLayout { .. }
         ));
 
         logctx.cleanup_successful();
@@ -398,7 +399,7 @@ mod test {
                 DiskVariant::U2,
             )
             .expect_err("Should have failed parsing empty GPT"),
-            DiskError::BadPartitionLayout { .. }
+            PooledDiskError::BadPartitionLayout { .. }
         ));
 
         logctx.cleanup_successful();

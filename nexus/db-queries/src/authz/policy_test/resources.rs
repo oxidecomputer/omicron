@@ -67,6 +67,7 @@ pub async fn make_resources(
     builder.new_resource(authz::CONSOLE_SESSION_LIST);
     builder.new_resource(authz::DNS_CONFIG);
     builder.new_resource(authz::DEVICE_AUTH_REQUEST_LIST);
+    builder.new_resource(authz::INVENTORY);
     builder.new_resource(authz::IP_POOL_LIST);
 
     // Silo/organization/project hierarchy
@@ -317,6 +318,13 @@ async fn make_project(
         project.clone(),
         Uuid::new_v4(),
         LookupType::ByName(image_name),
+    ));
+
+    let floating_ip_name = format!("{project_name}-fip1");
+    builder.new_resource(authz::FloatingIp::new(
+        project.clone(),
+        Uuid::new_v4(),
+        LookupType::ByName(floating_ip_name),
     ));
 }
 

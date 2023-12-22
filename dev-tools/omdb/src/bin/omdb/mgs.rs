@@ -433,7 +433,7 @@ async fn show_sp_details(
                 board: caboose.board,
                 git_commit: caboose.git_commit,
                 name: caboose.name,
-                version: caboose.version.unwrap_or_else(|| "-".to_string()),
+                version: caboose.version,
             }
         }
     }

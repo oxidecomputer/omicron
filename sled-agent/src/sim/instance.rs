@@ -19,9 +19,10 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::api::internal::nexus::{
     InstanceRuntimeState, SledInstanceState,
 };
-use propolis_client::api::InstanceMigrateStatusResponse as PropolisMigrateStatus;
-use propolis_client::api::InstanceState as PropolisInstanceState;
-use propolis_client::api::InstanceStateMonitorResponse;
+use propolis_client::types::{
+    InstanceMigrateStatusResponse as PropolisMigrateStatus,
+    InstanceState as PropolisInstanceState, InstanceStateMonitorResponse,
+};
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -131,11 +132,11 @@ impl SimInstanceInner {
                     });
                 self.queue_migration_status(PropolisMigrateStatus {
                     migration_id,
-                    state: propolis_client::api::MigrationState::Sync,
+                    state: propolis_client::types::MigrationState::Sync,
                 });
                 self.queue_migration_status(PropolisMigrateStatus {
                     migration_id,
-                    state: propolis_client::api::MigrationState::Finish,
+                    state: propolis_client::types::MigrationState::Finish,
                 });
                 self.queue_propolis_state(PropolisInstanceState::Running);
             }
@@ -361,13 +362,11 @@ impl SimInstanceInner {
         }
 
         if self.state.instance().gen != old_runtime.gen {
-            return Err(Error::InvalidRequest {
-                message: format!(
-                    "wrong Propolis ID generation: expected {}, got {}",
-                    self.state.instance().gen,
-                    old_runtime.gen
-                ),
-            });
+            return Err(Error::invalid_request(format!(
+                "wrong Propolis ID generation: expected {}, got {}",
+                self.state.instance().gen,
+                old_runtime.gen
+            )));
         }
 
         self.state.set_migration_ids(ids, Utc::now());

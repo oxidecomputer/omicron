@@ -11,10 +11,8 @@ camino.workspace = true
 cfg-if.workspace = true
 futures.workspace = true
 illumos-utils.workspace = true
-key-manager.workspace = true
 libc.workspace = true
 macaddr.workspace = true
-nexus-client.workspace = true
 omicron-common.workspace = true
 rand.workspace = true
 schemars.workspace = true
@@ -33,4 +31,3 @@ libefi-illumos = { git = "https://github.com/oxidecomputer/libefi-illumos", bran
 [dev-dependencies]
 illumos-utils = { workspace = true, features = ["testing"] }
 omicron-test-utils.workspace = true
-serial_test.workspace = true

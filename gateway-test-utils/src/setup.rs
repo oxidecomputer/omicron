@@ -62,12 +62,12 @@ pub async fn test_setup(
     test_name: &str,
     sp_port: SpPort,
 ) -> GatewayTestContext {
-    let (server_config, mut sp_sim_config) = load_test_config();
+    let (server_config, sp_sim_config) = load_test_config();
     test_setup_with_config(
         test_name,
         sp_port,
         server_config,
-        &mut sp_sim_config,
+        &sp_sim_config,
         None,
     )
     .await

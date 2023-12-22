@@ -1143,6 +1143,8 @@ impl<S: StepSpec> ProgressEventKind<S> {
 
     /// Returns `step_elapsed` for the leaf event, recursing into nested events
     /// as necessary.
+    ///
+    /// Returns None for unknown events.
     pub fn leaf_step_elapsed(&self) -> Option<Duration> {
         match self {
             ProgressEventKind::WaitingForProgress { step_elapsed, .. }
@@ -1151,6 +1153,25 @@ impl<S: StepSpec> ProgressEventKind<S> {
             }
             ProgressEventKind::Nested { event, .. } => {
                 event.kind.leaf_step_elapsed()
+            }
+            ProgressEventKind::Unknown => None,
+        }
+    }
+
+    /// Returns `attempt_elapsed` for the leaf event, recursing into nested
+    /// events as necessary.
+    ///
+    /// Returns None for unknown events.
+    pub fn leaf_attempt_elapsed(&self) -> Option<Duration> {
+        match self {
+            ProgressEventKind::WaitingForProgress {
+                attempt_elapsed, ..
+            }
+            | ProgressEventKind::Progress { attempt_elapsed, .. } => {
+                Some(*attempt_elapsed)
+            }
+            ProgressEventKind::Nested { event, .. } => {
+                event.kind.leaf_attempt_elapsed()
             }
             ProgressEventKind::Unknown => None,
         }

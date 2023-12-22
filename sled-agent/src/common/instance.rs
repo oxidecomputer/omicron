@@ -10,8 +10,9 @@ use omicron_common::api::external::InstanceState as ApiInstanceState;
 use omicron_common::api::internal::nexus::{
     InstanceRuntimeState, SledInstanceState, VmmRuntimeState,
 };
-use propolis_client::api::{
+use propolis_client::types::{
     InstanceState as PropolisApiState, InstanceStateMonitorResponse,
+    MigrationState,
 };
 use uuid::Uuid;
 
@@ -36,7 +37,7 @@ impl From<PropolisApiState> for PropolisInstanceState {
 
 impl From<PropolisInstanceState> for ApiInstanceState {
     fn from(value: PropolisInstanceState) -> Self {
-        use propolis_client::api::InstanceState as State;
+        use propolis_client::types::InstanceState as State;
         match value.0 {
             // Nexus uses the VMM state as the externally-visible instance state
             // when an instance has an active VMM. A Propolis that is "creating"
@@ -119,7 +120,6 @@ impl ObservedPropolisState {
                 (Some(this_id), Some(propolis_migration))
                     if this_id == propolis_migration.migration_id =>
                 {
-                    use propolis_client::api::MigrationState;
                     match propolis_migration.state {
                         MigrationState::Finish => {
                             ObservedMigrationStatus::Succeeded
@@ -510,7 +510,7 @@ mod test {
     use chrono::Utc;
     use omicron_common::api::external::Generation;
     use omicron_common::api::internal::nexus::InstanceRuntimeState;
-    use propolis_client::api::InstanceState as Observed;
+    use propolis_client::types::InstanceState as Observed;
     use uuid::Uuid;
 
     fn make_instance() -> InstanceStates {

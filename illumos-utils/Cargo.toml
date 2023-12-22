@@ -11,6 +11,7 @@ async-trait.workspace = true
 bhyve_api.workspace = true
 byteorder.workspace = true
 camino.workspace = true
+camino-tempfile.workspace = true
 cfg-if.workspace = true
 crucible-smf.workspace = true
 futures.workspace = true
@@ -44,3 +45,6 @@ toml.workspace = true
 [features]
 # Enable to generate MockZones
 testing = ["mockall"]
+# Useful for tests that want real functionality and ability to run without
+# pfexec
+tmp_keypath = []

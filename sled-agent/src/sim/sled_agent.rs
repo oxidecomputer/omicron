@@ -35,15 +35,16 @@ use uuid::Uuid;
 use std::collections::HashMap;
 use std::str::FromStr;
 
-use crucible_client_types::VolumeConstructionRequest;
 use dropshot::HttpServer;
 use illumos_utils::opte::params::{
     DeleteVirtualNetworkInterfaceHost, SetVirtualNetworkInterfaceHost,
 };
 use nexus_client::types::PhysicalDiskKind;
 use omicron_common::address::PROPOLIS_PORT;
-use propolis_client::Client as PropolisClient;
-use propolis_server::mock_server::Context as PropolisContext;
+use propolis_client::{
+    types::VolumeConstructionRequest, Client as PropolisClient,
+};
+use propolis_mock_server::Context as PropolisContext;
 
 /// Simulates management of the control plane on a sled
 ///
@@ -67,16 +68,19 @@ pub struct SledAgent {
     pub v2p_mappings: Mutex<HashMap<Uuid, Vec<SetVirtualNetworkInterfaceHost>>>,
     mock_propolis:
         Mutex<Option<(HttpServer<Arc<PropolisContext>>, PropolisClient)>>,
+
+    instance_ensure_state_error: Mutex<Option<Error>>,
 }
 
 fn extract_targets_from_volume_construction_request(
-    vec: &mut Vec<SocketAddr>,
     vcr: &VolumeConstructionRequest,
-) {
+) -> Result<Vec<SocketAddr>, std::net::AddrParseError> {
     // A snapshot is simply a flush with an extra parameter, and flushes are
     // only sent to sub volumes, not the read only parent. Flushes are only
     // processed by regions, so extract each region that would be affected by a
     // flush.
+
+    let mut res = vec![];
     match vcr {
         VolumeConstructionRequest::Volume {
             id: _,
@@ -85,9 +89,9 @@ fn extract_targets_from_volume_construction_request(
             read_only_parent: _,
         } => {
             for sub_volume in sub_volumes.iter() {
-                extract_targets_from_volume_construction_request(
-                    vec, sub_volume,
-                );
+                res.extend(extract_targets_from_volume_construction_request(
+                    sub_volume,
+                )?);
             }
         }
 
@@ -103,7 +107,7 @@ fn extract_targets_from_volume_construction_request(
             gen: _,
         } => {
             for target in &opts.target {
-                vec.push(*target);
+                res.push(SocketAddr::from_str(target)?);
             }
         }
 
@@ -111,6 +115,7 @@ fn extract_targets_from_volume_construction_request(
             // noop
         }
     }
+    Ok(res)
 }
 
 impl SledAgent {
@@ -156,6 +161,7 @@ impl SledAgent {
             disk_id_to_region_ids: Mutex::new(HashMap::new()),
             v2p_mappings: Mutex::new(HashMap::new()),
             mock_propolis: Mutex::new(None),
+            instance_ensure_state_error: Mutex::new(None),
         })
     }
 
@@ -171,23 +177,19 @@ impl SledAgent {
         volume_construction_request: &VolumeConstructionRequest,
     ) -> Result<(), Error> {
         let disk_id = match volume_construction_request {
-            VolumeConstructionRequest::Volume {
-                id,
-                block_size: _,
-                sub_volumes: _,
-                read_only_parent: _,
-            } => id,
+            VolumeConstructionRequest::Volume { id, .. } => id,
 
             _ => {
                 panic!("root of volume construction request not a volume!");
             }
         };
 
-        let mut targets = Vec::new();
-        extract_targets_from_volume_construction_request(
-            &mut targets,
+        let targets = extract_targets_from_volume_construction_request(
             &volume_construction_request,
-        );
+        )
+        .map_err(|e| {
+            Error::invalid_request(&format!("bad socketaddr: {e:?}"))
+        })?;
 
         let mut region_ids = Vec::new();
 
@@ -344,15 +346,7 @@ impl SledAgent {
             updated_runtime: Some(instance.terminate()),
         };
 
-        // Poke the now-destroyed instance to force it to be removed from the
-        // collection.
-        //
-        // TODO: In the real sled agent, this happens inline without publishing
-        // any other state changes, whereas this call causes any pending state
-        // changes to be published. This can be fixed by adding a simulated
-        // object collection function to forcibly remove an object from a
-        // collection.
-        self.instances.sim_poke(instance_id, PokeMode::Drain).await;
+        self.instances.sim_force_remove(instance_id).await;
         Ok(response)
     }
 
@@ -362,6 +356,11 @@ impl SledAgent {
         instance_id: Uuid,
         state: InstanceStateRequested,
     ) -> Result<InstancePutStateResponse, Error> {
+        if let Some(e) = self.instance_ensure_state_error.lock().await.as_ref()
+        {
+            return Err(e.clone());
+        }
+
         let current =
             match self.instances.sim_get_cloned_object(&instance_id).await {
                 Ok(i) => i.current().clone(),
@@ -415,6 +414,10 @@ impl SledAgent {
         }
 
         Ok(InstancePutStateResponse { updated_runtime: Some(new_state) })
+    }
+
+    pub async fn set_instance_ensure_state_error(&self, error: Option<Error>) {
+        *self.instance_ensure_state_error.lock().await = error;
     }
 
     async fn detach_disks_from_instance(
@@ -640,11 +643,10 @@ impl SledAgent {
             ..Default::default()
         };
         let propolis_log = log.new(o!("component" => "propolis-server-mock"));
-        let private =
-            Arc::new(PropolisContext::new(Default::default(), propolis_log));
+        let private = Arc::new(PropolisContext::new(propolis_log));
         info!(log, "Starting mock propolis-server...");
         let dropshot_log = log.new(o!("component" => "dropshot"));
-        let mock_api = propolis_server::mock_server::api();
+        let mock_api = propolis_mock_server::api();
 
         let srv = dropshot::HttpServerStarter::new(
             &dropshot_config,

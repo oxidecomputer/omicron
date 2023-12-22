@@ -9,6 +9,8 @@ pub use crate::zone_bundle::ZoneBundleMetadata;
 pub use illumos_utils::opte::params::DhcpConfig;
 pub use illumos_utils::opte::params::VpcFirewallRule;
 pub use illumos_utils::opte::params::VpcFirewallRulesEnsureBody;
+use illumos_utils::zpool::ZpoolName;
+use omicron_common::api::external::Generation;
 use omicron_common::api::internal::nexus::{
     DiskRuntimeState, InstanceProperties, InstanceRuntimeState,
     SledInstanceState, VmmRuntimeState,
@@ -18,12 +20,13 @@ use omicron_common::api::internal::shared::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use sled_hardware::Baseboard;
 pub use sled_hardware::DendriteAsic;
+use sled_storage::dataset::DatasetKind;
+use sled_storage::dataset::DatasetName;
 use std::fmt::{Debug, Display, Formatter, Result as FormatResult};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
+use std::str::FromStr;
 use std::time::Duration;
-use thiserror::Error;
 use uuid::Uuid;
 
 /// Used to request a Disk state change
@@ -67,11 +70,12 @@ pub struct InstanceHardware {
     pub source_nat: SourceNatConfig,
     /// Zero or more external IP addresses (either floating or ephemeral),
     /// provided to an instance to allow inbound connectivity.
-    pub external_ips: Vec<IpAddr>,
+    pub ephemeral_ip: Option<IpAddr>,
+    pub floating_ips: Vec<IpAddr>,
     pub firewall_rules: Vec<VpcFirewallRule>,
     pub dhcp_config: DhcpConfig,
-    // TODO: replace `propolis_client::handmade::*` with locally-modeled request type
-    pub disks: Vec<propolis_client::handmade::api::DiskRequest>,
+    // TODO: replace `propolis_client::*` with locally-modeled request type
+    pub disks: Vec<propolis_client::types::DiskRequest>,
     pub cloud_init_bytes: Option<String>,
 }
 
@@ -228,309 +232,7 @@ pub struct Zpool {
     pub disk_type: DiskType,
 }
 
-/// The type of a dataset, and an auxiliary information necessary
-/// to successfully launch a zone managing the associated data.
-#[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
-)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum DatasetKind {
-    CockroachDb,
-    Crucible,
-    Clickhouse,
-    ClickhouseKeeper,
-    ExternalDns,
-    InternalDns,
-}
-
-impl From<DatasetKind> for sled_agent_client::types::DatasetKind {
-    fn from(k: DatasetKind) -> Self {
-        use DatasetKind::*;
-        match k {
-            CockroachDb => Self::CockroachDb,
-            Crucible => Self::Crucible,
-            Clickhouse => Self::Clickhouse,
-            ClickhouseKeeper => Self::ClickhouseKeeper,
-            ExternalDns => Self::ExternalDns,
-            InternalDns => Self::InternalDns,
-        }
-    }
-}
-
-impl From<DatasetKind> for nexus_client::types::DatasetKind {
-    fn from(k: DatasetKind) -> Self {
-        use DatasetKind::*;
-        match k {
-            CockroachDb => Self::Cockroach,
-            Crucible => Self::Crucible,
-            Clickhouse => Self::Clickhouse,
-            ClickhouseKeeper => Self::ClickhouseKeeper,
-            ExternalDns => Self::ExternalDns,
-            InternalDns => Self::InternalDns,
-        }
-    }
-}
-
-impl std::fmt::Display for DatasetKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use DatasetKind::*;
-        let s = match self {
-            Crucible => "crucible",
-            CockroachDb { .. } => "cockroachdb",
-            Clickhouse => "clickhouse",
-            ClickhouseKeeper => "clickhouse_keeper",
-            ExternalDns { .. } => "external_dns",
-            InternalDns { .. } => "internal_dns",
-        };
-        write!(f, "{}", s)
-    }
-}
-
-/// Describes service-specific parameters.
-#[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
-)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum ServiceType {
-    Nexus {
-        /// The address at which the internal nexus server is reachable.
-        internal_address: SocketAddrV6,
-        /// The address at which the external nexus server is reachable.
-        external_ip: IpAddr,
-        /// The service vNIC providing external connectivity using OPTE.
-        nic: NetworkInterface,
-        /// Whether Nexus's external endpoint should use TLS
-        external_tls: bool,
-        /// External DNS servers Nexus can use to resolve external hosts.
-        external_dns_servers: Vec<IpAddr>,
-    },
-    ExternalDns {
-        /// The address at which the external DNS server API is reachable.
-        http_address: SocketAddrV6,
-        /// The address at which the external DNS server is reachable.
-        dns_address: SocketAddr,
-        /// The service vNIC providing external connectivity using OPTE.
-        nic: NetworkInterface,
-    },
-    InternalDns {
-        http_address: SocketAddrV6,
-        dns_address: SocketAddrV6,
-        /// The addresses in the global zone which should be created
-        ///
-        /// For the DNS service, which exists outside the sleds's typical subnet - adding an
-        /// address in the GZ is necessary to allow inter-zone traffic routing.
-        gz_address: Ipv6Addr,
-
-        /// The address is also identified with an auxiliary bit of information
-        /// to ensure that the created global zone address can have a unique name.
-        gz_address_index: u32,
-    },
-    Oximeter {
-        address: SocketAddrV6,
-    },
-    // We should never receive external requests to start wicketd, MGS, sp-sim
-    // dendrite, tfport, or maghemite: these are all services running in the
-    // global zone or switch zone that we start autonomously. We tag them with
-    // `serde(skip)` both to omit them from our OpenAPI definition and to avoid
-    // needing their contained types to implement `JsonSchema + Deserialize +
-    // Serialize`.
-    #[serde(skip)]
-    ManagementGatewayService,
-    #[serde(skip)]
-    Wicketd {
-        baseboard: Baseboard,
-    },
-    #[serde(skip)]
-    Dendrite {
-        asic: DendriteAsic,
-    },
-    #[serde(skip)]
-    Tfport {
-        pkt_source: String,
-    },
-    #[serde(skip)]
-    Uplink,
-    #[serde(skip)]
-    MgDdm {
-        mode: String,
-    },
-    #[serde(skip)]
-    Mgd,
-    #[serde(skip)]
-    SpSim,
-    CruciblePantry {
-        address: SocketAddrV6,
-    },
-    BoundaryNtp {
-        address: SocketAddrV6,
-        ntp_servers: Vec<String>,
-        dns_servers: Vec<IpAddr>,
-        domain: Option<String>,
-        /// The service vNIC providing outbound connectivity using OPTE.
-        nic: NetworkInterface,
-        /// The SNAT configuration for outbound connections.
-        snat_cfg: SourceNatConfig,
-    },
-    InternalNtp {
-        address: SocketAddrV6,
-        ntp_servers: Vec<String>,
-        dns_servers: Vec<IpAddr>,
-        domain: Option<String>,
-    },
-    Clickhouse {
-        address: SocketAddrV6,
-    },
-    ClickhouseKeeper {
-        address: SocketAddrV6,
-    },
-    CockroachDb {
-        address: SocketAddrV6,
-    },
-    Crucible {
-        address: SocketAddrV6,
-    },
-}
-
-impl std::fmt::Display for ServiceType {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
-        match self {
-            ServiceType::Nexus { .. } => write!(f, "nexus"),
-            ServiceType::ExternalDns { .. } => write!(f, "external_dns"),
-            ServiceType::InternalDns { .. } => write!(f, "internal_dns"),
-            ServiceType::Oximeter { .. } => write!(f, "oximeter"),
-            ServiceType::ManagementGatewayService => write!(f, "mgs"),
-            ServiceType::Wicketd { .. } => write!(f, "wicketd"),
-            ServiceType::Dendrite { .. } => write!(f, "dendrite"),
-            ServiceType::Tfport { .. } => write!(f, "tfport"),
-            ServiceType::Uplink { .. } => write!(f, "uplink"),
-            ServiceType::CruciblePantry { .. } => write!(f, "crucible/pantry"),
-            ServiceType::BoundaryNtp { .. }
-            | ServiceType::InternalNtp { .. } => write!(f, "ntp"),
-            ServiceType::MgDdm { .. } => write!(f, "mg-ddm"),
-            ServiceType::Mgd => write!(f, "mgd"),
-            ServiceType::SpSim => write!(f, "sp-sim"),
-            ServiceType::Clickhouse { .. } => write!(f, "clickhouse"),
-            ServiceType::ClickhouseKeeper { .. } => {
-                write!(f, "clickhouse_keeper")
-            }
-            ServiceType::CockroachDb { .. } => write!(f, "cockroachdb"),
-            ServiceType::Crucible { .. } => write!(f, "crucible"),
-        }
-    }
-}
-
-impl crate::smf_helper::Service for ServiceType {
-    fn service_name(&self) -> String {
-        self.to_string()
-    }
-    fn smf_name(&self) -> String {
-        format!("svc:/oxide/{}", self.service_name())
-    }
-    fn should_import(&self) -> bool {
-        true
-    }
-}
-
-/// Error returned by attempting to convert an internal service (i.e., a service
-/// started autonomously by sled-agent) into a
-/// `sled_agent_client::types::ServiceType` to be sent to a remote sled-agent.
-#[derive(Debug, Clone, Copy, Error)]
-#[error("This service may only be started autonomously by sled-agent")]
-pub struct AutonomousServiceOnlyError;
-
-impl TryFrom<ServiceType> for sled_agent_client::types::ServiceType {
-    type Error = AutonomousServiceOnlyError;
-
-    fn try_from(s: ServiceType) -> Result<Self, Self::Error> {
-        use sled_agent_client::types::ServiceType as AutoSt;
-        use ServiceType as St;
-
-        match s {
-            St::Nexus {
-                internal_address,
-                external_ip,
-                nic,
-                external_tls,
-                external_dns_servers,
-            } => Ok(AutoSt::Nexus {
-                internal_address: internal_address.to_string(),
-                external_ip,
-                nic: nic.into(),
-                external_tls,
-                external_dns_servers,
-            }),
-            St::ExternalDns { http_address, dns_address, nic } => {
-                Ok(AutoSt::ExternalDns {
-                    http_address: http_address.to_string(),
-                    dns_address: dns_address.to_string(),
-                    nic: nic.into(),
-                })
-            }
-            St::InternalDns {
-                http_address,
-                dns_address,
-                gz_address,
-                gz_address_index,
-            } => Ok(AutoSt::InternalDns {
-                http_address: http_address.to_string(),
-                dns_address: dns_address.to_string(),
-                gz_address,
-                gz_address_index,
-            }),
-            St::Oximeter { address } => {
-                Ok(AutoSt::Oximeter { address: address.to_string() })
-            }
-            St::CruciblePantry { address } => {
-                Ok(AutoSt::CruciblePantry { address: address.to_string() })
-            }
-            St::BoundaryNtp {
-                address,
-                ntp_servers,
-                dns_servers,
-                domain,
-                nic,
-                snat_cfg,
-            } => Ok(AutoSt::BoundaryNtp {
-                address: address.to_string(),
-                ntp_servers,
-                dns_servers,
-                domain,
-                nic: nic.into(),
-                snat_cfg: snat_cfg.into(),
-            }),
-            St::InternalNtp { address, ntp_servers, dns_servers, domain } => {
-                Ok(AutoSt::InternalNtp {
-                    address: address.to_string(),
-                    ntp_servers,
-                    dns_servers,
-                    domain,
-                })
-            }
-            St::Clickhouse { address } => {
-                Ok(AutoSt::Clickhouse { address: address.to_string() })
-            }
-            St::ClickhouseKeeper { address } => {
-                Ok(AutoSt::ClickhouseKeeper { address: address.to_string() })
-            }
-            St::CockroachDb { address } => {
-                Ok(AutoSt::CockroachDb { address: address.to_string() })
-            }
-            St::Crucible { address } => {
-                Ok(AutoSt::Crucible { address: address.to_string() })
-            }
-            St::ManagementGatewayService
-            | St::SpSim
-            | St::Wicketd { .. }
-            | St::Dendrite { .. }
-            | St::Tfport { .. }
-            | St::Uplink
-            | St::Mgd
-            | St::MgDdm { .. } => Err(AutonomousServiceOnlyError),
-        }
-    }
-}
-
-/// The type of zone which may be requested from Sled Agent
+/// The type of zone that Sled Agent may run
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
 )]
@@ -547,24 +249,6 @@ pub enum ZoneType {
     Ntp,
     Oximeter,
     Switch,
-}
-
-impl From<ZoneType> for sled_agent_client::types::ZoneType {
-    fn from(zt: ZoneType) -> Self {
-        match zt {
-            ZoneType::Clickhouse => Self::Clickhouse,
-            ZoneType::ClickhouseKeeper => Self::ClickhouseKeeper,
-            ZoneType::CockroachDb => Self::CockroachDb,
-            ZoneType::Crucible => Self::Crucible,
-            ZoneType::CruciblePantry => Self::CruciblePantry,
-            ZoneType::InternalDns => Self::InternalDns,
-            ZoneType::ExternalDns => Self::ExternalDns,
-            ZoneType::Nexus => Self::Nexus,
-            ZoneType::Ntp => Self::Ntp,
-            ZoneType::Oximeter => Self::Oximeter,
-            ZoneType::Switch => Self::Switch,
-        }
-    }
 }
 
 impl std::fmt::Display for ZoneType {
@@ -587,280 +271,516 @@ impl std::fmt::Display for ZoneType {
     }
 }
 
-/// Describes a request to provision a specific dataset
+/// Generation 1 of `OmicronZonesConfig` is always the set of no zones.
+pub const OMICRON_ZONES_CONFIG_INITIAL_GENERATION: u32 = 1;
+
+/// Describes the set of Omicron-managed zones running on a sled
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
 )]
-pub struct DatasetRequest {
-    pub id: Uuid,
-    pub name: crate::storage::dataset::DatasetName,
-    pub service_address: SocketAddrV6,
+pub struct OmicronZonesConfig {
+    /// generation number of this configuration
+    ///
+    /// This generation number is owned by the control plane (i.e., RSS or
+    /// Nexus, depending on whether RSS-to-Nexus handoff has happened).  It
+    /// should not be bumped within Sled Agent.
+    ///
+    /// Sled Agent rejects attempts to set the configuration to a generation
+    /// older than the one it's currently running.
+    pub generation: Generation,
+
+    /// list of running zones
+    pub zones: Vec<OmicronZoneConfig>,
 }
 
-impl From<DatasetRequest> for sled_agent_client::types::DatasetRequest {
-    fn from(d: DatasetRequest) -> Self {
+impl From<OmicronZonesConfig> for sled_agent_client::types::OmicronZonesConfig {
+    fn from(local: OmicronZonesConfig) -> Self {
         Self {
-            id: d.id,
-            name: d.name.into(),
-            service_address: d.service_address.to_string(),
+            generation: local.generation.into(),
+            zones: local.zones.into_iter().map(|s| s.into()).collect(),
         }
     }
 }
 
-/// Describes a request to create a zone running one or more services.
+/// Describes one Omicron-managed zone running on a sled
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
 )]
-pub struct ServiceZoneRequest {
-    // The UUID of the zone to be initialized.
-    // TODO: Should this be removed? If we have UUIDs on the services, what's
-    // the point of this?
+pub struct OmicronZoneConfig {
     pub id: Uuid,
-    // The type of the zone to be created.
-    pub zone_type: ZoneType,
-    // The addresses on which the service should listen for requests.
-    pub addresses: Vec<Ipv6Addr>,
-    // Datasets which should be managed by this service.
-    #[serde(default)]
-    pub dataset: Option<DatasetRequest>,
-    // Services that should be run in the zone
-    pub services: Vec<ServiceZoneService>,
+    pub underlay_address: Ipv6Addr,
+    pub zone_type: OmicronZoneType,
 }
 
-impl ServiceZoneRequest {
-    // The full name of the zone, if it was to be created as a zone.
+impl From<OmicronZoneConfig> for sled_agent_client::types::OmicronZoneConfig {
+    fn from(local: OmicronZoneConfig) -> Self {
+        Self {
+            id: local.id,
+            underlay_address: local.underlay_address,
+            zone_type: local.zone_type.into(),
+        }
+    }
+}
+
+impl OmicronZoneConfig {
+    /// If this kind of zone has an associated dataset, returns the dataset's
+    /// name.  Othrwise, returns `None`.
+    pub fn dataset_name(&self) -> Option<DatasetName> {
+        self.zone_type.dataset_name()
+    }
+
+    /// If this kind of zone has an associated dataset, return the dataset's
+    /// name and the associated "service address".  Otherwise, returns `None`.
+    pub fn dataset_name_and_address(
+        &self,
+    ) -> Option<(DatasetName, SocketAddrV6)> {
+        self.zone_type.dataset_name_and_address()
+    }
+
+    /// Returns the name that is (or will be) used for the illumos zone
+    /// associated with this zone
     pub fn zone_name(&self) -> String {
         illumos_utils::running_zone::InstalledZone::get_zone_name(
-            &self.zone_type.to_string(),
-            self.zone_name_unique_identifier(),
+            &self.zone_type.zone_type_str(),
+            Some(self.id),
         )
     }
 
-    // The name of a unique identifier for the zone, if one is necessary.
-    pub fn zone_name_unique_identifier(&self) -> Option<Uuid> {
-        match &self.zone_type {
-            // The switch zone is necessarily a singleton.
-            ZoneType::Switch => None,
-            // All other zones should be identified by their zone UUID.
-            ZoneType::Clickhouse
-            | ZoneType::ClickhouseKeeper
-            | ZoneType::CockroachDb
-            | ZoneType::Crucible
-            | ZoneType::ExternalDns
-            | ZoneType::InternalDns
-            | ZoneType::Nexus
-            | ZoneType::CruciblePantry
-            | ZoneType::Ntp
-            | ZoneType::Oximeter => Some(self.id),
-        }
-    }
-}
-
-impl TryFrom<ServiceZoneRequest>
-    for sled_agent_client::types::ServiceZoneRequest
-{
-    type Error = AutonomousServiceOnlyError;
-
-    fn try_from(s: ServiceZoneRequest) -> Result<Self, Self::Error> {
-        let mut services = Vec::with_capacity(s.services.len());
-        for service in s.services {
-            services.push(service.try_into()?);
-        }
-
-        Ok(Self {
-            id: s.id,
-            zone_type: s.zone_type.into(),
-            addresses: s.addresses,
-            dataset: s.dataset.map(|d| d.into()),
-            services,
-        })
-    }
-}
-
-impl ServiceZoneRequest {
-    pub fn into_nexus_service_req(
+    /// Returns the structure that describes this zone to Nexus during rack
+    /// initialization
+    pub fn to_nexus_service_req(
         &self,
         sled_id: Uuid,
-    ) -> Result<
-        Vec<nexus_client::types::ServicePutRequest>,
-        AutonomousServiceOnlyError,
-    > {
+    ) -> nexus_client::types::ServicePutRequest {
         use nexus_client::types as NexusTypes;
 
-        let mut services = vec![];
-        for svc in &self.services {
-            let service_id = svc.id;
-            let zone_id = Some(self.id);
-            match &svc.details {
-                ServiceType::Nexus {
-                    external_ip,
-                    internal_address,
-                    nic,
-                    ..
-                } => {
-                    services.push(NexusTypes::ServicePutRequest {
-                        service_id,
-                        zone_id,
-                        sled_id,
-                        address: internal_address.to_string(),
-                        kind: NexusTypes::ServiceKind::Nexus {
-                            external_address: *external_ip,
-                            nic: NexusTypes::ServiceNic {
-                                id: nic.id,
-                                name: nic.name.clone(),
-                                ip: nic.ip,
-                                mac: nic.mac,
-                            },
+        let service_id = self.id;
+        let zone_id = Some(self.id);
+        match &self.zone_type {
+            OmicronZoneType::Nexus {
+                external_ip,
+                internal_address,
+                nic,
+                ..
+            } => NexusTypes::ServicePutRequest {
+                service_id,
+                zone_id,
+                sled_id,
+                address: internal_address.to_string(),
+                kind: NexusTypes::ServiceKind::Nexus {
+                    external_address: *external_ip,
+                    nic: NexusTypes::ServiceNic {
+                        id: nic.id,
+                        name: nic.name.clone(),
+                        ip: nic.ip,
+                        mac: nic.mac,
+                    },
+                },
+            },
+            OmicronZoneType::ExternalDns {
+                http_address,
+                dns_address,
+                nic,
+                ..
+            } => NexusTypes::ServicePutRequest {
+                service_id,
+                zone_id,
+                sled_id,
+                address: http_address.to_string(),
+                kind: NexusTypes::ServiceKind::ExternalDns {
+                    external_address: dns_address.ip(),
+                    nic: NexusTypes::ServiceNic {
+                        id: nic.id,
+                        name: nic.name.clone(),
+                        ip: nic.ip,
+                        mac: nic.mac,
+                    },
+                },
+            },
+            OmicronZoneType::InternalDns { http_address, .. } => {
+                NexusTypes::ServicePutRequest {
+                    service_id,
+                    zone_id,
+                    sled_id,
+                    address: http_address.to_string(),
+                    kind: NexusTypes::ServiceKind::InternalDns,
+                }
+            }
+            OmicronZoneType::Oximeter { address } => {
+                NexusTypes::ServicePutRequest {
+                    service_id,
+                    zone_id,
+                    sled_id,
+                    address: address.to_string(),
+                    kind: NexusTypes::ServiceKind::Oximeter,
+                }
+            }
+            OmicronZoneType::CruciblePantry { address } => {
+                NexusTypes::ServicePutRequest {
+                    service_id,
+                    zone_id,
+                    sled_id,
+                    address: address.to_string(),
+                    kind: NexusTypes::ServiceKind::CruciblePantry,
+                }
+            }
+            OmicronZoneType::BoundaryNtp { address, snat_cfg, nic, .. } => {
+                NexusTypes::ServicePutRequest {
+                    service_id,
+                    zone_id,
+                    sled_id,
+                    address: address.to_string(),
+                    kind: NexusTypes::ServiceKind::BoundaryNtp {
+                        snat: snat_cfg.into(),
+                        nic: NexusTypes::ServiceNic {
+                            id: nic.id,
+                            name: nic.name.clone(),
+                            ip: nic.ip,
+                            mac: nic.mac,
                         },
-                    });
+                    },
                 }
-                ServiceType::ExternalDns { http_address, dns_address, nic } => {
-                    services.push(NexusTypes::ServicePutRequest {
-                        service_id,
-                        zone_id,
-                        sled_id,
-                        address: http_address.to_string(),
-                        kind: NexusTypes::ServiceKind::ExternalDns {
-                            external_address: dns_address.ip(),
-                            nic: NexusTypes::ServiceNic {
-                                id: nic.id,
-                                name: nic.name.clone(),
-                                ip: nic.ip,
-                                mac: nic.mac,
-                            },
-                        },
-                    });
+            }
+            OmicronZoneType::InternalNtp { address, .. } => {
+                NexusTypes::ServicePutRequest {
+                    service_id,
+                    zone_id,
+                    sled_id,
+                    address: address.to_string(),
+                    kind: NexusTypes::ServiceKind::InternalNtp,
                 }
-                ServiceType::InternalDns { http_address, .. } => {
-                    services.push(NexusTypes::ServicePutRequest {
-                        service_id,
-                        zone_id,
-                        sled_id,
-                        address: http_address.to_string(),
-                        kind: NexusTypes::ServiceKind::InternalDns,
-                    });
+            }
+            OmicronZoneType::Clickhouse { address, .. } => {
+                NexusTypes::ServicePutRequest {
+                    service_id,
+                    zone_id,
+                    sled_id,
+                    address: address.to_string(),
+                    kind: NexusTypes::ServiceKind::Clickhouse,
                 }
-                ServiceType::Oximeter { address } => {
-                    services.push(NexusTypes::ServicePutRequest {
-                        service_id,
-                        zone_id,
-                        sled_id,
-                        address: address.to_string(),
-                        kind: NexusTypes::ServiceKind::Oximeter,
-                    });
+            }
+            OmicronZoneType::ClickhouseKeeper { address, .. } => {
+                NexusTypes::ServicePutRequest {
+                    service_id,
+                    zone_id,
+                    sled_id,
+                    address: address.to_string(),
+                    kind: NexusTypes::ServiceKind::ClickhouseKeeper,
                 }
-                ServiceType::CruciblePantry { address } => {
-                    services.push(NexusTypes::ServicePutRequest {
-                        service_id,
-                        zone_id,
-                        sled_id,
-                        address: address.to_string(),
-                        kind: NexusTypes::ServiceKind::CruciblePantry,
-                    });
+            }
+            OmicronZoneType::Crucible { address, .. } => {
+                NexusTypes::ServicePutRequest {
+                    service_id,
+                    zone_id,
+                    sled_id,
+                    address: address.to_string(),
+                    kind: NexusTypes::ServiceKind::Crucible,
                 }
-                ServiceType::BoundaryNtp { address, snat_cfg, nic, .. } => {
-                    services.push(NexusTypes::ServicePutRequest {
-                        service_id,
-                        zone_id,
-                        sled_id,
-                        address: address.to_string(),
-                        kind: NexusTypes::ServiceKind::BoundaryNtp {
-                            snat: snat_cfg.into(),
-                            nic: NexusTypes::ServiceNic {
-                                id: nic.id,
-                                name: nic.name.clone(),
-                                ip: nic.ip,
-                                mac: nic.mac,
-                            },
-                        },
-                    });
-                }
-                ServiceType::InternalNtp { address, .. } => {
-                    services.push(NexusTypes::ServicePutRequest {
-                        service_id,
-                        zone_id,
-                        sled_id,
-                        address: address.to_string(),
-                        kind: NexusTypes::ServiceKind::InternalNtp,
-                    });
-                }
-                ServiceType::Clickhouse { address } => {
-                    services.push(NexusTypes::ServicePutRequest {
-                        service_id,
-                        zone_id,
-                        sled_id,
-                        address: address.to_string(),
-                        kind: NexusTypes::ServiceKind::Clickhouse,
-                    });
-                }
-                ServiceType::ClickhouseKeeper { address } => {
-                    services.push(NexusTypes::ServicePutRequest {
-                        service_id,
-                        zone_id,
-                        sled_id,
-                        address: address.to_string(),
-                        kind: NexusTypes::ServiceKind::ClickhouseKeeper,
-                    });
-                }
-                ServiceType::Crucible { address } => {
-                    services.push(NexusTypes::ServicePutRequest {
-                        service_id,
-                        zone_id,
-                        sled_id,
-                        address: address.to_string(),
-                        kind: NexusTypes::ServiceKind::Crucible,
-                    });
-                }
-                ServiceType::CockroachDb { address } => {
-                    services.push(NexusTypes::ServicePutRequest {
-                        service_id,
-                        zone_id,
-                        sled_id,
-                        address: address.to_string(),
-                        kind: NexusTypes::ServiceKind::Cockroach,
-                    });
-                }
-                ServiceType::ManagementGatewayService
-                | ServiceType::SpSim
-                | ServiceType::Wicketd { .. }
-                | ServiceType::Dendrite { .. }
-                | ServiceType::MgDdm { .. }
-                | ServiceType::Mgd
-                | ServiceType::Tfport { .. }
-                | ServiceType::Uplink => {
-                    return Err(AutonomousServiceOnlyError);
+            }
+            OmicronZoneType::CockroachDb { address, .. } => {
+                NexusTypes::ServicePutRequest {
+                    service_id,
+                    zone_id,
+                    sled_id,
+                    address: address.to_string(),
+                    kind: NexusTypes::ServiceKind::Cockroach,
                 }
             }
         }
-
-        Ok(services)
     }
 }
 
-/// Used to request that the Sled initialize a single service.
+/// Describes a persistent ZFS dataset associated with an Omicron zone
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
 )]
-pub struct ServiceZoneService {
-    pub id: Uuid,
-    pub details: ServiceType,
+pub struct OmicronZoneDataset {
+    pub pool_name: ZpoolName,
 }
 
-impl TryFrom<ServiceZoneService>
-    for sled_agent_client::types::ServiceZoneService
-{
-    type Error = AutonomousServiceOnlyError;
-
-    fn try_from(s: ServiceZoneService) -> Result<Self, Self::Error> {
-        let details = s.details.try_into()?;
-        Ok(Self { id: s.id, details })
+impl From<OmicronZoneDataset> for sled_agent_client::types::OmicronZoneDataset {
+    fn from(local: OmicronZoneDataset) -> Self {
+        Self {
+            pool_name: sled_agent_client::types::ZpoolName::from_str(
+                &local.pool_name.to_string(),
+            )
+            .unwrap(),
+        }
     }
 }
 
-/// Used to request that the Sled initialize multiple services.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-pub struct ServiceEnsureBody {
-    pub services: Vec<ServiceZoneRequest>,
+/// Describes what kind of zone this is (i.e., what component is running in it)
+/// as well as any type-specific configuration
+#[derive(
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum OmicronZoneType {
+    BoundaryNtp {
+        address: SocketAddrV6,
+        ntp_servers: Vec<String>,
+        dns_servers: Vec<IpAddr>,
+        domain: Option<String>,
+        /// The service vNIC providing outbound connectivity using OPTE.
+        nic: NetworkInterface,
+        /// The SNAT configuration for outbound connections.
+        snat_cfg: SourceNatConfig,
+    },
+
+    Clickhouse {
+        address: SocketAddrV6,
+        dataset: OmicronZoneDataset,
+    },
+
+    ClickhouseKeeper {
+        address: SocketAddrV6,
+        dataset: OmicronZoneDataset,
+    },
+    CockroachDb {
+        address: SocketAddrV6,
+        dataset: OmicronZoneDataset,
+    },
+
+    Crucible {
+        address: SocketAddrV6,
+        dataset: OmicronZoneDataset,
+    },
+    CruciblePantry {
+        address: SocketAddrV6,
+    },
+    ExternalDns {
+        dataset: OmicronZoneDataset,
+        /// The address at which the external DNS server API is reachable.
+        http_address: SocketAddrV6,
+        /// The address at which the external DNS server is reachable.
+        dns_address: SocketAddr,
+        /// The service vNIC providing external connectivity using OPTE.
+        nic: NetworkInterface,
+    },
+    InternalDns {
+        dataset: OmicronZoneDataset,
+        http_address: SocketAddrV6,
+        dns_address: SocketAddrV6,
+        /// The addresses in the global zone which should be created
+        ///
+        /// For the DNS service, which exists outside the sleds's typical subnet
+        /// - adding an address in the GZ is necessary to allow inter-zone
+        /// traffic routing.
+        gz_address: Ipv6Addr,
+
+        /// The address is also identified with an auxiliary bit of information
+        /// to ensure that the created global zone address can have a unique
+        /// name.
+        gz_address_index: u32,
+    },
+    InternalNtp {
+        address: SocketAddrV6,
+        ntp_servers: Vec<String>,
+        dns_servers: Vec<IpAddr>,
+        domain: Option<String>,
+    },
+    Nexus {
+        /// The address at which the internal nexus server is reachable.
+        internal_address: SocketAddrV6,
+        /// The address at which the external nexus server is reachable.
+        external_ip: IpAddr,
+        /// The service vNIC providing external connectivity using OPTE.
+        nic: NetworkInterface,
+        /// Whether Nexus's external endpoint should use TLS
+        external_tls: bool,
+        /// External DNS servers Nexus can use to resolve external hosts.
+        external_dns_servers: Vec<IpAddr>,
+    },
+    Oximeter {
+        address: SocketAddrV6,
+    },
+}
+
+impl OmicronZoneType {
+    /// Returns a canonical string identifying the type of zone this is
+    ///
+    /// This is used to construct zone names, SMF service names, etc.
+    pub fn zone_type_str(&self) -> String {
+        match self {
+            OmicronZoneType::BoundaryNtp { .. }
+            | OmicronZoneType::InternalNtp { .. } => ZoneType::Ntp,
+
+            OmicronZoneType::Clickhouse { .. } => ZoneType::Clickhouse,
+            OmicronZoneType::ClickhouseKeeper { .. } => {
+                ZoneType::ClickhouseKeeper
+            }
+            OmicronZoneType::CockroachDb { .. } => ZoneType::CockroachDb,
+            OmicronZoneType::Crucible { .. } => ZoneType::Crucible,
+            OmicronZoneType::CruciblePantry { .. } => ZoneType::CruciblePantry,
+            OmicronZoneType::ExternalDns { .. } => ZoneType::ExternalDns,
+            OmicronZoneType::InternalDns { .. } => ZoneType::InternalDns,
+            OmicronZoneType::Nexus { .. } => ZoneType::Nexus,
+            OmicronZoneType::Oximeter { .. } => ZoneType::Oximeter,
+        }
+        .to_string()
+    }
+
+    /// If this kind of zone has an associated dataset, returns the dataset's
+    /// name.  Othrwise, returns `None`.
+    pub fn dataset_name(&self) -> Option<DatasetName> {
+        self.dataset_name_and_address().map(|d| d.0)
+    }
+
+    /// If this kind of zone has an associated dataset, return the dataset's
+    /// name and the associated "service address".  Otherwise, returns `None`.
+    pub fn dataset_name_and_address(
+        &self,
+    ) -> Option<(DatasetName, SocketAddrV6)> {
+        let (dataset, dataset_kind, address) = match self {
+            OmicronZoneType::BoundaryNtp { .. }
+            | OmicronZoneType::InternalNtp { .. }
+            | OmicronZoneType::Nexus { .. }
+            | OmicronZoneType::Oximeter { .. }
+            | OmicronZoneType::CruciblePantry { .. } => None,
+            OmicronZoneType::Clickhouse { dataset, address, .. } => {
+                Some((dataset, DatasetKind::Clickhouse, address))
+            }
+            OmicronZoneType::ClickhouseKeeper { dataset, address, .. } => {
+                Some((dataset, DatasetKind::ClickhouseKeeper, address))
+            }
+            OmicronZoneType::CockroachDb { dataset, address, .. } => {
+                Some((dataset, DatasetKind::CockroachDb, address))
+            }
+            OmicronZoneType::Crucible { dataset, address, .. } => {
+                Some((dataset, DatasetKind::Crucible, address))
+            }
+            OmicronZoneType::ExternalDns { dataset, http_address, .. } => {
+                Some((dataset, DatasetKind::ExternalDns, http_address))
+            }
+            OmicronZoneType::InternalDns { dataset, http_address, .. } => {
+                Some((dataset, DatasetKind::InternalDns, http_address))
+            }
+        }?;
+
+        Some((
+            DatasetName::new(dataset.pool_name.clone(), dataset_kind),
+            *address,
+        ))
+    }
+}
+
+impl crate::smf_helper::Service for OmicronZoneType {
+    fn service_name(&self) -> String {
+        // For historical reasons, crucible-pantry is the only zone type whose
+        // SMF service does not match the canonical name that we use for the
+        // zone.
+        match self {
+            OmicronZoneType::CruciblePantry { .. } => {
+                "crucible/pantry".to_owned()
+            }
+            _ => self.zone_type_str(),
+        }
+    }
+    fn smf_name(&self) -> String {
+        format!("svc:/oxide/{}", self.service_name())
+    }
+    fn should_import(&self) -> bool {
+        true
+    }
+}
+
+impl From<OmicronZoneType> for sled_agent_client::types::OmicronZoneType {
+    fn from(local: OmicronZoneType) -> Self {
+        use sled_agent_client::types::OmicronZoneType as Other;
+        match local {
+            OmicronZoneType::BoundaryNtp {
+                address,
+                ntp_servers,
+                dns_servers,
+                domain,
+                nic,
+                snat_cfg,
+            } => Other::BoundaryNtp {
+                address: address.to_string(),
+                dns_servers,
+                domain,
+                ntp_servers,
+                snat_cfg: snat_cfg.into(),
+                nic: nic.into(),
+            },
+            OmicronZoneType::Clickhouse { address, dataset } => {
+                Other::Clickhouse {
+                    address: address.to_string(),
+                    dataset: dataset.into(),
+                }
+            }
+            OmicronZoneType::ClickhouseKeeper { address, dataset } => {
+                Other::ClickhouseKeeper {
+                    address: address.to_string(),
+                    dataset: dataset.into(),
+                }
+            }
+            OmicronZoneType::CockroachDb { address, dataset } => {
+                Other::CockroachDb {
+                    address: address.to_string(),
+                    dataset: dataset.into(),
+                }
+            }
+            OmicronZoneType::Crucible { address, dataset } => Other::Crucible {
+                address: address.to_string(),
+                dataset: dataset.into(),
+            },
+            OmicronZoneType::CruciblePantry { address } => {
+                Other::CruciblePantry { address: address.to_string() }
+            }
+            OmicronZoneType::ExternalDns {
+                dataset,
+                http_address,
+                dns_address,
+                nic,
+            } => Other::ExternalDns {
+                dataset: dataset.into(),
+                http_address: http_address.to_string(),
+                dns_address: dns_address.to_string(),
+                nic: nic.into(),
+            },
+            OmicronZoneType::InternalDns {
+                dataset,
+                http_address,
+                dns_address,
+                gz_address,
+                gz_address_index,
+            } => Other::InternalDns {
+                dataset: dataset.into(),
+                http_address: http_address.to_string(),
+                dns_address: dns_address.to_string(),
+                gz_address,
+                gz_address_index,
+            },
+            OmicronZoneType::InternalNtp {
+                address,
+                ntp_servers,
+                dns_servers,
+                domain,
+            } => Other::InternalNtp {
+                address: address.to_string(),
+                ntp_servers,
+                dns_servers,
+                domain,
+            },
+            OmicronZoneType::Nexus {
+                internal_address,
+                external_ip,
+                nic,
+                external_tls,
+                external_dns_servers,
+            } => Other::Nexus {
+                external_dns_servers,
+                external_ip,
+                external_tls,
+                internal_address: internal_address.to_string(),
+                nic: nic.into(),
+            },
+            OmicronZoneType::Oximeter { address } => {
+                Other::Oximeter { address: address.to_string() }
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]

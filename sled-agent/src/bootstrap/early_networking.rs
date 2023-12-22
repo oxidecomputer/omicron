@@ -17,16 +17,19 @@ use gateway_client::Client as MgsClient;
 use internal_dns::resolver::{ResolveError, Resolver as DnsResolver};
 use internal_dns::ServiceName;
 use ipnetwork::{IpNetwork, Ipv6Network};
-use omicron_common::address::{Ipv6Subnet, MGS_PORT};
+use mg_admin_client::types::{ApplyRequest, BgpPeerConfig, Prefix4};
+use mg_admin_client::Client as MgdClient;
+use omicron_common::address::{Ipv6Subnet, MGD_PORT, MGS_PORT};
 use omicron_common::address::{DDMD_PORT, DENDRITE_PORT};
 use omicron_common::api::internal::shared::{
-    PortConfigV1, PortFec, PortSpeed, RackNetworkConfig, RackNetworkConfigV1,
-    SwitchLocation, UplinkConfig,
+    BgpConfig, PortConfigV1, PortFec, PortSpeed, RackNetworkConfig,
+    RackNetworkConfigV1, SwitchLocation, UplinkConfig,
 };
 use omicron_common::backoff::{
     retry_notify, retry_policy_local, BackoffError, ExponentialBackoff,
     ExponentialBackoffBuilder,
 };
+use omicron_common::OMICRON_DPD_TAG;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use slog::Logger;
@@ -36,6 +39,7 @@ use std::time::{Duration, Instant};
 use thiserror::Error;
 
 static BOUNDARY_SERVICES_ADDR: &str = "fd00:99::1";
+const BGP_SESSION_RESOLUTION: u64 = 100;
 
 /// Errors that can occur during early network setup
 #[derive(Error, Debug)]
@@ -54,6 +58,12 @@ pub enum EarlyNetworkSetupError {
 
     #[error("Error during DNS lookup: {0}")]
     DnsResolver(#[from] ResolveError),
+
+    #[error("BGP configuration error: {0}")]
+    BgpConfigurationError(String),
+
+    #[error("MGD error: {0}")]
+    MgdError(String),
 }
 
 enum LookupSwitchZoneAddrsResult {
@@ -403,7 +413,7 @@ impl<'a> EarlyNetworkSetup<'a> {
         let dpd = DpdClient::new(
             &format!("http://[{}]:{}", switch_zone_underlay_ip, DENDRITE_PORT),
             dpd_client::ClientState {
-                tag: "early_networking".to_string(),
+                tag: OMICRON_DPD_TAG.into(),
                 log: self.log.new(o!("component" => "DpdClient")),
             },
         );
@@ -432,13 +442,17 @@ impl<'a> EarlyNetworkSetup<'a> {
                 "Configuring default uplink on switch";
                 "config" => #?dpd_port_settings
             );
-            dpd.port_settings_apply(&port_id, &dpd_port_settings)
-                .await
-                .map_err(|e| {
-                    EarlyNetworkSetupError::Dendrite(format!(
-                        "unable to apply uplink port configuration: {e}"
-                    ))
-                })?;
+            dpd.port_settings_apply(
+                &port_id,
+                Some(OMICRON_DPD_TAG),
+                &dpd_port_settings,
+            )
+            .await
+            .map_err(|e| {
+                EarlyNetworkSetupError::Dendrite(format!(
+                    "unable to apply uplink port configuration: {e}"
+                ))
+            })?;
 
             info!(self.log, "advertising boundary services loopback address");
 
@@ -446,6 +460,92 @@ impl<'a> EarlyNetworkSetup<'a> {
                 SocketAddrV6::new(switch_zone_underlay_ip, DDMD_PORT, 0, 0);
             let ddmd_client = DdmAdminClient::new(&self.log, ddmd_addr)?;
             ddmd_client.advertise_prefix(Ipv6Subnet::new(ipv6_entry.addr));
+        }
+
+        let mgd = MgdClient::new(
+            &self.log,
+            SocketAddrV6::new(switch_zone_underlay_ip, MGD_PORT, 0, 0).into(),
+        )
+        .map_err(|e| {
+            EarlyNetworkSetupError::MgdError(format!(
+                "initialize mgd client: {e}"
+            ))
+        })?;
+
+        let mut config: Option<BgpConfig> = None;
+        let mut bgp_peer_configs = HashMap::<String, Vec<BgpPeerConfig>>::new();
+
+        // Iterate through ports and apply BGP config.
+        for port in &our_ports {
+            for peer in &port.bgp_peers {
+                if let Some(config) = &config {
+                    if peer.asn != config.asn {
+                        return Err(EarlyNetworkSetupError::BadConfig(
+                            "only one ASN per switch is supported".into(),
+                        ));
+                    }
+                } else {
+                    config = Some(
+                        rack_network_config
+                            .bgp
+                            .iter()
+                            .find(|x| x.asn == peer.asn)
+                            .ok_or(
+                                EarlyNetworkSetupError::BgpConfigurationError(
+                                    format!(
+                                        "asn {} referenced by peer undefined",
+                                        peer.asn
+                                    ),
+                                ),
+                            )?
+                            .clone(),
+                    );
+                }
+
+                let bpc = BgpPeerConfig {
+                    name: format!("{}", peer.addr),
+                    host: format!("{}:179", peer.addr),
+                    hold_time: peer.hold_time.unwrap_or(6),
+                    idle_hold_time: peer.idle_hold_time.unwrap_or(3),
+                    delay_open: peer.delay_open.unwrap_or(0),
+                    connect_retry: peer.connect_retry.unwrap_or(3),
+                    keepalive: peer.keepalive.unwrap_or(2),
+                    resolution: BGP_SESSION_RESOLUTION,
+                    passive: false,
+                };
+                match bgp_peer_configs.get_mut(&port.port) {
+                    Some(peers) => {
+                        peers.push(bpc);
+                    }
+                    None => {
+                        bgp_peer_configs.insert(port.port.clone(), vec![bpc]);
+                    }
+                }
+            }
+        }
+
+        if !bgp_peer_configs.is_empty() {
+            if let Some(config) = &config {
+                mgd.inner
+                    .bgp_apply(&ApplyRequest {
+                        asn: config.asn,
+                        peers: bgp_peer_configs,
+                        originate: config
+                            .originate
+                            .iter()
+                            .map(|x| Prefix4 {
+                                length: x.prefix(),
+                                value: x.ip(),
+                            })
+                            .collect(),
+                    })
+                    .await
+                    .map_err(|e| {
+                        EarlyNetworkSetupError::BgpConfigurationError(format!(
+                            "BGP peer configuration failed: {e}",
+                        ))
+                    })?;
+            }
         }
 
         Ok(our_ports)
@@ -462,10 +562,9 @@ impl<'a> EarlyNetworkSetup<'a> {
                 "failed to parse `BOUNDARY_SERVICES_ADDR` as `Ipv6Addr`: {e}"
             ))
             })?,
-            tag: "rss".into(),
+            tag: OMICRON_DPD_TAG.into(),
         };
         let mut dpd_port_settings = PortSettings {
-            tag: "rss".into(),
             links: HashMap::new(),
             v4_routes: HashMap::new(),
             v6_routes: HashMap::new(),
@@ -474,22 +573,20 @@ impl<'a> EarlyNetworkSetup<'a> {
 
         let mut addrs = Vec::new();
         for a in &port_config.addresses {
+            // TODO We're discarding the `uplink_cidr.prefix()` here and only using
+            // the IP address; at some point we probably need to give the full CIDR
+            // to dendrite?
             addrs.push(a.ip());
         }
 
-        // TODO We're discarding the `uplink_cidr.prefix()` here and only using
-        // the IP address; at some point we probably need to give the full CIDR
-        // to dendrite?
         let link_settings = LinkSettings {
-            // TODO Allow user to configure link properties
-            // https://github.com/oxidecomputer/omicron/issues/3061
             params: LinkCreate {
-                autoneg: false,
-                kr: false,
+                autoneg: port_config.autoneg,
+                kr: false, //NOTE: kr does not apply to user configurable links.
                 fec: convert_fec(&port_config.uplink_port_fec),
                 speed: convert_speed(&port_config.uplink_port_speed),
+                lane: Some(LinkId(0)),
             },
-            //addrs: vec![addr],
             addrs,
         };
         dpd_port_settings.links.insert(link_id.to_string(), link_settings);
@@ -610,6 +707,65 @@ pub struct EarlyNetworkConfig {
     pub body: EarlyNetworkConfigBody,
 }
 
+impl EarlyNetworkConfig {
+    // Note: This currently only converts between v0 and v1 or deserializes v1 of
+    // `EarlyNetworkConfig`.
+    pub fn deserialize_bootstore_config(
+        log: &Logger,
+        config: &bootstore::NetworkConfig,
+    ) -> Result<Self, serde_json::Error> {
+        // Try to deserialize the latest version of the data structure (v1). If
+        // that succeeds we are done.
+        let v1_error =
+            match serde_json::from_slice::<EarlyNetworkConfig>(&config.blob) {
+                Ok(val) => return Ok(val),
+                Err(error) => {
+                    // Log this error and continue trying to deserialize older
+                    // versions.
+                    warn!(
+                        log,
+                        "Failed to deserialize EarlyNetworkConfig \
+                         as v1, trying next as v0: {}",
+                        error,
+                    );
+                    error
+                }
+            };
+
+        match serde_json::from_slice::<EarlyNetworkConfigV0>(&config.blob) {
+            Ok(val) => {
+                // Convert from v0 to v1
+                return Ok(EarlyNetworkConfig {
+                    generation: val.generation,
+                    schema_version: 1,
+                    body: EarlyNetworkConfigBody {
+                        ntp_servers: val.ntp_servers,
+                        rack_network_config: val.rack_network_config.map(
+                            |v0_config| {
+                                RackNetworkConfigV0::to_v1(
+                                    val.rack_subnet,
+                                    v0_config,
+                                )
+                            },
+                        ),
+                    },
+                });
+            }
+            Err(error) => {
+                // Log this error.
+                warn!(
+                    log,
+                    "Failed to deserialize EarlyNetworkConfig as v0: {}", error,
+                );
+            }
+        };
+
+        // Return the v1 error preferentially over the v0 error as it's more
+        // likely to be useful.
+        Err(v1_error)
+    }
+}
+
 /// This is the actual configuration of EarlyNetworking.
 ///
 /// We nest it below the "header" of `generation` and `schema_version` so that
@@ -636,39 +792,6 @@ impl From<EarlyNetworkConfig> for bootstore::NetworkConfig {
         let generation = value.generation;
 
         bootstore::NetworkConfig { generation, blob }
-    }
-}
-
-// Note: This currently only converts between v0 and v1 or deserializes v1 of
-// `EarlyNetworkConfig`.
-impl TryFrom<bootstore::NetworkConfig> for EarlyNetworkConfig {
-    type Error = serde_json::Error;
-
-    fn try_from(
-        value: bootstore::NetworkConfig,
-    ) -> std::result::Result<Self, Self::Error> {
-        // Try to deserialize the latest version of the data structure (v1). If
-        // that succeeds we are done.
-        if let Ok(val) =
-            serde_json::from_slice::<EarlyNetworkConfig>(&value.blob)
-        {
-            return Ok(val);
-        }
-
-        // We don't have the latest version. Try to deserialize v0 and then
-        // convert it to the latest version.
-        let v0 = serde_json::from_slice::<EarlyNetworkConfigV0>(&value.blob)?;
-
-        Ok(EarlyNetworkConfig {
-            generation: v0.generation,
-            schema_version: 1,
-            body: EarlyNetworkConfigBody {
-                ntp_servers: v0.ntp_servers,
-                rack_network_config: v0.rack_network_config.map(|v0_config| {
-                    RackNetworkConfigV0::to_v1(v0.rack_subnet, v0_config)
-                }),
-            },
-        })
     }
 }
 
@@ -743,9 +866,13 @@ fn convert_fec(fec: &PortFec) -> dpd_client::types::PortFec {
 mod tests {
     use super::*;
     use omicron_common::api::internal::shared::RouteConfig;
+    use omicron_test_utils::dev::test_setup_log;
 
     #[test]
     fn serialized_early_network_config_v0_to_v1_conversion() {
+        let logctx = test_setup_log(
+            "serialized_early_network_config_v0_to_v1_conversion",
+        );
         let v0 = EarlyNetworkConfigV0 {
             generation: 1,
             rack_subnet: Ipv6Addr::UNSPECIFIED,
@@ -769,7 +896,11 @@ mod tests {
         let bootstore_conf =
             bootstore::NetworkConfig { generation: 1, blob: v0_serialized };
 
-        let v1 = EarlyNetworkConfig::try_from(bootstore_conf).unwrap();
+        let v1 = EarlyNetworkConfig::deserialize_bootstore_config(
+            &logctx.log,
+            &bootstore_conf,
+        )
+        .unwrap();
         let v0_rack_network_config = v0.rack_network_config.unwrap();
         let uplink = v0_rack_network_config.uplinks[0].clone();
         let expected = EarlyNetworkConfig {
@@ -791,6 +922,7 @@ mod tests {
                         port: uplink.uplink_port,
                         uplink_port_speed: uplink.uplink_port_speed,
                         uplink_port_fec: uplink.uplink_port_fec,
+                        autoneg: false,
                         bgp_peers: vec![],
                     }],
                     bgp: vec![],
@@ -799,5 +931,7 @@ mod tests {
         };
 
         assert_eq!(expected, v1);
+
+        logctx.cleanup_successful();
     }
 }

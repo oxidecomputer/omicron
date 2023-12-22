@@ -8,10 +8,10 @@ use super::user_builtin;
 use super::FLEET_ID;
 use crate::db::model::IdentityType;
 use crate::db::model::RoleAssignment;
-use lazy_static::lazy_static;
+use once_cell::sync::Lazy;
 
-lazy_static! {
-    pub static ref BUILTIN_ROLE_ASSIGNMENTS: Vec<RoleAssignment> =
+pub static BUILTIN_ROLE_ASSIGNMENTS: Lazy<Vec<RoleAssignment>> =
+    Lazy::new(|| {
         vec![
             // The "internal-api" user gets the "admin" role on the sole Fleet.
             // This is a pretty elevated privilege.
@@ -24,7 +24,6 @@ lazy_static! {
                 *FLEET_ID,
                 role_builtin::FLEET_ADMIN.role_name,
             ),
-
             // The "USER_SERVICE_BALANCER" user gets the "admin" role on the
             // Fleet.
             //
@@ -38,7 +37,6 @@ lazy_static! {
                 *FLEET_ID,
                 role_builtin::FLEET_ADMIN.role_name,
             ),
-
             // The "internal-read" user gets the "viewer" role on the sole
             // Fleet.  This will grant them the ability to read various control
             // plane data (like the list of sleds), which is in turn used to
@@ -50,7 +48,6 @@ lazy_static! {
                 *FLEET_ID,
                 role_builtin::FLEET_VIEWER.role_name,
             ),
-
             // The "external-authenticator" user gets the "authenticator" role
             // on the sole fleet.  This grants them the ability to create
             // sessions.
@@ -61,5 +58,5 @@ lazy_static! {
                 *FLEET_ID,
                 role_builtin::FLEET_AUTHENTICATOR.role_name,
             ),
-        ];
-}
+        ]
+    });

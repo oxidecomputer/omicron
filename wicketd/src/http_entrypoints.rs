@@ -51,6 +51,7 @@ use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use wicket_common::rack_setup::PutRssUserConfigInsensitive;
 use wicket_common::update_events::EventReport;
+use wicket_common::WICKETD_TIMEOUT;
 
 use crate::ServerContext;
 
@@ -709,10 +710,28 @@ pub(crate) enum UpdateSimulatedResult {
 }
 
 #[derive(Clone, Debug, JsonSchema, Deserialize)]
+pub(crate) struct ClearUpdateStateParams {
+    /// The SP identifiers to clear the update state for. Must be non-empty.
+    pub(crate) targets: BTreeSet<SpIdentifier>,
+
+    /// Options for clearing update state
+    pub(crate) options: ClearUpdateStateOptions,
+}
+
+#[derive(Clone, Debug, JsonSchema, Deserialize)]
 pub(crate) struct ClearUpdateStateOptions {
     /// If passed in, fails the clear update state operation with a simulated
     /// error.
     pub(crate) test_error: Option<UpdateTestError>,
+}
+
+#[derive(Clone, Debug, Default, JsonSchema, Serialize)]
+pub(crate) struct ClearUpdateStateResponse {
+    /// The SPs for which update data was cleared.
+    pub(crate) cleared: BTreeSet<SpIdentifier>,
+
+    /// The SPs that had no update state to clear.
+    pub(crate) no_update_data: BTreeSet<SpIdentifier>,
 }
 
 #[derive(Clone, Debug, JsonSchema, Deserialize)]
@@ -878,20 +897,41 @@ async fn post_start_update(
     // 1. We haven't pulled its state in our inventory (most likely cause: the
     //    cubby is empty; less likely cause: the SP is misbehaving, which will
     //    make updating it very unlikely to work anyway)
-    // 2. We have pulled its state but our hardware manager says we can't update
-    //    it (most likely cause: the target is the sled we're currently running
-    //    on; less likely cause: our hardware manager failed to get our local
-    //    identifying information, and it refuses to update this target out of
-    //    an abundance of caution).
+    // 2. We have pulled its state but our hardware manager says we can't
+    //    update it (most likely cause: the target is the sled we're currently
+    //    running on; less likely cause: our hardware manager failed to get our
+    //    local identifying information, and it refuses to update this target
+    //    out of an abundance of caution).
     //
-    // First, get our most-recently-cached inventory view.
-    let inventory = match rqctx.mgs_handle.get_cached_inventory().await {
-        Ok(inventory) => inventory,
-        Err(ShutdownInProgress) => {
+    // First, get our most-recently-cached inventory view. (Only wait 80% of
+    // WICKETD_TIMEOUT for this: if even a cached inventory isn't available,
+    // it's because we've never established contact with MGS. In that case, we
+    // should produce a useful error message rather than timing out on the
+    // client.)
+    let inventory = match tokio::time::timeout(
+        WICKETD_TIMEOUT.mul_f32(0.8),
+        rqctx.mgs_handle.get_cached_inventory(),
+    )
+    .await
+    {
+        Ok(Ok(inventory)) => inventory,
+        Ok(Err(ShutdownInProgress)) => {
             return Err(HttpError::for_unavail(
                 None,
                 "Server is shutting down".into(),
             ));
+        }
+        Err(_) => {
+            // Have to construct an HttpError manually because
+            // HttpError::for_unavail doesn't accept an external message.
+            let message =
+                "Rack inventory not yet available (is MGS alive?)".to_owned();
+            return Err(HttpError {
+                status_code: http::StatusCode::SERVICE_UNAVAILABLE,
+                error_code: None,
+                external_message: message.clone(),
+                internal_message: message,
+            });
         }
     };
 
@@ -1080,25 +1120,31 @@ async fn post_abort_update(
 /// Use this to clear update state after a failed update.
 #[endpoint {
     method = POST,
-    path = "/clear-update-state/{type}/{slot}",
+    path = "/clear-update-state",
 }]
 async fn post_clear_update_state(
     rqctx: RequestContext<ServerContext>,
-    target: Path<SpIdentifier>,
-    opts: TypedBody<ClearUpdateStateOptions>,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    params: TypedBody<ClearUpdateStateParams>,
+) -> Result<HttpResponseOk<ClearUpdateStateResponse>, HttpError> {
     let log = &rqctx.log;
-    let target = target.into_inner();
+    let rqctx = rqctx.context();
+    let params = params.into_inner();
 
-    let opts = opts.into_inner();
-    if let Some(test_error) = opts.test_error {
+    if params.targets.is_empty() {
+        return Err(HttpError::for_bad_request(
+            None,
+            "No targets specified".into(),
+        ));
+    }
+
+    if let Some(test_error) = params.options.test_error {
         return Err(test_error
             .into_http_error(log, "clearing update state")
             .await);
     }
 
-    match rqctx.context().update_tracker.clear_update_state(target).await {
-        Ok(()) => Ok(HttpResponseUpdatedNoContent {}),
+    match rqctx.update_tracker.clear_update_state(params.targets).await {
+        Ok(response) => Ok(HttpResponseOk(response)),
         Err(err) => Err(err.to_http_error()),
     }
 }

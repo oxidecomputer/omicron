@@ -9,13 +9,19 @@ use super::dns_config;
 use super::dns_propagation;
 use super::dns_servers;
 use super::external_endpoints;
+use super::inventory_collection;
+use super::nat_cleanup;
+use super::phantom_disks;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_common::nexus_config::BackgroundTaskConfig;
 use omicron_common::nexus_config::DnsTasksConfig;
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::sync::Arc;
+use uuid::Uuid;
 
 /// Describes ongoing background tasks and provides interfaces for working with
 /// them
@@ -42,6 +48,14 @@ pub struct BackgroundTasks {
     pub external_endpoints: tokio::sync::watch::Receiver<
         Option<external_endpoints::ExternalEndpoints>,
     >,
+    /// task handle for the ipv4 nat entry garbage collector
+    pub nat_cleanup: common::TaskHandle,
+
+    /// task handle for the task that collects inventory
+    pub task_inventory_collection: common::TaskHandle,
+
+    /// task handle for the task that detects phantom disks
+    pub task_phantom_disks: common::TaskHandle,
 }
 
 impl BackgroundTasks {
@@ -50,6 +64,9 @@ impl BackgroundTasks {
         opctx: &OpContext,
         datastore: Arc<DataStore>,
         config: &BackgroundTaskConfig,
+        dpd_clients: &HashMap<SwitchLocation, Arc<dpd_client::Client>>,
+        nexus_id: Uuid,
+        resolver: internal_dns::resolver::Resolver,
     ) -> BackgroundTasks {
         let mut driver = common::Driver::new();
 
@@ -70,8 +87,9 @@ impl BackgroundTasks {
 
         // Background task: External endpoints list watcher
         let (task_external_endpoints, external_endpoints) = {
-            let watcher =
-                external_endpoints::ExternalEndpointsWatcher::new(datastore);
+            let watcher = external_endpoints::ExternalEndpointsWatcher::new(
+                datastore.clone(),
+            );
             let watcher_channel = watcher.watcher();
             let task = driver.register(
                 String::from("external_endpoints"),
@@ -88,6 +106,63 @@ impl BackgroundTasks {
             (task, watcher_channel)
         };
 
+        let nat_cleanup = {
+            driver.register(
+                "nat_v4_garbage_collector".to_string(),
+                String::from(
+                    "prunes soft-deleted IPV4 NAT entries from ipv4_nat_entry table \
+                     based on a predetermined retention policy",
+                ),
+                config.nat_cleanup.period_secs,
+                Box::new(nat_cleanup::Ipv4NatGarbageCollector::new(
+                    datastore.clone(),
+                    dpd_clients.values().map(|client| client.clone()).collect(),
+                )),
+                opctx.child(BTreeMap::new()),
+                vec![],
+            )
+        };
+
+        // Background task: inventory collector
+        let task_inventory_collection = {
+            let collector = inventory_collection::InventoryCollector::new(
+                datastore.clone(),
+                resolver,
+                &nexus_id.to_string(),
+                config.inventory.nkeep,
+                config.inventory.disable,
+            );
+            let task = driver.register(
+                String::from("inventory_collection"),
+                String::from(
+                    "collects hardware and software inventory data from the \
+                    whole system",
+                ),
+                config.inventory.period_secs,
+                Box::new(collector),
+                opctx.child(BTreeMap::new()),
+                vec![],
+            );
+
+            task
+        };
+
+        // Background task: phantom disk detection
+        let task_phantom_disks = {
+            let detector = phantom_disks::PhantomDiskDetector::new(datastore);
+
+            let task = driver.register(
+                String::from("phantom_disks"),
+                String::from("detects and un-deletes phantom disks"),
+                config.phantom_disks.period_secs,
+                Box::new(detector),
+                opctx.child(BTreeMap::new()),
+                vec![],
+            );
+
+            task
+        };
+
         BackgroundTasks {
             driver,
             task_internal_dns_config,
@@ -96,6 +171,9 @@ impl BackgroundTasks {
             task_external_dns_servers,
             task_external_endpoints,
             external_endpoints,
+            nat_cleanup,
+            task_inventory_collection,
+            task_phantom_disks,
         }
     }
 
@@ -169,14 +247,12 @@ fn init_dns(
 
 #[cfg(test)]
 pub mod test {
-    use async_bb8_diesel::AsyncConnection;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use dropshot::HandlerTaskMode;
     use nexus_db_model::DnsGroup;
     use nexus_db_model::Generation;
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db::DataStore;
-    use nexus_db_queries::db::TransactionError;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::internal_api::params as nexus_params;
     use nexus_types::internal_api::params::ServiceKind;
@@ -368,11 +444,11 @@ pub mod test {
         datastore: &DataStore,
         internal_dns_zone_id: Uuid,
     ) {
-        type TxnError = TransactionError<()>;
         {
             let conn = datastore.pool_connection_for_tests().await.unwrap();
-            let _: Result<(), TxnError> = conn
-                .transaction_async(|conn| async move {
+            let _: Result<(), _> = datastore
+                .transaction_retry_wrapper("write_test_dns_generation")
+                .transaction(&conn, |conn| async move {
                     {
                         use nexus_db_queries::db::model::DnsVersion;
                         use nexus_db_queries::db::schema::dns_version::dsl;

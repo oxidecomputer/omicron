@@ -14,6 +14,7 @@ use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
 use dropshot::HandlerTaskMode;
+use gateway_test_utils::setup::GatewayTestContext;
 use nexus_test_interface::NexusServer;
 use nexus_types::external_api::params::UserId;
 use nexus_types::internal_api::params::Certificate;
@@ -29,6 +30,7 @@ use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::{IdentityMetadata, Name};
 use omicron_common::api::internal::nexus::ProducerEndpoint;
+use omicron_common::api::internal::nexus::ProducerKind;
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_common::nexus_config;
 use omicron_common::nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
@@ -86,6 +88,7 @@ pub struct ControlPlaneTestContext<N> {
     pub sled_agent: sim::Server,
     pub oximeter: Oximeter,
     pub producer: ProducerServer,
+    pub gateway: GatewayTestContext,
     pub dendrite: HashMap<SwitchLocation, dev::dendrite::DendriteInstance>,
     pub mgd: HashMap<SwitchLocation, dev::maghemite::MgdInstance>,
     pub external_dns_zone_name: String,
@@ -107,6 +110,7 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         self.sled_agent.http_server.close().await.unwrap();
         self.oximeter.close().await.unwrap();
         self.producer.close().await.unwrap();
+        self.gateway.teardown().await;
         for (_, mut dendrite) in self.dendrite {
             dendrite.cleanup().await.unwrap();
         }
@@ -226,6 +230,7 @@ impl RackInitRequestBuilder {
 
 pub struct ControlPlaneTestContextBuilder<'a, N: NexusServer> {
     pub config: &'a mut omicron_common::nexus_config::Config,
+    test_name: &'a str,
     rack_init_builder: RackInitRequestBuilder,
 
     pub start_time: chrono::DateTime<chrono::Utc>,
@@ -241,6 +246,7 @@ pub struct ControlPlaneTestContextBuilder<'a, N: NexusServer> {
     pub sled_agent: Option<sim::Server>,
     pub oximeter: Option<Oximeter>,
     pub producer: Option<ProducerServer>,
+    pub gateway: Option<GatewayTestContext>,
     pub dendrite: HashMap<SwitchLocation, dev::dendrite::DendriteInstance>,
     pub mgd: HashMap<SwitchLocation, dev::maghemite::MgdInstance>,
 
@@ -259,7 +265,7 @@ pub struct ControlPlaneTestContextBuilder<'a, N: NexusServer> {
 
 impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
     pub fn new(
-        test_name: &str,
+        test_name: &'a str,
         config: &'a mut omicron_common::nexus_config::Config,
     ) -> Self {
         let start_time = chrono::Utc::now();
@@ -267,6 +273,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
 
         Self {
             config,
+            test_name,
             rack_init_builder: RackInitRequestBuilder::new(),
             start_time,
             logctx,
@@ -279,6 +286,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             sled_agent: None,
             oximeter: None,
             producer: None,
+            gateway: None,
             dendrite: HashMap::new(),
             mgd: HashMap::new(),
             nexus_internal: None,
@@ -375,6 +383,37 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             .as_mut()
             .expect("Tests expect to set a port of Clickhouse")
             .set_port(port);
+    }
+
+    pub async fn start_gateway(&mut self) {
+        // For now, this MGS is not configured to match up in any way with
+        // either the simulated sled agent or the Dendrite instances.  It's
+        // useful for testing stuff unrelated to that.  But at some point we
+        // will probably want the reported data to match up better.
+        debug!(&self.logctx.log, "Starting Management Gateway");
+        let gateway = gateway_test_utils::setup::test_setup(
+            self.test_name,
+            gateway_messages::SpPort::One,
+        )
+        .await;
+        let fake_mgs_zone_id = Uuid::new_v4();
+        let SocketAddr::V6(v6addr) = gateway.client.bind_address else {
+            panic!("MGS unexpectedly listening on IPv4?");
+        };
+        let zone = self
+            .rack_init_builder
+            .internal_dns_config
+            .host_zone(fake_mgs_zone_id, *v6addr.ip())
+            .expect("Failed to add DNS for MGS zone");
+        self.rack_init_builder
+            .internal_dns_config
+            .service_backend_zone(
+                internal_dns::ServiceName::ManagementGatewayService,
+                &zone,
+                v6addr.port(),
+            )
+            .expect("Failed to add DNS for MGS service");
+        self.gateway = Some(gateway);
     }
 
     pub async fn start_dendrite(&mut self, switch_location: SwitchLocation) {
@@ -796,6 +835,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             oximeter: self.oximeter.unwrap(),
             producer: self.producer.unwrap(),
             logctx: self.logctx,
+            gateway: self.gateway.unwrap(),
             dendrite: self.dendrite,
             mgd: self.mgd,
             external_dns_zone_name: self.external_dns_zone_name.unwrap(),
@@ -824,6 +864,9 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         }
         if let Some(producer) = self.producer {
             producer.close().await.unwrap();
+        }
+        if let Some(gateway) = self.gateway {
+            gateway.teardown().await;
         }
         for (_, mut dendrite) in self.dendrite {
             dendrite.cleanup().await.unwrap();
@@ -919,6 +962,7 @@ async fn setup_with_config_impl<N: NexusServer>(
 ) -> ControlPlaneTestContext<N> {
     builder.start_crdb_impl(populate).await;
     builder.start_clickhouse().await;
+    builder.start_gateway().await;
     builder.start_dendrite(SwitchLocation::Switch0).await;
     builder.start_dendrite(SwitchLocation::Switch1).await;
     builder.start_mgd(SwitchLocation::Switch0).await;
@@ -1049,6 +1093,7 @@ pub async fn start_producer_server(
     let producer_address = SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 0);
     let server_info = ProducerEndpoint {
         id,
+        kind: ProducerKind::Service,
         address: producer_address,
         base_route: "/collect".to_string(),
         interval: Duration::from_secs(1),

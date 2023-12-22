@@ -10,6 +10,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use std::fmt;
+use std::sync::Arc;
 use thiserror::Error;
 use update_engine::errors::NestedEngineError;
 use update_engine::StepSpec;
@@ -169,7 +170,7 @@ pub enum UpdateTerminalError {
         #[source]
         error: anyhow::Error,
     },
-    #[error("failed to find correctly-singed RoT image")]
+    #[error("failed to find correctly-signed RoT image")]
     FailedFindingSignedRotImage {
         #[source]
         error: anyhow::Error,
@@ -197,12 +198,13 @@ pub enum UpdateTerminalError {
         #[source]
         error: gateway_client::Error<gateway_client::types::Error>,
     },
-    #[error("failed to upload trampoline phase 2 to MGS (was a new TUF repo uploaded?)")]
-    // Currently, the only way this error variant can be produced is if the
-    // upload task died or was replaced because a new TUF repository was
-    // uploaded. In the future, we may want to produce errors here if the upload
-    // to MGS fails too many times, for example.
-    TrampolinePhase2UploadFailed,
+    #[error("uploading trampoline phase 2 to MGS failed")]
+    TrampolinePhase2UploadFailed {
+        #[source]
+        error: Arc<anyhow::Error>,
+    },
+    #[error("uploading trampoline phase 2 to MGS cancelled (was a new TUF repo uploaded?)")]
+    TrampolinePhase2UploadCancelled,
     #[error("downloading installinator failed")]
     DownloadingInstallinatorFailed {
         #[source]

@@ -12,15 +12,17 @@ pub mod collection_attach;
 pub mod collection_detach;
 pub mod collection_detach_many;
 pub mod collection_insert;
+mod column_walker;
 mod config;
 mod cte_utils;
 // This is marked public for use by the integration tests
 pub mod datastore;
-mod error;
+pub(crate) mod error;
 mod explain;
 pub mod fixed_data;
 pub mod lookup;
-mod pagination;
+// Public for doctests.
+pub mod pagination;
 mod pool;
 // This is marked public because the error types are used elsewhere, e.g., in
 // sagas.
@@ -41,7 +43,7 @@ pub use nexus_db_model::schema;
 pub use crate::db::error::TransactionError;
 pub use config::Config;
 pub use datastore::DataStore;
-pub use pool::Pool;
+pub use pool::{DbConnection, Pool};
 pub use saga_recovery::{recover, CompletionTask, RecoveryTask};
 pub use saga_types::SecId;
 pub use sec_store::CockroachDbSecStore;

@@ -12,7 +12,7 @@
 //! would be the only consumer -- and in that case it's okay to query the
 //! database directly.
 
-// NOTE: eminates from Tabled macros
+// NOTE: emanates from Tabled macros
 #![allow(clippy::useless_vec)]
 
 use crate::Omdb;
@@ -35,6 +35,8 @@ use diesel::NullableExpressionMethods;
 use nexus_db_model::saga_types::Saga;
 use nexus_db_model::saga_types::SagaId;
 use nexus_db_model::saga_types::SagaNodeEvent;
+use diesel::TextExpressionMethods;
+use gateway_client::types::SpType;
 use nexus_db_model::Dataset;
 use nexus_db_model::Disk;
 use nexus_db_model::DnsGroup;
@@ -43,25 +45,37 @@ use nexus_db_model::DnsVersion;
 use nexus_db_model::DnsZone;
 use nexus_db_model::ExternalIp;
 use nexus_db_model::Image;
+use nexus_db_model::HwBaseboardId;
 use nexus_db_model::Instance;
+use nexus_db_model::InvCollection;
 use nexus_db_model::Project;
 use nexus_db_model::Region;
 use nexus_db_model::RegionSnapshot;
 use nexus_db_model::Sled;
 use nexus_db_model::Snapshot;
 use nexus_db_model::SnapshotState;
+use nexus_db_model::SwCaboose;
+use nexus_db_model::SwRotPage;
 use nexus_db_model::Vmm;
+use nexus_db_model::Volume;
 use nexus_db_model::Zpool;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
+use nexus_db_queries::db::datastore::read_only_resources_associated_with_volume;
+use nexus_db_queries::db::datastore::CrucibleTargets;
+use nexus_db_queries::db::datastore::DataStoreConnection;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::model::ServiceKind;
 use nexus_db_queries::db::DataStore;
+use nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params::DnsRecord;
 use nexus_types::internal_api::params::Srv;
+use nexus_types::inventory::CabooseWhich;
+use nexus_types::inventory::Collection;
+use nexus_types::inventory::RotPageWhich;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Generation;
 use omicron_common::postgres_config::PostgresConfigWithUrl;
@@ -69,8 +83,11 @@ use petgraph::graph::NodeIndex;
 use petgraph::Graph;
 use serde::Deserialize;
 use serde::Serialize;
+use sled_agent_client::types::VolumeConstructionRequest;
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt::Display;
@@ -127,7 +144,8 @@ pub struct DbArgs {
     /// limit to apply to queries that fetch rows
     #[clap(
         long = "fetch-limit",
-        default_value_t = NonZeroU32::new(500).unwrap()
+        default_value_t = NonZeroU32::new(500).unwrap(),
+        env("OMDB_FETCH_LIMIT"),
     )]
     fetch_limit: NonZeroU32,
 
@@ -142,6 +160,8 @@ enum DbCommands {
     Disks(DiskArgs),
     /// Print information about internal and external DNS
     Dns(DnsArgs),
+    /// Print information about collected hardware/software inventory
+    Inventory(InventoryArgs),
     /// Print information about control plane services
     Services(ServicesArgs),
     /// Print information about sleds
@@ -156,6 +176,8 @@ enum DbCommands {
     Sagas(SagaArgs),
     /// Print information about snapshots
     Snapshots(SnapshotArgs),
+    /// Validate the contents of the database
+    Validate(ValidateArgs),
 }
 
 #[derive(Debug, Args)]
@@ -224,6 +246,47 @@ impl CliDnsGroup {
             CliDnsGroup::External => DnsGroup::External,
         }
     }
+}
+
+#[derive(Debug, Args)]
+struct InventoryArgs {
+    #[command(subcommand)]
+    command: InventoryCommands,
+}
+
+#[derive(Debug, Subcommand)]
+enum InventoryCommands {
+    /// list all baseboards ever found
+    BaseboardIds,
+    /// list all cabooses ever found
+    Cabooses,
+    /// list and show details from particular collections
+    Collections(CollectionsArgs),
+    /// list all root of trust pages ever found
+    RotPages,
+}
+
+#[derive(Debug, Args)]
+struct CollectionsArgs {
+    #[command(subcommand)]
+    command: CollectionsCommands,
+}
+
+#[derive(Debug, Subcommand)]
+enum CollectionsCommands {
+    /// list collections
+    List,
+    /// show what was found in a particular collection
+    Show(CollectionsShowArgs),
+}
+
+#[derive(Debug, Args)]
+struct CollectionsShowArgs {
+    /// id of the collection
+    id: Uuid,
+    /// show long strings in their entirety
+    #[clap(long)]
+    show_long_strings: bool,
 }
 
 #[derive(Debug, Args)]
@@ -362,6 +425,23 @@ struct SnapshotInfoArgs {
     uuid: Uuid,
 }
 
+#[derive(Debug, Args)]
+struct ValidateArgs {
+    #[command(subcommand)]
+    command: ValidateCommands,
+}
+
+#[derive(Debug, Subcommand)]
+enum ValidateCommands {
+    /// Validate each `volume_references` column in the region snapshots table
+    ValidateVolumeReferences,
+
+    /// Find either region snapshots Nexus knows about that the corresponding
+    /// Crucible agent says were deleted, or region snapshots that Nexus doesn't
+    /// know about.
+    ValidateRegionSnapshots,
+}
+
 impl DbArgs {
     /// Run a `omdb db` subcommand.
     pub(crate) async fn run_cmd(
@@ -434,6 +514,15 @@ impl DbArgs {
             DbCommands::Dns(DnsArgs { command: DnsCommands::Names(args) }) => {
                 cmd_db_dns_names(&opctx, &datastore, self.fetch_limit, args)
                     .await
+            }
+            DbCommands::Inventory(inventory_args) => {
+                cmd_db_inventory(
+                    &opctx,
+                    &datastore,
+                    self.fetch_limit,
+                    inventory_args,
+                )
+                .await
             }
             DbCommands::Services(ServicesArgs {
                 command: ServicesCommands::ListInstances,
@@ -538,6 +627,18 @@ impl DbArgs {
             DbCommands::Snapshots(SnapshotArgs {
                 command: SnapshotCommands::List,
             }) => cmd_db_snapshot_list(&datastore, self.fetch_limit).await,
+            DbCommands::Validate(ValidateArgs {
+                command: ValidateCommands::ValidateVolumeReferences,
+            }) => {
+                cmd_db_validate_volume_references(&datastore, self.fetch_limit)
+                    .await
+            }
+            DbCommands::Validate(ValidateArgs {
+                command: ValidateCommands::ValidateRegionSnapshots,
+            }) => {
+                cmd_db_validate_region_snapshots(&datastore, self.fetch_limit)
+                    .await
+            }
         }
     }
 }
@@ -593,13 +694,21 @@ where
     D: Display,
 {
     if items.len() == usize::try_from(limit.get()).unwrap() {
-        eprintln!(
-            "WARN: {}: found {} items (the limit).  There may be more items \
-            that were ignored.  Consider overriding with --fetch-limit.",
-            context(),
-            items.len(),
-        );
+        limit_error(limit, context);
     }
+}
+
+fn limit_error<F, D>(limit: NonZeroU32, context: F)
+where
+    F: FnOnce() -> D,
+    D: Display,
+{
+    eprintln!(
+        "WARN: {}: found {} items (the limit).  There may be more items \
+            that were ignored.  Consider overriding with --fetch-limit.",
+        context(),
+        limit,
+    );
 }
 
 /// Returns pagination parameters to fetch the first page of results for a
@@ -2895,17 +3004,23 @@ async fn cmd_db_regions_find_deleted(
     struct Row {
         dataset_id: Uuid,
         region_id: Uuid,
+        region_snapshot_id: String,
         volume_id: Uuid,
     }
 
     let rows: Vec<Row> = datasets_regions_volumes
         .into_iter()
         .map(|row| {
-            let (dataset, region, volume) = row;
+            let (dataset, region, region_snapshot, volume) = row;
 
             Row {
                 dataset_id: dataset.id(),
                 region_id: region.id(),
+                region_snapshot_id: if let Some(region_snapshot) = region_snapshot {
+                    region_snapshot.snapshot_id.to_string()
+                } else {
+                    String::from("")
+                },
                 volume_id: volume.id(),
             }
         })
@@ -2913,6 +3028,427 @@ async fn cmd_db_regions_find_deleted(
 
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::psql())
+        .to_string();
+
+    println!("{}", table);
+
+    Ok(())
+}
+
+/// Validate the `volume_references` column of the region snapshots table
+async fn cmd_db_validate_volume_references(
+    datastore: &DataStore,
+    limit: NonZeroU32,
+) -> Result<(), anyhow::Error> {
+    // First, get all region snapshot records
+    let region_snapshots: Vec<RegionSnapshot> = {
+        let region_snapshots: Vec<RegionSnapshot> = datastore
+            .pool_connection_for_tests()
+            .await?
+            .transaction_async(|conn| async move {
+                // Selecting all region snapshots requires a full table scan
+                conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
+
+                use db::schema::region_snapshot::dsl;
+                dsl::region_snapshot
+                    .select(RegionSnapshot::as_select())
+                    .get_results_async(&conn)
+                    .await
+            })
+            .await?;
+
+        check_limit(&region_snapshots, limit, || {
+            String::from("listing region snapshots")
+        });
+
+        region_snapshots
+    };
+
+    #[derive(Tabled)]
+    struct Row {
+        dataset_id: Uuid,
+        region_id: Uuid,
+        snapshot_id: Uuid,
+        error: String,
+    }
+
+    let mut rows = Vec::new();
+
+    // Then, for each, make sure that the `volume_references` matches what is in
+    // the volume table
+    for region_snapshot in region_snapshots {
+        let matching_volumes: Vec<Volume> = {
+            let snapshot_addr = region_snapshot.snapshot_addr.clone();
+
+            let matching_volumes = datastore
+                .pool_connection_for_tests()
+                .await?
+                .transaction_async(|conn| async move {
+                    // Selecting all volumes based on the data column requires a
+                    // full table scan
+                    conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
+
+                    let pattern = format!("%{}%", &snapshot_addr);
+
+                    use db::schema::volume::dsl;
+
+                    // Find all volumes that have not been deleted that contain
+                    // this snapshot_addr. If a Volume has been soft deleted,
+                    // then the region snapshot record should have had its
+                    // volume references column updated accordingly.
+                    dsl::volume
+                        .filter(dsl::time_deleted.is_null())
+                        .filter(dsl::data.like(pattern))
+                        .select(Volume::as_select())
+                        .get_results_async(&conn)
+                        .await
+                })
+                .await?;
+
+            check_limit(&matching_volumes, limit, || {
+                String::from("finding matching volumes")
+            });
+
+            matching_volumes
+        };
+
+        // The Crucible Agent will reuse ports for regions and running snapshots
+        // when they're deleted. Check that the matching volume construction requests
+        // reference this snapshot addr as a read-only target.
+        let matching_volumes = matching_volumes
+            .into_iter()
+            .filter(|volume| {
+                let vcr: VolumeConstructionRequest =
+                    serde_json::from_str(&volume.data()).unwrap();
+
+                let mut targets = CrucibleTargets::default();
+                read_only_resources_associated_with_volume(&vcr, &mut targets);
+
+                targets
+                    .read_only_targets
+                    .contains(&region_snapshot.snapshot_addr)
+            })
+            .count();
+
+        if matching_volumes != region_snapshot.volume_references as usize {
+            rows.push(Row {
+                dataset_id: region_snapshot.dataset_id,
+                region_id: region_snapshot.region_id,
+                snapshot_id: region_snapshot.snapshot_id,
+                error: format!(
+                    "record has {} volume references when it should be {}!",
+                    region_snapshot.volume_references, matching_volumes,
+                ),
+            });
+        } else {
+            // The volume references are correct, but additionally check to see
+            // deleting is true when matching_volumes is 0. Be careful: in the
+            // snapshot create saga, the region snapshot record is created
+            // before the snapshot's volume is inserted into the DB. There's a
+            // time between these operations that this function would flag that
+            // this region snapshot should have `deleting` set to true.
+
+            if matching_volumes == 0 && !region_snapshot.deleting {
+                rows.push(Row {
+                    dataset_id: region_snapshot.dataset_id,
+                    region_id: region_snapshot.region_id,
+                    snapshot_id: region_snapshot.snapshot_id,
+                    error: String::from(
+                        "record has 0 volume references but deleting is false!",
+                    ),
+                });
+            }
+        }
+    }
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .to_string();
+
+    println!("{}", table);
+
+    Ok(())
+}
+
+async fn cmd_db_validate_region_snapshots(
+    datastore: &DataStore,
+    limit: NonZeroU32,
+) -> Result<(), anyhow::Error> {
+    let mut regions_to_snapshots_map: BTreeMap<Uuid, HashSet<Uuid>> =
+        BTreeMap::default();
+
+    // First, get all region snapshot records (with their corresponding dataset)
+    let datasets_and_region_snapshots: Vec<(Dataset, RegionSnapshot)> = {
+        let datasets_region_snapshots: Vec<(Dataset, RegionSnapshot)> =
+            datastore
+                .pool_connection_for_tests()
+                .await?
+                .transaction_async(|conn| async move {
+                    // Selecting all datasets and region snapshots requires a full table scan
+                    conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
+
+                    use db::schema::dataset::dsl as dataset_dsl;
+                    use db::schema::region_snapshot::dsl;
+
+                    dsl::region_snapshot
+                        .inner_join(
+                            dataset_dsl::dataset
+                                .on(dsl::dataset_id.eq(dataset_dsl::id)),
+                        )
+                        .select((
+                            Dataset::as_select(),
+                            RegionSnapshot::as_select(),
+                        ))
+                        .get_results_async(&conn)
+                        .await
+                })
+                .await?;
+
+        check_limit(&datasets_region_snapshots, limit, || {
+            String::from("listing datasets and region snapshots")
+        });
+
+        datasets_region_snapshots
+    };
+
+    #[derive(Tabled)]
+    struct Row {
+        dataset_id: Uuid,
+        region_id: Uuid,
+        snapshot_id: Uuid,
+        dataset_addr: std::net::SocketAddrV6,
+        error: String,
+    }
+
+    let mut rows = Vec::new();
+
+    // Then, for each one, reconcile with the corresponding Crucible Agent: do
+    // the region_snapshot records match reality?
+    for (dataset, region_snapshot) in datasets_and_region_snapshots {
+        regions_to_snapshots_map
+            .entry(region_snapshot.region_id)
+            .or_default()
+            .insert(region_snapshot.snapshot_id);
+
+        use crucible_agent_client::types::RegionId;
+        use crucible_agent_client::types::State;
+        use crucible_agent_client::Client as CrucibleAgentClient;
+
+        let url = format!("http://{}", dataset.address());
+        let client = CrucibleAgentClient::new(&url);
+
+        let actual_region_snapshots = client
+            .region_get_snapshots(&RegionId(
+                region_snapshot.region_id.to_string(),
+            ))
+            .await?;
+
+        let snapshot_id = region_snapshot.snapshot_id.to_string();
+
+        if actual_region_snapshots
+            .snapshots
+            .iter()
+            .any(|x| x.name == snapshot_id)
+        {
+            // A snapshot currently exists, matching the database entry
+        } else {
+            // In this branch, there's a database entry for a snapshot that was
+            // deleted. Due to how the snapshot create saga is currently
+            // written, a database entry would not have been created unless a
+            // snapshot was successfully made: unless that saga changes, we can
+            // be reasonably sure that this snapshot existed at some point.
+
+            match actual_region_snapshots.running_snapshots.get(&snapshot_id) {
+                Some(running_snapshot) => {
+                    match running_snapshot.state {
+                        State::Destroyed | State::Failed => {
+                            // In this branch, we can be sure a snapshot previously
+                            // existed and was deleted: a running snapshot was made
+                            // from it, then deleted, and the snapshot does not
+                            // currently exist in the list of snapshots for this
+                            // region. This record should be deleted.
+
+                            // Before recommending anything, validate the higher
+                            // level Snapshot object too: it should have been
+                            // destroyed.
+
+                            let snapshot: Snapshot = {
+                                use db::schema::snapshot::dsl;
+
+                                dsl::snapshot
+                                    .filter(
+                                        dsl::id.eq(region_snapshot.snapshot_id),
+                                    )
+                                    .select(Snapshot::as_select())
+                                    .first_async(
+                                        &*datastore
+                                            .pool_connection_for_tests()
+                                            .await?,
+                                    )
+                                    .await?
+                            };
+
+                            if snapshot.time_deleted().is_some() {
+                                // This is ok - Nexus currently soft-deletes its
+                                // resource records.
+                                rows.push(Row {
+                                    dataset_id: region_snapshot.dataset_id,
+                                    region_id: region_snapshot.region_id,
+                                    snapshot_id: region_snapshot.snapshot_id,
+                                    dataset_addr: dataset.address(),
+                                    error: String::from(
+                                        "region snapshot was deleted, please remove its record",
+                                    ),
+                                });
+                            } else {
+                                // If the higher level Snapshot was _not_
+                                // deleted, this is a Nexus bug: something told
+                                // the Agent to delete the snapshot when the
+                                // higher level Snapshot was not deleted!
+
+                                rows.push(Row {
+                                    dataset_id: region_snapshot.dataset_id,
+                                    region_id: region_snapshot.region_id,
+                                    snapshot_id: region_snapshot.snapshot_id,
+                                    dataset_addr: dataset.address(),
+                                    error: String::from(
+                                        "NEXUS BUG: region snapshot was deleted, but the higher level snapshot was not!",
+                                    ),
+                                });
+                            }
+                        }
+
+                        State::Requested
+                        | State::Created
+                        | State::Tombstoned => {
+                            // The agent is in a bad state: we did not find the
+                            // snapshot in the list of snapshots for this
+                            // region, but either:
+                            //
+                            // - there's a requested or existing running
+                            //   snapshot for it, or
+                            //
+                            // - there's a running snapshot that should have
+                            //   been completely deleted before the snapshot
+                            //   itself was deleted.
+                            //
+                            // This should have never been allowed to happen by
+                            // the Agent, so it's a bug.
+
+                            rows.push(Row {
+                                dataset_id: region_snapshot.dataset_id,
+                                region_id: region_snapshot.region_id,
+                                snapshot_id: region_snapshot.snapshot_id,
+                                dataset_addr: dataset.address(),
+                                error: format!(
+                                    "AGENT BUG: region snapshot was deleted but has a running snapshot in state {:?}!",
+                                    running_snapshot.state,
+                                ),
+                            });
+                        }
+                    }
+                }
+
+                None => {
+                    // A running snapshot never existed for this snapshot
+                }
+            }
+        }
+    }
+
+    // Second, get all regions
+    let datasets_and_regions: Vec<(Dataset, Region)> = {
+        let datasets_and_regions: Vec<(Dataset, Region)> = datastore
+            .pool_connection_for_tests()
+            .await?
+            .transaction_async(|conn| async move {
+                // Selecting all datasets and regions requires a full table scan
+                conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
+
+                use db::schema::dataset::dsl as dataset_dsl;
+                use db::schema::region::dsl;
+
+                dsl::region
+                    .inner_join(
+                        dataset_dsl::dataset
+                            .on(dsl::dataset_id.eq(dataset_dsl::id)),
+                    )
+                    .select((Dataset::as_select(), Region::as_select()))
+                    .get_results_async(&conn)
+                    .await
+            })
+            .await?;
+
+        check_limit(&datasets_and_regions, limit, || {
+            String::from("listing datasets and regions")
+        });
+
+        datasets_and_regions
+    };
+
+    // Reconcile with the Crucible agents: are there snapshots that Nexus does
+    // not know about?
+    for (dataset, region) in datasets_and_regions {
+        use crucible_agent_client::types::RegionId;
+        use crucible_agent_client::types::State;
+        use crucible_agent_client::Client as CrucibleAgentClient;
+
+        let url = format!("http://{}", dataset.address());
+        let client = CrucibleAgentClient::new(&url);
+
+        let actual_region_snapshots = client
+            .region_get_snapshots(&RegionId(region.id().to_string()))
+            .await?;
+
+        let default = HashSet::default();
+        let nexus_region_snapshots: &HashSet<Uuid> =
+            regions_to_snapshots_map.get(&region.id()).unwrap_or(&default);
+
+        for actual_region_snapshot in &actual_region_snapshots.snapshots {
+            let snapshot_id: Uuid = actual_region_snapshot.name.parse()?;
+            if !nexus_region_snapshots.contains(&snapshot_id) {
+                rows.push(Row {
+                    dataset_id: dataset.id(),
+                    region_id: region.id(),
+                    snapshot_id,
+                    dataset_addr: dataset.address(),
+                    error: String::from(
+                        "Nexus does not know about this snapshot!",
+                    ),
+                });
+            }
+        }
+
+        for (_, actual_region_running_snapshot) in
+            &actual_region_snapshots.running_snapshots
+        {
+            let snapshot_id: Uuid =
+                actual_region_running_snapshot.name.parse()?;
+
+            match actual_region_running_snapshot.state {
+                State::Destroyed | State::Failed | State::Tombstoned => {
+                    // don't check, Nexus would consider this gone
+                }
+
+                State::Requested | State::Created => {
+                    if !nexus_region_snapshots.contains(&snapshot_id) {
+                        rows.push(Row {
+                            dataset_id: dataset.id(),
+                            region_id: region.id(),
+                            snapshot_id,
+                            dataset_addr: dataset.address(),
+                            error: String::from(
+                                "Nexus does not know about this running snapshot!"
+                            ),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
         .to_string();
 
     println!("{}", table);
@@ -2964,5 +3500,525 @@ fn format_record(record: &DnsRecord) -> impl Display {
         DnsRecord::Srv(Srv { port, target, .. }) => {
             format!("SRV  port {:5} {}", port, target)
         }
+    }
+}
+
+// Inventory
+
+async fn cmd_db_inventory(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    limit: NonZeroU32,
+    inventory_args: &InventoryArgs,
+) -> Result<(), anyhow::Error> {
+    let conn = datastore.pool_connection_for_tests().await?;
+    match inventory_args.command {
+        InventoryCommands::BaseboardIds => {
+            cmd_db_inventory_baseboard_ids(&conn, limit).await
+        }
+        InventoryCommands::Cabooses => {
+            cmd_db_inventory_cabooses(&conn, limit).await
+        }
+        InventoryCommands::Collections(CollectionsArgs {
+            command: CollectionsCommands::List,
+        }) => cmd_db_inventory_collections_list(&conn, limit).await,
+        InventoryCommands::Collections(CollectionsArgs {
+            command:
+                CollectionsCommands::Show(CollectionsShowArgs {
+                    id,
+                    show_long_strings,
+                }),
+        }) => {
+            let long_string_formatter =
+                LongStringFormatter { show_long_strings };
+            cmd_db_inventory_collections_show(
+                opctx,
+                datastore,
+                id,
+                limit,
+                long_string_formatter,
+            )
+            .await
+        }
+        InventoryCommands::RotPages => {
+            cmd_db_inventory_rot_pages(&conn, limit).await
+        }
+    }
+}
+
+async fn cmd_db_inventory_baseboard_ids(
+    conn: &DataStoreConnection<'_>,
+    limit: NonZeroU32,
+) -> Result<(), anyhow::Error> {
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct BaseboardRow {
+        id: Uuid,
+        part_number: String,
+        serial_number: String,
+    }
+
+    use db::schema::hw_baseboard_id::dsl;
+    let baseboard_ids = dsl::hw_baseboard_id
+        .order_by((dsl::part_number, dsl::serial_number))
+        .limit(i64::from(u32::from(limit)))
+        .select(HwBaseboardId::as_select())
+        .load_async(&**conn)
+        .await
+        .context("loading baseboard ids")?;
+    check_limit(&baseboard_ids, limit, || "loading baseboard ids");
+
+    let rows = baseboard_ids.into_iter().map(|baseboard_id| BaseboardRow {
+        id: baseboard_id.id,
+        part_number: baseboard_id.part_number,
+        serial_number: baseboard_id.serial_number,
+    });
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
+
+    Ok(())
+}
+
+async fn cmd_db_inventory_cabooses(
+    conn: &DataStoreConnection<'_>,
+    limit: NonZeroU32,
+) -> Result<(), anyhow::Error> {
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct CabooseRow {
+        id: Uuid,
+        board: String,
+        git_commit: String,
+        name: String,
+        version: String,
+    }
+
+    use db::schema::sw_caboose::dsl;
+    let mut cabooses = dsl::sw_caboose
+        .limit(i64::from(u32::from(limit)))
+        .select(SwCaboose::as_select())
+        .load_async(&**conn)
+        .await
+        .context("loading cabooses")?;
+    check_limit(&cabooses, limit, || "loading cabooses");
+    cabooses.sort();
+
+    let rows = cabooses.into_iter().map(|caboose| CabooseRow {
+        id: caboose.id,
+        board: caboose.board,
+        name: caboose.name,
+        version: caboose.version,
+        git_commit: caboose.git_commit,
+    });
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
+
+    Ok(())
+}
+
+async fn cmd_db_inventory_rot_pages(
+    conn: &DataStoreConnection<'_>,
+    limit: NonZeroU32,
+) -> Result<(), anyhow::Error> {
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct RotPageRow {
+        id: Uuid,
+        data_base64: String,
+    }
+
+    use db::schema::sw_root_of_trust_page::dsl;
+    let mut rot_pages = dsl::sw_root_of_trust_page
+        .limit(i64::from(u32::from(limit)))
+        .select(SwRotPage::as_select())
+        .load_async(&**conn)
+        .await
+        .context("loading rot_pages")?;
+    check_limit(&rot_pages, limit, || "loading rot_pages");
+    rot_pages.sort();
+
+    let rows = rot_pages.into_iter().map(|rot_page| RotPageRow {
+        id: rot_page.id,
+        data_base64: rot_page.data_base64,
+    });
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
+
+    Ok(())
+}
+
+async fn cmd_db_inventory_collections_list(
+    conn: &DataStoreConnection<'_>,
+    limit: NonZeroU32,
+) -> Result<(), anyhow::Error> {
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct CollectionRow {
+        id: Uuid,
+        started: String,
+        took: String,
+        nsps: i64,
+        nerrors: i64,
+    }
+
+    let collections = {
+        use db::schema::inv_collection::dsl;
+        dsl::inv_collection
+            .order_by(dsl::time_started)
+            .limit(i64::from(u32::from(limit)))
+            .select(InvCollection::as_select())
+            .load_async(&**conn)
+            .await
+            .context("loading collections")?
+    };
+    check_limit(&collections, limit, || "loading collections");
+
+    let mut rows = Vec::new();
+    for collection in collections {
+        let nerrors = {
+            use db::schema::inv_collection_error::dsl;
+            dsl::inv_collection_error
+                .filter(dsl::inv_collection_id.eq(collection.id))
+                .select(diesel::dsl::count_star())
+                .first_async(&**conn)
+                .await
+                .context("counting errors")?
+        };
+
+        let nsps = {
+            use db::schema::inv_service_processor::dsl;
+            dsl::inv_service_processor
+                .filter(dsl::inv_collection_id.eq(collection.id))
+                .select(diesel::dsl::count_star())
+                .first_async(&**conn)
+                .await
+                .context("counting SPs")?
+        };
+
+        let took = format!(
+            "{} ms",
+            collection
+                .time_done
+                .signed_duration_since(&collection.time_started)
+                .num_milliseconds()
+        );
+        rows.push(CollectionRow {
+            id: collection.id,
+            started: humantime::format_rfc3339_seconds(
+                collection.time_started.into(),
+            )
+            .to_string(),
+            took,
+            nsps,
+            nerrors,
+        });
+    }
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
+
+    Ok(())
+}
+
+async fn cmd_db_inventory_collections_show(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    id: Uuid,
+    limit: NonZeroU32,
+    long_string_formatter: LongStringFormatter,
+) -> Result<(), anyhow::Error> {
+    let (collection, incomplete) = datastore
+        .inventory_collection_read_best_effort(opctx, id, limit)
+        .await
+        .context("reading collection")?;
+    if incomplete {
+        limit_error(limit, || "loading collection");
+    }
+
+    inv_collection_print(&collection).await?;
+    let nerrors = inv_collection_print_errors(&collection).await?;
+    inv_collection_print_devices(&collection, &long_string_formatter).await?;
+
+    if nerrors > 0 {
+        eprintln!(
+            "warning: {} collection error{} {} reported above",
+            nerrors,
+            if nerrors == 1 { "" } else { "s" },
+            if nerrors == 1 { "was" } else { "were" },
+        );
+    }
+
+    Ok(())
+}
+
+async fn inv_collection_print(
+    collection: &Collection,
+) -> Result<(), anyhow::Error> {
+    println!("collection: {}", collection.id);
+    println!(
+        "collector:  {}{}",
+        collection.collector,
+        if collection.collector.parse::<Uuid>().is_ok() {
+            " (likely a Nexus instance)"
+        } else {
+            ""
+        }
+    );
+    println!(
+        "started:    {}",
+        humantime::format_rfc3339_millis(collection.time_started.into())
+    );
+    println!(
+        "done:       {}",
+        humantime::format_rfc3339_millis(collection.time_done.into())
+    );
+
+    Ok(())
+}
+
+async fn inv_collection_print_errors(
+    collection: &Collection,
+) -> Result<u32, anyhow::Error> {
+    println!("errors:     {}", collection.errors.len());
+    for (index, message) in collection.errors.iter().enumerate() {
+        println!("  error {}: {}", index, message);
+    }
+
+    Ok(collection
+        .errors
+        .len()
+        .try_into()
+        .expect("could not convert error count into u32 (yikes)"))
+}
+
+async fn inv_collection_print_devices(
+    collection: &Collection,
+    long_string_formatter: &LongStringFormatter,
+) -> Result<(), anyhow::Error> {
+    // Assemble a list of baseboard ids, sorted first by device type (sled,
+    // switch, power), then by slot number.  This is the order in which we will
+    // print everything out.
+    let mut sorted_baseboard_ids: Vec<_> =
+        collection.sps.keys().cloned().collect();
+    sorted_baseboard_ids.sort_by(|s1, s2| {
+        let sp1 = collection.sps.get(s1).unwrap();
+        let sp2 = collection.sps.get(s2).unwrap();
+        sp1.sp_type.cmp(&sp2.sp_type).then(sp1.sp_slot.cmp(&sp2.sp_slot))
+    });
+
+    // Now print them.
+    for baseboard_id in &sorted_baseboard_ids {
+        // This unwrap should not fail because the collection we're iterating
+        // over came from the one we're looking into now.
+        let sp = collection.sps.get(baseboard_id).unwrap();
+        let baseboard = collection.baseboards.get(baseboard_id);
+        let rot = collection.rots.get(baseboard_id);
+
+        println!("");
+        match baseboard {
+            None => {
+                // It should be impossible to find an SP whose baseboard
+                // information we didn't previously fetch.  That's either a bug
+                // in this tool (for failing to fetch or find the right
+                // baseboard information) or the inventory system (for failing
+                // to insert a record into the hw_baseboard_id table).
+                println!(
+                    "{:?} (serial number unknown -- this is a bug)",
+                    sp.sp_type
+                );
+                println!("    part number: unknown");
+            }
+            Some(baseboard) => {
+                println!("{:?} {}", sp.sp_type, baseboard.serial_number);
+                println!("    part number: {}", baseboard.part_number);
+            }
+        };
+
+        println!("    power:    {:?}", sp.power_state);
+        println!("    revision: {}", sp.baseboard_revision);
+        print!("    MGS slot: {:?} {}", sp.sp_type, sp.sp_slot);
+        if let SpType::Sled = sp.sp_type {
+            print!(" (cubby {})", sp.sp_slot);
+        }
+        println!("");
+        println!("    found at: {} from {}", sp.time_collected, sp.source);
+
+        #[derive(Tabled)]
+        #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+        struct CabooseRow<'a> {
+            slot: String,
+            board: &'a str,
+            name: &'a str,
+            version: &'a str,
+            git_commit: &'a str,
+        }
+
+        println!("    cabooses:");
+        let caboose_rows: Vec<_> = CabooseWhich::iter()
+            .filter_map(|c| {
+                collection.caboose_for(c, baseboard_id).map(|d| (c, d))
+            })
+            .map(|(c, found_caboose)| CabooseRow {
+                slot: format!("{:?}", c),
+                board: &found_caboose.caboose.board,
+                name: &found_caboose.caboose.name,
+                version: &found_caboose.caboose.version,
+                git_commit: &found_caboose.caboose.git_commit,
+            })
+            .collect();
+        let table = tabled::Table::new(caboose_rows)
+            .with(tabled::settings::Style::empty())
+            .with(tabled::settings::Padding::new(0, 1, 0, 0))
+            .to_string();
+        println!("{}", textwrap::indent(&table.to_string(), "        "));
+
+        #[derive(Tabled)]
+        #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+        struct RotPageRow<'a> {
+            slot: String,
+            data_base64: Cow<'a, str>,
+        }
+
+        println!("    RoT pages:");
+        let rot_page_rows: Vec<_> = RotPageWhich::iter()
+            .filter_map(|which| {
+                collection.rot_page_for(which, baseboard_id).map(|d| (which, d))
+            })
+            .map(|(which, found_page)| RotPageRow {
+                slot: format!("{which:?}"),
+                data_base64: long_string_formatter
+                    .maybe_truncate(&found_page.page.data_base64),
+            })
+            .collect();
+        let table = tabled::Table::new(rot_page_rows)
+            .with(tabled::settings::Style::empty())
+            .with(tabled::settings::Padding::new(0, 1, 0, 0))
+            .to_string();
+        println!("{}", textwrap::indent(&table.to_string(), "        "));
+
+        if let Some(rot) = rot {
+            println!("    RoT: active slot: slot {:?}", rot.active_slot);
+            println!(
+                "    RoT: persistent boot preference: slot {:?}",
+                rot.persistent_boot_preference,
+            );
+            println!(
+                "    RoT: pending persistent boot preference: {}",
+                rot.pending_persistent_boot_preference
+                    .map(|s| format!("slot {:?}", s))
+                    .unwrap_or_else(|| String::from("-"))
+            );
+            println!(
+                "    RoT: transient boot preference: {}",
+                rot.transient_boot_preference
+                    .map(|s| format!("slot {:?}", s))
+                    .unwrap_or_else(|| String::from("-"))
+            );
+
+            println!(
+                "    RoT: slot A SHA3-256: {}",
+                rot.slot_a_sha3_256_digest
+                    .clone()
+                    .unwrap_or_else(|| String::from("-"))
+            );
+
+            println!(
+                "    RoT: slot B SHA3-256: {}",
+                rot.slot_b_sha3_256_digest
+                    .clone()
+                    .unwrap_or_else(|| String::from("-"))
+            );
+        } else {
+            println!("    RoT: no information found");
+        }
+    }
+
+    println!("");
+    for sp_missing_rot in collection
+        .sps
+        .keys()
+        .collect::<BTreeSet<_>>()
+        .difference(&collection.rots.keys().collect::<BTreeSet<_>>())
+    {
+        // It's not a bug in either omdb or the inventory system to find an SP
+        // with no RoT.  It just means that when we collected inventory from the
+        // SP, it couldn't communicate with its RoT.
+        let sp = collection.sps.get(*sp_missing_rot).unwrap();
+        println!(
+            "warning: found SP with no RoT: {:?} slot {}",
+            sp.sp_type, sp.sp_slot
+        );
+    }
+
+    for rot_missing_sp in collection
+        .rots
+        .keys()
+        .collect::<BTreeSet<_>>()
+        .difference(&collection.sps.keys().collect::<BTreeSet<_>>())
+    {
+        // It *is* a bug in the inventory system (or omdb) to find an RoT with
+        // no SP, since we get the RoT information from the SP in the first
+        // place.
+        println!(
+            "error: found RoT with no SP: \
+            hw_baseboard_id {:?} -- this is a bug",
+            rot_missing_sp
+        );
+    }
+
+    Ok(())
+}
+
+#[derive(Debug)]
+struct LongStringFormatter {
+    show_long_strings: bool,
+}
+
+impl LongStringFormatter {
+    fn maybe_truncate<'a>(&self, s: &'a str) -> Cow<'a, str> {
+        use unicode_width::UnicodeWidthChar;
+
+        // pick an arbitrary width at which we'll truncate, knowing that these
+        // strings are probably contained in tables with other columns
+        const TRUNCATE_AT_WIDTH: usize = 32;
+
+        // quick check for short strings or if we should show long strings in
+        // their entirety
+        if self.show_long_strings || s.len() <= TRUNCATE_AT_WIDTH {
+            return s.into();
+        }
+
+        // longer check; we'll do the proper thing here and check the unicode
+        // width, and we don't really care about speed, so we can just iterate
+        // over chars
+        let mut width = 0;
+        for (pos, ch) in s.char_indices() {
+            let ch_width = UnicodeWidthChar::width(ch).unwrap_or(0);
+            if width + ch_width > TRUNCATE_AT_WIDTH {
+                let (prefix, _) = s.split_at(pos);
+                return format!("{prefix}...").into();
+            }
+            width += ch_width;
+        }
+
+        // if we didn't break out of the loop, `s` in its entirety is not too
+        // wide, so return it as-is
+        s.into()
     }
 }

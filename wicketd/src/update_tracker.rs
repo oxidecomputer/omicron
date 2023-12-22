@@ -8,6 +8,7 @@ use crate::artifacts::ArtifactIdData;
 use crate::artifacts::UpdatePlan;
 use crate::artifacts::WicketdArtifactStore;
 use crate::helpers::sps_to_string;
+use crate::http_entrypoints::ClearUpdateStateResponse;
 use crate::http_entrypoints::GetArtifactsAndEventReportsResponse;
 use crate::http_entrypoints::StartUpdateOptions;
 use crate::http_entrypoints::UpdateSimulatedResult;
@@ -40,7 +41,6 @@ use installinator_common::InstallinatorSpec;
 use installinator_common::M2Slot;
 use installinator_common::WriteOutput;
 use omicron_common::api::external::SemverVersion;
-use omicron_common::backoff;
 use omicron_common::update::ArtifactHash;
 use slog::error;
 use slog::info;
@@ -52,6 +52,7 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::io;
 use std::net::SocketAddrV6;
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::time::Duration;
@@ -93,7 +94,8 @@ use wicket_common::update_events::UpdateTerminalError;
 
 #[derive(Debug)]
 struct SpUpdateData {
-    task: JoinHandle<()>,
+    // See the documentation for is_finished.
+    finished: Arc<AtomicBool>,
     abort_handle: AbortHandle,
     // Note: Our mutex here is a standard mutex, not a tokio mutex. We generally
     // hold it only log enough to update its state or push a new update event
@@ -101,13 +103,37 @@ struct SpUpdateData {
     event_buffer: Arc<StdMutex<EventBuffer>>,
 }
 
+impl SpUpdateData {
+    /// Returns true if the update has reached a terminal state.
+    ///
+    /// To check whether an update has finished, we used to store the
+    /// JoinHandle to the task and check `task.is_finished()`. However, there
+    /// are some minor things we do after finishing the update (e.g. in the
+    /// case of a fake update, sending a message indicating that the update has
+    /// finished). So instead, we use a boolean as a flag to indicate when the
+    /// task has finished doing the bulk of its work.
+    fn is_finished(&self) -> bool {
+        self.finished.load(std::sync::atomic::Ordering::Acquire)
+    }
+}
+
 #[derive(Debug)]
-struct UploadTrampolinePhase2ToMgsStatus {
-    hash: ArtifactHash,
-    // The upload task retries forever until it succeeds, so we don't need to
-    // keep a "tried but failed" variant here; we just need to know the ID of
-    // the uploaded image once it's done.
-    uploaded_image_id: Option<HostPhase2RecoveryImageId>,
+enum UploadTrampolinePhase2ToMgsStatus {
+    Running { hash: ArtifactHash },
+    Done { hash: ArtifactHash, uploaded_image_id: HostPhase2RecoveryImageId },
+    Failed(Arc<anyhow::Error>),
+}
+
+impl UploadTrampolinePhase2ToMgsStatus {
+    fn hash(&self) -> Option<ArtifactHash> {
+        match self {
+            UploadTrampolinePhase2ToMgsStatus::Running { hash }
+            | UploadTrampolinePhase2ToMgsStatus::Done { hash, .. } => {
+                Some(*hash)
+            }
+            UploadTrampolinePhase2ToMgsStatus::Failed(_) => None,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -171,23 +197,28 @@ impl UpdateTracker {
     }
 
     /// Starts a fake update that doesn't perform any steps, but simply waits
-    /// for a watch receiver to resolve.
+    /// for a receiver to resolve.
+    ///
+    /// The inner sender will resolve once the update is completed.
     #[doc(hidden)]
     pub async fn start_fake_update(
         &self,
         sps: BTreeSet<SpIdentifier>,
-        watch_receiver: watch::Receiver<()>,
+        fake_step_receiver: oneshot::Receiver<oneshot::Sender<()>>,
     ) -> Result<(), Vec<StartUpdateError>> {
-        let imp = FakeUpdateDriver { watch_receiver, log: self.log.clone() };
+        let imp = FakeUpdateDriver {
+            fake_step_receiver: Some(fake_step_receiver),
+            log: self.log.clone(),
+        };
         self.start_impl(sps, Some(imp)).await
     }
 
     pub(crate) async fn clear_update_state(
         &self,
-        sp: SpIdentifier,
-    ) -> Result<(), ClearUpdateStateError> {
+        sps: BTreeSet<SpIdentifier>,
+    ) -> Result<ClearUpdateStateResponse, ClearUpdateStateError> {
         let mut update_data = self.sp_update_data.lock().await;
-        update_data.clear_update_state(sp)
+        update_data.clear_update_state(&sps)
     }
 
     pub(crate) async fn abort_update(
@@ -226,24 +257,23 @@ impl UpdateTracker {
 
         let mut errors = Vec::new();
 
-        // Check that we're not already updating any of these SPs.
-        let update_in_progress: Vec<_> = sps
+        // Check that we don't already have any update state for these SPs.
+        let existing_updates: Vec<_> = sps
             .iter()
             .filter(|sp| {
                 // If we don't have any update data for this SP, it's not in
                 // progress.
                 //
-                // If we do, it's in progress if the task is not finished.
-                update_data
-                    .sp_update_data
-                    .get(sp)
-                    .map_or(false, |data| !data.task.is_finished())
+                // This used to check that the task was finished, but we changed
+                // that in favor of forcing users to clear update state before
+                // starting a new one.
+                update_data.sp_update_data.get(sp).is_some()
             })
             .copied()
             .collect();
 
-        if !update_in_progress.is_empty() {
-            errors.push(StartUpdateError::UpdateInProgress(update_in_progress));
+        if !existing_updates.is_empty() {
+            errors.push(StartUpdateError::ExistingUpdates(existing_updates));
         }
 
         let plan = update_data.artifact_store.current_plan();
@@ -280,19 +310,10 @@ impl UpdateTracker {
                         );
                     }
                     // Occupied: we've previously started an update to this sp.
-                    Entry::Occupied(mut slot) => {
-                        assert!(
-                            slot.get().task.is_finished(),
-                            "we just checked that the task was finished"
-                        );
-                        slot.insert(
-                            spawn_update_driver
-                                .spawn_update_driver(
-                                    sp,
-                                    plan.clone(),
-                                    &setup_data,
-                                )
-                                .await,
+                    Entry::Occupied(_) => {
+                        panic!(
+                            "we just checked that there was \
+                             no update data for this SP"
                         );
                     }
                 }
@@ -308,9 +329,8 @@ impl UpdateTracker {
     ) -> UploadTrampolinePhase2ToMgs {
         let artifact = plan.trampoline_phase_2.clone();
         let (status_tx, status_rx) =
-            watch::channel(UploadTrampolinePhase2ToMgsStatus {
+            watch::channel(UploadTrampolinePhase2ToMgsStatus::Running {
                 hash: artifact.data.hash(),
-                uploaded_image_id: None,
             });
         let task = tokio::spawn(upload_trampoline_phase_2_to_mgs(
             self.mgs_client.clone(),
@@ -426,8 +446,8 @@ impl<'tr> SpawnUpdateDriver for RealSpawnUpdateDriver<'tr> {
                 // this artifact? If not, cancel the old task (which
                 // might still be trying to upload) and start a new one
                 // with our current image.
-                if prev.status.borrow().hash
-                    != plan.trampoline_phase_2.data.hash()
+                if prev.status.borrow().hash()
+                    != Some(plan.trampoline_phase_2.data.hash())
                 {
                     // It does _not_ match - we have a new plan with a
                     // different trampoline image. If the old task is
@@ -484,20 +504,25 @@ impl<'tr> SpawnUpdateDriver for RealSpawnUpdateDriver<'tr> {
         // ideal, but it works and is the easiest way to send it without
         // restructuring this code.
         let (abort_handle_sender, abort_handle_receiver) = oneshot::channel();
-        let task = tokio::spawn(update_driver.run(
+
+        let finished = Arc::new(AtomicBool::new(false));
+        let finished_indicator = SetTrueOnDrop(finished.clone());
+
+        tokio::spawn(update_driver.run(
             plan,
             update_cx,
             event_buffer.clone(),
             ipr_start_receiver,
             self.opts.clone(),
             abort_handle_sender,
+            finished_indicator,
         ));
 
         let abort_handle = abort_handle_receiver
             .await
             .expect("abort handle is sent immediately");
 
-        SpUpdateData { task, abort_handle, event_buffer }
+        SpUpdateData { finished, abort_handle, event_buffer }
     }
 }
 
@@ -507,7 +532,7 @@ impl<'tr> SpawnUpdateDriver for RealSpawnUpdateDriver<'tr> {
 /// waits for a [`watch::Receiver`] to resolve.
 #[derive(Debug)]
 struct FakeUpdateDriver {
-    watch_receiver: watch::Receiver<()>,
+    fake_step_receiver: Option<oneshot::Receiver<oneshot::Sender<()>>>,
     log: Logger,
 }
 
@@ -531,22 +556,27 @@ impl SpawnUpdateDriver for FakeUpdateDriver {
         let engine = UpdateEngine::new(&log, sender);
         let abort_handle = engine.abort_handle();
 
-        let mut watch_receiver = self.watch_receiver.clone();
+        let fake_step_receiver = self
+            .fake_step_receiver
+            .take()
+            .expect("fake step receiver is only taken once");
 
-        let task = tokio::spawn(async move {
+        let finished = Arc::new(AtomicBool::new(false));
+        let finished_indicator = SetTrueOnDrop(finished.clone());
+
+        tokio::spawn(async move {
             // The step component and ID have been chosen arbitrarily here --
             // they aren't important.
-            engine
+            let final_sender_handle = engine
                 .new_step(
                     UpdateComponent::Host,
                     UpdateStepId::RunningInstallinator,
                     "Fake step that waits for receiver to resolve",
                     move |_cx| async move {
-                        // This will resolve as soon as the watch sender
-                        // (typically a test) sends a value over the watch
-                        // channel.
-                        _ = watch_receiver.changed().await;
-                        StepSuccess::new(()).into()
+                        // This will resolve as soon as the sender (typically a
+                        // test) sends a value over the channel.
+                        let ret = fake_step_receiver.await;
+                        StepSuccess::new(ret).into()
                     },
                 )
                 .register();
@@ -558,19 +588,42 @@ impl SpawnUpdateDriver for FakeUpdateDriver {
                 }
             });
 
-            match engine.execute().await {
-                Ok(_cx) => (),
-                Err(err) => {
-                    error!(log, "update failed"; "err" => %err);
-                }
-            }
+            let engine_res = engine.execute().await;
 
             // Wait for all events to be received and written to the event
             // buffer.
             event_receiving_task.await.expect("event receiving task panicked");
+
+            // Indicate to the outside world that the update is finished.
+            std::mem::drop(finished_indicator);
+
+            // Finally, notify the receiving end of the inner sender: this
+            // indicates that the update is done.
+            match engine_res {
+                Ok(cx) => {
+                    info!(log, "fake update completed successfully");
+                    let final_sender =
+                        final_sender_handle.into_value(cx.token()).await;
+                    match final_sender {
+                        Ok(sender) => {
+                            if let Err(_) = sender.send(()) {
+                                warn!(log, "failed to send final value");
+                            }
+                        }
+                        Err(error) => {
+                            // This occurs if the fake_step_receiver's sender
+                            // side was closed. Nothing to do here but warn.
+                            warn!(log, "failed to get final sender: {}", error);
+                        }
+                    }
+                }
+                Err(error) => {
+                    error!(log, "fake update failed: {}", error);
+                }
+            }
         });
 
-        SpUpdateData { task, abort_handle, event_buffer }
+        SpUpdateData { finished, abort_handle, event_buffer }
     }
 }
 
@@ -609,19 +662,36 @@ impl UpdateTrackerData {
 
     fn clear_update_state(
         &mut self,
-        sp: SpIdentifier,
-    ) -> Result<(), ClearUpdateStateError> {
-        // Is an update currently running? If so, then reject the request.
-        let is_running = self
-            .sp_update_data
-            .get(&sp)
-            .map_or(false, |update_data| !update_data.task.is_finished());
-        if is_running {
-            return Err(ClearUpdateStateError::UpdateInProgress);
+        sps: &BTreeSet<SpIdentifier>,
+    ) -> Result<ClearUpdateStateResponse, ClearUpdateStateError> {
+        // Are any updates currently running? If so, then reject the request.
+        let in_progress_updates = sps
+            .iter()
+            .filter_map(|sp| {
+                self.sp_update_data
+                    .get(sp)
+                    .map_or(false, |update_data| !update_data.is_finished())
+                    .then(|| *sp)
+            })
+            .collect::<Vec<_>>();
+
+        if !in_progress_updates.is_empty() {
+            return Err(ClearUpdateStateError::UpdateInProgress(
+                in_progress_updates,
+            ));
         }
 
-        self.sp_update_data.remove(&sp);
-        Ok(())
+        let mut resp = ClearUpdateStateResponse::default();
+
+        for sp in sps {
+            if self.sp_update_data.remove(sp).is_some() {
+                resp.cleared.insert(*sp);
+            } else {
+                resp.no_update_data.insert(*sp);
+            }
+        }
+
+        Ok(resp)
     }
 
     async fn abort_update(
@@ -638,7 +708,7 @@ impl UpdateTrackerData {
         // There's a race possible here between the task finishing and this
         // check, but that's totally fine: the worst case is that the abort is
         // ignored.
-        if update_data.task.is_finished() {
+        if update_data.is_finished() {
             return Err(AbortUpdateError::UpdateFinished);
         }
 
@@ -665,13 +735,13 @@ impl UpdateTrackerData {
             .sp_update_data
             .iter()
             .filter_map(|(sp_identifier, update_data)| {
-                (!update_data.task.is_finished()).then(|| *sp_identifier)
+                (!update_data.is_finished()).then(|| *sp_identifier)
             })
             .collect::<Vec<_>>();
         if !running_sps.is_empty() {
             return Err(HttpError::for_bad_request(
                 None,
-                "Updates currently running for {running_sps:?}".to_owned(),
+                format!("Updates currently running for {running_sps:?}"),
             ));
         }
 
@@ -689,14 +759,14 @@ impl UpdateTrackerData {
 pub enum StartUpdateError {
     #[error("no TUF repository available")]
     TufRepositoryUnavailable,
-    #[error("targets are already being updated: {}", sps_to_string(.0))]
-    UpdateInProgress(Vec<SpIdentifier>),
+    #[error("existing update data found (must clear state before starting): {}", sps_to_string(.0))]
+    ExistingUpdates(Vec<SpIdentifier>),
 }
 
 #[derive(Debug, Clone, Error, Eq, PartialEq)]
 pub enum ClearUpdateStateError {
-    #[error("target is currently being updated")]
-    UpdateInProgress,
+    #[error("targets are currently being updated: {}", sps_to_string(.0))]
+    UpdateInProgress(Vec<SpIdentifier>),
 }
 
 impl ClearUpdateStateError {
@@ -704,7 +774,7 @@ impl ClearUpdateStateError {
         let message = DisplayErrorChain::new(self).to_string();
 
         match self {
-            ClearUpdateStateError::UpdateInProgress => {
+            ClearUpdateStateError::UpdateInProgress(_) => {
                 HttpError::for_bad_request(None, message)
             }
         }
@@ -733,10 +803,19 @@ impl AbortUpdateError {
     }
 }
 
+struct SetTrueOnDrop(Arc<AtomicBool>);
+
+impl Drop for SetTrueOnDrop {
+    fn drop(&mut self) {
+        self.0.store(true, std::sync::atomic::Ordering::Release);
+    }
+}
+
 #[derive(Debug)]
 struct UpdateDriver {}
 
 impl UpdateDriver {
+    #![allow(clippy::too_many_arguments)]
     async fn run(
         self,
         plan: UpdatePlan,
@@ -745,6 +824,7 @@ impl UpdateDriver {
         ipr_start_receiver: IprStartReceiver,
         opts: StartUpdateOptions,
         abort_handle_sender: oneshot::Sender<AbortHandle>,
+        finished_indicator: SetTrueOnDrop,
     ) {
         let update_cx = &update_cx;
 
@@ -839,25 +919,21 @@ impl UpdateDriver {
 
                     let message = format!(
                         "SP board {}, version {} (git commit {})",
-                        caboose.board,
-                        caboose.version.as_deref().unwrap_or("unknown"),
-                        caboose.git_commit
+                        caboose.board, caboose.version, caboose.git_commit
                     );
-                    match caboose.version.map(|v| v.parse::<SemverVersion>()) {
-                        Some(Ok(version)) => {
+                    match caboose.version.parse::<SemverVersion>() {
+                        Ok(version) => {
                             StepSuccess::new((sp_artifact, Some(version)))
                                 .with_message(message)
                                 .into()
                         }
-                        Some(Err(err)) => StepWarning::new(
+                        Err(err) => StepWarning::new(
                             (sp_artifact, None),
                             format!(
                                 "{message} (failed to parse SP version: {err})"
                             ),
                         )
                         .into(),
-                        None => StepWarning::new((sp_artifact, None), message)
-                            .into(),
                     }
                 },
             )
@@ -888,17 +964,24 @@ impl UpdateDriver {
                             (),
                             format!(
                                 "RoT active slot already at version {}",
-                                rot_interrogation.artifact_to_apply.id.version
+                                rot_interrogation.available_artifacts_version,
                             ),
                         )
                         .into();
                     }
 
+                    let artifact_to_apply = rot_interrogation
+                        .choose_artifact_to_apply(
+                            &update_cx.mgs_client,
+                            &update_cx.log,
+                        )
+                        .await?;
+
                     cx.with_nested_engine(|engine| {
                         inner_cx.register_steps(
                             engine,
                             rot_interrogation.slot_to_update,
-                            &rot_interrogation.artifact_to_apply,
+                            artifact_to_apply,
                         );
                         Ok(())
                     })
@@ -912,7 +995,7 @@ impl UpdateDriver {
                             (),
                             format!(
                                 "RoT updated despite already having version {}",
-                                rot_interrogation.artifact_to_apply.id.version
+                                rot_interrogation.available_artifacts_version
                             ),
                         )
                         .into()
@@ -1009,6 +1092,8 @@ impl UpdateDriver {
 
         // Wait for all events to be received and written to the update log.
         event_receiving_task.await.expect("event receiving task panicked");
+        // This would happen anyway, but be explicit about the drop.
+        std::mem::drop(finished_indicator);
     }
 
     fn register_sled_steps<'a>(
@@ -1125,19 +1210,38 @@ impl UpdateDriver {
                 // We expect this loop to run just once, but iterate just in
                 // case the image ID doesn't get populated the first time.
                 loop {
+                    match &*upload_trampoline_phase_2_to_mgs.borrow_and_update()
+                    {
+                        UploadTrampolinePhase2ToMgsStatus::Running { .. } => {
+                            // fall through to `.changed()` below
+                        },
+                        UploadTrampolinePhase2ToMgsStatus::Done {
+                            uploaded_image_id,
+                            ..
+                        } => {
+                            return StepSuccess::new(
+                                uploaded_image_id.clone(),
+                            ).into();
+                        }
+                        UploadTrampolinePhase2ToMgsStatus::Failed(error) => {
+                            let error = Arc::clone(error);
+                            return Err(UpdateTerminalError::TrampolinePhase2UploadFailed {
+                                error,
+                            });
+                        }
+                    }
+
+                    // `upload_trampoline_phase_2_to_mgs` holds onto the sending
+                    // half of this channel until all receivers are gone, so the
+                    // only way we can fail to receive here is if that task
+                    // panicked (which would abort our process) or was cancelled
+                    // (because a new TUF repo has been uploaded), in which case
+                    // we should fail the current update.
                     upload_trampoline_phase_2_to_mgs.changed().await.map_err(
                         |_recv_err| {
-                            UpdateTerminalError::TrampolinePhase2UploadFailed
+                            UpdateTerminalError::TrampolinePhase2UploadCancelled
                         }
                     )?;
-
-                    if let Some(image_id) = upload_trampoline_phase_2_to_mgs
-                        .borrow()
-                        .uploaded_image_id
-                        .as_ref()
-                    {
-                        return StepSuccess::new(image_id.clone()).into();
-                    }
                 }
             },
         ).register();
@@ -1459,14 +1563,191 @@ fn define_test_steps(engine: &UpdateEngine, secs: u64) {
 
 #[derive(Debug)]
 struct RotInterrogation {
+    // Which RoT slot we need to update.
     slot_to_update: u16,
-    artifact_to_apply: ArtifactIdData,
+    // This is a `Vec<_>` because we may have the same version of the RoT
+    // artifact supplied with different keys. Once we decide whether we're going
+    // to apply this update at all, we'll ask the RoT for its CMPA and CFPA
+    // pages to filter this list down to the one matching artifact.
+    available_artifacts: Vec<ArtifactIdData>,
+    // We require all the artifacts in `available_artifacts` to have the same
+    // version, and we record that here for use in our methods below.
+    available_artifacts_version: SemverVersion,
+    // Identifier of the target RoT's SP.
+    sp: SpIdentifier,
+    // Version reported by the target RoT.
     active_version: Option<SemverVersion>,
 }
 
 impl RotInterrogation {
     fn active_version_matches_artifact_to_apply(&self) -> bool {
-        Some(&self.artifact_to_apply.id.version) == self.active_version.as_ref()
+        Some(&self.available_artifacts_version) == self.active_version.as_ref()
+    }
+
+    /// Via `client`, ask the target RoT for its CMPA/CFPA pages, then loop
+    /// through our `available_artifacts` to find one that verifies.
+    ///
+    /// For backwards compatibility with RoTs that do not know how to return
+    /// their CMPA/CFPA pages, if we fail to fetch them _and_
+    /// `available_artifacts` has exactly one item, we will return that one
+    /// item.
+    async fn choose_artifact_to_apply(
+        &self,
+        client: &gateway_client::Client,
+        log: &Logger,
+    ) -> Result<&ArtifactIdData, UpdateTerminalError> {
+        let cmpa = match client
+            .sp_rot_cmpa_get(
+                self.sp.type_,
+                self.sp.slot,
+                SpComponent::ROT.const_as_str(),
+            )
+            .await
+        {
+            Ok(response) => {
+                let data = response.into_inner().base64_data;
+                self.decode_rot_page(&data).map_err(|error| {
+                    UpdateTerminalError::GetRotCmpaFailed { error }
+                })?
+            }
+            // TODO is there a better way to check the _specific_ error response
+            // we get here? We only have a couple of strings; we could check the
+            // error string contents for something like "WrongVersion", but
+            // that's pretty fragile. Instead we'll treat any error response
+            // here as a "fallback to previous behavior".
+            Err(err @ gateway_client::Error::ErrorResponse(_)) => {
+                if self.available_artifacts.len() == 1 {
+                    info!(
+                        log,
+                        "Failed to get RoT CMPA page; \
+                         using only available RoT artifact";
+                        "err" => %err,
+                    );
+                    return Ok(&self.available_artifacts[0]);
+                } else {
+                    error!(
+                        log,
+                        "Failed to get RoT CMPA; unable to choose from \
+                         multiple available RoT artifacts";
+                        "err" => %err,
+                        "num_rot_artifacts" => self.available_artifacts.len(),
+                    );
+                    return Err(UpdateTerminalError::GetRotCmpaFailed {
+                        error: err.into(),
+                    });
+                }
+            }
+            // For any other error (e.g., comms failures), just fail as normal.
+            Err(err) => {
+                return Err(UpdateTerminalError::GetRotCmpaFailed {
+                    error: err.into(),
+                });
+            }
+        };
+
+        // We have a CMPA; we also need the CFPA, but we don't bother checking
+        // for an `ErrorResponse` as above because succeeding in getting the
+        // CMPA means the RoT is new enough to support returning both.
+        let cfpa = client
+            .sp_rot_cfpa_get(
+                self.sp.type_,
+                self.sp.slot,
+                SpComponent::ROT.const_as_str(),
+                &gateway_client::types::GetCfpaParams {
+                    slot: RotCfpaSlot::Active,
+                },
+            )
+            .await
+            .map_err(|err| UpdateTerminalError::GetRotCfpaFailed {
+                error: err.into(),
+            })
+            .and_then(|response| {
+                let data = response.into_inner().base64_data;
+                self.decode_rot_page(&data).map_err(|error| {
+                    UpdateTerminalError::GetRotCfpaFailed { error }
+                })
+            })?;
+
+        // Loop through our possible artifacts and find the first (we only
+        // expect one!) that verifies against the RoT's CMPA/CFPA.
+        for artifact in &self.available_artifacts {
+            let image = artifact
+                .data
+                .reader_stream()
+                .and_then(|stream| async {
+                    let mut buf = Vec::with_capacity(artifact.data.file_size());
+                    StreamReader::new(stream)
+                        .read_to_end(&mut buf)
+                        .await
+                        .context("I/O error reading extracted archive")?;
+                    Ok(buf)
+                })
+                .await
+                .map_err(|error| {
+                    UpdateTerminalError::FailedFindingSignedRotImage { error }
+                })?;
+            let archive = RawHubrisArchive::from_vec(image).map_err(|err| {
+                UpdateTerminalError::FailedFindingSignedRotImage {
+                    error: anyhow::Error::new(err).context(format!(
+                        "failed to read hubris archive for {:?}",
+                        artifact.id
+                    )),
+                }
+            })?;
+            match archive.verify(&cmpa, &cfpa) {
+                Ok(()) => {
+                    info!(
+                        log, "RoT archive verification success";
+                        "name" => artifact.id.name.as_str(),
+                        "version" => %artifact.id.version,
+                        "kind" => ?artifact.id.kind,
+                    );
+                    return Ok(artifact);
+                }
+                Err(err) => {
+                    // We log this but don't fail - we want to continue
+                    // looking for a verifiable artifact.
+                    info!(
+                        log, "RoT archive verification failed";
+                        "artifact" => ?artifact.id,
+                        "err" => %DisplayErrorChain::new(&err),
+                    );
+                }
+            }
+        }
+
+        // If the loop above didn't find a verifiable image, we cannot proceed.
+        Err(UpdateTerminalError::FailedFindingSignedRotImage {
+            error: anyhow!("no RoT image found with valid CMPA/CFPA"),
+        })
+    }
+
+    /// Decode a base64-encoded RoT page we received from MGS.
+    fn decode_rot_page(
+        &self,
+        data: &str,
+    ) -> anyhow::Result<[u8; ROT_PAGE_SIZE]> {
+        // Even though we know `data` should decode to exactly
+        // `ROT_PAGE_SIZE` bytes, the base64 crate requires an output buffer
+        // of at least `decoded_len_estimate`. Allocate such a buffer here,
+        // then we'll copy to the fixed-size array we need after confirming
+        // the number of decoded bytes;
+        let mut output_buf = vec![0; base64::decoded_len_estimate(data.len())];
+
+        let n = base64::engine::general_purpose::STANDARD
+            .decode_slice(&data, &mut output_buf)
+            .with_context(|| {
+                format!("failed to decode base64 string: {data:?}")
+            })?;
+        if n != ROT_PAGE_SIZE {
+            bail!(
+                "incorrect len ({n}, expected {ROT_PAGE_SIZE}) \
+                     after decoding base64 string: {data:?}",
+            );
+        }
+        let mut page = [0; ROT_PAGE_SIZE];
+        page.copy_from_slice(&output_buf[..n]);
+        Ok(page)
     }
 }
 
@@ -1582,175 +1863,16 @@ impl UpdateContext {
                 }
             };
 
-        // Read the CMPA and currently-active CFPA so we can find the
-        // correctly-signed artifact.
-        let base64_decode_rot_page = |data: String| {
-            // Even though we know `data` should decode to exactly
-            // `ROT_PAGE_SIZE` bytes, the base64 crate requires an output buffer
-            // of at least `decoded_len_estimate`. Allocate such a buffer here,
-            // then we'll copy to the fixed-size array we need after confirming
-            // the number of decoded bytes;
-            let mut output_buf =
-                vec![0; base64::decoded_len_estimate(data.len())];
-
-            let n = base64::engine::general_purpose::STANDARD
-                .decode_slice(&data, &mut output_buf)
-                .with_context(|| {
-                    format!("failed to decode base64 string: {data:?}")
-                })?;
-            if n != ROT_PAGE_SIZE {
-                bail!(
-                    "incorrect len ({n}, expected {ROT_PAGE_SIZE}) \
-                     after decoding base64 string: {data:?}",
-                );
-            }
-            let mut page = [0; ROT_PAGE_SIZE];
-            page.copy_from_slice(&output_buf[..n]);
-            Ok(page)
-        };
-
-        // We may be talking to an SP / RoT that doesn't yet know how to give us
-        // its CMPA. If we hit a protocol version error here, we can fall back
-        // to our old behavior of requiring exactly 1 RoT artifact.
-        let mut artifact_to_apply = None;
-
-        let cmpa = match self
-            .mgs_client
-            .sp_rot_cmpa_get(
-                self.sp.type_,
-                self.sp.slot,
-                SpComponent::ROT.const_as_str(),
-            )
-            .await
-        {
-            Ok(response) => {
-                let data = response.into_inner().base64_data;
-                Some(base64_decode_rot_page(data).map_err(|error| {
-                    UpdateTerminalError::GetRotCmpaFailed { error }
-                })?)
-            }
-            // TODO is there a better way to check the _specific_ error response
-            // we get here? We only have a couple of strings; we could check the
-            // error string contents for something like "WrongVersion", but
-            // that's pretty fragile. Instead we'll treat any error response
-            // here as a "fallback to previous behavior".
-            Err(err @ gateway_client::Error::ErrorResponse(_)) => {
-                if available_artifacts.len() == 1 {
-                    info!(
-                        self.log,
-                        "Failed to get RoT CMPA page; \
-                         using only available RoT artifact";
-                        "err" => %err,
-                    );
-                    artifact_to_apply = Some(available_artifacts[0].clone());
-                    None
-                } else {
-                    error!(
-                        self.log,
-                        "Failed to get RoT CMPA; unable to choose from \
-                         multiple available RoT artifacts";
-                        "err" => %err,
-                        "num_rot_artifacts" => available_artifacts.len(),
-                    );
-                    return Err(UpdateTerminalError::GetRotCmpaFailed {
-                        error: err.into(),
-                    });
-                }
-            }
-            // For any other error (e.g., comms failures), just fail as normal.
-            Err(err) => {
-                return Err(UpdateTerminalError::GetRotCmpaFailed {
-                    error: err.into(),
-                });
-            }
-        };
-
-        // If we were able to fetch the CMPA, we also need to fetch the CFPA and
-        // then find the correct RoT artifact. If we weren't able to fetch the
-        // CMPA, we either already set `artifact_to_apply` to the one-and-only
-        // RoT artifact available, or we returned a terminal error.
-        if let Some(cmpa) = cmpa {
-            let cfpa = self
-                .mgs_client
-                .sp_rot_cfpa_get(
-                    self.sp.type_,
-                    self.sp.slot,
-                    SpComponent::ROT.const_as_str(),
-                    &gateway_client::types::GetCfpaParams {
-                        slot: RotCfpaSlot::Active,
-                    },
-                )
-                .await
-                .map_err(|err| UpdateTerminalError::GetRotCfpaFailed {
-                    error: err.into(),
-                })
-                .and_then(|response| {
-                    let data = response.into_inner().base64_data;
-                    base64_decode_rot_page(data).map_err(|error| {
-                        UpdateTerminalError::GetRotCfpaFailed { error }
-                    })
-                })?;
-
-            // Loop through our possible artifacts and find the first (we only
-            // expect one!) that verifies against the RoT's CMPA/CFPA.
-            for artifact in available_artifacts {
-                let image = artifact
-                    .data
-                    .reader_stream()
-                    .and_then(|stream| async {
-                        let mut buf =
-                            Vec::with_capacity(artifact.data.file_size());
-                        StreamReader::new(stream)
-                            .read_to_end(&mut buf)
-                            .await
-                            .context("I/O error reading extracted archive")?;
-                        Ok(buf)
-                    })
-                    .await
-                    .map_err(|error| {
-                        UpdateTerminalError::FailedFindingSignedRotImage {
-                            error,
-                        }
-                    })?;
-                let archive =
-                    RawHubrisArchive::from_vec(image).map_err(|err| {
-                        UpdateTerminalError::FailedFindingSignedRotImage {
-                            error: anyhow::Error::new(err).context(format!(
-                                "failed to read hubris archive for {:?}",
-                                artifact.id
-                            )),
-                        }
-                    })?;
-                match archive.verify(&cmpa, &cfpa) {
-                    Ok(()) => {
-                        info!(
-                            self.log, "RoT archive verification success";
-                            "name" => artifact.id.name.as_str(),
-                            "version" => %artifact.id.version,
-                            "kind" => ?artifact.id.kind,
-                        );
-                        artifact_to_apply = Some(artifact.clone());
-                        break;
-                    }
-                    Err(err) => {
-                        // We log this but don't fail - we want to continue
-                        // looking for a verifiable artifact.
-                        info!(
-                            self.log, "RoT archive verification failed";
-                            "artifact" => ?artifact.id,
-                            "err" => %DisplayErrorChain::new(&err),
-                        );
-                    }
-                }
-            }
-        }
-
-        // Ensure we found a valid RoT artifact.
-        let artifact_to_apply = artifact_to_apply.ok_or_else(|| {
-            UpdateTerminalError::FailedFindingSignedRotImage {
-                error: anyhow!("no RoT image found with valid CMPA/CFPA"),
-            }
-        })?;
+        // We already validated at repo-upload time there is at least one RoT
+        // artifact available and that all available RoT artifacts are the same
+        // version, so we can unwrap the first artifact here and assume its
+        // version matches any subsequent artifacts.
+        let available_artifacts_version = available_artifacts
+            .get(0)
+            .expect("no RoT artifacts available")
+            .id
+            .version
+            .clone();
 
         // Read the caboose of the currently-active slot.
         let caboose = self
@@ -1769,26 +1891,27 @@ impl UpdateContext {
 
         let message = format!(
             "RoT slot {active_slot_name} version {} (git commit {})",
-            caboose.version.as_deref().unwrap_or("unknown"),
-            caboose.git_commit
+            caboose.version, caboose.git_commit
         );
 
+        let available_artifacts = available_artifacts.to_vec();
         let make_result = |active_version| RotInterrogation {
             slot_to_update,
-            artifact_to_apply,
+            available_artifacts,
+            available_artifacts_version,
+            sp: self.sp,
             active_version,
         };
 
-        match caboose.version.map(|v| v.parse::<SemverVersion>()) {
-            Some(Ok(version)) => StepSuccess::new(make_result(Some(version)))
+        match caboose.version.parse::<SemverVersion>() {
+            Ok(version) => StepSuccess::new(make_result(Some(version)))
                 .with_message(message)
                 .into(),
-            Some(Err(err)) => StepWarning::new(
+            Err(err) => StepWarning::new(
                 make_result(None),
                 format!("{message} (failed to parse RoT version: {err})"),
             )
             .into(),
-            None => StepWarning::new(make_result(None), message).into(),
         }
     }
 
@@ -2108,59 +2231,68 @@ async fn upload_trampoline_phase_2_to_mgs(
     status: watch::Sender<UploadTrampolinePhase2ToMgsStatus>,
     log: Logger,
 ) {
-    let data = artifact.data;
-    let hash = data.hash();
-    let upload_task = move || {
-        let mgs_client = mgs_client.clone();
-        let data = data.clone();
+    // We make at most 3 attempts to upload the trampoline to our local MGS,
+    // sleeping briefly between attempts if we fail.
+    const MAX_ATTEMPTS: usize = 3;
+    const SLEEP_BETWEEN_ATTEMPTS: Duration = Duration::from_secs(1);
 
-        async move {
-            let image_stream = data.reader_stream().await.map_err(|e| {
-                // TODO-correctness If we get an I/O error opening the file
-                // associated with `data`, is it actually a transient error? If
-                // we change this to `permanent` we'll have to do some different
-                // error handling below and at our call site to retry. We
-                // _shouldn't_ get errors from `reader_stream()` in general, so
-                // it's probably okay either way?
-                backoff::BackoffError::transient(format!("{e:#}"))
-            })?;
-            mgs_client
-                .recovery_host_phase2_upload(reqwest::Body::wrap_stream(
-                    image_stream,
-                ))
-                .await
-                .map_err(|e| backoff::BackoffError::transient(e.to_string()))
+    let mut attempt = 1;
+    let final_status = loop {
+        let image_stream = match artifact.data.reader_stream().await {
+            Ok(stream) => stream,
+            Err(err) => {
+                error!(
+                    log, "failed to read trampoline phase 2";
+                    "err" => #%err,
+                );
+                break UploadTrampolinePhase2ToMgsStatus::Failed(Arc::new(
+                    err.context("failed to read trampoline phase 2"),
+                ));
+            }
+        };
+
+        match mgs_client
+            .recovery_host_phase2_upload(reqwest::Body::wrap_stream(
+                image_stream,
+            ))
+            .await
+        {
+            Ok(response) => {
+                break UploadTrampolinePhase2ToMgsStatus::Done {
+                    hash: artifact.data.hash(),
+                    uploaded_image_id: response.into_inner(),
+                };
+            }
+            Err(err) => {
+                if attempt < MAX_ATTEMPTS {
+                    error!(
+                        log, "failed to upload trampoline phase 2 to MGS; \
+                              will retry after {SLEEP_BETWEEN_ATTEMPTS:?}";
+                        "attempt" => attempt,
+                        "err" => %DisplayErrorChain::new(&err),
+                    );
+                    tokio::time::sleep(SLEEP_BETWEEN_ATTEMPTS).await;
+                    attempt += 1;
+                    continue;
+                } else {
+                    error!(
+                        log, "failed to upload trampoline phase 2 to MGS; \
+                              giving up";
+                        "attempt" => attempt,
+                        "err" => %DisplayErrorChain::new(&err),
+                    );
+                    break UploadTrampolinePhase2ToMgsStatus::Failed(Arc::new(
+                        anyhow::Error::new(err)
+                            .context("failed to upload trampoline phase 2"),
+                    ));
+                }
+            }
         }
     };
 
-    let log_failure = move |err, delay| {
-        warn!(
-            log,
-            "failed to upload trampoline phase 2 to MGS, will retry in {:?}",
-            delay;
-            "err" => %err,
-        );
-    };
-
-    // retry_policy_internal_service_aggressive() retries forever, so we can
-    // unwrap this call to retry_notify
-    let uploaded_image_id = backoff::retry_notify(
-        backoff::retry_policy_internal_service_aggressive(),
-        upload_task,
-        log_failure,
-    )
-    .await
-    .unwrap()
-    .into_inner();
-
-    // Notify all receivers that we've uploaded the image.
-    _ = status.send(UploadTrampolinePhase2ToMgsStatus {
-        hash,
-        uploaded_image_id: Some(uploaded_image_id),
-    });
-
-    // Wait for all receivers to be gone before we exit, so they don't get recv
-    // errors unless we're cancelled.
+    // Send our final status, then wait for all receivers to be gone before we
+    // exit, so they don't get recv errors unless we're cancelled.
+    status.send_replace(final_status);
     status.closed().await;
 }
 
