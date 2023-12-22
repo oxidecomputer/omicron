@@ -377,9 +377,9 @@ mod test {
     use omicron_sled_agent::sim;
     use std::fmt::Write;
     use std::net::Ipv6Addr;
+    use std::net::SocketAddrV6;
     use std::sync::Arc;
     use uuid::Uuid;
-    use std::net::SocketAddrV6;
 
     fn dump_collection(collection: &Collection) -> String {
         // Construct a stable, human-readable summary of the Collection
@@ -537,8 +537,7 @@ mod test {
         let sled_url = format!("http://{}/", agent.http_server.local_addr());
         let client = sled_agent_client::Client::new(&sled_url, log);
 
-        let zone_address =
-            SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0);
+        let zone_address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0);
         client
             .omicron_zones_put(&sled_agent_client::types::OmicronZonesConfig {
                 generation: sled_agent_client::types::Generation::from(3),
@@ -559,8 +558,8 @@ mod test {
 
     #[tokio::test]
     async fn test_basic() {
-        // Set up the stock MGS test setup which includes a couple of fake SPs.
-        // Then run a collection against it.
+        // Set up the stock MGS test setup (which includes a couple of fake SPs)
+        // and a simulated sled agent.  Then run a collection against these.
         let gwtestctx =
             gateway_test_utils::setup::test_setup("test_basic", SpPort::One)
                 .await;
@@ -571,11 +570,18 @@ mod test {
             "5125277f-0988-490b-ac01-3bba20cc8f07".parse().unwrap(),
         )
         .await;
+        let sled2 = sim_sled_agent(
+            log.clone(),
+            "03265caf-da7d-46c7-b1c2-39fa90ce5c65".parse().unwrap(),
+            "8b88a56f-3eb6-4d80-ba42-75d867bc427d".parse().unwrap(),
+        )
+        .await;
         let sled1_url = format!("http://{}/", sled1.http_server.local_addr());
+        let sled2_url = format!("http://{}/", sled2.http_server.local_addr());
         let mgs_url = format!("http://{}/", gwtestctx.client.bind_address);
         let mgs_client =
             Arc::new(gateway_client::Client::new(&mgs_url, log.clone()));
-        let sled_enum = StaticSledAgentEnumerator::new([sled1_url]);
+        let sled_enum = StaticSledAgentEnumerator::new([sled1_url, sled2_url]);
         let collector = Collector::new(
             "test-suite",
             &[mgs_client],
@@ -600,7 +606,7 @@ mod test {
     async fn test_multi_mgs() {
         // This is the same as the basic test, but we set up two different MGS
         // instances and point the collector at both.  We should get the same
-        // result.
+        // result.  We don't bother with the sled agent stuff here.
         let gwtestctx1 = gateway_test_utils::setup::test_setup(
             "test_multi_mgs_1",
             SpPort::One,
@@ -621,12 +627,8 @@ mod test {
             })
             .collect::<Vec<_>>();
         let sled_enum = StaticSledAgentEnumerator::empty();
-        let collector = Collector::new(
-            "test-suite",
-            &mgs_clients,
-            &sled_enum, // XXX-dap
-            log.clone(),
-        );
+        let collector =
+            Collector::new("test-suite", &mgs_clients, &sled_enum, log.clone());
         let collection = collector
             .collect_all()
             .await
@@ -668,7 +670,7 @@ mod test {
         let collector = Collector::new(
             "test-suite",
             mgs_clients,
-            &sled_enum, // XXX-dap
+            &sled_enum,
             log.clone(),
         );
         let collection = collector
@@ -680,6 +682,52 @@ mod test {
         let s = dump_collection(&collection);
         expectorate::assert_contents("tests/output/collector_errors.txt", &s);
 
+        gwtestctx.teardown().await;
+    }
+
+    #[tokio::test]
+    async fn test_sled_agent_failure() {
+        // Similar to the basic test, but use multiple sled agents, one of which
+        // is non-functional.
+        let gwtestctx = gateway_test_utils::setup::test_setup(
+            "test_sled_agent_failure",
+            SpPort::One,
+        )
+        .await;
+        let log = &gwtestctx.logctx.log;
+        let sled1 = sim_sled_agent(
+            log.clone(),
+            "9cb9b78f-5614-440c-b66d-e8e81fab69b0".parse().unwrap(),
+            "5125277f-0988-490b-ac01-3bba20cc8f07".parse().unwrap(),
+        )
+        .await;
+        let sled1_url = format!("http://{}/", sled1.http_server.local_addr());
+        let sledbogus_url = format!("http://[100::1]:45678");
+        let mgs_url = format!("http://{}/", gwtestctx.client.bind_address);
+        let mgs_client =
+            Arc::new(gateway_client::Client::new(&mgs_url, log.clone()));
+        let sled_enum =
+            StaticSledAgentEnumerator::new([sled1_url, sledbogus_url]);
+        let collector = Collector::new(
+            "test-suite",
+            &[mgs_client],
+            &sled_enum,
+            log.clone(),
+        );
+        let collection = collector
+            .collect_all()
+            .await
+            .expect("failed to carry out collection");
+        assert!(!collection.errors.is_empty());
+        assert_eq!(collection.collector, "test-suite");
+
+        let s = dump_collection(&collection);
+        expectorate::assert_contents(
+            "tests/output/collector_sled_agent_errors.txt",
+            &s,
+        );
+
+        sled1.http_server.close().await.unwrap();
         gwtestctx.teardown().await;
     }
 }
