@@ -2725,7 +2725,7 @@ async fn cmd_db_sagas_list_interleave(
         let mut row: Vec<String> = Vec::with_capacity(args.saga_id.len() + 1);
         row.resize(args.saga_id.len() + 1, String::from(""));
 
-        row[0] = saga_node.event_time.to_string();
+        row[0] = chrono_to_rfc_3999(&saga_node.event_time);
 
         let this_sagas_col = saga_id_to_column[&saga_node.saga_id.0 .0];
 
