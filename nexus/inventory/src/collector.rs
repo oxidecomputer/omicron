@@ -667,12 +667,8 @@ mod test {
         };
         let mgs_clients = &[bad_client, real_client];
         let sled_enum = StaticSledAgentEnumerator::empty();
-        let collector = Collector::new(
-            "test-suite",
-            mgs_clients,
-            &sled_enum,
-            log.clone(),
-        );
+        let collector =
+            Collector::new("test-suite", mgs_clients, &sled_enum, log.clone());
         let collection = collector
             .collect_all()
             .await
@@ -702,7 +698,7 @@ mod test {
         )
         .await;
         let sled1_url = format!("http://{}/", sled1.http_server.local_addr());
-        let sledbogus_url = format!("http://[100::1]:45678");
+        let sledbogus_url = String::from("http://[100::1]:45678");
         let mgs_url = format!("http://{}/", gwtestctx.client.bind_address);
         let mgs_client =
             Arc::new(gateway_client::Client::new(&mgs_url, log.clone()));
