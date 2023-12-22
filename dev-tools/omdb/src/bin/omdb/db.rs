@@ -1962,6 +1962,7 @@ fn print_sagas(sagas: Vec<Saga>, with_start_params: bool) {
 
         struct SagaRow {
             id: Uuid,
+            creator_id: Uuid,
             time_created: String,
             name: String,
             state: String,
@@ -1972,6 +1973,7 @@ fn print_sagas(sagas: Vec<Saga>, with_start_params: bool) {
             .into_iter()
             .map(|saga: Saga| SagaRow {
                 id: saga.id.0.into(),
+                creator_id: saga.creator.0,
                 time_created: chrono_to_rfc_3999(&saga.time_created),
                 name: saga.name,
                 state: format!("{:?}", saga.saga_state),
@@ -2003,6 +2005,7 @@ fn print_sagas(sagas: Vec<Saga>, with_start_params: bool) {
             .map(|x| {
                 (
                     format!("{}", x.id).chars().count(),
+                    format!("{}", x.creator_id).chars().count(),
                     x.time_created.chars().count(),
                     x.name.chars().count(),
                     x.state.chars().count(),
@@ -2011,28 +2014,39 @@ fn print_sagas(sagas: Vec<Saga>, with_start_params: bool) {
             })
             .collect();
 
-        let (width0, width1, width2, width3): (usize, usize, usize, usize) = (
+        let (width0, width1, width2, width3, width4): (
+            usize,
+            usize,
+            usize,
+            usize,
+            usize,
+        ) = (
             std::cmp::max(
                 row_char_counts.iter().map(|x| x.0).max().unwrap(),
                 "saga id".len(),
             ),
             std::cmp::max(
                 row_char_counts.iter().map(|x| x.1).max().unwrap(),
-                "time created".len(),
+                "creator id".len(),
             ),
             std::cmp::max(
                 row_char_counts.iter().map(|x| x.2).max().unwrap(),
-                "name".len(),
+                "time created".len(),
             ),
             std::cmp::max(
                 row_char_counts.iter().map(|x| x.3).max().unwrap(),
+                "name".len(),
+            ),
+            std::cmp::max(
+                row_char_counts.iter().map(|x| x.4).max().unwrap(),
                 "state".len(),
             ),
         );
 
         println!(
-            "{:>width0$} | {:width1$} | {:width2$} | {:width3$} | {}",
+            "{:>width0$} | {:width1$} | {:width2$} | {:width3$} | {:width4$} | {}",
             String::from("saga id"),
+            String::from("creator id"),
             String::from("time created"),
             String::from("name"),
             String::from("state"),
@@ -2040,24 +2054,31 @@ fn print_sagas(sagas: Vec<Saga>, with_start_params: bool) {
         );
 
         println!(
-            "{:>width0$} | {:width1$} | {:width2$} | {:width3$} | {}",
+            "{:>width0$} | {:width1$} | {:width2$} | {:width3$} | {:width4$} | {}",
             (0..width0).map(|_| "-").collect::<String>(),
             (0..width1).map(|_| "-").collect::<String>(),
             (0..width2).map(|_| "-").collect::<String>(),
             (0..width3).map(|_| "-").collect::<String>(),
+            (0..width4).map(|_| "-").collect::<String>(),
             String::from("-------------"),
         );
 
         for row in rows {
             println!(
-                "{:>width0$} | {:width1$} | {:width2$} | {:width3$} | {}",
-                row.id, row.time_created, row.name, row.state, row.start_params,
+                "{:>width0$} | {:width1$} | {:width2$} | {:width3$} | {:width4$} | {}",
+                row.id,
+                row.creator_id,
+                row.time_created,
+                row.name,
+                row.state,
+                row.start_params,
             );
         }
     } else {
         #[derive(Tabled)]
         struct SagaRow {
             id: Uuid,
+            creator_id: Uuid,
             time_created: String,
             name: String,
             state: String,
@@ -2067,6 +2088,7 @@ fn print_sagas(sagas: Vec<Saga>, with_start_params: bool) {
             .into_iter()
             .map(|saga: Saga| SagaRow {
                 id: saga.id.0.into(),
+                creator_id: saga.creator.0,
                 time_created: chrono_to_rfc_3999(&saga.time_created),
                 name: saga.name,
                 state: format!("{:?}", saga.saga_state),
