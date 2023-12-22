@@ -32,11 +32,11 @@ use diesel::BoolExpressionMethods;
 use diesel::ExpressionMethods;
 use diesel::JoinOnDsl;
 use diesel::NullableExpressionMethods;
+use diesel::TextExpressionMethods;
+use gateway_client::types::SpType;
 use nexus_db_model::saga_types::Saga;
 use nexus_db_model::saga_types::SagaId;
 use nexus_db_model::saga_types::SagaNodeEvent;
-use diesel::TextExpressionMethods;
-use gateway_client::types::SpType;
 use nexus_db_model::Dataset;
 use nexus_db_model::Disk;
 use nexus_db_model::DnsGroup;
@@ -44,8 +44,8 @@ use nexus_db_model::DnsName;
 use nexus_db_model::DnsVersion;
 use nexus_db_model::DnsZone;
 use nexus_db_model::ExternalIp;
-use nexus_db_model::Image;
 use nexus_db_model::HwBaseboardId;
+use nexus_db_model::Image;
 use nexus_db_model::Instance;
 use nexus_db_model::InvCollection;
 use nexus_db_model::Project;
@@ -3016,7 +3016,9 @@ async fn cmd_db_regions_find_deleted(
             Row {
                 dataset_id: dataset.id(),
                 region_id: region.id(),
-                region_snapshot_id: if let Some(region_snapshot) = region_snapshot {
+                region_snapshot_id: if let Some(region_snapshot) =
+                    region_snapshot
+                {
                     region_snapshot.snapshot_id.to_string()
                 } else {
                     String::from("")
