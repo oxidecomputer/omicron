@@ -12,9 +12,7 @@ use crate::app::sagas::declare_saga_actions;
 use crate::app::{authn, authz, db};
 use crate::external_api::params;
 use nexus_db_model::{ExternalIp, IpAttachState};
-use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup::LookupPath;
-use nexus_db_queries::db::queries::external_ip::SAFE_TRANSITORY_INSTANCE_STATES;
 use nexus_types::external_api::views;
 use omicron_common::api::external::{Error, InstanceState};
 use serde::Deserialize;
@@ -210,7 +208,7 @@ async fn siia_complete_attach(
         &sagactx,
         &params.serialized_authn,
         IpAttachState::Attaching,
-        IpAttachState::Detached,
+        IpAttachState::Attached,
     )
     .await?;
 

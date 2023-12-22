@@ -161,7 +161,7 @@ async fn siid_get_instance_state(
         &sagactx,
         &params.serialized_authn,
         &params.authz_instance,
-        "attach",
+        "detach",
     )
     .await
 }
@@ -228,7 +228,7 @@ async fn siid_complete_attach(
         (false, InstanceState::Stopped) | (true, _) => {
             target_ip.try_into().map_err(ActionError::action_failed)
         }
-        _ => Err(Error::internal_error("failed to complete IP attach"))
+        _ => Err(Error::internal_error("failed to complete IP detach"))
             .map_err(ActionError::action_failed),
     }
 }

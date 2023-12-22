@@ -44,6 +44,7 @@ use nexus_db_model::ExternalIp;
 use nexus_db_model::HwBaseboardId;
 use nexus_db_model::Instance;
 use nexus_db_model::InvCollection;
+use nexus_db_model::IpAttachState;
 use nexus_db_model::Project;
 use nexus_db_model::Region;
 use nexus_db_model::RegionSnapshot;
@@ -1653,6 +1654,7 @@ async fn cmd_db_eips(
         ip: ipnetwork::IpNetwork,
         ports: PortRange,
         kind: String,
+        state: IpAttachState,
         owner: Owner,
     }
 
@@ -1737,6 +1739,7 @@ async fn cmd_db_eips(
                 first: ip.first_port.into(),
                 last: ip.last_port.into(),
             },
+            state: ip.state,
             kind: format!("{:?}", ip.kind),
             owner,
         };

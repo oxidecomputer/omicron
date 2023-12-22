@@ -33,18 +33,15 @@ use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
-use db::model::InstanceState as DbInstanceState;
 use diesel::prelude::*;
 use nexus_db_model::Instance;
 use nexus_db_model::IpAttachState;
 use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
-use omicron_common::api;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::InstanceState as ApiInstanceState;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
@@ -261,6 +258,7 @@ impl DataStore {
                         )
                     }
                 }
+                // Floating IP: name conflict 
                 DatabaseError(UniqueViolation, ..) if name.is_some() => {
                     TransactionError::CustomError(public_error_from_diesel(
                         e,
@@ -270,6 +268,12 @@ impl DataStore {
                                 .map(|m| m.as_str())
                                 .unwrap_or_default(),
                         ),
+                    ))
+                }
+                // Ephemeral IP: violated one-per-instance rule.
+                DatabaseError(UniqueViolation, ..) => {
+                    TransactionError::CustomError(Error::invalid_request(
+                        "instance/service cannot have more than one ephemeral IP"
                     ))
                 }
                 _ => {
@@ -646,9 +650,8 @@ impl DataStore {
             },
             AttachError::NoUpdate { attached_count, resource, collection } => {
                 match resource.state {
-                    // Idempotent errors: attach succeeded or is in progress for
-                    // same resource pair -- this is fine.
-                    IpAttachState::Attached | IpAttachState::Attaching if resource.parent_id == Some(instance_id) => return Ok((collection, resource)),
+                    // Idempotent errors: is in progress forsame resource pair -- this is fine.
+                    IpAttachState::Attaching if resource.parent_id == Some(instance_id) => return Ok((collection, resource)),
                     IpAttachState::Attached => return Err(Error::invalid_request(
                         "floating IP cannot be attached to one \
                          instance while still attached to another"

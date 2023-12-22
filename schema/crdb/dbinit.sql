@@ -1784,6 +1784,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_external_ip_by_parent ON omicron.public
 )
     WHERE parent_id IS NOT NULL AND time_deleted IS NULL;
 
+/* Enforce a limit of one Ephemeral IP per instance */
+CREATE UNIQUE INDEX IF NOT EXISTS one_ephemeral_ip_per_instance ON omicron.public.external_ip (
+    parent_id
+)
+    WHERE kind = 'ephemeral' AND parent_id IS NOT NULL AND time_deleted IS NULL;
+
 /* Enforce name-uniqueness of floating (service) IPs at fleet level. */
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_floating_ip_by_name on omicron.public.external_ip (
     name

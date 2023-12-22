@@ -57,6 +57,17 @@ impl_enum_type!(
      Attaching => b"attaching"
 );
 
+impl std::fmt::Display for IpAttachState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            IpAttachState::Detached => "Detached",
+            IpAttachState::Attached => "Attached",
+            IpAttachState::Detaching => "Detaching",
+            IpAttachState::Attaching => "Attaching",
+        })
+    }
+}
+
 /// The main model type for external IP addresses for instances
 /// and externally-facing services.
 ///
