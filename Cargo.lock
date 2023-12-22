@@ -4191,6 +4191,7 @@ dependencies = [
  "gateway-test-utils",
  "nexus-types",
  "omicron-common",
+ "omicron-sled-agent",
  "omicron-workspace-hack",
  "regex",
  "reqwest",

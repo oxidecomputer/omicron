@@ -25,5 +25,6 @@ omicron-workspace-hack.workspace = true
 [dev-dependencies]
 expectorate.workspace = true
 gateway-test-utils.workspace = true
+omicron-sled-agent.workspace = true
 regex.workspace = true
 tokio.workspace = true

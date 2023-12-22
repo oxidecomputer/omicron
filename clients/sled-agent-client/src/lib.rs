@@ -41,6 +41,29 @@ impl Eq for types::OmicronZoneConfig {}
 impl Eq for types::OmicronZoneType {}
 impl Eq for types::OmicronZoneDataset {}
 
+impl types::OmicronZoneType {
+    /// Human-readable label describing what kind of zone this is
+    ///
+    /// This is just use for testing and reporting.
+    pub fn label(&self) -> impl std::fmt::Display {
+        match self {
+            types::OmicronZoneType::BoundaryNtp { .. } => "boundary_ntp",
+            types::OmicronZoneType::Clickhouse { .. } => "clickhouse",
+            types::OmicronZoneType::ClickhouseKeeper { .. } => {
+                "clickhouse_keeper"
+            }
+            types::OmicronZoneType::CockroachDb { .. } => "cockroach_db",
+            types::OmicronZoneType::Crucible { .. } => "crucible",
+            types::OmicronZoneType::CruciblePantry { .. } => "crucible_pantry",
+            types::OmicronZoneType::ExternalDns { .. } => "external_dns",
+            types::OmicronZoneType::InternalDns { .. } => "internal_dns",
+            types::OmicronZoneType::InternalNtp { .. } => "internal_ntp",
+            types::OmicronZoneType::Nexus { .. } => "nexus",
+            types::OmicronZoneType::Oximeter { .. } => "oximeter",
+        }
+    }
+}
+
 impl omicron_common::api::external::ClientError for types::Error {
     fn message(&self) -> String {
         self.message.clone()

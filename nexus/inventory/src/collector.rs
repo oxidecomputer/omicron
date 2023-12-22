@@ -374,8 +374,12 @@ mod test {
     use crate::StaticSledAgentEnumerator;
     use gateway_messages::SpPort;
     use nexus_types::inventory::Collection;
+    use omicron_sled_agent::sim;
     use std::fmt::Write;
+    use std::net::Ipv6Addr;
     use std::sync::Arc;
+    use uuid::Uuid;
+    use std::net::SocketAddrV6;
 
     fn dump_collection(collection: &Collection) -> String {
         // Construct a stable, human-readable summary of the Collection
@@ -463,6 +467,35 @@ mod test {
             }
         }
 
+        write!(&mut s, "\nsled agents found:\n").unwrap();
+        for (sled_id, sled_info) in &collection.sled_agents {
+            assert_eq!(*sled_id, sled_info.sled_id);
+            write!(&mut s, "  sled {} ({:?})\n", sled_id, sled_info.sled_role)
+                .unwrap();
+            write!(&mut s, "    baseboard {:?}\n", sled_info.baseboard_id)
+                .unwrap();
+
+            if let Some(found_zones) = collection.omicron_zones.get(sled_id) {
+                assert_eq!(*sled_id, found_zones.sled_id);
+                write!(
+                    &mut s,
+                    "    zone generation: {:?}\n",
+                    found_zones.zones.generation
+                )
+                .unwrap();
+                write!(&mut s, "    zones found:\n").unwrap();
+                for zone in &found_zones.zones.zones {
+                    write!(
+                        &mut s,
+                        "        zone {} type {}\n",
+                        zone.id,
+                        zone.zone_type.label(),
+                    )
+                    .unwrap();
+                }
+            }
+        }
+
         write!(&mut s, "\nerrors:\n").unwrap();
         for e in &collection.errors {
             // Some error strings have OS error numbers in them.  We want to
@@ -486,6 +519,44 @@ mod test {
         s
     }
 
+    async fn sim_sled_agent(
+        log: slog::Logger,
+        sled_id: Uuid,
+        zone_id: Uuid,
+    ) -> sim::Server {
+        // Start a simulated sled agent.
+        let config =
+            sim::Config::for_testing(sled_id, sim::SimMode::Auto, None, None);
+        let agent = sim::Server::start(&config, &log, false).await.unwrap();
+
+        // Pretend to put some zones onto this sled.  We don't need to test this
+        // exhaustively here because there are builder tests that exercise a
+        // variety of different data.  We just want to make sure that if the
+        // sled agent reports something specific (some non-degenerate case),
+        // then it shows up in the resulting collection.
+        let sled_url = format!("http://{}/", agent.http_server.local_addr());
+        let client = sled_agent_client::Client::new(&sled_url, log);
+
+        let zone_address =
+            SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0);
+        client
+            .omicron_zones_put(&sled_agent_client::types::OmicronZonesConfig {
+                generation: sled_agent_client::types::Generation::from(3),
+                zones: vec![sled_agent_client::types::OmicronZoneConfig {
+                    id: zone_id,
+                    underlay_address: *zone_address.ip(),
+                    zone_type:
+                        sled_agent_client::types::OmicronZoneType::Oximeter {
+                            address: zone_address.to_string(),
+                        },
+                }],
+            })
+            .await
+            .expect("failed to write initial zone version to fake sled agent");
+
+        agent
+    }
+
     #[tokio::test]
     async fn test_basic() {
         // Set up the stock MGS test setup which includes a couple of fake SPs.
@@ -494,14 +565,21 @@ mod test {
             gateway_test_utils::setup::test_setup("test_basic", SpPort::One)
                 .await;
         let log = &gwtestctx.logctx.log;
+        let sled1 = sim_sled_agent(
+            log.clone(),
+            "9cb9b78f-5614-440c-b66d-e8e81fab69b0".parse().unwrap(),
+            "5125277f-0988-490b-ac01-3bba20cc8f07".parse().unwrap(),
+        )
+        .await;
+        let sled1_url = format!("http://{}/", sled1.http_server.local_addr());
         let mgs_url = format!("http://{}/", gwtestctx.client.bind_address);
         let mgs_client =
             Arc::new(gateway_client::Client::new(&mgs_url, log.clone()));
-        let sled_enum = StaticSledAgentEnumerator::empty();
+        let sled_enum = StaticSledAgentEnumerator::new([sled1_url]);
         let collector = Collector::new(
             "test-suite",
             &[mgs_client],
-            &sled_enum, // XXX-dap
+            &sled_enum,
             log.clone(),
         );
         let collection = collector
@@ -514,6 +592,7 @@ mod test {
         let s = dump_collection(&collection);
         expectorate::assert_contents("tests/output/collector_basic.txt", &s);
 
+        sled1.http_server.close().await.unwrap();
         gwtestctx.teardown().await;
     }
 

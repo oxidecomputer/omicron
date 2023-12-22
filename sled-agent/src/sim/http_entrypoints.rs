@@ -10,7 +10,7 @@ use crate::bootstrap::early_networking::{
 use crate::params::{
     DiskEnsureBody, InstanceEnsureBody, InstancePutMigrationIdsBody,
     InstancePutStateBody, InstancePutStateResponse, InstanceUnregisterResponse,
-    VpcFirewallRulesEnsureBody,
+    Inventory, OmicronZonesConfig, VpcFirewallRulesEnsureBody,
 };
 use dropshot::endpoint;
 use dropshot::ApiDescription;
@@ -56,6 +56,9 @@ pub fn api() -> SledApiDescription {
         api.register(uplink_ensure)?;
         api.register(read_network_bootstore_config)?;
         api.register(write_network_bootstore_config)?;
+        api.register(inventory)?;
+        api.register(omicron_zones_get)?;
+        api.register(omicron_zones_put)?;
 
         Ok(())
     }
@@ -382,5 +385,46 @@ async fn write_network_bootstore_config(
     _rqctx: RequestContext<Arc<SledAgent>>,
     _body: TypedBody<EarlyNetworkConfig>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+/// Fetch basic information about this sled
+#[endpoint {
+    method = GET,
+    path = "/inventory",
+}]
+async fn inventory(
+    rqctx: RequestContext<Arc<SledAgent>>,
+) -> Result<HttpResponseOk<Inventory>, HttpError> {
+    let sa = rqctx.context();
+    Ok(HttpResponseOk(sa.inventory(rqctx.server.local_addr).map_err(|e| {
+        // XXX-dap sync up and use this instead
+        // HttpError::for_internal_error(InlineErrorChain::new(e).to_string())
+        HttpError::for_internal_error(format!("{:#}", e))
+    })?))
+}
+
+#[endpoint {
+    method = GET,
+    path = "/omicron-zones",
+}]
+async fn omicron_zones_get(
+    rqctx: RequestContext<Arc<SledAgent>>,
+) -> Result<HttpResponseOk<OmicronZonesConfig>, HttpError> {
+    let sa = rqctx.context();
+    Ok(HttpResponseOk(sa.omicron_zones_list().await))
+}
+
+#[endpoint {
+    method = PUT,
+    path = "/omicron-zones",
+}]
+async fn omicron_zones_put(
+    rqctx: RequestContext<Arc<SledAgent>>,
+    body: TypedBody<OmicronZonesConfig>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let sa = rqctx.context();
+    let body_args = body.into_inner();
+    sa.omicron_zones_ensure(body_args).await;
     Ok(HttpResponseUpdatedNoContent())
 }
