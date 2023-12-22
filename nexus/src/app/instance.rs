@@ -61,6 +61,83 @@ use uuid::Uuid;
 
 const MAX_KEYS_PER_INSTANCE: u32 = 8;
 
+type SledAgentClientError =
+    sled_agent_client::Error<sled_agent_client::types::Error>;
+
+// Newtype wrapper to avoid the orphan type rule.
+#[derive(Debug, thiserror::Error)]
+pub struct SledAgentInstancePutError(pub SledAgentClientError);
+
+impl std::fmt::Display for SledAgentInstancePutError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<SledAgentClientError> for SledAgentInstancePutError {
+    fn from(value: SledAgentClientError) -> Self {
+        Self(value)
+    }
+}
+
+impl From<SledAgentInstancePutError> for omicron_common::api::external::Error {
+    fn from(value: SledAgentInstancePutError) -> Self {
+        value.0.into()
+    }
+}
+
+impl SledAgentInstancePutError {
+    /// Returns `true` if this error is of a class that indicates that Nexus
+    /// cannot assume anything about the health of the instance or its sled.
+    pub fn instance_unhealthy(&self) -> bool {
+        // TODO(#3238) TODO(#4226) For compatibility, this logic is lifted from
+        // the From impl that converts Progenitor client errors to
+        // `omicron_common::api::external::Error`s and from previous logic in
+        // this module that inferred instance health from those converted
+        // errors. In particular, some of the outer Progenitor client error
+        // variants (e.g. CommunicationError) can indicate transient conditions
+        // that aren't really fatal to an instance and don't otherwise indicate
+        // that it's unhealthy.
+        //
+        // To match old behavior until this is revisited, however, treat all
+        // Progenitor errors except for explicit error responses as signs of an
+        // unhealthy instance, and then only treat an instance as healthy if its
+        // sled returned a 400-level status code.
+        match &self.0 {
+            progenitor_client::Error::ErrorResponse(rv) => {
+                !rv.status().is_client_error()
+            }
+            _ => true,
+        }
+    }
+}
+
+/// An error that can be returned from an operation that changes the state of an
+/// instance on a specific sled.
+#[derive(Debug, thiserror::Error)]
+pub enum InstanceStateChangeError {
+    /// Sled agent returned an error from one of its instance endpoints.
+    #[error("sled agent client error")]
+    SledAgent(#[source] SledAgentInstancePutError),
+
+    /// Some other error occurred outside of the attempt to communicate with
+    /// sled agent.
+    #[error(transparent)]
+    Other(#[from] omicron_common::api::external::Error),
+}
+
+// Allow direct conversion of instance state change errors into API errors for
+// callers who don't care about the specific reason the update failed and just
+// need to return an API error.
+impl From<InstanceStateChangeError> for omicron_common::api::external::Error {
+    fn from(value: InstanceStateChangeError) -> Self {
+        match value {
+            InstanceStateChangeError::SledAgent(e) => e.into(),
+            InstanceStateChangeError::Other(e) => e,
+        }
+    }
+}
+
 /// The kinds of state changes that can be requested of an instance's current
 /// VMM (i.e. the VMM pointed to be the instance's `propolis_id` field).
 pub(crate) enum InstanceStateChangeRequest {
@@ -211,13 +288,13 @@ impl super::Nexus {
         // Reject instances where the memory is not at least
         // MIN_MEMORY_BYTES_PER_INSTANCE
         if params.memory.to_bytes() < MIN_MEMORY_BYTES_PER_INSTANCE as u64 {
-            return Err(Error::InvalidValue {
-                label: String::from("size"),
-                message: format!(
+            return Err(Error::invalid_value(
+                "size",
+                format!(
                     "memory must be at least {}",
                     ByteCount::from(MIN_MEMORY_BYTES_PER_INSTANCE)
                 ),
-            });
+            ));
         }
 
         // Reject instances where the memory is not divisible by
@@ -225,24 +302,24 @@ impl super::Nexus {
         if (params.memory.to_bytes() % MIN_MEMORY_BYTES_PER_INSTANCE as u64)
             != 0
         {
-            return Err(Error::InvalidValue {
-                label: String::from("size"),
-                message: format!(
+            return Err(Error::invalid_value(
+                "size",
+                format!(
                     "memory must be divisible by {}",
                     ByteCount::from(MIN_MEMORY_BYTES_PER_INSTANCE)
                 ),
-            });
+            ));
         }
 
         // Reject instances where the memory is greater than the limit
         if params.memory.to_bytes() > MAX_MEMORY_BYTES_PER_INSTANCE {
-            return Err(Error::InvalidValue {
-                label: String::from("size"),
-                message: format!(
+            return Err(Error::invalid_value(
+                "size",
+                format!(
                     "memory must be less than or equal to {}",
                     ByteCount::try_from(MAX_MEMORY_BYTES_PER_INSTANCE).unwrap()
                 ),
-            });
+            ));
         }
 
         let saga_params = sagas::instance_create::Params {
@@ -376,7 +453,7 @@ impl super::Nexus {
         }
 
         if instance.runtime().migration_id.is_some() {
-            return Err(Error::unavail("instance is already migrating"));
+            return Err(Error::conflict("instance is already migrating"));
         }
 
         // Kick off the migration saga
@@ -438,19 +515,30 @@ impl super::Nexus {
                 },
             )
             .await
-            .map(|res| Some(res.into_inner()));
+            .map(|res| Some(res.into_inner().into()))
+            .map_err(|e| SledAgentInstancePutError(e));
 
         // Write the updated instance runtime state back to CRDB. If this
         // outright fails, this operation fails. If the operation nominally
         // succeeds but nothing was updated, this action is outdated and the
         // caller should not proceed with migration.
-        let (updated, _) = self
-            .handle_instance_put_result(
-                &instance_id,
-                prev_instance_runtime,
-                instance_put_result.map(|state| state.map(Into::into)),
-            )
-            .await?;
+        let (updated, _) = match instance_put_result {
+            Ok(state) => {
+                self.write_returned_instance_state(&instance_id, state).await?
+            }
+            Err(e) => {
+                if e.instance_unhealthy() {
+                    let _ = self
+                        .mark_instance_failed(
+                            &instance_id,
+                            &prev_instance_runtime,
+                            &e,
+                        )
+                        .await;
+                }
+                return Err(e.into());
+            }
+        };
 
         if updated {
             Ok(self
@@ -498,14 +586,26 @@ impl super::Nexus {
                 },
             )
             .await
-            .map(|res| Some(res.into_inner()));
+            .map(|res| Some(res.into_inner().into()))
+            .map_err(|e| SledAgentInstancePutError(e));
 
-        self.handle_instance_put_result(
-            &instance_id,
-            prev_instance_runtime,
-            instance_put_result.map(|state| state.map(Into::into)),
-        )
-        .await?;
+        match instance_put_result {
+            Ok(state) => {
+                self.write_returned_instance_state(&instance_id, state).await?;
+            }
+            Err(e) => {
+                if e.instance_unhealthy() {
+                    let _ = self
+                        .mark_instance_failed(
+                            &instance_id,
+                            &prev_instance_runtime,
+                            &e,
+                        )
+                        .await;
+                }
+                return Err(e.into());
+            }
+        }
 
         Ok(())
     }
@@ -524,14 +624,31 @@ impl super::Nexus {
             .instance_fetch_with_vmm(opctx, &authz_instance)
             .await?;
 
-        self.instance_request_state(
-            opctx,
-            &authz_instance,
-            state.instance(),
-            state.vmm(),
-            InstanceStateChangeRequest::Reboot,
-        )
-        .await?;
+        if let Err(e) = self
+            .instance_request_state(
+                opctx,
+                &authz_instance,
+                state.instance(),
+                state.vmm(),
+                InstanceStateChangeRequest::Reboot,
+            )
+            .await
+        {
+            if let InstanceStateChangeError::SledAgent(inner) = &e {
+                if inner.instance_unhealthy() {
+                    let _ = self
+                        .mark_instance_failed(
+                            &authz_instance.id(),
+                            state.instance().runtime(),
+                            inner,
+                        )
+                        .await;
+                }
+            }
+
+            return Err(e.into());
+        }
+
         self.db_datastore.instance_fetch_with_vmm(opctx, &authz_instance).await
     }
 
@@ -611,14 +728,30 @@ impl super::Nexus {
             .instance_fetch_with_vmm(opctx, &authz_instance)
             .await?;
 
-        self.instance_request_state(
-            opctx,
-            &authz_instance,
-            state.instance(),
-            state.vmm(),
-            InstanceStateChangeRequest::Stop,
-        )
-        .await?;
+        if let Err(e) = self
+            .instance_request_state(
+                opctx,
+                &authz_instance,
+                state.instance(),
+                state.vmm(),
+                InstanceStateChangeRequest::Stop,
+            )
+            .await
+        {
+            if let InstanceStateChangeError::SledAgent(inner) = &e {
+                if inner.instance_unhealthy() {
+                    let _ = self
+                        .mark_instance_failed(
+                            &authz_instance.id(),
+                            state.instance().runtime(),
+                            inner,
+                        )
+                        .await;
+                }
+            }
+
+            return Err(e.into());
+        }
 
         self.db_datastore.instance_fetch_with_vmm(opctx, &authz_instance).await
     }
@@ -631,22 +764,18 @@ impl super::Nexus {
         opctx: &OpContext,
         authz_instance: &authz::Instance,
         sled_id: &Uuid,
-        prev_instance_runtime: &db::model::InstanceRuntimeState,
-    ) -> Result<(), Error> {
+    ) -> Result<Option<nexus::SledInstanceState>, InstanceStateChangeError>
+    {
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
         let sa = self.sled_client(&sled_id).await?;
-        let result = sa
-            .instance_unregister(&authz_instance.id())
+        sa.instance_unregister(&authz_instance.id())
             .await
-            .map(|res| res.into_inner().updated_runtime);
-
-        self.handle_instance_put_result(
-            &authz_instance.id(),
-            prev_instance_runtime,
-            result.map(|state| state.map(Into::into)),
-        )
-        .await
-        .map(|_| ())
+            .map(|res| res.into_inner().updated_runtime.map(Into::into))
+            .map_err(|e| {
+                InstanceStateChangeError::SledAgent(SledAgentInstancePutError(
+                    e,
+                ))
+            })
     }
 
     /// Determines the action to take on an instance's active VMM given a
@@ -785,12 +914,10 @@ impl super::Nexus {
         if allowed {
             Ok(InstanceStateChangeRequestAction::SendToSled(sled_id))
         } else {
-            Err(Error::InvalidRequest {
-                message: format!(
-                    "instance state cannot be changed from state \"{}\"",
-                    effective_state
-                ),
-            })
+            Err(Error::invalid_request(format!(
+                "instance state cannot be changed from state \"{}\"",
+                effective_state
+            )))
         }
     }
 
@@ -801,7 +928,7 @@ impl super::Nexus {
         prev_instance_state: &db::model::Instance,
         prev_vmm_state: &Option<db::model::Vmm>,
         requested: InstanceStateChangeRequest,
-    ) -> Result<(), Error> {
+    ) -> Result<(), InstanceStateChangeError> {
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
         let instance_id = authz_instance.id();
 
@@ -819,16 +946,23 @@ impl super::Nexus {
                         &InstancePutStateBody { state: requested.into() },
                     )
                     .await
-                    .map(|res| res.into_inner().updated_runtime)
-                    .map(|state| state.map(Into::into));
+                    .map(|res| res.into_inner().updated_runtime.map(Into::into))
+                    .map_err(|e| SledAgentInstancePutError(e));
 
-                self.handle_instance_put_result(
-                    &instance_id,
-                    prev_instance_state.runtime(),
-                    instance_put_result,
-                )
-                .await
-                .map(|_| ())
+                // If the operation succeeded, write the instance state back,
+                // returning any subsequent errors that occurred during that
+                // write.
+                //
+                // If the operation failed, kick the sled agent error back up to
+                // the caller to let it decide how to handle it.
+                match instance_put_result {
+                    Ok(state) => self
+                        .write_returned_instance_state(&instance_id, state)
+                        .await
+                        .map(|_| ())
+                        .map_err(Into::into),
+                    Err(e) => Err(InstanceStateChangeError::SledAgent(e)),
+                }
             }
         }
     }
@@ -1048,143 +1182,117 @@ impl super::Nexus {
                 },
             )
             .await
-            .map(|res| Some(res.into_inner()));
+            .map(|res| Some(res.into_inner().into()))
+            .map_err(|e| SledAgentInstancePutError(e));
 
-        self.handle_instance_put_result(
-            &db_instance.id(),
-            db_instance.runtime(),
-            instance_register_result.map(|state| state.map(Into::into)),
-        )
-        .await
-        .map(|_| ())
+        match instance_register_result {
+            Ok(state) => {
+                self.write_returned_instance_state(&db_instance.id(), state)
+                    .await?;
+            }
+            Err(e) => {
+                if e.instance_unhealthy() {
+                    let _ = self
+                        .mark_instance_failed(
+                            &db_instance.id(),
+                            db_instance.runtime(),
+                            &e,
+                        )
+                        .await;
+                }
+                return Err(e.into());
+            }
+        }
+
+        Ok(())
     }
 
-    /// Updates an instance's CRDB record based on the result of a call to sled
-    /// agent that tried to update the instance's state.
-    ///
-    /// # Parameters
-    ///
-    /// - `db_instance`: The CRDB instance record observed by the caller before
-    ///   it attempted to update the instance's state.
-    /// - `result`: The result of the relevant sled agent operation. If this is
-    ///   `Ok`, the payload is the updated instance runtime state returned from
-    ///   sled agent, if there was one.
+    /// Takes an updated instance state returned from a call to sled agent and
+    /// writes it back to the database.
     ///
     /// # Return value
     ///
-    /// - `Ok(true)` if the caller supplied an updated instance record and this
-    ///   routine successfully wrote it to CRDB.
-    /// - `Ok(false)` if the sled agent call succeeded, but this routine did not
-    ///   update CRDB.
-    ///   This can happen either because sled agent didn't return an updated
-    ///   record or because the updated record was superseded by a state update
-    ///   with a more advanced generation number.
-    /// - `Err` if the sled agent operation failed or this routine received an
-    ///   error while trying to update CRDB.
-    async fn handle_instance_put_result(
+    /// - `Ok((instance_updated, vmm_updated))` if no failures occurred. The
+    ///   tuple fields indicate which database records (if any) were updated.
+    ///   Note that it is possible for sled agent not to return an updated
+    ///   instance state from a particular API call. In that case, the `state`
+    ///   parameter is `None` and this routine returns `Ok((false, false))`.
+    /// - `Err` if an error occurred while writing state to the database. A
+    ///   database operation that succeeds but doesn't update anything (e.g.
+    ///   owing to an outdated generation number) will return `Ok`.
+    async fn write_returned_instance_state(
+        &self,
+        instance_id: &Uuid,
+        state: Option<nexus::SledInstanceState>,
+    ) -> Result<(bool, bool), Error> {
+        slog::debug!(&self.log,
+                     "writing instance state returned from sled agent";
+                     "instance_id" => %instance_id,
+                     "new_state" => ?state);
+
+        if let Some(state) = state {
+            let update_result = self
+                .db_datastore
+                .instance_and_vmm_update_runtime(
+                    instance_id,
+                    &state.instance_state.into(),
+                    &state.propolis_id,
+                    &state.vmm_state.into(),
+                )
+                .await;
+
+            slog::debug!(&self.log,
+                         "attempted to write instance state from sled agent";
+                         "instance_id" => %instance_id,
+                         "propolis_id" => %state.propolis_id,
+                         "result" => ?update_result);
+
+            update_result
+        } else {
+            Ok((false, false))
+        }
+    }
+
+    /// Attempts to move an instance from `prev_instance_runtime` to the
+    /// `Failed` state in response to an error returned from a call to a sled
+    /// agent instance API, supplied in `reason`.
+    pub(crate) async fn mark_instance_failed(
         &self,
         instance_id: &Uuid,
         prev_instance_runtime: &db::model::InstanceRuntimeState,
-        result: Result<
-            Option<nexus::SledInstanceState>,
-            sled_agent_client::Error<sled_agent_client::types::Error>,
-        >,
-    ) -> Result<(bool, bool), Error> {
-        slog::debug!(&self.log, "Handling sled agent instance PUT result";
-                     "instance_id" => %instance_id,
-                     "result" => ?result);
+        reason: &SledAgentInstancePutError,
+    ) -> Result<(), Error> {
+        error!(self.log, "marking instance failed due to sled agent API error";
+               "instance_id" => %instance_id,
+               "error" => ?reason);
 
-        match result {
-            Ok(Some(new_state)) => {
-                let update_result = self
-                    .db_datastore
-                    .instance_and_vmm_update_runtime(
-                        instance_id,
-                        &new_state.instance_state.into(),
-                        &new_state.propolis_id,
-                        &new_state.vmm_state.into(),
-                    )
-                    .await;
+        let new_runtime = db::model::InstanceRuntimeState {
+            nexus_state: db::model::InstanceState::new(InstanceState::Failed),
 
-                slog::debug!(&self.log,
-                             "Attempted DB update after instance PUT";
-                             "instance_id" => %instance_id,
-                             "propolis_id" => %new_state.propolis_id,
-                             "result" => ?update_result);
+            // TODO(#4226): Clearing the Propolis ID is required to allow the
+            // instance to be deleted, but this doesn't actually terminate the
+            // VMM.
+            propolis_id: None,
+            gen: prev_instance_runtime.gen.next().into(),
+            ..prev_instance_runtime.clone()
+        };
 
-                update_result
-            }
-            Ok(None) => Ok((false, false)),
-            Err(e) => {
-                // The sled-agent has told us that it can't do what we
-                // requested, but does that mean a failure? One example would be
-                // if we try to "reboot" a stopped instance. That shouldn't
-                // transition the instance to failed. But if the sled-agent
-                // *can't* boot a stopped instance, that should transition
-                // to failed.
-                //
-                // Without a richer error type, let the sled-agent tell Nexus
-                // what to do with status codes.
-                error!(self.log, "received error from instance PUT";
-                       "instance_id" => %instance_id,
-                       "error" => ?e);
-
-                // Convert to the Omicron API error type.
-                //
-                // TODO(#3238): This is an extremely lossy conversion: if the
-                // operation failed without getting a response from sled agent,
-                // this unconditionally converts to Error::InternalError.
-                let e = e.into();
-
-                match &e {
-                    // Bad request shouldn't change the instance state.
-                    Error::InvalidRequest { .. } => Err(e),
-
-                    // Internal server error (or anything else) should change
-                    // the instance state to failed, we don't know what state
-                    // the instance is in.
-                    //
-                    // TODO(#4226): This logic needs to be revisited:
-                    // - Some errors that don't get classified as
-                    //   Error::InvalidRequest (timeouts, disconnections due to
-                    //   network weather, etc.) are not necessarily fatal to the
-                    //   instance and shouldn't mark it as Failed.
-                    // - If the instance still has a running VMM, this operation
-                    //   won't terminate it or reclaim its resources. (The
-                    //   resources will be reclaimed if the sled later reports
-                    //   that the VMM is gone, however.)
-                    _ => {
-                        let new_runtime = db::model::InstanceRuntimeState {
-                            nexus_state: db::model::InstanceState::new(
-                                InstanceState::Failed,
-                            ),
-
-                            // TODO(#4226): Clearing the Propolis ID is required
-                            // to allow the instance to be deleted, but this
-                            // doesn't actually terminate the VMM (see above).
-                            propolis_id: None,
-                            gen: prev_instance_runtime.gen.next().into(),
-                            ..prev_instance_runtime.clone()
-                        };
-
-                        // XXX what if this fails?
-                        let result = self
-                            .db_datastore
-                            .instance_update_runtime(&instance_id, &new_runtime)
-                            .await;
-
-                        error!(
-                            self.log,
-                            "attempted to set instance to Failed after bad put";
+        match self
+            .db_datastore
+            .instance_update_runtime(&instance_id, &new_runtime)
+            .await
+        {
+            Ok(_) => info!(self.log, "marked instance as Failed";
+                           "instance_id" => %instance_id),
+            // XXX: It's not clear what to do with this error; should it be
+            // bubbled back up to the caller?
+            Err(e) => error!(self.log,
+                            "failed to write Failed instance state to DB";
                             "instance_id" => %instance_id,
-                            "result" => ?result,
-                        );
-
-                        Err(e)
-                    }
-                }
-            }
+                            "error" => ?e),
         }
+
+        Ok(())
     }
 
     /// Lists disks attached to the instance.
@@ -1231,10 +1339,9 @@ impl super::Nexus {
         // permissions on both) without verifying the shared hierarchy. To
         // mitigate that we verify that their parent projects have the same ID.
         if authz_project.id() != authz_project_disk.id() {
-            return Err(Error::InvalidRequest {
-                message: "disk must be in the same project as the instance"
-                    .to_string(),
-            });
+            return Err(Error::invalid_request(
+                "disk must be in the same project as the instance",
+            ));
         }
 
         // TODO(https://github.com/oxidecomputer/omicron/issues/811):
@@ -1614,28 +1721,22 @@ impl super::Nexus {
                 | InstanceState::Starting
                 | InstanceState::Stopping
                 | InstanceState::Stopped
-                | InstanceState::Failed => Err(Error::ServiceUnavailable {
-                    internal_message: format!(
-                        "cannot connect to serial console of instance in state \
-                            {:?}",
-                        vmm.runtime.state.0
-                    ),
-                }),
-                InstanceState::Destroyed => Err(Error::ServiceUnavailable {
-                    internal_message: format!(
-                        "cannot connect to serial console of instance in state \
-                        {:?}",
-                        InstanceState::Stopped),
-                }),
+                | InstanceState::Failed => {
+                    Err(Error::invalid_request(format!(
+                        "cannot connect to serial console of instance in state \"{}\"",
+                        vmm.runtime.state.0,
+                    )))
+                }
+                InstanceState::Destroyed => Err(Error::invalid_request(
+                    "cannot connect to serial console of destroyed instance",
+                )),
             }
         } else {
-            Err(Error::ServiceUnavailable {
-                internal_message: format!(
-                    "instance is in state {:?} and has no active serial console \
+            Err(Error::invalid_request(format!(
+                "instance is {} and has no active serial console \
                     server",
-                    instance.runtime().nexus_state
-                )
-            })
+                instance.runtime().nexus_state
+            )))
         }
     }
 

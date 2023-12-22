@@ -6,11 +6,13 @@
 
 use super::{
     console_api, device_auth, params,
+    params::ProjectSelector,
     shared::UninitializedSled,
     views::{
         self, Certificate, Group, IdentityProvider, Image, IpPool, IpPoolRange,
-        PhysicalDisk, Project, Rack, Role, Silo, Sled, Snapshot, SshKey, User,
-        UserBuiltin, Vpc, VpcRouter, VpcSubnet,
+        PhysicalDisk, Project, Rack, Role, Silo, SiloQuotas, SiloUtilization,
+        Sled, SledInstance, Snapshot, SshKey, Switch, User, UserBuiltin, Vpc,
+        VpcRouter, VpcSubnet,
     },
 };
 use crate::external_api::shared;
@@ -38,6 +40,7 @@ use dropshot::{
 use ipnetwork::IpNetwork;
 use nexus_db_queries::authz;
 use nexus_db_queries::db;
+use nexus_db_queries::db::identity::AssetIdentityMetadata;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup::ImageLookup;
 use nexus_db_queries::db::lookup::ImageParentLookup;
@@ -45,11 +48,7 @@ use nexus_db_queries::db::model::Name;
 use nexus_db_queries::{
     authz::ApiResource, db::fixed_data::silo::INTERNAL_SILO_ID,
 };
-use nexus_types::external_api::params::ProjectSelector;
-use nexus_types::{
-    external_api::views::{SledInstance, Switch},
-    identity::AssetIdentityMetadata,
-};
+use nexus_types::external_api::views::Utilization;
 use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_common::api::external::http_pagination::marker_for_name;
 use omicron_common::api::external::http_pagination::marker_for_name_or_id;
@@ -154,7 +153,6 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(disk_bulk_write_import_start)?;
         api.register(disk_bulk_write_import)?;
         api.register(disk_bulk_write_import_stop)?;
-        api.register(disk_import_blocks_from_url)?;
         api.register(disk_finalize_import)?;
 
         api.register(instance_list)?;
@@ -229,7 +227,7 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(physical_disk_list)?;
         api.register(switch_list)?;
         api.register(switch_view)?;
-        api.register(uninitialized_sled_list)?;
+        api.register(sled_list_uninitialized)?;
         api.register(add_sled_to_initialized_rack)?;
 
         api.register(user_builtin_list)?;
@@ -273,6 +271,8 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(networking_bgp_announce_set_list)?;
         api.register(networking_bgp_announce_set_delete)?;
 
+        api.register(utilization_view)?;
+
         // Fleet-wide API operations
         api.register(silo_list)?;
         api.register(silo_create)?;
@@ -280,6 +280,13 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(silo_delete)?;
         api.register(silo_policy_view)?;
         api.register(silo_policy_update)?;
+
+        api.register(silo_utilization_view)?;
+        api.register(silo_utilization_list)?;
+
+        api.register(system_quotas_list)?;
+        api.register(silo_quotas_view)?;
+        api.register(silo_quotas_update)?;
 
         api.register(silo_identity_provider_list)?;
 
@@ -507,6 +514,172 @@ async fn policy_update(
         let policy =
             nexus.silo_update_policy(&opctx, &silo_lookup, &new_policy).await?;
         Ok(HttpResponseOk(policy))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// View the resource utilization of the user's current silo
+#[endpoint {
+    method = GET,
+    path = "/v1/utilization",
+    tags = ["silos"],
+}]
+async fn utilization_view(
+    rqctx: RequestContext<Arc<ServerContext>>,
+) -> Result<HttpResponseOk<Utilization>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let silo_lookup = nexus.current_silo_lookup(&opctx)?;
+        let utilization =
+            nexus.silo_utilization_view(&opctx, &silo_lookup).await?;
+
+        Ok(HttpResponseOk(utilization.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// View the current utilization of a given silo
+#[endpoint {
+    method = GET,
+    path = "/v1/system/utilization/silos/{silo}",
+    tags = ["system/silos"],
+}]
+async fn silo_utilization_view(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::SiloPath>,
+) -> Result<HttpResponseOk<SiloUtilization>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let silo_lookup =
+            nexus.silo_lookup(&opctx, path_params.into_inner().silo)?;
+        let quotas = nexus.silo_utilization_view(&opctx, &silo_lookup).await?;
+
+        Ok(HttpResponseOk(quotas.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+/// List current utilization state for all silos
+#[endpoint {
+    method = GET,
+    path = "/v1/system/utilization/silos",
+    tags = ["system/silos"],
+}]
+async fn silo_utilization_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedByNameOrId>,
+) -> Result<HttpResponseOk<ResultsPage<SiloUtilization>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+
+        let query = query_params.into_inner();
+        let pagparams = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pagparams, scan_params)?;
+
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let utilization = nexus
+            .silo_utilization_list(&opctx, &paginated_by)
+            .await?
+            .into_iter()
+            .map(|p| p.into())
+            .collect();
+
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
+            utilization,
+            &marker_for_name_or_id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Lists resource quotas for all silos
+#[endpoint {
+    method = GET,
+    path = "/v1/system/silo-quotas",
+    tags = ["system/silos"],
+}]
+async fn system_quotas_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<SiloQuotas>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+
+        let query = query_params.into_inner();
+        let pagparams = data_page_params_for(&rqctx, &query)?;
+
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let quotas = nexus
+            .fleet_list_quotas(&opctx, &pagparams)
+            .await?
+            .into_iter()
+            .map(|p| p.into())
+            .collect();
+
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            quotas,
+            &|_, quota: &SiloQuotas| quota.silo_id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// View the resource quotas of a given silo
+#[endpoint {
+    method = GET,
+    path = "/v1/system/silos/{silo}/quotas",
+    tags = ["system/silos"],
+}]
+async fn silo_quotas_view(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::SiloPath>,
+) -> Result<HttpResponseOk<SiloQuotas>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let silo_lookup =
+            nexus.silo_lookup(&opctx, path_params.into_inner().silo)?;
+        let quota = nexus.silo_quotas_view(&opctx, &silo_lookup).await?;
+        Ok(HttpResponseOk(quota.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Update the resource quotas of a given silo
+///
+/// If a quota value is not specified, it will remain unchanged.
+#[endpoint {
+    method = PUT,
+    path = "/v1/system/silos/{silo}/quotas",
+    tags = ["system/silos"],
+}]
+async fn silo_quotas_update(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::SiloPath>,
+    new_quota: TypedBody<params::SiloQuotasUpdate>,
+) -> Result<HttpResponseOk<SiloQuotas>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let silo_lookup =
+            nexus.silo_lookup(&opctx, path_params.into_inner().silo)?;
+        let quota = nexus
+            .silo_update_quota(&opctx, &silo_lookup, &new_quota.into_inner())
+            .await?;
+        Ok(HttpResponseOk(quota.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1910,39 +2083,6 @@ async fn disk_bulk_write_import_stop(
         let disk_lookup = nexus.disk_lookup(&opctx, disk_selector)?;
 
         nexus.disk_manual_import_stop(&opctx, &disk_lookup).await?;
-
-        Ok(HttpResponseUpdatedNoContent())
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Request to import blocks from URL
-#[endpoint {
-    method = POST,
-    path = "/v1/disks/{disk}/import",
-    tags = ["disks"],
-}]
-async fn disk_import_blocks_from_url(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<params::DiskPath>,
-    query_params: Query<params::OptionalProjectSelector>,
-    import_params: TypedBody<params::ImportBlocksFromUrl>,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let query = query_params.into_inner();
-        let params = import_params.into_inner();
-
-        let disk_selector =
-            params::DiskSelector { disk: path.disk, project: query.project };
-        let disk_lookup = nexus.disk_lookup(&opctx, disk_selector)?;
-
-        nexus
-            .import_blocks_from_url_for_disk(&opctx, &disk_lookup, params)
-            .await?;
 
         Ok(HttpResponseUpdatedNoContent())
     };
@@ -4514,18 +4654,26 @@ async fn rack_view(
 /// List uninitialized sleds in a given rack
 #[endpoint {
     method = GET,
-    path = "/v1/system/hardware/uninitialized-sleds",
+    path = "/v1/system/hardware/sleds-uninitialized",
     tags = ["system/hardware"]
 }]
-async fn uninitialized_sled_list(
+async fn sled_list_uninitialized(
     rqctx: RequestContext<Arc<ServerContext>>,
-) -> Result<HttpResponseOk<Vec<UninitializedSled>>, HttpError> {
+    query: Query<PaginationParams<EmptyScanParams, String>>,
+) -> Result<HttpResponseOk<ResultsPage<UninitializedSled>>, HttpError> {
     let apictx = rqctx.context();
+    // We don't actually support real pagination
+    let pag_params = query.into_inner();
+    if let dropshot::WhichPage::Next(last_seen) = &pag_params.page {
+        return Err(
+            Error::invalid_value(last_seen.clone(), "bad page token").into()
+        );
+    }
     let handler = async {
         let nexus = &apictx.nexus;
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let sleds = nexus.uninitialized_sled_list(&opctx).await?;
-        Ok(HttpResponseOk(sleds))
+        let sleds = nexus.sled_list_uninitialized(&opctx).await?;
+        Ok(HttpResponseOk(ResultsPage { items: sleds, next_page: None }))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -5432,10 +5580,7 @@ async fn role_list(
             WhichPage::First(..) => None,
             WhichPage::Next(RolePage { last_seen }) => {
                 Some(last_seen.split_once('.').ok_or_else(|| {
-                    Error::InvalidValue {
-                        label: last_seen.clone(),
-                        message: String::from("bad page token"),
-                    }
+                    Error::invalid_value(last_seen.clone(), "bad page token")
                 })?)
                 .map(|(s1, s2)| (s1.to_string(), s2.to_string()))
             }

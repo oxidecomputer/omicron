@@ -845,12 +845,7 @@ impl ServiceManager {
                 None,
                 omicron_zones_config.clone(),
                 |z: &OmicronZoneConfig| {
-                    matches!(
-                        z.zone_type,
-                        OmicronZoneType::InternalDns { .. }
-                            | OmicronZoneType::BoundaryNtp { .. }
-                            | OmicronZoneType::InternalNtp { .. }
-                    )
+                    matches!(z.zone_type, OmicronZoneType::InternalDns { .. })
                 },
             )
             .await?;
@@ -859,8 +854,6 @@ impl ServiceManager {
         // synchronization, which is a pre-requisite for the other services. We
         // keep `OmicronZoneType::InternalDns` because
         // `ensure_all_omicron_zones` is additive.
-        // TODO This looks like a duplicate of the block above -- why do we do
-        // this?
         let all_zones_request = self
             .ensure_all_omicron_zones(
                 &mut existing_zones,
@@ -1378,8 +1371,8 @@ impl ServiceManager {
             .add_property_group(dns_config_builder)
             // We do need to enable the default instance of the
             // dns/install service.  It's enough to just mention it
-            // here, as the ServiceInstanceBuilder always enables the
-            // instance being added.
+            // here, as the ServiceInstanceBuilder enables the
+            // instance being added by default.
             .add_instance(ServiceInstanceBuilder::new("default")))
     }
 
@@ -1480,6 +1473,8 @@ impl ServiceManager {
         //
         // These zones are self-assembling -- after they boot, there should
         // be no "zlogin" necessary to initialize.
+        let disabled_ssh_service = ServiceBuilder::new("network/ssh")
+            .add_instance(ServiceInstanceBuilder::new("default").disable());
         match &request {
             ZoneArgs::Omicron(OmicronZoneConfigLocal {
                 zone:
@@ -1514,6 +1509,7 @@ impl ServiceManager {
                     );
 
                 let profile = ProfileBuilder::new("omicron")
+                    .add_service(disabled_ssh_service)
                     .add_service(clickhouse_service)
                     .add_service(dns_service);
                 profile
@@ -1558,6 +1554,7 @@ impl ServiceManager {
                                 .add_property_group(config),
                         );
                 let profile = ProfileBuilder::new("omicron")
+                    .add_service(disabled_ssh_service)
                     .add_service(clickhouse_keeper_service)
                     .add_service(dns_service);
                 profile
@@ -1610,6 +1607,7 @@ impl ServiceManager {
                     );
 
                 let profile = ProfileBuilder::new("omicron")
+                    .add_service(disabled_ssh_service)
                     .add_service(cockroachdb_service)
                     .add_service(dns_service);
                 profile
@@ -1653,12 +1651,15 @@ impl ServiceManager {
                     .add_property("uuid", "astring", uuid)
                     .add_property("store", "astring", "/data");
 
-                let profile = ProfileBuilder::new("omicron").add_service(
-                    ServiceBuilder::new("oxide/crucible/agent").add_instance(
-                        ServiceInstanceBuilder::new("default")
-                            .add_property_group(config),
-                    ),
-                );
+                let profile = ProfileBuilder::new("omicron")
+                    .add_service(disabled_ssh_service)
+                    .add_service(
+                        ServiceBuilder::new("oxide/crucible/agent")
+                            .add_instance(
+                                ServiceInstanceBuilder::new("default")
+                                    .add_property_group(config),
+                            ),
+                    );
                 profile
                     .add_to_zone(&self.inner.log, &installed_zone)
                     .await
@@ -1692,12 +1693,15 @@ impl ServiceManager {
                     .add_property("listen_addr", "astring", listen_addr)
                     .add_property("listen_port", "astring", listen_port);
 
-                let profile = ProfileBuilder::new("omicron").add_service(
-                    ServiceBuilder::new("oxide/crucible/pantry").add_instance(
-                        ServiceInstanceBuilder::new("default")
-                            .add_property_group(config),
-                    ),
-                );
+                let profile = ProfileBuilder::new("omicron")
+                    .add_service(disabled_ssh_service)
+                    .add_service(
+                        ServiceBuilder::new("oxide/crucible/pantry")
+                            .add_instance(
+                                ServiceInstanceBuilder::new("default")
+                                    .add_property_group(config),
+                            ),
+                    );
                 profile
                     .add_to_zone(&self.inner.log, &installed_zone)
                     .await
@@ -3891,7 +3895,6 @@ mod test {
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_ensure_service() {
         let logctx =
             omicron_test_utils::dev::test_setup_log("test_ensure_service");
@@ -3923,7 +3926,6 @@ mod test {
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_ensure_service_which_already_exists() {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_ensure_service_which_already_exists",
@@ -3951,7 +3953,6 @@ mod test {
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_services_are_recreated_on_reboot() {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_services_are_recreated_on_reboot",
@@ -3988,7 +3989,6 @@ mod test {
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_services_do_not_persist_without_config() {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_services_do_not_persist_without_config",
@@ -4030,7 +4030,6 @@ mod test {
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_bad_generations() {
         // Start like the normal tests.
         let logctx =
@@ -4135,7 +4134,6 @@ mod test {
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_old_ledger_migration() {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_old_ledger_migration",
@@ -4200,7 +4198,6 @@ mod test {
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_old_ledger_migration_continue() {
         // This test is just like "test_old_ledger_migration", except that we
         // deploy a new zone after migration and before shutting down the
@@ -4278,7 +4275,6 @@ mod test {
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_old_ledger_migration_bad() {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_old_ledger_migration_bad",

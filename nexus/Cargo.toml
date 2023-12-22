@@ -32,7 +32,6 @@ http.workspace = true
 hyper.workspace = true
 internal-dns.workspace = true
 ipnetwork.workspace = true
-lazy_static.workspace = true
 macaddr.workspace = true
 mime_guess.workspace = true
 # Not under "dev-dependencies"; these also need to be implemented for

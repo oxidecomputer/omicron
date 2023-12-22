@@ -1786,7 +1786,7 @@ mod test {
     const INSTANCE_NAME: &str = "base-instance";
 
     async fn create_org_project_and_disk(client: &ClientTestContext) -> Uuid {
-        create_ip_pool(&client, "p0", None).await;
+        create_ip_pool(&client, "p0", None, None).await;
         create_project(client, PROJECT_NAME).await;
         create_disk(client, PROJECT_NAME, DISK_NAME).await.identity.id
     }

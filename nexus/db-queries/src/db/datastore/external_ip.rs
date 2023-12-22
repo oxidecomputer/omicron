@@ -147,22 +147,34 @@ impl DataStore {
     ) -> CreateResult<ExternalIp> {
         let ip_id = Uuid::new_v4();
 
-        let pool_id = match params.pool {
-            Some(NameOrId::Name(name)) => {
-                LookupPath::new(opctx, self)
-                    .ip_pool_name(&Name(name))
-                    .fetch_for(authz::Action::Read)
-                    .await?
-                    .1
+        // See `allocate_instance_ephemeral_ip`: we're replicating
+        // its strucutre to prevent cross-silo pool access.
+        let pool_id = if let Some(name_or_id) = params.pool {
+            let (.., authz_pool, pool) = match name_or_id {
+                NameOrId::Name(name) => {
+                    LookupPath::new(opctx, self)
+                        .ip_pool_name(&Name(name))
+                        .fetch_for(authz::Action::CreateChild)
+                        .await?
+                }
+                NameOrId::Id(id) => {
+                    LookupPath::new(opctx, self)
+                        .ip_pool_id(id)
+                        .fetch_for(authz::Action::CreateChild)
+                        .await?
+                }
+            };
+
+            let authz_silo_id = opctx.authn.silo_required()?.id();
+            if let Some(pool_silo_id) = pool.silo_id {
+                if pool_silo_id != authz_silo_id {
+                    return Err(authz_pool.not_found());
+                }
             }
-            Some(NameOrId::Id(id)) => {
-                LookupPath::new(opctx, self)
-                    .ip_pool_id(id)
-                    .fetch_for(authz::Action::Read)
-                    .await?
-                    .1
-            }
-            None => self.ip_pools_fetch_default(opctx).await?,
+
+            pool
+        } else {
+            self.ip_pools_fetch_default(opctx).await?
         }
         .id();
 
@@ -219,9 +231,12 @@ impl DataStore {
                             "Requested external IP address not available",
                         ))
                     } else {
-                        TransactionError::CustomError(Error::invalid_request(
-                            "No external IP addresses available",
-                        ))
+                        TransactionError::CustomError(
+                            Error::insufficient_capacity(
+                                "No external IP addresses available",
+                                "NextExternalIp::new returned NotFound",
+                            ),
+                        )
                     }
                 }
                 DatabaseError(UniqueViolation, ..) if name.is_some() => {
@@ -450,10 +465,9 @@ impl DataStore {
             })?;
 
         if updated_rows == 0 {
-            return Err(Error::InvalidRequest {
-                message: "deletion failed due to concurrent modification"
-                    .to_string(),
-            });
+            return Err(Error::invalid_request(
+                "deletion failed due to concurrent modification",
+            ));
         }
         Ok(())
     }

@@ -699,55 +699,6 @@
         }
       }
     },
-    "/v1/disks/{disk}/import": {
-      "post": {
-        "tags": [
-          "disks"
-        ],
-        "summary": "Request to import blocks from URL",
-        "operationId": "disk_import_blocks_from_url",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "disk",
-            "description": "Name or ID of the disk",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "project",
-            "description": "Name or ID of the project",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ImportBlocksFromUrl"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/v1/disks/{disk}/metrics/{metric}": {
       "get": {
         "tags": [
@@ -4064,6 +4015,58 @@
         }
       }
     },
+    "/v1/system/hardware/sleds-uninitialized": {
+      "get": {
+        "tags": [
+          "system/hardware"
+        ],
+        "summary": "List uninitialized sleds in a given rack",
+        "operationId": "sled_list_uninitialized",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UninitializedSledResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
     "/v1/system/hardware/switch-port": {
       "get": {
         "tags": [
@@ -4326,37 +4329,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Switch"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/v1/system/hardware/uninitialized-sleds": {
-      "get": {
-        "tags": [
-          "system/hardware"
-        ],
-        "summary": "List uninitialized sleds in a given rack",
-        "operationId": "uninitialized_sled_list",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "title": "Array_of_UninitializedSled",
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/UninitializedSled"
-                  }
                 }
               }
             }
@@ -6259,6 +6231,65 @@
         }
       }
     },
+    "/v1/system/silo-quotas": {
+      "get": {
+        "tags": [
+          "system/silos"
+        ],
+        "summary": "Lists resource quotas for all silos",
+        "operationId": "system_quotas_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiloQuotasResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
     "/v1/system/silos": {
       "get": {
         "tags": [
@@ -6507,6 +6538,91 @@
         }
       }
     },
+    "/v1/system/silos/{silo}/quotas": {
+      "get": {
+        "tags": [
+          "system/silos"
+        ],
+        "summary": "View the resource quotas of a given silo",
+        "operationId": "silo_quotas_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "silo",
+            "description": "Name or ID of the silo",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiloQuotas"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "system/silos"
+        ],
+        "summary": "Update the resource quotas of a given silo",
+        "description": "If a quota value is not specified, it will remain unchanged.",
+        "operationId": "silo_quotas_update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "silo",
+            "description": "Name or ID of the silo",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SiloQuotasUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiloQuotas"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/users": {
       "get": {
         "tags": [
@@ -6720,6 +6836,103 @@
         }
       }
     },
+    "/v1/system/utilization/silos": {
+      "get": {
+        "tags": [
+          "system/silos"
+        ],
+        "summary": "List current utilization state for all silos",
+        "operationId": "silo_utilization_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiloUtilizationResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
+    "/v1/system/utilization/silos/{silo}": {
+      "get": {
+        "tags": [
+          "system/silos"
+        ],
+        "summary": "View the current utilization of a given silo",
+        "operationId": "silo_utilization_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "silo",
+            "description": "Name or ID of the silo",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiloUtilization"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/users": {
       "get": {
         "tags": [
@@ -6785,6 +6998,33 @@
         },
         "x-dropshot-pagination": {
           "required": []
+        }
+      }
+    },
+    "/v1/utilization": {
+      "get": {
+        "tags": [
+          "silos"
+        ],
+        "summary": "View the resource utilization of the user's current silo",
+        "operationId": "utilization_view",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Utilization"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
         }
       }
     },
@@ -10527,22 +10767,6 @@
           "request_id"
         ]
       },
-      "ExpectedDigest": {
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "sha256": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "sha256"
-            ],
-            "additionalProperties": false
-          }
-        ]
-      },
       "ExternalIp": {
         "type": "object",
         "properties": {
@@ -11297,11 +11521,6 @@
             "type": "string",
             "format": "date-time"
           },
-          "url": {
-            "nullable": true,
-            "description": "URL source of this image, if any",
-            "type": "string"
-          },
           "version": {
             "description": "Version of the operating system",
             "type": "string"
@@ -11381,33 +11600,6 @@
           {
             "type": "object",
             "properties": {
-              "block_size": {
-                "description": "The block size in bytes",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/BlockSize"
-                  }
-                ]
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "url"
-                ]
-              },
-              "url": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "block_size",
-              "type",
-              "url"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
               "id": {
                 "type": "string",
                 "format": "uuid"
@@ -11457,28 +11649,6 @@
         "required": [
           "base64_encoded_data",
           "offset"
-        ]
-      },
-      "ImportBlocksFromUrl": {
-        "description": "Parameters for importing blocks from a URL to a disk",
-        "type": "object",
-        "properties": {
-          "expected_digest": {
-            "nullable": true,
-            "description": "Expected digest of all blocks when importing from a URL",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ExpectedDigest"
-              }
-            ]
-          },
-          "url": {
-            "description": "the source to pull blocks from",
-            "type": "string"
-          }
-        },
-        "required": [
-          "url"
         ]
       },
       "Instance": {
@@ -12667,7 +12837,7 @@
         "title": "A name unique within the parent collection",
         "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID though they may contain a UUID.",
         "type": "string",
-        "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z][a-z0-9-]*[a-zA-Z0-9]*$",
+        "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z]([a-zA-Z0-9-]*[a-zA-Z0-9]+)?$",
         "minLength": 1,
         "maxLength": 63
       },
@@ -13325,6 +13495,14 @@
           "name": {
             "$ref": "#/components/schemas/Name"
           },
+          "quotas": {
+            "description": "Limits the amount of provisionable CPU, memory, and storage in the Silo. CPU and memory are only consumed by running instances, while storage is consumed by any disk or snapshot. A value of 0 means that resource is *not* provisionable.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SiloQuotasCreate"
+              }
+            ]
+          },
           "tls_certificates": {
             "description": "Initial TLS certificates to be used for the new Silo's console and API endpoints.  These should be valid for the Silo's DNS name(s).",
             "type": "array",
@@ -13338,6 +13516,7 @@
           "discoverable",
           "identity_mode",
           "name",
+          "quotas",
           "tls_certificates"
         ]
       },
@@ -13359,6 +13538,126 @@
             ]
           }
         ]
+      },
+      "SiloQuotas": {
+        "description": "A collection of resource counts used to set the virtual capacity of a silo",
+        "type": "object",
+        "properties": {
+          "cpus": {
+            "description": "Number of virtual CPUs",
+            "type": "integer",
+            "format": "int64"
+          },
+          "memory": {
+            "description": "Amount of memory in bytes",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          },
+          "silo_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "storage": {
+            "description": "Amount of disk storage in bytes",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          }
+        },
+        "required": [
+          "cpus",
+          "memory",
+          "silo_id",
+          "storage"
+        ]
+      },
+      "SiloQuotasCreate": {
+        "description": "The amount of provisionable resources for a Silo",
+        "type": "object",
+        "properties": {
+          "cpus": {
+            "description": "The amount of virtual CPUs available for running instances in the Silo",
+            "type": "integer",
+            "format": "int64"
+          },
+          "memory": {
+            "description": "The amount of RAM (in bytes) available for running instances in the Silo",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          },
+          "storage": {
+            "description": "The amount of storage (in bytes) available for disks or snapshots",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          }
+        },
+        "required": [
+          "cpus",
+          "memory",
+          "storage"
+        ]
+      },
+      "SiloQuotasResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SiloQuotas"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "SiloQuotasUpdate": {
+        "description": "Updateable properties of a Silo's resource limits. If a value is omitted it will not be updated.",
+        "type": "object",
+        "properties": {
+          "cpus": {
+            "nullable": true,
+            "description": "The amount of virtual CPUs available for running instances in the Silo",
+            "type": "integer",
+            "format": "int64"
+          },
+          "memory": {
+            "nullable": true,
+            "description": "The amount of RAM (in bytes) available for running instances in the Silo",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          },
+          "storage": {
+            "nullable": true,
+            "description": "The amount of storage (in bytes) available for disks or snapshots",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          }
+        }
       },
       "SiloResultsPage": {
         "description": "A single page of results",
@@ -13424,6 +13723,62 @@
           "identity_id",
           "identity_type",
           "role_name"
+        ]
+      },
+      "SiloUtilization": {
+        "description": "View of a silo's resource utilization and capacity",
+        "type": "object",
+        "properties": {
+          "allocated": {
+            "description": "Accounts for the total amount of resources reserved for silos via their quotas",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VirtualResourceCounts"
+              }
+            ]
+          },
+          "provisioned": {
+            "description": "Accounts for resources allocated by in silos like CPU or memory for running instances and storage for disks and snapshots Note that CPU and memory resources associated with a stopped instances are not counted here",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VirtualResourceCounts"
+              }
+            ]
+          },
+          "silo_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "silo_name": {
+            "$ref": "#/components/schemas/Name"
+          }
+        },
+        "required": [
+          "allocated",
+          "provisioned",
+          "silo_id",
+          "silo_name"
+        ]
+      },
+      "SiloUtilizationResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SiloUtilization"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
         ]
       },
       "Sled": {
@@ -14554,6 +14909,27 @@
           "rack_id"
         ]
       },
+      "UninitializedSledResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UninitializedSled"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
       "User": {
         "description": "View of a User",
         "type": "object",
@@ -14669,7 +15045,7 @@
         "title": "A name unique within the parent collection",
         "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID though they may contain a UUID.",
         "type": "string",
-        "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z][a-z0-9-]*[a-zA-Z0-9]*$",
+        "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z]([a-zA-Z0-9-]*[a-zA-Z0-9]+)?$",
         "minLength": 1,
         "maxLength": 63
       },
@@ -14747,6 +15123,64 @@
         "required": [
           "password",
           "username"
+        ]
+      },
+      "Utilization": {
+        "description": "View of the current silo's resource utilization and capacity",
+        "type": "object",
+        "properties": {
+          "capacity": {
+            "description": "The total amount of resources that can be provisioned in this silo Actions that would exceed this limit will fail",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VirtualResourceCounts"
+              }
+            ]
+          },
+          "provisioned": {
+            "description": "Accounts for resources allocated to running instances or storage allocated via disks or snapshots Note that CPU and memory resources associated with a stopped instances are not counted here whereas associated disks will still be counted",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VirtualResourceCounts"
+              }
+            ]
+          }
+        },
+        "required": [
+          "capacity",
+          "provisioned"
+        ]
+      },
+      "VirtualResourceCounts": {
+        "description": "A collection of resource counts used to describe capacity and utilization",
+        "type": "object",
+        "properties": {
+          "cpus": {
+            "description": "Number of virtual CPUs",
+            "type": "integer",
+            "format": "int64"
+          },
+          "memory": {
+            "description": "Amount of memory in bytes",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          },
+          "storage": {
+            "description": "Amount of disk storage in bytes",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          }
+        },
+        "required": [
+          "cpus",
+          "memory",
+          "storage"
         ]
       },
       "Vpc": {

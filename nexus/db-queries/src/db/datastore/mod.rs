@@ -68,6 +68,7 @@ mod network_interface;
 mod oximeter;
 mod physical_disk;
 mod project;
+mod quota;
 mod rack;
 mod region;
 mod region_snapshot;
@@ -85,6 +86,7 @@ mod switch;
 mod switch_interface;
 mod switch_port;
 mod update;
+mod utilization;
 mod virtual_provisioning_collection;
 mod vmm;
 mod volume;
@@ -1046,7 +1048,7 @@ mod test {
                 "Saw error: \'{err}\', but expected \'{expected}\'"
             );
 
-            assert!(matches!(err, Error::ServiceUnavailable { .. }));
+            assert!(matches!(err, Error::InsufficientCapacity { .. }));
         }
 
         let _ = db.cleanup().await;
@@ -1191,7 +1193,7 @@ mod test {
             "Saw error: \'{err}\', but expected \'{expected}\'"
         );
 
-        assert!(matches!(err, Error::ServiceUnavailable { .. }));
+        assert!(matches!(err, Error::InsufficientCapacity { .. }));
 
         let _ = db.cleanup().await;
         logctx.cleanup_successful();

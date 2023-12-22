@@ -116,12 +116,18 @@ impl Display for ServiceBuilder {
 
 pub struct ServiceInstanceBuilder {
     name: String,
+    enabled: bool,
     property_groups: Vec<PropertyGroupBuilder>,
 }
 
 impl ServiceInstanceBuilder {
     pub fn new(name: &str) -> Self {
-        Self { name: name.to_string(), property_groups: vec![] }
+        Self { name: name.to_string(), enabled: true, property_groups: vec![] }
+    }
+
+    pub fn disable(mut self) -> Self {
+        self.enabled = false;
+        self
     }
 
     pub fn add_property_group(
@@ -137,9 +143,10 @@ impl Display for ServiceInstanceBuilder {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(
             f,
-            r#"    <instance enabled="true" name="{name}">
+            r#"    <instance enabled="{enabled}" name="{name}">
 "#,
-            name = self.name
+            name = self.name,
+            enabled = self.enabled
         )?;
 
         for property_group in &self.property_groups {
@@ -309,6 +316,24 @@ mod tests {
 <service_bundle type="profile" name="myprofile">
   <service version="1" type="service" name="myservice">
     <instance enabled="true" name="default">
+    </instance>
+  </service>
+</service_bundle>"#,
+        );
+    }
+
+    #[test]
+    fn test_disabled_instance() {
+        let builder = ProfileBuilder::new("myprofile")
+            .add_service(ServiceBuilder::new("myservice").add_instance(
+                ServiceInstanceBuilder::new("default").disable(),
+            ));
+        assert_eq!(
+            format!("{}", builder),
+            r#"<!DOCTYPE service_bundle SYSTEM "/usr/share/lib/xml/dtd/service_bundle.dtd.1">
+<service_bundle type="profile" name="myprofile">
+  <service version="1" type="service" name="myservice">
+    <instance enabled="false" name="default">
     </instance>
   </service>
 </service_bundle>"#,

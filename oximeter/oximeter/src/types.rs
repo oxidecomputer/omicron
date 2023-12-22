@@ -330,6 +330,11 @@ impl DatumType {
                 | DatumType::HistogramF64
         )
     }
+
+    /// Return `true` if this datum type is a histogram, and `false` otherwise.
+    pub const fn is_histogram(&self) -> bool {
+        matches!(self, DatumType::HistogramF64 | DatumType::HistogramI64)
+    }
 }
 
 impl std::fmt::Display for DatumType {
@@ -629,6 +634,8 @@ pub enum MetricsError {
 
     #[error("Missing datum of type {datum_type} cannot have a start time")]
     MissingDatumCannotHaveStartTime { datum_type: DatumType },
+    #[error("Invalid timeseries name")]
+    InvalidTimeseriesName,
 }
 
 impl From<MetricsError> for omicron_common::api::external::Error {
