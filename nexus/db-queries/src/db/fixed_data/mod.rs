@@ -31,7 +31,7 @@
 //    001de000-074c   built-in services vpc
 //    001de000-c470   built-in services vpc subnets
 
-use lazy_static::lazy_static;
+use once_cell::sync::Lazy;
 
 pub mod project;
 pub mod role_assignment;
@@ -43,13 +43,12 @@ pub mod vpc;
 pub mod vpc_firewall_rule;
 pub mod vpc_subnet;
 
-lazy_static! {
-    /* See above for where this uuid comes from. */
-    pub static ref FLEET_ID: uuid::Uuid =
-        "001de000-1334-4000-8000-000000000000"
-            .parse()
-            .expect("invalid uuid for builtin fleet id");
-}
+/* See above for where this uuid comes from. */
+pub static FLEET_ID: Lazy<uuid::Uuid> = Lazy::new(|| {
+    "001de000-1334-4000-8000-000000000000"
+        .parse()
+        .expect("invalid uuid for builtin fleet id")
+});
 
 #[cfg(test)]
 fn assert_valid_uuid(id: &uuid::Uuid) {

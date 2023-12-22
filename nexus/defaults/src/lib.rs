@@ -6,10 +6,10 @@
 
 use ipnetwork::Ipv4Network;
 use ipnetwork::Ipv6Network;
-use lazy_static::lazy_static;
 use omicron_common::api::external;
 use omicron_common::api::external::Ipv4Net;
 use omicron_common::api::external::Ipv6Net;
+use once_cell::sync::Lazy;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 
@@ -17,51 +17,51 @@ use std::net::Ipv6Addr;
 /// instance.
 pub const DEFAULT_PRIMARY_NIC_NAME: &str = "net0";
 
-lazy_static! {
-    /// The default IPv4 subnet range assigned to the default VPC Subnet, when
-    /// the VPC is created, if one is not provided in the request. See
-    /// <https://rfd.shared.oxide.computer/rfd/0021> for details.
-    pub static ref DEFAULT_VPC_SUBNET_IPV4_BLOCK: external::Ipv4Net =
-        Ipv4Net(Ipv4Network::new(Ipv4Addr::new(172, 30, 0, 0), 22).unwrap());
-}
+/// The default IPv4 subnet range assigned to the default VPC Subnet, when
+/// the VPC is created, if one is not provided in the request. See
+/// <https://rfd.shared.oxide.computer/rfd/0021> for details.
+pub static DEFAULT_VPC_SUBNET_IPV4_BLOCK: Lazy<external::Ipv4Net> =
+    Lazy::new(|| {
+        Ipv4Net(Ipv4Network::new(Ipv4Addr::new(172, 30, 0, 0), 22).unwrap())
+    });
 
-lazy_static! {
-    pub static ref DEFAULT_FIREWALL_RULES: external::VpcFirewallRuleUpdateParams =
+pub static DEFAULT_FIREWALL_RULES: Lazy<external::VpcFirewallRuleUpdateParams> =
+    Lazy::new(|| {
         serde_json::from_str(r#"{
-            "rules": [
-                {
-                    "name": "allow-internal-inbound",
-                    "status": "enabled",
-                    "direction": "inbound",
-                    "targets": [ { "type": "vpc", "value": "default" } ],
-                    "filters": { "hosts": [ { "type": "vpc", "value": "default" } ] },
-                    "action": "allow",
-                    "priority": 65534,
-                    "description": "allow inbound traffic to all instances within the VPC if originated within the VPC"
-                },
-                {
-                    "name": "allow-ssh",
-                    "status": "enabled",
-                    "direction": "inbound",
-                    "targets": [ { "type": "vpc", "value": "default" } ],
-                    "filters": { "ports": [ "22" ], "protocols": [ "TCP" ] },
-                    "action": "allow",
-                    "priority": 65534,
-                    "description": "allow inbound TCP connections on port 22 from anywhere"
-                },
-                {
-                    "name": "allow-icmp",
-                    "status": "enabled",
-                    "direction": "inbound",
-                    "targets": [ { "type": "vpc", "value": "default" } ],
-                    "filters": { "protocols": [ "ICMP" ] },
-                    "action": "allow",
-                    "priority": 65534,
-                    "description": "allow inbound ICMP traffic from anywhere"
-                }
-            ]
-        }"#).unwrap();
-}
+        "rules": [
+            {
+                "name": "allow-internal-inbound",
+                "status": "enabled",
+                "direction": "inbound",
+                "targets": [ { "type": "vpc", "value": "default" } ],
+                "filters": { "hosts": [ { "type": "vpc", "value": "default" } ] },
+                "action": "allow",
+                "priority": 65534,
+                "description": "allow inbound traffic to all instances within the VPC if originated within the VPC"
+            },
+            {
+                "name": "allow-ssh",
+                "status": "enabled",
+                "direction": "inbound",
+                "targets": [ { "type": "vpc", "value": "default" } ],
+                "filters": { "ports": [ "22" ], "protocols": [ "TCP" ] },
+                "action": "allow",
+                "priority": 65534,
+                "description": "allow inbound TCP connections on port 22 from anywhere"
+            },
+            {
+                "name": "allow-icmp",
+                "status": "enabled",
+                "direction": "inbound",
+                "targets": [ { "type": "vpc", "value": "default" } ],
+                "filters": { "protocols": [ "ICMP" ] },
+                "action": "allow",
+                "priority": 65534,
+                "description": "allow inbound ICMP traffic from anywhere"
+            }
+        ]
+    }"#).unwrap()
+    });
 
 /// Generate a random VPC IPv6 prefix, in the range `fd00::/48`.
 pub fn random_vpc_ipv6_prefix() -> Result<Ipv6Net, external::Error> {

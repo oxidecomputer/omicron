@@ -16,7 +16,7 @@ use anyhow::Context;
 use async_trait::async_trait;
 use headers::authorization::{Authorization, Bearer};
 use headers::HeaderMapExt;
-use lazy_static::lazy_static;
+use once_cell::sync::Lazy;
 use uuid::Uuid;
 
 // This scheme is intended for demos, development, and testing until we have a
@@ -54,18 +54,21 @@ const SPOOF_RESERVED_BAD_CREDS: &str = "this-fake-ID-it-is-truly-excellent";
 // subsets of the base64 character set, so we do not bother encoding them.
 const SPOOF_PREFIX: &str = "oxide-spoof-";
 
-lazy_static! {
-    /// Actor (id) used for the special "bad credentials" error
-    static ref SPOOF_RESERVED_BAD_CREDS_ACTOR: Actor = Actor::UserBuiltin {
-        user_builtin_id: "22222222-2222-2222-2222-222222222222".parse().unwrap(),
-    };
-    /// Complete HTTP header value to trigger the "bad actor" error
-    pub static ref SPOOF_HEADER_BAD_ACTOR: Authorization<Bearer> =
-        make_header_value_str(SPOOF_RESERVED_BAD_ACTOR).unwrap();
-    /// Complete HTTP header value to trigger the "bad creds" error
-    pub static ref SPOOF_HEADER_BAD_CREDS: Authorization<Bearer> =
-        make_header_value_str(SPOOF_RESERVED_BAD_CREDS).unwrap();
-}
+/// Actor (id) used for the special "bad credentials" error
+static SPOOF_RESERVED_BAD_CREDS_ACTOR: Lazy<Actor> =
+    Lazy::new(|| Actor::UserBuiltin {
+        user_builtin_id: "22222222-2222-2222-2222-222222222222"
+            .parse()
+            .unwrap(),
+    });
+
+/// Complete HTTP header value to trigger the "bad actor" error
+pub static SPOOF_HEADER_BAD_ACTOR: Lazy<Authorization<Bearer>> =
+    Lazy::new(|| make_header_value_str(SPOOF_RESERVED_BAD_ACTOR).unwrap());
+
+/// Complete HTTP header value to trigger the "bad creds" error
+pub static SPOOF_HEADER_BAD_CREDS: Lazy<Authorization<Bearer>> =
+    Lazy::new(|| make_header_value_str(SPOOF_RESERVED_BAD_CREDS).unwrap());
 
 /// Implements a (test-only) authentication scheme where the client simply
 /// provides the actor information in a custom bearer token and we always trust

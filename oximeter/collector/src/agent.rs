@@ -654,6 +654,8 @@ mod tests {
     use std::net::Ipv6Addr;
     use std::net::SocketAddr;
     use std::net::SocketAddrV6;
+    use std::sync::atomic::AtomicU64;
+    use std::sync::atomic::Ordering;
     use std::time::Duration;
     use tokio::sync::oneshot;
     use tokio::time::Instant;
@@ -667,7 +669,8 @@ mod tests {
     // timers complete as expected.
     const TICK_INTERVAL: Duration = Duration::from_millis(10);
 
-    // Total number of collection attempts.
+    // Total number of collection attempts, and the expected number of
+    // collections which fail in the "unreachability" test below.
     const N_COLLECTIONS: u64 = 5;
 
     // Period these tests wait using `tokio::time::advance()` before checking
@@ -676,6 +679,12 @@ mod tests {
         COLLECTION_INTERVAL.as_millis() as u64 * N_COLLECTIONS
             + COLLECTION_INTERVAL.as_millis() as u64 / 2,
     );
+
+    // The number of actual successful test collections.
+    static N_SUCCESSFUL_COLLECTIONS: AtomicU64 = AtomicU64::new(0);
+
+    // The number of actual failed test collections.
+    static N_FAILED_COLLECTIONS: AtomicU64 = AtomicU64::new(0);
 
     // Test that we count successful collections from a target correctly.
     #[tokio::test]
@@ -697,13 +706,11 @@ mod tests {
         // will be no actual data here, but the sample counter will increment.
         let addr =
             SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0));
-        async fn handler(
-            _: Request<Body>,
-        ) -> Result<Response<Body>, Infallible> {
-            Ok(Response::new(Body::from("[]")))
-        }
         let make_svc = make_service_fn(|_conn| async {
-            Ok::<_, Infallible>(service_fn(handler))
+            Ok::<_, Infallible>(service_fn(|_: Request<Body>| async {
+                N_SUCCESSFUL_COLLECTIONS.fetch_add(1, Ordering::SeqCst);
+                Ok::<_, Infallible>(Response::new(Body::from("[]")))
+            }))
         });
         let server = Server::bind(&addr).serve(make_svc);
         let address = server.local_addr();
@@ -722,7 +729,11 @@ mod tests {
             .await
             .expect("failed to register dummy producer");
 
-        // Step time until there has been exactly `N_COLLECTIONS` collections.
+        // Step time for a few collections.
+        //
+        // Due to scheduling variations, we don't verify the number of
+        // collections we expect based on time, but we instead check that every
+        // collection that _has_ occurred bumps the counter.
         tokio::time::pause();
         let now = Instant::now();
         while now.elapsed() < TEST_WAIT_PERIOD {
@@ -744,7 +755,10 @@ mod tests {
             .await
             .expect("failed to request statistics from task");
         let stats = rx.await.expect("failed to receive statistics from task");
-        assert_eq!(stats.collections.datum.value(), N_COLLECTIONS);
+        assert_eq!(
+            stats.collections.datum.value(),
+            N_SUCCESSFUL_COLLECTIONS.load(Ordering::SeqCst)
+        );
         assert!(stats.failed_collections.is_empty());
         logctx.cleanup_successful();
     }
@@ -837,15 +851,13 @@ mod tests {
         // And a dummy server that will always fail with a 500.
         let addr =
             SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0));
-        async fn handler(
-            _: Request<Body>,
-        ) -> Result<Response<Body>, Infallible> {
-            let mut res = Response::new(Body::from("im ded"));
-            *res.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
-            Ok(res)
-        }
         let make_svc = make_service_fn(|_conn| async {
-            Ok::<_, Infallible>(service_fn(handler))
+            Ok::<_, Infallible>(service_fn(|_: Request<Body>| async {
+                N_FAILED_COLLECTIONS.fetch_add(1, Ordering::SeqCst);
+                let mut res = Response::new(Body::from("im ded"));
+                *res.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+                Ok::<_, Infallible>(res)
+            }))
         });
         let server = Server::bind(&addr).serve(make_svc);
         let address = server.local_addr();
@@ -865,6 +877,12 @@ mod tests {
             .expect("failed to register flaky producer");
 
         // Step time until there has been exactly `N_COLLECTIONS` collections.
+        //
+        // NOTE: This is technically still a bit racy, in that the server task
+        // may have made a different number of attempts than we expect. In
+        // practice, we've not seen this one fail, so basing the number of
+        // counts on time seems reasonable, especially since we don't have other
+        // low-cost options for verifying the behavior.
         tokio::time::pause();
         let now = Instant::now();
         while now.elapsed() < TEST_WAIT_PERIOD {
@@ -894,7 +912,7 @@ mod tests {
                 .unwrap()
                 .datum
                 .value(),
-            N_COLLECTIONS,
+            N_FAILED_COLLECTIONS.load(Ordering::SeqCst),
         );
         assert_eq!(stats.failed_collections.len(), 1);
         logctx.cleanup_successful();

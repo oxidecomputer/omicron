@@ -71,6 +71,7 @@ pub struct SledAgent {
         Mutex<Option<(HttpServer<Arc<PropolisContext>>, PropolisClient)>>,
     config: Config,
     fake_zones: Mutex<OmicronZonesConfig>,
+    instance_ensure_state_error: Mutex<Option<Error>>,
 }
 
 fn extract_targets_from_volume_construction_request(
@@ -167,6 +168,7 @@ impl SledAgent {
                 generation: Generation::new(),
                 zones: vec![],
             }),
+            instance_ensure_state_error: Mutex::new(None),
         })
     }
 
@@ -351,15 +353,7 @@ impl SledAgent {
             updated_runtime: Some(instance.terminate()),
         };
 
-        // Poke the now-destroyed instance to force it to be removed from the
-        // collection.
-        //
-        // TODO: In the real sled agent, this happens inline without publishing
-        // any other state changes, whereas this call causes any pending state
-        // changes to be published. This can be fixed by adding a simulated
-        // object collection function to forcibly remove an object from a
-        // collection.
-        self.instances.sim_poke(instance_id, PokeMode::Drain).await;
+        self.instances.sim_force_remove(instance_id).await;
         Ok(response)
     }
 
@@ -369,6 +363,11 @@ impl SledAgent {
         instance_id: Uuid,
         state: InstanceStateRequested,
     ) -> Result<InstancePutStateResponse, Error> {
+        if let Some(e) = self.instance_ensure_state_error.lock().await.as_ref()
+        {
+            return Err(e.clone());
+        }
+
         let current =
             match self.instances.sim_get_cloned_object(&instance_id).await {
                 Ok(i) => i.current().clone(),
@@ -422,6 +421,10 @@ impl SledAgent {
         }
 
         Ok(InstancePutStateResponse { updated_runtime: Some(new_state) })
+    }
+
+    pub async fn set_instance_ensure_state_error(&self, error: Option<Error>) {
+        *self.instance_ensure_state_error.lock().await = error;
     }
 
     async fn detach_disks_from_instance(
