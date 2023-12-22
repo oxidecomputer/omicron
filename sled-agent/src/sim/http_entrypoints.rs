@@ -397,9 +397,10 @@ async fn inventory(
     rqctx: RequestContext<Arc<SledAgent>>,
 ) -> Result<HttpResponseOk<Inventory>, HttpError> {
     let sa = rqctx.context();
-    Ok(HttpResponseOk(sa.inventory(rqctx.server.local_addr).map_err(|e| {
-        HttpError::for_internal_error(format!("{:#}", e))
-    })?))
+    Ok(HttpResponseOk(
+        sa.inventory(rqctx.server.local_addr)
+            .map_err(|e| HttpError::for_internal_error(format!("{:#}", e)))?,
+    ))
 }
 
 #[endpoint {
