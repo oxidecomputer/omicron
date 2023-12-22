@@ -219,8 +219,9 @@ async fn siia_complete_attach(
         (false, InstanceState::Stopped) | (true, _) => {
             target_ip.try_into().map_err(ActionError::action_failed)
         }
-        _ => Err(Error::internal_error("failed to complete IP attach"))
-            .map_err(ActionError::action_failed),
+        _ => Err(ActionError::action_failed(Error::internal_error(
+            "failed to complete IP attach",
+        ))),
     }
 }
 

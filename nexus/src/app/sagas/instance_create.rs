@@ -666,7 +666,14 @@ async fn sic_allocate_instance_external_ip(
         .await
         .map_err(ActionError::action_failed)?;
 
-    Ok(Some(ip))
+    if n_rows != 1 {
+        Err(ActionError::action_failed(Error::internal_error(&format!(
+            "failed to completely attach ip address {}",
+            ip.id
+        ))))
+    } else {
+        Ok(Some(ip))
+    }
 }
 
 async fn sic_allocate_instance_external_ip_undo(
@@ -725,6 +732,15 @@ async fn sic_allocate_instance_external_ip_undo(
                 )
                 .await
                 .map_err(ActionError::action_failed)?;
+
+            if n_rows != 1 {
+                let id = ip.id;
+                error!(
+                    osagactx.log(),
+                    "sic_allocate_instance_external_ip_undo: failed to \
+                     completely detach ip {id}"
+                );
+            }
         }
     }
     Ok(())

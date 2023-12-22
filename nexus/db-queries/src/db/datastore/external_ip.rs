@@ -28,7 +28,7 @@ use crate::db::pool::DbConnection;
 use crate::db::queries::external_ip::NextExternalIp;
 use crate::db::queries::external_ip::SAFE_TO_ATTACH_INSTANCE_STATES;
 use crate::db::queries::external_ip::SAFE_TO_ATTACH_INSTANCE_STATES_CREATING;
-use crate::db::queries::external_ip::SAFE_TRANSITORY_INSTANCE_STATES;
+use crate::db::queries::external_ip::SAFE_TRANSIENT_INSTANCE_STATES;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -54,6 +54,7 @@ use uuid::Uuid;
 // FIXME: should be exported from a shared location, original lives in
 //        nexus/app.
 const MAX_EXTERNAL_IPS_PER_INSTANCE: u32 = 32;
+const MAX_EXTERNAL_IPS_PLUS_SNAT: u32 = MAX_EXTERNAL_IPS_PER_INSTANCE + 1;
 
 impl DataStore {
     /// Create an external IP address for source NAT for an instance.
@@ -400,43 +401,43 @@ impl DataStore {
 
         let eip = query.detach_and_get_result_async(&*self.pool_connection_authorized(opctx).await?)
         .await
-        .or_else(|e: DetachError<ExternalIp, _, _>| match e {
+        .map_err(|e: DetachError<ExternalIp, _, _>| match e {
             DetachError::CollectionNotFound => {
-                Err(Error::not_found_by_id(
+                Error::not_found_by_id(
                     ResourceType::Instance,
                     &instance_id,
-                ))
+                )
             },
             DetachError::ResourceNotFound => {
-                Err(Error::invalid_request("instance has no ephemeral IP to detach"))
+                Error::invalid_request("instance has no ephemeral IP to detach")
             },
             DetachError::NoUpdate { resource, collection } => {
                 match resource.state {
-                    IpAttachState::Attached if resource.parent_id != Some(instance_id) => return Err(Error::internal_error(
+                    IpAttachState::Attached if resource.parent_id != Some(instance_id) => return Error::internal_error(
                         "Ephemeral IP is not attached to the target instance",
-                    )),
+                    ),
                     // User can reattempt depending on how the current saga unfolds.
-                    IpAttachState::Attaching | IpAttachState::Detaching => return Err(Error::ServiceUnavailable {
-                        internal_message: "tried to detach ephemeral IP mid-attach/detach".into()
-                    }),
+                    IpAttachState::Attaching | IpAttachState::Detaching => return Error::unavail (
+                        "tried to detach ephemeral IP mid-attach/detach"
+                    ),
                     IpAttachState::Attached => {},
-                    IpAttachState::Detached => return Err(Error::internal_error(
+                    IpAttachState::Detached => return Error::internal_error(
                         "Ephemeral IP cannot exist in 'detached' state",
-                    )),
+                    ),
                 }
 
-                Err(match collection.runtime_state.nexus_state {
-                    state if SAFE_TRANSITORY_INSTANCE_STATES.contains(&state) => Error::ServiceUnavailable {
-                        internal_message: "tried to detach ephemeral IP while instance was changing state".into()
-                    },
+                match collection.runtime_state.nexus_state {
+                    state if SAFE_TRANSIENT_INSTANCE_STATES.contains(&state) => Error::unavail (
+                        "tried to detach ephemeral IP while instance was changing state"
+                    ),
                     state if SAFE_TO_ATTACH_INSTANCE_STATES.contains(&state) => {
                         Error::internal_error("failed to detach ephemeral IP")
                     },
                     state => Error::invalid_request(&format!("cannot attach ephemeral IP to instance in {state} state")),
-                })
+                }
             },
             DetachError::DatabaseError(e) => {
-                Err(public_error_from_diesel(e, ErrorHandler::Server))
+                public_error_from_diesel(e, ErrorHandler::Server)
             },
 
         })?;
@@ -624,8 +625,7 @@ impl DataStore {
                 .filter(dsl::state.eq(IpAttachState::Detached))
                 .filter(dsl::kind.eq(IpKind::Floating))
                 .filter(dsl::parent_id.is_null()),
-            // +1 to account for SNat
-            MAX_EXTERNAL_IPS_PER_INSTANCE + 1,
+            MAX_EXTERNAL_IPS_PLUS_SNAT,
             diesel::update(dsl::external_ip).set((
                 dsl::parent_id.eq(Some(instance_id)),
                 dsl::time_modified.eq(Utc::now()),
@@ -657,19 +657,19 @@ impl DataStore {
                          instance while still attached to another"
                     )),
                     // User can reattempt depending on how the current saga unfolds.
-                    IpAttachState::Attaching | IpAttachState::Detaching => return Err(Error::ServiceUnavailable {
-                        internal_message: "tried to attach floating IP mid-attach/detach".into()
-                    }),
+                    IpAttachState::Attaching | IpAttachState::Detaching => return Err(Error::unavail(
+                        "tried to attach floating IP mid-attach/detach"
+                    )),
 
                     IpAttachState::Detached => {},
                 }
 
                 Err(match collection.runtime_state.nexus_state {
-                    state if SAFE_TRANSITORY_INSTANCE_STATES.contains(&state) => Error::ServiceUnavailable {
-                        internal_message: "tried to attach floating IP while instance was changing state".into()
-                    },
+                    state if SAFE_TRANSIENT_INSTANCE_STATES.contains(&state) => Error::unavail(
+                        "tried to attach floating IP while instance was changing state"
+                    ),
                     state if SAFE_TO_ATTACH_INSTANCE_STATES.contains(&state) => {
-                        if attached_count >= MAX_EXTERNAL_IPS_PER_INSTANCE as i64 + 1 {
+                        if attached_count >= MAX_EXTERNAL_IPS_PLUS_SNAT as i64 {
                             Error::invalid_request(&format!(
                                 "an instance may not have more than {} external IP addresses",
                                 MAX_EXTERNAL_IPS_PER_INSTANCE,
@@ -739,47 +739,47 @@ impl DataStore {
 
         let eip = query.detach_and_get_result_async(&*self.pool_connection_authorized(opctx).await?)
         .await
-        .or_else(|e: DetachError<ExternalIp, _, _>| match e {
+        .map_err(|e: DetachError<ExternalIp, _, _>| match e {
             DetachError::CollectionNotFound => {
-                Err(Error::not_found_by_id(
+                Error::not_found_by_id(
                     ResourceType::Instance,
                     &instance_id,
-                ))
+                )
             },
             DetachError::ResourceNotFound => {
-                Err(Error::not_found_by_id(
+                Error::not_found_by_id(
                     ResourceType::FloatingIp,
                     &fip_id,
-                ))
+                )
             },
             DetachError::NoUpdate { resource, collection } => {
                 match resource.state {
-                    IpAttachState::Attached if resource.parent_id != Some(instance_id) => return Err(Error::invalid_request(
+                    IpAttachState::Attached if resource.parent_id != Some(instance_id) => return Error::invalid_request(
                         "Floating IP is not attached to the target instance",
-                    )),
+                    ),
                     // TODO: should we just... let this one through?
-                    IpAttachState::Detached => return Err(Error::invalid_request(
+                    IpAttachState::Detached => return Error::invalid_request(
                         "Floating IP is not attached to an instance",
-                    )),
+                    ),
                     // User can reattempt depending on how the current saga unfolds.
-                    IpAttachState::Attaching | IpAttachState::Detaching => return Err(Error::ServiceUnavailable {
-                        internal_message: "tried to detach floating IP mid-attach/detach".into()
-                    }),
+                    IpAttachState::Attaching | IpAttachState::Detaching => return Error::unavail(
+                        "tried to detach floating IP mid-attach/detach"
+                    ),
                     IpAttachState::Attached => {},
                 }
 
-                Err(match collection.runtime_state.nexus_state {
-                    state if SAFE_TRANSITORY_INSTANCE_STATES.contains(&state) => Error::ServiceUnavailable {
-                        internal_message: "tried to detach floating IP while instance was changing state".into()
-                    },
+                match collection.runtime_state.nexus_state {
+                    state if SAFE_TRANSIENT_INSTANCE_STATES.contains(&state) => Error::unavail (
+                        "tried to detach floating IP while instance was changing state"
+                    ),
                     state if SAFE_TO_ATTACH_INSTANCE_STATES.contains(&state) => {
                         Error::internal_error("failed to detach floating IP")
                     },
                     state => Error::invalid_request(&format!("cannot detach floating IP to instance in {state} state")),
-                })
+                }
             },
             DetachError::DatabaseError(e) => {
-                Err(public_error_from_diesel(e, ErrorHandler::Server))
+                public_error_from_diesel(e, ErrorHandler::Server)
             },
 
         })?;

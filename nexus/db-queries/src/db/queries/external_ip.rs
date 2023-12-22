@@ -51,7 +51,7 @@ pub const SAFE_TO_ATTACH_INSTANCE_STATES: [DbInstanceState; 2] = [
 // TODO: Currently stop if there's a migration or other state change.
 //       This may be a good case for RPWing
 //       external_ip_state -> { NAT RPW, sled-agent } in future.
-pub const SAFE_TRANSITORY_INSTANCE_STATES: [DbInstanceState; 5] = [
+pub const SAFE_TRANSIENT_INSTANCE_STATES: [DbInstanceState; 5] = [
     DbInstanceState(ApiInstanceState::Starting),
     DbInstanceState(ApiInstanceState::Stopping),
     DbInstanceState(ApiInstanceState::Creating),

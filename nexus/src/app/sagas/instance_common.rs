@@ -14,7 +14,7 @@ use nexus_db_model::{
 };
 use nexus_db_queries::authz;
 use nexus_db_queries::db::lookup::LookupPath;
-use nexus_db_queries::db::queries::external_ip::SAFE_TRANSITORY_INSTANCE_STATES;
+use nexus_db_queries::db::queries::external_ip::SAFE_TRANSIENT_INSTANCE_STATES;
 use nexus_db_queries::{authn, context::OpContext, db, db::DataStore};
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InstanceState;
@@ -226,7 +226,7 @@ pub async fn instance_ip_get_instance_state(
             InstanceState::Stopped
         }
         InstanceState::Running => InstanceState::Running,
-        state if SAFE_TRANSITORY_INSTANCE_STATES.contains(&state.into()) => {
+        state if SAFE_TRANSIENT_INSTANCE_STATES.contains(&state.into()) => {
             return Err(ActionError::action_failed(Error::unavail(&format!(
                 "can't {verb} in transient state {state}"
             ))))

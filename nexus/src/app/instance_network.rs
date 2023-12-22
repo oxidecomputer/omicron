@@ -360,16 +360,13 @@ impl super::Nexus {
         // the request is retryable.
         if ips_of_interest
             .iter()
-            .find(|ip| {
+            .any(|ip| {
                 must_all_be_attached && ip.state != IpAttachState::Attached
             })
-            .is_some()
         {
-            return Err(Error::ServiceUnavailable {
-                internal_message:
-                    "cannot push all DPD state: IP attach/detach in progress"
-                        .into(),
-            });
+            return Err(Error::unavail(
+                "cannot push all DPD state: IP attach/detach in progress",
+            ));
         }
 
         let sled_address =

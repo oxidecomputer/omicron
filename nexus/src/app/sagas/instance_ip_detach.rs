@@ -11,9 +11,7 @@ use super::{ActionRegistry, NexusActionContext, NexusSaga};
 use crate::app::sagas::declare_saga_actions;
 use crate::app::{authn, authz, db};
 use crate::external_api::params;
-use futures::TryFutureExt;
 use nexus_db_model::{ExternalIp, IpAttachState, IpKind};
-use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_types::external_api::views;
 use omicron_common::api::external::{Error, InstanceState};
@@ -228,8 +226,9 @@ async fn siid_complete_attach(
         (false, InstanceState::Stopped) | (true, _) => {
             target_ip.try_into().map_err(ActionError::action_failed)
         }
-        _ => Err(Error::internal_error("failed to complete IP detach"))
-            .map_err(ActionError::action_failed),
+        _ => Err(ActionError::action_failed(Error::internal_error(
+            "failed to complete IP detach",
+        ))),
     }
 }
 
