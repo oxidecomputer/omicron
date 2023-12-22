@@ -2093,6 +2093,7 @@ fn print_saga_nodes(saga: Option<Saga>, saga_nodes: Vec<SagaNodeEvent>) {
     struct SagaNodeRow {
         saga_id: Uuid,
         event_time: chrono::DateTime<chrono::Utc>,
+        sub_saga_id: Option<u32>,
         node_id: String,
         event_type: String,
         data: String,
@@ -2114,11 +2115,11 @@ fn print_saga_nodes(saga: Option<Saga>, saga_nodes: Vec<SagaNodeEvent>) {
     let mut rows: Vec<_> = Vec::with_capacity(saga_nodes.len());
 
     for saga_node in saga_nodes {
-        let node_id = if let Some(dag) = &dag {
+        let (node_id, sub_saga_id) = if let Some(dag) = &dag {
             let dag_node =
                 dag.get_from_saga_node_id(&saga_node.node_id).unwrap();
 
-            let this_sub_saga_id: Option<u32> = match sub_saga_map
+            let sub_saga_id: Option<u32> = match sub_saga_map
                 .get(&saga_node.node_id)
             {
                 Some(id) => {
@@ -2185,13 +2186,8 @@ fn print_saga_nodes(saga: Option<Saga>, saga_nodes: Vec<SagaNodeEvent>) {
                 }
             };
 
-            format!(
-                "{}{:3}: {}",
-                if let Some(this_sub_saga_id) = this_sub_saga_id {
-                    format!("sub saga {:3}: ", this_sub_saga_id)
-                } else {
-                    String::from("")
-                },
+            let node_id = format!(
+                "{:3}: {}",
                 saga_node.node_id.0,
                 match dag_node {
                     StenoNode::Start { .. } => String::from("start"),
@@ -2207,14 +2203,18 @@ fn print_saga_nodes(saga: Option<Saga>, saga_nodes: Vec<SagaNodeEvent>) {
                     StenoNode::SubsagaEnd { name } =>
                         format!("subsaga end {}", name),
                 },
-            )
+            );
+
+            (node_id, sub_saga_id)
         } else {
-            format!("{}", saga_node.node_id.0)
+            let node_id = format!("{}", saga_node.node_id.0);
+            (node_id, None)
         };
 
         rows.push(SagaNodeRow {
             saga_id: saga_node.saga_id.0.into(),
             event_time: saga_node.event_time,
+            sub_saga_id,
             node_id,
             event_type: saga_node.event_type,
             data: saga_node
@@ -2236,6 +2236,11 @@ fn print_saga_nodes(saga: Option<Saga>, saga_nodes: Vec<SagaNodeEvent>) {
             (
                 format!("{}", x.saga_id).chars().count(),
                 format!("{}", x.event_time).chars().count(),
+                if let Some(sub_saga_id) = x.sub_saga_id {
+                    format!("{}", sub_saga_id).chars().count()
+                } else {
+                    0
+                },
                 x.node_id.chars().count(),
                 x.event_type.chars().count(),
                 x.data.chars().count(),
@@ -2243,41 +2248,62 @@ fn print_saga_nodes(saga: Option<Saga>, saga_nodes: Vec<SagaNodeEvent>) {
         })
         .collect();
 
-    let (width0, width1, width2, width3): (usize, usize, usize, usize) = (
+    let (width0, width1, width2, width3, width4): (
+        usize,
+        usize,
+        usize,
+        usize,
+        usize,
+    ) = (
         row_char_counts.iter().map(|x| x.0).max().unwrap(),
         row_char_counts.iter().map(|x| x.1).max().unwrap(),
         std::cmp::max(
             row_char_counts.iter().map(|x| x.2).max().unwrap(),
-            "node id".len(),
+            "sub saga id".len(),
         ),
         std::cmp::max(
             row_char_counts.iter().map(|x| x.3).max().unwrap(),
+            "node id".len(),
+        ),
+        std::cmp::max(
+            row_char_counts.iter().map(|x| x.4).max().unwrap(),
             "event type".len(),
         ),
     );
 
     println!(
-        "{:>width0$} | {:width1$} | {:width2$} | {:width3$} | {}",
+        "{:>width0$} | {:width1$} | {:width2$} | {:width3$} | {:width4$} | {}",
         String::from("saga id"),
         String::from("event time"),
+        String::from("sub saga id"),
         String::from("node id"),
         String::from("event type"),
         String::from("data"),
     );
 
     println!(
-        "{:>width0$} | {:width1$} | {:width2$} | {:width3$} | {}",
+        "{:>width0$} | {:width1$} | {:width2$} | {:width3$} | {:width4$} | {}",
         (0..width0).map(|_| "-").collect::<String>(),
         (0..width1).map(|_| "-").collect::<String>(),
         (0..width2).map(|_| "-").collect::<String>(),
         (0..width3).map(|_| "-").collect::<String>(),
+        (0..width4).map(|_| "-").collect::<String>(),
         String::from("---"),
     );
 
     for row in rows {
         println!(
-            "{:>width0$} | {:width1$} | {:width2$} | {:width3$} | {}",
-            row.saga_id, row.event_time, row.node_id, row.event_type, row.data,
+            "{:>width0$} | {:width1$} | {:width2$} | {:width3$} | {:width4$} | {}",
+            row.saga_id,
+            row.event_time,
+            if let Some(sub_saga_id) = row.sub_saga_id {
+                format!("{}", sub_saga_id)
+            } else {
+                String::from("")
+            },
+            row.node_id,
+            row.event_type,
+            row.data,
         );
     }
 }
