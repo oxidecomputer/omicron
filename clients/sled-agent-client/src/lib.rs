@@ -106,17 +106,17 @@ impl From<omicron_common::api::external::InstanceState>
     }
 }
 
-impl From<omicron_common::api::external::ByteCount> for types::ByteCount {
-    fn from(s: omicron_common::api::external::ByteCount) -> Self {
-        Self(s.to_bytes())
-    }
-}
-
 impl From<omicron_common::api::external::InstanceCpuCount>
     for types::InstanceCpuCount
 {
     fn from(s: omicron_common::api::external::InstanceCpuCount) -> Self {
         Self(s.0)
+    }
+}
+
+impl From<omicron_common::api::external::ByteCount> for types::ByteCount {
+    fn from(s: omicron_common::api::external::ByteCount) -> Self {
+        Self(s.to_bytes())
     }
 }
 
