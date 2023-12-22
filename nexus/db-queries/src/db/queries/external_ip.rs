@@ -1811,11 +1811,11 @@ mod tests {
         context.create_ip_pool("p1", second_range, /* default */ false).await;
 
         // Allocate all available addresses in the second pool.
-        let instance_id = Uuid::new_v4();
         let pool_name = Some(Name("p1".parse().unwrap()));
         let first_octet = first_address.octets()[3];
         let last_octet = last_address.octets()[3];
         for octet in first_octet..=last_octet {
+            let instance_id = Uuid::new_v4();
             let ip = context
                 .db_datastore
                 .allocate_instance_ephemeral_ip(
@@ -1840,7 +1840,7 @@ mod tests {
             .allocate_instance_ephemeral_ip(
                 &context.opctx,
                 Uuid::new_v4(),
-                instance_id,
+                Uuid::new_v4(),
                 pool_name,
             )
             .await

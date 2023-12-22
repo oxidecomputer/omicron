@@ -408,6 +408,7 @@ mod test {
     use chrono::{Duration, Utc};
     use futures::stream;
     use futures::StreamExt;
+    use nexus_db_model::IpAttachState;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::external_api::params;
     use omicron_common::api::external::DataPageParams;
@@ -1653,7 +1654,8 @@ mod test {
         // Create a few records.
         let now = Utc::now();
         let instance_id = Uuid::new_v4();
-        let ips = (0..4)
+        let kinds = [IpKind::SNat, IpKind::Ephemeral];
+        let ips = (0..2)
             .map(|i| ExternalIp {
                 id: Uuid::new_v4(),
                 name: None,
@@ -1666,7 +1668,7 @@ mod test {
                 project_id: None,
                 is_service: false,
                 parent_id: Some(instance_id),
-                kind: IpKind::Ephemeral,
+                kind: kinds[i as usize],
                 ip: ipnetwork::IpNetwork::from(IpAddr::from(Ipv4Addr::new(
                     10, 0, 0, i,
                 ))),
@@ -1813,6 +1815,7 @@ mod test {
         // - description
         // - parent (instance / service) UUID
         // - project UUID
+        // - attach state
         let names = [None, Some("foo")];
         let descriptions = [None, Some("foo".to_string())];
         let parent_ids = [None, Some(Uuid::new_v4())];
@@ -1853,6 +1856,12 @@ mod test {
                 continue;
             }
 
+            let state = if parent_id.is_some() {
+                IpAttachState::Attached
+            } else {
+                IpAttachState::Detached
+            };
+
             let new_ip = ExternalIp {
                 id: Uuid::new_v4(),
                 name: name_local.clone(),
@@ -1861,6 +1870,7 @@ mod test {
                 is_service,
                 parent_id: *parent_id,
                 project_id: *project_id,
+                state,
                 ..ip
             };
 
@@ -1933,6 +1943,11 @@ mod test {
             let name_local = name.map(|v| {
                 db::model::Name(Name::try_from(v.to_string()).unwrap())
             });
+            let state = if parent_id.is_some() {
+                IpAttachState::Attached
+            } else {
+                IpAttachState::Detached
+            };
             let new_ip = ExternalIp {
                 id: Uuid::new_v4(),
                 name: name_local,
@@ -1942,6 +1957,7 @@ mod test {
                 is_service,
                 parent_id: *parent_id,
                 project_id: *project_id,
+                state,
                 ..ip
             };
             let res = diesel::insert_into(dsl::external_ip)

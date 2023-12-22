@@ -655,7 +655,10 @@ async fn sic_allocate_instance_external_ip(
         }
     };
 
-    let n_rows = datastore
+    // Ignore row count here, this is infallible with correct
+    // (state, state', kind) but may be zero  on repeat call for
+    // idempotency.
+    _ = datastore
         .external_ip_complete_op(
             &opctx,
             ip.id,
@@ -666,14 +669,7 @@ async fn sic_allocate_instance_external_ip(
         .await
         .map_err(ActionError::action_failed)?;
 
-    if n_rows != 1 {
-        Err(ActionError::action_failed(Error::internal_error(&format!(
-            "failed to completely attach ip address {}",
-            ip.id
-        ))))
-    } else {
-        Ok(Some(ip))
-    }
+    Ok(Some(ip))
 }
 
 async fn sic_allocate_instance_external_ip_undo(
@@ -734,11 +730,10 @@ async fn sic_allocate_instance_external_ip_undo(
                 .map_err(ActionError::action_failed)?;
 
             if n_rows != 1 {
-                let id = ip.id;
                 error!(
                     osagactx.log(),
                     "sic_allocate_instance_external_ip_undo: failed to \
-                     completely detach ip {id}"
+                     completely detach ip {}", ip.id
                 );
             }
         }

@@ -417,7 +417,7 @@ impl DataStore {
                         "Ephemeral IP is not attached to the target instance",
                     ),
                     // User can reattempt depending on how the current saga unfolds.
-                    IpAttachState::Attaching | IpAttachState::Detaching => return Error::unavail (
+                    IpAttachState::Attaching | IpAttachState::Detaching => return Error::unavail(
                         "tried to detach ephemeral IP mid-attach/detach"
                     ),
                     IpAttachState::Attached => {},
@@ -427,7 +427,7 @@ impl DataStore {
                 }
 
                 match collection.runtime_state.nexus_state {
-                    state if SAFE_TRANSIENT_INSTANCE_STATES.contains(&state) => Error::unavail (
+                    state if SAFE_TRANSIENT_INSTANCE_STATES.contains(&state) => Error::unavail(
                         "tried to detach ephemeral IP while instance was changing state"
                     ),
                     state if SAFE_TO_ATTACH_INSTANCE_STATES.contains(&state) => {
@@ -739,7 +739,7 @@ impl DataStore {
 
         let eip = query.detach_and_get_result_async(&*self.pool_connection_authorized(opctx).await?)
         .await
-        .map_err(|e: DetachError<ExternalIp, _, _>| match e {
+        .or_else(|e: DetachError<ExternalIp, _, _>| Err(match e {
             DetachError::CollectionNotFound => {
                 Error::not_found_by_id(
                     ResourceType::Instance,
@@ -753,23 +753,23 @@ impl DataStore {
                 )
             },
             DetachError::NoUpdate { resource, collection } => {
+                let parent_match = resource.parent_id == Some(instance_id);
                 match resource.state {
-                    IpAttachState::Attached if resource.parent_id != Some(instance_id) => return Error::invalid_request(
+                    // Idempotent cases: already detached OR detaching from same instance.
+                    IpAttachState::Detached => return Ok(resource),
+                    IpAttachState::Detaching if parent_match => return Ok(resource),
+                    IpAttachState::Attached if !parent_match => return Err(Error::invalid_request(
                         "Floating IP is not attached to the target instance",
-                    ),
-                    // TODO: should we just... let this one through?
-                    IpAttachState::Detached => return Error::invalid_request(
-                        "Floating IP is not attached to an instance",
-                    ),
+                    )),
                     // User can reattempt depending on how the current saga unfolds.
-                    IpAttachState::Attaching | IpAttachState::Detaching => return Error::unavail(
+                    IpAttachState::Attaching | IpAttachState::Detaching => return Err(Error::unavail(
                         "tried to detach floating IP mid-attach/detach"
-                    ),
+                    )),
                     IpAttachState::Attached => {},
                 }
 
                 match collection.runtime_state.nexus_state {
-                    state if SAFE_TRANSIENT_INSTANCE_STATES.contains(&state) => Error::unavail (
+                    state if SAFE_TRANSIENT_INSTANCE_STATES.contains(&state) => Error::unavail(
                         "tried to detach floating IP while instance was changing state"
                     ),
                     state if SAFE_TO_ATTACH_INSTANCE_STATES.contains(&state) => {
@@ -782,14 +782,19 @@ impl DataStore {
                 public_error_from_diesel(e, ErrorHandler::Server)
             },
 
-        })?;
+        }))?;
 
         Ok(eip)
     }
 
     /// Move an external IP from a transitional state (attaching, detaching)
     /// to its intended end state.
-    // FIXME: what do do in case of undo?
+    ///
+    /// Returns the number of rows modified, this may be zero on:
+    ///  - instance delete by another saga
+    ///  - saga action rerun
+    ///
+    /// This is valid in both cases for idempotency.
     pub async fn external_ip_complete_op(
         &self,
         opctx: &OpContext,
