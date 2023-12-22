@@ -20,6 +20,7 @@ use std::sync::Arc;
 use strum::EnumIter;
 use uuid::Uuid;
 
+use crate::external_api::params::UninitializedSledId;
 use crate::external_api::shared::Baseboard;
 
 /// Results of collecting hardware/software inventory from various Omicron
@@ -135,6 +136,12 @@ pub struct BaseboardId {
 
 impl From<Baseboard> for BaseboardId {
     fn from(value: Baseboard) -> Self {
+        BaseboardId { part_number: value.part, serial_number: value.serial }
+    }
+}
+
+impl From<UninitializedSledId> for BaseboardId {
+    fn from(value: UninitializedSledId) -> Self {
         BaseboardId { part_number: value.part, serial_number: value.serial }
     }
 }
