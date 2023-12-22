@@ -2146,7 +2146,7 @@ fn print_saga_nodes(saga: Option<Saga>, saga_nodes: Vec<SagaNodeEvent>) {
     let mut rows: Vec<_> = Vec::with_capacity(saga_nodes.len());
 
     for saga_node in saga_nodes {
-        let (node_id, sub_saga_id) = if let Some(dag) = &dag {
+        let (node_id, sub_saga_id, data) = if let Some(dag) = &dag {
             let dag_node =
                 dag.get_from_saga_node_id(&saga_node.node_id).unwrap();
 
@@ -2236,10 +2236,43 @@ fn print_saga_nodes(saga: Option<Saga>, saga_nodes: Vec<SagaNodeEvent>) {
                 },
             );
 
-            (node_id, sub_saga_id)
+            // If the saga node produced data, label it with the saga name, not the action name
+            let data = match dag_node {
+                StenoNode::Action { name, .. } => {
+                    if let Some(saga_node_data) = saga_node.data {
+                        match saga_node_data {
+                            serde_json::Value::Null => String::from(""),
+
+                            x => {
+                                format!(
+                                    "\"{}\" => {}",
+                                    name,
+                                    serde_json::to_string(&x).unwrap(),
+                                )
+                            }
+                        }
+                    } else {
+                        String::from("")
+                    }
+                }
+
+                _ => String::from(""),
+            };
+
+            (node_id, sub_saga_id, data)
         } else {
             let node_id = format!("{}", saga_node.node_id.0);
-            (node_id, None)
+
+            let data = if let Some(saga_node_data) = saga_node.data {
+                match saga_node_data {
+                    serde_json::Value::Null => String::from(""),
+                    x => serde_json::to_string(&x).unwrap(),
+                }
+            } else {
+                String::from("")
+            };
+
+            (node_id, None, data)
         };
 
         rows.push(SagaNodeRow {
@@ -2248,13 +2281,7 @@ fn print_saga_nodes(saga: Option<Saga>, saga_nodes: Vec<SagaNodeEvent>) {
             sub_saga_id,
             node_id,
             event_type: saga_node.event_type,
-            data: saga_node
-                .data
-                .map(|x| match x {
-                    serde_json::Value::Null => String::from(""),
-                    _ => serde_json::to_string(&x).unwrap(),
-                })
-                .unwrap_or(String::from("")),
+            data,
         })
     }
 
