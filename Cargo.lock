@@ -354,6 +354,7 @@ version = "0.1.0"
 dependencies = [
  "heck 0.4.1",
  "omicron-workspace-hack",
+ "prettyplease",
  "proc-macro2",
  "quote",
  "serde",
@@ -1539,9 +1540,9 @@ version = "0.1.0"
 dependencies = [
  "heck 0.4.1",
  "omicron-workspace-hack",
+ "prettyplease",
  "proc-macro2",
  "quote",
- "rustfmt-wrapper",
  "serde",
  "serde_tokenstream 0.2.0",
  "syn 2.0.32",
@@ -4164,7 +4165,6 @@ dependencies = [
  "internal-dns",
  "ipnetwork",
  "itertools 0.12.0",
- "lazy_static",
  "macaddr",
  "newtype_derive",
  "nexus-db-model",
@@ -4177,6 +4177,7 @@ dependencies = [
  "omicron-sled-agent",
  "omicron-test-utils",
  "omicron-workspace-hack",
+ "once_cell",
  "openapiv3",
  "openssl",
  "oso",
@@ -4213,9 +4214,9 @@ name = "nexus-defaults"
 version = "0.1.0"
 dependencies = [
  "ipnetwork",
- "lazy_static",
  "omicron-common",
  "omicron-workspace-hack",
+ "once_cell",
  "rand 0.8.5",
  "serde_json",
 ]
@@ -4618,10 +4619,10 @@ dependencies = [
  "hex",
  "http",
  "ipnetwork",
- "lazy_static",
  "libc",
  "macaddr",
  "omicron-workspace-hack",
+ "once_cell",
  "parse-display",
  "progenitor",
  "proptest",
@@ -4698,6 +4699,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64",
+ "camino",
  "clap 4.4.3",
  "dropshot",
  "expectorate",
@@ -4723,6 +4725,7 @@ dependencies = [
  "signal-hook-tokio",
  "slog",
  "slog-dtrace",
+ "slog-error-chain",
  "sp-sim",
  "subprocess",
  "thiserror",
@@ -4771,7 +4774,6 @@ dependencies = [
  "internal-dns",
  "ipnetwork",
  "itertools 0.12.0",
- "lazy_static",
  "macaddr",
  "mg-admin-client",
  "mime_guess",
@@ -6146,9 +6148,9 @@ dependencies = [
 
 [[package]]
 name = "prettyplease"
-version = "0.2.12"
+version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6c64d9ba0963cdcea2e1b2230fbae2bab30eb25a174be395c41e764bfb65dd62"
+checksum = "ae005bd773ab59b4725093fd7df83fd7892f7d8eafb48dbd7de6e024e4215f9d"
 dependencies = [
  "proc-macro2",
  "syn 2.0.32",
@@ -7840,6 +7842,25 @@ dependencies = [
  "slog-scope",
  "slog-stdlog",
  "slog-term",
+]
+
+[[package]]
+name = "slog-error-chain"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/slog-error-chain?branch=main#15f69041f45774602108e47fb25e705dc23acfb2"
+dependencies = [
+ "slog",
+ "slog-error-chain-derive",
+]
+
+[[package]]
+name = "slog-error-chain-derive"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/slog-error-chain?branch=main#15f69041f45774602108e47fb25e705dc23acfb2"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.32",
 ]
 
 [[package]]

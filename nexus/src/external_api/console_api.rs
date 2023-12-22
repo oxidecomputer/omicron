@@ -17,7 +17,6 @@ use dropshot::{
 };
 use http::{header, Response, StatusCode, Uri};
 use hyper::Body;
-use lazy_static::lazy_static;
 use mime_guess;
 use nexus_db_model::AuthenticationMode;
 use nexus_db_queries::authn::silos::IdentityProviderType;
@@ -36,6 +35,7 @@ use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{DataPageParams, Error, NameOrId};
+use once_cell::sync::Lazy;
 use parse_display::Display;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -810,15 +810,15 @@ fn not_found(internal_msg: &str) -> HttpError {
     HttpError::for_not_found(None, internal_msg.to_string())
 }
 
-lazy_static! {
-    static ref ALLOWED_EXTENSIONS: HashSet<OsString> = HashSet::from(
+static ALLOWED_EXTENSIONS: Lazy<HashSet<OsString>> = Lazy::new(|| {
+    HashSet::from(
         [
             "js", "css", "html", "ico", "map", "otf", "png", "svg", "ttf",
             "txt", "webp", "woff", "woff2",
         ]
-        .map(|s| OsString::from(s))
-    );
-}
+        .map(|s| OsString::from(s)),
+    )
+});
 
 /// Starting from `root_dir`, follow the segments of `path` down the file tree
 /// until we find a file (or not). Do not follow symlinks.

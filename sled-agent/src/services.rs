@@ -1371,8 +1371,8 @@ impl ServiceManager {
             .add_property_group(dns_config_builder)
             // We do need to enable the default instance of the
             // dns/install service.  It's enough to just mention it
-            // here, as the ServiceInstanceBuilder always enables the
-            // instance being added.
+            // here, as the ServiceInstanceBuilder enables the
+            // instance being added by default.
             .add_instance(ServiceInstanceBuilder::new("default")))
     }
 
@@ -1473,6 +1473,8 @@ impl ServiceManager {
         //
         // These zones are self-assembling -- after they boot, there should
         // be no "zlogin" necessary to initialize.
+        let disabled_ssh_service = ServiceBuilder::new("network/ssh")
+            .add_instance(ServiceInstanceBuilder::new("default").disable());
         match &request {
             ZoneArgs::Omicron(OmicronZoneConfigLocal {
                 zone:
@@ -1507,6 +1509,7 @@ impl ServiceManager {
                     );
 
                 let profile = ProfileBuilder::new("omicron")
+                    .add_service(disabled_ssh_service)
                     .add_service(clickhouse_service)
                     .add_service(dns_service);
                 profile
@@ -1551,6 +1554,7 @@ impl ServiceManager {
                                 .add_property_group(config),
                         );
                 let profile = ProfileBuilder::new("omicron")
+                    .add_service(disabled_ssh_service)
                     .add_service(clickhouse_keeper_service)
                     .add_service(dns_service);
                 profile
@@ -1603,6 +1607,7 @@ impl ServiceManager {
                     );
 
                 let profile = ProfileBuilder::new("omicron")
+                    .add_service(disabled_ssh_service)
                     .add_service(cockroachdb_service)
                     .add_service(dns_service);
                 profile
@@ -1646,12 +1651,15 @@ impl ServiceManager {
                     .add_property("uuid", "astring", uuid)
                     .add_property("store", "astring", "/data");
 
-                let profile = ProfileBuilder::new("omicron").add_service(
-                    ServiceBuilder::new("oxide/crucible/agent").add_instance(
-                        ServiceInstanceBuilder::new("default")
-                            .add_property_group(config),
-                    ),
-                );
+                let profile = ProfileBuilder::new("omicron")
+                    .add_service(disabled_ssh_service)
+                    .add_service(
+                        ServiceBuilder::new("oxide/crucible/agent")
+                            .add_instance(
+                                ServiceInstanceBuilder::new("default")
+                                    .add_property_group(config),
+                            ),
+                    );
                 profile
                     .add_to_zone(&self.inner.log, &installed_zone)
                     .await
@@ -1685,12 +1693,15 @@ impl ServiceManager {
                     .add_property("listen_addr", "astring", listen_addr)
                     .add_property("listen_port", "astring", listen_port);
 
-                let profile = ProfileBuilder::new("omicron").add_service(
-                    ServiceBuilder::new("oxide/crucible/pantry").add_instance(
-                        ServiceInstanceBuilder::new("default")
-                            .add_property_group(config),
-                    ),
-                );
+                let profile = ProfileBuilder::new("omicron")
+                    .add_service(disabled_ssh_service)
+                    .add_service(
+                        ServiceBuilder::new("oxide/crucible/pantry")
+                            .add_instance(
+                                ServiceInstanceBuilder::new("default")
+                                    .add_property_group(config),
+                            ),
+                    );
                 profile
                     .add_to_zone(&self.inner.log, &installed_zone)
                     .await
